@@ -109,15 +109,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               child: Row(
                 children: [
                   if (_currentPage > 0)
-                    Semantics(
-                      button: true,
-                      label: 'Previous page',
-                      child: IconButton(
-                        icon: const Icon(Icons.arrow_back),
-                        onPressed: () => _pageController.previousPage(
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeInOut,
-                        ),
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back),
+                      tooltip: 'Previous page',
+                      onPressed: () => _pageController.previousPage(
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
                       ),
                     ),
                   const Spacer(),
