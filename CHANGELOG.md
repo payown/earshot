@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 8 complete — Alpha build prep
+
+- Version set to 0.1.0+1
+- Release CI workflow at .github/workflows/release.yml (triggered on v*.*.* tags)
+- Android signing config ready (key.properties template provided)
+- build_runner codegen step added to all CI jobs (fixes *.g.dart not committed)
+- Replaced file_picker with file_selector (Flutter team package, fixes Android namespace error)
+- Upgraded sentry_flutter to v9 (fixes Kotlin 1.6 deprecation on CI)
+- CI: Analyze and test ✓, Build iOS ✓, Build Android ✓
+
 ### Phase 7 complete — Polish: sleep timer, onboarding, bookmarks, telemetry
 
 - Sleep timer: presets (end of episode, 5–60 min), Extend +5 min in now-playing bar and player screen, all actions announced to screen readers
