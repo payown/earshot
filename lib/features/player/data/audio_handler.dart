@@ -62,6 +62,9 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> stop() async {
     await _player.stop();
     _episodeIdController.add(null);
+    // Delay super.stop() slightly so the playbackEventStream pipe from
+    // just_audio finishes emitting before audio_service tries to add to it.
+    await Future<void>.delayed(const Duration(milliseconds: 50));
     await super.stop();
   }
 

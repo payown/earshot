@@ -98,6 +98,7 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
     const typeGroup = XTypeGroup(
       label: 'OPML',
       extensions: ['opml', 'xml'],
+      uniformTypeIdentifiers: ['public.xml', 'public.text'],
     );
     final file = await openFile(acceptedTypeGroups: [typeGroup]);
     if (file == null) return;
