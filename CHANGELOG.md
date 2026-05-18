@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 7 complete — Polish: sleep timer, onboarding, bookmarks, telemetry
+
+- Sleep timer: presets (end of episode, 5–60 min), Extend +5 min in now-playing bar and player screen, all actions announced to screen readers
+- Onboarding: 7 screens shown on first launch, skippable, "Next" gated on screen 6 until a podcast is added, completion persisted
+- Bookmarks: Quick Action captures current playback position, announced "Bookmarked at M:SS"
+- Sentry crash reporting wired (opt-out, DSN via compile-time env var, no-op when empty)
+- PostHog analytics wired (opt-out, API key via env var, no-op when empty)
+- Privacy Settings: crash reports and analytics toggles, history retention, delete all
+- CSV stats export from Stats screen via share sheet
+- **Deferred to Phase 8 prep:** chapter support, volume boost/mono audio, silence trim, CarPlay/Android Auto, beta build upload
+
 ### Phase 6 complete — Search, OPML import/export, podcast discovery
 
 - Search icon in Subscriptions opens podcast directory search (Apple Podcasts / iTunes API)
