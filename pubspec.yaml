@@ -46,7 +46,7 @@ dependencies:
   path: ^1.9.1
   xml: ^7.0.1
   share_plus: ^13.1.0
-  sentry_flutter: ^8.14.2
+  sentry_flutter: ^9.0.0
   posthog_flutter: ^5.24.2
   file_selector: ^1.1.0
 
