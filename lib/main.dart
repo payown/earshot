@@ -2,10 +2,10 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/presentation/main_shell.dart';
 import 'core/theme/app_theme.dart';
 import 'features/player/data/audio_handler.dart';
 import 'features/player/presentation/providers/player_providers.dart';
-import 'features/subscriptions/presentation/screens/subscriptions_screen.dart';
 
 // Ensure positionTrackerProvider is initialized at app start so it
 // begins listening to playback state immediately.
@@ -55,7 +55,7 @@ class EarshotApp extends StatelessWidget {
       highContrastTheme: AppTheme.highContrastLight(),
       highContrastDarkTheme: AppTheme.highContrastDark(),
       themeMode: ThemeMode.system,
-      home: const SubscriptionsScreen(),
+      home: const MainShell(),
     );
   }
 }

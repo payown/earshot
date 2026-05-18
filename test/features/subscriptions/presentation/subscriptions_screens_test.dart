@@ -1,4 +1,9 @@
+import 'package:drift/native.dart';
+import 'package:earshot/core/providers/core_providers.dart';
+import 'package:earshot/data/db/app_database.dart';
 import 'package:earshot/data/db/enums.dart';
+import 'package:earshot/features/downloads/data/download_manager.dart';
+import 'package:earshot/features/downloads/presentation/providers/downloads_providers.dart';
 import 'package:earshot/features/subscriptions/data/podcast_exception.dart';
 import 'package:earshot/features/subscriptions/data/podcast_repository.dart';
 import 'package:earshot/features/subscriptions/domain/episode.dart';
@@ -13,6 +18,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 class MockPodcastRepository extends Mock implements PodcastRepository {}
+
+class MockDownloadManager extends Mock implements DownloadManager {}
 
 final _now = DateTime(2024, 6, 1);
 
@@ -181,14 +188,23 @@ void main() {
 
     testWidgets('pops on successful subscribe', (tester) async {
       final podcast = _fakePodcast();
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      final dlManager = MockDownloadManager();
       when(() => repo.subscribe(any())).thenAnswer((_) async => podcast);
+      when(
+        () => dlManager.downloadRecentEpisodes(any(), any()),
+      ).thenAnswer((_) async {});
       when(
         () => repo.watchSubscriptions(),
       ).thenAnswer((_) => Stream.value([podcast]));
 
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [podcastRepositoryProvider.overrideWithValue(repo)],
+          overrides: [
+            podcastRepositoryProvider.overrideWithValue(repo),
+            appDatabaseProvider.overrideWithValue(db),
+            downloadManagerProvider.overrideWithValue(dlManager),
+          ],
           child: MaterialApp(
             home: Builder(
               builder: (context) => ElevatedButton(
@@ -216,6 +232,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(AddPodcastScreen), findsNothing);
+      await db.close();
     });
   });
 

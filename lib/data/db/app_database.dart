@@ -6,21 +6,32 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'enums.dart';
+import 'tables/app_settings.dart';
 import 'tables/episodes.dart';
 import 'tables/podcasts.dart';
 import 'tables/queue_items.dart';
 import 'tables/quick_action_configs.dart';
+import 'tables/recently_expired.dart';
 
 part 'app_database.g.dart';
 
-@DriftDatabase(tables: [Podcasts, Episodes, QueueItems, QuickActionConfigs])
+@DriftDatabase(
+  tables: [
+    Podcasts,
+    Episodes,
+    QueueItems,
+    QuickActionConfigs,
+    AppSettings,
+    RecentlyExpired,
+  ],
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -30,6 +41,10 @@ class AppDatabase extends _$AppDatabase {
     onUpgrade: (m, from, to) async {
       if (from < 2) {
         await m.createTable(queueItems);
+      }
+      if (from < 3) {
+        await m.createTable(appSettings);
+        await m.createTable(recentlyExpired);
       }
     },
     beforeOpen: (_) async {

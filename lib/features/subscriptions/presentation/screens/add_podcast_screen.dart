@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../features/downloads/presentation/providers/downloads_providers.dart';
+import '../../../../features/settings/data/app_settings_repository.dart';
+import '../../../../core/providers/core_providers.dart';
 import '../../data/podcast_exception.dart';
 import '../providers/subscriptions_providers.dart';
 
@@ -83,7 +88,17 @@ class _AddPodcastScreenState extends ConsumerState<AddPodcastScreen> {
     });
 
     try {
-      await ref.read(podcastRepositoryProvider).subscribe(url);
+      final podcast = await ref.read(podcastRepositoryProvider).subscribe(url);
+      final count = await AppSettingsRepositoryImpl(
+        database: ref.read(appDatabaseProvider),
+      ).getAutoDownloadCount();
+      if (count > 0) {
+        unawaited(
+          ref
+              .read(downloadManagerProvider)
+              .downloadRecentEpisodes(podcast.id, count),
+        );
+      }
       if (mounted) Navigator.of(context).pop();
     } on PodcastAlreadySubscribedException {
       _setError('You\'re already subscribed to this podcast.');

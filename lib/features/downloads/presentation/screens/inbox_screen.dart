@@ -1,0 +1,228 @@
+import 'package:drift/drift.dart' hide Column;
+import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../core/providers/core_providers.dart';
+import '../../../../data/db/enums.dart';
+import '../../../player/presentation/providers/player_providers.dart';
+import '../../../subscriptions/domain/episode.dart';
+import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
+import '../providers/downloads_providers.dart';
+
+class InboxScreen extends ConsumerWidget {
+  const InboxScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // All episodes across all podcasts with newEpisode status, newest first.
+    final allEpisodes = ref.watch(_inboxEpisodesProvider);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Inbox')),
+      body: allEpisodes.when(
+        data: (episodes) => episodes.isEmpty
+            ? _EmptyInbox()
+            : ListView.builder(
+                itemCount: episodes.length,
+                itemBuilder: (context, index) => _InboxEpisodeTile(
+                  episode: episodes[index],
+                  onAddToQueue: () => ref
+                      .read(queueRepositoryProvider)
+                      .addToQueue(episodes[index].id),
+                  onMarkPlayed: () => ref
+                      .read(podcastRepositoryProvider)
+                      .updateEpisodeStatus(
+                        episodes[index].id,
+                        EpisodeStatus.played,
+                      ),
+                  onDelete: () => _confirmDelete(context, ref, episodes[index]),
+                ),
+              ),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text('Error: $e')),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(
+    BuildContext context,
+    WidgetRef ref,
+    Episode episode,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete episode?'),
+        content: Text('Remove "${episode.title}" from Inbox?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(downloadManagerProvider).deleteDownload(episode.id);
+      await ref
+          .read(podcastRepositoryProvider)
+          .updateEpisodeStatus(
+            episode.id,
+            EpisodeStatus.played,
+          );
+    }
+  }
+}
+
+// Provider for inbox: all newEpisode-status episodes, newest first.
+final _inboxEpisodesProvider = StreamProvider<List<Episode>>((ref) {
+  final db = ref.watch(appDatabaseProvider);
+  return (db.select(db.episodes)
+        ..where((e) => e.status.equals(EpisodeStatus.newEpisode.name))
+        ..orderBy([(e) => OrderingTerm.desc(e.pubDate)]))
+      .watch()
+      .map(
+        (rows) => rows
+            .map(
+              (r) => Episode(
+                id: r.id,
+                podcastId: r.podcastId,
+                guid: r.guid,
+                title: r.title,
+                description: r.description,
+                audioUrl: r.audioUrl,
+                durationSeconds: r.durationSeconds,
+                pubDate: r.pubDate,
+                artworkUrl: r.artworkUrl,
+                episodeNumber: r.episodeNumber,
+                seasonNumber: r.seasonNumber,
+                chapterUrl: r.chapterUrl,
+                transcriptUrl: r.transcriptUrl,
+                status: r.status,
+                downloadStatus: r.downloadStatus,
+                downloadPath: r.downloadPath,
+                positionSeconds: r.positionSeconds,
+                playedAt: r.playedAt,
+                createdAt: r.createdAt,
+              ),
+            )
+            .toList(),
+      );
+});
+
+class _EmptyInbox extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.inbox,
+              size: 64,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              semanticLabel: '',
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Inbox is empty',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'New episodes from your subscriptions appear here.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InboxEpisodeTile extends StatelessWidget {
+  const _InboxEpisodeTile({
+    required this.episode,
+    required this.onAddToQueue,
+    required this.onMarkPlayed,
+    required this.onDelete,
+  });
+
+  final Episode episode;
+  final VoidCallback onAddToQueue;
+  final VoidCallback onMarkPlayed;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: episode.title,
+      customSemanticsActions: {
+        const CustomSemanticsAction(label: 'Add to queue'): onAddToQueue,
+        const CustomSemanticsAction(label: 'Mark as played'): onMarkPlayed,
+        const CustomSemanticsAction(label: 'Delete'): onDelete,
+      },
+      child: ListTile(
+        title: ExcludeSemantics(
+          child: Text(
+            episode.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ),
+        subtitle: ExcludeSemantics(
+          child: episode.pubDate != null
+              ? Text(
+                  _formatDate(episode.pubDate!),
+                  style: Theme.of(context).textTheme.bodySmall,
+                )
+              : null,
+        ),
+        trailing: ExcludeSemantics(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Semantics(
+                button: true,
+                label: 'Add to queue',
+                child: IconButton(
+                  icon: const Icon(Icons.queue_music),
+                  onPressed: onAddToQueue,
+                  tooltip: 'Add to queue',
+                ),
+              ),
+              Semantics(
+                button: true,
+                label: 'Mark as played',
+                child: IconButton(
+                  icon: const Icon(Icons.check),
+                  onPressed: onMarkPlayed,
+                  tooltip: 'Mark as played',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    final diff = DateTime.now().difference(date);
+    if (diff.inDays == 0) return 'Today';
+    if (diff.inDays == 1) return 'Yesterday';
+    if (diff.inDays < 7) return '${diff.inDays} days ago';
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+}
