@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 1 complete — Core data model, RSS, subscriptions
+
+- Subscribe to any podcast by RSS URL
+- RSS parser handles RSS 2.0, iTunes namespace, and Podcasting 2.0 (chapters, transcripts)
+- Subscriptions list with podcast artwork, title, and author
+- Podcast detail screen with episode list (most recent first)
+- Episode rows show title, duration, and relative date
+- Pull-to-refresh updates all subscribed feeds
+- Subscriptions and episodes persist in SQLite via drift
+- All screens accessible: semantic labels on every interactive element, error messages announced via SemanticsService
+- **Deferred:** Background feed refresh (every 6 hours) — moved to Phase 4 alongside download manager and background services
+- **Deferred:** VoiceOver/TalkBack manual test — carry into Phase 2 PR checklist
+
 ### Phase 0 complete — Project setup, tooling, CI
 
 - Flutter 3.41.9 project scaffolded (bundle ID `media.payown.earshot`, iOS + Android)
