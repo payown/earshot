@@ -1,0 +1,24 @@
+include: package:very_good_analysis/analysis_options.yaml
+
+analyzer:
+  errors:
+    # Treat these as errors, not warnings
+    missing_required_param: error
+    missing_return: error
+    invalid_assignment: error
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "build/**"
+
+linter:
+  rules:
+    # Earshot-specific additions on top of very_good_analysis
+    avoid_print: error
+    prefer_const_constructors: error
+    prefer_const_constructors_in_immutables: error
+    prefer_const_declarations: error
+    prefer_const_literals_to_create_immutables: error
+    # Accessibility-relevant
+    use_super_parameters: true
+    sort_child_properties_last: true
