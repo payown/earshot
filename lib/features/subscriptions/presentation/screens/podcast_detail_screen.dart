@@ -1,6 +1,10 @@
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../features/player/presentation/providers/player_providers.dart';
+import '../../../../features/player/presentation/widgets/now_playing_bar.dart';
+import '../../domain/episode.dart';
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
 import '../widgets/episode_list_tile.dart';
@@ -15,6 +19,7 @@ class PodcastDetailScreen extends ConsumerWidget {
     final episodes = ref.watch(episodesProvider(podcast.id));
 
     return Scaffold(
+      bottomNavigationBar: const NowPlayingBar(),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
@@ -65,8 +70,10 @@ class PodcastDetailScreen extends ConsumerWidget {
                 : SliverList.separated(
                     itemCount: list.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (_, index) =>
-                        EpisodeListTile(episode: list[index]),
+                    itemBuilder: (_, index) => EpisodeListTile(
+                      episode: list[index],
+                      onTap: () => _playEpisode(ref, list[index], podcast),
+                    ),
                   ),
             loading: () => const SliverToBoxAdapter(
               child: Center(child: CircularProgressIndicator()),
@@ -80,6 +87,32 @@ class PodcastDetailScreen extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+
+  void _playEpisode(WidgetRef ref, Episode episode, Podcast podcast) {
+    final handler = ref.read(audioHandlerProvider);
+    final resumePosition =
+        episode.positionSeconds > 0 &&
+            episode.durationSeconds != null &&
+            episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
+        ? episode.positionSeconds
+        : 0;
+
+    handler.playEpisode(
+      MediaItem(
+        id: episode.audioUrl,
+        title: episode.title,
+        album: podcast.title,
+        artUri: podcast.artworkUrl != null
+            ? Uri.parse(podcast.artworkUrl!)
+            : null,
+        duration: episode.durationSeconds != null
+            ? Duration(seconds: episode.durationSeconds!)
+            : null,
+        extras: {'episodeId': episode.id},
+      ),
+      resumePositionSeconds: resumePosition,
     );
   }
 }

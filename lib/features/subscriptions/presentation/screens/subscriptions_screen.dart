@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../features/player/presentation/widgets/now_playing_bar.dart';
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
 import '../widgets/podcast_list_tile.dart';
@@ -18,6 +19,7 @@ class SubscriptionsScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Earshot'),
       ),
+      bottomNavigationBar: const NowPlayingBar(),
       body: subscriptions.when(
         data: (podcasts) => podcasts.isEmpty
             ? _EmptyState(

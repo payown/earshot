@@ -3,9 +3,14 @@ import 'package:flutter/material.dart';
 import '../../domain/episode.dart';
 
 class EpisodeListTile extends StatelessWidget {
-  const EpisodeListTile({required this.episode, super.key});
+  const EpisodeListTile({
+    required this.episode,
+    this.onTap,
+    super.key,
+  });
 
   final Episode episode;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -22,28 +27,48 @@ class EpisodeListTile extends StatelessWidget {
 
     return Semantics(
       label: semanticLabel,
+      button: onTap != null,
       child: ExcludeSemantics(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                episode.title,
-                style: Theme.of(context).textTheme.titleSmall,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (parts.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  parts.join(' · '),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        episode.title,
+                        style: Theme.of(context).textTheme.titleSmall,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (parts.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          parts.join(' · '),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
+                if (onTap != null)
+                  Icon(
+                    Icons.play_circle_outline,
+                    size: 32,
+                    color: Theme.of(context).colorScheme.primary,
+                    semanticLabel: '',
+                  ),
               ],
-            ],
+            ),
           ),
         ),
       ),

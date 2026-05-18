@@ -7,6 +7,18 @@ import 'features/player/data/audio_handler.dart';
 import 'features/player/presentation/providers/player_providers.dart';
 import 'features/subscriptions/presentation/screens/subscriptions_screen.dart';
 
+// Ensure positionTrackerProvider is initialized at app start so it
+// begins listening to playback state immediately.
+class _AppInitializer extends ConsumerWidget {
+  const _AppInitializer();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(positionTrackerProvider);
+    return const EarshotApp();
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -26,7 +38,7 @@ Future<void> main() async {
       overrides: [
         audioHandlerProvider.overrideWithValue(audioHandler),
       ],
-      child: const EarshotApp(),
+      child: const _AppInitializer(),
     ),
   );
 }
