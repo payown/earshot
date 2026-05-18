@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 0 complete — Project setup, tooling, CI
+
+- Flutter 3.41.9 project scaffolded (bundle ID `media.payown.earshot`, iOS + Android)
+- Core dependencies added: `flutter_riverpod`, `just_audio`, `audio_service`, `drift`, `dio`, `logging`, `package_info_plus`, `path_provider`, `sqlite3_flutter_libs`
+- Dev dependencies added: `mocktail`, `build_runner`, `drift_dev`, `very_good_analysis`
+- Feature-first folder structure in place (`lib/core/`, `lib/features/`, `lib/data/`)
+- Light, dark, and high-contrast themes wired to system settings
+- Spacing token constants defined
+- "Welcome to Earshot" screen with accessible `Semantics(header: true)` heading
+- Widget test verifying semantic heading label
+- CI passing: lint, format check, tests, iOS + Android debug builds
+- Accessibility enforcement hooks installed via Community Access agents
+- **Deferred:** Manual VoiceOver test on welcome screen (carry into Phase 1 PR checklist)
+
 ### Added
 - Initial project structure
 - Product requirements document (`docs/PRD.md`)
