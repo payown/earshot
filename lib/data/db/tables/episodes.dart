@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../enums.dart';
 import 'podcasts.dart';
 
+@DataClassName('EpisodeRow')
 class Episodes extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get podcastId =>

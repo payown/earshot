@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+@DataClassName('PodcastRow')
 class Podcasts extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get rssUrl => text().unique()();
