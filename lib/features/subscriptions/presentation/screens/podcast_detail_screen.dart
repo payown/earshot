@@ -1,9 +1,13 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../data/db/enums.dart';
 import '../../../../features/player/presentation/providers/player_providers.dart';
 import '../../../../features/player/presentation/widgets/now_playing_bar.dart';
+import '../../../../features/settings/domain/quick_action_definition.dart';
+import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../domain/episode.dart';
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
@@ -70,10 +74,22 @@ class PodcastDetailScreen extends ConsumerWidget {
                 : SliverList.separated(
                     itemCount: list.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (_, index) => EpisodeListTile(
-                      episode: list[index],
-                      onTap: () => _playEpisode(ref, list[index], podcast),
-                    ),
+                    itemBuilder: (ctx, index) {
+                      final episode = list[index];
+                      final actions =
+                          ref.watch(episodeActionsProvider).asData?.value ??
+                          defaultEpisodeActions;
+                      return EpisodeListTile(
+                        episode: episode,
+                        quickActions: _buildEpisodeActions(
+                          ctx,
+                          ref,
+                          episode,
+                          podcast,
+                          actions,
+                        ),
+                      );
+                    },
                   ),
             loading: () => const SliverToBoxAdapter(
               child: Center(child: CircularProgressIndicator()),
@@ -90,7 +106,78 @@ class PodcastDetailScreen extends ConsumerWidget {
     );
   }
 
-  void _playEpisode(WidgetRef ref, Episode episode, Podcast podcast) {
+  List<EpisodeQuickActionItem> _buildEpisodeActions(
+    BuildContext context,
+    WidgetRef ref,
+    Episode episode,
+    Podcast podcast,
+    List<EpisodeAction> order,
+  ) {
+    return order.map((action) {
+      return switch (action) {
+        EpisodeAction.playNow => EpisodeQuickActionItem(
+          label: action.label,
+          onInvoke: () => _play(ref, episode, podcast),
+        ),
+        EpisodeAction.addToQueue => EpisodeQuickActionItem(
+          label: action.label,
+          onInvoke: () async {
+            await ref.read(queueRepositoryProvider).addToQueue(episode.id);
+            if (context.mounted) {
+              SemanticsService.sendAnnouncement(
+                View.of(context),
+                'Added to queue',
+                TextDirection.ltr,
+              );
+            }
+          },
+        ),
+        EpisodeAction.markPlayed => EpisodeQuickActionItem(
+          label: episode.status == EpisodeStatus.played
+              ? 'Mark as unplayed'
+              : 'Mark as played',
+          onInvoke: () {
+            final newStatus = episode.status == EpisodeStatus.played
+                ? EpisodeStatus.newEpisode
+                : EpisodeStatus.played;
+            ref
+                .read(podcastRepositoryProvider)
+                .updateEpisodeStatus(episode.id, newStatus);
+          },
+        ),
+        EpisodeAction.openShowNotes => EpisodeQuickActionItem(
+          label: action.label,
+          onInvoke: () => showDialog<void>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: Text(episode.title),
+              content: SingleChildScrollView(
+                child: Text(
+                  episode.description ?? 'No show notes available.',
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        EpisodeAction.download => EpisodeQuickActionItem(
+          label: action.label,
+          onInvoke: () {},
+        ),
+        EpisodeAction.share => EpisodeQuickActionItem(
+          label: action.label,
+          onInvoke: () {},
+        ),
+      };
+    }).toList();
+  }
+
+  void _play(WidgetRef ref, Episode episode, Podcast podcast) {
     final handler = ref.read(audioHandlerProvider);
     final resumePosition =
         episode.positionSeconds > 0 &&
@@ -98,7 +185,6 @@ class PodcastDetailScreen extends ConsumerWidget {
             episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
         ? episode.positionSeconds
         : 0;
-
     handler.playEpisode(
       MediaItem(
         id: episode.audioUrl,

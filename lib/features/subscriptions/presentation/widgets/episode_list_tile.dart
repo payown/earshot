@@ -1,16 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import '../../domain/episode.dart';
+
+class EpisodeQuickActionItem {
+  const EpisodeQuickActionItem({required this.label, required this.onInvoke});
+
+  final String label;
+  final VoidCallback onInvoke;
+}
 
 class EpisodeListTile extends StatelessWidget {
   const EpisodeListTile({
     required this.episode,
-    this.onTap,
+    this.quickActions = const [],
     super.key,
   });
 
   final Episode episode;
-  final VoidCallback? onTap;
+
+  // Ordered list of Quick Actions. Index 0 is the default tap action.
+  final List<EpisodeQuickActionItem> quickActions;
+
+  VoidCallback? get _defaultTap =>
+      quickActions.isNotEmpty ? quickActions[0].onInvoke : null;
 
   @override
   Widget build(BuildContext context) {
@@ -25,12 +38,18 @@ class EpisodeListTile extends StatelessWidget {
         ? episode.title
         : '${episode.title}, ${parts.join(', ')}';
 
+    final semanticActions = <CustomSemanticsAction, VoidCallback>{
+      for (final action in quickActions)
+        CustomSemanticsAction(label: action.label): action.onInvoke,
+    };
+
     return Semantics(
       label: semanticLabel,
-      button: onTap != null,
+      button: _defaultTap != null,
+      customSemanticsActions: semanticActions,
       child: ExcludeSemantics(
         child: InkWell(
-          onTap: onTap,
+          onTap: _defaultTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
@@ -60,7 +79,7 @@ class EpisodeListTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (onTap != null)
+                if (_defaultTap != null)
                   Icon(
                     Icons.play_circle_outline,
                     size: 32,

@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import 'package:logging/logging.dart';
 
 import '../../../data/db/app_database.dart';
+import '../../../data/db/enums.dart';
 import '../../../data/rss/parsed_feed.dart';
 import '../../../data/rss/rss_parser.dart';
 import '../domain/episode.dart';
@@ -187,6 +188,12 @@ class PodcastRepositoryImpl implements PodcastRepository {
             .insert(companion, mode: InsertMode.insertOrIgnore);
       }
     }
+  }
+
+  @override
+  Future<void> updateEpisodeStatus(int episodeId, EpisodeStatus status) async {
+    await (_db.update(_db.episodes)..where((e) => e.id.equals(episodeId)))
+        .write(EpisodesCompanion(status: Value(status)));
   }
 
   Podcast _podcastFromRow(PodcastRow row) => Podcast(

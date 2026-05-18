@@ -1,3 +1,4 @@
+import '../../../data/db/enums.dart';
 import '../domain/episode.dart';
 import '../domain/podcast.dart';
 
@@ -11,4 +12,6 @@ abstract interface class PodcastRepository {
   Stream<List<Episode>> watchEpisodes(int podcastId);
 
   Future<void> refreshFeed(int podcastId);
+
+  Future<void> updateEpisodeStatus(int episodeId, EpisodeStatus status);
 }

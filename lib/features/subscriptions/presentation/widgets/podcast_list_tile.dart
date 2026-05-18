@@ -1,16 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import '../../domain/podcast.dart';
+
+class PodcastQuickActionItem {
+  const PodcastQuickActionItem({required this.label, required this.onInvoke});
+
+  final String label;
+  final VoidCallback onInvoke;
+}
 
 class PodcastListTile extends StatelessWidget {
   const PodcastListTile({
     required this.podcast,
     required this.onTap,
+    this.quickActions = const [],
     super.key,
   });
 
   final Podcast podcast;
   final VoidCallback onTap;
+  final List<PodcastQuickActionItem> quickActions;
 
   @override
   Widget build(BuildContext context) {
@@ -18,9 +28,15 @@ class PodcastListTile extends StatelessWidget {
         ? '${podcast.title}, by ${podcast.author}'
         : podcast.title;
 
+    final semanticActions = <CustomSemanticsAction, VoidCallback>{
+      for (final action in quickActions)
+        CustomSemanticsAction(label: action.label): action.onInvoke,
+    };
+
     return Semantics(
       label: label,
       button: true,
+      customSemanticsActions: semanticActions,
       child: ExcludeSemantics(
         child: ListTile(
           minTileHeight: 72,
