@@ -4,6 +4,8 @@ import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:logging/logging.dart';
 
+import '../domain/sleep_timer.dart';
+
 final _log = Logger('AudioHandler');
 
 class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
@@ -12,9 +14,16 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) _onEpisodeCompleted();
     });
+
+    sleepTimer = SleepTimer(
+      onExpired: () {
+        pause();
+      },
+    );
   }
 
   final AudioPlayer _player = AudioPlayer();
+  late final SleepTimer sleepTimer;
 
   // episodeId of the currently loaded episode — used by PositionTracker.
   final StreamController<int?> _episodeIdController =
@@ -97,10 +106,12 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
 
   void _onEpisodeCompleted() {
     _log.info('Episode completed: ${mediaItem.value?.title}');
+    sleepTimer.onEpisodeEnded();
     stop();
   }
 
   Future<void> dispose() async {
+    sleepTimer.dispose();
     await _episodeIdController.close();
     await _player.dispose();
   }

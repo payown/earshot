@@ -1,6 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../../../../core/providers/core_providers.dart';
 import '../../domain/stats_period.dart';
 import '../providers/stats_providers.dart';
 
@@ -19,7 +24,20 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
     final stats = ref.watch(statsProvider(_period));
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Stats')),
+      appBar: AppBar(
+        title: const Text('Stats'),
+        actions: [
+          Semantics(
+            button: true,
+            label: 'Export stats as CSV',
+            child: IconButton(
+              icon: const Icon(Icons.share),
+              tooltip: 'Export as CSV',
+              onPressed: () => _exportCsv(context, ref),
+            ),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           _PeriodSelector(
@@ -79,6 +97,42 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _exportCsv(BuildContext context, WidgetRef ref) async {
+    final db = ref.read(appDatabaseProvider);
+    final sessions = await db.select(db.listeningSessions).get();
+
+    if (sessions.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No listening history to export.')),
+        );
+      }
+      return;
+    }
+
+    final buffer = StringBuffer()
+      ..writeln('date,podcast_id,episode_id,duration_seconds,speed');
+    for (final s in sessions) {
+      buffer.writeln(
+        '${s.date.toIso8601String()},${s.podcastId},${s.episodeId},'
+        '${s.durationSeconds},${s.speed}',
+      );
+    }
+
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/earshot-stats.csv');
+    await file.writeAsString(buffer.toString());
+
+    if (context.mounted) {
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path, mimeType: 'text/csv')],
+          subject: 'Earshot Listening Stats',
+        ),
+      );
+    }
   }
 
   String _formatDuration(int seconds) {

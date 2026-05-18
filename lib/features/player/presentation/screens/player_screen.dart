@@ -1,8 +1,11 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/spacing.dart';
+import '../../data/audio_handler.dart';
+import '../../domain/sleep_timer.dart';
 import '../providers/player_providers.dart';
 
 class PlayerScreen extends ConsumerWidget {
@@ -85,6 +88,8 @@ class PlayerScreen extends ConsumerWidget {
                 onSpeedChanged: (speed) =>
                     ref.read(audioHandlerProvider).setSpeed(speed),
               ),
+              const SizedBox(height: Spacing.md),
+              _SleepTimerControls(),
             ],
           ),
         ),
@@ -303,4 +308,118 @@ class _SpeedSelector extends StatelessWidget {
   }
 
   String _label(double s) => s == s.roundToDouble() ? '${s.toInt()}x' : '${s}x';
+}
+
+class _SleepTimerControls extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timerState =
+        ref.watch(sleepTimerStateProvider).asData?.value ??
+        const SleepTimerState.inactive();
+    final handler = ref.read(audioHandlerProvider);
+
+    if (timerState.isActive) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Semantics(
+            label: timerState.announcementLabel,
+            child: ExcludeSemantics(
+              child: Text(
+                timerState.endOfEpisode
+                    ? 'Sleep: end of episode'
+                    : 'Sleep: ${_formatRemaining(timerState.remaining)}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Semantics(
+            button: true,
+            label: 'Extend sleep timer by 5 minutes',
+            child: TextButton(
+              onPressed: () {
+                handler.sleepTimer.extend();
+                SemanticsService.sendAnnouncement(
+                  View.of(context),
+                  'Sleep timer extended by 5 minutes',
+                  TextDirection.ltr,
+                );
+              },
+              child: const Text('+5 min'),
+            ),
+          ),
+          Semantics(
+            button: true,
+            label: 'Cancel sleep timer',
+            child: IconButton(
+              icon: const Icon(Icons.cancel_outlined),
+              iconSize: 20,
+              tooltip: 'Cancel sleep timer',
+              onPressed: handler.sleepTimer.cancel,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Semantics(
+      button: true,
+      label: 'Set sleep timer',
+      child: TextButton.icon(
+        icon: const Icon(Icons.bedtime_outlined, size: 18),
+        label: const Text('Sleep timer'),
+        onPressed: () => _showPicker(context, handler),
+      ),
+    );
+  }
+
+  Future<void> _showPicker(
+    BuildContext context,
+    EarshotAudioHandler handler,
+  ) async {
+    final preset = await showModalBottomSheet<SleepTimerPreset>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'Sleep timer',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            ...SleepTimerPreset.values.map(
+              (p) => ListTile(
+                title: Text(p.label),
+                onTap: () => Navigator.of(context).pop(p),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (preset != null) {
+      handler.sleepTimer.set(preset);
+      if (context.mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Sleep timer set for ${preset.label}',
+          TextDirection.ltr,
+        );
+      }
+    }
+  }
+
+  String _formatRemaining(Duration? d) {
+    if (d == null) return '';
+    final m = d.inMinutes;
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
 }

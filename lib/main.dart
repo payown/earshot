@@ -3,12 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/presentation/main_shell.dart';
+import 'core/providers/core_providers.dart';
 import 'core/theme/app_theme.dart';
+import 'features/onboarding/presentation/screens/onboarding_screen.dart';
 import 'features/player/data/audio_handler.dart';
 import 'features/player/presentation/providers/player_providers.dart';
+import 'features/settings/data/app_settings_repository.dart';
 
-// Ensure positionTrackerProvider is initialized at app start so it
-// begins listening to playback state immediately.
 class _AppInitializer extends ConsumerWidget {
   const _AppInitializer();
 
@@ -43,11 +44,11 @@ Future<void> main() async {
   );
 }
 
-class EarshotApp extends StatelessWidget {
+class EarshotApp extends ConsumerWidget {
   const EarshotApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp(
       title: 'Earshot',
       theme: AppTheme.light(),
@@ -55,7 +56,30 @@ class EarshotApp extends StatelessWidget {
       highContrastTheme: AppTheme.highContrastLight(),
       highContrastDarkTheme: AppTheme.highContrastDark(),
       themeMode: ThemeMode.system,
-      home: const MainShell(),
+      home: const _HomeRouter(),
+    );
+  }
+}
+
+class _HomeRouter extends ConsumerWidget {
+  const _HomeRouter();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final db = ref.watch(appDatabaseProvider);
+    return FutureBuilder<bool>(
+      future: AppSettingsRepositoryImpl(database: db).isOnboardingComplete(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.data == true) {
+          return const MainShell();
+        }
+        return const OnboardingScreen();
+      },
     );
   }
 }

@@ -9,6 +9,10 @@ abstract interface class AppSettingsRepository {
   Future<int?> getHistoryRetentionDays();
 
   Future<void> setHistoryRetentionDays(int? days);
+
+  Future<bool> isOnboardingComplete();
+
+  Future<void> setOnboardingComplete({required bool complete});
 }
 
 class AppSettingsRepositoryImpl implements AppSettingsRepository {
@@ -19,6 +23,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
 
   static const _keyAutoDownload = 'auto_download_count';
   static const _keyHistoryRetention = 'history_retention_days';
+  static const _keyOnboardingComplete = 'onboarding_complete';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
 
@@ -52,6 +57,18 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
     _keyHistoryRetention,
     days?.toString() ?? 'null',
   );
+
+  @override
+  Future<bool> isOnboardingComplete() async {
+    final row = await (_db.select(
+      _db.appSettings,
+    )..where((s) => s.key.equals(_keyOnboardingComplete))).getSingleOrNull();
+    return row?.value == 'true';
+  }
+
+  @override
+  Future<void> setOnboardingComplete({required bool complete}) =>
+      _set(_keyOnboardingComplete, complete.toString());
 
   Future<void> _set(String key, String value) async {
     await _db

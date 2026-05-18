@@ -7,6 +7,7 @@ import '../../data/audio_handler.dart';
 import '../../data/position_tracker.dart';
 import '../../data/queue_repository.dart';
 import '../../data/queue_repository_impl.dart';
+import '../../domain/sleep_timer.dart';
 
 // Overridden in main() after AudioService.init completes.
 final audioHandlerProvider = Provider<EarshotAudioHandler>(
@@ -41,4 +42,8 @@ final queueRepositoryProvider = Provider<QueueRepository>(
 
 final queueProvider = StreamProvider<List<Episode>>(
   (ref) => ref.watch(queueRepositoryProvider).watchQueue(),
+);
+
+final sleepTimerStateProvider = StreamProvider<SleepTimerState>(
+  (ref) => ref.watch(audioHandlerProvider).sleepTimer.stateStream,
 );

@@ -1,5 +1,6 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/player_providers.dart';
@@ -12,6 +13,7 @@ class NowPlayingBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final mediaItem = ref.watch(mediaItemProvider).asData?.value;
     final playbackState = ref.watch(playbackStateProvider).asData?.value;
+    final timerState = ref.watch(sleepTimerStateProvider).asData?.value;
 
     if (mediaItem == null || playbackState == null)
       return const SizedBox.shrink();
@@ -75,6 +77,28 @@ class NowPlayingBar extends ConsumerWidget {
                         ? ref.read(audioHandlerProvider).pause()
                         : ref.read(audioHandlerProvider).play(),
                   ),
+                  if (timerState?.isActive == true)
+                    Semantics(
+                      button: true,
+                      label: 'Extend sleep timer by 5 minutes',
+                      child: ExcludeSemantics(
+                        child: TextButton(
+                          onPressed: () {
+                            ref.read(audioHandlerProvider).sleepTimer.extend();
+                            SemanticsService.sendAnnouncement(
+                              View.of(context),
+                              'Sleep timer extended by 5 minutes',
+                              TextDirection.ltr,
+                            );
+                          },
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: const Size(48, 48),
+                          ),
+                          child: const Text('+5 min'),
+                        ),
+                      ),
+                    ),
                   _ControlButton(
                     icon: Icons.forward_30,
                     tooltip: 'Skip forward 30 seconds',
