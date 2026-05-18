@@ -23,14 +23,12 @@ class Episodes extends Table {
   TextColumn get downloadStatus =>
       textEnum<DownloadStatus>().withDefault(const Constant('none'))();
   TextColumn get downloadPath => text().nullable()();
-  IntColumn get positionSeconds =>
-      integer().withDefault(const Constant(0))();
+  IntColumn get positionSeconds => integer().withDefault(const Constant(0))();
   DateTimeColumn get playedAt => dateTime().nullable()();
-  DateTimeColumn get createdAt =>
-      dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
   List<Set<Column<Object>>> get uniqueKeys => [
-        {podcastId, guid},
-      ];
+    {podcastId, guid},
+  ];
 }

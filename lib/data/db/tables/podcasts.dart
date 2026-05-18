@@ -10,13 +10,11 @@ class Podcasts extends Table {
   TextColumn get websiteUrl => text().nullable()();
   TextColumn get language => text().nullable()();
   TextColumn get category => text().nullable()();
-  BoolColumn get autoQueue =>
-      boolean().withDefault(const Constant(false))();
+  BoolColumn get autoQueue => boolean().withDefault(const Constant(false))();
   BoolColumn get notificationEnabled =>
       boolean().withDefault(const Constant(false))();
   RealColumn get speedOverride => real().nullable()();
   IntColumn get queueAgeLimitDays => integer().nullable()();
-  DateTimeColumn get createdAt =>
-      dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get refreshedAt => dateTime().nullable()();
 }

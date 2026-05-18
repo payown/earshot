@@ -10,6 +10,6 @@ class QuickActionConfigs extends Table {
 
   @override
   List<Set<Column<Object>>> get uniqueKeys => [
-        {contentType, actionKey},
-      ];
+    {contentType, actionKey},
+  ];
 }

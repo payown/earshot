@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+  xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+  xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  <channel>
+    <title>Test Podcast</title>
+    <link>https://example.com/podcast</link>
+    <language>en-us</language>
+    <description>A podcast for testing purposes.</description>
+    <itunes:author>Jane Smith</itunes:author>
+    <itunes:image href="https://example.com/artwork.jpg"/>
+    <itunes:category text="Technology"/>
+
+    <item>
+      <title>Episode 1: The Beginning</title>
+      <guid>https://example.com/episodes/1</guid>
+      <pubDate>Mon, 01 Jan 2024 08:00:00 +0000</pubDate>
+      <enclosure url="https://example.com/ep1.mp3" type="audio/mpeg" length="12345678"/>
+      <itunes:duration>3600</itunes:duration>
+      <itunes:episode>1</itunes:episode>
+      <itunes:season>1</itunes:season>
+      <itunes:image href="https://example.com/ep1-art.jpg"/>
+      <itunes:summary>The first episode.</itunes:summary>
+      <podcast:chapters url="https://example.com/ep1.chapters.json" type="application/json+chapters"/>
+      <podcast:transcript url="https://example.com/ep1.vtt" type="text/vtt"/>
+    </item>
+
+    <item>
+      <title>Episode 2: Going Deeper</title>
+      <guid>https://example.com/episodes/2</guid>
+      <pubDate>Mon, 08 Jan 2024 08:00:00 +0000</pubDate>
+      <enclosure url="https://example.com/ep2.mp3" type="audio/mpeg" length="23456789"/>
+      <itunes:duration>1:45:30</itunes:duration>
+      <itunes:episode>2</itunes:episode>
+      <itunes:season>1</itunes:season>
+      <description>The second episode, described in plain RSS.</description>
+    </item>
+
+    <item>
+      <title>Episode without enclosure — should be skipped</title>
+      <guid>https://example.com/episodes/no-audio</guid>
+      <pubDate>Mon, 15 Jan 2024 08:00:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>
