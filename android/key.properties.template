@@ -1,0 +1,12 @@
+# Copy this file to key.properties (gitignored) and fill in your values.
+# Generate a keystore with:
+#   keytool -genkey -v -keystore earshot-release.jks \
+#     -keyalg RSA -keysize 2048 -validity 10000 \
+#     -alias earshot
+#
+# Store earshot-release.jks somewhere OUTSIDE the repo.
+
+storePassword=<your-keystore-password>
+keyPassword=<your-key-password>
+keyAlias=earshot
+storeFile=<absolute-path-to-earshot-release.jks>
