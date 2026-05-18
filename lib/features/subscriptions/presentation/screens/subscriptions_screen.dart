@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../features/player/presentation/widgets/now_playing_bar.dart';
+import '../../../../features/search/presentation/screens/search_screen.dart';
 import '../../../../features/settings/domain/quick_action_definition.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/settings/presentation/screens/settings_screen.dart';
@@ -25,6 +26,11 @@ class SubscriptionsScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Earshot'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: 'Search podcasts',
+            onPressed: () => _openSearch(context),
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Settings',
@@ -154,6 +160,12 @@ class SubscriptionsScreen extends ConsumerWidget {
       MaterialPageRoute<void>(
         builder: (_) => PodcastDetailScreen(podcast: podcast),
       ),
+    );
+  }
+
+  void _openSearch(BuildContext context) {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const SearchScreen()),
     );
   }
 

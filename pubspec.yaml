@@ -45,6 +45,8 @@ dependencies:
   sqlite3_flutter_libs: ^0.6.0+eol
   path: ^1.9.1
   xml: ^7.0.1
+  file_picker: ^3.0.4
+  share_plus: ^13.1.0
 
 dev_dependencies:
   flutter_test:
