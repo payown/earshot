@@ -46,7 +46,7 @@ void main() {
     );
   }
 
-  final sampleEpisode = ParsedEpisode(
+  const sampleEpisode = ParsedEpisode(
     guid: 'ep-1',
     title: 'Episode 1',
     audioUrl: 'https://example.com/ep1.mp3',
@@ -176,13 +176,16 @@ void main() {
       stubFeed(episodes: [sampleEpisode]);
       final podcast = await repo.subscribe(_rssUrl);
 
-      final ep2 = ParsedEpisode(
+      const ep2 = ParsedEpisode(
         guid: 'ep-2',
         title: 'Episode 2',
         audioUrl: 'https://example.com/ep2.mp3',
       );
       when(() => parser.parse(any())).thenReturn(
-        ParsedPodcast(title: 'Test Podcast', episodes: [sampleEpisode, ep2]),
+        const ParsedPodcast(
+          title: 'Test Podcast',
+          episodes: [sampleEpisode, ep2],
+        ),
       );
       await repo.refreshFeed(podcast.id);
 
