@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 3 complete — Quick Actions, Settings, accessibility layer
+
+- Episode and podcast rows expose VoiceOver actions rotor / TalkBack custom actions via `customSemanticsActions`
+- Default episode Quick Actions: Play now, Add to queue, Mark played/unplayed, Open show notes
+- Default podcast Quick Actions: Open, Toggle notifications, Toggle auto-queue, Unsubscribe
+- First action in user's list is the default double-tap action
+- Settings screen accessible via gear icon in app bar
+- Quick Action configurator: drag-to-reorder list with up/down button alternatives for screen readers
+- Quick Action order persists to SQLite and takes effect immediately
+- `ReduceMotion` extension on `BuildContext` ready for all future animations
+- High-contrast theme wired to system setting via `MaterialApp.highContrastTheme`
+- **Deferred:** Toggle notifications and Toggle auto-queue actions (stubs — need Phase 4 backend)
+- **Deferred:** Share action (Phase 7)
+- **Deferred:** Manual VoiceOver/TalkBack test — carry into Phase 4
+
 ### Phase 2 complete — Playback engine, queue, player UI
 
 - Tap any episode to play it — audio streams via `just_audio` with background playback
