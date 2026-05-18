@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 2 complete — Playback engine, queue, player UI
+
+- Tap any episode to play it — audio streams via `just_audio` with background playback
+- Lock screen and Control Center controls wired via `audio_service` (iOS and Android)
+- Now-playing bar on subscriptions list and podcast detail screens: artwork, title, skip, play/pause
+- Full player screen: large artwork, progress bar with position announced for screen readers, speed selector (0.5x–3.0x), skip controls
+- Playback position auto-saves on pause and restores on resume
+- Episode marked played at completion
+- Queue data model persists across restarts
+- Platform configuration: iOS background audio mode, Android foreground service and media permissions
+- **Deferred:** Periodic position save while playing (every 10s) — Phase 7 polish
+- **Deferred:** VoiceOver/TalkBack manual test — carry into Phase 3
+
 ### Phase 1 complete — Core data model, RSS, subscriptions
 
 - Subscribe to any podcast by RSS URL
