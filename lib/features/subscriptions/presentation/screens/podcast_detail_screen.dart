@@ -4,6 +4,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../data/db/enums.dart';
+import '../../../../features/bookmarks/presentation/providers/bookmarks_providers.dart';
 import '../../../../features/player/presentation/providers/player_providers.dart';
 import '../../../../features/player/presentation/widgets/now_playing_bar.dart';
 import '../../../../features/settings/domain/quick_action_definition.dart';
@@ -164,6 +165,25 @@ class PodcastDetailScreen extends ConsumerWidget {
               ],
             ),
           ),
+        ),
+        EpisodeAction.bookmark => EpisodeQuickActionItem(
+          label: action.label,
+          onInvoke: () async {
+            final handler = ref.read(audioHandlerProvider);
+            final pos = handler.position.inSeconds;
+            await ref
+                .read(bookmarkRepositoryProvider)
+                .addBookmark(episode.id, pos);
+            if (context.mounted) {
+              final m = pos ~/ 60;
+              final s = (pos % 60).toString().padLeft(2, '0');
+              SemanticsService.sendAnnouncement(
+                View.of(context),
+                'Bookmarked at $m:$s',
+                TextDirection.ltr,
+              );
+            }
+          },
         ),
         EpisodeAction.download => EpisodeQuickActionItem(
           label: action.label,

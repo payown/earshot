@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'enums.dart';
 import 'tables/app_settings.dart';
+import 'tables/bookmarks.dart';
 import 'tables/episodes.dart';
 import 'tables/listening_sessions.dart';
 import 'tables/podcasts.dart';
@@ -25,6 +26,7 @@ part 'app_database.g.dart';
     AppSettings,
     RecentlyExpired,
     ListeningSessions,
+    Bookmarks,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -33,7 +35,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -50,6 +52,9 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 4) {
         await m.createTable(listeningSessions);
+      }
+      if (from < 5) {
+        await m.createTable(bookmarks);
       }
     },
     beforeOpen: (_) async {

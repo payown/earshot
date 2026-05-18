@@ -13,6 +13,14 @@ abstract interface class AppSettingsRepository {
   Future<bool> isOnboardingComplete();
 
   Future<void> setOnboardingComplete({required bool complete});
+
+  Future<bool> isCrashReportingEnabled();
+
+  Future<void> setCrashReportingEnabled({required bool enabled});
+
+  Future<bool> isAnalyticsEnabled();
+
+  Future<void> setAnalyticsEnabled({required bool enabled});
 }
 
 class AppSettingsRepositoryImpl implements AppSettingsRepository {
@@ -24,6 +32,8 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyAutoDownload = 'auto_download_count';
   static const _keyHistoryRetention = 'history_retention_days';
   static const _keyOnboardingComplete = 'onboarding_complete';
+  static const _keyCrashReporting = 'crash_reporting_enabled';
+  static const _keyAnalytics = 'analytics_enabled';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
 
@@ -69,6 +79,30 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setOnboardingComplete({required bool complete}) =>
       _set(_keyOnboardingComplete, complete.toString());
+
+  @override
+  Future<bool> isCrashReportingEnabled() =>
+      _getBool(_keyCrashReporting, defaultValue: true);
+
+  @override
+  Future<void> setCrashReportingEnabled({required bool enabled}) =>
+      _set(_keyCrashReporting, enabled.toString());
+
+  @override
+  Future<bool> isAnalyticsEnabled() =>
+      _getBool(_keyAnalytics, defaultValue: true);
+
+  @override
+  Future<void> setAnalyticsEnabled({required bool enabled}) =>
+      _set(_keyAnalytics, enabled.toString());
+
+  Future<bool> _getBool(String key, {required bool defaultValue}) async {
+    final row = await (_db.select(
+      _db.appSettings,
+    )..where((s) => s.key.equals(key))).getSingleOrNull();
+    if (row == null) return defaultValue;
+    return row.value == 'true';
+  }
 
   Future<void> _set(String key, String value) async {
     await _db

@@ -16,6 +16,8 @@ class PrivacySettingsScreen extends ConsumerStatefulWidget {
 
 class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
   int? _retentionDays;
+  bool _crashReporting = true;
+  bool _analytics = true;
   bool _loaded = false;
 
   static const _options = <String, int?>{
@@ -34,14 +36,18 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
 
   Future<void> _load() async {
     final db = ref.read(appDatabaseProvider);
-    final days = await AppSettingsRepositoryImpl(
-      database: db,
-    ).getHistoryRetentionDays();
-    if (mounted)
+    final settings = AppSettingsRepositoryImpl(database: db);
+    final days = await settings.getHistoryRetentionDays();
+    final crash = await settings.isCrashReportingEnabled();
+    final analytics = await settings.isAnalyticsEnabled();
+    if (mounted) {
       setState(() {
         _retentionDays = days;
+        _crashReporting = crash;
+        _analytics = analytics;
         _loaded = true;
       });
+    }
   }
 
   @override
@@ -61,6 +67,45 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
       appBar: AppBar(title: const Text('Privacy & History')),
       body: ListView(
         children: [
+          Semantics(
+            header: true,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Text(
+                'Crash Reports & Analytics',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            ),
+          ),
+          SwitchListTile(
+            title: const Text('Crash reports'),
+            subtitle: const Text(
+              'Anonymized crash data to help fix bugs. Never contains your podcasts or listening history.',
+            ),
+            value: _crashReporting,
+            onChanged: (v) async {
+              setState(() => _crashReporting = v);
+              await AppSettingsRepositoryImpl(
+                database: ref.read(appDatabaseProvider),
+              ).setCrashReportingEnabled(enabled: v);
+            },
+          ),
+          SwitchListTile(
+            title: const Text('Anonymous analytics'),
+            subtitle: const Text(
+              'Feature usage counts only. Never contains search queries, episode titles, or personal data.',
+            ),
+            value: _analytics,
+            onChanged: (v) async {
+              setState(() => _analytics = v);
+              await AppSettingsRepositoryImpl(
+                database: ref.read(appDatabaseProvider),
+              ).setAnalyticsEnabled(enabled: v);
+            },
+          ),
+          const Divider(),
           Semantics(
             header: true,
             child: Padding(

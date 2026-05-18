@@ -3,6 +3,7 @@ enum EpisodeAction {
   addToQueue,
   markPlayed,
   openShowNotes,
+  bookmark,
   download,
   share
   ;
@@ -12,6 +13,7 @@ enum EpisodeAction {
     EpisodeAction.addToQueue => 'Add to queue',
     EpisodeAction.markPlayed => 'Mark as played',
     EpisodeAction.openShowNotes => 'Open show notes',
+    EpisodeAction.bookmark => 'Bookmark current spot',
     EpisodeAction.download => 'Download',
     EpisodeAction.share => 'Share',
   };
@@ -43,6 +45,7 @@ const defaultEpisodeActions = [
   EpisodeAction.addToQueue,
   EpisodeAction.markPlayed,
   EpisodeAction.openShowNotes,
+  EpisodeAction.bookmark,
   EpisodeAction.download,
   EpisodeAction.share,
 ];
