@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 5 complete — Stats, listening history, privacy controls
+
+- App records listening sessions (episode, podcast, duration, speed, date) on pause and stop
+- Stats screen: time listened, time saved by speed, episodes completed — all as plain text
+- Per-podcast breakdown sorted by time
+- Period selector: This Week, This Month, This Year, All Time
+- Privacy Settings: history retention (30d/90d/1y/forever), "Delete all history"
+- Retention applied automatically on app launch
+- Settings → Listening Stats and Settings → Privacy & History navigation
+- 10 unit tests for stats aggregations, period filtering, and retention
+- **Deferred:** CSV export, year-in-review, streaks — Phase 7 polish
+
 ### Phase 4 complete — Downloads, Inbox, queue expiration, bottom navigation
 
 - Subscribe auto-downloads 3 most recent episodes (configurable, default 3)
