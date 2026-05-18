@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 6 complete — Search, OPML import/export, podcast discovery
+
+- Search icon in Subscriptions opens podcast directory search (Apple Podcasts / iTunes API)
+- Debounced search (300ms), result list with per-row Subscribe buttons
+- Subscribe confirmation announced via SemanticsService
+- OPML import: file picker → bulk subscribe with live progress as semantic live region
+- OPML export: generates OPML 2.0 and shares via system share sheet
+- Settings → Subscriptions section with Import and Export
+- 7 OPML unit tests (parse, edge cases, generate, round-trip)
+- **Deferred:** Local audio import (iOS "Open In" / Android SAF) — Phase 7
+- **Deferred:** Podcast Index integration — Phase 7 or later
+- **Deferred:** In-app subscription filter (type to filter subscribed list) — Phase 7
+
 ### Phase 5 complete — Stats, listening history, privacy controls
 
 - App records listening sessions (episode, podcast, duration, speed, date) on pause and stop
