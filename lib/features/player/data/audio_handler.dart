@@ -10,7 +10,11 @@ final _log = Logger('AudioHandler');
 
 class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   EarshotAudioHandler() {
-    _player.playbackEventStream.map(_buildPlaybackState).pipe(playbackState);
+    // Use listen() not pipe() — pipe() locks the sink and conflicts with
+    // BaseAudioHandler.stop() which also adds to playbackState directly.
+    _player.playbackEventStream
+        .map(_buildPlaybackState)
+        .listen(playbackState.add);
     _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) _onEpisodeCompleted();
     });
@@ -62,9 +66,6 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> stop() async {
     await _player.stop();
     _episodeIdController.add(null);
-    // Delay super.stop() slightly so the playbackEventStream pipe from
-    // just_audio finishes emitting before audio_service tries to add to it.
-    await Future<void>.delayed(const Duration(milliseconds: 50));
     await super.stop();
   }
 
