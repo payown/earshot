@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 4 complete — Downloads, Inbox, queue expiration, bottom navigation
+
+- Subscribe auto-downloads 3 most recent episodes (configurable, default 3)
+- Download manager with progress tracking and cancellation via dio
+- Inbox tab: all new untriaged episodes with Add to queue, Mark played, Delete actions
+- Queue tab: reorderable list with Remove and Move-to-top Quick Actions
+- Downloads tab: downloaded episodes + Recently Expired with 7-day restore window
+- Queue expiration: items older than per-podcast age limit auto-move to Recently Expired
+- Bottom navigation bar with badge count on Inbox
+- Schema version 3: app_settings (key-value), recently_expired tables
+- **Deferred:** Wi-Fi-only enforcement (connectivity_plus/xml version conflict) — Phase 7
+- **Deferred:** Auto-queue toggle and change-queue-age-limit Quick Actions — still stubs
+
 ### Phase 3 complete — Quick Actions, Settings, accessibility layer
 
 - Episode and podcast rows expose VoiceOver actions rotor / TalkBack custom actions via `customSemanticsActions`
