@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -95,15 +95,14 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
   }
 
   Future<void> _pickAndImport() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['opml', 'xml'],
+    const typeGroup = XTypeGroup(
+      label: 'OPML',
+      extensions: ['opml', 'xml'],
     );
+    final file = await openFile(acceptedTypeGroups: [typeGroup]);
+    if (file == null) return;
 
-    if (result == null || result.files.isEmpty) return;
-
-    final path = result.files.first.path;
-    if (path == null) return;
+    final path = file.path;
 
     String content;
     try {
