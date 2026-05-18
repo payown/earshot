@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../../features/stats/presentation/screens/stats_screen.dart';
 import 'quick_action_configurator_screen.dart';
+import 'privacy_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -42,11 +44,41 @@ class SettingsScreen extends StatelessWidget {
           const Divider(),
           Semantics(
             header: true,
+            child: const _SectionHeader(label: 'Stats'),
+          ),
+          ListTile(
+            title: const Text('Listening Stats'),
+            subtitle: const Text('Time listened, speed savings, history'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => const StatsScreen(),
+              ),
+            ),
+          ),
+          const Divider(),
+          Semantics(
+            header: true,
+            child: const _SectionHeader(label: 'Privacy'),
+          ),
+          ListTile(
+            title: const Text('Privacy & History'),
+            subtitle: const Text('History retention, delete all data'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => const PrivacySettingsScreen(),
+              ),
+            ),
+          ),
+          const Divider(),
+          Semantics(
+            header: true,
             child: const _SectionHeader(label: 'About'),
           ),
           const ListTile(
             title: Text('Version'),
-            subtitle: Text('Phase 3 build'),
+            subtitle: Text('Phase 5 build'),
           ),
         ],
       ),

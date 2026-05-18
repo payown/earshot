@@ -15,27 +15,43 @@ class PositionTracker {
   final AppDatabase _db;
   StreamSubscription<PlaybackState>? _subscription;
 
+  int? _lastPositionSeconds;
+  double _lastSpeed = 1.0;
+
   void attach(
     Stream<PlaybackState> playbackStateStream,
     Stream<int?> episodeIdStream,
   ) {
     int? currentEpisodeId;
-    episodeIdStream.listen((id) => currentEpisodeId = id);
+    episodeIdStream.listen((id) {
+      _lastPositionSeconds = null;
+      currentEpisodeId = id;
+    });
 
     _subscription = playbackStateStream.listen((state) async {
       final id = currentEpisodeId;
       if (id == null) return;
 
       final position = state.position.inSeconds;
+      _lastSpeed = state.speed;
 
-      if (!state.playing &&
-          state.processingState != AudioProcessingState.idle) {
+      final wasPlaying = state.playing;
+      final isPaused =
+          !wasPlaying &&
+          state.processingState != AudioProcessingState.idle &&
+          state.processingState != AudioProcessingState.completed;
+
+      if (isPaused) {
         await _savePosition(id, position);
+        await _recordSession(id, position);
       }
 
       if (state.processingState == AudioProcessingState.completed) {
+        await _recordSession(id, position);
         await _markPlayed(id);
       }
+
+      _lastPositionSeconds = position;
     });
   }
 
@@ -46,6 +62,32 @@ class PositionTracker {
     await (_db.update(_db.episodes)..where((e) => e.id.equals(episodeId)))
         .write(EpisodesCompanion(positionSeconds: Value(seconds)));
     _log.fine('Saved position $seconds for episode $episodeId');
+  }
+
+  Future<void> _recordSession(int episodeId, int currentPosition) async {
+    final prev = _lastPositionSeconds;
+    if (prev == null || currentPosition <= prev) return;
+
+    final duration = currentPosition - prev;
+    if (duration < 2) return; // Ignore trivial sessions.
+
+    final episode = await (_db.select(
+      _db.episodes,
+    )..where((e) => e.id.equals(episodeId))).getSingleOrNull();
+    if (episode == null) return;
+
+    await _db
+        .into(_db.listeningSessions)
+        .insert(
+          ListeningSessionsCompanion.insert(
+            episodeId: episodeId,
+            podcastId: episode.podcastId,
+            durationSeconds: duration,
+            speed: Value(_lastSpeed),
+            date: Value(DateTime.now().toUtc()),
+          ),
+        );
+    _log.fine('Recorded session: ${duration}s at ${_lastSpeed}x');
   }
 
   Future<void> _markPlayed(int episodeId) async {

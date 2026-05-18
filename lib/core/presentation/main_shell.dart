@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/db/enums.dart';
 import '../../features/downloads/presentation/providers/downloads_providers.dart';
+import '../../features/settings/data/app_settings_repository.dart';
+import '../../features/stats/data/stats_repository.dart';
 import '../../features/downloads/presentation/screens/downloads_screen.dart';
 import '../../features/downloads/presentation/screens/inbox_screen.dart';
 import '../../features/player/presentation/screens/queue_screen.dart';
@@ -26,12 +28,21 @@ class _MainShellState extends ConsumerState<MainShell> {
     DownloadsScreen(),
   ];
 
+  Future<void> _applyHistoryRetention() async {
+    final db = ref.read(appDatabaseProvider);
+    final days = await AppSettingsRepositoryImpl(
+      database: db,
+    ).getHistoryRetentionDays();
+    await StatsRepositoryImpl(database: db).applyRetentionPolicy(days);
+  }
+
   @override
   void initState() {
     super.initState();
-    // Run queue expiration on app launch.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // Run housekeeping on app launch.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       ref.read(queueExpirationServiceProvider).runExpiration();
+      await _applyHistoryRetention();
     });
   }
 
