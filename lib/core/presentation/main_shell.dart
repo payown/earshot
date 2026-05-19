@@ -1,33 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../data/db/enums.dart';
 import '../../features/downloads/presentation/providers/downloads_providers.dart';
 import '../../features/settings/data/app_settings_repository.dart';
 import '../../features/stats/data/stats_repository.dart';
-import '../../features/downloads/presentation/screens/downloads_screen.dart';
-import '../../features/downloads/presentation/screens/inbox_screen.dart';
-import '../../features/player/presentation/screens/queue_screen.dart';
-import '../../features/subscriptions/presentation/screens/subscriptions_screen.dart';
 import '../providers/core_providers.dart';
 
 class MainShell extends ConsumerStatefulWidget {
-  const MainShell({super.key});
+  const MainShell({required this.shell, super.key});
+
+  final StatefulNavigationShell shell;
 
   @override
   ConsumerState<MainShell> createState() => _MainShellState();
 }
 
 class _MainShellState extends ConsumerState<MainShell> {
-  int _currentIndex = 2; // Start on Subscriptions
-
-  static const _tabs = [
-    InboxScreen(),
-    QueueScreen(),
-    SubscriptionsScreen(),
-    DownloadsScreen(),
-  ];
-
   Future<void> _applyHistoryRetention() async {
     final db = ref.read(appDatabaseProvider);
     final days = await AppSettingsRepositoryImpl(
@@ -39,7 +29,6 @@ class _MainShellState extends ConsumerState<MainShell> {
   @override
   void initState() {
     super.initState();
-    // Run housekeeping on app launch.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       ref.read(queueExpirationServiceProvider).runExpiration();
       await _applyHistoryRetention();
@@ -51,13 +40,13 @@ class _MainShellState extends ConsumerState<MainShell> {
     final inboxCount = ref.watch(_inboxCountProvider).asData?.value ?? 0;
 
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _tabs,
-      ),
+      body: widget.shell,
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) => setState(() => _currentIndex = index),
+        selectedIndex: widget.shell.currentIndex,
+        onDestinationSelected: (index) => widget.shell.goBranch(
+          index,
+          initialLocation: index == widget.shell.currentIndex,
+        ),
         destinations: [
           NavigationDestination(
             icon: Badge(

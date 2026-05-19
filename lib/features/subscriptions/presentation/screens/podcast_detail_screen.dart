@@ -15,14 +15,54 @@ import '../providers/subscriptions_providers.dart';
 import '../widgets/episode_list_tile.dart';
 
 class PodcastDetailScreen extends ConsumerWidget {
-  const PodcastDetailScreen({required this.podcast, super.key});
+  const PodcastDetailScreen({required this.podcastId, super.key});
 
-  final Podcast podcast;
+  final int podcastId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final episodes = ref.watch(episodesProvider(podcast.id));
+    final podcastAsync = ref.watch(podcastProvider(podcastId));
+    final episodes = ref.watch(episodesProvider(podcastId));
 
+    return podcastAsync.when(
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      ),
+      error: (e, _) => Scaffold(
+        appBar: AppBar(),
+        body: Center(child: Text('Error: $e')),
+      ),
+      data: (podcast) {
+        if (podcast == null) {
+          return Scaffold(
+            appBar: AppBar(),
+            body: const Center(child: Text('Podcast not found.')),
+          );
+        }
+        return _PodcastDetailView(
+          podcast: podcast,
+          episodes: episodes,
+          ref: ref,
+        );
+      },
+    );
+  }
+}
+
+class _PodcastDetailView extends ConsumerWidget {
+  const _PodcastDetailView({
+    required this.podcast,
+    required this.episodes,
+    required this.ref,
+  });
+
+  final Podcast podcast;
+  final AsyncValue<List<Episode>> episodes;
+  // ignore: unused_field — passed through for action callbacks
+  final WidgetRef ref;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       bottomNavigationBar: const NowPlayingBar(),
       body: CustomScrollView(
@@ -86,7 +126,6 @@ class PodcastDetailScreen extends ConsumerWidget {
                           ctx,
                           ref,
                           episode,
-                          podcast,
                           actions,
                         ),
                       );
@@ -111,14 +150,13 @@ class PodcastDetailScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     Episode episode,
-    Podcast podcast,
     List<EpisodeAction> order,
   ) {
     return order.map((action) {
       return switch (action) {
         EpisodeAction.playNow => EpisodeQuickActionItem(
           label: action.label,
-          onInvoke: () => _play(ref, episode, podcast),
+          onInvoke: () => _play(ref, episode),
         ),
         EpisodeAction.addToQueue => EpisodeQuickActionItem(
           label: action.label,
@@ -197,7 +235,7 @@ class PodcastDetailScreen extends ConsumerWidget {
     }).toList();
   }
 
-  void _play(WidgetRef ref, Episode episode, Podcast podcast) {
+  void _play(WidgetRef ref, Episode episode) {
     final handler = ref.read(audioHandlerProvider);
     final resumePosition =
         episode.positionSeconds > 0 &&

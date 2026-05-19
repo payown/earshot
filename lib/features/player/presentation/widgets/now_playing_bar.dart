@@ -2,9 +2,10 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../core/router/app_router.dart';
 import '../providers/player_providers.dart';
-import '../screens/player_screen.dart';
 
 class NowPlayingBar extends ConsumerWidget {
   const NowPlayingBar({super.key});
@@ -115,9 +116,7 @@ class NowPlayingBar extends ConsumerWidget {
   }
 
   void _openPlayer(BuildContext context) {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const PlayerScreen()),
-    );
+    context.push(AppRoutes.player);
   }
 }
 

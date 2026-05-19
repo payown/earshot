@@ -18,6 +18,11 @@ final subscriptionsProvider = StreamProvider<List<Podcast>>(
   (ref) => ref.watch(podcastRepositoryProvider).watchSubscriptions(),
 );
 
+final podcastProvider = StreamProvider.family<Podcast?, int>(
+  (ref, podcastId) =>
+      ref.watch(podcastRepositoryProvider).watchPodcast(podcastId),
+);
+
 final episodesProvider = StreamProvider.family<List<Episode>, int>(
   (ref, podcastId) =>
       ref.watch(podcastRepositoryProvider).watchEpisodes(podcastId),

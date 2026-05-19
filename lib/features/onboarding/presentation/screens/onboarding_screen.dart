@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:go_router/go_router.dart';
+
 import '../../../../core/providers/core_providers.dart';
-import '../../../../features/search/presentation/screens/search_screen.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
-import '../../../../features/subscriptions/presentation/screens/add_podcast_screen.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
@@ -151,7 +152,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     await AppSettingsRepositoryImpl(
       database: db,
     ).setOnboardingComplete(complete: true);
-    if (mounted) Navigator.of(context).pop();
+    // Invalidate the cached onboarding state so the router redirect re-fires.
+    ref.invalidate(isOnboardingCompleteProvider);
+    if (mounted) context.go(AppRoutes.subscriptions);
   }
 }
 
@@ -287,9 +290,7 @@ class _AddFirstPodcastPage extends ConsumerWidget {
             icon: const Icon(Icons.search),
             label: const Text('Search podcasts'),
             onPressed: () async {
-              await Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(builder: (_) => const SearchScreen()),
-              );
+              await context.push<void>(AppRoutes.search);
               onPodcastAdded();
             },
           ),
@@ -298,11 +299,7 @@ class _AddFirstPodcastPage extends ConsumerWidget {
             icon: const Icon(Icons.link),
             label: const Text('Add by RSS URL'),
             onPressed: () async {
-              await Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(
-                  builder: (_) => const AddPodcastScreen(),
-                ),
-              );
+              await context.push<void>(AppRoutes.addPodcast);
               onPodcastAdded();
             },
           ),

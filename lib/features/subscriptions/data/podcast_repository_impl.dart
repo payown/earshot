@@ -89,6 +89,13 @@ class PodcastRepositoryImpl implements PodcastRepository {
   }
 
   @override
+  Stream<Podcast?> watchPodcast(int podcastId) {
+    return (_db.select(_db.podcasts)..where((p) => p.id.equals(podcastId)))
+        .watchSingleOrNull()
+        .map((row) => row == null ? null : _podcastFromRow(row));
+  }
+
+  @override
   Stream<List<Episode>> watchEpisodes(int podcastId) {
     return (_db.select(_db.episodes)
           ..where((e) => e.podcastId.equals(podcastId))

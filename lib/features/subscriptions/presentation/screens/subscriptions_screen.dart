@@ -1,16 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../core/router/app_router.dart';
 import '../../../../features/player/presentation/widgets/now_playing_bar.dart';
-import '../../../../features/search/presentation/screens/search_screen.dart';
 import '../../../../features/settings/domain/quick_action_definition.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
-import '../../../../features/settings/presentation/screens/settings_screen.dart';
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
 import '../widgets/podcast_list_tile.dart';
-import 'add_podcast_screen.dart';
-import 'podcast_detail_screen.dart';
 
 class SubscriptionsScreen extends ConsumerWidget {
   const SubscriptionsScreen({super.key});
@@ -29,19 +27,19 @@ class SubscriptionsScreen extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.search),
             tooltip: 'Search podcasts',
-            onPressed: () => _openSearch(context),
+            onPressed: () => context.push(AppRoutes.search),
           ),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Settings',
-            onPressed: () => _openSettings(context),
+            onPressed: () => context.push(AppRoutes.settings),
           ),
         ],
       ),
       bottomNavigationBar: const NowPlayingBar(),
       body: subscriptions.when(
         data: (podcasts) => podcasts.isEmpty
-            ? _EmptyState(onAddTap: () => _openAddPodcast(context))
+            ? _EmptyState(onAddTap: () => context.push(AppRoutes.addPodcast))
             : RefreshIndicator(
                 onRefresh: () => _refreshAll(ref, podcasts),
                 child: ListView.builder(
@@ -50,7 +48,9 @@ class SubscriptionsScreen extends ConsumerWidget {
                     final podcast = podcasts[index];
                     return PodcastListTile(
                       podcast: podcast,
-                      onTap: () => _openDetail(context, podcast),
+                      onTap: () => context.push(
+                        AppRoutes.podcastDetail(podcast.id),
+                      ),
                       quickActions: _buildPodcastActions(
                         context,
                         ref,
@@ -74,7 +74,7 @@ class SubscriptionsScreen extends ConsumerWidget {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _openAddPodcast(context),
+        onPressed: () => context.push(AppRoutes.addPodcast),
         tooltip: 'Add podcast',
         child: const Icon(Icons.add),
       ),
@@ -91,7 +91,7 @@ class SubscriptionsScreen extends ConsumerWidget {
       return switch (action) {
         PodcastAction.open => PodcastQuickActionItem(
           label: action.label,
-          onInvoke: () => _openDetail(context, podcast),
+          onInvoke: () => context.push(AppRoutes.podcastDetail(podcast.id)),
         ),
         PodcastAction.toggleNotifications => PodcastQuickActionItem(
           label: podcast.notificationEnabled
@@ -124,9 +124,7 @@ class SubscriptionsScreen extends ConsumerWidget {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Unsubscribe?'),
-        content: Text(
-          'Remove ${podcast.title} and all its episodes?',
-        ),
+        content: Text('Remove ${podcast.title} and all its episodes?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -147,32 +145,6 @@ class SubscriptionsScreen extends ConsumerWidget {
   Future<void> _refreshAll(WidgetRef ref, List<Podcast> podcasts) async {
     final repo = ref.read(podcastRepositoryProvider);
     await Future.wait(podcasts.map((p) => repo.refreshFeed(p.id)));
-  }
-
-  void _openAddPodcast(BuildContext context) {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const AddPodcastScreen()),
-    );
-  }
-
-  void _openDetail(BuildContext context, Podcast podcast) {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => PodcastDetailScreen(podcast: podcast),
-      ),
-    );
-  }
-
-  void _openSearch(BuildContext context) {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const SearchScreen()),
-    );
-  }
-
-  void _openSettings(BuildContext context) {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
-    );
   }
 }
 

@@ -9,6 +9,8 @@ abstract interface class PodcastRepository {
 
   Stream<List<Podcast>> watchSubscriptions();
 
+  Stream<Podcast?> watchPodcast(int podcastId);
+
   Stream<List<Episode>> watchEpisodes(int podcastId);
 
   Future<void> refreshFeed(int podcastId);

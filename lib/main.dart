@@ -4,13 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:posthog_flutter/posthog_flutter.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
-import 'core/presentation/main_shell.dart';
-import 'core/providers/core_providers.dart';
+import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
-import 'features/onboarding/presentation/screens/onboarding_screen.dart';
 import 'features/player/data/audio_handler.dart';
 import 'features/player/presentation/providers/player_providers.dart';
-import 'features/settings/data/app_settings_repository.dart';
 
 // Placeholder DSNs — replace with real values before beta build.
 // These are safe to leave empty; Sentry/PostHog silently no-op with empty DSN.
@@ -49,7 +46,6 @@ Future<void> main() async {
     ),
   );
 
-  // Initialize PostHog (no-op if key is empty).
   if (_posthogApiKey.isNotEmpty) {
     final config = PostHogConfig(_posthogApiKey)..host = _posthogHost;
     await Posthog().setup(config);
@@ -83,37 +79,15 @@ class EarshotApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return MaterialApp(
+    final router = ref.watch(appRouterProvider);
+    return MaterialApp.router(
       title: 'Earshot',
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       highContrastTheme: AppTheme.highContrastLight(),
       highContrastDarkTheme: AppTheme.highContrastDark(),
       themeMode: ThemeMode.system,
-      home: const _HomeRouter(),
-    );
-  }
-}
-
-class _HomeRouter extends ConsumerWidget {
-  const _HomeRouter();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final db = ref.watch(appDatabaseProvider);
-    return FutureBuilder<bool>(
-      future: AppSettingsRepositoryImpl(database: db).isOnboardingComplete(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-        if (snapshot.data == true) {
-          return const MainShell();
-        }
-        return const OnboardingScreen();
-      },
+      routerConfig: router,
     );
   }
 }

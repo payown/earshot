@@ -15,6 +15,7 @@ import 'package:earshot/features/subscriptions/presentation/screens/subscription
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 
 class MockPodcastRepository extends Mock implements PodcastRepository {}
@@ -52,11 +53,30 @@ Episode _fakeEpisode({int id = 1}) => Episode(
 );
 
 Widget _buildApp(Widget child, MockPodcastRepository repo) {
+  // Wrap in a minimal GoRouter so context.push/go calls work in tests.
+  final router = GoRouter(
+    initialLocation: '/',
+    routes: [
+      GoRoute(path: '/', builder: (_, __) => child),
+      GoRoute(
+        path: '/subscriptions/:id',
+        builder: (_, state) => PodcastDetailScreen(
+          podcastId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/add-podcast',
+        builder: (_, __) => const AddPodcastScreen(),
+      ),
+      GoRoute(path: '/search', builder: (_, __) => const Scaffold()),
+      GoRoute(path: '/settings', builder: (_, __) => const Scaffold()),
+    ],
+  );
   return ProviderScope(
     overrides: [
       podcastRepositoryProvider.overrideWithValue(repo),
     ],
-    child: MaterialApp(home: child),
+    child: MaterialApp.router(routerConfig: router),
   );
 }
 
@@ -122,6 +142,9 @@ void main() {
       when(
         () => repo.watchSubscriptions(),
       ).thenAnswer((_) => Stream.value([_fakePodcast()]));
+      when(
+        () => repo.watchPodcast(1),
+      ).thenAnswer((_) => Stream.value(_fakePodcast()));
       when(() => repo.watchEpisodes(1)).thenAnswer((_) => Stream.value([]));
 
       await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
@@ -238,10 +261,13 @@ void main() {
 
   group('PodcastDetailScreen', () {
     testWidgets('shows podcast title in app bar', (tester) async {
+      when(
+        () => repo.watchPodcast(1),
+      ).thenAnswer((_) => Stream.value(_fakePodcast()));
       when(() => repo.watchEpisodes(1)).thenAnswer((_) => Stream.value([]));
 
       await tester.pumpWidget(
-        _buildApp(PodcastDetailScreen(podcast: _fakePodcast()), repo),
+        _buildApp(PodcastDetailScreen(podcastId: 1), repo),
       );
       await tester.pump();
 
@@ -250,11 +276,14 @@ void main() {
 
     testWidgets('shows episode list', (tester) async {
       when(
+        () => repo.watchPodcast(1),
+      ).thenAnswer((_) => Stream.value(_fakePodcast()));
+      when(
         () => repo.watchEpisodes(1),
       ).thenAnswer((_) => Stream.value([_fakeEpisode()]));
 
       await tester.pumpWidget(
-        _buildApp(PodcastDetailScreen(podcast: _fakePodcast()), repo),
+        _buildApp(PodcastDetailScreen(podcastId: 1), repo),
       );
       await tester.pump();
 
@@ -262,10 +291,13 @@ void main() {
     });
 
     testWidgets('episodes section has accessible heading', (tester) async {
+      when(
+        () => repo.watchPodcast(1),
+      ).thenAnswer((_) => Stream.value(_fakePodcast()));
       when(() => repo.watchEpisodes(1)).thenAnswer((_) => Stream.value([]));
 
       await tester.pumpWidget(
-        _buildApp(PodcastDetailScreen(podcast: _fakePodcast()), repo),
+        _buildApp(PodcastDetailScreen(podcastId: 1), repo),
       );
       await tester.pump();
 
@@ -279,11 +311,14 @@ void main() {
       tester,
     ) async {
       when(
+        () => repo.watchPodcast(1),
+      ).thenAnswer((_) => Stream.value(_fakePodcast()));
+      when(
         () => repo.watchEpisodes(1),
       ).thenAnswer((_) => Stream.value([_fakeEpisode()]));
 
       await tester.pumpWidget(
-        _buildApp(PodcastDetailScreen(podcast: _fakePodcast()), repo),
+        _buildApp(PodcastDetailScreen(podcastId: 1), repo),
       );
       await tester.pump();
 

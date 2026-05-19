@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../data/db/enums.dart';
 import '../../domain/quick_action_definition.dart';
 import '../providers/settings_providers.dart';
-import 'settings_screen.dart';
 
 class QuickActionConfiguratorScreen extends ConsumerStatefulWidget {
   const QuickActionConfiguratorScreen({

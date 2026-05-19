@@ -2,15 +2,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../../core/router/app_router.dart';
+import '../../../../data/db/enums.dart';
 import '../../../../features/search/presentation/providers/search_providers.dart';
-import '../../../../features/search/presentation/screens/opml_import_screen.dart';
-import '../../../../features/stats/presentation/screens/stats_screen.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
-import 'privacy_settings_screen.dart';
-import 'quick_action_configurator_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -29,11 +28,7 @@ class SettingsScreen extends ConsumerWidget {
             title: const Text('Import OPML'),
             subtitle: const Text('Import subscriptions from another app'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute<void>(
-                builder: (_) => const OpmlImportScreen(),
-              ),
-            ),
+            onTap: () => context.push(AppRoutes.settingsImportOpml),
           ),
           ListTile(
             title: const Text('Export OPML'),
@@ -50,11 +45,9 @@ class SettingsScreen extends ConsumerWidget {
             title: const Text('Episode Quick Actions'),
             subtitle: const Text('Choose and reorder actions on episodes'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute<void>(
-                builder: (_) => const QuickActionConfiguratorScreen(
-                  contentType: QuickActionContentType.episode,
-                ),
+            onTap: () => context.push(
+              AppRoutes.settingsQuickActions(
+                QuickActionContentType.episode.name,
               ),
             ),
           ),
@@ -62,11 +55,9 @@ class SettingsScreen extends ConsumerWidget {
             title: const Text('Podcast Quick Actions'),
             subtitle: const Text('Choose and reorder actions on podcasts'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute<void>(
-                builder: (_) => const QuickActionConfiguratorScreen(
-                  contentType: QuickActionContentType.podcast,
-                ),
+            onTap: () => context.push(
+              AppRoutes.settingsQuickActions(
+                QuickActionContentType.podcast.name,
               ),
             ),
           ),
@@ -79,11 +70,7 @@ class SettingsScreen extends ConsumerWidget {
             title: const Text('Listening Stats'),
             subtitle: const Text('Time listened, speed savings, history'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute<void>(
-                builder: (_) => const StatsScreen(),
-              ),
-            ),
+            onTap: () => context.push(AppRoutes.settingsStats),
           ),
           const Divider(),
           Semantics(
@@ -94,11 +81,7 @@ class SettingsScreen extends ConsumerWidget {
             title: const Text('Privacy & History'),
             subtitle: const Text('History retention, delete all data'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute<void>(
-                builder: (_) => const PrivacySettingsScreen(),
-              ),
-            ),
+            onTap: () => context.push(AppRoutes.settingsPrivacy),
           ),
           const Divider(),
           Semantics(
@@ -163,5 +146,3 @@ class _SectionHeader extends StatelessWidget {
     );
   }
 }
-
-enum QuickActionContentType { episode, podcast }
