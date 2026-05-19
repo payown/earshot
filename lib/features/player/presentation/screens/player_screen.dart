@@ -4,7 +4,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/spacing.dart';
-// audio_handler import removed — type is inferred via audioHandlerProvider;
+import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/sleep_timer.dart';
 import '../providers/player_providers.dart';
 
@@ -85,9 +85,20 @@ class PlayerScreen extends ConsumerWidget {
               const SizedBox(height: Spacing.md),
               _SpeedSelector(
                 speed: playbackState?.speed ?? 1.0,
-                onSpeedChanged: (speed) =>
-                    ref.read(audioHandlerProvider).setSpeed(speed),
+                onSpeedChanged: (speed) {
+                  ref.read(audioHandlerProvider).setSpeed(speed);
+                  // Save as per-podcast override so the next episode from
+                  // this show starts at the same speed.
+                  final podcastId = mediaItem.extras?['podcastId'] as int?;
+                  if (podcastId != null) {
+                    ref
+                        .read(podcastRepositoryProvider)
+                        .updateSpeedOverride(podcastId, speed);
+                  }
+                },
               ),
+              const SizedBox(height: Spacing.md),
+              _AudioExtrasRow(),
               const SizedBox(height: Spacing.md),
               _SleepTimerControls(),
             ],
@@ -481,5 +492,77 @@ class _SleepTimerControls extends ConsumerWidget {
     final m = d.inMinutes;
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$m:$s';
+  }
+}
+
+class _AudioExtrasRow extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final skipSilence = ref.watch(skipSilenceProvider).asData?.value ?? false;
+    final voiceEnhance = ref.watch(voiceEnhanceProvider).asData?.value ?? false;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _ToggleChip(
+          label: 'Trim Silence',
+          icon: Icons.graphic_eq,
+          enabled: skipSilence,
+          onToggle: (v) async {
+            await ref.read(skipSilenceProvider.notifier).set(v);
+            await ref.read(audioHandlerProvider).setSkipSilenceEnabled(v);
+          },
+        ),
+        const SizedBox(width: 12),
+        _ToggleChip(
+          label: 'Voice Boost',
+          icon: Icons.spatial_audio,
+          enabled: voiceEnhance,
+          onToggle: (v) async {
+            await ref.read(voiceEnhanceProvider.notifier).set(v);
+            await ref.read(audioHandlerProvider).setVoiceEnhance(v);
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _ToggleChip extends StatelessWidget {
+  const _ToggleChip({
+    required this.label,
+    required this.icon,
+    required this.enabled,
+    required this.onToggle,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool enabled;
+  final ValueChanged<bool> onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Semantics(
+      toggled: enabled,
+      label: '$label, ${enabled ? 'on' : 'off'}',
+      button: true,
+      child: ExcludeSemantics(
+        child: FilterChip(
+          avatar: Icon(
+            icon,
+            size: 18,
+            color: enabled
+                ? colorScheme.onSecondaryContainer
+                : colorScheme.onSurfaceVariant,
+          ),
+          label: Text(label),
+          selected: enabled,
+          onSelected: onToggle,
+          showCheckmark: false,
+        ),
+      ),
+    );
   }
 }

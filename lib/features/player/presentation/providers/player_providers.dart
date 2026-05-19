@@ -2,6 +2,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/providers/core_providers.dart';
+import '../../../../features/settings/data/app_settings_repository.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../../data/audio_handler.dart';
 import '../../data/position_tracker.dart';
@@ -46,6 +47,45 @@ final queueProvider = StreamProvider<List<Episode>>(
 
 final sleepTimerStateProvider = StreamProvider<SleepTimerState>(
   (ref) => ref.watch(audioHandlerProvider).sleepTimer.stateStream,
+);
+
+// ── Audio enhancement settings ────────────────────────────────────────────────
+
+class _AudioSettingNotifier extends AsyncNotifier<bool> {
+  _AudioSettingNotifier({
+    required Future<bool> Function(AppSettingsRepositoryImpl) read,
+    required Future<void> Function(AppSettingsRepositoryImpl, bool) write,
+  }) : _read = read,
+       _write = write;
+
+  final Future<bool> Function(AppSettingsRepositoryImpl) _read;
+  final Future<void> Function(AppSettingsRepositoryImpl, bool) _write;
+
+  @override
+  Future<bool> build() async {
+    final db = ref.watch(appDatabaseProvider);
+    return _read(AppSettingsRepositoryImpl(database: db));
+  }
+
+  Future<void> set(bool value) async {
+    state = AsyncData(value);
+    final db = ref.read(appDatabaseProvider);
+    await _write(AppSettingsRepositoryImpl(database: db), value);
+  }
+}
+
+final skipSilenceProvider = AsyncNotifierProvider<_AudioSettingNotifier, bool>(
+  () => _AudioSettingNotifier(
+    read: (r) => r.isSkipSilenceEnabled(),
+    write: (r, v) => r.setSkipSilenceEnabled(enabled: v),
+  ),
+);
+
+final voiceEnhanceProvider = AsyncNotifierProvider<_AudioSettingNotifier, bool>(
+  () => _AudioSettingNotifier(
+    read: (r) => r.isVoiceEnhanceEnabled(),
+    write: (r, v) => r.setVoiceEnhanceEnabled(enabled: v),
+  ),
 );
 
 final queueAutoAdvanceProvider = Provider<void>((ref) {

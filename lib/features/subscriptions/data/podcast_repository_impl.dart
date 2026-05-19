@@ -241,6 +241,13 @@ class PodcastRepositoryImpl implements PodcastRepository {
         .write(EpisodesCompanion(status: Value(status)));
   }
 
+  @override
+  Future<void> updateSpeedOverride(int podcastId, double? speed) async {
+    await (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId)))
+        .write(PodcastsCompanion(speedOverride: Value(speed)));
+    _log.fine('Speed override for podcast $podcastId set to $speed');
+  }
+
   Podcast _podcastFromRow(PodcastRow row) => Podcast(
     id: row.id,
     rssUrl: row.rssUrl,

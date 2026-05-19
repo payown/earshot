@@ -10,6 +10,12 @@ final _log = Logger('AudioHandler');
 
 class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   EarshotAudioHandler() {
+    _loudnessEnhancer = AndroidLoudnessEnhancer();
+    _player = AudioPlayer(
+      audioPipeline: AudioPipeline(
+        androidAudioEffects: [_loudnessEnhancer],
+      ),
+    );
     _attachPlaybackListener();
     _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) unawaited(_onEpisodeCompleted());
@@ -22,13 +28,11 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     );
   }
 
-  final AudioPlayer _player = AudioPlayer();
+  late final AndroidLoudnessEnhancer _loudnessEnhancer;
+  late final AudioPlayer _player;
   late final SleepTimer sleepTimer;
   StreamSubscription<PlaybackState>? _playbackSubscription;
 
-  // Set by queueAutoAdvanceProvider. If set, called instead of stop() when
-  // an episode completes. The callback is responsible for calling stop() or
-  // playEpisode() as appropriate.
   Future<void> Function()? onEpisodeCompleted;
 
   void _attachPlaybackListener() {
@@ -37,7 +41,6 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
         .listen(playbackState.add);
   }
 
-  // episodeId of the currently loaded episode — used by PositionTracker.
   final StreamController<int?> _episodeIdController =
       StreamController<int?>.broadcast();
   Stream<int?> get episodeIdStream => _episodeIdController.stream;
@@ -52,6 +55,13 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
 
     final episodeId = item.extras?['episodeId'] as int?;
     _episodeIdController.add(episodeId);
+
+    // Restore per-podcast speed override before playback starts.
+    final speedOverride = item.extras?['speedOverride'] as double?;
+    if (speedOverride != null) {
+      await _player.setSpeed(speedOverride);
+      playbackState.add(playbackState.value.copyWith(speed: speedOverride));
+    }
 
     try {
       await _player.setUrl(item.id);
@@ -76,10 +86,6 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _playbackSubscription = null;
     await _player.stop();
     _episodeIdController.add(null);
-    // Skip super.stop() — it calls playbackState.add() which throws
-    // "cannot add while addStream is in progress" because audio_service's
-    // own infrastructure has an addStream open on the same BehaviorSubject.
-    // BaseAudioHandler.stop() only emits idle state, so we do it directly.
     playbackState.add(
       playbackState.value.copyWith(
         processingState: AudioProcessingState.idle,
@@ -95,12 +101,27 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> setSpeed(double speed) async {
     await _player.setSpeed(speed);
-    // BaseAudioHandler.setSpeed only updates the state; we also need the
-    // player itself changed, so we push the new speed explicitly.
     playbackState.add(playbackState.value.copyWith(speed: speed));
   }
 
-  // SeekHandler provides fastForward/rewind using the configured intervals.
+  Future<void> setSkipSilenceEnabled(bool enabled) async {
+    await _player.setSkipSilenceEnabled(enabled);
+    _log.info('Skip silence: $enabled');
+  }
+
+  // Volume boost + Android dynamic compression.
+  // iOS gets a 1.5× volume boost; Android also gets loudness normalization
+  // via AndroidLoudnessEnhancer (targetGain 500 millibels ≈ +5 dB).
+  Future<void> setVoiceEnhance(bool enabled) async {
+    await _player.setVolume(enabled ? 1.5 : 1.0);
+    try {
+      await _loudnessEnhancer.setEnabled(enabled);
+      if (enabled) await _loudnessEnhancer.setTargetGain(500);
+    } on Exception {
+      // AndroidLoudnessEnhancer is a no-op on iOS; swallow the error.
+    }
+    _log.info('Voice enhance: $enabled');
+  }
 
   Duration get position => _player.position;
 

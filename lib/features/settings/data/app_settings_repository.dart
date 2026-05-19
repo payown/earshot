@@ -21,6 +21,14 @@ abstract interface class AppSettingsRepository {
   Future<bool> isAnalyticsEnabled();
 
   Future<void> setAnalyticsEnabled({required bool enabled});
+
+  Future<bool> isSkipSilenceEnabled();
+
+  Future<void> setSkipSilenceEnabled({required bool enabled});
+
+  Future<bool> isVoiceEnhanceEnabled();
+
+  Future<void> setVoiceEnhanceEnabled({required bool enabled});
 }
 
 class AppSettingsRepositoryImpl implements AppSettingsRepository {
@@ -34,6 +42,8 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyOnboardingComplete = 'onboarding_complete';
   static const _keyCrashReporting = 'crash_reporting_enabled';
   static const _keyAnalytics = 'analytics_enabled';
+  static const _keySkipSilence = 'skip_silence_enabled';
+  static const _keyVoiceEnhance = 'voice_enhance_enabled';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
 
@@ -95,6 +105,22 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setAnalyticsEnabled({required bool enabled}) =>
       _set(_keyAnalytics, enabled.toString());
+
+  @override
+  Future<bool> isSkipSilenceEnabled() =>
+      _getBool(_keySkipSilence, defaultValue: false);
+
+  @override
+  Future<void> setSkipSilenceEnabled({required bool enabled}) =>
+      _set(_keySkipSilence, enabled.toString());
+
+  @override
+  Future<bool> isVoiceEnhanceEnabled() =>
+      _getBool(_keyVoiceEnhance, defaultValue: false);
+
+  @override
+  Future<void> setVoiceEnhanceEnabled({required bool enabled}) =>
+      _set(_keyVoiceEnhance, enabled.toString());
 
   Future<bool> _getBool(String key, {required bool defaultValue}) async {
     final row = await (_db.select(

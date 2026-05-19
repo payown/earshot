@@ -254,7 +254,12 @@ class _PodcastDetailView extends ConsumerWidget {
         duration: episode.durationSeconds != null
             ? Duration(seconds: episode.durationSeconds!)
             : null,
-        extras: {'episodeId': episode.id},
+        extras: {
+          'episodeId': episode.id,
+          'podcastId': podcast.id,
+          if (podcast.speedOverride != null)
+            'speedOverride': podcast.speedOverride!,
+        },
       ),
       resumePositionSeconds: resumePosition,
     );
