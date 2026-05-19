@@ -63,8 +63,7 @@ class InboxScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
   ) async {
-    final count =
-        ref.read(_inboxEpisodesProvider).asData?.value.length ?? 0;
+    final count = ref.read(_inboxEpisodesProvider).asData?.value.length ?? 0;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(

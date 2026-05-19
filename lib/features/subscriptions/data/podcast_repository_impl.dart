@@ -158,8 +158,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
     // most-recent episodes rather than arbitrary feed order.
     final ordered = preserveUserData
         ? episodes
-        : (List<ParsedEpisode>.from(episodes)
-          ..sort((a, b) {
+        : (List<ParsedEpisode>.from(episodes)..sort((a, b) {
             if (a.pubDate == null) return 1;
             if (b.pubDate == null) return -1;
             return b.pubDate!.compareTo(a.pubDate!);
@@ -170,8 +169,9 @@ class PodcastRepositoryImpl implements PodcastRepository {
 
       // Historical episodes (beyond the inbox limit) are inserted as played
       // so they don't flood the inbox on bulk imports like OPML.
-      final initialStatus =
-          i < inboxLimit ? EpisodeStatus.newEpisode : EpisodeStatus.played;
+      final initialStatus = i < inboxLimit
+          ? EpisodeStatus.newEpisode
+          : EpisodeStatus.played;
 
       final companion = EpisodesCompanion.insert(
         podcastId: podcastId,
@@ -186,9 +186,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
         seasonNumber: Value(ep.seasonNumber),
         chapterUrl: Value(ep.chapterUrl),
         transcriptUrl: Value(ep.transcriptUrl),
-        status: preserveUserData
-            ? const Value.absent()
-            : Value(initialStatus),
+        status: preserveUserData ? const Value.absent() : Value(initialStatus),
       );
 
       if (preserveUserData) {
@@ -222,11 +220,11 @@ class PodcastRepositoryImpl implements PodcastRepository {
 
   @override
   Future<void> markAllInboxPlayed() async {
-    await (_db.update(_db.episodes)
-          ..where((e) => e.status.equals(EpisodeStatus.newEpisode.name)))
-        .write(
-          const EpisodesCompanion(status: Value(EpisodeStatus.played)),
-        );
+    await (_db.update(
+      _db.episodes,
+    )..where((e) => e.status.equals(EpisodeStatus.newEpisode.name))).write(
+      const EpisodesCompanion(status: Value(EpisodeStatus.played)),
+    );
     _log.info('Marked all inbox episodes as played');
   }
 

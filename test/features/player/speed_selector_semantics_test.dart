@@ -64,8 +64,7 @@ class _TestSpeedSelector extends StatelessWidget {
     return best;
   }
 
-  String _label(double s) =>
-      s == s.roundToDouble() ? '${s.toInt()}x' : '${s}x';
+  String _label(double s) => s == s.roundToDouble() ? '${s.toInt()}x' : '${s}x';
 }
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
@@ -73,34 +72,36 @@ Finder _speedFinder() => find.bySemanticsLabel('Playback speed');
 
 void main() {
   group('_SpeedSelector VoiceOver adjustable semantics', () {
-    testWidgets('has slider trait, current value, and increase/decrease actions',
-        (tester) async {
-      final handle = tester.ensureSemantics();
+    testWidgets(
+      'has slider trait, current value, and increase/decrease actions',
+      (tester) async {
+        final handle = tester.ensureSemantics();
 
-      await tester.pumpWidget(
-        _wrap(
-          _TestSpeedSelector(
-            speed: 1.0,
-            onSpeedChanged: (_) {},
+        await tester.pumpWidget(
+          _wrap(
+            _TestSpeedSelector(
+              speed: 1.0,
+              onSpeedChanged: (_) {},
+            ),
           ),
-        ),
-      );
+        );
 
-      expect(
-        tester.getSemantics(_speedFinder()),
-        matchesSemantics(
-          label: 'Playback speed',
-          value: '1x',
-          isSlider: true,
-          hasIncreaseAction: true,
-          hasDecreaseAction: true,
-          increasedValue: '1.25x',
-          decreasedValue: '0.75x',
-        ),
-      );
+        expect(
+          tester.getSemantics(_speedFinder()),
+          matchesSemantics(
+            label: 'Playback speed',
+            value: '1x',
+            isSlider: true,
+            hasIncreaseAction: true,
+            hasDecreaseAction: true,
+            increasedValue: '1.25x',
+            decreasedValue: '0.75x',
+          ),
+        );
 
-      handle.dispose();
-    });
+        handle.dispose();
+      },
+    );
 
     testWidgets('onIncrease moves to next speed', (tester) async {
       final handle = tester.ensureSemantics();

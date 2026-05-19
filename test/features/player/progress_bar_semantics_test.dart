@@ -38,8 +38,10 @@ class _TestProgressBar extends StatelessWidget {
           height: 48,
           child: Slider(
             value: duration.inMilliseconds > 0
-                ? (position.inMilliseconds / duration.inMilliseconds)
-                    .clamp(0.0, 1.0)
+                ? (position.inMilliseconds / duration.inMilliseconds).clamp(
+                    0.0,
+                    1.0,
+                  )
                 : 0.0,
             onChanged: (v) {
               final ms = (v * duration.inMilliseconds).round();
@@ -72,35 +74,37 @@ Finder _progressFinder() =>
 
 void main() {
   group('_ProgressBar VoiceOver adjustable semantics', () {
-    testWidgets('has slider trait, value label, and increase/decrease actions',
-        (tester) async {
-      final semanticsHandle = tester.ensureSemantics();
+    testWidgets(
+      'has slider trait, value label, and increase/decrease actions',
+      (tester) async {
+        final semanticsHandle = tester.ensureSemantics();
 
-      await tester.pumpWidget(
-        _wrap(
-          _TestProgressBar(
-            position: const Duration(minutes: 5),
-            duration: const Duration(minutes: 30),
-            onSeek: (_) {},
+        await tester.pumpWidget(
+          _wrap(
+            _TestProgressBar(
+              position: const Duration(minutes: 5),
+              duration: const Duration(minutes: 30),
+              onSeek: (_) {},
+            ),
           ),
-        ),
-      );
+        );
 
-      expect(
-        tester.getSemantics(_progressFinder()),
-        matchesSemantics(
-          label: 'Playback position: 05:00 of 30:00',
-          value: '05:00',
-          isSlider: true,
-          hasIncreaseAction: true,
-          hasDecreaseAction: true,
-          increasedValue: '05:30',
-          decreasedValue: '04:30',
-        ),
-      );
+        expect(
+          tester.getSemantics(_progressFinder()),
+          matchesSemantics(
+            label: 'Playback position: 05:00 of 30:00',
+            value: '05:00',
+            isSlider: true,
+            hasIncreaseAction: true,
+            hasDecreaseAction: true,
+            increasedValue: '05:30',
+            decreasedValue: '04:30',
+          ),
+        );
 
-      semanticsHandle.dispose();
-    });
+        semanticsHandle.dispose();
+      },
+    );
 
     testWidgets('onIncrease seeks forward 30 seconds', (tester) async {
       final semanticsHandle = tester.ensureSemantics();
@@ -117,8 +121,10 @@ void main() {
       );
 
       final nodeId = tester.getSemantics(_progressFinder()).id;
-      tester.binding.pipelineOwner.semanticsOwner!
-          .performAction(nodeId, SemanticsAction.increase);
+      tester.binding.pipelineOwner.semanticsOwner!.performAction(
+        nodeId,
+        SemanticsAction.increase,
+      );
       await tester.pump();
 
       expect(seeked, const Duration(minutes: 5, seconds: 30));
@@ -140,8 +146,10 @@ void main() {
       );
 
       final nodeId = tester.getSemantics(_progressFinder()).id;
-      tester.binding.pipelineOwner.semanticsOwner!
-          .performAction(nodeId, SemanticsAction.decrease);
+      tester.binding.pipelineOwner.semanticsOwner!.performAction(
+        nodeId,
+        SemanticsAction.decrease,
+      );
       await tester.pump();
 
       expect(seeked, const Duration(minutes: 4, seconds: 30));
@@ -163,15 +171,19 @@ void main() {
       );
 
       final nodeId = tester.getSemantics(_progressFinder()).id;
-      tester.binding.pipelineOwner.semanticsOwner!
-          .performAction(nodeId, SemanticsAction.decrease);
+      tester.binding.pipelineOwner.semanticsOwner!.performAction(
+        nodeId,
+        SemanticsAction.decrease,
+      );
       await tester.pump();
 
       expect(seeked, Duration.zero);
       semanticsHandle.dispose();
     });
 
-    testWidgets('increase clamps to duration at end of episode', (tester) async {
+    testWidgets('increase clamps to duration at end of episode', (
+      tester,
+    ) async {
       const dur = Duration(minutes: 30);
       final semanticsHandle = tester.ensureSemantics();
       Duration? seeked;
@@ -187,8 +199,10 @@ void main() {
       );
 
       final nodeId = tester.getSemantics(_progressFinder()).id;
-      tester.binding.pipelineOwner.semanticsOwner!
-          .performAction(nodeId, SemanticsAction.increase);
+      tester.binding.pipelineOwner.semanticsOwner!.performAction(
+        nodeId,
+        SemanticsAction.increase,
+      );
       await tester.pump();
 
       expect(seeked, dur);
