@@ -55,24 +55,27 @@ Future<void> main() async {
     await Posthog().setup(config);
   }
 
-  // Initialize Sentry wrapping runApp so it captures Flutter errors.
-  await SentryFlutter.init(
-    (options) {
-      options
-        ..dsn = _sentryDsn
-        ..tracesSampleRate = 0
-        ..attachScreenshot = false
-        ..sendDefaultPii = false;
-    },
-    appRunner: () => runApp(
-      ProviderScope(
-        overrides: [
-          audioHandlerProvider.overrideWithValue(audioHandler),
-        ],
-        child: const _AppInitializer(),
-      ),
+  void launchApp() => runApp(
+    ProviderScope(
+      overrides: [audioHandlerProvider.overrideWithValue(audioHandler)],
+      child: const _AppInitializer(),
     ),
   );
+
+  if (_sentryDsn.isNotEmpty) {
+    await SentryFlutter.init(
+      (options) {
+        options
+          ..dsn = _sentryDsn
+          ..tracesSampleRate = 0
+          ..attachScreenshot = false
+          ..sendDefaultPii = false;
+      },
+      appRunner: launchApp,
+    );
+  } else {
+    launchApp();
+  }
 }
 
 class EarshotApp extends ConsumerWidget {
