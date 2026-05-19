@@ -84,9 +84,8 @@ class _QuickActionConfiguratorScreenState
           Expanded(
             child: ReorderableListView.builder(
               itemCount: keys.length,
-              onReorder: (oldIndex, newIndex) {
+              onReorderItem: (oldIndex, newIndex) {
                 setState(() {
-                  if (newIndex > oldIndex) newIndex--;
                   final item = keys.removeAt(oldIndex);
                   keys.insert(newIndex, item);
                   _orderedKeys = List.from(keys);

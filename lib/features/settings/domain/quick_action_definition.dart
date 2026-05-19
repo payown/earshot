@@ -5,8 +5,7 @@ enum EpisodeAction {
   openShowNotes,
   bookmark,
   download,
-  share
-  ;
+  share;
 
   String get label => switch (this) {
     EpisodeAction.playNow => 'Play now',
@@ -26,8 +25,7 @@ enum PodcastAction {
   toggleNotifications,
   toggleAutoQueue,
   unsubscribe,
-  share
-  ;
+  share;
 
   String get label => switch (this) {
     PodcastAction.open => 'Open podcast',

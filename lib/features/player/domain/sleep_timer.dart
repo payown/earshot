@@ -11,8 +11,7 @@ enum SleepTimerPreset {
   fifteenMinutes,
   thirtyMinutes,
   fortyFiveMinutes,
-  sixtyMinutes
-  ;
+  sixtyMinutes;
 
   String get label => switch (this) {
     SleepTimerPreset.endOfEpisode => 'End of episode',

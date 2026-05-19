@@ -69,7 +69,12 @@ Announcement copy should lead with:
 - [ ] TestFlight/Play reviews: respond to all reviews during beta
 - [ ] Respond to all feedback within 48 hours
 
-### 8. macOS version (optional, parallel track)
+### 8. OPML share sheet integration (backlog)
+- [ ] Register `public.xml` / `public.opml` document types in `ios/Runner/Info.plist`
+- [ ] Handle incoming file via Flutter's `onGenerateRoute` or a platform channel so Earshot appears as a destination in iOS share sheets
+- [ ] Test: Castro → Export → share directly to Earshot
+
+### 9. macOS version (optional, parallel track)
 - [ ] `flutter create --platforms macos .`
 - [ ] Add macOS background audio entitlement
 - [ ] Adapt layout for wider screen (sidebar + content split)

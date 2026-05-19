@@ -2,8 +2,7 @@ enum StatsPeriod {
   thisWeek,
   thisMonth,
   thisYear,
-  allTime
-  ;
+  allTime;
 
   String get label => switch (this) {
     StatsPeriod.thisWeek => 'This Week',

@@ -48,8 +48,7 @@ class QueueScreen extends ConsumerWidget {
               )
             : ReorderableListView.builder(
                 itemCount: episodes.length,
-                onReorder: (oldIndex, newIndex) async {
-                  if (newIndex > oldIndex) newIndex--;
+                onReorderItem: (oldIndex, newIndex) async {
                   await ref
                       .read(queueRepositoryProvider)
                       .reorder(episodes[oldIndex].id, newIndex);
