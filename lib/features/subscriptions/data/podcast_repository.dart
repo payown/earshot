@@ -14,4 +14,6 @@ abstract interface class PodcastRepository {
   Future<void> refreshFeed(int podcastId);
 
   Future<void> updateEpisodeStatus(int episodeId, EpisodeStatus status);
+
+  Future<void> markAllInboxPlayed();
 }

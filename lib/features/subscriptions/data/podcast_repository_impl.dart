@@ -58,7 +58,12 @@ class PodcastRepositoryImpl implements PodcastRepository {
           ),
         );
 
-    await _upsertEpisodes(podcastId, feed.episodes, preserveUserData: false);
+    await _upsertEpisodes(
+      podcastId,
+      feed.episodes,
+      preserveUserData: false,
+      inboxLimit: 3,
+    );
 
     _log.info('Subscribed to podcast: ${feed.title}');
 
@@ -140,12 +145,34 @@ class PodcastRepositoryImpl implements PodcastRepository {
   // When preserveUserData is true, existing episodes only get metadata
   // columns updated (status/position are preserved). When false (initial
   // subscribe), the full row is inserted and conflicts are ignored.
+  // inboxLimit controls how many of the most-recent episodes land as
+  // newEpisode on initial subscribe; the rest are inserted as played so
+  // they don't flood the inbox (only meaningful when preserveUserData=false).
   Future<void> _upsertEpisodes(
     int podcastId,
     List<ParsedEpisode> episodes, {
     required bool preserveUserData,
+    int inboxLimit = 3,
   }) async {
-    for (final ep in episodes) {
+    // On initial subscribe, sort newest-first so inboxLimit applies to the
+    // most-recent episodes rather than arbitrary feed order.
+    final ordered = preserveUserData
+        ? episodes
+        : (List<ParsedEpisode>.from(episodes)
+          ..sort((a, b) {
+            if (a.pubDate == null) return 1;
+            if (b.pubDate == null) return -1;
+            return b.pubDate!.compareTo(a.pubDate!);
+          }));
+
+    for (var i = 0; i < ordered.length; i++) {
+      final ep = ordered[i];
+
+      // Historical episodes (beyond the inbox limit) are inserted as played
+      // so they don't flood the inbox on bulk imports like OPML.
+      final initialStatus =
+          i < inboxLimit ? EpisodeStatus.newEpisode : EpisodeStatus.played;
+
       final companion = EpisodesCompanion.insert(
         podcastId: podcastId,
         guid: ep.guid,
@@ -159,6 +186,9 @@ class PodcastRepositoryImpl implements PodcastRepository {
         seasonNumber: Value(ep.seasonNumber),
         chapterUrl: Value(ep.chapterUrl),
         transcriptUrl: Value(ep.transcriptUrl),
+        status: preserveUserData
+            ? const Value.absent()
+            : Value(initialStatus),
       );
 
       if (preserveUserData) {
@@ -188,6 +218,16 @@ class PodcastRepositoryImpl implements PodcastRepository {
             .insert(companion, mode: InsertMode.insertOrIgnore);
       }
     }
+  }
+
+  @override
+  Future<void> markAllInboxPlayed() async {
+    await (_db.update(_db.episodes)
+          ..where((e) => e.status.equals(EpisodeStatus.newEpisode.name)))
+        .write(
+          const EpisodesCompanion(status: Value(EpisodeStatus.played)),
+        );
+    _log.info('Marked all inbox episodes as played');
   }
 
   @override

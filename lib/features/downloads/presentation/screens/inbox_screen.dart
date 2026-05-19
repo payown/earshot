@@ -19,7 +19,21 @@ class InboxScreen extends ConsumerWidget {
     final allEpisodes = ref.watch(_inboxEpisodesProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Inbox')),
+      appBar: AppBar(
+        title: const Text('Inbox'),
+        actions: [
+          if (allEpisodes.asData?.value.isNotEmpty ?? false)
+            Semantics(
+              button: true,
+              label: 'Mark all as played',
+              child: IconButton(
+                icon: const Icon(Icons.done_all),
+                tooltip: 'Mark all as played',
+                onPressed: () => _confirmMarkAllPlayed(context, ref),
+              ),
+            ),
+        ],
+      ),
       body: allEpisodes.when(
         data: (episodes) => episodes.isEmpty
             ? _EmptyInbox()
@@ -43,6 +57,36 @@ class InboxScreen extends ConsumerWidget {
         error: (e, _) => Center(child: Text('Error: $e')),
       ),
     );
+  }
+
+  Future<void> _confirmMarkAllPlayed(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final count =
+        ref.read(_inboxEpisodesProvider).asData?.value.length ?? 0;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Mark all as played?'),
+        content: Text(
+          'This will clear all $count episodes from your inbox.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Mark all played'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(podcastRepositoryProvider).markAllInboxPlayed();
+    }
   }
 
   Future<void> _confirmDelete(
