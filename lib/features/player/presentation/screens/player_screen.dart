@@ -151,6 +151,9 @@ class _ProgressBar extends StatelessWidget {
   final Duration duration;
   final ValueChanged<Duration> onSeek;
 
+  // 30-second step matches the skip buttons, so the gesture feels consistent.
+  static const _kStep = Duration(seconds: 30);
+
   @override
   Widget build(BuildContext context) {
     final posLabel = _format(position);
@@ -159,10 +162,17 @@ class _ProgressBar extends StatelessWidget {
         ? position.inMilliseconds / duration.inMilliseconds
         : 0.0;
 
+    final increased = _clamp(position + _kStep);
+    final decreased = _clamp(position - _kStep);
+
     return Semantics(
       label: 'Playback position: $posLabel of $durLabel',
       slider: true,
       value: posLabel,
+      increasedValue: _format(increased),
+      decreasedValue: _format(decreased),
+      onIncrease: () => onSeek(increased),
+      onDecrease: () => onSeek(decreased),
       child: ExcludeSemantics(
         child: Column(
           children: [
@@ -193,6 +203,12 @@ class _ProgressBar extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Duration _clamp(Duration d) {
+    if (d.isNegative) return Duration.zero;
+    if (duration.inMilliseconds > 0 && d > duration) return duration;
+    return d;
   }
 
   String _format(Duration d) {
