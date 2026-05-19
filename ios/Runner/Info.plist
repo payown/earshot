@@ -5,6 +5,13 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>media.payown.earshot.refreshFeeds</string>
+		<string>media.payown.earshot.downloadEpisodes</string>
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>

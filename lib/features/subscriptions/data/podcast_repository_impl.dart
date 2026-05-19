@@ -105,6 +105,21 @@ class PodcastRepositoryImpl implements PodcastRepository {
   }
 
   @override
+  Future<void> refreshAllFeeds() async {
+    final podcasts = await (_db.select(_db.podcasts)).get();
+    for (final podcast in podcasts) {
+      try {
+        await refreshFeed(podcast.id);
+      } catch (e) {
+        _log.warning('Background refresh failed for podcast ${podcast.id}: $e');
+      }
+    }
+    _log.info(
+      'Background feed refresh complete for ${podcasts.length} podcasts',
+    );
+  }
+
+  @override
   Future<void> refreshFeed(int podcastId) async {
     final podcastRow = await (_db.select(
       _db.podcasts,

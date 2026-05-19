@@ -50,6 +50,7 @@ dependencies:
   posthog_flutter: ^5.24.2
   file_selector: ^1.1.0
   go_router: ^17.2.3
+  workmanager: ^0.9.0
 
 
 dev_dependencies:

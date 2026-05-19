@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:posthog_flutter/posthog_flutter.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
+import 'core/background/background_tasks.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/player/data/audio_handler.dart';
@@ -34,6 +35,9 @@ class _AppInitializer extends ConsumerWidget {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await BackgroundTaskService.initialize();
+  await BackgroundTaskService.scheduleAll();
 
   final audioHandler = await AudioService.init(
     builder: EarshotAudioHandler.new,
