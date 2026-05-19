@@ -300,27 +300,58 @@ class _SpeedSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final idx = _nearestIndex(speed);
+    final prev = idx > 0 ? _speeds[idx - 1] : null;
+    final next = idx < _speeds.length - 1 ? _speeds[idx + 1] : null;
+
     return Semantics(
-      label: 'Playback speed: ${_label(speed)}',
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
+      label: 'Playback speed',
+      slider: true,
+      value: _label(speed),
+      decreasedValue: prev != null ? _label(prev) : null,
+      increasedValue: next != null ? _label(next) : null,
+      onDecrease: prev != null ? () => onSpeedChanged(prev) : null,
+      onIncrease: next != null ? () => onSpeedChanged(next) : null,
+      child: ExcludeSemantics(
         child: Row(
-          children: _speeds
-              .map(
-                (s) => Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: ChoiceChip(
-                    label: Text(_label(s)),
-                    selected: speed == s,
-                    onSelected: (_) => onSpeedChanged(s),
-                    tooltip: 'Set speed to ${_label(s)}',
-                  ),
-                ),
-              )
-              .toList(),
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.chevron_left),
+              iconSize: 28,
+              onPressed: prev != null ? () => onSpeedChanged(prev) : null,
+            ),
+            SizedBox(
+              width: 56,
+              child: Text(
+                _label(speed),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.chevron_right),
+              iconSize: 28,
+              onPressed: next != null ? () => onSpeedChanged(next) : null,
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  int _nearestIndex(double s) {
+    var best = 0;
+    var bestDist = (s - _speeds[0]).abs();
+    for (var i = 1; i < _speeds.length; i++) {
+      final d = (s - _speeds[i]).abs();
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    return best;
   }
 
   String _label(double s) => s == s.roundToDouble() ? '${s.toInt()}x' : '${s}x';

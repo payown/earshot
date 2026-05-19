@@ -92,6 +92,14 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> seek(Duration position) => _player.seek(position);
 
+  @override
+  Future<void> setSpeed(double speed) async {
+    await _player.setSpeed(speed);
+    // BaseAudioHandler.setSpeed only updates the state; we also need the
+    // player itself changed, so we push the new speed explicitly.
+    playbackState.add(playbackState.value.copyWith(speed: speed));
+  }
+
   // SeekHandler provides fastForward/rewind using the configured intervals.
 
   Duration get position => _player.position;
