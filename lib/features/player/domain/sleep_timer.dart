@@ -37,16 +37,20 @@ enum SleepTimerPreset {
 class SleepTimerState {
   const SleepTimerState({
     required this.isActive,
+    this.preset,
     this.remaining,
     this.endOfEpisode = false,
   });
 
   const SleepTimerState.inactive()
     : isActive = false,
+      preset = null,
       remaining = null,
       endOfEpisode = false;
 
   final bool isActive;
+  // The preset that was selected. Null when inactive.
+  final SleepTimerPreset? preset;
   final Duration? remaining;
   final bool endOfEpisode;
 
@@ -73,14 +77,23 @@ class SleepTimer {
   Timer? _countdownTimer;
   DateTime? _endTime;
   bool _endOfEpisode = false;
+  SleepTimerPreset? _currentPreset;
 
   SleepTimerState get current {
     if (!isActive) return const SleepTimerState.inactive();
     if (_endOfEpisode) {
-      return const SleepTimerState(isActive: true, endOfEpisode: true);
+      return SleepTimerState(
+        isActive: true,
+        preset: _currentPreset,
+        endOfEpisode: true,
+      );
     }
     final remaining = _endTime?.difference(DateTime.now());
-    return SleepTimerState(isActive: true, remaining: remaining);
+    return SleepTimerState(
+      isActive: true,
+      preset: _currentPreset,
+      remaining: remaining,
+    );
   }
 
   bool get isActive => _countdownTimer != null || _endOfEpisode;
@@ -89,6 +102,7 @@ class SleepTimer {
 
   void set(SleepTimerPreset preset) {
     cancel();
+    _currentPreset = preset;
     if (preset == SleepTimerPreset.endOfEpisode) {
       _endOfEpisode = true;
       _emit();
@@ -122,6 +136,7 @@ class SleepTimer {
     _countdownTimer = null;
     _endTime = null;
     _endOfEpisode = false;
+    _currentPreset = null;
     _emit();
   }
 

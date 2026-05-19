@@ -4,7 +4,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/spacing.dart';
-import '../../data/audio_handler.dart';
+// audio_handler import removed — type is inferred via audioHandlerProvider;
 import '../../domain/sleep_timer.dart';
 import '../providers/player_providers.dart';
 
@@ -358,6 +358,20 @@ class _SpeedSelector extends StatelessWidget {
 }
 
 class _SleepTimerControls extends ConsumerWidget {
+  // Timed options first (ascending), end of episode last. null = Off.
+  static final _options = <SleepTimerPreset?>[
+    null,
+    SleepTimerPreset.fiveMinutes,
+    SleepTimerPreset.tenMinutes,
+    SleepTimerPreset.fifteenMinutes,
+    SleepTimerPreset.thirtyMinutes,
+    SleepTimerPreset.fortyFiveMinutes,
+    SleepTimerPreset.sixtyMinutes,
+    SleepTimerPreset.endOfEpisode,
+  ];
+
+  static String _label(SleepTimerPreset? p) => p == null ? 'Off' : p.label;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final timerState =
@@ -365,24 +379,84 @@ class _SleepTimerControls extends ConsumerWidget {
         const SleepTimerState.inactive();
     final handler = ref.read(audioHandlerProvider);
 
-    if (timerState.isActive) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Semantics(
-            label: timerState.announcementLabel,
-            child: ExcludeSemantics(
-              child: Text(
-                timerState.endOfEpisode
-                    ? 'Sleep: end of episode'
-                    : 'Sleep: ${_formatRemaining(timerState.remaining)}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.primary,
+    final currentPreset = timerState.preset;
+    final idx = _options.indexOf(currentPreset);
+    final prev = idx > 0 ? _options[idx - 1] : null;
+    final next = idx < _options.length - 1 ? _options[idx + 1] : null;
+
+    void applyPreset(SleepTimerPreset? p) {
+      if (p == null) {
+        handler.sleepTimer.cancel();
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Sleep timer cancelled',
+          TextDirection.ltr,
+        );
+      } else {
+        handler.sleepTimer.set(p);
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Sleep timer set for ${p.label}',
+          TextDirection.ltr,
+        );
+      }
+    }
+
+    final canExtend = timerState.isActive && !timerState.endOfEpisode;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Semantics(
+          label: 'Sleep timer',
+          slider: true,
+          value: _label(currentPreset),
+          decreasedValue: idx > 0 ? _label(prev) : null,
+          increasedValue: next != null ? _label(next) : null,
+          onDecrease: idx > 0 ? () => applyPreset(prev) : null,
+          onIncrease: next != null ? () => applyPreset(next) : null,
+          child: ExcludeSemantics(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  iconSize: 28,
+                  onPressed: idx > 0 ? () => applyPreset(prev) : null,
                 ),
-              ),
+                SizedBox(
+                  width: 112,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _label(currentPreset),
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      if (timerState.isActive && !timerState.endOfEpisode)
+                        Text(
+                          _formatRemaining(timerState.remaining),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                        ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right),
+                  iconSize: 28,
+                  onPressed: next != null ? () => applyPreset(next) : null,
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 8),
+        ),
+        if (canExtend)
           Semantics(
             button: true,
             label: 'Extend sleep timer by 5 minutes',
@@ -395,72 +469,11 @@ class _SleepTimerControls extends ConsumerWidget {
                   TextDirection.ltr,
                 );
               },
-              child: const Text('+5 min'),
+              child: const ExcludeSemantics(child: Text('+5 min')),
             ),
           ),
-          Semantics(
-            button: true,
-            label: 'Cancel sleep timer',
-            child: IconButton(
-              icon: const Icon(Icons.cancel_outlined),
-              iconSize: 20,
-              tooltip: 'Cancel sleep timer',
-              onPressed: handler.sleepTimer.cancel,
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Semantics(
-      button: true,
-      label: 'Set sleep timer',
-      child: TextButton.icon(
-        icon: const Icon(Icons.bedtime_outlined, size: 18),
-        label: const Text('Sleep timer'),
-        onPressed: () => _showPicker(context, handler),
-      ),
+      ],
     );
-  }
-
-  Future<void> _showPicker(
-    BuildContext context,
-    EarshotAudioHandler handler,
-  ) async {
-    final preset = await showModalBottomSheet<SleepTimerPreset>(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Sleep timer',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            ...SleepTimerPreset.values.map(
-              (p) => ListTile(
-                title: Text(p.label),
-                onTap: () => Navigator.of(context).pop(p),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (preset != null) {
-      handler.sleepTimer.set(preset);
-      if (context.mounted) {
-        SemanticsService.sendAnnouncement(
-          View.of(context),
-          'Sleep timer set for ${preset.label}',
-          TextDirection.ltr,
-        );
-      }
-    }
   }
 
   String _formatRemaining(Duration? d) {
