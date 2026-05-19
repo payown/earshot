@@ -1,6 +1,6 @@
 import Flutter
 import UIKit
-import workmanager
+import workmanager_apple
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -8,8 +8,8 @@ import workmanager
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    WorkmanagerPlugin.registerTask(withIdentifier: "media.payown.earshot.refreshFeeds")
-    WorkmanagerPlugin.registerTask(withIdentifier: "media.payown.earshot.downloadEpisodes")
+    WorkmanagerPlugin.registerPeriodicTask(withIdentifier: "media.payown.earshot.refreshFeeds", frequency: nil)
+    WorkmanagerPlugin.registerBGProcessingTask(withIdentifier: "media.payown.earshot.downloadEpisodes")
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
