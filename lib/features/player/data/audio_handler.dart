@@ -10,13 +10,9 @@ final _log = Logger('AudioHandler');
 
 class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   EarshotAudioHandler() {
-    // Use listen() not pipe() — pipe() locks the sink and conflicts with
-    // BaseAudioHandler.stop() which also adds to playbackState directly.
-    _player.playbackEventStream
-        .map(_buildPlaybackState)
-        .listen(playbackState.add);
+    _attachPlaybackListener();
     _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.completed) _onEpisodeCompleted();
+      if (state == ProcessingState.completed) unawaited(_onEpisodeCompleted());
     });
 
     sleepTimer = SleepTimer(
@@ -28,6 +24,18 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
 
   final AudioPlayer _player = AudioPlayer();
   late final SleepTimer sleepTimer;
+  StreamSubscription<PlaybackState>? _playbackSubscription;
+
+  // Set by queueAutoAdvanceProvider. If set, called instead of stop() when
+  // an episode completes. The callback is responsible for calling stop() or
+  // playEpisode() as appropriate.
+  Future<void> Function()? onEpisodeCompleted;
+
+  void _attachPlaybackListener() {
+    _playbackSubscription = _player.playbackEventStream
+        .map(_buildPlaybackState)
+        .listen(playbackState.add);
+  }
 
   // episodeId of the currently loaded episode — used by PositionTracker.
   final StreamController<int?> _episodeIdController =
@@ -64,9 +72,21 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> stop() async {
+    await _playbackSubscription?.cancel();
+    _playbackSubscription = null;
     await _player.stop();
     _episodeIdController.add(null);
-    await super.stop();
+    // Skip super.stop() — it calls playbackState.add() which throws
+    // "cannot add while addStream is in progress" because audio_service's
+    // own infrastructure has an addStream open on the same BehaviorSubject.
+    // BaseAudioHandler.stop() only emits idle state, so we do it directly.
+    playbackState.add(
+      playbackState.value.copyWith(
+        processingState: AudioProcessingState.idle,
+        playing: false,
+      ),
+    );
+    _attachPlaybackListener();
   }
 
   @override
@@ -108,14 +128,20 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
         ProcessingState.completed => AudioProcessingState.completed,
       };
 
-  void _onEpisodeCompleted() {
+  Future<void> _onEpisodeCompleted() async {
     _log.info('Episode completed: ${mediaItem.value?.title}');
     sleepTimer.onEpisodeEnded();
-    stop();
+    final callback = onEpisodeCompleted;
+    if (callback != null) {
+      await callback();
+    } else {
+      await stop();
+    }
   }
 
   Future<void> dispose() async {
     sleepTimer.dispose();
+    await _playbackSubscription?.cancel();
     await _episodeIdController.close();
     await _player.dispose();
   }

@@ -30,6 +30,7 @@ class _AppInitializer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(positionTrackerProvider);
+    ref.watch(queueAutoAdvanceProvider);
     return const EarshotApp();
   }
 }

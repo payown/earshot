@@ -47,3 +47,32 @@ final queueProvider = StreamProvider<List<Episode>>(
 final sleepTimerStateProvider = StreamProvider<SleepTimerState>(
   (ref) => ref.watch(audioHandlerProvider).sleepTimer.stateStream,
 );
+
+final queueAutoAdvanceProvider = Provider<void>((ref) {
+  final handler = ref.read(audioHandlerProvider);
+  final queueRepo = ref.read(queueRepositoryProvider);
+
+  handler.onEpisodeCompleted = () async {
+    final queue = await queueRepo.watchQueue().first;
+    if (queue.isEmpty) {
+      await handler.stop();
+      return;
+    }
+    final next = queue.first;
+    await queueRepo.removeFromQueue(next.id);
+    await handler.playEpisode(
+      MediaItem(
+        id: next.audioUrl,
+        title: next.title,
+        artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
+        duration: next.durationSeconds != null
+            ? Duration(seconds: next.durationSeconds!)
+            : null,
+        extras: {'episodeId': next.id},
+      ),
+      resumePositionSeconds: next.positionSeconds,
+    );
+  };
+
+  ref.onDispose(() => handler.onEpisodeCompleted = null);
+});
