@@ -25,7 +25,8 @@ enum PodcastAction {
   toggleNotifications,
   toggleAutoQueue,
   unsubscribe,
-  share;
+  share,
+  manageFolders;
 
   String get label => switch (this) {
     PodcastAction.open => 'Open podcast',
@@ -33,6 +34,7 @@ enum PodcastAction {
     PodcastAction.toggleAutoQueue => 'Toggle auto-queue',
     PodcastAction.unsubscribe => 'Unsubscribe',
     PodcastAction.share => 'Share podcast',
+    PodcastAction.manageFolders => 'Manage folders',
   };
 
   String get key => name;
@@ -54,4 +56,5 @@ const defaultPodcastActions = [
   PodcastAction.toggleAutoQueue,
   PodcastAction.unsubscribe,
   PodcastAction.share,
+  PodcastAction.manageFolders,
 ];

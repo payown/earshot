@@ -10,6 +10,8 @@ import 'tables/app_settings.dart';
 import 'tables/bookmarks.dart';
 import 'tables/episodes.dart';
 import 'tables/listening_sessions.dart';
+import 'tables/podcast_folder_memberships.dart';
+import 'tables/podcast_folders.dart';
 import 'tables/podcasts.dart';
 import 'tables/queue_items.dart';
 import 'tables/quick_action_configs.dart';
@@ -27,6 +29,8 @@ part 'app_database.g.dart';
     RecentlyExpired,
     ListeningSessions,
     Bookmarks,
+    PodcastFolders,
+    PodcastFolderMemberships,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -35,7 +39,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -55,6 +59,10 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 5) {
         await m.createTable(bookmarks);
+      }
+      if (from < 6) {
+        await m.createTable(podcastFolders);
+        await m.createTable(podcastFolderMemberships);
       }
     },
     beforeOpen: (_) async {

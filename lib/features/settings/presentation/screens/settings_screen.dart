@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/router/app_router.dart';
 import '../../../../data/db/enums.dart';
+import '../../../../features/folders/presentation/providers/folders_providers.dart';
 import '../../../../features/search/presentation/providers/search_providers.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 
@@ -35,6 +36,12 @@ class SettingsScreen extends ConsumerWidget {
             subtitle: const Text('Share your subscriptions list'),
             trailing: const Icon(Icons.share),
             onTap: () => _exportOpml(context, ref),
+          ),
+          ListTile(
+            title: const Text('Export OPML with folders'),
+            subtitle: const Text('Share subscriptions grouped by folder'),
+            trailing: const Icon(Icons.share),
+            onTap: () => _exportOpmlWithFolders(context, ref),
           ),
           const Divider(),
           Semantics(
@@ -95,6 +102,39 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _exportOpmlWithFolders(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final groups = await ref
+        .read(folderRepositoryProvider)
+        .getAllWithFolderStructure();
+
+    final hasContent = groups.any((g) => g.podcasts.isNotEmpty);
+    if (!hasContent) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No subscriptions to export.')),
+        );
+      }
+      return;
+    }
+
+    final xml = ref.read(opmlServiceProvider).generateWithFolders(groups);
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/earshot-subscriptions-folders.opml');
+    await file.writeAsString(xml);
+
+    if (context.mounted) {
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path, mimeType: 'text/x-opml')],
+          subject: 'Earshot Subscriptions',
+        ),
+      );
+    }
   }
 
   Future<void> _exportOpml(BuildContext context, WidgetRef ref) async {
