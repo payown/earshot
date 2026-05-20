@@ -4,6 +4,8 @@ import 'package:earshot/data/db/app_database.dart';
 import 'package:earshot/data/db/enums.dart';
 import 'package:earshot/features/downloads/data/download_manager.dart';
 import 'package:earshot/features/downloads/presentation/providers/downloads_providers.dart';
+import 'package:earshot/features/folders/data/folder_repository.dart';
+import 'package:earshot/features/folders/presentation/providers/folders_providers.dart';
 import 'package:earshot/features/subscriptions/data/podcast_exception.dart';
 import 'package:earshot/features/subscriptions/data/podcast_repository.dart';
 import 'package:earshot/features/subscriptions/domain/episode.dart';
@@ -21,6 +23,8 @@ import 'package:mocktail/mocktail.dart';
 class MockPodcastRepository extends Mock implements PodcastRepository {}
 
 class MockDownloadManager extends Mock implements DownloadManager {}
+
+class MockFolderRepository extends Mock implements FolderRepository {}
 
 final _now = DateTime(2024, 6, 1);
 
@@ -52,12 +56,30 @@ Episode _fakeEpisode({int id = 1}) => Episode(
   pubDate: DateTime(2024, 1, id),
 );
 
-Widget _buildApp(Widget child, MockPodcastRepository repo) {
+Widget _buildApp(
+  Widget child,
+  MockPodcastRepository repo, {
+  MockFolderRepository? folderRepo,
+}) {
+  final fr = folderRepo ?? MockFolderRepository();
+  // Default stubs so tests that don't care about folders still work.
+  when(() => fr.watchFolders()).thenAnswer((_) => Stream.value([]));
+  when(() => fr.watchUnfiledPodcasts()).thenAnswer(
+    (_) => repo.watchSubscriptions(),
+  );
+  when(
+    () => fr.watchPodcastsInFolder(any()),
+  ).thenAnswer((_) => Stream.value([]));
+
   // Wrap in a minimal GoRouter so context.push/go calls work in tests.
   final router = GoRouter(
     initialLocation: '/',
     routes: [
       GoRoute(path: '/', builder: (_, __) => child),
+      GoRoute(
+        path: '/subscriptions/folders/:id',
+        builder: (_, __) => const Scaffold(),
+      ),
       GoRoute(
         path: '/subscriptions/:id',
         builder: (_, state) => PodcastDetailScreen(
@@ -75,6 +97,7 @@ Widget _buildApp(Widget child, MockPodcastRepository repo) {
   return ProviderScope(
     overrides: [
       podcastRepositoryProvider.overrideWithValue(repo),
+      folderRepositoryProvider.overrideWithValue(fr),
     ],
     child: MaterialApp.router(routerConfig: router),
   );
