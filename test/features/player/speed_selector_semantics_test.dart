@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // Mirrors _SpeedSelector so we can test semantics without the full player setup.
@@ -113,10 +113,11 @@ void main() {
         ),
       );
 
-      tester.binding.pipelineOwner.semanticsOwner!.performAction(
-        tester.getSemantics(_speedFinder()).id,
-        SemanticsAction.increase,
-      );
+      RendererBinding.instance.renderViews.first.owner!.semanticsOwner!
+          .performAction(
+            tester.getSemantics(_speedFinder()).id,
+            SemanticsAction.increase,
+          );
       await tester.pump();
 
       expect(selected, 1.25);
@@ -133,10 +134,11 @@ void main() {
         ),
       );
 
-      tester.binding.pipelineOwner.semanticsOwner!.performAction(
-        tester.getSemantics(_speedFinder()).id,
-        SemanticsAction.decrease,
-      );
+      RendererBinding.instance.renderViews.first.owner!.semanticsOwner!
+          .performAction(
+            tester.getSemantics(_speedFinder()).id,
+            SemanticsAction.decrease,
+          );
       await tester.pump();
 
       expect(selected, 0.75);

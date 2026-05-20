@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // Mirrors the _ProgressBar semantics shape so we can test the accessible
@@ -121,10 +121,11 @@ void main() {
       );
 
       final nodeId = tester.getSemantics(_progressFinder()).id;
-      tester.binding.pipelineOwner.semanticsOwner!.performAction(
-        nodeId,
-        SemanticsAction.increase,
-      );
+      RendererBinding.instance.renderViews.first.owner!.semanticsOwner!
+          .performAction(
+            nodeId,
+            SemanticsAction.increase,
+          );
       await tester.pump();
 
       expect(seeked, const Duration(minutes: 5, seconds: 30));
@@ -146,10 +147,11 @@ void main() {
       );
 
       final nodeId = tester.getSemantics(_progressFinder()).id;
-      tester.binding.pipelineOwner.semanticsOwner!.performAction(
-        nodeId,
-        SemanticsAction.decrease,
-      );
+      RendererBinding.instance.renderViews.first.owner!.semanticsOwner!
+          .performAction(
+            nodeId,
+            SemanticsAction.decrease,
+          );
       await tester.pump();
 
       expect(seeked, const Duration(minutes: 4, seconds: 30));
@@ -171,10 +173,11 @@ void main() {
       );
 
       final nodeId = tester.getSemantics(_progressFinder()).id;
-      tester.binding.pipelineOwner.semanticsOwner!.performAction(
-        nodeId,
-        SemanticsAction.decrease,
-      );
+      RendererBinding.instance.renderViews.first.owner!.semanticsOwner!
+          .performAction(
+            nodeId,
+            SemanticsAction.decrease,
+          );
       await tester.pump();
 
       expect(seeked, Duration.zero);
@@ -199,10 +202,11 @@ void main() {
       );
 
       final nodeId = tester.getSemantics(_progressFinder()).id;
-      tester.binding.pipelineOwner.semanticsOwner!.performAction(
-        nodeId,
-        SemanticsAction.increase,
-      );
+      RendererBinding.instance.renderViews.first.owner!.semanticsOwner!
+          .performAction(
+            nodeId,
+            SemanticsAction.increase,
+          );
       await tester.pump();
 
       expect(seeked, dur);

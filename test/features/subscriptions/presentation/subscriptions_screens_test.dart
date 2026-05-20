@@ -267,7 +267,7 @@ void main() {
       when(() => repo.watchEpisodes(1)).thenAnswer((_) => Stream.value([]));
 
       await tester.pumpWidget(
-        _buildApp(PodcastDetailScreen(podcastId: 1), repo),
+        _buildApp(const PodcastDetailScreen(podcastId: 1), repo),
       );
       await tester.pump();
 
@@ -283,7 +283,7 @@ void main() {
       ).thenAnswer((_) => Stream.value([_fakeEpisode()]));
 
       await tester.pumpWidget(
-        _buildApp(PodcastDetailScreen(podcastId: 1), repo),
+        _buildApp(const PodcastDetailScreen(podcastId: 1), repo),
       );
       await tester.pump();
 
@@ -297,7 +297,7 @@ void main() {
       when(() => repo.watchEpisodes(1)).thenAnswer((_) => Stream.value([]));
 
       await tester.pumpWidget(
-        _buildApp(PodcastDetailScreen(podcastId: 1), repo),
+        _buildApp(const PodcastDetailScreen(podcastId: 1), repo),
       );
       await tester.pump();
 
@@ -318,7 +318,7 @@ void main() {
       ).thenAnswer((_) => Stream.value([_fakeEpisode()]));
 
       await tester.pumpWidget(
-        _buildApp(PodcastDetailScreen(podcastId: 1), repo),
+        _buildApp(const PodcastDetailScreen(podcastId: 1), repo),
       );
       await tester.pump();
 
