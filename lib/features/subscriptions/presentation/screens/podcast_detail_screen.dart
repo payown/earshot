@@ -42,27 +42,33 @@ class PodcastDetailScreen extends ConsumerWidget {
         return _PodcastDetailView(
           podcast: podcast,
           episodes: episodes,
-          ref: ref,
         );
       },
     );
   }
 }
 
-class _PodcastDetailView extends ConsumerWidget {
+class _PodcastDetailView extends ConsumerStatefulWidget {
   const _PodcastDetailView({
     required this.podcast,
     required this.episodes,
-    required this.ref,
   });
 
   final Podcast podcast;
   final AsyncValue<List<Episode>> episodes;
-  // ignore: unused_field — passed through for action callbacks
-  final WidgetRef ref;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_PodcastDetailView> createState() => _PodcastDetailViewState();
+}
+
+class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
+  bool _showUnplayedOnly = false;
+
+  Podcast get podcast => widget.podcast;
+  AsyncValue<List<Episode>> get episodes => widget.episodes;
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       bottomNavigationBar: const NowPlayingBar(),
       body: CustomScrollView(
@@ -94,7 +100,7 @@ class _PodcastDetailView extends ConsumerWidget {
             ),
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
               child: Semantics(
                 header: true,
                 child: Text(
@@ -104,33 +110,54 @@ class _PodcastDetailView extends ConsumerWidget {
               ),
             ),
           ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Semantics(
+                label: 'Filter episodes',
+                child: SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: false, label: Text('All')),
+                    ButtonSegment(value: true, label: Text('Unplayed')),
+                  ],
+                  selected: {_showUnplayedOnly},
+                  onSelectionChanged: (selection) =>
+                      setState(() => _showUnplayedOnly = selection.first),
+                ),
+              ),
+            ),
+          ),
           episodes.when(
-            data: (list) => list.isEmpty
-                ? const SliverToBoxAdapter(
-                    child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text('No episodes yet.'),
-                    ),
-                  )
-                : SliverList.separated(
-                    itemCount: list.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (ctx, index) {
-                      final episode = list[index];
-                      final actions =
-                          ref.watch(episodeActionsProvider).asData?.value ??
-                          defaultEpisodeActions;
-                      return EpisodeListTile(
-                        episode: episode,
-                        quickActions: _buildEpisodeActions(
-                          ctx,
-                          ref,
-                          episode,
-                          actions,
-                        ),
-                      );
-                    },
-                  ),
+            data: (list) {
+              final displayed = _showUnplayedOnly
+                  ? list.where((e) => e.status != EpisodeStatus.played).toList()
+                  : list;
+              return displayed.isEmpty
+                  ? const SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Text('No episodes yet.'),
+                      ),
+                    )
+                  : SliverList.separated(
+                      itemCount: displayed.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (ctx, index) {
+                        final episode = displayed[index];
+                        final actions =
+                            ref.watch(episodeActionsProvider).asData?.value ??
+                            defaultEpisodeActions;
+                        return EpisodeListTile(
+                          episode: episode,
+                          quickActions: _buildEpisodeActions(
+                            ctx,
+                            episode,
+                            actions,
+                          ),
+                        );
+                      },
+                    );
+            },
             loading: () => const SliverToBoxAdapter(
               child: Center(child: CircularProgressIndicator()),
             ),
@@ -148,7 +175,6 @@ class _PodcastDetailView extends ConsumerWidget {
 
   List<EpisodeQuickActionItem> _buildEpisodeActions(
     BuildContext context,
-    WidgetRef ref,
     Episode episode,
     List<EpisodeAction> order,
   ) {
@@ -156,7 +182,7 @@ class _PodcastDetailView extends ConsumerWidget {
       return switch (action) {
         EpisodeAction.playNow => EpisodeQuickActionItem(
           label: action.label,
-          onInvoke: () => _play(ref, episode),
+          onInvoke: () => _play(episode),
         ),
         EpisodeAction.addToQueue => EpisodeQuickActionItem(
           label: action.label,
@@ -175,13 +201,21 @@ class _PodcastDetailView extends ConsumerWidget {
           label: episode.status == EpisodeStatus.played
               ? 'Mark as unplayed'
               : 'Mark as played',
-          onInvoke: () {
+          onInvoke: () async {
             final newStatus = episode.status == EpisodeStatus.played
                 ? EpisodeStatus.newEpisode
                 : EpisodeStatus.played;
-            ref
+            await ref
                 .read(podcastRepositoryProvider)
                 .updateEpisodeStatus(episode.id, newStatus);
+            // When marking an inQueue episode as played, also remove it
+            // from the queue (internal removal — status already set above).
+            if (newStatus == EpisodeStatus.played &&
+                episode.status == EpisodeStatus.inQueue) {
+              await ref
+                  .read(queueRepositoryProvider)
+                  .removeFromQueue(episode.id);
+            }
           },
         ),
         EpisodeAction.openShowNotes => EpisodeQuickActionItem(
@@ -235,7 +269,7 @@ class _PodcastDetailView extends ConsumerWidget {
     }).toList();
   }
 
-  void _play(WidgetRef ref, Episode episode) {
+  void _play(Episode episode) {
     final handler = ref.read(audioHandlerProvider);
     final resumePosition =
         episode.positionSeconds > 0 &&

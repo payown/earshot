@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 import 'package:logging/logging.dart';
 
 import '../../../data/db/app_database.dart';
+import '../../../data/db/enums.dart';
 import '../../subscriptions/domain/episode.dart';
 import 'queue_repository.dart';
 
@@ -24,6 +25,8 @@ class QueueRepositoryImpl implements QueueRepository {
           ),
           mode: InsertMode.insertOrIgnore,
         );
+    await (_db.update(_db.episodes)..where((e) => e.id.equals(episodeId)))
+        .write(const EpisodesCompanion(status: Value(EpisodeStatus.inQueue)));
     _log.fine('Added episode $episodeId to queue');
   }
 
@@ -33,6 +36,23 @@ class QueueRepositoryImpl implements QueueRepository {
       _db.queueItems,
     )..where((q) => q.episodeId.equals(episodeId))).go();
     await _compactPositions();
+  }
+
+  @override
+  Future<void> cancelFromQueue(int episodeId) async {
+    await (_db.delete(
+      _db.queueItems,
+    )..where((q) => q.episodeId.equals(episodeId))).go();
+    await _compactPositions();
+    await (_db.update(_db.episodes)..where(
+          (e) =>
+              e.id.equals(episodeId) &
+              e.status.equals(EpisodeStatus.inQueue.name),
+        ))
+        .write(
+          const EpisodesCompanion(status: Value(EpisodeStatus.newEpisode)),
+        );
+    _log.fine('Cancelled episode $episodeId from queue, returned to inbox');
   }
 
   @override
@@ -70,6 +90,11 @@ class QueueRepositoryImpl implements QueueRepository {
   @override
   Future<void> clearQueue() async {
     await _db.delete(_db.queueItems).go();
+    await (_db.update(
+      _db.episodes,
+    )..where((e) => e.status.equals(EpisodeStatus.inQueue.name))).write(
+      const EpisodesCompanion(status: Value(EpisodeStatus.newEpisode)),
+    );
   }
 
   Future<int> _maxPosition() async {

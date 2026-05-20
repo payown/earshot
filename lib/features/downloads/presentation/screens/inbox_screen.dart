@@ -240,7 +240,7 @@ class _InboxEpisodeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: episode.title,
+      label: '${episode.title}, New episode',
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Add to queue'): onAddToQueue,
         const CustomSemanticsAction(label: 'Mark as played'): onMarkPlayed,
@@ -256,12 +256,26 @@ class _InboxEpisodeTile extends StatelessWidget {
           ),
         ),
         subtitle: ExcludeSemantics(
-          child: episode.pubDate != null
-              ? Text(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Chip(
+                label: const Text('New'),
+                visualDensity: VisualDensity.compact,
+                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
+                padding: EdgeInsets.zero,
+              ),
+              if (episode.pubDate != null)
+                Text(
                   _formatDate(episode.pubDate!),
                   style: Theme.of(context).textTheme.bodySmall,
-                )
-              : null,
+                ),
+            ],
+          ),
         ),
         trailing: ExcludeSemantics(
           child: Row(

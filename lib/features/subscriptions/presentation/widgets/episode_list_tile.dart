@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
+import '../../../../data/db/enums.dart';
 import '../../domain/episode.dart';
 
 class EpisodeQuickActionItem {
@@ -29,14 +30,14 @@ class EpisodeListTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final duration = _formatDuration(episode.durationSeconds);
     final date = _formatDate(episode.pubDate);
+    final statusText = _statusLabel(episode.status);
 
     final parts = [
+      statusText,
       if (duration != null) duration,
       if (date != null) date,
     ];
-    final semanticLabel = parts.isEmpty
-        ? episode.title
-        : '${episode.title}, ${parts.join(', ')}';
+    final semanticLabel = '${episode.title}, ${parts.join(', ')}';
 
     final semanticActions = <CustomSemanticsAction, VoidCallback>{
       for (final action in quickActions)
@@ -64,10 +65,15 @@ class EpisodeListTile extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (parts.isNotEmpty) ...[
-                        const SizedBox(height: 4),
+                      const SizedBox(height: 4),
+                      _StatusChip(status: episode.status),
+                      if (duration != null || date != null) ...[
+                        const SizedBox(height: 2),
                         Text(
-                          parts.join(' · '),
+                          [
+                            if (duration != null) duration,
+                            if (date != null) date,
+                          ].join(' · '),
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
                                 color: Theme.of(
@@ -94,6 +100,13 @@ class EpisodeListTile extends StatelessWidget {
     );
   }
 
+  String _statusLabel(EpisodeStatus status) => switch (status) {
+    EpisodeStatus.newEpisode => 'New',
+    EpisodeStatus.inQueue => 'In queue',
+    EpisodeStatus.played => 'Played',
+    EpisodeStatus.expired => 'Expired',
+  };
+
   String? _formatDuration(int? seconds) {
     if (seconds == null) return null;
     final h = seconds ~/ 3600;
@@ -111,5 +124,46 @@ class EpisodeListTile extends StatelessWidget {
     if (diff.inDays == 1) return 'Yesterday';
     if (diff.inDays < 7) return '${diff.inDays} days ago';
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.status});
+
+  final EpisodeStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final (bg, fg, label) = switch (status) {
+      EpisodeStatus.newEpisode => (
+        colorScheme.primaryContainer,
+        colorScheme.onPrimaryContainer,
+        'New',
+      ),
+      EpisodeStatus.inQueue => (
+        colorScheme.secondaryContainer,
+        colorScheme.onSecondaryContainer,
+        'In queue',
+      ),
+      EpisodeStatus.played => (
+        colorScheme.surfaceContainerHighest,
+        colorScheme.onSurfaceVariant,
+        'Played',
+      ),
+      EpisodeStatus.expired => (
+        colorScheme.errorContainer,
+        colorScheme.onErrorContainer,
+        'Expired',
+      ),
+    };
+
+    return Chip(
+      label: Text(label),
+      visualDensity: VisualDensity.compact,
+      backgroundColor: bg,
+      labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(color: fg),
+      padding: EdgeInsets.zero,
+    );
   }
 }
