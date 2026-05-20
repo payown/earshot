@@ -2,9 +2,11 @@ import 'package:drift/drift.dart' hide Column, View;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
 
 import '../../../../core/providers/core_providers.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../data/db/enums.dart';
 import '../../../folders/domain/podcast_folder.dart';
 import '../../../folders/presentation/providers/folder_inbox_providers.dart';
@@ -39,6 +41,11 @@ class InboxScreen extends ConsumerWidget {
               tooltip: 'Mark all as played',
               onPressed: () => _confirmMarkAllPlayed(context, ref),
             ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Settings',
+            onPressed: () => context.push(AppRoutes.settings),
+          ),
         ],
       ),
       body: allEpisodes.when(

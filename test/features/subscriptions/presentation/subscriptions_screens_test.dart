@@ -77,6 +77,10 @@ Widget _buildApp(
     routes: [
       GoRoute(path: '/', builder: (_, __) => child),
       GoRoute(
+        path: '/subscriptions/all',
+        builder: (_, __) => const Scaffold(body: Text('All Podcasts Screen')),
+      ),
+      GoRoute(
         path: '/subscriptions/folders/:id',
         builder: (_, __) => const Scaffold(),
       ),
@@ -121,19 +125,25 @@ void main() {
       expect(find.text('Add your first podcast'), findsOneWidget);
     });
 
-    testWidgets('shows podcast list when subscriptions exist', (tester) async {
-      when(
-        () => repo.watchSubscriptions(),
-      ).thenAnswer((_) => Stream.value([_fakePodcast()]));
+    testWidgets(
+      'shows All Podcasts entry with count when subscriptions exist',
+      (
+        tester,
+      ) async {
+        when(
+          () => repo.watchSubscriptions(),
+        ).thenAnswer((_) => Stream.value([_fakePodcast()]));
 
-      await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
-      await tester.pump();
+        await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
+        await tester.pump();
 
-      expect(find.text('Test Podcast'), findsOneWidget);
-      expect(find.text('Jane Smith'), findsOneWidget);
-    });
+        // Library screen shows the "All Podcasts" entry with the total count.
+        expect(find.text('All Podcasts'), findsOneWidget);
+        expect(find.text('1 podcast'), findsOneWidget);
+      },
+    );
 
-    testWidgets('podcast list tile has semantic label with author', (
+    testWidgets('All Podcasts entry has accessible semantic label', (
       tester,
     ) async {
       when(
@@ -143,9 +153,8 @@ void main() {
       await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
       await tester.pump();
 
-      // The tile uses Semantics + ExcludeSemantics; find by the label directly.
       expect(
-        find.bySemanticsLabel('Test Podcast, by Jane Smith'),
+        find.bySemanticsLabel('All Podcasts, 1 podcast'),
         findsOneWidget,
       );
     });
@@ -161,21 +170,19 @@ void main() {
       expect(fabNode.tooltip, 'Add podcast');
     });
 
-    testWidgets('tapping podcast navigates to detail screen', (tester) async {
+    testWidgets('tapping All Podcasts entry navigates to all podcasts screen', (
+      tester,
+    ) async {
       when(
         () => repo.watchSubscriptions(),
       ).thenAnswer((_) => Stream.value([_fakePodcast()]));
-      when(
-        () => repo.watchPodcast(1),
-      ).thenAnswer((_) => Stream.value(_fakePodcast()));
-      when(() => repo.watchEpisodes(1)).thenAnswer((_) => Stream.value([]));
 
       await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
       await tester.pump();
-      await tester.tap(find.bySemanticsLabel('Test Podcast, by Jane Smith'));
+      await tester.tap(find.bySemanticsLabel('All Podcasts, 1 podcast'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(PodcastDetailScreen), findsOneWidget);
+      expect(find.text('All Podcasts Screen'), findsOneWidget);
     });
 
     testWidgets('tapping FAB navigates to add podcast screen', (tester) async {

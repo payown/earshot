@@ -17,6 +17,7 @@ import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../../features/stats/presentation/screens/stats_screen.dart';
 import '../../features/folders/presentation/screens/folder_detail_screen.dart';
 import '../../features/subscriptions/presentation/screens/add_podcast_screen.dart';
+import '../../features/subscriptions/presentation/screens/all_podcasts_screen.dart';
 import '../../features/subscriptions/presentation/screens/podcast_detail_screen.dart';
 import '../../features/subscriptions/presentation/screens/subscriptions_screen.dart';
 import '../presentation/main_shell.dart';
@@ -29,6 +30,7 @@ abstract final class AppRoutes {
   static const inbox = '/inbox';
   static const queue = '/queue';
   static const subscriptions = '/subscriptions';
+  static const allPodcasts = '/subscriptions/all';
   static String podcastDetail(int id) => '/subscriptions/$id';
   static String folderDetail(int id) => '/subscriptions/folders/$id';
   static const downloads = '/downloads';
@@ -188,6 +190,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 path: AppRoutes.subscriptions,
                 builder: (_, __) => const SubscriptionsScreen(),
                 routes: [
+                  GoRoute(
+                    path: 'all',
+                    builder: (_, __) => const AllPodcastsScreen(),
+                  ),
                   GoRoute(
                     path: 'folders/:id',
                     builder: (_, state) => FolderDetailScreen(

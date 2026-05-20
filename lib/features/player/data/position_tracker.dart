@@ -48,7 +48,7 @@ class PositionTracker {
 
       if (state.processingState == AudioProcessingState.completed) {
         await _recordSession(id, position);
-        await _markPlayed(id);
+        await _markPlayed(id, completionPosition: position);
       }
 
       _lastPositionSeconds = position;
@@ -90,7 +90,30 @@ class PositionTracker {
     _log.fine('Recorded session: ${duration}s at ${_lastSpeed}x');
   }
 
-  Future<void> _markPlayed(int episodeId) async {
+  Future<void> _markPlayed(
+    int episodeId, {
+    required int completionPosition,
+  }) async {
+    // Guard against false completion events fired when switching episodes.
+    // Only mark as played when the position is within 85% of the episode
+    // duration. If duration is unknown we trust the completion event.
+    final episode = await (_db.select(
+      _db.episodes,
+    )..where((e) => e.id.equals(episodeId))).getSingleOrNull();
+    if (episode == null) return;
+
+    final duration = episode.durationSeconds;
+    if (duration != null && duration > 0) {
+      if (completionPosition < duration * 0.85) {
+        _log.warning(
+          'Skipping markPlayed for episode $episodeId: '
+          'position ${completionPosition}s is less than 85% of ${duration}s. '
+          'Likely a spurious completion event from episode switching.',
+        );
+        return;
+      }
+    }
+
     await (_db.update(
       _db.episodes,
     )..where((e) => e.id.equals(episodeId))).write(

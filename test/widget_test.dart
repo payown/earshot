@@ -54,7 +54,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Subscriptions'), findsOneWidget);
+    expect(find.text('Library'), findsWidgets);
     expect(find.text('Inbox'), findsOneWidget);
     await db.close();
   });

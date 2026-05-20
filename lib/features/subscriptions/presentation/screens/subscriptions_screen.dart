@@ -7,35 +7,28 @@ import '../../../../features/folders/domain/podcast_folder.dart';
 import '../../../../features/folders/presentation/providers/folders_providers.dart';
 import '../../../../features/folders/presentation/widgets/create_folder_dialog.dart';
 import '../../../../features/folders/presentation/widgets/folder_list_tile.dart';
-import '../../../../features/folders/presentation/widgets/folder_podcast_picker_sheet.dart';
 import '../../../../features/player/presentation/widgets/now_playing_bar.dart';
-import '../../../../features/settings/domain/quick_action_definition.dart';
-import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
-import '../widgets/podcast_list_tile.dart';
 
 class SubscriptionsScreen extends ConsumerWidget {
   const SubscriptionsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final folders = ref.watch(foldersProvider);
-    final unfiledPodcasts = ref.watch(unfiledPodcastsProvider);
     final allPodcasts = ref.watch(subscriptionsProvider);
-    final podcastActions =
-        ref.watch(podcastActionsProvider).asData?.value ??
-        defaultPodcastActions;
+    final folders = ref.watch(foldersProvider);
     final podcastsInFolders = {
       for (final folder in folders.asData?.value ?? <PodcastFolder>[])
         folder.id: ref.watch(podcastsInFolderProvider(folder.id)),
     };
 
-    final hasFolders = folders.asData?.value.isNotEmpty ?? false;
+    final totalCount = allPodcasts.asData?.value.length ?? 0;
+    final folderList = folders.asData?.value ?? [];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Earshot'),
+        title: const Text('Library'),
         actions: [
           IconButton(
             icon: const Icon(Icons.create_new_folder_outlined),
@@ -66,15 +59,53 @@ class SubscriptionsScreen extends ConsumerWidget {
             );
           }
 
-          final folderList = folders.asData?.value ?? [];
-          final unfiledList = unfiledPodcasts.asData?.value ?? podcasts;
-
           return RefreshIndicator(
             onRefresh: () => _refreshAll(ref, podcasts),
             child: CustomScrollView(
               slivers: [
-                // ── Folders section ─────────────────────────────────────────
-                if (hasFolders) ...[
+                // ── All Podcasts entry ───────────────────────────────────────
+                SliverToBoxAdapter(
+                  child: Semantics(
+                    button: true,
+                    label:
+                        'All Podcasts, $totalCount podcast${totalCount == 1 ? '' : 's'}',
+                    child: ListTile(
+                      leading: Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          Icons.podcasts,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      title: ExcludeSemantics(
+                        child: Text(
+                          'All Podcasts',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      subtitle: ExcludeSemantics(
+                        child: Text(
+                          '$totalCount podcast${totalCount == 1 ? '' : 's'}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                      trailing: const ExcludeSemantics(
+                        child: Icon(Icons.chevron_right),
+                      ),
+                      onTap: () => context.push(AppRoutes.allPodcasts),
+                    ),
+                  ),
+                ),
+
+                // ── Folders section ──────────────────────────────────────────
+                if (folderList.isNotEmpty) ...[
                   SliverToBoxAdapter(
                     child: Semantics(
                       header: true,
@@ -119,56 +150,6 @@ class SubscriptionsScreen extends ConsumerWidget {
                     ),
                   ),
                 ],
-
-                // ── Podcasts section ─────────────────────────────────────────
-                if (unfiledList.isNotEmpty) ...[
-                  if (hasFolders)
-                    SliverToBoxAdapter(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Divider(height: 1),
-                          Semantics(
-                            header: true,
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                              child: Text(
-                                'Podcasts',
-                                style:
-                                    Theme.of(
-                                      context,
-                                    ).textTheme.labelLarge?.copyWith(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.primary,
-                                    ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (ctx, index) {
-                        final podcast = unfiledList[index];
-                        return PodcastListTile(
-                          podcast: podcast,
-                          onTap: () => context.push(
-                            AppRoutes.podcastDetail(podcast.id),
-                          ),
-                          quickActions: _buildPodcastActions(
-                            context,
-                            ref,
-                            podcast,
-                            podcastActions,
-                          ),
-                        );
-                      },
-                      childCount: unfiledList.length,
-                    ),
-                  ),
-                ],
               ],
             ),
           );
@@ -191,78 +172,6 @@ class SubscriptionsScreen extends ConsumerWidget {
         child: const Icon(Icons.add),
       ),
     );
-  }
-
-  List<PodcastQuickActionItem> _buildPodcastActions(
-    BuildContext context,
-    WidgetRef ref,
-    Podcast podcast,
-    List<PodcastAction> order,
-  ) {
-    return order.map((action) {
-      return switch (action) {
-        PodcastAction.open => PodcastQuickActionItem(
-          label: action.label,
-          onInvoke: () => context.push(AppRoutes.podcastDetail(podcast.id)),
-        ),
-        PodcastAction.toggleNotifications => PodcastQuickActionItem(
-          label: podcast.notificationEnabled
-              ? 'Disable notifications'
-              : 'Enable notifications',
-          onInvoke: () {},
-        ),
-        PodcastAction.toggleAutoQueue => PodcastQuickActionItem(
-          label: podcast.autoQueue ? 'Disable auto-queue' : 'Enable auto-queue',
-          onInvoke: () {},
-        ),
-        PodcastAction.unsubscribe => PodcastQuickActionItem(
-          label: action.label,
-          onInvoke: () => _confirmUnsubscribe(context, ref, podcast),
-        ),
-        PodcastAction.share => PodcastQuickActionItem(
-          label: action.label,
-          onInvoke: () {},
-        ),
-        PodcastAction.manageFolders => PodcastQuickActionItem(
-          label: action.label,
-          onInvoke: () => showModalBottomSheet<void>(
-            context: context,
-            isScrollControlled: true,
-            useSafeArea: true,
-            builder: (_) => FolderPodcastPickerSheet(
-              mode: ManageFoldersForPodcast(podcast.id),
-            ),
-          ),
-        ),
-      };
-    }).toList();
-  }
-
-  Future<void> _confirmUnsubscribe(
-    BuildContext context,
-    WidgetRef ref,
-    Podcast podcast,
-  ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Unsubscribe?'),
-        content: Text('Remove ${podcast.title} and all its episodes?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Unsubscribe'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      await ref.read(podcastRepositoryProvider).unsubscribe(podcast.id);
-    }
   }
 
   Future<void> _confirmDeleteFolder(
