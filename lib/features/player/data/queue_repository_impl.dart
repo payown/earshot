@@ -15,18 +15,28 @@ class QueueRepositoryImpl implements QueueRepository {
 
   @override
   Future<void> addToQueue(int episodeId) async {
-    final maxPosition = await _maxPosition();
-    await _db
-        .into(_db.queueItems)
-        .insert(
-          QueueItemsCompanion.insert(
-            episodeId: episodeId,
-            position: maxPosition + 1,
-          ),
-          mode: InsertMode.insertOrIgnore,
-        );
-    await (_db.update(_db.episodes)..where((e) => e.id.equals(episodeId)))
-        .write(const EpisodesCompanion(status: Value(EpisodeStatus.inQueue)));
+    await _db.transaction(() async {
+      final maxPosition = await _maxPosition();
+      await _db
+          .into(_db.queueItems)
+          .insert(
+            QueueItemsCompanion.insert(
+              episodeId: episodeId,
+              position: maxPosition + 1,
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+      // Only flip to inQueue when the episode is new. Played/expired episodes
+      // can be re-queued without disturbing their existing status.
+      await (_db.update(_db.episodes)..where(
+            (e) =>
+                e.id.equals(episodeId) &
+                e.status.equals(EpisodeStatus.newEpisode.name),
+          ))
+          .write(
+            const EpisodesCompanion(status: Value(EpisodeStatus.inQueue)),
+          );
+    });
     _log.fine('Added episode $episodeId to queue');
   }
 
@@ -40,18 +50,20 @@ class QueueRepositoryImpl implements QueueRepository {
 
   @override
   Future<void> cancelFromQueue(int episodeId) async {
-    await (_db.delete(
-      _db.queueItems,
-    )..where((q) => q.episodeId.equals(episodeId))).go();
-    await _compactPositions();
-    await (_db.update(_db.episodes)..where(
-          (e) =>
-              e.id.equals(episodeId) &
-              e.status.equals(EpisodeStatus.inQueue.name),
-        ))
-        .write(
-          const EpisodesCompanion(status: Value(EpisodeStatus.newEpisode)),
-        );
+    await _db.transaction(() async {
+      await (_db.delete(
+        _db.queueItems,
+      )..where((q) => q.episodeId.equals(episodeId))).go();
+      await _compactPositions();
+      await (_db.update(_db.episodes)..where(
+            (e) =>
+                e.id.equals(episodeId) &
+                e.status.equals(EpisodeStatus.inQueue.name),
+          ))
+          .write(
+            const EpisodesCompanion(status: Value(EpisodeStatus.newEpisode)),
+          );
+    });
     _log.fine('Cancelled episode $episodeId from queue, returned to inbox');
   }
 
@@ -89,12 +101,14 @@ class QueueRepositoryImpl implements QueueRepository {
 
   @override
   Future<void> clearQueue() async {
-    await _db.delete(_db.queueItems).go();
-    await (_db.update(
-      _db.episodes,
-    )..where((e) => e.status.equals(EpisodeStatus.inQueue.name))).write(
-      const EpisodesCompanion(status: Value(EpisodeStatus.newEpisode)),
-    );
+    await _db.transaction(() async {
+      await _db.delete(_db.queueItems).go();
+      await (_db.update(
+        _db.episodes,
+      )..where((e) => e.status.equals(EpisodeStatus.inQueue.name))).write(
+        const EpisodesCompanion(status: Value(EpisodeStatus.newEpisode)),
+      );
+    });
   }
 
   Future<int> _maxPosition() async {
