@@ -58,7 +58,7 @@ class QueueScreen extends ConsumerWidget {
                   return Semantics(
                     key: ValueKey(episode.id),
                     label:
-                        '${episode.title}, position ${index + 1} of ${episodes.length}',
+                        '${episode.title}, In queue, position ${index + 1} of ${episodes.length}',
                     customSemanticsActions: {
                       const CustomSemanticsAction(label: 'Move to top'): () =>
                           ref
@@ -68,7 +68,7 @@ class QueueScreen extends ConsumerWidget {
                         label: 'Remove from queue',
                       ): () => ref
                           .read(queueRepositoryProvider)
-                          .removeFromQueue(episode.id),
+                          .cancelFromQueue(episode.id),
                     },
                     child: ListTile(
                       leading: ExcludeSemantics(
@@ -85,6 +85,31 @@ class QueueScreen extends ConsumerWidget {
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
                       ),
+                      subtitle: ExcludeSemantics(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Wrap(
+                            children: [
+                              Chip(
+                                label: const Text('In queue'),
+                                visualDensity: VisualDensity.compact,
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.secondaryContainer,
+                                labelStyle: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSecondaryContainer,
+                                    ),
+                                padding: EdgeInsets.zero,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                       trailing: ExcludeSemantics(
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -96,7 +121,7 @@ class QueueScreen extends ConsumerWidget {
                                 icon: const Icon(Icons.remove_circle_outline),
                                 onPressed: () => ref
                                     .read(queueRepositoryProvider)
-                                    .removeFromQueue(episode.id),
+                                    .cancelFromQueue(episode.id),
                                 tooltip: 'Remove from queue',
                               ),
                             ),
