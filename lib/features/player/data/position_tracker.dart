@@ -104,7 +104,8 @@ class PositionTracker {
 
     final duration = episode.durationSeconds;
     if (duration != null && duration > 0) {
-      if (completionPosition < duration * 0.85) {
+      // Integer math avoids floating-point rounding: pos * 100 < dur * 85.
+      if (completionPosition * 100 < duration * 85) {
         _log.warning(
           'Skipping markPlayed for episode $episodeId: '
           'position ${completionPosition}s is less than 85% of ${duration}s. '

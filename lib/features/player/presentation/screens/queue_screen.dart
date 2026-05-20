@@ -142,7 +142,10 @@ class QueueScreen extends ConsumerWidget {
                             ),
                             ReorderableDragStartListener(
                               index: index,
-                              child: const Icon(Icons.drag_handle),
+                              child: const Tooltip(
+                                message: 'Reorder',
+                                child: Icon(Icons.drag_handle),
+                              ),
                             ),
                           ],
                         ),

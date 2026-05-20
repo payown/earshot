@@ -1,5 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:earshot/core/providers/core_providers.dart';
+import 'package:flutter/material.dart';
 import 'package:earshot/core/router/app_router.dart';
 import 'package:earshot/data/db/app_database.dart';
 import 'package:earshot/features/subscriptions/data/podcast_repository.dart';
@@ -54,7 +55,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Library'), findsWidgets);
+    // "Library" appears in both the AppBar title and the NavigationBar label.
+    // Target the nav label specifically so the assertion remains meaningful.
+    expect(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Library'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Inbox'), findsOneWidget);
     await db.close();
   });
