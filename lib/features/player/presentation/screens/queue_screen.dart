@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../core/router/app_router.dart';
 import '../providers/player_providers.dart';
 import '../widgets/now_playing_bar.dart';
 
@@ -13,7 +15,16 @@ class QueueScreen extends ConsumerWidget {
     final queue = ref.watch(queueProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Queue')),
+      appBar: AppBar(
+        title: const Text('Queue'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Settings',
+            onPressed: () => context.push(AppRoutes.settings),
+          ),
+        ],
+      ),
       bottomNavigationBar: const NowPlayingBar(),
       body: queue.when(
         data: (episodes) => episodes.isEmpty
@@ -47,6 +58,11 @@ class QueueScreen extends ConsumerWidget {
                 ),
               )
             : ReorderableListView.builder(
+                // Disable the implicit drag handles Flutter adds; we provide
+                // our own ReorderableDragStartListener so sighted users can
+                // drag using the handle icon. This also eliminates the extra
+                // silent semantic node VoiceOver was encountering.
+                buildDefaultDragHandles: false,
                 itemCount: episodes.length,
                 onReorderItem: (oldIndex, newIndex) async {
                   await ref
@@ -114,18 +130,20 @@ class QueueScreen extends ConsumerWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Semantics(
-                              button: true,
-                              label: 'Remove from queue',
-                              child: IconButton(
-                                icon: const Icon(Icons.remove_circle_outline),
-                                onPressed: () => ref
-                                    .read(queueRepositoryProvider)
-                                    .cancelFromQueue(episode.id),
-                                tooltip: 'Remove from queue',
-                              ),
+                            // The outer Semantics node already exposes
+                            // "Remove from queue" as a custom action, so this
+                            // button needs no inner Semantics of its own.
+                            IconButton(
+                              icon: const Icon(Icons.remove_circle_outline),
+                              onPressed: () => ref
+                                  .read(queueRepositoryProvider)
+                                  .cancelFromQueue(episode.id),
+                              tooltip: 'Remove from queue',
                             ),
-                            const Icon(Icons.drag_handle),
+                            ReorderableDragStartListener(
+                              index: index,
+                              child: const Icon(Icons.drag_handle),
+                            ),
                           ],
                         ),
                       ),

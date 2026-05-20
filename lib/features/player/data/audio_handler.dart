@@ -74,6 +74,22 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  // AirPods double-click fires skipToNext(). Remap to seek +30 s.
+  @override
+  Future<void> skipToNext() => _seekBy(const Duration(seconds: 30));
+
+  // AirPods triple-click fires skipToPrevious(). Remap to seek -15 s.
+  @override
+  Future<void> skipToPrevious() => _seekBy(const Duration(seconds: -15));
+
+  Future<void> _seekBy(Duration offset) async {
+    var pos = _player.position + offset;
+    if (pos < Duration.zero) pos = Duration.zero;
+    final dur = _player.duration;
+    if (dur != null && pos > dur) pos = dur;
+    await _player.seek(pos);
+  }
+
   @override
   Future<void> play() => _player.play();
 
@@ -138,6 +154,8 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
         MediaAction.seek,
         MediaAction.fastForward,
         MediaAction.rewind,
+        MediaAction.skipToNext,
+        MediaAction.skipToPrevious,
       },
       androidCompactActionIndices: const [0, 1, 2],
       processingState: _mapProcessingState(_player.processingState),

@@ -71,8 +71,8 @@ class _MainShellState extends ConsumerState<MainShell> {
           const NavigationDestination(
             icon: Icon(Icons.podcasts_outlined),
             selectedIcon: Icon(Icons.podcasts),
-            label: 'Subscriptions',
-            tooltip: 'Subscriptions',
+            label: 'Library',
+            tooltip: 'Library',
           ),
           const NavigationDestination(
             icon: Icon(Icons.download_outlined),

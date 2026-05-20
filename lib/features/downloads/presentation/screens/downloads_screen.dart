@@ -2,8 +2,10 @@ import 'package:drift/drift.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/providers/core_providers.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../data/db/app_database.dart';
 import '../../../../data/db/enums.dart';
 import '../../../subscriptions/domain/episode.dart';
@@ -18,7 +20,16 @@ class DownloadsScreen extends ConsumerWidget {
     final recentlyExpired = ref.watch(recentlyExpiredProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Downloads')),
+      appBar: AppBar(
+        title: const Text('Downloads'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Settings',
+            onPressed: () => context.push(AppRoutes.settings),
+          ),
+        ],
+      ),
       body: CustomScrollView(
         slivers: [
           downloads.when(
