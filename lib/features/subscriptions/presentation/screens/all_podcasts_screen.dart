@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:logging/logging.dart';
 
 import '../../../../core/router/app_router.dart';
 import '../../../../features/folders/presentation/widgets/folder_podcast_picker_sheet.dart';
@@ -10,6 +11,8 @@ import '../../../../features/settings/presentation/providers/settings_providers.
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
 import '../widgets/podcast_list_tile.dart';
+
+final _log = Logger('AllPodcastsScreen');
 
 class AllPodcastsScreen extends ConsumerWidget {
   const AllPodcastsScreen({super.key});
@@ -54,7 +57,18 @@ class AllPodcastsScreen extends ConsumerWidget {
                 },
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, stack) {
+          _log.severe('Failed to load podcasts', e, stack);
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Something went wrong. Pull to retry.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        },
       ),
     );
   }
