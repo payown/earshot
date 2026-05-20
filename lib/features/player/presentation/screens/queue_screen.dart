@@ -1,11 +1,37 @@
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/router/app_router.dart';
+import '../../../../features/subscriptions/domain/episode.dart';
 import '../providers/player_providers.dart';
 import '../widgets/now_playing_bar.dart';
+
+void _playEpisode(WidgetRef ref, Episode episode) {
+  final handler = ref.read(audioHandlerProvider);
+  final resumePosition =
+      episode.positionSeconds > 0 &&
+          episode.durationSeconds != null &&
+          episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
+      ? episode.positionSeconds
+      : 0;
+  handler.playEpisode(
+    MediaItem(
+      id: episode.audioUrl,
+      title: episode.title,
+      artUri: episode.artworkUrl != null
+          ? Uri.parse(episode.artworkUrl!)
+          : null,
+      duration: episode.durationSeconds != null
+          ? Duration(seconds: episode.durationSeconds!)
+          : null,
+      extras: {'episodeId': episode.id, 'podcastId': episode.podcastId},
+    ),
+    resumePositionSeconds: resumePosition,
+  );
+}
 
 class QueueScreen extends ConsumerWidget {
   const QueueScreen({super.key});
@@ -58,10 +84,6 @@ class QueueScreen extends ConsumerWidget {
                 ),
               )
             : ReorderableListView.builder(
-                // Disable the implicit drag handles Flutter adds; we provide
-                // our own ReorderableDragStartListener so sighted users can
-                // drag using the handle icon. This also eliminates the extra
-                // silent semantic node VoiceOver was encountering.
                 buildDefaultDragHandles: false,
                 itemCount: episodes.length,
                 onReorderItem: (oldIndex, newIndex) async {
@@ -71,11 +93,21 @@ class QueueScreen extends ConsumerWidget {
                 },
                 itemBuilder: (context, index) {
                   final episode = episodes[index];
+                  // container: false lets our label and custom actions merge UP
+                  // into the _ReorderableItem semantic node that Flutter creates
+                  // around each item. The list-slot boundary still gives each
+                  // episode exactly one VoiceOver focus stop, now carrying the
+                  // full label + all reorder and custom actions together.
+                  // ExcludeSemantics on the ListTile prevents any residual child
+                  // nodes from creating extra focus stops.
                   return Semantics(
                     key: ValueKey(episode.id),
+                    container: false,
                     label:
                         '${episode.title}, In queue, position ${index + 1} of ${episodes.length}',
                     customSemanticsActions: {
+                      const CustomSemanticsAction(label: 'Play'): () =>
+                          _playEpisode(ref, episode),
                       const CustomSemanticsAction(label: 'Move to top'): () =>
                           ref
                               .read(queueRepositoryProvider)
@@ -86,23 +118,19 @@ class QueueScreen extends ConsumerWidget {
                           .read(queueRepositoryProvider)
                           .cancelFromQueue(episode.id),
                     },
-                    child: ListTile(
-                      leading: ExcludeSemantics(
-                        child: Text(
+                    child: ExcludeSemantics(
+                      child: ListTile(
+                        leading: Text(
                           '${index + 1}',
                           style: Theme.of(context).textTheme.labelLarge,
                         ),
-                      ),
-                      title: ExcludeSemantics(
-                        child: Text(
+                        title: Text(
                           episode.title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
-                      ),
-                      subtitle: ExcludeSemantics(
-                        child: Padding(
+                        subtitle: Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Wrap(
                             children: [
@@ -125,20 +153,20 @@ class QueueScreen extends ConsumerWidget {
                             ],
                           ),
                         ),
-                      ),
-                      trailing: ExcludeSemantics(
-                        child: Row(
+                        trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            // The outer Semantics node already exposes
-                            // "Remove from queue" as a custom action, so this
-                            // button needs no inner Semantics of its own.
+                            IconButton(
+                              icon: const Icon(Icons.play_arrow),
+                              tooltip: 'Play',
+                              onPressed: () => _playEpisode(ref, episode),
+                            ),
                             IconButton(
                               icon: const Icon(Icons.remove_circle_outline),
+                              tooltip: 'Remove from queue',
                               onPressed: () => ref
                                   .read(queueRepositoryProvider)
                                   .cancelFromQueue(episode.id),
-                              tooltip: 'Remove from queue',
                             ),
                             ReorderableDragStartListener(
                               index: index,
