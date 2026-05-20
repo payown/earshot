@@ -37,16 +37,12 @@ class SubscriptionsScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Earshot'),
         actions: [
-          Semantics(
-            button: true,
-            label: 'Create folder',
-            child: IconButton(
-              icon: const Icon(Icons.create_new_folder_outlined),
-              tooltip: 'Create folder',
-              onPressed: () => showDialog<void>(
-                context: context,
-                builder: (_) => const CreateFolderDialog(),
-              ),
+          IconButton(
+            icon: const Icon(Icons.create_new_folder_outlined),
+            tooltip: 'Create folder',
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (_) => const CreateFolderDialog(),
             ),
           ),
           IconButton(

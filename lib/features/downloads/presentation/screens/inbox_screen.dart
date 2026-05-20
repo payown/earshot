@@ -28,24 +28,16 @@ class InboxScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Inbox'),
         actions: [
-          Semantics(
-            button: true,
-            label: 'Add folder to queue',
-            child: IconButton(
-              icon: const Icon(Icons.folder_outlined),
-              tooltip: 'Add folder to queue',
-              onPressed: () => _showFolderQueueSheet(context, ref),
-            ),
+          IconButton(
+            icon: const Icon(Icons.folder_outlined),
+            tooltip: 'Add folder to queue',
+            onPressed: () => _showFolderQueueSheet(context, ref),
           ),
           if (allEpisodes.asData?.value.isNotEmpty ?? false)
-            Semantics(
-              button: true,
-              label: 'Mark all as played',
-              child: IconButton(
-                icon: const Icon(Icons.done_all),
-                tooltip: 'Mark all as played',
-                onPressed: () => _confirmMarkAllPlayed(context, ref),
-              ),
+            IconButton(
+              icon: const Icon(Icons.done_all),
+              tooltip: 'Mark all as played',
+              onPressed: () => _confirmMarkAllPlayed(context, ref),
             ),
         ],
       ),
