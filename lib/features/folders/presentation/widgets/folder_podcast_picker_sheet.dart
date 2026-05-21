@@ -254,19 +254,12 @@ class _PodcastCheckList extends StatelessWidget {
       itemBuilder: (context, index) {
         final podcast = podcasts[index];
         final checked = selectedIds.contains(podcast.id);
-        return Semantics(
-          label: podcast.title,
-          checked: checked,
-          onTap: () => onToggle(podcast.id, !checked),
-          child: ExcludeSemantics(
-            child: CheckboxListTile(
-              value: checked,
-              onChanged: (v) => onToggle(podcast.id, v ?? false),
-              title: Text(podcast.title),
-              subtitle: podcast.author != null ? Text(podcast.author!) : null,
-              controlAffinity: ListTileControlAffinity.leading,
-            ),
-          ),
+        return CheckboxListTile(
+          value: checked,
+          onChanged: (v) => onToggle(podcast.id, v ?? false),
+          title: Text(podcast.title),
+          subtitle: podcast.author != null ? Text(podcast.author!) : null,
+          controlAffinity: ListTileControlAffinity.leading,
         );
       },
     );
@@ -292,32 +285,23 @@ class _FolderCheckList extends StatelessWidget {
       shrinkWrap: true,
       children: [
         for (final folder in folders) ...[
-          Semantics(
-            label: folder.name,
-            checked: selectedIds.contains(folder.id),
-            onTap: () => onToggle(folder.id, !selectedIds.contains(folder.id)),
-            child: ExcludeSemantics(
-              child: CheckboxListTile(
-                value: selectedIds.contains(folder.id),
-                onChanged: (v) => onToggle(folder.id, v ?? false),
-                title: Text(folder.name),
-                controlAffinity: ListTileControlAffinity.leading,
-                secondary: const Icon(Icons.folder_outlined),
-              ),
+          CheckboxListTile(
+            value: selectedIds.contains(folder.id),
+            onChanged: (v) => onToggle(folder.id, v ?? false),
+            title: Text(folder.name),
+            controlAffinity: ListTileControlAffinity.leading,
+            secondary: const ExcludeSemantics(
+              child: Icon(Icons.folder_outlined),
             ),
           ),
         ],
         if (onCreateFolder != null)
-          Semantics(
-            button: true,
-            label: 'Create new folder',
-            child: ExcludeSemantics(
-              child: ListTile(
-                leading: const Icon(Icons.create_new_folder_outlined),
-                title: const Text('Create new folder'),
-                onTap: onCreateFolder,
-              ),
+          ListTile(
+            leading: const ExcludeSemantics(
+              child: Icon(Icons.create_new_folder_outlined),
             ),
+            title: const Text('Create new folder'),
+            onTap: onCreateFolder,
           ),
       ],
     );
