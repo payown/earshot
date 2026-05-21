@@ -285,15 +285,7 @@ class _FolderCheckList extends StatelessWidget {
       shrinkWrap: true,
       children: [
         for (final folder in folders) ...[
-          CheckboxListTile(
-            value: selectedIds.contains(folder.id),
-            onChanged: (v) => onToggle(folder.id, v ?? false),
-            title: Text(folder.name),
-            controlAffinity: ListTileControlAffinity.leading,
-            secondary: const ExcludeSemantics(
-              child: Icon(Icons.folder_outlined),
-            ),
-          ),
+          _folderTile(folder),
         ],
         if (onCreateFolder != null)
           ListTile(
@@ -304,6 +296,19 @@ class _FolderCheckList extends StatelessWidget {
             onTap: onCreateFolder,
           ),
       ],
+    );
+  }
+
+  Widget _folderTile(PodcastFolder folder) {
+    final isSelected = selectedIds.contains(folder.id);
+    return CheckboxListTile(
+      value: isSelected,
+      onChanged: (v) => onToggle(folder.id, v ?? false),
+      title: Text(folder.name),
+      controlAffinity: ListTileControlAffinity.leading,
+      secondary: const ExcludeSemantics(
+        child: Icon(Icons.folder_outlined),
+      ),
     );
   }
 }

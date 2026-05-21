@@ -8,24 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- Folder picker checkboxes no longer announced as "dimmed, switch button off".
-  Custom Semantics wrappers with ExcludeSemantics were causing iOS to mark items
-  as disabled (dimmed) and map the checked state to a switch control type.
-  Replaced with plain CheckboxListTile — its built-in MergeSemantics correctly
-  maps to "checkbox, checked/unchecked" on iOS VoiceOver.
-- "Create new folder" row no longer dimmed; removed redundant Semantics/
-  ExcludeSemantics wrapping that caused the same issue.
-
-### Fixed
-- Folder picker sheet: VoiceOver no longer announces "Add to Folder, Done,
-  heading" on open. The `Focus(autofocus: true)` wrapper was making the sheet
-  root a VoiceOver container that grouped and summarised its children on entry.
-  Removed; `barrierLabel` on `showModalBottomSheet` already handles focus routing.
-- Folder picker sheet: folder and podcast checkboxes are now VoiceOver-interactive.
-  `Semantics` nodes now declare `checked:` (so VoiceOver announces checked/unchecked
-  state) and `onTap:` (so double-tap actually toggles the item).
-
-### Fixed
 - Library screen: "All Podcasts" row no longer appears as an unlabeled button
   in the VoiceOver/TalkBack accessibility tree.
 - Folder picker sheet: "Done" button now has an explicit semantic label and hint.
@@ -35,11 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Play All Unplayed Episodes now starts playback immediately instead of only
   adding episodes to the queue.
 - Folder picker sheet: Removed duplicate "Add to Folder" heading, unlabeled
-  button after Done, and extra VoiceOver traversal stop (skipTraversal fix per
-  GHCP recommendation). Done button moved to sheet footer so it is reachable
-  by swiping forward after selecting folders.
+  button after Done, and extra VoiceOver traversal stop. Done button moved to
+  sheet footer so it is reachable by swiping forward after selecting folders.
 - Folder picker sheet: "Create new folder" no longer appears as two buttons in
   the VoiceOver tree.
+- Folder picker sheet: VoiceOver no longer announces "Add to Folder, Done,
+  heading" on open. Removed `Focus(autofocus: true)` container wrapper that was
+  causing VoiceOver to group and summarise all children on sheet entry.
+- Folder picker checkboxes no longer announced as "dimmed, switch button off".
+  Replaced custom Semantics/ExcludeSemantics wrappers with plain CheckboxListTile
+  whose built-in MergeSemantics correctly maps to "checkbox, checked/unchecked"
+  on iOS VoiceOver. Same fix applied to "Create new folder" row.
 
 ### Phase 8 complete — Alpha build prep
 
