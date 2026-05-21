@@ -192,48 +192,43 @@ class _SheetScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // skipTraversal keeps autofocus working without adding an extra tab/VO stop.
-    return Focus(
-      autofocus: true,
-      skipTraversal: true,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Semantics(
+            header: true,
+            label: title,
+            child: ExcludeSemantics(
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+          ),
+        ),
+        const Divider(height: 1),
+        Flexible(child: body),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: SizedBox(
+            width: double.infinity,
             child: Semantics(
-              header: true,
-              label: title,
+              button: true,
+              label: 'Done',
+              hint: 'Save changes and close',
               child: ExcludeSemantics(
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleLarge,
+                child: FilledButton(
+                  onPressed: onDone,
+                  child: const Text('Done'),
                 ),
               ),
             ),
           ),
-          const Divider(height: 1),
-          Flexible(child: body),
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: SizedBox(
-              width: double.infinity,
-              child: Semantics(
-                button: true,
-                label: 'Done',
-                hint: 'Save changes and close',
-                child: ExcludeSemantics(
-                  child: FilledButton(
-                    onPressed: onDone,
-                    child: const Text('Done'),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -260,7 +255,9 @@ class _PodcastCheckList extends StatelessWidget {
         final podcast = podcasts[index];
         final checked = selectedIds.contains(podcast.id);
         return Semantics(
-          label: '${podcast.title}, ${checked ? 'in folder' : 'not in folder'}',
+          label: podcast.title,
+          checked: checked,
+          onTap: () => onToggle(podcast.id, !checked),
           child: ExcludeSemantics(
             child: CheckboxListTile(
               value: checked,
@@ -296,8 +293,9 @@ class _FolderCheckList extends StatelessWidget {
       children: [
         for (final folder in folders) ...[
           Semantics(
-            label:
-                '${folder.name}, ${selectedIds.contains(folder.id) ? 'selected' : 'not selected'}',
+            label: folder.name,
+            checked: selectedIds.contains(folder.id),
+            onTap: () => onToggle(folder.id, !selectedIds.contains(folder.id)),
             child: ExcludeSemantics(
               child: CheckboxListTile(
                 value: selectedIds.contains(folder.id),

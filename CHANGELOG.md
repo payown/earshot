@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Folder picker sheet: VoiceOver no longer announces "Add to Folder, Done,
+  heading" on open. The `Focus(autofocus: true)` wrapper was making the sheet
+  root a VoiceOver container that grouped and summarised its children on entry.
+  Removed; `barrierLabel` on `showModalBottomSheet` already handles focus routing.
+- Folder picker sheet: folder and podcast checkboxes are now VoiceOver-interactive.
+  `Semantics` nodes now declare `checked:` (so VoiceOver announces checked/unchecked
+  state) and `onTap:` (so double-tap actually toggles the item).
+
+### Fixed
 - Library screen: "All Podcasts" row no longer appears as an unlabeled button
   in the VoiceOver/TalkBack accessibility tree.
 - Folder picker sheet: "Done" button now has an explicit semantic label and hint.
