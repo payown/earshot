@@ -76,3 +76,87 @@ When in doubt, test with VoiceOver or TalkBack physically before merging.
 - `Visibility(visible: false)` for elements that should remain in tree but inaccessible (use `ExcludeSemantics` or remove from tree)
 - Custom gesture-based controls without alternative button-based access
 - Reading text aloud via TTS yourself; let the system screen reader handle it
+
+## Modal bottom sheets
+
+Always set `barrierLabel` so VoiceOver doesn't announce the scrim as "scrim":
+
+```dart
+showModalBottomSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  barrierLabel: 'Dismiss folder picker',  // required
+  builder: (_) => MySheet(),
+);
+```
+
+Never put `Focus(autofocus: true)` on the sheet's root container widget. VoiceOver treats any `Focus`-wrapped container as a group and reads a merged summary of all children on entry ("Add to Folder, Done, heading"). `barrierLabel` is sufficient to route VoiceOver past the scrim.
+
+## Overriding built-in widget semantics
+
+**Trust the widget first.** `CheckboxListTile`, `Switch`, `Slider`, `IconButton`, `ListTile` all produce correct semantics. Override only when the default label is wrong.
+
+**When you DO override with an outer `Semantics` node:**
+
+```dart
+// CORRECT — exclude the whole interactive widget so only the outer node exists
+Semantics(
+  button: true,
+  label: 'Done',
+  hint: 'Save changes and close',
+  child: ExcludeSemantics(       // wrap the entire FilledButton
+    child: FilledButton(
+      onPressed: onDone,
+      child: const Text('Done'), // Text does NOT need ExcludeSemantics here
+    ),
+  ),
+),
+```
+
+```dart
+// WRONG — ExcludeSemantics only on the Text leaves FilledButton creating its
+// own unnamed button node alongside the outer Semantics node
+Semantics(
+  button: true,
+  label: 'Done',
+  child: FilledButton(
+    onPressed: onDone,
+    child: const ExcludeSemantics(child: Text('Done')),  // ❌
+  ),
+),
+```
+
+**Never do this to a checkbox/toggle widget:**
+
+```dart
+// WRONG — ExcludeSemantics strips the gesture recognizer; iOS marks the node
+// "dimmed". Semantics(checked:) without a proper type maps to "switch button".
+Semantics(
+  checked: value,
+  onTap: () => onToggle(!value),
+  child: ExcludeSemantics(child: CheckboxListTile(...)),  // ❌
+),
+
+// CORRECT — let CheckboxListTile own its semantics
+CheckboxListTile(
+  value: value,
+  onChanged: (v) => onToggle(v ?? false),
+  title: Text(label),
+  secondary: const ExcludeSemantics(child: Icon(Icons.folder_outlined)),
+),
+```
+
+## Sheet headings
+
+`Semantics(header: true)` without an explicit `label:` derives its label from the child widget, creating two nodes with the same text (the `Semantics` node and the `Text` node). Always write:
+
+```dart
+Semantics(
+  header: true,
+  label: title,                      // explicit label
+  child: ExcludeSemantics(           // prevent child Text from making a 2nd node
+    child: Text(title, style: ...),
+  ),
+),
+```
