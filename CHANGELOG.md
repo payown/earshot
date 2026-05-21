@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Manage Folders flow: VoiceOver no longer lands on "scrim" when the folder
   picker sheet opens via a quick action. The barrier is now labeled "Dismiss
   folder picker" and the sheet claims focus on open.
+- Play All Unplayed Episodes now starts playback immediately instead of only
+  adding episodes to the queue.
+- Folder picker sheet: Removed duplicate "Add to Folder" heading, unlabeled
+  button after Done, and extra VoiceOver traversal stop (skipTraversal fix per
+  GHCP recommendation). Done button moved to sheet footer so it is reachable
+  by swiping forward after selecting folders.
+- Folder picker sheet: "Create new folder" no longer appears as two buttons in
+  the VoiceOver tree.
 
 ### Phase 8 complete — Alpha build prep
 

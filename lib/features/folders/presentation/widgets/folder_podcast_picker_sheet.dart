@@ -192,38 +192,46 @@ class _SheetScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // skipTraversal keeps autofocus working without adding an extra tab/VO stop.
     return Focus(
       autofocus: true,
+      skipTraversal: true,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Semantics(
-                    header: true,
-                    child: Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Semantics(
+              header: true,
+              label: title,
+              child: ExcludeSemantics(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
-                Semantics(
-                  button: true,
-                  label: 'Done',
-                  hint: 'Save changes and close',
-                  child: FilledButton(
-                    onPressed: onDone,
-                    child: const ExcludeSemantics(child: Text('Done')),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
           const Divider(height: 1),
           Flexible(child: body),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: SizedBox(
+              width: double.infinity,
+              child: Semantics(
+                button: true,
+                label: 'Done',
+                hint: 'Save changes and close',
+                child: ExcludeSemantics(
+                  child: FilledButton(
+                    onPressed: onDone,
+                    child: const Text('Done'),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -305,10 +313,12 @@ class _FolderCheckList extends StatelessWidget {
           Semantics(
             button: true,
             label: 'Create new folder',
-            child: ListTile(
-              leading: const Icon(Icons.create_new_folder_outlined),
-              title: const Text('Create new folder'),
-              onTap: onCreateFolder,
+            child: ExcludeSemantics(
+              child: ListTile(
+                leading: const Icon(Icons.create_new_folder_outlined),
+                title: const Text('Create new folder'),
+                onTap: onCreateFolder,
+              ),
             ),
           ),
       ],
