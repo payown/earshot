@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Library screen: "All Podcasts" row no longer appears as an unlabeled button
   in the VoiceOver/TalkBack accessibility tree.
 - Folder picker sheet: "Done" button now has an explicit semantic label and hint.
+- Manage Folders flow: VoiceOver no longer lands on "scrim" when the folder
+  picker sheet opens via a quick action. The barrier is now labeled "Dismiss
+  folder picker" and the sheet claims focus on open.
 
 ### Phase 8 complete — Alpha build prep
 

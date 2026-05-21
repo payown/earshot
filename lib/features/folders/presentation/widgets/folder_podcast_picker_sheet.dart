@@ -192,37 +192,40 @@ class _SheetScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Semantics(
-                  header: true,
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleLarge,
+    return Focus(
+      autofocus: true,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Semantics(
+                    header: true,
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
                   ),
                 ),
-              ),
-              Semantics(
-                button: true,
-                label: 'Done',
-                hint: 'Save changes and close',
-                child: FilledButton(
-                  onPressed: onDone,
-                  child: const ExcludeSemantics(child: Text('Done')),
+                Semantics(
+                  button: true,
+                  label: 'Done',
+                  hint: 'Save changes and close',
+                  child: FilledButton(
+                    onPressed: onDone,
+                    child: const ExcludeSemantics(child: Text('Done')),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        const Divider(height: 1),
-        Flexible(child: body),
-      ],
+          const Divider(height: 1),
+          Flexible(child: body),
+        ],
+      ),
     );
   }
 }

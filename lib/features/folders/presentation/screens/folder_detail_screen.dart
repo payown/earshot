@@ -119,6 +119,7 @@ class FolderDetailScreen extends ConsumerWidget {
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
+          barrierLabel: 'Dismiss folder picker',
           builder: (_) => FolderPodcastPickerSheet(
             mode: AddPodcastsToFolder(folderId),
           ),
