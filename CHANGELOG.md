@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Library screen: "All Podcasts" row no longer appears as an unlabeled button
+  in the VoiceOver/TalkBack accessibility tree.
+- Folder picker sheet: "Done" button now has an explicit semantic label and hint.
+
 ### Phase 8 complete — Alpha build prep
 
 - Version set to 0.1.0+1
