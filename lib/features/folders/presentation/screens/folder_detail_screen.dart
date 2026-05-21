@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -152,16 +153,40 @@ class FolderDetailScreen extends ConsumerWidget {
       'Added ${episodes.length} episodes from folder $folderId to queue',
     );
 
+    final first = episodes.first;
+    final resumePos =
+        first.positionSeconds > 0 &&
+            first.durationSeconds != null &&
+            first.positionSeconds < (first.durationSeconds! * 0.95).round()
+        ? first.positionSeconds
+        : 0;
+    await ref
+        .read(audioHandlerProvider)
+        .playEpisode(
+          MediaItem(
+            id: first.audioUrl,
+            title: first.title,
+            artUri: first.artworkUrl != null
+                ? Uri.parse(first.artworkUrl!)
+                : null,
+            duration: first.durationSeconds != null
+                ? Duration(seconds: first.durationSeconds!)
+                : null,
+            extras: {'episodeId': first.id, 'podcastId': first.podcastId},
+          ),
+          resumePositionSeconds: resumePos,
+        );
+
     if (context.mounted) {
       SemanticsService.sendAnnouncement(
         View.of(context),
-        'Added ${episodes.length} episode${episodes.length == 1 ? '' : 's'} to queue',
+        'Playing ${episodes.length} episode${episodes.length == 1 ? '' : 's'} from folder',
         TextDirection.ltr,
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Added ${episodes.length} episode${episodes.length == 1 ? '' : 's'} to queue',
+            'Playing ${episodes.length} episode${episodes.length == 1 ? '' : 's'} from folder',
           ),
         ),
       );
