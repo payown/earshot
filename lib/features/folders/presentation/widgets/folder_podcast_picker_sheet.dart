@@ -208,9 +208,14 @@ class _SheetScaffold extends StatelessWidget {
                   ),
                 ),
               ),
-              FilledButton(
-                onPressed: onDone,
-                child: const Text('Done'),
+              Semantics(
+                button: true,
+                label: 'Done',
+                hint: 'Save changes and close',
+                child: FilledButton(
+                  onPressed: onDone,
+                  child: const ExcludeSemantics(child: Text('Done')),
+                ),
               ),
             ],
           ),

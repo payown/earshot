@@ -69,37 +69,35 @@ class SubscriptionsScreen extends ConsumerWidget {
                     button: true,
                     label:
                         'All Podcasts, $totalCount podcast${totalCount == 1 ? '' : 's'}',
-                    child: ListTile(
-                      leading: Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(8),
+                    child: ExcludeSemantics(
+                      child: ListTile(
+                        leading: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            Icons.podcasts,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onPrimaryContainer,
+                          ),
                         ),
-                        child: Icon(
-                          Icons.podcasts,
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onPrimaryContainer,
-                        ),
-                      ),
-                      title: ExcludeSemantics(
-                        child: Text(
+                        title: Text(
                           'All Podcasts',
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
-                      ),
-                      subtitle: ExcludeSemantics(
-                        child: Text(
+                        subtitle: Text(
                           '$totalCount podcast${totalCount == 1 ? '' : 's'}',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => context.push(AppRoutes.allPodcasts),
                       ),
-                      trailing: const ExcludeSemantics(
-                        child: Icon(Icons.chevron_right),
-                      ),
-                      onTap: () => context.push(AppRoutes.allPodcasts),
                     ),
                   ),
                 ),
