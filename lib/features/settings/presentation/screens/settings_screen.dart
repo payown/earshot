@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
@@ -9,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/folders/presentation/providers/folders_providers.dart';
+import '../../../../features/player/presentation/providers/player_providers.dart';
 import '../../../../features/search/presentation/providers/search_providers.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 
@@ -89,6 +91,33 @@ class SettingsScreen extends ConsumerWidget {
             subtitle: const Text('History retention, delete all data'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push(AppRoutes.settingsPrivacy),
+          ),
+          const Divider(),
+          Semantics(
+            header: true,
+            label: 'Accessibility',
+            child: const ExcludeSemantics(
+              child: _SectionHeader(label: 'Accessibility'),
+            ),
+          ),
+          SwitchListTile(
+            title: const Text('Direct Touch Mode'),
+            subtitle: const Text(
+              'Enables gesture controls on the artwork area for VoiceOver and TalkBack users',
+            ),
+            value: ref.watch(directTouchEnabledProvider).value ?? false,
+            onChanged: ref.watch(directTouchEnabledProvider).isLoading
+                ? null
+                : (val) {
+                    ref.read(directTouchEnabledProvider.notifier).set(val);
+                    SemanticsService.sendAnnouncement(
+                      View.of(context),
+                      val
+                          ? 'Direct Touch Mode enabled'
+                          : 'Direct Touch Mode disabled',
+                      TextDirection.ltr,
+                    );
+                  },
           ),
           const Divider(),
           Semantics(

@@ -3,19 +3,96 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/constants/playback.dart';
 import '../../../../core/constants/spacing.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/sleep_timer.dart';
 import '../providers/player_providers.dart';
 
-class PlayerScreen extends ConsumerWidget {
+class PlayerScreen extends ConsumerStatefulWidget {
   const PlayerScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PlayerScreen> createState() => _PlayerScreenState();
+}
+
+class _PlayerScreenState extends ConsumerState<PlayerScreen> {
+  bool _directTouchActive = false;
+  double? _speedBeforeHold;
+
+  @override
+  void dispose() {
+    if (_speedBeforeHold != null) {
+      ref.read(audioHandlerProvider).setSpeed(_speedBeforeHold!);
+    }
+    super.dispose();
+  }
+
+  void _toggleDirectTouch() {
+    final enabled = ref.read(directTouchEnabledProvider).value ?? false;
+    if (!enabled) return;
+    setState(() => _directTouchActive = !_directTouchActive);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      _directTouchActive
+          ? 'Direct Touch activated. Swipe up to skip forward, '
+                'swipe down to rewind, hold to fast-forward.'
+          : 'Direct Touch deactivated.',
+      TextDirection.ltr,
+    );
+  }
+
+  void _onHoldStart() {
+    _speedBeforeHold =
+        ref.read(playbackStateProvider).asData?.value.speed ?? 1.0;
+    ref.read(audioHandlerProvider).setSpeed(4.0);
+  }
+
+  void _onHoldEnd() {
+    ref.read(audioHandlerProvider).setSpeed(_speedBeforeHold ?? 1.0);
+    _speedBeforeHold = null;
+  }
+
+  void _onVerticalDrag(DragEndDetails details) {
+    final v = details.primaryVelocity ?? 0;
+    if (v < 0) {
+      _skipForward();
+    } else if (v > 0) {
+      _skipBack();
+    }
+  }
+
+  void _skipForward() {
+    ref.read(audioHandlerProvider).fastForward();
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
+      TextDirection.ltr,
+    );
+  }
+
+  void _skipBack() {
+    ref.read(audioHandlerProvider).rewind();
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Skip back ${kSkipBackDuration.inSeconds} seconds',
+      TextDirection.ltr,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final mediaItem = ref.watch(mediaItemProvider).asData?.value;
     final playbackState = ref.watch(playbackStateProvider).asData?.value;
     final position = ref.watch(positionProvider).asData?.value ?? Duration.zero;
+    final directTouchEnabled =
+        ref.watch(directTouchEnabledProvider).value ?? false;
+
+    ref.listen<AsyncValue<bool>>(directTouchEnabledProvider, (_, next) {
+      if (next.value == false && _directTouchActive) {
+        setState(() => _directTouchActive = false);
+      }
+    });
 
     if (mediaItem == null) {
       return const Scaffold(
@@ -43,7 +120,37 @@ class PlayerScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(child: _Artwork(artUri: mediaItem.artUri)),
+              Expanded(
+                child: Semantics(
+                  label: _directTouchActive
+                      ? 'Artwork. Direct Touch active. Swipe up to skip forward, '
+                            'swipe down to rewind, hold to fast-forward.'
+                      : 'Artwork',
+                  onScrollRight: directTouchEnabled ? _toggleDirectTouch : null,
+                  customSemanticsActions: _directTouchActive
+                      ? {
+                          CustomSemanticsAction(
+                            label:
+                                'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
+                          ): _skipForward,
+                          CustomSemanticsAction(
+                            label:
+                                'Skip back ${kSkipBackDuration.inSeconds} seconds',
+                          ): _skipBack,
+                        }
+                      : null,
+                  child: GestureDetector(
+                    onLongPress: _directTouchActive ? _onHoldStart : null,
+                    onLongPressEnd: _directTouchActive
+                        ? (_) => _onHoldEnd()
+                        : null,
+                    onVerticalDragEnd: _directTouchActive
+                        ? _onVerticalDrag
+                        : null,
+                    child: _Artwork(artUri: mediaItem.artUri),
+                  ),
+                ),
+              ),
               const SizedBox(height: Spacing.lg),
               Semantics(
                 header: true,
@@ -87,8 +194,6 @@ class PlayerScreen extends ConsumerWidget {
                 speed: playbackState?.speed ?? 1.0,
                 onSpeedChanged: (speed) {
                   ref.read(audioHandlerProvider).setSpeed(speed);
-                  // Save as per-podcast override so the next episode from
-                  // this show starts at the same speed.
                   final podcastId = mediaItem.extras?['podcastId'] as int?;
                   if (podcastId != null) {
                     ref
@@ -252,12 +357,12 @@ class _PlaybackControls extends StatelessWidget {
       children: [
         Semantics(
           button: true,
-          label: 'Skip back 15 seconds',
+          label: 'Skip back ${kSkipBackDuration.inSeconds} seconds',
           child: ExcludeSemantics(
             child: IconButton(
               icon: const Icon(Icons.replay_30),
               iconSize: 40,
-              tooltip: 'Skip back 15 seconds',
+              tooltip: 'Skip back ${kSkipBackDuration.inSeconds} seconds',
               onPressed: onRewind,
             ),
           ),
@@ -283,12 +388,12 @@ class _PlaybackControls extends StatelessWidget {
         ),
         Semantics(
           button: true,
-          label: 'Skip forward 30 seconds',
+          label: 'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
           child: ExcludeSemantics(
             child: IconButton(
               icon: const Icon(Icons.forward_30),
               iconSize: 40,
-              tooltip: 'Skip forward 30 seconds',
+              tooltip: 'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
               onPressed: onFastForward,
             ),
           ),

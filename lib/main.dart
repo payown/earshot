@@ -5,6 +5,7 @@ import 'package:posthog_flutter/posthog_flutter.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'core/background/background_tasks.dart';
+import 'core/constants/playback.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/player/data/audio_handler.dart';
@@ -45,8 +46,8 @@ Future<void> main() async {
       androidNotificationChannelId: 'media.payown.earshot.audio',
       androidNotificationChannelName: 'Earshot',
       androidNotificationOngoing: true,
-      fastForwardInterval: Duration(seconds: 30),
-      rewindInterval: Duration(seconds: 15),
+      fastForwardInterval: kSkipForwardDuration,
+      rewindInterval: kSkipBackDuration,
     ),
   );
 

@@ -88,6 +88,14 @@ final voiceEnhanceProvider = AsyncNotifierProvider<_AudioSettingNotifier, bool>(
   ),
 );
 
+final directTouchEnabledProvider =
+    AsyncNotifierProvider<_AudioSettingNotifier, bool>(
+      () => _AudioSettingNotifier(
+        read: (r) => r.getDirectTouchEnabled(),
+        write: (r, v) => r.setDirectTouchEnabled(v),
+      ),
+    );
+
 final queueAutoAdvanceProvider = Provider<void>((ref) {
   final handler = ref.read(audioHandlerProvider);
   final queueRepo = ref.read(queueRepositoryProvider);
