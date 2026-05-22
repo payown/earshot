@@ -17,8 +17,10 @@ class PlayerScreen extends ConsumerStatefulWidget {
 }
 
 class _PlayerScreenState extends ConsumerState<PlayerScreen> {
-  bool _directTouchActive = false;
+  // Speed saved before a hold-to-fast-forward gesture (GestureDetector path).
   double? _speedBeforeHold;
+  // Whether fast-forward is active via the VoiceOver rotor action path.
+  bool _voFastForwardActive = false;
 
   @override
   void dispose() {
@@ -28,19 +30,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     super.dispose();
   }
 
-  void _toggleDirectTouch() {
-    final enabled = ref.read(directTouchEnabledProvider).value ?? false;
-    if (!enabled) return;
-    setState(() => _directTouchActive = !_directTouchActive);
-    SemanticsService.sendAnnouncement(
-      View.of(context),
-      _directTouchActive
-          ? 'Direct Touch activated. Swipe up to skip forward, '
-                'swipe down to rewind, hold to fast-forward.'
-          : 'Direct Touch deactivated.',
-      TextDirection.ltr,
-    );
-  }
+  // ── GestureDetector paths (sighted users) ────────────────────────────────
 
   void _onHoldStart() {
     _speedBeforeHold =
@@ -61,6 +51,33 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       _skipBack();
     }
   }
+
+  // ── Rotor action paths (VoiceOver / TalkBack users) ──────────────────────
+
+  void _startVoFastForward() {
+    _speedBeforeHold =
+        ref.read(playbackStateProvider).asData?.value.speed ?? 1.0;
+    ref.read(audioHandlerProvider).setSpeed(4.0);
+    setState(() => _voFastForwardActive = true);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Fast forward at 4 times speed',
+      TextDirection.ltr,
+    );
+  }
+
+  void _stopVoFastForward() {
+    ref.read(audioHandlerProvider).setSpeed(_speedBeforeHold ?? 1.0);
+    _speedBeforeHold = null;
+    setState(() => _voFastForwardActive = false);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Fast forward stopped',
+      TextDirection.ltr,
+    );
+  }
+
+  // ── Shared ────────────────────────────────────────────────────────────────
 
   void _skipForward() {
     ref.read(audioHandlerProvider).fastForward();
@@ -88,9 +105,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final directTouchEnabled =
         ref.watch(directTouchEnabledProvider).value ?? false;
 
+    // Stop rotor fast-forward if the setting is turned off mid-session.
     ref.listen<AsyncValue<bool>>(directTouchEnabledProvider, (_, next) {
-      if (next.value == false && _directTouchActive) {
-        setState(() => _directTouchActive = false);
+      if (next.value == false && _voFastForwardActive) {
+        _stopVoFastForward();
       }
     });
 
@@ -122,46 +140,38 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             children: [
               Expanded(
                 child: Semantics(
-                  label: _directTouchActive
-                      ? 'Artwork. Direct Touch active.'
+                  // Label change on fast-forward state forces VoiceOver to
+                  // refresh customSemanticsActions (workaround for Flutter
+                  // issue #149613 where rotor actions don't update otherwise).
+                  label: _voFastForwardActive
+                      ? 'Artwork. Fast forward active.'
                       : 'Artwork',
-                  // VoiceOver: 3-finger swipe RIGHT fires onScrollLeft (the
-                  // gesture name describes content movement, not hand direction).
-                  onScrollLeft: directTouchEnabled ? _toggleDirectTouch : null,
-                  hint: directTouchEnabled
-                      ? (_directTouchActive
-                            ? 'Swipe right with 3 fingers to deactivate. '
-                                  'Or use the actions rotor.'
-                            : 'Swipe right with 3 fingers to activate. '
-                                  'Or use the actions rotor.')
-                      : null,
                   customSemanticsActions: directTouchEnabled
                       ? {
-                          if (!_directTouchActive)
+                          CustomSemanticsAction(
+                            label:
+                                'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
+                          ): _skipForward,
+                          CustomSemanticsAction(
+                            label:
+                                'Skip back ${kSkipBackDuration.inSeconds} seconds',
+                          ): _skipBack,
+                          if (!_voFastForwardActive)
                             const CustomSemanticsAction(
-                              label: 'Enable Direct Touch Mode',
-                            ): _toggleDirectTouch,
-                          if (_directTouchActive) ...{
+                              label: 'Start Fast Forward',
+                            ): _startVoFastForward,
+                          if (_voFastForwardActive)
                             const CustomSemanticsAction(
-                              label: 'Disable Direct Touch Mode',
-                            ): _toggleDirectTouch,
-                            CustomSemanticsAction(
-                              label:
-                                  'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
-                            ): _skipForward,
-                            CustomSemanticsAction(
-                              label:
-                                  'Skip back ${kSkipBackDuration.inSeconds} seconds',
-                            ): _skipBack,
-                          },
+                              label: 'Stop Fast Forward',
+                            ): _stopVoFastForward,
                         }
                       : null,
                   child: GestureDetector(
-                    onLongPress: _directTouchActive ? _onHoldStart : null,
-                    onLongPressEnd: _directTouchActive
+                    onLongPress: directTouchEnabled ? _onHoldStart : null,
+                    onLongPressEnd: directTouchEnabled
                         ? (_) => _onHoldEnd()
                         : null,
-                    onVerticalDragEnd: _directTouchActive
+                    onVerticalDragEnd: directTouchEnabled
                         ? _onVerticalDrag
                         : null,
                     child: _Artwork(artUri: mediaItem.artUri),
