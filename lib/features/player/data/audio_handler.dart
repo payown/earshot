@@ -4,6 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:logging/logging.dart';
 
+import '../../../core/constants/playback.dart';
 import '../domain/sleep_timer.dart';
 
 final _log = Logger('AudioHandler');
@@ -76,11 +77,11 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
 
   // AirPods double-click fires skipToNext(). Remap to seek +30 s.
   @override
-  Future<void> skipToNext() => _seekBy(const Duration(seconds: 30));
+  Future<void> skipToNext() => _seekBy(kSkipForwardDuration);
 
   // AirPods triple-click fires skipToPrevious(). Remap to seek -15 s.
   @override
-  Future<void> skipToPrevious() => _seekBy(const Duration(seconds: -15));
+  Future<void> skipToPrevious() => _seekBy(-kSkipBackDuration);
 
   Future<void> _seekBy(Duration offset) async {
     var pos = _player.position + offset;

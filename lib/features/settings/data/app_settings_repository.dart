@@ -29,6 +29,10 @@ abstract interface class AppSettingsRepository {
   Future<bool> isVoiceEnhanceEnabled();
 
   Future<void> setVoiceEnhanceEnabled({required bool enabled});
+
+  Future<bool> getDirectTouchEnabled();
+
+  Future<void> setDirectTouchEnabled(bool value);
 }
 
 class AppSettingsRepositoryImpl implements AppSettingsRepository {
@@ -44,6 +48,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyAnalytics = 'analytics_enabled';
   static const _keySkipSilence = 'skip_silence_enabled';
   static const _keyVoiceEnhance = 'voice_enhance_enabled';
+  static const _keyDirectTouch = 'direct_touch_enabled';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
 
@@ -121,6 +126,14 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setVoiceEnhanceEnabled({required bool enabled}) =>
       _set(_keyVoiceEnhance, enabled.toString());
+
+  @override
+  Future<bool> getDirectTouchEnabled() =>
+      _getBool(_keyDirectTouch, defaultValue: false);
+
+  @override
+  Future<void> setDirectTouchEnabled(bool value) =>
+      _set(_keyDirectTouch, value.toString());
 
   Future<bool> _getBool(String key, {required bool defaultValue}) async {
     final row = await (_db.select(
