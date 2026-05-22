@@ -3,7 +3,7 @@
 # Usage: testflight [--notes "What to test"]
 #
 # What this does:
-#   1. Verifies you're on main and fully pushed
+#   1. Verifies the working tree is clean and in sync with remote
 #   2. Bumps the build number in pubspec.yaml and commits it
 #   3. Builds a release IPA
 #   4. Uploads to the Internal Testing Group on TestFlight
@@ -25,22 +25,20 @@ done
 
 # ── Safety checks ────────────────────────────────────────────────────────────
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [[ "$BRANCH" != "main" ]]; then
-  echo "❌ You're on branch '$BRANCH'. Merge to main before deploying."
-  exit 1
-fi
-
-git fetch origin main --quiet
-LOCAL=$(git rev-parse HEAD)
-REMOTE=$(git rev-parse origin/main)
-if [[ "$LOCAL" != "$REMOTE" ]]; then
-  echo "❌ Local main is out of sync with origin. Push or pull first."
-  exit 1
-fi
 
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "❌ Uncommitted changes. Commit or stash before deploying."
   exit 1
+fi
+
+git fetch origin "$BRANCH" --quiet 2>/dev/null || true
+REMOTE_SHA=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+if [[ -n "$REMOTE_SHA" ]]; then
+  LOCAL=$(git rev-parse HEAD)
+  if [[ "$LOCAL" != "$REMOTE_SHA" ]]; then
+    echo "❌ Local '$BRANCH' is out of sync with origin. Push or pull first."
+    exit 1
+  fi
 fi
 
 # ── Bump build number ─────────────────────────────────────────────────────────
@@ -53,7 +51,7 @@ NEW_VERSION="${MARKETING}+${NEXT_BUILD}"
 sed -i '' "s/^version: .*/version: $NEW_VERSION/" pubspec.yaml
 git add pubspec.yaml
 git commit -m "chore: bump build number to $NEXT_BUILD for TestFlight"
-git push origin main
+git push origin "$BRANCH"
 
 echo "▶ Version: $NEW_VERSION"
 
