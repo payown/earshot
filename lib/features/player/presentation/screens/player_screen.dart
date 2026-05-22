@@ -123,20 +123,37 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               Expanded(
                 child: Semantics(
                   label: _directTouchActive
-                      ? 'Artwork. Direct Touch active. Swipe up to skip forward, '
-                            'swipe down to rewind, hold to fast-forward.'
+                      ? 'Artwork. Direct Touch active.'
                       : 'Artwork',
-                  onScrollRight: directTouchEnabled ? _toggleDirectTouch : null,
-                  customSemanticsActions: _directTouchActive
+                  // VoiceOver: 3-finger swipe RIGHT fires onScrollLeft (the
+                  // gesture name describes content movement, not hand direction).
+                  onScrollLeft: directTouchEnabled ? _toggleDirectTouch : null,
+                  hint: directTouchEnabled
+                      ? (_directTouchActive
+                            ? 'Swipe right with 3 fingers to deactivate. '
+                                  'Or use the actions rotor.'
+                            : 'Swipe right with 3 fingers to activate. '
+                                  'Or use the actions rotor.')
+                      : null,
+                  customSemanticsActions: directTouchEnabled
                       ? {
-                          CustomSemanticsAction(
-                            label:
-                                'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
-                          ): _skipForward,
-                          CustomSemanticsAction(
-                            label:
-                                'Skip back ${kSkipBackDuration.inSeconds} seconds',
-                          ): _skipBack,
+                          if (!_directTouchActive)
+                            const CustomSemanticsAction(
+                              label: 'Enable Direct Touch Mode',
+                            ): _toggleDirectTouch,
+                          if (_directTouchActive) ...{
+                            const CustomSemanticsAction(
+                              label: 'Disable Direct Touch Mode',
+                            ): _toggleDirectTouch,
+                            CustomSemanticsAction(
+                              label:
+                                  'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
+                            ): _skipForward,
+                            CustomSemanticsAction(
+                              label:
+                                  'Skip back ${kSkipBackDuration.inSeconds} seconds',
+                            ): _skipBack,
+                          },
                         }
                       : null,
                   child: GestureDetector(
