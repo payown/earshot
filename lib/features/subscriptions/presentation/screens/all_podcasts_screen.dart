@@ -5,7 +5,6 @@ import 'package:logging/logging.dart';
 
 import '../../../../core/router/app_router.dart';
 import '../../../../features/folders/presentation/widgets/folder_podcast_picker_sheet.dart';
-import '../../../../features/player/presentation/widgets/now_playing_bar.dart';
 import '../../../../features/settings/domain/quick_action_definition.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../domain/podcast.dart';
@@ -35,7 +34,6 @@ class AllPodcastsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      bottomNavigationBar: const NowPlayingBar(),
       body: podcasts.when(
         data: (list) => list.isEmpty
             ? const Center(child: Text('No podcasts yet.'))

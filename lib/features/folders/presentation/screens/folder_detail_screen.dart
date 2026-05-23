@@ -11,7 +11,6 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/router/app_router.dart';
 import '../../../player/presentation/providers/player_providers.dart';
-import '../../../player/presentation/widgets/now_playing_bar.dart';
 import '../../../subscriptions/presentation/widgets/podcast_list_tile.dart';
 import '../providers/folders_providers.dart';
 import '../widgets/folder_podcast_picker_sheet.dart';
@@ -30,7 +29,6 @@ class FolderDetailScreen extends ConsumerWidget {
     final podcasts = ref.watch(podcastsInFolderProvider(folderId));
 
     return Scaffold(
-      bottomNavigationBar: const NowPlayingBar(),
       body: folder.when(
         data: (f) {
           if (f == null) {
