@@ -3,20 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:logging/logging.dart';
 
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../data/db/enums.dart';
-import '../../../folders/domain/podcast_folder.dart';
-import '../../../folders/presentation/providers/folder_inbox_providers.dart';
-import '../../../folders/presentation/providers/folders_providers.dart';
 import '../../../player/presentation/providers/player_providers.dart';
 import '../../../subscriptions/domain/episode.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../providers/downloads_providers.dart';
-
-final _log = Logger('InboxScreen');
 
 class InboxScreen extends ConsumerWidget {
   const InboxScreen({super.key});
@@ -30,11 +24,6 @@ class InboxScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Inbox'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.folder_outlined),
-            tooltip: 'Add folder to queue',
-            onPressed: () => _showFolderQueueSheet(context, ref),
-          ),
           if (allEpisodes.asData?.value.isNotEmpty ?? false)
             IconButton(
               icon: const Icon(Icons.done_all),
@@ -73,31 +62,6 @@ class InboxScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _showFolderQueueSheet(
-    BuildContext context,
-    WidgetRef ref,
-  ) async {
-    final folders = ref.read(foldersProvider).asData?.value ?? [];
-    if (folders.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No folders yet. Create one from the Subscriptions tab.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      barrierLabel: 'Dismiss folder queue sheet',
-      builder: (ctx) => _FolderQueueSheet(folders: folders),
-    );
-  }
-
   Future<void> _confirmMarkAllPlayed(
     BuildContext context,
     WidgetRef ref,
@@ -123,7 +87,17 @@ class InboxScreen extends ConsumerWidget {
       ),
     );
     if (confirmed == true) {
-      await ref.read(podcastRepositoryProvider).markAllInboxPlayed();
+      try {
+        await ref.read(podcastRepositoryProvider).markAllInboxPlayed();
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not mark all as played. Try again.'),
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -320,113 +294,5 @@ class _InboxEpisodeTile extends StatelessWidget {
     if (diff.inDays == 1) return 'Yesterday';
     if (diff.inDays < 7) return '${diff.inDays} days ago';
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-  }
-}
-
-// Bottom sheet that lists folders; tapping one queues its inbox episodes.
-class _FolderQueueSheet extends ConsumerWidget {
-  const _FolderQueueSheet({required this.folders});
-
-  final List<PodcastFolder> folders;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Semantics(
-            header: true,
-            label: 'Add folder to queue',
-            child: ExcludeSemantics(
-              child: Text(
-                'Add folder to queue',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
-          ),
-        ),
-        const Divider(height: 1),
-        ListView.builder(
-          shrinkWrap: true,
-          itemCount: folders.length,
-          itemBuilder: (ctx, index) {
-            final folder = folders[index];
-            return Semantics(
-              button: true,
-              label: folder.name,
-              child: ListTile(
-                leading: const Icon(Icons.folder_outlined),
-                title: Text(folder.name),
-                onTap: () => _queueFolder(context, ref, folder),
-              ),
-            );
-          },
-        ),
-        const SizedBox(height: 8),
-      ],
-    );
-  }
-
-  Future<void> _queueFolder(
-    BuildContext context,
-    WidgetRef ref,
-    PodcastFolder folder,
-  ) async {
-    Navigator.of(context).pop();
-
-    final List<Episode> rawEpisodes =
-        ref.read(inboxEpisodesByFolderProvider(folder.id)).asData?.value ??
-        await ref.read(inboxEpisodesByFolderProvider(folder.id).future);
-
-    // Apply folder queue age limit filter if set.
-    final List<Episode> episodes;
-    if (folder.queueAgeLimitDays != null) {
-      final cutoff = DateTime.now().toUtc().subtract(
-        Duration(days: folder.queueAgeLimitDays!),
-      );
-      episodes = rawEpisodes
-          .where((e) => e.pubDate != null && e.pubDate!.isAfter(cutoff))
-          .toList();
-    } else {
-      episodes = rawEpisodes;
-    }
-
-    if (episodes.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('No inbox episodes in "${folder.name}".'),
-          ),
-        );
-      }
-      return;
-    }
-
-    final queueRepo = ref.read(queueRepositoryProvider);
-    for (final ep in episodes) {
-      await queueRepo.addToQueue(ep.id);
-    }
-
-    _log.info(
-      'Added ${episodes.length} inbox episodes from folder ${folder.id} to queue',
-    );
-
-    if (context.mounted) {
-      final count = episodes.length;
-      SemanticsService.sendAnnouncement(
-        View.of(context),
-        'Added $count episode${count == 1 ? '' : 's'} from ${folder.name} to queue',
-        TextDirection.ltr,
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Added $count episode${count == 1 ? '' : 's'} from "${folder.name}" to queue',
-          ),
-        ),
-      );
-    }
   }
 }

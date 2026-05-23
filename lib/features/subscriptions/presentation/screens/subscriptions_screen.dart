@@ -39,11 +39,6 @@ class SubscriptionsScreen extends ConsumerWidget {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: 'Search podcasts',
-            onPressed: () => context.push(AppRoutes.search),
-          ),
-          IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Settings',
             onPressed: () => context.push(AppRoutes.settings),
@@ -164,10 +159,24 @@ class SubscriptionsScreen extends ConsumerWidget {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push(AppRoutes.addPodcast),
-        tooltip: 'Add podcast',
-        child: const Icon(Icons.add),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'fab_search',
+            onPressed: () => context.push(AppRoutes.search),
+            tooltip: 'Search podcasts',
+            child: const Icon(Icons.search),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: 'fab_add',
+            onPressed: () => context.push(AppRoutes.addPodcast),
+            tooltip: 'Add podcast by URL',
+            child: const Icon(Icons.add),
+          ),
+        ],
       ),
     );
   }
