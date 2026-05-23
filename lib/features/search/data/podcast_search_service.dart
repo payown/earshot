@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
 
@@ -16,7 +18,7 @@ class PodcastSearchService {
     if (query.trim().isEmpty) return [];
 
     try {
-      final response = await _dio.get<Map<String, dynamic>>(
+      final response = await _dio.get<String>(
         _itunesBaseUrl,
         queryParameters: {
           'term': query.trim(),
@@ -24,12 +26,18 @@ class PodcastSearchService {
           'limit': 20,
           'entity': 'podcast',
         },
-        options: Options(responseType: ResponseType.json),
+        options: Options(responseType: ResponseType.plain),
       );
 
-      final data = response.data;
+      final body = response.data;
+      if (body == null || body.isEmpty) {
+        _log.warning('iTunes search returned empty body for query: "$query"');
+        return [];
+      }
+
+      final data = jsonDecode(body) as Map<String, dynamic>?;
       if (data == null) {
-        _log.warning('iTunes search returned null data for query: "$query"');
+        _log.warning('iTunes search returned null JSON for query: "$query"');
         return [];
       }
 

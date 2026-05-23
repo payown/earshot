@@ -159,15 +159,15 @@ void main() {
       );
     });
 
-    testWidgets('FAB has accessible label', (tester) async {
+    testWidgets('FABs have accessible labels', (tester) async {
       when(() => repo.watchSubscriptions()).thenAnswer((_) => Stream.value([]));
 
       await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
       await tester.pump();
 
-      // Verify the FAB tooltip is set — this is what VoiceOver announces.
-      final fabNode = tester.getSemantics(find.byType(FloatingActionButton));
-      expect(fabNode.tooltip, 'Add podcast');
+      // Both FABs must have tooltips for VoiceOver/TalkBack.
+      expect(find.byTooltip('Search podcasts'), findsOneWidget);
+      expect(find.byTooltip('Add podcast by URL'), findsOneWidget);
     });
 
     testWidgets('tapping All Podcasts entry navigates to all podcasts screen', (
@@ -185,12 +185,14 @@ void main() {
       expect(find.text('All Podcasts Screen'), findsOneWidget);
     });
 
-    testWidgets('tapping FAB navigates to add podcast screen', (tester) async {
+    testWidgets('tapping add-by-URL FAB navigates to add podcast screen', (
+      tester,
+    ) async {
       when(() => repo.watchSubscriptions()).thenAnswer((_) => Stream.value([]));
 
       await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
       await tester.pump();
-      await tester.tap(find.byType(FloatingActionButton));
+      await tester.tap(find.byTooltip('Add podcast by URL'));
       await tester.pumpAndSettle();
 
       expect(find.byType(AddPodcastScreen), findsOneWidget);

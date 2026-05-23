@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Search: fixed podcast search still returning no results. iTunes API returns
+  `Content-Type: text/javascript`; response is now fetched as plain text and
+  decoded manually, bypassing Dio's content-type-based auto-parsing entirely.
+- Search: moved search entry point from the Library AppBar to the Library screen's
+  FAB area. A small search FAB now sits above the "Add by URL" FAB in the bottom
+  right corner — both have accessible tooltips for VoiceOver/TalkBack.
+- Inbox: removed the folder-queue button from the Inbox AppBar.
+- Inbox: "Mark all as played" no longer crashes the app. Any database error is now
+  caught and shown as a snackbar instead of crashing the app.
 - Search: fixed podcast search returning no results. iTunes API returns
   `Content-Type: text/javascript`; Dio now forces JSON parsing regardless of
   content type.
