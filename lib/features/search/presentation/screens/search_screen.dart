@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:logging/logging.dart';
 
+import '../../../../core/router/app_router.dart';
 import '../../../../features/subscriptions/data/podcast_exception.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/search_result.dart';
 import '../providers/search_providers.dart';
+
+final _log = Logger('SearchScreen');
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
@@ -40,12 +45,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 ? Semantics(
                     button: true,
                     label: 'Clear search',
-                    child: IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _controller.clear();
-                        setState(() => _query = '');
-                      },
+                    child: ExcludeSemantics(
+                      child: IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _controller.clear();
+                          setState(() => _query = '');
+                        },
+                      ),
                     ),
                   )
                 : null,
@@ -113,13 +120,13 @@ class _EmptySearch extends StatelessWidget {
   }
 }
 
-class _ResultList extends ConsumerWidget {
+class _ResultList extends StatelessWidget {
   const _ResultList({required this.results});
 
   final List<PodcastSearchResult> results;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return Semantics(
       label: '${results.length} results',
       child: ListView.separated(
@@ -131,113 +138,69 @@ class _ResultList extends ConsumerWidget {
   }
 }
 
-class _ResultTile extends ConsumerStatefulWidget {
+class _ResultTile extends ConsumerWidget {
   const _ResultTile({required this.result});
 
   final PodcastSearchResult result;
 
   @override
-  ConsumerState<_ResultTile> createState() => _ResultTileState();
-}
-
-class _ResultTileState extends ConsumerState<_ResultTile> {
-  bool _subscribing = false;
-  bool _subscribed = false;
-  String? _error;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = _subscribed
-        ? '${widget.result.title}, subscribed'
-        : widget.result.author != null
-        ? '${widget.result.title}, by ${widget.result.author}'
-        : widget.result.title;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final label = result.author != null
+        ? '${result.title}, by ${result.author}'
+        : result.title;
 
     return Semantics(
       label: label,
+      button: true,
+      customSemanticsActions: {
+        const CustomSemanticsAction(label: 'Follow'): () =>
+            _follow(context, ref),
+      },
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        onTap: () => context.push(AppRoutes.searchResult, extra: result),
         leading: ExcludeSemantics(
-          child: _Artwork(url: widget.result.artworkUrl),
+          child: _Artwork(url: result.artworkUrl),
         ),
         title: ExcludeSemantics(
           child: Text(
-            widget.result.title,
+            result.title,
             style: Theme.of(context).textTheme.titleSmall,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
         ),
-        subtitle: ExcludeSemantics(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (widget.result.author != null)
-                Text(
-                  widget.result.author!,
+        subtitle: result.author != null
+            ? ExcludeSemantics(
+                child: Text(
+                  result.author!,
                   style: Theme.of(context).textTheme.bodySmall,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-              if (_error != null)
-                Text(
-                  _error!,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                ),
-            ],
-          ),
-        ),
-        trailing: ExcludeSemantics(
-          child: _subscribed
-              ? Icon(
-                  Icons.check_circle,
-                  color: Theme.of(context).colorScheme.primary,
-                )
-              : Semantics(
-                  button: true,
-                  label: 'Subscribe to ${widget.result.title}',
-                  child: FilledButton.tonal(
-                    onPressed: _subscribing ? null : _subscribe,
-                    child: _subscribing
-                        ? const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Subscribe'),
-                  ),
-                ),
+              )
+            : null,
+        trailing: const ExcludeSemantics(
+          child: Icon(Icons.chevron_right),
         ),
       ),
     );
   }
 
-  Future<void> _subscribe() async {
-    setState(() {
-      _subscribing = true;
-      _error = null;
-    });
+  Future<void> _follow(BuildContext context, WidgetRef ref) async {
     try {
-      await ref
-          .read(podcastRepositoryProvider)
-          .subscribe(widget.result.feedUrl);
-      if (mounted) {
-        setState(() => _subscribed = true);
+      await ref.read(podcastRepositoryProvider).subscribe(result.feedUrl);
+      if (context.mounted) {
         SemanticsService.sendAnnouncement(
           View.of(context),
-          'Subscribed to ${widget.result.title}',
+          'Following ${result.title}',
           TextDirection.ltr,
         );
       }
     } on PodcastAlreadySubscribedException {
-      if (mounted) setState(() => _subscribed = true);
-    } on PodcastFetchException catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (_) {
-      if (mounted) setState(() => _error = 'Something went wrong.');
-    } finally {
-      if (mounted) setState(() => _subscribing = false);
+      // already following — no-op
+    } catch (e) {
+      _log.warning('Follow from search list failed for ${result.feedUrl}: $e');
     }
   }
 }

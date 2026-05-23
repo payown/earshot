@@ -8,7 +8,9 @@ import '../../features/downloads/presentation/screens/inbox_screen.dart';
 import '../../features/onboarding/presentation/screens/onboarding_screen.dart';
 import '../../features/player/presentation/screens/player_screen.dart';
 import '../../features/player/presentation/screens/queue_screen.dart';
+import '../../features/search/domain/search_result.dart';
 import '../../features/search/presentation/screens/opml_import_screen.dart';
+import '../../features/search/presentation/screens/search_result_detail_screen.dart';
 import '../../features/search/presentation/screens/search_screen.dart';
 import '../../features/settings/data/app_settings_repository.dart';
 import '../../features/settings/presentation/screens/privacy_settings_screen.dart';
@@ -35,6 +37,7 @@ abstract final class AppRoutes {
   static String folderDetail(int id) => '/subscriptions/folders/$id';
   static const downloads = '/downloads';
   static const search = '/search';
+  static const searchResult = '/search/result';
   static const addPodcast = '/add-podcast';
   static const player = '/player';
   static const settings = '/settings';
@@ -121,6 +124,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.search,
         parentNavigatorKey: _rootKey,
         builder: (_, __) => const SearchScreen(),
+        routes: [
+          GoRoute(
+            path: 'result',
+            parentNavigatorKey: _rootKey,
+            builder: (_, state) {
+              final result = state.extra as PodcastSearchResult;
+              return SearchResultDetailScreen(result: result);
+            },
+          ),
+        ],
       ),
       GoRoute(
         path: AppRoutes.addPodcast,

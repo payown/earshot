@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Search: fixed podcast search returning no results. iTunes API returns
+  `Content-Type: text/javascript`; Dio now forces JSON parsing regardless of
+  content type.
+- Search: tapping a search result now opens a podcast preview screen with title,
+  author, description, and episode list from the RSS feed. VoiceOver users can
+  flick down on any result to access a "Follow" action directly from the list.
+- Search: Clear search (X) button no longer announces twice. Only
+  "Clear search, button" is visible to screen readers.
+- Inbox: "Add folder to queue" sheet barrier is now labeled "Dismiss folder queue
+  sheet" so VoiceOver users know how to dismiss it.
+- Inbox: "Add folder to queue" sheet heading no longer announces twice.
 - Library screen: "All Podcasts" row no longer appears as an unlabeled button
   in the VoiceOver/TalkBack accessibility tree.
 - Folder picker sheet: "Done" button now has an explicit semantic label and hint.

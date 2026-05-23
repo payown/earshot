@@ -1,0 +1,331 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:logging/logging.dart';
+
+import '../../../../core/router/app_router.dart';
+import '../../../../data/rss/parsed_feed.dart';
+import '../../../subscriptions/data/podcast_exception.dart';
+import '../../../subscriptions/domain/podcast.dart';
+import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
+import '../../domain/search_result.dart';
+import '../providers/search_preview_providers.dart';
+
+final _log = Logger('SearchResultDetailScreen');
+
+class SearchResultDetailScreen extends ConsumerStatefulWidget {
+  const SearchResultDetailScreen({required this.result, super.key});
+
+  final PodcastSearchResult result;
+
+  @override
+  ConsumerState<SearchResultDetailScreen> createState() =>
+      _SearchResultDetailScreenState();
+}
+
+class _SearchResultDetailScreenState
+    extends ConsumerState<SearchResultDetailScreen> {
+  bool _following = false;
+  String? _error;
+
+  PodcastSearchResult get result => widget.result;
+
+  Future<void> _follow() async {
+    setState(() {
+      _following = true;
+      _error = null;
+    });
+    try {
+      final podcast = await ref
+          .read(podcastRepositoryProvider)
+          .subscribe(result.feedUrl);
+      if (mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Following ${result.title}',
+          TextDirection.ltr,
+        );
+        context.go(AppRoutes.podcastDetail(podcast.id));
+      }
+    } on PodcastAlreadySubscribedException {
+      final List<Podcast> subs =
+          ref.read(subscriptionsProvider).asData?.value ?? [];
+      final existing = subs
+          .where((Podcast p) => p.rssUrl == result.feedUrl)
+          .firstOrNull;
+      if (mounted && existing != null) {
+        context.go(AppRoutes.podcastDetail(existing.id));
+      } else if (mounted) {
+        setState(() => _following = false);
+      }
+    } catch (e) {
+      _log.warning('Failed to follow ${result.feedUrl}: $e');
+      if (mounted) {
+        setState(() {
+          _following = false;
+          _error = 'Could not follow. Try again.';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Podcast> subs =
+        ref.watch(subscriptionsProvider).asData?.value ?? [];
+    final existing = subs
+        .where((Podcast p) => p.rssUrl == result.feedUrl)
+        .firstOrNull;
+    final isSubscribed = existing != null;
+
+    final preview = ref.watch(podcastPreviewProvider(result.feedUrl));
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(result.title),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Semantics(
+              button: true,
+              label: isSubscribed
+                  ? 'Following ${result.title}'
+                  : 'Follow ${result.title}',
+              child: ExcludeSemantics(
+                child: _following
+                    ? const SizedBox(
+                        width: 72,
+                        child: Center(
+                          child: SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      )
+                    : FilledButton.tonal(
+                        onPressed: isSubscribed
+                            ? () => context.go(
+                                AppRoutes.podcastDetail(existing.id),
+                              )
+                            : _follow,
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                        ),
+                        child: Text(isSubscribed ? 'Following' : 'Follow'),
+                      ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: _PodcastHeader(result: result),
+          ),
+          if (result.description != null)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  result.description!,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+            ),
+          if (_error != null)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                child: Text(
+                  _error!,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ),
+            ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Semantics(
+                header: true,
+                label: 'Episodes',
+                child: ExcludeSemantics(
+                  child: Text(
+                    'Episodes',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          preview.when(
+            loading: () => const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (_, __) => const SliverFillRemaining(
+              child: Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('Could not load episodes.'),
+                ),
+              ),
+            ),
+            data: (pod) => pod.episodes.isEmpty
+                ? const SliverFillRemaining(
+                    child: Center(child: Text('No episodes available.')),
+                  )
+                : SliverList.builder(
+                    itemCount: pod.episodes.length,
+                    itemBuilder: (context, i) =>
+                        _PreviewEpisodeTile(episode: pod.episodes[i]),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PodcastHeader extends StatelessWidget {
+  const _PodcastHeader({required this.result});
+
+  final PodcastSearchResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ExcludeSemantics(child: _Artwork(url: result.artworkUrl)),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ExcludeSemantics(
+                  child: Text(
+                    result.title,
+                    style: Theme.of(context).textTheme.titleLarge,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (result.author != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    result.author!,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Artwork extends StatelessWidget {
+  const _Artwork({required this.url});
+
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    if (url == null) return _placeholder(colorScheme);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(
+        url!,
+        width: 80,
+        height: 80,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _placeholder(colorScheme),
+      ),
+    );
+  }
+
+  Widget _placeholder(ColorScheme colorScheme) => Container(
+    width: 80,
+    height: 80,
+    decoration: BoxDecoration(
+      color: colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Icon(Icons.podcasts, size: 36, color: colorScheme.onSurfaceVariant),
+  );
+}
+
+class _PreviewEpisodeTile extends StatelessWidget {
+  const _PreviewEpisodeTile({required this.episode});
+
+  final ParsedEpisode episode;
+
+  @override
+  Widget build(BuildContext context) {
+    final dateStr = episode.pubDate != null
+        ? _formatDate(episode.pubDate!)
+        : null;
+    final durationStr = episode.durationSeconds != null
+        ? _formatDuration(episode.durationSeconds!)
+        : null;
+    final parts = [
+      if (dateStr != null) dateStr,
+      if (durationStr != null) durationStr,
+    ];
+    final semanticLabel = parts.isEmpty
+        ? episode.title
+        : '${episode.title}, ${parts.join(', ')}';
+
+    return Semantics(
+      label: semanticLabel,
+      child: ListTile(
+        title: ExcludeSemantics(
+          child: Text(
+            episode.title,
+            style: Theme.of(context).textTheme.titleSmall,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        subtitle: parts.isNotEmpty
+            ? ExcludeSemantics(
+                child: Text(
+                  parts.join(' · '),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              )
+            : null,
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    final diff = DateTime.now().difference(date);
+    if (diff.inDays == 0) return 'Today';
+    if (diff.inDays == 1) return 'Yesterday';
+    if (diff.inDays < 7) return '${diff.inDays} days ago';
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String _formatDuration(int seconds) {
+    if (seconds < 60) return '$seconds sec';
+    final minutes = seconds ~/ 60;
+    if (minutes < 60) return '$minutes min';
+    final hours = minutes ~/ 60;
+    final rem = minutes % 60;
+    return rem > 0 ? '$hours hr $rem min' : '$hours hr';
+  }
+}

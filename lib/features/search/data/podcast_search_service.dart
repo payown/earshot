@@ -24,10 +24,14 @@ class PodcastSearchService {
           'limit': 20,
           'entity': 'podcast',
         },
+        options: Options(responseType: ResponseType.json),
       );
 
       final data = response.data;
-      if (data == null) return [];
+      if (data == null) {
+        _log.warning('iTunes search returned null data for query: "$query"');
+        return [];
+      }
 
       final results = data['results'] as List<dynamic>? ?? [];
       return results

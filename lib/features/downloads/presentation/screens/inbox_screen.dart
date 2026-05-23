@@ -93,6 +93,7 @@ class InboxScreen extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      barrierLabel: 'Dismiss folder queue sheet',
       builder: (ctx) => _FolderQueueSheet(folders: folders),
     );
   }
@@ -337,9 +338,12 @@ class _FolderQueueSheet extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Semantics(
             header: true,
-            child: Text(
-              'Add folder to queue',
-              style: Theme.of(context).textTheme.titleLarge,
+            label: 'Add folder to queue',
+            child: ExcludeSemantics(
+              child: Text(
+                'Add folder to queue',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
             ),
           ),
         ),
