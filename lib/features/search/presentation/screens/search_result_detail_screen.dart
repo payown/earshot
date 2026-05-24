@@ -1,11 +1,13 @@
+import 'dart:async';
+
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
 
-import '../../../../core/router/app_router.dart';
 import '../../../../data/rss/parsed_feed.dart';
+import '../../../player/presentation/providers/player_providers.dart';
 import '../../../subscriptions/data/podcast_exception.dart';
 import '../../../subscriptions/domain/podcast.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
@@ -27,9 +29,17 @@ class SearchResultDetailScreen extends ConsumerStatefulWidget {
 class _SearchResultDetailScreenState
     extends ConsumerState<SearchResultDetailScreen> {
   bool _following = false;
+  bool _unfollowing = false;
   String? _error;
+  final FocusNode _followButtonFocusNode = FocusNode();
 
   PodcastSearchResult get result => widget.result;
+
+  @override
+  void dispose() {
+    _followButtonFocusNode.dispose();
+    super.dispose();
+  }
 
   Future<void> _follow() async {
     setState(() {
@@ -37,28 +47,17 @@ class _SearchResultDetailScreenState
       _error = null;
     });
     try {
-      final podcast = await ref
-          .read(podcastRepositoryProvider)
-          .subscribe(result.feedUrl);
+      await ref.read(podcastRepositoryProvider).subscribe(result.feedUrl);
       if (mounted) {
+        setState(() => _following = false);
         SemanticsService.sendAnnouncement(
           View.of(context),
           'Following ${result.title}',
           TextDirection.ltr,
         );
-        context.go(AppRoutes.podcastDetail(podcast.id));
       }
     } on PodcastAlreadySubscribedException {
-      final List<Podcast> subs =
-          ref.read(subscriptionsProvider).asData?.value ?? [];
-      final existing = subs
-          .where((Podcast p) => p.rssUrl == result.feedUrl)
-          .firstOrNull;
-      if (mounted && existing != null) {
-        context.go(AppRoutes.podcastDetail(existing.id));
-      } else if (mounted) {
-        setState(() => _following = false);
-      }
+      if (mounted) setState(() => _following = false);
     } catch (e) {
       _log.warning('Failed to follow ${result.feedUrl}: $e');
       if (mounted) {
@@ -66,6 +65,37 @@ class _SearchResultDetailScreenState
           _following = false;
           _error = 'Could not follow. Try again.';
         });
+      }
+    }
+  }
+
+  Future<void> _unfollow(Podcast existing) async {
+    setState(() => _unfollowing = true);
+    try {
+      await ref.read(podcastRepositoryProvider).unsubscribe(existing.id);
+      if (!mounted) return;
+      setState(() => _unfollowing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unfollowed ${result.title}'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Unfollowed ${result.title}. Follow button is now available.',
+        TextDirection.ltr,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _followButtonFocusNode.requestFocus();
+      });
+    } catch (e) {
+      _log.warning('Failed to unfollow ${result.feedUrl}: $e');
+      if (mounted) {
+        setState(() => _unfollowing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not unfollow. Try again.')),
+        );
       }
     }
   }
@@ -80,41 +110,55 @@ class _SearchResultDetailScreenState
     final isSubscribed = existing != null;
 
     final preview = ref.watch(podcastPreviewProvider(result.feedUrl));
+    final previewPod = preview.asData?.value;
+
+    // Prefer DB record when subscribed, then RSS preview, then search result.
+    final subscribedPodcast = isSubscribed
+        ? ref.watch(podcastProvider(existing.id)).value
+        : null;
+    final description =
+        subscribedPodcast?.description ??
+        previewPod?.description ??
+        result.description;
+    final fallbackAuthor = result.author ?? previewPod?.author;
+
+    final isLoading = _following || _unfollowing;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(result.title),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Semantics(
-              button: true,
-              label: isSubscribed
-                  ? 'Following ${result.title}'
-                  : 'Follow ${result.title}',
-              child: ExcludeSemantics(
-                child: _following
-                    ? const SizedBox(
-                        width: 72,
-                        child: Center(
-                          child: SizedBox.square(
-                            dimension: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+          Focus(
+            focusNode: _followButtonFocusNode,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Semantics(
+                button: true,
+                label: isSubscribed
+                    ? 'Unfollow ${result.title}'
+                    : 'Follow ${result.title}',
+                child: ExcludeSemantics(
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 72,
+                          child: Center(
+                            child: SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                           ),
+                        )
+                      : FilledButton.tonal(
+                          onPressed: isSubscribed
+                              ? () => _unfollow(existing)
+                              : _follow,
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                          ),
+                          child: Text(isSubscribed ? 'Unfollow' : 'Follow'),
                         ),
-                      )
-                    : FilledButton.tonal(
-                        onPressed: isSubscribed
-                            ? () => context.go(
-                                AppRoutes.podcastDetail(existing.id),
-                              )
-                            : _follow,
-                        style: FilledButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                        ),
-                        child: Text(isSubscribed ? 'Following' : 'Follow'),
-                      ),
+                ),
               ),
             ),
           ),
@@ -123,14 +167,17 @@ class _SearchResultDetailScreenState
       body: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
-            child: _PodcastHeader(result: result),
+            child: _PodcastHeader(
+              result: result,
+              fallbackAuthor: fallbackAuthor,
+            ),
           ),
-          if (result.description != null)
+          if (description != null)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Text(
-                  result.description!,
+                  description,
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
@@ -180,8 +227,11 @@ class _SearchResultDetailScreenState
                   )
                 : SliverList.builder(
                     itemCount: pod.episodes.length,
-                    itemBuilder: (context, i) =>
-                        _PreviewEpisodeTile(episode: pod.episodes[i]),
+                    itemBuilder: (context, i) => _PreviewEpisodeTile(
+                      episode: pod.episodes[i],
+                      podcastArtworkUrl: result.artworkUrl,
+                      speedOverride: subscribedPodcast?.speedOverride,
+                    ),
                   ),
           ),
         ],
@@ -191,12 +241,14 @@ class _SearchResultDetailScreenState
 }
 
 class _PodcastHeader extends StatelessWidget {
-  const _PodcastHeader({required this.result});
+  const _PodcastHeader({required this.result, this.fallbackAuthor});
 
   final PodcastSearchResult result;
+  final String? fallbackAuthor;
 
   @override
   Widget build(BuildContext context) {
+    final author = result.author ?? fallbackAuthor;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Row(
@@ -216,10 +268,10 @@ class _PodcastHeader extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (result.author != null) ...[
+                if (author != null) ...[
                   const SizedBox(height: 4),
                   Text(
-                    result.author!,
+                    author,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -268,13 +320,45 @@ class _Artwork extends StatelessWidget {
   );
 }
 
-class _PreviewEpisodeTile extends StatelessWidget {
-  const _PreviewEpisodeTile({required this.episode});
+class _PreviewEpisodeTile extends ConsumerWidget {
+  const _PreviewEpisodeTile({
+    required this.episode,
+    this.podcastArtworkUrl,
+    this.speedOverride,
+  });
 
   final ParsedEpisode episode;
+  final String? podcastArtworkUrl;
+  final double? speedOverride;
+
+  void _play(BuildContext context, WidgetRef ref) {
+    final artworkUrl = episode.artworkUrl ?? podcastArtworkUrl;
+    unawaited(
+      ref
+          .read(audioHandlerProvider)
+          .playEpisode(
+            MediaItem(
+              id: episode.audioUrl,
+              title: episode.title,
+              artUri: artworkUrl != null ? Uri.tryParse(artworkUrl) : null,
+              duration: episode.durationSeconds != null
+                  ? Duration(seconds: episode.durationSeconds!)
+                  : null,
+              extras: {
+                if (speedOverride != null) 'speedOverride': speedOverride!,
+              },
+            ),
+          ),
+    );
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Playing ${episode.title}',
+      TextDirection.ltr,
+    );
+  }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final dateStr = episode.pubDate != null
         ? _formatDate(episode.pubDate!)
         : null;
@@ -290,24 +374,28 @@ class _PreviewEpisodeTile extends StatelessWidget {
         : '${episode.title}, ${parts.join(', ')}';
 
     return Semantics(
+      button: true,
+      onTap: () => _play(context, ref),
       label: semanticLabel,
-      child: ListTile(
-        title: ExcludeSemantics(
-          child: Text(
+      customSemanticsActions: {
+        const CustomSemanticsAction(label: 'Play'): () => _play(context, ref),
+      },
+      child: ExcludeSemantics(
+        child: ListTile(
+          onTap: () => _play(context, ref),
+          title: Text(
             episode.title,
             style: Theme.of(context).textTheme.titleSmall,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-        ),
-        subtitle: parts.isNotEmpty
-            ? ExcludeSemantics(
-                child: Text(
+          subtitle: parts.isNotEmpty
+              ? Text(
                   parts.join(' · '),
                   style: Theme.of(context).textTheme.bodySmall,
-                ),
-              )
-            : null,
+                )
+              : null,
+        ),
       ),
     );
   }
