@@ -186,7 +186,7 @@ class SubscriptionsScreen extends ConsumerWidget {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       'Add Podcast',
-                      style: Theme.of(context).textTheme.titleLarge,
+                      style: Theme.of(sheetContext).textTheme.titleLarge,
                     ),
                   ),
                 ),
@@ -197,7 +197,7 @@ class SubscriptionsScreen extends ConsumerWidget {
               title: const Text('Search podcasts'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                context.push(AppRoutes.search);
+                if (context.mounted) context.push(AppRoutes.search);
               },
             ),
             ListTile(
@@ -205,7 +205,7 @@ class SubscriptionsScreen extends ConsumerWidget {
               title: const Text('Add by URL'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                context.push(AppRoutes.addPodcast);
+                if (context.mounted) context.push(AppRoutes.addPodcast);
               },
             ),
           ],
