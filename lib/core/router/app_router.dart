@@ -78,7 +78,11 @@ class _RouterNotifier extends ChangeNotifier {
         final atOnboarding = state.matchedLocation.startsWith(
           AppRoutes.onboarding,
         );
-        if (!done && !atOnboarding) return AppRoutes.onboarding;
+        final isAllowedDuringOnboarding =
+            state.matchedLocation.startsWith(AppRoutes.search) ||
+            state.matchedLocation.startsWith(AppRoutes.addPodcast);
+        if (!done && !atOnboarding && !isAllowedDuringOnboarding)
+          return AppRoutes.onboarding;
         if (done && atOnboarding) return AppRoutes.subscriptions;
         return null;
       },
