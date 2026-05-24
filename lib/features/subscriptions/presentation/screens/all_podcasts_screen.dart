@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
@@ -46,7 +47,7 @@ class AllPodcastsScreen extends ConsumerWidget {
                     onTap: () =>
                         context.push(AppRoutes.podcastDetail(podcast.id)),
                     quickActions: _buildActions(
-                      ctx,
+                      context,
                       ref,
                       podcast,
                       podcastActions,
@@ -95,7 +96,7 @@ class AllPodcastsScreen extends ConsumerWidget {
         ),
         PodcastAction.unsubscribe => PodcastQuickActionItem(
           label: action.label,
-          onInvoke: () => _confirmUnsubscribe(context, ref, podcast),
+          onInvoke: () => _unfollow(context, ref, podcast),
         ),
         PodcastAction.share => PodcastQuickActionItem(
           label: action.label,
@@ -117,30 +118,48 @@ class AllPodcastsScreen extends ConsumerWidget {
     }).toList();
   }
 
-  Future<void> _confirmUnsubscribe(
+  Future<void> _unfollow(
     BuildContext context,
     WidgetRef ref,
     Podcast podcast,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Unsubscribe?'),
-        content: Text('Remove ${podcast.title} and all its episodes?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Unsubscribe'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
+    try {
       await ref.read(podcastRepositoryProvider).unsubscribe(podcast.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unfollowed ${podcast.title}'),
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              try {
+                await ref
+                    .read(podcastRepositoryProvider)
+                    .subscribe(podcast.rssUrl);
+                if (!context.mounted) return;
+                SemanticsService.sendAnnouncement(
+                  View.of(context),
+                  'Followed ${podcast.title} again.',
+                  TextDirection.ltr,
+                );
+              } catch (e) {
+                _log.warning('Failed to re-follow ${podcast.rssUrl}: $e');
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Could not undo. Try again.')),
+                );
+              }
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      _log.warning('Failed to unfollow ${podcast.rssUrl}: $e');
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not unfollow. Try again.')),
+      );
     }
   }
 }
