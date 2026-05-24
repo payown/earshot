@@ -111,7 +111,7 @@ class _AddPodcastScreenState extends ConsumerState<AddPodcastScreen> {
       if (mounted)
         Navigator.of(context).pop(widget.fromOnboarding ? true : null);
     } on PodcastAlreadySubscribedException {
-      _setError('You\'re already subscribed to this podcast.');
+      _setError('You\'re already following this podcast.');
     } on PodcastNotFoundException {
       _setError(
         'No podcast found at that URL. Check the address and try again.',

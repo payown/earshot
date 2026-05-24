@@ -53,7 +53,7 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
                     const SizedBox(height: 12),
                     ExcludeSemantics(
                       child: Text(
-                        'Subscribed $_done of $_total'
+                        'Followed $_done of $_total'
                         '${_skipped > 0 ? " ($_skipped skipped)" : ""}',
                         style: Theme.of(context).textTheme.bodyMedium,
                         textAlign: TextAlign.center,
@@ -71,8 +71,8 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
               if (_done > 0) ...[
                 const SizedBox(height: 16),
                 Text(
-                  'Import complete: $_done subscribed'
-                  '${_skipped > 0 ? ", $_skipped already subscribed" : ""}.',
+                  'Import complete: $_done followed'
+                  '${_skipped > 0 ? ", $_skipped already following" : ""}.',
                   style: Theme.of(context).textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
@@ -135,7 +135,7 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
           setState(() => _done++);
           SemanticsService.sendAnnouncement(
             View.of(context),
-            'Subscribed $_done of $_total',
+            'Followed $_done of $_total',
             TextDirection.ltr,
           );
         }
