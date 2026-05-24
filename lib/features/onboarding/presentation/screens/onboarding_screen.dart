@@ -70,7 +70,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     icon: Icons.move_down,
                     title: 'How your content flows',
                     body:
-                        'Subscribe to a podcast, and new episodes arrive in your Inbox. '
+                        'Follow a podcast, and new episodes arrive in your Inbox. '
                         'Triage them into your Queue when you\'re ready to listen. '
                         'Mark a podcast as Auto-Queue and new episodes skip Inbox entirely.',
                   ),
