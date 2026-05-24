@@ -385,6 +385,7 @@ class _PlaybackControls extends StatelessWidget {
         Semantics(
           button: true,
           label: 'Skip back ${kSkipBackDuration.inSeconds} seconds',
+          onTap: onRewind,
           child: ExcludeSemantics(
             child: IconButton(
               icon: const Icon(Icons.replay_30),
@@ -397,6 +398,7 @@ class _PlaybackControls extends StatelessWidget {
         Semantics(
           button: true,
           label: isPlaying ? 'Pause' : 'Play',
+          onTap: onPlayPause,
           child: ExcludeSemantics(
             child: SizedBox.square(
               dimension: 72,
@@ -416,6 +418,7 @@ class _PlaybackControls extends StatelessWidget {
         Semantics(
           button: true,
           label: 'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
+          onTap: onFastForward,
           child: ExcludeSemantics(
             child: IconButton(
               icon: const Icon(Icons.forward_30),
@@ -603,16 +606,26 @@ class _SleepTimerControls extends ConsumerWidget {
           Semantics(
             button: true,
             label: 'Extend sleep timer by 5 minutes',
-            child: TextButton(
-              onPressed: () {
-                handler.sleepTimer.extend();
-                SemanticsService.sendAnnouncement(
-                  View.of(context),
-                  'Sleep timer extended by 5 minutes',
-                  TextDirection.ltr,
-                );
-              },
-              child: const ExcludeSemantics(child: Text('+5 min')),
+            onTap: () {
+              handler.sleepTimer.extend();
+              SemanticsService.sendAnnouncement(
+                View.of(context),
+                'Sleep timer extended by 5 minutes',
+                TextDirection.ltr,
+              );
+            },
+            child: ExcludeSemantics(
+              child: TextButton(
+                onPressed: () {
+                  handler.sleepTimer.extend();
+                  SemanticsService.sendAnnouncement(
+                    View.of(context),
+                    'Sleep timer extended by 5 minutes',
+                    TextDirection.ltr,
+                  );
+                },
+                child: const Text('+5 min'),
+              ),
             ),
           ),
       ],
@@ -680,6 +693,7 @@ class _ToggleChip extends StatelessWidget {
       toggled: enabled,
       label: '$label, ${enabled ? 'on' : 'off'}',
       button: true,
+      onTap: () => onToggle(!enabled),
       child: ExcludeSemantics(
         child: FilterChip(
           avatar: Icon(
