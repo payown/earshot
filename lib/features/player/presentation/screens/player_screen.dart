@@ -181,11 +181,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               const SizedBox(height: Spacing.lg),
               Semantics(
                 header: true,
-                child: Text(
-                  mediaItem.title,
-                  style: Theme.of(context).textTheme.titleLarge,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                label: mediaItem.title,
+                child: ExcludeSemantics(
+                  child: Text(
+                    mediaItem.title,
+                    style: Theme.of(context).textTheme.titleLarge,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
               if (mediaItem.album != null) ...[
