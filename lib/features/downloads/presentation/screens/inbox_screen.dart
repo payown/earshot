@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' hide Column, View;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -44,15 +46,19 @@ class InboxScreen extends ConsumerWidget {
                 itemCount: episodes.length,
                 itemBuilder: (context, index) => _InboxEpisodeTile(
                   episode: episodes[index],
-                  onAddToQueue: () => ref
-                      .read(queueRepositoryProvider)
-                      .addToQueue(episodes[index].id),
-                  onMarkPlayed: () => ref
-                      .read(podcastRepositoryProvider)
-                      .updateEpisodeStatus(
-                        episodes[index].id,
-                        EpisodeStatus.played,
-                      ),
+                  onAddToQueue: () => unawaited(
+                    ref
+                        .read(queueRepositoryProvider)
+                        .addToQueue(episodes[index].id),
+                  ),
+                  onMarkPlayed: () => unawaited(
+                    ref
+                        .read(podcastRepositoryProvider)
+                        .updateEpisodeStatus(
+                          episodes[index].id,
+                          EpisodeStatus.played,
+                        ),
+                  ),
                   onDelete: () => _confirmDelete(context, ref, episodes[index]),
                 ),
               ),
@@ -69,23 +75,24 @@ class InboxScreen extends ConsumerWidget {
     final count = ref.read(_inboxEpisodesProvider).asData?.value.length ?? 0;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Mark all as played?'),
         content: Text(
           'This will clear all $count episodes from your inbox.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('Mark all played'),
           ),
         ],
       ),
     );
+    if (!context.mounted) return;
     if (confirmed == true) {
       try {
         await ref.read(podcastRepositoryProvider).markAllInboxPlayed();
@@ -108,29 +115,37 @@ class InboxScreen extends ConsumerWidget {
   ) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Delete episode?'),
         content: Text('Remove "${episode.title}" from Inbox?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
+    if (!context.mounted) return;
     if (confirmed == true) {
-      await ref.read(downloadManagerProvider).deleteDownload(episode.id);
-      await ref
-          .read(podcastRepositoryProvider)
-          .updateEpisodeStatus(
-            episode.id,
-            EpisodeStatus.played,
+      try {
+        await ref.read(downloadManagerProvider).deleteDownload(episode.id);
+        await ref
+            .read(podcastRepositoryProvider)
+            .updateEpisodeStatus(episode.id, EpisodeStatus.played);
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not delete episode. Try again.'),
+            ),
           );
+        }
+      }
     }
   }
 }
