@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:drift/drift.dart' hide Column, View;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -46,6 +47,7 @@ class InboxScreen extends ConsumerWidget {
                 itemCount: episodes.length,
                 itemBuilder: (context, index) => _InboxEpisodeTile(
                   episode: episodes[index],
+                  onPlay: () => _playEpisode(context, episodes[index], ref),
                   onAddToQueue: () => unawaited(
                     ref
                         .read(queueRepositoryProvider)
@@ -67,6 +69,38 @@ class InboxScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
       ),
+    );
+  }
+
+  void _playEpisode(BuildContext context, Episode episode, WidgetRef ref) {
+    final resumePosition =
+        episode.positionSeconds > 0 &&
+            episode.durationSeconds != null &&
+            episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
+        ? episode.positionSeconds
+        : 0;
+    unawaited(
+      ref
+          .read(audioHandlerProvider)
+          .playEpisode(
+            MediaItem(
+              id: episode.audioUrl,
+              title: episode.title,
+              artUri: episode.artworkUrl != null
+                  ? Uri.tryParse(episode.artworkUrl!)
+                  : null,
+              duration: episode.durationSeconds != null
+                  ? Duration(seconds: episode.durationSeconds!)
+                  : null,
+              extras: {'episodeId': episode.id, 'podcastId': episode.podcastId},
+            ),
+            resumePositionSeconds: resumePosition,
+          ),
+    );
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Playing ${episode.title}',
+      TextDirection.ltr,
     );
   }
 
@@ -208,11 +242,12 @@ class _EmptyInbox extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.inbox,
-              size: 64,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-              semanticLabel: '',
+            ExcludeSemantics(
+              child: Icon(
+                Icons.inbox,
+                size: 64,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -237,12 +272,14 @@ class _EmptyInbox extends StatelessWidget {
 class _InboxEpisodeTile extends StatelessWidget {
   const _InboxEpisodeTile({
     required this.episode,
+    required this.onPlay,
     required this.onAddToQueue,
     required this.onMarkPlayed,
     required this.onDelete,
   });
 
   final Episode episode;
+  final VoidCallback onPlay;
   final VoidCallback onAddToQueue;
   final VoidCallback onMarkPlayed;
   final VoidCallback onDelete;
@@ -250,64 +287,61 @@ class _InboxEpisodeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Semantics(
+      button: true,
+      onTap: onPlay,
       label: '${episode.title}, New episode',
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Add to queue'): onAddToQueue,
         const CustomSemanticsAction(label: 'Mark as played'): onMarkPlayed,
         const CustomSemanticsAction(label: 'Delete'): onDelete,
       },
-      child: ListTile(
-        title: ExcludeSemantics(
-          child: Text(
-            episode.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleSmall,
+      child: ExcludeSemantics(
+        child: ListTile(
+          onTap: onPlay,
+          title: ExcludeSemantics(
+            child: Text(
+              episode.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
           ),
-        ),
-        subtitle: ExcludeSemantics(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          subtitle: ExcludeSemantics(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Chip(
+                  label: const Text('New'),
+                  visualDensity: VisualDensity.compact,
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer,
+                  labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                  padding: EdgeInsets.zero,
+                ),
+                if (episode.pubDate != null)
+                  Text(
+                    _formatDate(episode.pubDate!),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+              ],
+            ),
+          ),
+          trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Chip(
-                label: const Text('New'),
-                visualDensity: VisualDensity.compact,
-                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onPrimaryContainer,
-                ),
-                padding: EdgeInsets.zero,
+              IconButton(
+                icon: const Icon(Icons.queue_music),
+                onPressed: onAddToQueue,
+                tooltip: 'Add to queue',
               ),
-              if (episode.pubDate != null)
-                Text(
-                  _formatDate(episode.pubDate!),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-            ],
-          ),
-        ),
-        trailing: ExcludeSemantics(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Semantics(
-                button: true,
-                label: 'Add to queue',
-                child: IconButton(
-                  icon: const Icon(Icons.queue_music),
-                  onPressed: onAddToQueue,
-                  tooltip: 'Add to queue',
-                ),
-              ),
-              Semantics(
-                button: true,
-                label: 'Mark as played',
-                child: IconButton(
-                  icon: const Icon(Icons.check),
-                  onPressed: onMarkPlayed,
-                  tooltip: 'Mark as played',
-                ),
+              IconButton(
+                icon: const Icon(Icons.check),
+                onPressed: onMarkPlayed,
+                tooltip: 'Mark as played',
               ),
             ],
           ),
