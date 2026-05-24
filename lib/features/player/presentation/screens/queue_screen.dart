@@ -7,7 +7,6 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../providers/player_providers.dart';
-import '../widgets/now_playing_bar.dart';
 
 void _playEpisode(WidgetRef ref, Episode episode) {
   final handler = ref.read(audioHandlerProvider);
@@ -51,7 +50,6 @@ class QueueScreen extends ConsumerWidget {
           ),
         ],
       ),
-      bottomNavigationBar: const NowPlayingBar(),
       body: queue.when(
         data: (episodes) => episodes.isEmpty
             ? Center(

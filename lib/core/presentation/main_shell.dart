@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../data/db/enums.dart';
 import '../../features/downloads/presentation/providers/downloads_providers.dart';
+import '../../features/player/presentation/widgets/now_playing_bar.dart';
 import '../../features/settings/data/app_settings_repository.dart';
 import '../../features/stats/data/stats_repository.dart';
 import '../providers/core_providers.dart';
@@ -41,44 +42,50 @@ class _MainShellState extends ConsumerState<MainShell> {
 
     return Scaffold(
       body: widget.shell,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: widget.shell.currentIndex,
-        onDestinationSelected: (index) => widget.shell.goBranch(
-          index,
-          initialLocation: index == widget.shell.currentIndex,
-        ),
-        destinations: [
-          NavigationDestination(
-            icon: Badge(
-              isLabelVisible: inboxCount > 0,
-              label: Text('$inboxCount'),
-              child: const Icon(Icons.inbox_outlined),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const NowPlayingBar(),
+          NavigationBar(
+            selectedIndex: widget.shell.currentIndex,
+            onDestinationSelected: (index) => widget.shell.goBranch(
+              index,
+              initialLocation: index == widget.shell.currentIndex,
             ),
-            selectedIcon: Badge(
-              isLabelVisible: inboxCount > 0,
-              label: Text('$inboxCount'),
-              child: const Icon(Icons.inbox),
-            ),
-            label: 'Inbox',
-            tooltip: inboxCount > 0 ? 'Inbox, $inboxCount new' : 'Inbox',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.queue_music_outlined),
-            selectedIcon: Icon(Icons.queue_music),
-            label: 'Queue',
-            tooltip: 'Queue',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.podcasts_outlined),
-            selectedIcon: Icon(Icons.podcasts),
-            label: 'Library',
-            tooltip: 'Library',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.download_outlined),
-            selectedIcon: Icon(Icons.download),
-            label: 'Downloads',
-            tooltip: 'Downloads',
+            destinations: [
+              NavigationDestination(
+                icon: Badge(
+                  isLabelVisible: inboxCount > 0,
+                  label: Text('$inboxCount'),
+                  child: const Icon(Icons.inbox_outlined),
+                ),
+                selectedIcon: Badge(
+                  isLabelVisible: inboxCount > 0,
+                  label: Text('$inboxCount'),
+                  child: const Icon(Icons.inbox),
+                ),
+                label: 'Inbox',
+                tooltip: inboxCount > 0 ? 'Inbox, $inboxCount new' : 'Inbox',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.queue_music_outlined),
+                selectedIcon: Icon(Icons.queue_music),
+                label: 'Queue',
+                tooltip: 'Queue',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.podcasts_outlined),
+                selectedIcon: Icon(Icons.podcasts),
+                label: 'Library',
+                tooltip: 'Library',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.download_outlined),
+                selectedIcon: Icon(Icons.download),
+                label: 'Downloads',
+                tooltip: 'Downloads',
+              ),
+            ],
           ),
         ],
       ),

@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/bookmarks/presentation/providers/bookmarks_providers.dart';
 import '../../../../features/player/presentation/providers/player_providers.dart';
-import '../../../../features/player/presentation/widgets/now_playing_bar.dart';
 import '../../../../features/settings/domain/quick_action_definition.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../domain/episode.dart';
@@ -70,7 +69,6 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      bottomNavigationBar: const NowPlayingBar(),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(

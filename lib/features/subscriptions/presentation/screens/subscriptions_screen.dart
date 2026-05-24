@@ -7,7 +7,6 @@ import '../../../../features/folders/domain/podcast_folder.dart';
 import '../../../../features/folders/presentation/providers/folders_providers.dart';
 import '../../../../features/folders/presentation/widgets/create_folder_dialog.dart';
 import '../../../../features/folders/presentation/widgets/folder_list_tile.dart';
-import '../../../../features/player/presentation/widgets/now_playing_bar.dart';
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
 
@@ -45,7 +44,6 @@ class SubscriptionsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      bottomNavigationBar: const NowPlayingBar(),
       body: allPodcasts.when(
         data: (podcasts) {
           if (podcasts.isEmpty) {
