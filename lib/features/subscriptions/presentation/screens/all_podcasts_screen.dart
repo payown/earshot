@@ -129,30 +129,13 @@ class AllPodcastsScreen extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Unfollowed ${podcast.title}'),
-          duration: const Duration(seconds: 4),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () async {
-              try {
-                await ref
-                    .read(podcastRepositoryProvider)
-                    .subscribe(podcast.rssUrl);
-                if (!context.mounted) return;
-                SemanticsService.sendAnnouncement(
-                  View.of(context),
-                  'Followed ${podcast.title} again.',
-                  TextDirection.ltr,
-                );
-              } catch (e) {
-                _log.warning('Failed to re-follow ${podcast.rssUrl}: $e');
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Could not undo. Try again.')),
-                );
-              }
-            },
-          ),
+          duration: const Duration(seconds: 3),
         ),
+      );
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Unfollowed ${podcast.title}.',
+        TextDirection.ltr,
       );
     } catch (e) {
       _log.warning('Failed to unfollow ${podcast.rssUrl}: $e');
