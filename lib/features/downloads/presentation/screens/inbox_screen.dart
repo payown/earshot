@@ -59,7 +59,9 @@ class InboxScreen extends ConsumerWidget {
                           EpisodeStatus.played,
                         ),
                   ),
-                  onDelete: () => _confirmDelete(context, ref, episodes[index]),
+                  onDelete: () => unawaited(
+                    _confirmDelete(context, ref, episodes[index]),
+                  ),
                 ),
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -134,6 +136,17 @@ class InboxScreen extends ConsumerWidget {
     if (confirmed == true) {
       try {
         await ref.read(downloadManagerProvider).deleteDownload(episode.id);
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not delete the download file. Try again.'),
+            ),
+          );
+        }
+        return;
+      }
+      try {
         await ref
             .read(podcastRepositoryProvider)
             .updateEpisodeStatus(episode.id, EpisodeStatus.played);
@@ -141,7 +154,7 @@ class InboxScreen extends ConsumerWidget {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Could not delete episode. Try again.'),
+              content: Text('Could not mark episode as played. Try again.'),
             ),
           );
         }
