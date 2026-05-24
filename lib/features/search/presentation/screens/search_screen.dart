@@ -148,11 +148,12 @@ class _ResultTile extends ConsumerWidget {
     final label = result.author != null
         ? '${result.title}, by ${result.author}'
         : result.title;
+    void openDetail() => context.push(AppRoutes.searchResult, extra: result);
 
     return Semantics(
       label: label,
       button: true,
-      onTap: () => context.push(AppRoutes.searchResult, extra: result),
+      onTap: openDetail,
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Follow'): () =>
             _follow(context, ref),
@@ -163,31 +164,23 @@ class _ResultTile extends ConsumerWidget {
             horizontal: 16,
             vertical: 8,
           ),
-          onTap: () => context.push(AppRoutes.searchResult, extra: result),
-          leading: ExcludeSemantics(
-            child: _Artwork(url: result.artworkUrl),
-          ),
-          title: ExcludeSemantics(
-            child: Text(
-              result.title,
-              style: Theme.of(context).textTheme.titleSmall,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+          onTap: openDetail,
+          leading: _Artwork(url: result.artworkUrl),
+          title: Text(
+            result.title,
+            style: Theme.of(context).textTheme.titleSmall,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
           subtitle: result.author != null
-              ? ExcludeSemantics(
-                  child: Text(
-                    result.author!,
-                    style: Theme.of(context).textTheme.bodySmall,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+              ? Text(
+                  result.author!,
+                  style: Theme.of(context).textTheme.bodySmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 )
               : null,
-          trailing: const ExcludeSemantics(
-            child: Icon(Icons.chevron_right),
-          ),
+          trailing: const Icon(Icons.chevron_right),
         ),
       ),
     );
