@@ -32,7 +32,7 @@ enum PodcastAction {
     PodcastAction.open => 'Open podcast',
     PodcastAction.toggleNotifications => 'Toggle notifications',
     PodcastAction.toggleAutoQueue => 'Toggle auto-queue',
-    PodcastAction.unsubscribe => 'Unsubscribe',
+    PodcastAction.unsubscribe => 'Unfollow',
     PodcastAction.share => 'Share podcast',
     PodcastAction.manageFolders => 'Manage folders',
   };
