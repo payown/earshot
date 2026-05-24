@@ -31,8 +31,15 @@ class _SearchResultDetailScreenState
   bool _following = false;
   bool _unfollowing = false;
   String? _error;
+  final FocusNode _followButtonFocusNode = FocusNode();
 
   PodcastSearchResult get result => widget.result;
+
+  @override
+  void dispose() {
+    _followButtonFocusNode.dispose();
+    super.dispose();
+  }
 
   Future<void> _follow() async {
     setState(() {
@@ -71,9 +78,17 @@ class _SearchResultDetailScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Unfollowed ${result.title}'),
-          action: SnackBarAction(label: 'Undo', onPressed: _follow),
+          duration: const Duration(seconds: 3),
         ),
       );
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Unfollowed ${result.title}. Follow button is now available.',
+        TextDirection.ltr,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _followButtonFocusNode.requestFocus();
+      });
     } catch (e) {
       _log.warning('Failed to unfollow ${result.feedUrl}: $e');
       if (mounted) {
@@ -113,34 +128,37 @@ class _SearchResultDetailScreenState
       appBar: AppBar(
         title: Text(result.title),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Semantics(
-              button: true,
-              label: isSubscribed
-                  ? 'Unfollow ${result.title}'
-                  : 'Follow ${result.title}',
-              child: ExcludeSemantics(
-                child: isLoading
-                    ? const SizedBox(
-                        width: 72,
-                        child: Center(
-                          child: SizedBox.square(
-                            dimension: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+          Focus(
+            focusNode: _followButtonFocusNode,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Semantics(
+                button: true,
+                label: isSubscribed
+                    ? 'Unfollow ${result.title}'
+                    : 'Follow ${result.title}',
+                child: ExcludeSemantics(
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 72,
+                          child: Center(
+                            child: SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                           ),
+                        )
+                      : FilledButton.tonal(
+                          onPressed: isSubscribed
+                              ? () => _unfollow(existing)
+                              : _follow,
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                          ),
+                          child: Text(isSubscribed ? 'Unfollow' : 'Follow'),
                         ),
-                      )
-                    : FilledButton.tonal(
-                        onPressed: isSubscribed
-                            ? () => _unfollow(existing)
-                            : _follow,
-                        style: FilledButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                        ),
-                        child: Text(isSubscribed ? 'Unfollow' : 'Follow'),
-                      ),
+                ),
               ),
             ),
           ),
