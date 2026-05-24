@@ -79,6 +79,10 @@ class InboxScreen extends ConsumerWidget {
             episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
         ? episode.positionSeconds
         : 0;
+    final speedOverride = ref
+        .read(podcastProvider(episode.podcastId))
+        .value
+        ?.speedOverride;
     unawaited(
       ref
           .read(audioHandlerProvider)
@@ -92,10 +96,22 @@ class InboxScreen extends ConsumerWidget {
               duration: episode.durationSeconds != null
                   ? Duration(seconds: episode.durationSeconds!)
                   : null,
-              extras: {'episodeId': episode.id, 'podcastId': episode.podcastId},
+              extras: {
+                'episodeId': episode.id,
+                'podcastId': episode.podcastId,
+                if (speedOverride != null) 'speedOverride': speedOverride,
+              },
             ),
             resumePositionSeconds: resumePosition,
           ),
+    );
+    unawaited(
+      ref.read(queueRepositoryProvider).addToQueue(episode.id),
+    );
+    unawaited(
+      ref
+          .read(podcastRepositoryProvider)
+          .updateEpisodeStatus(episode.id, EpisodeStatus.played),
     );
     SemanticsService.sendAnnouncement(
       View.of(context),
@@ -298,37 +314,33 @@ class _InboxEpisodeTile extends StatelessWidget {
       child: ExcludeSemantics(
         child: ListTile(
           onTap: onPlay,
-          title: ExcludeSemantics(
-            child: Text(
-              episode.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
+          title: Text(
+            episode.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleSmall,
           ),
-          subtitle: ExcludeSemantics(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Chip(
-                  label: const Text('New'),
-                  visualDensity: VisualDensity.compact,
-                  backgroundColor: Theme.of(
-                    context,
-                  ).colorScheme.primaryContainer,
-                  labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                  padding: EdgeInsets.zero,
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Chip(
+                label: const Text('New'),
+                visualDensity: VisualDensity.compact,
+                backgroundColor: Theme.of(
+                  context,
+                ).colorScheme.primaryContainer,
+                labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
                 ),
-                if (episode.pubDate != null)
-                  Text(
-                    _formatDate(episode.pubDate!),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-              ],
-            ),
+                padding: EdgeInsets.zero,
+              ),
+              if (episode.pubDate != null)
+                Text(
+                  _formatDate(episode.pubDate!),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+            ],
           ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
