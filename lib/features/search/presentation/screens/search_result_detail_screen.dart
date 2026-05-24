@@ -4,10 +4,8 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
 
-import '../../../../core/router/app_router.dart';
 import '../../../../data/rss/parsed_feed.dart';
 import '../../../player/presentation/providers/player_providers.dart';
 import '../../../subscriptions/data/podcast_exception.dart';
@@ -42,28 +40,17 @@ class _SearchResultDetailScreenState
       _error = null;
     });
     try {
-      final podcast = await ref
-          .read(podcastRepositoryProvider)
-          .subscribe(result.feedUrl);
+      await ref.read(podcastRepositoryProvider).subscribe(result.feedUrl);
       if (mounted) {
+        setState(() => _following = false);
         SemanticsService.sendAnnouncement(
           View.of(context),
           'Following ${result.title}',
           TextDirection.ltr,
         );
-        context.go(AppRoutes.podcastDetail(podcast.id));
       }
     } on PodcastAlreadySubscribedException {
-      final List<Podcast> subs =
-          ref.read(subscriptionsProvider).asData?.value ?? [];
-      final existing = subs
-          .where((Podcast p) => p.rssUrl == result.feedUrl)
-          .firstOrNull;
-      if (mounted && existing != null) {
-        context.go(AppRoutes.podcastDetail(existing.id));
-      } else if (mounted) {
-        setState(() => _following = false);
-      }
+      if (mounted) setState(() => _following = false);
     } catch (e) {
       _log.warning('Failed to follow ${result.feedUrl}: $e');
       if (mounted) {
@@ -107,13 +94,19 @@ class _SearchResultDetailScreenState
         .firstOrNull;
     final isSubscribed = existing != null;
 
-    // When subscribed, prefer the richer description from the DB record.
+    final preview = ref.watch(podcastPreviewProvider(result.feedUrl));
+    final previewPod = preview.asData?.value;
+
+    // Prefer DB record when subscribed, then RSS preview, then search result.
     final subscribedPodcast = isSubscribed
         ? ref.watch(podcastProvider(existing.id)).value
         : null;
-    final description = subscribedPodcast?.description ?? result.description;
+    final description =
+        subscribedPodcast?.description ??
+        previewPod?.description ??
+        result.description;
+    final fallbackAuthor = result.author ?? previewPod?.author;
 
-    final preview = ref.watch(podcastPreviewProvider(result.feedUrl));
     final isLoading = _following || _unfollowing;
 
     return Scaffold(
@@ -156,7 +149,10 @@ class _SearchResultDetailScreenState
       body: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
-            child: _PodcastHeader(result: result),
+            child: _PodcastHeader(
+              result: result,
+              fallbackAuthor: fallbackAuthor,
+            ),
           ),
           if (description != null)
             SliverToBoxAdapter(
@@ -227,12 +223,14 @@ class _SearchResultDetailScreenState
 }
 
 class _PodcastHeader extends StatelessWidget {
-  const _PodcastHeader({required this.result});
+  const _PodcastHeader({required this.result, this.fallbackAuthor});
 
   final PodcastSearchResult result;
+  final String? fallbackAuthor;
 
   @override
   Widget build(BuildContext context) {
+    final author = result.author ?? fallbackAuthor;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Row(
@@ -252,10 +250,10 @@ class _PodcastHeader extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (result.author != null) ...[
+                if (author != null) ...[
                   const SizedBox(height: 4),
                   Text(
-                    result.author!,
+                    author,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -361,6 +359,9 @@ class _PreviewEpisodeTile extends ConsumerWidget {
       button: true,
       onTap: () => _play(context, ref),
       label: semanticLabel,
+      customSemanticsActions: {
+        const CustomSemanticsAction(label: 'Play'): () => _play(context, ref),
+      },
       child: ExcludeSemantics(
         child: ListTile(
           onTap: () => _play(context, ref),
@@ -376,11 +377,6 @@ class _PreviewEpisodeTile extends ConsumerWidget {
                   style: Theme.of(context).textTheme.bodySmall,
                 )
               : null,
-          trailing: IconButton(
-            icon: const Icon(Icons.play_arrow),
-            onPressed: () => _play(context, ref),
-            tooltip: 'Play',
-          ),
         ),
       ),
     );
