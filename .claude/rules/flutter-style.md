@@ -87,6 +87,33 @@
 - Test files mirror source structure: `test/features/<feature>/...`
 - Use `mocktail` for mocks, not `mockito` (null-safety, simpler API).
 
+## iOS VoiceOver: toggled Semantics nodes require enabled: true
+
+Any `Semantics` node that sets `toggled:` (any non-null value) **must also set `enabled: true`**.
+
+When `toggled:` is non-null, Flutter's iOS accessibility bridge routes the node to `FlutterSwitchSemanticsObject`, which backs the element with a real `UISwitch`. That switch's `enabled` property is set to `(isEnabled == SemanticsTristate.kTrue)`. If `enabled:` is omitted from the `Semantics` widget, `isEnabled` is `kNone` — not `kTrue` — so the switch is marked disabled, and VoiceOver announces the control as "dimmed" regardless of whether `onTap` is set.
+
+```dart
+// CORRECT
+Semantics(
+  toggled: isActive,
+  button: true,
+  enabled: true,        // required whenever toggled: is set
+  onTap: _handleTap,
+  child: ExcludeSemantics(child: ...),
+)
+
+// WRONG — VoiceOver announces "dimmed" even though onTap is present
+Semantics(
+  toggled: isActive,
+  button: true,
+  onTap: _handleTap,    // onTap alone is not enough
+  child: ExcludeSemantics(child: ...),
+)
+```
+
+This applies to `checked:` too — `FlutterSwitchSemanticsObject` is used for both toggled and checked nodes.
+
 ## What to avoid
 
 - `GlobalKey` unless absolutely necessary

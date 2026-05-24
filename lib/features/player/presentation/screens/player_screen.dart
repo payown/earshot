@@ -700,6 +700,7 @@ class _ToggleChip extends StatelessWidget {
       toggled: enabled,
       label: label,
       button: true,
+      enabled: true,
       onTap: () => onToggle(!enabled),
       child: ExcludeSemantics(
         child: Material(
