@@ -11,7 +11,9 @@ import '../../data/podcast_exception.dart';
 import '../providers/subscriptions_providers.dart';
 
 class AddPodcastScreen extends ConsumerStatefulWidget {
-  const AddPodcastScreen({super.key});
+  const AddPodcastScreen({super.key, this.fromOnboarding = false});
+
+  final bool fromOnboarding;
 
   @override
   ConsumerState<AddPodcastScreen> createState() => _AddPodcastScreenState();
@@ -33,6 +35,13 @@ class _AddPodcastScreenState extends ConsumerState<AddPodcastScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Add Podcast'),
+        actions: [
+          if (widget.fromOnboarding)
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Done'),
+            ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(24),
@@ -99,7 +108,8 @@ class _AddPodcastScreenState extends ConsumerState<AddPodcastScreen> {
               .downloadRecentEpisodes(podcast.id, count),
         );
       }
-      if (mounted) Navigator.of(context).pop();
+      if (mounted)
+        Navigator.of(context).pop(widget.fromOnboarding ? true : null);
     } on PodcastAlreadySubscribedException {
       _setError('You\'re already subscribed to this podcast.');
     } on PodcastNotFoundException {

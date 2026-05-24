@@ -92,8 +92,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                         'deep-dive? Two weeks. Or leave it off entirely — it\'s up to you.',
                   ),
                   _AddFirstPodcastPage(
-                    onPodcastAdded: () =>
-                        setState(() => _hasAddedPodcast = true),
+                    onPodcastAdded: () {
+                      setState(() => _hasAddedPodcast = true);
+                      _nextPage();
+                    },
                   ),
                   const _OnboardingPage(
                     icon: Icons.check_circle_outline,
@@ -290,8 +292,11 @@ class _AddFirstPodcastPage extends ConsumerWidget {
             icon: const Icon(Icons.search),
             label: const Text('Search podcasts'),
             onPressed: () async {
-              await context.push<void>(AppRoutes.search);
-              onPodcastAdded();
+              final done = await context.push<bool>(
+                AppRoutes.search,
+                extra: true,
+              );
+              if (done == true) onPodcastAdded();
             },
           ),
           const SizedBox(height: 12),
@@ -299,8 +304,11 @@ class _AddFirstPodcastPage extends ConsumerWidget {
             icon: const Icon(Icons.link),
             label: const Text('Add by RSS URL'),
             onPressed: () async {
-              await context.push<void>(AppRoutes.addPodcast);
-              onPodcastAdded();
+              final done = await context.push<bool>(
+                AppRoutes.addPodcast,
+                extra: true,
+              );
+              if (done == true) onPodcastAdded();
             },
           ),
         ],

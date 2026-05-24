@@ -127,14 +127,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.search,
         parentNavigatorKey: _rootKey,
-        builder: (_, __) => const SearchScreen(),
+        builder: (_, state) => SearchScreen(
+          fromOnboarding: state.extra == true,
+        ),
         routes: [
           GoRoute(
             path: 'result',
             parentNavigatorKey: _rootKey,
             builder: (_, state) {
-              final result = state.extra as PodcastSearchResult;
-              return SearchResultDetailScreen(result: result);
+              final (result, fromOnboarding) =
+                  state.extra as (PodcastSearchResult, bool);
+              return SearchResultDetailScreen(
+                result: result,
+                fromOnboarding: fromOnboarding,
+              );
             },
           ),
         ],
@@ -142,7 +148,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.addPodcast,
         parentNavigatorKey: _rootKey,
-        builder: (_, __) => const AddPodcastScreen(),
+        builder: (_, state) => AddPodcastScreen(
+          fromOnboarding: state.extra == true,
+        ),
       ),
       GoRoute(
         path: AppRoutes.player,

@@ -13,7 +13,9 @@ import '../providers/search_providers.dart';
 final _log = Logger('SearchScreen');
 
 class SearchScreen extends ConsumerStatefulWidget {
-  const SearchScreen({super.key});
+  const SearchScreen({super.key, this.fromOnboarding = false});
+
+  final bool fromOnboarding;
 
   @override
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
@@ -60,6 +62,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           onChanged: (v) => setState(() => _query = v.trim()),
           textInputAction: TextInputAction.search,
         ),
+        actions: [
+          if (widget.fromOnboarding)
+            TextButton(
+              onPressed: () => context.pop(true),
+              child: const Text('Done'),
+            ),
+        ],
       ),
       body: _query.isEmpty
           ? const _EmptySearch()
@@ -75,7 +84,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                         ),
                       ),
                     )
-                  : _ResultList(results: list),
+                  : _ResultList(
+                      results: list,
+                      fromOnboarding: widget.fromOnboarding,
+                    ),
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Center(child: Text('Search error: $e')),
             ),
@@ -121,9 +133,13 @@ class _EmptySearch extends StatelessWidget {
 }
 
 class _ResultList extends StatelessWidget {
-  const _ResultList({required this.results});
+  const _ResultList({
+    required this.results,
+    required this.fromOnboarding,
+  });
 
   final List<PodcastSearchResult> results;
+  final bool fromOnboarding;
 
   @override
   Widget build(BuildContext context) {
@@ -132,28 +148,38 @@ class _ResultList extends StatelessWidget {
       child: ListView.separated(
         itemCount: results.length,
         separatorBuilder: (_, __) => const Divider(height: 1),
-        itemBuilder: (context, index) => _ResultTile(result: results[index]),
+        itemBuilder: (context, index) => _ResultTile(
+          result: results[index],
+          fromOnboarding: fromOnboarding,
+        ),
       ),
     );
   }
 }
 
 class _ResultTile extends ConsumerWidget {
-  const _ResultTile({required this.result});
+  const _ResultTile({required this.result, required this.fromOnboarding});
 
   final PodcastSearchResult result;
+  final bool fromOnboarding;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final label = result.author != null
         ? '${result.title}, by ${result.author}'
         : result.title;
-    void openDetail() => context.push(AppRoutes.searchResult, extra: result);
+    Future<void> openDetail() async {
+      final done = await context.push<bool>(
+        AppRoutes.searchResult,
+        extra: (result, fromOnboarding),
+      );
+      if (done == true && context.mounted) context.pop(true);
+    }
 
     return Semantics(
       label: label,
       button: true,
-      onTap: openDetail,
+      onTap: () => openDetail(),
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Follow'): () =>
             _follow(context, ref),
@@ -164,7 +190,7 @@ class _ResultTile extends ConsumerWidget {
             horizontal: 16,
             vertical: 8,
           ),
-          onTap: openDetail,
+          onTap: () => openDetail(),
           leading: _Artwork(url: result.artworkUrl),
           title: Text(
             result.title,

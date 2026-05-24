@@ -4,6 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
 
 import '../../../../data/rss/parsed_feed.dart';
@@ -17,9 +18,14 @@ import '../providers/search_preview_providers.dart';
 final _log = Logger('SearchResultDetailScreen');
 
 class SearchResultDetailScreen extends ConsumerStatefulWidget {
-  const SearchResultDetailScreen({required this.result, super.key});
+  const SearchResultDetailScreen({
+    required this.result,
+    this.fromOnboarding = false,
+    super.key,
+  });
 
   final PodcastSearchResult result;
+  final bool fromOnboarding;
 
   @override
   ConsumerState<SearchResultDetailScreen> createState() =>
@@ -162,6 +168,11 @@ class _SearchResultDetailScreenState
               ),
             ),
           ),
+          if (widget.fromOnboarding)
+            TextButton(
+              onPressed: () => context.pop(true),
+              child: const Text('Done'),
+            ),
         ],
       ),
       body: CustomScrollView(
