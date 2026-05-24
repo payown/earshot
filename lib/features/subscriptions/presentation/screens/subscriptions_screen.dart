@@ -48,7 +48,7 @@ class SubscriptionsScreen extends ConsumerWidget {
         data: (podcasts) {
           if (podcasts.isEmpty) {
             return _EmptyState(
-              onAddTap: () => context.push(AppRoutes.addPodcast),
+              onAddTap: () => _showAddPodcastSheet(context),
             );
           }
 
@@ -100,14 +100,17 @@ class SubscriptionsScreen extends ConsumerWidget {
                   SliverToBoxAdapter(
                     child: Semantics(
                       header: true,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                        child: Text(
-                          'Folders',
-                          style: Theme.of(context).textTheme.labelLarge
-                              ?.copyWith(
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
+                      label: 'Folders',
+                      child: ExcludeSemantics(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                          child: Text(
+                            'Folders',
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                          ),
                         ),
                       ),
                     ),
@@ -157,24 +160,56 @@ class SubscriptionsScreen extends ConsumerWidget {
           ),
         ),
       ),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          FloatingActionButton.small(
-            heroTag: 'fab_search',
-            onPressed: () => context.push(AppRoutes.search),
-            tooltip: 'Search podcasts',
-            child: const Icon(Icons.search),
-          ),
-          const SizedBox(height: 12),
-          FloatingActionButton(
-            heroTag: 'fab_add',
-            onPressed: () => context.push(AppRoutes.addPodcast),
-            tooltip: 'Add podcast by URL',
-            child: const Icon(Icons.add),
-          ),
-        ],
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddPodcastSheet(context),
+        tooltip: 'Add podcast',
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  void _showAddPodcastSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      barrierLabel: 'Dismiss Add Podcast options',
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Semantics(
+              header: true,
+              label: 'Add Podcast',
+              child: ExcludeSemantics(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Add Podcast',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const ExcludeSemantics(child: Icon(Icons.search)),
+              title: const Text('Search podcasts'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                context.push(AppRoutes.search);
+              },
+            ),
+            ListTile(
+              leading: const ExcludeSemantics(child: Icon(Icons.link)),
+              title: const Text('Add by URL'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                context.push(AppRoutes.addPodcast);
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
