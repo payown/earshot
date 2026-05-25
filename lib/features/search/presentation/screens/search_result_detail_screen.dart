@@ -9,6 +9,7 @@ import 'package:logging/logging.dart';
 
 import '../../../../data/rss/parsed_feed.dart';
 import '../../../player/presentation/providers/player_providers.dart';
+import '../../../player/presentation/widgets/now_playing_bar.dart';
 import '../../../subscriptions/data/podcast_exception.dart';
 import '../../../subscriptions/domain/podcast.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
@@ -131,6 +132,7 @@ class _SearchResultDetailScreenState
     final isLoading = _following || _unfollowing;
 
     return Scaffold(
+      bottomNavigationBar: const NowPlayingBar(),
       appBar: AppBar(
         title: Text(result.title),
         actions: [
