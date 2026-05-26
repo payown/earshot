@@ -71,7 +71,9 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
       }
       await _player.play();
     } on Exception catch (e) {
-      _log.severe('Failed to load audio: $e');
+      _log.severe('Failed to load audio for "${item.title}": $e');
+      mediaItem.add(null);
+      await stop();
     }
   }
 

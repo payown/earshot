@@ -140,7 +140,8 @@ class RssParser {
 
   String? _enclosureUrl(XmlElement item) {
     final enclosure = item.findElements('enclosure').firstOrNull;
-    return enclosure?.getAttribute('url');
+    final url = enclosure?.getAttribute('url')?.trim();
+    return (url == null || url.isEmpty) ? null : url;
   }
 
   String? _itunesCategory(XmlElement channel) {
