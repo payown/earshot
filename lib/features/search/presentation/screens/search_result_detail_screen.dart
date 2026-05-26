@@ -7,6 +7,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
 
+import 'package:flutter_html/flutter_html.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../../../data/rss/parsed_feed.dart';
 import '../../../player/presentation/providers/player_providers.dart';
 import '../../../player/presentation/widgets/now_playing_bar.dart';
@@ -188,10 +191,14 @@ class _SearchResultDetailScreenState
           if (description != null)
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(
-                  description,
-                  style: Theme.of(context).textTheme.bodyMedium,
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+                child: Html(
+                  data: description,
+                  onLinkTap: (url, _, __) async {
+                    if (url == null) return;
+                    final uri = Uri.tryParse(url);
+                    if (uri != null) await launchUrl(uri);
+                  },
                 ),
               ),
             ),
