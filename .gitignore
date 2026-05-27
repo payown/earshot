@@ -77,3 +77,4 @@ coverage/
 secrets/
 *.p12
 *.mobileprovision
+lib/core/config/api_keys.dart
