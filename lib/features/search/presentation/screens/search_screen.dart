@@ -251,7 +251,6 @@ class _ResultTileState extends ConsumerState<_ResultTile> {
 
     final subscriptions = ref.watch(subscriptionsProvider).asData?.value ?? [];
     final isSubscribed = _isSubscribed(subscriptions);
-    final subscribedId = _subscribedId(subscriptions);
 
     return Semantics(
       label: label,
@@ -262,9 +261,13 @@ class _ResultTileState extends ConsumerState<_ResultTile> {
           const CustomSemanticsAction(label: 'Follow'): () {
             _follow();
           },
-        if (isSubscribed && subscribedId != null)
+        if (isSubscribed)
           const CustomSemanticsAction(label: 'Unfollow'): () {
-            _unfollow(subscribedId);
+            // Look up ID at callback time — DB will have updated by now.
+            final id = _subscribedId(
+              ref.read(subscriptionsProvider).asData?.value ?? [],
+            );
+            if (id != null) _unfollow(id);
           },
       },
       child: ExcludeSemantics(
