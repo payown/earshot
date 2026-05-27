@@ -92,6 +92,14 @@ class SettingsScreen extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push(AppRoutes.settingsPrivacy),
           ),
+          const ListTile(
+            title: Text('Search Privacy'),
+            subtitle: Text(
+              'When you search for podcasts, your search terms are sent to '
+              'the Podcast Index API (podcastindex.org). No account or '
+              'personal information is shared.',
+            ),
+          ),
           const Divider(),
           Semantics(
             header: true,
@@ -127,6 +135,10 @@ class SettingsScreen extends ConsumerWidget {
           const ListTile(
             title: Text('Version'),
             subtitle: Text('Phase 6 build'),
+          ),
+          const ListTile(
+            title: Text('Podcast search powered by Podcast Index'),
+            subtitle: Text('podcastindex.org'),
           ),
         ],
       ),

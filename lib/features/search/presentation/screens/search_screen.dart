@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
 
 import '../../../../core/router/app_router.dart';
+import '../../../../core/utils/text_utils.dart';
 import '../../../../features/subscriptions/data/podcast_exception.dart';
 import '../../../../features/subscriptions/domain/podcast.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
@@ -248,14 +249,16 @@ class _ResultTileState extends ConsumerState<_ResultTile> {
     final subscriptions = ref.watch(subscriptionsProvider).asData?.value ?? [];
     final isSubscribed = _isSubscribed(subscriptions);
 
-    // Include subscription state in the label so VoiceOver announces it and,
-    // crucially, so the label change forces a semantics node refresh when the
-    // subscription state flips — workaround for flutter/flutter#149613 where
-    // customSemanticsActions aren't picked up on a focused element.
+    // Label includes following state (forces semantics node refresh on state
+    // change — workaround for flutter/flutter#149613) and the full stripped
+    // description so VoiceOver announces it without requiring navigation.
     final baseLabel = widget.result.author != null
         ? '${widget.result.title}, by ${widget.result.author}'
         : widget.result.title;
-    final label = isSubscribed ? '$baseLabel, Following' : baseLabel;
+    final followLabel = isSubscribed ? ', Following' : '';
+    final desc = stripHtml(widget.result.description);
+    final descLabel = desc.isNotEmpty ? ', $desc' : '';
+    final label = '$baseLabel$followLabel$descLabel';
 
     return Semantics(
       label: label,
