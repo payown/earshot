@@ -168,6 +168,13 @@ class _ResultTile extends ConsumerWidget {
     final label = result.author != null
         ? '${result.title}, by ${result.author}'
         : result.title;
+
+    final subscriptions = ref.watch(subscriptionsProvider).asData?.value ?? [];
+    final subscribedPodcast = subscriptions
+        .where((p) => p.rssUrl == result.feedUrl)
+        .firstOrNull;
+    final isSubscribed = subscribedPodcast != null;
+
     Future<void> openDetail() async {
       final done = await context.push<bool>(
         AppRoutes.searchResult,
@@ -179,10 +186,13 @@ class _ResultTile extends ConsumerWidget {
     return Semantics(
       label: label,
       button: true,
-      onTap: () => openDetail(),
+      onTap: openDetail,
       customSemanticsActions: {
-        const CustomSemanticsAction(label: 'Follow'): () =>
-            _follow(context, ref),
+        CustomSemanticsAction(
+          label: isSubscribed ? 'Unfollow' : 'Follow',
+        ): isSubscribed
+            ? () => _unfollow(context, ref, subscribedPodcast.id)
+            : () => _follow(context, ref),
       },
       child: ExcludeSemantics(
         child: ListTile(
@@ -226,6 +236,41 @@ class _ResultTile extends ConsumerWidget {
       // already following — no-op
     } catch (e) {
       _log.warning('Follow from search list failed for ${result.feedUrl}: $e');
+      if (context.mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Could not follow ${result.title}. Try again.',
+          TextDirection.ltr,
+        );
+      }
+    }
+  }
+
+  Future<void> _unfollow(
+    BuildContext context,
+    WidgetRef ref,
+    int podcastId,
+  ) async {
+    try {
+      await ref.read(podcastRepositoryProvider).unsubscribe(podcastId);
+      if (context.mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Unfollowed ${result.title}',
+          TextDirection.ltr,
+        );
+      }
+    } catch (e) {
+      _log.warning(
+        'Unfollow from search list failed for ${result.feedUrl}: $e',
+      );
+      if (context.mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Could not unfollow ${result.title}. Try again.',
+          TextDirection.ltr,
+        );
+      }
     }
   }
 }
