@@ -123,6 +123,37 @@ void main() {
       });
     });
 
+    group('enclosure URL trimming', () {
+      test('trims leading and trailing whitespace from enclosure url', () {
+        final xml = '''<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <title>T</title>
+  <item>
+    <title>Ep</title>
+    <enclosure url="  https://example.com/ep.mp3  " type="audio/mpeg" length="1"/>
+  </item>
+</channel></rss>''';
+        final feed = parser.parse(xml);
+        expect(feed.episodes.single.audioUrl, 'https://example.com/ep.mp3');
+      });
+
+      test(
+        'treats whitespace-only enclosure url as missing (episode skipped)',
+        () {
+          final xml = '''<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <title>T</title>
+  <item>
+    <title>Ep</title>
+    <enclosure url="   " type="audio/mpeg" length="1"/>
+  </item>
+</channel></rss>''';
+          final feed = parser.parse(xml);
+          expect(feed.episodes, isEmpty);
+        },
+      );
+    });
+
     group('error handling', () {
       test('throws RssParseException on invalid XML', () {
         expect(

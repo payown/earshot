@@ -13,6 +13,11 @@
 		<string>media.payown.earshot.refreshFeeds</string>
 		<string>media.payown.earshot.downloadEpisodes</string>
 	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsForMedia</key>
+		<true/>
+	</dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
