@@ -6,6 +6,7 @@ import 'package:logging/logging.dart';
 
 import '../../../../core/router/app_router.dart';
 import '../../../../features/subscriptions/data/podcast_exception.dart';
+import '../../../../features/subscriptions/domain/podcast.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/search_result.dart';
 import '../providers/search_providers.dart';
@@ -157,42 +158,122 @@ class _ResultList extends StatelessWidget {
   }
 }
 
-class _ResultTile extends ConsumerWidget {
+class _ResultTile extends ConsumerStatefulWidget {
   const _ResultTile({required this.result, required this.fromOnboarding});
 
   final PodcastSearchResult result;
   final bool fromOnboarding;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final label = result.author != null
-        ? '${result.title}, by ${result.author}'
-        : result.title;
+  ConsumerState<_ResultTile> createState() => _ResultTileState();
+}
 
-    final subscriptions = ref.watch(subscriptionsProvider).asData?.value ?? [];
-    final subscribedPodcast = subscriptions
-        .where((p) => p.rssUrl == result.feedUrl)
-        .firstOrNull;
-    final isSubscribed = subscribedPodcast != null;
+class _ResultTileState extends ConsumerState<_ResultTile> {
+  // Optimistic local state: flips the action label immediately on tap
+  // without waiting for the network + DB round-trip.
+  // null = defer to subscriptionsProvider; true/false = local override.
+  bool? _optimisticFollowed;
 
-    Future<void> openDetail() async {
-      final done = await context.push<bool>(
-        AppRoutes.searchResult,
-        extra: (result, fromOnboarding),
+  bool _isSubscribed(List<Podcast> subscriptions) =>
+      _optimisticFollowed ??
+      subscriptions.any((p) => p.rssUrl == widget.result.feedUrl);
+
+  int? _subscribedId(List<Podcast> subscriptions) => subscriptions
+      .where((p) => p.rssUrl == widget.result.feedUrl)
+      .firstOrNull
+      ?.id;
+
+  Future<void> _openDetail() async {
+    final done = await context.push<bool>(
+      AppRoutes.searchResult,
+      extra: (widget.result, widget.fromOnboarding),
+    );
+    if (done == true && mounted) context.pop(true);
+  }
+
+  Future<void> _follow() async {
+    setState(() => _optimisticFollowed = true);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Following ${widget.result.title}',
+      TextDirection.ltr,
+    );
+    try {
+      await ref
+          .read(podcastRepositoryProvider)
+          .subscribe(widget.result.feedUrl);
+    } on PodcastAlreadySubscribedException {
+      // already following — optimistic state is correct, keep it
+    } catch (e) {
+      _log.warning(
+        'Follow from search list failed for ${widget.result.feedUrl}: $e',
       );
-      if (done == true && context.mounted) context.pop(true);
+      setState(() => _optimisticFollowed = null);
+      if (mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Could not follow ${widget.result.title}. Try again.',
+          TextDirection.ltr,
+        );
+      }
     }
+  }
+
+  Future<void> _unfollow(int podcastId) async {
+    setState(() => _optimisticFollowed = false);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Unfollowed ${widget.result.title}',
+      TextDirection.ltr,
+    );
+    try {
+      await ref.read(podcastRepositoryProvider).unsubscribe(podcastId);
+    } catch (e) {
+      _log.warning(
+        'Unfollow from search list failed for ${widget.result.feedUrl}: $e',
+      );
+      setState(() => _optimisticFollowed = null);
+      if (mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Could not unfollow ${widget.result.title}. Try again.',
+          TextDirection.ltr,
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final subscriptions = ref.watch(subscriptionsProvider).asData?.value ?? [];
+    final isSubscribed = _isSubscribed(subscriptions);
+
+    // Include subscription state in the label so VoiceOver announces it and,
+    // crucially, so the label change forces a semantics node refresh when the
+    // subscription state flips — workaround for flutter/flutter#149613 where
+    // customSemanticsActions aren't picked up on a focused element.
+    final baseLabel = widget.result.author != null
+        ? '${widget.result.title}, by ${widget.result.author}'
+        : widget.result.title;
+    final label = isSubscribed ? '$baseLabel, Following' : baseLabel;
 
     return Semantics(
       label: label,
       button: true,
-      onTap: openDetail,
+      onTap: _openDetail,
       customSemanticsActions: {
-        CustomSemanticsAction(
-          label: isSubscribed ? 'Unfollow' : 'Follow',
-        ): isSubscribed
-            ? () => _unfollow(context, ref, subscribedPodcast.id)
-            : () => _follow(context, ref),
+        if (!isSubscribed)
+          const CustomSemanticsAction(label: 'Follow'): () {
+            _follow();
+          },
+        if (isSubscribed)
+          const CustomSemanticsAction(label: 'Unfollow'): () {
+            // Look up ID at callback time — DB will have updated by now.
+            final id = _subscribedId(
+              ref.read(subscriptionsProvider).asData?.value ?? [],
+            );
+            if (id != null) _unfollow(id);
+          },
       },
       child: ExcludeSemantics(
         child: ListTile(
@@ -200,17 +281,17 @@ class _ResultTile extends ConsumerWidget {
             horizontal: 16,
             vertical: 8,
           ),
-          onTap: () => openDetail(),
-          leading: _Artwork(url: result.artworkUrl),
+          onTap: _openDetail,
+          leading: _Artwork(url: widget.result.artworkUrl),
           title: Text(
-            result.title,
+            widget.result.title,
             style: Theme.of(context).textTheme.titleSmall,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          subtitle: result.author != null
+          subtitle: widget.result.author != null
               ? Text(
-                  result.author!,
+                  widget.result.author!,
                   style: Theme.of(context).textTheme.bodySmall,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -220,58 +301,6 @@ class _ResultTile extends ConsumerWidget {
         ),
       ),
     );
-  }
-
-  Future<void> _follow(BuildContext context, WidgetRef ref) async {
-    try {
-      await ref.read(podcastRepositoryProvider).subscribe(result.feedUrl);
-      if (context.mounted) {
-        SemanticsService.sendAnnouncement(
-          View.of(context),
-          'Following ${result.title}',
-          TextDirection.ltr,
-        );
-      }
-    } on PodcastAlreadySubscribedException {
-      // already following — no-op
-    } catch (e) {
-      _log.warning('Follow from search list failed for ${result.feedUrl}: $e');
-      if (context.mounted) {
-        SemanticsService.sendAnnouncement(
-          View.of(context),
-          'Could not follow ${result.title}. Try again.',
-          TextDirection.ltr,
-        );
-      }
-    }
-  }
-
-  Future<void> _unfollow(
-    BuildContext context,
-    WidgetRef ref,
-    int podcastId,
-  ) async {
-    try {
-      await ref.read(podcastRepositoryProvider).unsubscribe(podcastId);
-      if (context.mounted) {
-        SemanticsService.sendAnnouncement(
-          View.of(context),
-          'Unfollowed ${result.title}',
-          TextDirection.ltr,
-        );
-      }
-    } catch (e) {
-      _log.warning(
-        'Unfollow from search list failed for ${result.feedUrl}: $e',
-      );
-      if (context.mounted) {
-        SemanticsService.sendAnnouncement(
-          View.of(context),
-          'Could not unfollow ${result.title}. Try again.',
-          TextDirection.ltr,
-        );
-      }
-    }
   }
 }
 
