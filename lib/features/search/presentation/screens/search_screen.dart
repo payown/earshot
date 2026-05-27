@@ -193,17 +193,15 @@ class _ResultTileState extends ConsumerState<_ResultTile> {
 
   Future<void> _follow() async {
     setState(() => _optimisticFollowed = true);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Following ${widget.result.title}',
+      TextDirection.ltr,
+    );
     try {
       await ref
           .read(podcastRepositoryProvider)
           .subscribe(widget.result.feedUrl);
-      if (mounted) {
-        SemanticsService.sendAnnouncement(
-          View.of(context),
-          'Following ${widget.result.title}',
-          TextDirection.ltr,
-        );
-      }
     } on PodcastAlreadySubscribedException {
       // already following — optimistic state is correct, keep it
     } catch (e) {
@@ -223,15 +221,13 @@ class _ResultTileState extends ConsumerState<_ResultTile> {
 
   Future<void> _unfollow(int podcastId) async {
     setState(() => _optimisticFollowed = false);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Unfollowed ${widget.result.title}',
+      TextDirection.ltr,
+    );
     try {
       await ref.read(podcastRepositoryProvider).unsubscribe(podcastId);
-      if (mounted) {
-        SemanticsService.sendAnnouncement(
-          View.of(context),
-          'Unfollowed ${widget.result.title}',
-          TextDirection.ltr,
-        );
-      }
     } catch (e) {
       _log.warning(
         'Unfollow from search list failed for ${widget.result.feedUrl}: $e',
