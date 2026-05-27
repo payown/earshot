@@ -262,8 +262,14 @@ class _ResultTileState extends ConsumerState<_ResultTile> {
       button: true,
       onTap: _openDetail,
       customSemanticsActions: {
-        CustomSemanticsAction(label: isSubscribed ? 'Unfollow' : 'Follow'):
-            isSubscribed ? () => _unfollow(subscribedId ?? 0) : _follow,
+        if (!isSubscribed)
+          const CustomSemanticsAction(label: 'Follow'): () {
+            _follow();
+          },
+        if (isSubscribed && subscribedId != null)
+          const CustomSemanticsAction(label: 'Unfollow'): () {
+            _unfollow(subscribedId);
+          },
       },
       child: ExcludeSemantics(
         child: ListTile(
