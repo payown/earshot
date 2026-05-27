@@ -245,12 +245,17 @@ class _ResultTileState extends ConsumerState<_ResultTile> {
 
   @override
   Widget build(BuildContext context) {
-    final label = widget.result.author != null
-        ? '${widget.result.title}, by ${widget.result.author}'
-        : widget.result.title;
-
     final subscriptions = ref.watch(subscriptionsProvider).asData?.value ?? [];
     final isSubscribed = _isSubscribed(subscriptions);
+
+    // Include subscription state in the label so VoiceOver announces it and,
+    // crucially, so the label change forces a semantics node refresh when the
+    // subscription state flips — workaround for flutter/flutter#149613 where
+    // customSemanticsActions aren't picked up on a focused element.
+    final baseLabel = widget.result.author != null
+        ? '${widget.result.title}, by ${widget.result.author}'
+        : widget.result.title;
+    final label = isSubscribed ? '$baseLabel, Following' : baseLabel;
 
     return Semantics(
       label: label,
