@@ -18,6 +18,7 @@ final inboxEpisodesByFolderProvider = StreamProvider.family<List<Episode>, int>(
       ..where(
         (e) =>
             e.status.equals(EpisodeStatus.newEpisode.name) &
+            e.inboxDismissed.equals(false) &
             e.podcastId.isInQuery(podcastIdsSubquery),
       )
       ..orderBy([(e) => OrderingTerm.desc(e.pubDate)]);
