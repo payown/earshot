@@ -48,3 +48,11 @@ final inboxOptInOnlyProvider =
         write: (r, v) => r.setInboxOptInOnly(value: v),
       ),
     );
+
+final wifiOnlyDownloadsProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.isWifiOnlyDownloads(),
+        write: (r, v) => r.setWifiOnlyDownloads(value: v),
+      ),
+    );

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:logging/logging.dart';
@@ -8,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../../data/db/app_database.dart';
 import '../../../data/db/enums.dart';
+import '../../../features/settings/data/app_settings_repository.dart';
 
 final _log = Logger('DownloadManager');
 
@@ -15,11 +17,14 @@ class DownloadManager {
   DownloadManager({
     required AppDatabase database,
     required Dio dio,
+    required AppSettingsRepository settings,
   }) : _db = database,
-       _dio = dio;
+       _dio = dio,
+       _settings = settings;
 
   final AppDatabase _db;
   final Dio _dio;
+  final AppSettingsRepository _settings;
 
   final Map<int, CancelToken> _cancelTokens = {};
 
@@ -109,9 +114,12 @@ class DownloadManager {
     }
   }
 
-  // Stub: always returns true. Replace with connectivity_plus check once
-  // the xml version conflict with its dbus dependency is resolved.
-  Future<bool> _isWifiAvailable() async => true;
+  Future<bool> _isWifiAvailable() async {
+    final wifiOnly = await _settings.isWifiOnlyDownloads();
+    if (!wifiOnly) return true;
+    final result = await Connectivity().checkConnectivity();
+    return result.contains(ConnectivityResult.wifi);
+  }
 
   Future<void> _setStatus(int episodeId, DownloadStatus status) async {
     await (_db.update(_db.episodes)..where((e) => e.id.equals(episodeId)))
