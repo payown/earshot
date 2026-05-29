@@ -3,6 +3,7 @@ import 'package:drift/native.dart';
 import 'package:earshot/data/db/app_database.dart';
 import 'package:earshot/data/rss/parsed_feed.dart';
 import 'package:earshot/data/rss/rss_parser.dart';
+import 'package:earshot/features/settings/data/app_settings_repository.dart';
 import 'package:earshot/features/subscriptions/data/podcast_exception.dart';
 import 'package:earshot/features/subscriptions/data/podcast_repository_impl.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,7 +25,12 @@ void main() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
     dio = MockDio();
     parser = MockRssParser();
-    repo = PodcastRepositoryImpl(database: db, dio: dio, rssParser: parser);
+    repo = PodcastRepositoryImpl(
+      database: db,
+      dio: dio,
+      rssParser: parser,
+      settings: AppSettingsRepositoryImpl(database: db),
+    );
   });
 
   tearDown(() => db.close());

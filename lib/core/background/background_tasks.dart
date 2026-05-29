@@ -36,6 +36,7 @@ Future<bool> _runFeedRefresh() async {
       database: db,
       dio: _buildDio(),
       rssParser: RssParser(),
+      settings: AppSettingsRepositoryImpl(database: db),
     );
     await repo.refreshAllFeeds();
     return true;

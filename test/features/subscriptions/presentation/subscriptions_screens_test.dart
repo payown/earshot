@@ -39,6 +39,7 @@ Podcast _fakePodcast({
   author: author,
   autoQueue: false,
   notificationEnabled: false,
+  inboxExcluded: false,
   createdAt: _now,
 );
 

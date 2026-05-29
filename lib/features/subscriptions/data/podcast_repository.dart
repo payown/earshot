@@ -21,5 +21,7 @@ abstract interface class PodcastRepository {
 
   Future<void> clearInbox();
 
+  Future<void> setInboxExcluded(int podcastId, {required bool excluded});
+
   Future<void> updateSpeedOverride(int podcastId, double? speed);
 }

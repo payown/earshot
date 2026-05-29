@@ -94,6 +94,12 @@ class AllPodcastsScreen extends ConsumerWidget {
           label: podcast.autoQueue ? 'Disable auto-queue' : 'Enable auto-queue',
           onInvoke: () {},
         ),
+        PodcastAction.toggleInboxExcluded => PodcastQuickActionItem(
+          label: podcast.inboxExcluded
+              ? 'Include ${podcast.title} in inbox'
+              : 'Exclude ${podcast.title} from inbox',
+          onInvoke: () => _toggleInboxExcluded(context, ref, podcast),
+        ),
         PodcastAction.unsubscribe => PodcastQuickActionItem(
           label: action.label,
           onInvoke: () => _unfollow(context, ref, podcast),
@@ -116,6 +122,36 @@ class AllPodcastsScreen extends ConsumerWidget {
         ),
       };
     }).toList();
+  }
+
+  Future<void> _toggleInboxExcluded(
+    BuildContext context,
+    WidgetRef ref,
+    Podcast podcast,
+  ) async {
+    final excluded = !podcast.inboxExcluded;
+    try {
+      await ref
+          .read(podcastRepositoryProvider)
+          .setInboxExcluded(podcast.id, excluded: excluded);
+      if (!context.mounted) return;
+      final message = excluded
+          ? '${podcast.title} excluded from inbox.'
+          : '${podcast.title} included in inbox.';
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        message,
+        TextDirection.ltr,
+      );
+    } catch (e) {
+      _log.warning('Failed to toggle inbox excluded for ${podcast.id}: $e');
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not update inbox setting. Try again.'),
+        ),
+      );
+    }
   }
 
   Future<void> _unfollow(

@@ -24,6 +24,7 @@ Podcast _fakePodcast({int id = 1, String title = 'Test Podcast'}) => Podcast(
   author: 'Jane Smith',
   autoQueue: false,
   notificationEnabled: false,
+  inboxExcluded: false,
   createdAt: _now,
 );
 
