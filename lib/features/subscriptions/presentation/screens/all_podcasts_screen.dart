@@ -40,20 +40,10 @@ class AllPodcastsScreen extends ConsumerWidget {
             ? const Center(child: Text('No podcasts yet.'))
             : ListView.builder(
                 itemCount: list.length,
-                itemBuilder: (ctx, index) {
-                  final podcast = list[index];
-                  return PodcastListTile(
-                    podcast: podcast,
-                    onTap: () =>
-                        context.push(AppRoutes.podcastDetail(podcast.id)),
-                    quickActions: _buildActions(
-                      context,
-                      ref,
-                      podcast,
-                      podcastActions,
-                    ),
-                  );
-                },
+                itemBuilder: (ctx, index) => _PodcastTileItem(
+                  podcast: list[index],
+                  podcastActions: podcastActions,
+                ),
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, stack) {
@@ -71,13 +61,85 @@ class AllPodcastsScreen extends ConsumerWidget {
       ),
     );
   }
+}
 
-  List<PodcastQuickActionItem> _buildActions(
-    BuildContext context,
-    WidgetRef ref,
-    Podcast podcast,
-    List<PodcastAction> order,
-  ) {
+class _PodcastTileItem extends ConsumerStatefulWidget {
+  const _PodcastTileItem({
+    required this.podcast,
+    required this.podcastActions,
+  });
+
+  final Podcast podcast;
+  final List<PodcastAction> podcastActions;
+
+  @override
+  ConsumerState<_PodcastTileItem> createState() => _PodcastTileItemState();
+}
+
+class _PodcastTileItemState extends ConsumerState<_PodcastTileItem> {
+  // Optimistic local state: flips the action label immediately on tap
+  // without waiting for the DB round-trip — same pattern as Follow/Unfollow.
+  // null = defer to podcast.inboxExcluded; true/false = local override.
+  bool? _optimisticExcluded;
+
+  bool get _effectiveExcluded =>
+      _optimisticExcluded ?? widget.podcast.inboxExcluded;
+
+  Future<void> _toggleInboxExcluded() async {
+    final excluded = !_effectiveExcluded;
+    setState(() => _optimisticExcluded = excluded);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      excluded
+          ? '${widget.podcast.title} excluded from inbox.'
+          : '${widget.podcast.title} included in inbox.',
+      TextDirection.ltr,
+    );
+    try {
+      await ref
+          .read(podcastRepositoryProvider)
+          .setInboxExcluded(widget.podcast.id, excluded: excluded);
+    } catch (e) {
+      _log.warning(
+        'Failed to toggle inbox excluded for ${widget.podcast.id}: $e',
+      );
+      setState(() => _optimisticExcluded = null);
+      if (mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Could not update inbox setting.',
+          TextDirection.ltr,
+        );
+      }
+    }
+  }
+
+  Future<void> _unfollow() async {
+    try {
+      await ref.read(podcastRepositoryProvider).unsubscribe(widget.podcast.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unfollowed ${widget.podcast.title}'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Unfollowed ${widget.podcast.title}.',
+        TextDirection.ltr,
+      );
+    } catch (e) {
+      _log.warning('Failed to unfollow ${widget.podcast.rssUrl}: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not unfollow. Try again.')),
+      );
+    }
+  }
+
+  List<PodcastQuickActionItem> _buildActions(List<PodcastAction> order) {
+    final podcast = widget.podcast;
     return order.map((action) {
       return switch (action) {
         PodcastAction.open => PodcastQuickActionItem(
@@ -95,14 +157,14 @@ class AllPodcastsScreen extends ConsumerWidget {
           onInvoke: () {},
         ),
         PodcastAction.toggleInboxExcluded => PodcastQuickActionItem(
-          label: podcast.inboxExcluded
+          label: _effectiveExcluded
               ? 'Include ${podcast.title} in inbox'
               : 'Exclude ${podcast.title} from inbox',
-          onInvoke: () => _toggleInboxExcluded(context, ref, podcast),
+          onInvoke: _toggleInboxExcluded,
         ),
         PodcastAction.unsubscribe => PodcastQuickActionItem(
           label: action.label,
-          onInvoke: () => _unfollow(context, ref, podcast),
+          onInvoke: _unfollow,
         ),
         PodcastAction.share => PodcastQuickActionItem(
           label: action.label,
@@ -124,61 +186,17 @@ class AllPodcastsScreen extends ConsumerWidget {
     }).toList();
   }
 
-  Future<void> _toggleInboxExcluded(
-    BuildContext context,
-    WidgetRef ref,
-    Podcast podcast,
-  ) async {
-    final excluded = !podcast.inboxExcluded;
-    try {
-      await ref
-          .read(podcastRepositoryProvider)
-          .setInboxExcluded(podcast.id, excluded: excluded);
-      if (!context.mounted) return;
-      final message = excluded
-          ? '${podcast.title} excluded from inbox.'
-          : '${podcast.title} included in inbox.';
-      SemanticsService.sendAnnouncement(
-        View.of(context),
-        message,
-        TextDirection.ltr,
-      );
-    } catch (e) {
-      _log.warning('Failed to toggle inbox excluded for ${podcast.id}: $e');
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not update inbox setting. Try again.'),
-        ),
-      );
-    }
-  }
+  @override
+  Widget build(BuildContext context) {
+    // Include excluded state in the semantic label to force VoiceOver to
+    // refresh the node when the state changes (flutter/flutter#149613).
+    final semanticSuffix = _effectiveExcluded ? ', Excluded from inbox' : '';
 
-  Future<void> _unfollow(
-    BuildContext context,
-    WidgetRef ref,
-    Podcast podcast,
-  ) async {
-    try {
-      await ref.read(podcastRepositoryProvider).unsubscribe(podcast.id);
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Unfollowed ${podcast.title}'),
-          duration: const Duration(seconds: 3),
-        ),
-      );
-      SemanticsService.sendAnnouncement(
-        View.of(context),
-        'Unfollowed ${podcast.title}.',
-        TextDirection.ltr,
-      );
-    } catch (e) {
-      _log.warning('Failed to unfollow ${podcast.rssUrl}: $e');
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not unfollow. Try again.')),
-      );
-    }
+    return PodcastListTile(
+      podcast: widget.podcast,
+      onTap: () => context.push(AppRoutes.podcastDetail(widget.podcast.id)),
+      quickActions: _buildActions(widget.podcastActions),
+      semanticSuffix: semanticSuffix,
+    );
   }
 }
