@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:go_router/go_router.dart';
@@ -59,7 +60,24 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             Expanded(
               child: PageView(
                 controller: _pageController,
-                onPageChanged: (i) => setState(() => _currentPage = i),
+                onPageChanged: (i) {
+                  setState(() => _currentPage = i);
+                  const titles = [
+                    'Welcome to Earshot',
+                    'How your content flows',
+                    'Your Privacy',
+                    'Quick Actions',
+                    'Queue expiration',
+                    'Add your first podcast',
+                    "You're all set",
+                  ];
+                  final title = i < titles.length ? titles[i] : '';
+                  SemanticsService.sendAnnouncement(
+                    View.of(context),
+                    'Page ${i + 1} of $_totalPages: $title',
+                    TextDirection.ltr,
+                  );
+                },
                 children: [
                   const _OnboardingPage(
                     icon: Icons.headphones,
@@ -122,11 +140,17 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     ),
                   const Spacer(),
                   if (_currentPage < _totalPages - 1)
-                    FilledButton(
-                      onPressed: (_currentPage == 5 && !_hasAddedPodcast)
-                          ? null
-                          : _nextPage,
-                      child: const Text('Next'),
+                    Semantics(
+                      enabled: _currentPage != 5 || _hasAddedPodcast,
+                      hint: (_currentPage == 5 && !_hasAddedPodcast)
+                          ? 'Add a podcast first to continue'
+                          : null,
+                      child: FilledButton(
+                        onPressed: (_currentPage == 5 && !_hasAddedPodcast)
+                            ? null
+                            : _nextPage,
+                        child: const Text('Next'),
+                      ),
                     )
                   else
                     FilledButton(
@@ -182,15 +206,17 @@ class _OnboardingPage extends StatelessWidget {
             icon,
             size: 80,
             color: Theme.of(context).colorScheme.primary,
-            semanticLabel: '',
           ),
           const SizedBox(height: 32),
           Semantics(
             header: true,
-            child: Text(
-              title,
-              style: Theme.of(context).textTheme.headlineSmall,
-              textAlign: TextAlign.center,
+            label: title,
+            child: ExcludeSemantics(
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -219,15 +245,17 @@ class _PrivacyPage extends StatelessWidget {
             Icons.lock_outline,
             size: 80,
             color: Theme.of(context).colorScheme.primary,
-            semanticLabel: '',
           ),
           const SizedBox(height: 32),
           Semantics(
             header: true,
-            child: Text(
-              'Your Privacy',
-              style: Theme.of(context).textTheme.headlineSmall,
-              textAlign: TextAlign.center,
+            label: 'Your Privacy',
+            child: ExcludeSemantics(
+              child: Text(
+                'Your Privacy',
+                style: Theme.of(context).textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -268,15 +296,17 @@ class _AddFirstPodcastPage extends ConsumerWidget {
             Icons.podcasts,
             size: 80,
             color: Theme.of(context).colorScheme.primary,
-            semanticLabel: '',
           ),
           const SizedBox(height: 32),
           Semantics(
             header: true,
-            child: Text(
-              'Add your first podcast',
-              style: Theme.of(context).textTheme.headlineSmall,
-              textAlign: TextAlign.center,
+            label: 'Add your first podcast',
+            child: ExcludeSemantics(
+              child: Text(
+                'Add your first podcast',
+                style: Theme.of(context).textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
           const SizedBox(height: 16),
