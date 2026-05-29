@@ -14,7 +14,11 @@ class PositionTracker {
 
   final AppDatabase _db;
   StreamSubscription<PlaybackState>? _subscription;
+  Timer? _periodicTimer;
 
+  int? _currentEpisodeId;
+  bool _isPlaying = false;
+  int _currentPositionSeconds = 0;
   int? _lastPositionSeconds;
   double _lastSpeed = 1.0;
 
@@ -22,22 +26,22 @@ class PositionTracker {
     Stream<PlaybackState> playbackStateStream,
     Stream<int?> episodeIdStream,
   ) {
-    int? currentEpisodeId;
     episodeIdStream.listen((id) {
       _lastPositionSeconds = null;
-      currentEpisodeId = id;
+      _currentEpisodeId = id;
     });
 
     _subscription = playbackStateStream.listen((state) async {
-      final id = currentEpisodeId;
+      final id = _currentEpisodeId;
       if (id == null) return;
 
       final position = state.position.inSeconds;
       _lastSpeed = state.speed;
+      _isPlaying = state.playing;
+      _currentPositionSeconds = position;
 
-      final wasPlaying = state.playing;
       final isPaused =
-          !wasPlaying &&
+          !state.playing &&
           state.processingState != AudioProcessingState.idle &&
           state.processingState != AudioProcessingState.completed;
 
@@ -52,6 +56,13 @@ class PositionTracker {
       }
 
       _lastPositionSeconds = position;
+    });
+
+    _periodicTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+      if (!_isPlaying) return;
+      final id = _currentEpisodeId;
+      if (id == null) return;
+      await _savePosition(id, _currentPositionSeconds);
     });
   }
 
@@ -130,5 +141,8 @@ class PositionTracker {
     _log.info('Marked episode $episodeId as played');
   }
 
-  void dispose() => _subscription?.cancel();
+  void dispose() {
+    _periodicTimer?.cancel();
+    _subscription?.cancel();
+  }
 }
