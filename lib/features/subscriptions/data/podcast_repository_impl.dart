@@ -223,9 +223,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
         chapterUrl: Value(ep.chapterUrl),
         transcriptUrl: Value(ep.transcriptUrl),
         status: preserveUserData ? const Value.absent() : Value(initialStatus),
-        inboxDismissed: preserveUserData
-            ? const Value.absent()
-            : Value(inboxDismissed),
+        inboxDismissed: Value(inboxDismissed),
       );
 
       if (preserveUserData) {
