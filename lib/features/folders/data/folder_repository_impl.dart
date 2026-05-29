@@ -203,7 +203,8 @@ class FolderRepositoryImpl implements FolderRepository {
                 ..where(
                   (e) =>
                       e.podcastId.equals(podcastId) &
-                      e.status.equals(EpisodeStatus.newEpisode.name),
+                      e.status.equals(EpisodeStatus.newEpisode.name) &
+                      e.inboxDismissed.equals(false),
                 )
                 ..orderBy([(e) => OrderingTerm.desc(e.pubDate)])
                 ..limit(1))

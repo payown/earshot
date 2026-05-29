@@ -19,7 +19,7 @@ abstract interface class PodcastRepository {
 
   Future<void> updateEpisodeStatus(int episodeId, EpisodeStatus status);
 
-  Future<void> markAllInboxPlayed();
+  Future<void> clearInbox();
 
   Future<void> updateSpeedOverride(int podcastId, double? speed);
 }

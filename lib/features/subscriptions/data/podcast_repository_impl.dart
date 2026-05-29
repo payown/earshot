@@ -241,17 +241,18 @@ class PodcastRepositoryImpl implements PodcastRepository {
   }
 
   @override
-  Future<void> markAllInboxPlayed() async {
-    final now = DateTime.now().toUtc();
+  Future<void> clearInbox() async {
     await (_db.update(
-      _db.episodes,
-    )..where((e) => e.status.equals(EpisodeStatus.newEpisode.name))).write(
-      EpisodesCompanion(
-        status: const Value(EpisodeStatus.played),
-        playedAt: Value(now),
-      ),
-    );
-    _log.info('Marked all inbox episodes as played');
+          _db.episodes,
+        )..where(
+          (e) =>
+              e.status.equals(EpisodeStatus.newEpisode.name) &
+              e.inboxDismissed.equals(false),
+        ))
+        .write(
+          const EpisodesCompanion(inboxDismissed: Value(true)),
+        );
+    _log.info('Cleared inbox');
   }
 
   @override

@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -95,8 +96,11 @@ class _MainShellState extends ConsumerState<MainShell> {
 
 final _inboxCountProvider = StreamProvider<int>((ref) {
   final db = ref.watch(appDatabaseProvider);
-  return (db.select(db.episodes)
-        ..where((e) => e.status.equals(EpisodeStatus.newEpisode.name)))
+  return (db.select(db.episodes)..where(
+        (e) =>
+            e.status.equals(EpisodeStatus.newEpisode.name) &
+            e.inboxDismissed.equals(false),
+      ))
       .watch()
       .map((rows) => rows.length);
 });

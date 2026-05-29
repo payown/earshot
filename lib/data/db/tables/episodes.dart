@@ -26,6 +26,8 @@ class Episodes extends Table {
   TextColumn get downloadPath => text().nullable()();
   IntColumn get positionSeconds => integer().withDefault(const Constant(0))();
   DateTimeColumn get playedAt => dateTime().nullable()();
+  BoolColumn get inboxDismissed =>
+      boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 
   @override

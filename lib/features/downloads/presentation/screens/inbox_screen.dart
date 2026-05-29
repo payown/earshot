@@ -29,9 +29,9 @@ class InboxScreen extends ConsumerWidget {
         actions: [
           if (allEpisodes.asData?.value.isNotEmpty ?? false)
             IconButton(
-              icon: const Icon(Icons.done_all),
-              tooltip: 'Mark all as played',
-              onPressed: () => _confirmMarkAllPlayed(context, ref),
+              icon: const Icon(Icons.clear_all),
+              tooltip: 'Clear inbox',
+              onPressed: () => _confirmClearInbox(context, ref),
             ),
           IconButton(
             icon: const Icon(Icons.settings),
@@ -120,17 +120,18 @@ class InboxScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _confirmMarkAllPlayed(
+  Future<void> _confirmClearInbox(
     BuildContext context,
     WidgetRef ref,
   ) async {
     final count = ref.read(_inboxEpisodesProvider).asData?.value.length ?? 0;
     final confirmed = await showDialog<bool>(
       context: context,
+      barrierLabel: 'Dismiss clear inbox dialog',
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Mark all as played?'),
+        title: const Text('Clear inbox?'),
         content: Text(
-          'This will clear all $count episodes from your inbox.',
+          'This will remove all $count episodes from your inbox. Their play status will not change.',
         ),
         actions: [
           TextButton(
@@ -139,7 +140,7 @@ class InboxScreen extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Mark all played'),
+            child: const Text('Clear inbox'),
           ),
         ],
       ),
@@ -147,13 +148,18 @@ class InboxScreen extends ConsumerWidget {
     if (!context.mounted) return;
     if (confirmed == true) {
       try {
-        await ref.read(podcastRepositoryProvider).markAllInboxPlayed();
+        await ref.read(podcastRepositoryProvider).clearInbox();
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Could not mark all as played. Try again.'),
+              content: Text('Could not clear inbox. Try again.'),
             ),
+          );
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            'Could not clear inbox. Try again.',
+            TextDirection.ltr,
           );
         }
       }
@@ -167,6 +173,7 @@ class InboxScreen extends ConsumerWidget {
   ) async {
     final confirmed = await showDialog<bool>(
       context: context,
+      barrierLabel: 'Dismiss delete episode dialog',
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete episode?'),
         content: Text('Remove "${episode.title}" from Inbox?'),
@@ -193,6 +200,11 @@ class InboxScreen extends ConsumerWidget {
               content: Text('Could not delete the download file. Try again.'),
             ),
           );
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            'Could not delete the download file. Try again.',
+            TextDirection.ltr,
+          );
         }
         return;
       }
@@ -207,17 +219,26 @@ class InboxScreen extends ConsumerWidget {
               content: Text('Could not mark episode as played. Try again.'),
             ),
           );
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            'Could not mark episode as played. Try again.',
+            TextDirection.ltr,
+          );
         }
       }
     }
   }
 }
 
-// Provider for inbox: all newEpisode-status episodes, newest first.
+// Provider for inbox: all non-dismissed newEpisode-status episodes, newest first.
 final _inboxEpisodesProvider = StreamProvider<List<Episode>>((ref) {
   final db = ref.watch(appDatabaseProvider);
   return (db.select(db.episodes)
-        ..where((e) => e.status.equals(EpisodeStatus.newEpisode.name))
+        ..where(
+          (e) =>
+              e.status.equals(EpisodeStatus.newEpisode.name) &
+              e.inboxDismissed.equals(false),
+        )
         ..orderBy([(e) => OrderingTerm.desc(e.pubDate)]))
       .watch()
       .map(
