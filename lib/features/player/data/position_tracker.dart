@@ -29,6 +29,10 @@ class PositionTracker {
     episodeIdStream.listen((id) {
       _lastPositionSeconds = null;
       _currentEpisodeId = id;
+      // Reset playing state so the periodic timer cannot write the previous
+      // episode's position to the new episode before fresh state arrives.
+      _isPlaying = false;
+      _currentPositionSeconds = 0;
     });
 
     _subscription = playbackStateStream.listen((state) async {
