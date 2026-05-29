@@ -16,6 +16,8 @@ class Podcasts extends Table {
       boolean().withDefault(const Constant(false))();
   RealColumn get speedOverride => real().nullable()();
   IntColumn get queueAgeLimitDays => integer().nullable()();
+  BoolColumn get inboxExcluded =>
+      boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get refreshedAt => dateTime().nullable()();
 }

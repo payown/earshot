@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/providers/core_providers.dart';
+import '../../../settings/data/app_settings_repository.dart';
 import '../../data/podcast_repository.dart';
 import '../../data/podcast_repository_impl.dart';
 import '../../domain/episode.dart';
@@ -11,6 +12,9 @@ final podcastRepositoryProvider = Provider<PodcastRepository>(
     database: ref.watch(appDatabaseProvider),
     dio: ref.watch(dioProvider),
     rssParser: ref.watch(rssParserProvider),
+    settings: AppSettingsRepositoryImpl(
+      database: ref.watch(appDatabaseProvider),
+    ),
   ),
 );
 

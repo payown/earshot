@@ -39,7 +39,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -66,6 +66,9 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 7) {
         await m.addColumn(episodes, episodes.inboxDismissed);
+      }
+      if (from < 8) {
+        await m.addColumn(podcasts, podcasts.inboxExcluded);
       }
     },
     beforeOpen: (_) async {

@@ -6,6 +6,7 @@ import '../../../data/db/app_database.dart';
 import '../../../data/db/enums.dart';
 import '../../../data/rss/parsed_feed.dart';
 import '../../../data/rss/rss_parser.dart';
+import '../../settings/data/app_settings_repository.dart';
 import '../domain/episode.dart';
 import '../domain/podcast.dart';
 import 'podcast_exception.dart';
@@ -18,13 +19,16 @@ class PodcastRepositoryImpl implements PodcastRepository {
     required AppDatabase database,
     required Dio dio,
     required RssParser rssParser,
+    required AppSettingsRepository settings,
   }) : _db = database,
        _dio = dio,
-       _rssParser = rssParser;
+       _rssParser = rssParser,
+       _settings = settings;
 
   final AppDatabase _db;
   final Dio _dio;
   final RssParser _rssParser;
+  final AppSettingsRepository _settings;
 
   @override
   Future<Podcast> subscribe(String rssUrl) async {
@@ -144,7 +148,14 @@ class PodcastRepositoryImpl implements PodcastRepository {
       ),
     );
 
-    await _upsertEpisodes(podcastId, feed.episodes, preserveUserData: true);
+    final inboxOptInOnly = await _settings.isInboxOptInOnly();
+    final dismissed = podcastRow.inboxExcluded || inboxOptInOnly;
+    await _upsertEpisodes(
+      podcastId,
+      feed.episodes,
+      preserveUserData: true,
+      inboxDismissed: dismissed,
+    );
 
     _log.info('Refreshed feed for podcast $podcastId');
   }
@@ -170,11 +181,14 @@ class PodcastRepositoryImpl implements PodcastRepository {
   // inboxLimit controls how many of the most-recent episodes land as
   // newEpisode on initial subscribe; the rest are inserted as played so
   // they don't flood the inbox (only meaningful when preserveUserData=false).
+  // inboxDismissed pre-dismisses new episodes so they never appear in the
+  // inbox (used when the podcast is excluded or inbox opt-in mode is on).
   Future<void> _upsertEpisodes(
     int podcastId,
     List<ParsedEpisode> episodes, {
     required bool preserveUserData,
     int inboxLimit = 3,
+    bool inboxDismissed = false,
   }) async {
     // On initial subscribe, sort newest-first so inboxLimit applies to the
     // most-recent episodes rather than arbitrary feed order.
@@ -209,6 +223,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
         chapterUrl: Value(ep.chapterUrl),
         transcriptUrl: Value(ep.transcriptUrl),
         status: preserveUserData ? const Value.absent() : Value(initialStatus),
+        inboxDismissed: Value(inboxDismissed),
       );
 
       if (preserveUserData) {
@@ -276,6 +291,13 @@ class PodcastRepositoryImpl implements PodcastRepository {
     _log.fine('Speed override for podcast $podcastId set to $speed');
   }
 
+  @override
+  Future<void> setInboxExcluded(int podcastId, {required bool excluded}) async {
+    await (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId)))
+        .write(PodcastsCompanion(inboxExcluded: Value(excluded)));
+    _log.fine('Inbox excluded for podcast $podcastId set to $excluded');
+  }
+
   Podcast _podcastFromRow(PodcastRow row) => Podcast(
     id: row.id,
     rssUrl: row.rssUrl,
@@ -288,6 +310,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
     category: row.category,
     autoQueue: row.autoQueue,
     notificationEnabled: row.notificationEnabled,
+    inboxExcluded: row.inboxExcluded,
     speedOverride: row.speedOverride,
     queueAgeLimitDays: row.queueAgeLimitDays,
     createdAt: row.createdAt,

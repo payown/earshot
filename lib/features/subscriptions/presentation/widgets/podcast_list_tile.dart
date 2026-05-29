@@ -15,6 +15,7 @@ class PodcastListTile extends StatelessWidget {
     required this.podcast,
     required this.onTap,
     this.quickActions = const [],
+    this.semanticSuffix = '',
     super.key,
   });
 
@@ -22,11 +23,18 @@ class PodcastListTile extends StatelessWidget {
   final VoidCallback onTap;
   final List<PodcastQuickActionItem> quickActions;
 
+  // Appended to the semantic label so callers can embed state that forces
+  // VoiceOver to refresh the node when it changes (flutter/flutter#149613).
+  final String semanticSuffix;
+
   @override
   Widget build(BuildContext context) {
-    final label = podcast.author != null
+    final baseLabel = podcast.author != null
         ? '${podcast.title}, by ${podcast.author}'
         : podcast.title;
+    final label = semanticSuffix.isEmpty
+        ? baseLabel
+        : '$baseLabel$semanticSuffix';
 
     final semanticActions = <CustomSemanticsAction, VoidCallback>{
       for (final action in quickActions)

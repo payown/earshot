@@ -24,6 +24,7 @@ enum PodcastAction {
   open,
   toggleNotifications,
   toggleAutoQueue,
+  toggleInboxExcluded,
   unsubscribe,
   share,
   manageFolders;
@@ -32,6 +33,7 @@ enum PodcastAction {
     PodcastAction.open => 'Open podcast',
     PodcastAction.toggleNotifications => 'Toggle notifications',
     PodcastAction.toggleAutoQueue => 'Toggle auto-queue',
+    PodcastAction.toggleInboxExcluded => 'Toggle inbox',
     PodcastAction.unsubscribe => 'Unfollow',
     PodcastAction.share => 'Share podcast',
     PodcastAction.manageFolders => 'Manage folders',
@@ -54,6 +56,7 @@ const defaultPodcastActions = [
   PodcastAction.open,
   PodcastAction.toggleNotifications,
   PodcastAction.toggleAutoQueue,
+  PodcastAction.toggleInboxExcluded,
   PodcastAction.unsubscribe,
   PodcastAction.share,
   PodcastAction.manageFolders,

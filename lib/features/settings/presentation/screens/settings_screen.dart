@@ -12,6 +12,7 @@ import '../../../../data/db/enums.dart';
 import '../../../../features/folders/presentation/providers/folders_providers.dart';
 import '../../../../features/player/presentation/providers/player_providers.dart';
 import '../../../../features/search/presentation/providers/search_providers.dart';
+import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -25,7 +26,10 @@ class SettingsScreen extends ConsumerWidget {
         children: [
           Semantics(
             header: true,
-            child: const _SectionHeader(label: 'Subscriptions'),
+            label: 'Subscriptions',
+            child: const ExcludeSemantics(
+              child: _SectionHeader(label: 'Subscriptions'),
+            ),
           ),
           ListTile(
             title: const Text('Import OPML'),
@@ -48,7 +52,10 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(),
           Semantics(
             header: true,
-            child: const _SectionHeader(label: 'Quick Actions'),
+            label: 'Quick Actions',
+            child: const ExcludeSemantics(
+              child: _SectionHeader(label: 'Quick Actions'),
+            ),
           ),
           ListTile(
             title: const Text('Episode Quick Actions'),
@@ -73,7 +80,49 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(),
           Semantics(
             header: true,
-            child: const _SectionHeader(label: 'Stats'),
+            label: 'Inbox',
+            child: const ExcludeSemantics(
+              child: _SectionHeader(label: 'Inbox'),
+            ),
+          ),
+          SwitchListTile(
+            title: const Text('Inbox for included podcasts only'),
+            subtitle: const Text(
+              'Only show new episodes in the inbox for podcasts you explicitly include',
+            ),
+            value: ref.watch(inboxOptInOnlyProvider).value ?? false,
+            onChanged: ref.watch(inboxOptInOnlyProvider).isLoading
+                ? null
+                : (val) async {
+                    try {
+                      await ref.read(inboxOptInOnlyProvider.notifier).set(val);
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          val
+                              ? 'Inbox limited to included podcasts'
+                              : 'Inbox showing all podcasts',
+                          TextDirection.ltr,
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          'Could not update inbox setting',
+                          TextDirection.ltr,
+                        );
+                      }
+                    }
+                  },
+          ),
+          const Divider(),
+          Semantics(
+            header: true,
+            label: 'Stats',
+            child: const ExcludeSemantics(
+              child: _SectionHeader(label: 'Stats'),
+            ),
           ),
           ListTile(
             title: const Text('Listening Stats'),
@@ -84,7 +133,10 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(),
           Semantics(
             header: true,
-            child: const _SectionHeader(label: 'Privacy'),
+            label: 'Privacy',
+            child: const ExcludeSemantics(
+              child: _SectionHeader(label: 'Privacy'),
+            ),
           ),
           ListTile(
             title: const Text('Privacy & History'),
@@ -130,7 +182,10 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(),
           Semantics(
             header: true,
-            child: const _SectionHeader(label: 'About'),
+            label: 'About',
+            child: const ExcludeSemantics(
+              child: _SectionHeader(label: 'About'),
+            ),
           ),
           const ListTile(
             title: Text('Version'),
