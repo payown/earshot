@@ -14,7 +14,11 @@ enum StatsPeriod {
   DateTime? get since {
     final now = DateTime.now().toUtc();
     return switch (this) {
-      StatsPeriod.thisWeek => now.subtract(Duration(days: now.weekday - 1)),
+      StatsPeriod.thisWeek => DateTime.utc(
+        now.year,
+        now.month,
+        now.day,
+      ).subtract(Duration(days: now.weekday - 1)),
       StatsPeriod.thisMonth => DateTime.utc(now.year, now.month),
       StatsPeriod.thisYear => DateTime.utc(now.year),
       StatsPeriod.allTime => null,
