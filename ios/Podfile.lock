@@ -4,6 +4,8 @@ PODS:
     - FlutterMacOS
   - audio_session (0.0.1):
     - Flutter
+  - connectivity_plus (0.0.1):
+    - Flutter
   - file_selector_ios (0.0.1):
     - Flutter
   - Flutter (1.0.0)
@@ -35,6 +37,7 @@ PODS:
 DEPENDENCIES:
   - audio_service (from `.symlinks/plugins/audio_service/darwin`)
   - audio_session (from `.symlinks/plugins/audio_session/ios`)
+  - connectivity_plus (from `.symlinks/plugins/connectivity_plus/ios`)
   - file_selector_ios (from `.symlinks/plugins/file_selector_ios/ios`)
   - Flutter (from `Flutter`)
   - just_audio (from `.symlinks/plugins/just_audio/darwin`)
@@ -56,6 +59,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/audio_service/darwin"
   audio_session:
     :path: ".symlinks/plugins/audio_session/ios"
+  connectivity_plus:
+    :path: ".symlinks/plugins/connectivity_plus/ios"
   file_selector_ios:
     :path: ".symlinks/plugins/file_selector_ios/ios"
   Flutter:
@@ -80,6 +85,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   audio_service: aa99a6ba2ae7565996015322b0bb024e1d25c6fd
   audio_session: 9bb7f6c970f21241b19f5a3658097ae459681ba0
+  connectivity_plus: cb623214f4e1f6ef8fe7403d580fdad517d2f7dd
   file_selector_ios: ec57ec07954363dd730b642e765e58f199bb621a
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   just_audio: 4e391f57b79cad2b0674030a00453ca5ce817eed
