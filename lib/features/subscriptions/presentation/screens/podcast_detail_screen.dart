@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../data/db/enums.dart';
 import '../../../../features/bookmarks/presentation/providers/bookmarks_providers.dart';
+import '../../../../features/downloads/data/download_manager.dart';
+import '../../../../features/downloads/presentation/providers/downloads_providers.dart';
 import '../../../../features/player/presentation/providers/player_providers.dart';
 import '../../../../features/settings/domain/quick_action_definition.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
@@ -265,8 +267,57 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
           },
         ),
         EpisodeAction.download => EpisodeQuickActionItem(
-          label: action.label,
-          onInvoke: () {},
+          label: switch (episode.downloadStatus) {
+            DownloadStatus.downloaded => 'Remove download',
+            DownloadStatus.downloading ||
+            DownloadStatus.pending => 'Cancel download',
+            DownloadStatus.failed => 'Retry download',
+            DownloadStatus.none => 'Download',
+          },
+          onInvoke: () async {
+            final mgr = ref.read(downloadManagerProvider);
+            final view = View.of(context);
+            switch (episode.downloadStatus) {
+              case DownloadStatus.downloaded:
+                await mgr.deleteDownload(episode.id);
+                if (context.mounted) {
+                  SemanticsService.sendAnnouncement(
+                    view,
+                    'Download removed',
+                    TextDirection.ltr,
+                  );
+                }
+              case DownloadStatus.downloading:
+              case DownloadStatus.pending:
+                await mgr.cancelDownload(episode.id);
+                if (context.mounted) {
+                  SemanticsService.sendAnnouncement(
+                    view,
+                    'Download cancelled',
+                    TextDirection.ltr,
+                  );
+                }
+              case DownloadStatus.none:
+              case DownloadStatus.failed:
+                final result = await mgr.downloadEpisode(episode.id);
+                if (!context.mounted) return;
+                SemanticsService.sendAnnouncement(
+                  view,
+                  switch (result) {
+                    DownloadStartResult.started => 'Download started',
+                    DownloadStartResult.skippedNoWifi =>
+                      'Download requires Wi-Fi',
+                    DownloadStartResult.alreadyDownloaded =>
+                      'Already downloaded',
+                    DownloadStartResult.alreadyDownloading =>
+                      'Already downloading',
+                    DownloadStartResult.failed => 'Download failed',
+                    DownloadStartResult.notFound => 'Episode unavailable',
+                  },
+                  TextDirection.ltr,
+                );
+            }
+          },
         ),
         EpisodeAction.share => EpisodeQuickActionItem(
           label: action.label,

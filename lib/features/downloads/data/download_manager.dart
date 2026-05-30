@@ -13,6 +13,15 @@ import '../../../features/settings/data/app_settings_repository.dart';
 
 final _log = Logger('DownloadManager');
 
+enum DownloadStartResult {
+  started,
+  skippedNoWifi,
+  alreadyDownloaded,
+  alreadyDownloading,
+  notFound,
+  failed,
+}
+
 class DownloadManager {
   DownloadManager({
     required AppDatabase database,
@@ -28,18 +37,22 @@ class DownloadManager {
 
   final Map<int, CancelToken> _cancelTokens = {};
 
-  Future<void> downloadEpisode(int episodeId) async {
+  Future<DownloadStartResult> downloadEpisode(int episodeId) async {
     final row = await (_db.select(
       _db.episodes,
     )..where((e) => e.id.equals(episodeId))).getSingleOrNull();
 
-    if (row == null) return;
-    if (row.downloadStatus == DownloadStatus.downloaded) return;
-    if (row.downloadStatus == DownloadStatus.downloading) return;
+    if (row == null) return DownloadStartResult.notFound;
+    if (row.downloadStatus == DownloadStatus.downloaded) {
+      return DownloadStartResult.alreadyDownloaded;
+    }
+    if (row.downloadStatus == DownloadStatus.downloading) {
+      return DownloadStartResult.alreadyDownloading;
+    }
 
     if (!await _isWifiAvailable()) {
       _log.info('Download skipped — not on Wi-Fi');
-      return;
+      return DownloadStartResult.skippedNoWifi;
     }
 
     await _setStatus(episodeId, DownloadStatus.pending);
@@ -61,15 +74,17 @@ class DownloadManager {
             .write(EpisodesCompanion(downloadPath: Value(file.path)));
       });
       _log.info('Downloaded episode $episodeId to ${file.path}');
+      return DownloadStartResult.started;
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) {
         _log.fine('Download cancelled for episode $episodeId');
         if (await file.exists()) await file.delete();
         await _setStatus(episodeId, DownloadStatus.none);
-      } else {
-        _log.warning('Download failed for episode $episodeId: ${e.message}');
-        await _setStatus(episodeId, DownloadStatus.failed);
+        return DownloadStartResult.started;
       }
+      _log.warning('Download failed for episode $episodeId: ${e.message}');
+      await _setStatus(episodeId, DownloadStatus.failed);
+      return DownloadStartResult.failed;
     } finally {
       _cancelTokens.remove(episodeId);
     }
