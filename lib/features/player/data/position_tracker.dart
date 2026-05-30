@@ -21,6 +21,7 @@ class PositionTracker {
   int _currentPositionSeconds = 0;
   int? _lastPositionSeconds;
   double _lastSpeed = 1.0;
+  int _periodicTicks = 0;
 
   void attach(
     Stream<PlaybackState> playbackStateStream,
@@ -33,6 +34,7 @@ class PositionTracker {
       // episode's position to the new episode before fresh state arrives.
       _isPlaying = false;
       _currentPositionSeconds = 0;
+      _periodicTicks = 0;
     });
 
     _subscription = playbackStateStream.listen((state) async {
@@ -67,6 +69,12 @@ class PositionTracker {
       final id = _currentEpisodeId;
       if (id == null) return;
       await _savePosition(id, _currentPositionSeconds);
+      _periodicTicks++;
+      if (_periodicTicks >= 3) {
+        _periodicTicks = 0;
+        await _recordSession(id, _currentPositionSeconds);
+        _lastPositionSeconds = _currentPositionSeconds;
+      }
     });
   }
 
