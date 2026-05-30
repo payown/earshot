@@ -56,7 +56,11 @@ Future<bool> _runEpisodeDownloads() async {
     final autoQueuePodcasts = await (db.select(
       db.podcasts,
     )..where((p) => p.autoQueue.equals(true))).get();
-    final manager = DownloadManager(database: db, dio: _buildDio());
+    final manager = DownloadManager(
+      database: db,
+      dio: _buildDio(),
+      settings: settings,
+    );
     for (final podcast in autoQueuePodcasts) {
       await manager.downloadRecentEpisodes(podcast.id, downloadCount);
     }

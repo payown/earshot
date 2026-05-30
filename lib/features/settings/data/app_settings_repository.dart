@@ -37,6 +37,10 @@ abstract interface class AppSettingsRepository {
   Future<bool> isInboxOptInOnly();
 
   Future<void> setInboxOptInOnly({required bool value});
+
+  Future<bool> isWifiOnlyDownloads();
+
+  Future<void> setWifiOnlyDownloads({required bool value});
 }
 
 class AppSettingsRepositoryImpl implements AppSettingsRepository {
@@ -54,6 +58,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyVoiceEnhance = 'voice_enhance_enabled';
   static const _keyDirectTouch = 'direct_touch_enabled';
   static const _keyInboxOptInOnly = 'inbox_opt_in_only';
+  static const _keyWifiOnlyDownloads = 'wifi_only_downloads';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
 
@@ -147,6 +152,14 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setInboxOptInOnly({required bool value}) =>
       _set(_keyInboxOptInOnly, value.toString());
+
+  @override
+  Future<bool> isWifiOnlyDownloads() =>
+      _getBool(_keyWifiOnlyDownloads, defaultValue: true);
+
+  @override
+  Future<void> setWifiOnlyDownloads({required bool value}) =>
+      _set(_keyWifiOnlyDownloads, value.toString());
 
   Future<bool> _getBool(String key, {required bool defaultValue}) async {
     final row = await (_db.select(

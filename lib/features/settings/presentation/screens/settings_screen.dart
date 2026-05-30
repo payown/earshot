@@ -156,6 +156,47 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(),
           Semantics(
             header: true,
+            label: 'Downloads',
+            child: const ExcludeSemantics(
+              child: _SectionHeader(label: 'Downloads'),
+            ),
+          ),
+          SwitchListTile(
+            title: const Text('Download over Wi-Fi only'),
+            subtitle: const Text(
+              'When off, episodes can download over cellular data',
+            ),
+            value: ref.watch(wifiOnlyDownloadsProvider).value ?? true,
+            onChanged: ref.watch(wifiOnlyDownloadsProvider).isLoading
+                ? null
+                : (val) async {
+                    try {
+                      await ref
+                          .read(wifiOnlyDownloadsProvider.notifier)
+                          .set(val);
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          val
+                              ? 'Wi-Fi only downloads enabled'
+                              : 'Downloads allowed on any network',
+                          TextDirection.ltr,
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          'Could not update download setting',
+                          TextDirection.ltr,
+                        );
+                      }
+                    }
+                  },
+          ),
+          const Divider(),
+          Semantics(
+            header: true,
             label: 'Accessibility',
             child: const ExcludeSemantics(
               child: _SectionHeader(label: 'Accessibility'),
