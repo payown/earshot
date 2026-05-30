@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../data/db/app_database.dart';
 import '../../data/rss/rss_parser.dart';
@@ -22,3 +23,7 @@ final dioProvider = Provider<Dio>(
 );
 
 final rssParserProvider = Provider<RssParser>((_) => RssParser());
+
+final packageInfoProvider = FutureProvider<PackageInfo>(
+  (_) => PackageInfo.fromPlatform(),
+);
