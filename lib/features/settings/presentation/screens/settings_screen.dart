@@ -384,6 +384,27 @@ class _VersionTileState extends ConsumerState<_VersionTile> {
                 _confirmResetOnboarding();
               },
             ),
+            ListTile(
+              leading: ExcludeSemantics(
+                child: Icon(
+                  Icons.delete_forever,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+              title: Text(
+                'Clear All App Data',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+              subtitle: const Text(
+                'Wipes everything and returns to onboarding',
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _confirmClearAllData();
+              },
+            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -425,6 +446,43 @@ class _VersionTileState extends ConsumerState<_VersionTile> {
         const SnackBar(content: Text('Onboarding reset — restart to see it')),
       );
     }
+  }
+
+  Future<void> _confirmClearAllData() async {
+    if (!context.mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierLabel: 'Dismiss clear all data dialog',
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear All App Data?'),
+        content: const Text(
+          'This permanently deletes all podcasts, episodes, queue, bookmarks, '
+          'stats, and settings. The app will return to onboarding. '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear Everything'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    await ref.read(appDatabaseProvider).clearAllData();
+    if (!context.mounted) return;
+
+    ref.invalidate(isOnboardingCompleteProvider);
   }
 
   @override

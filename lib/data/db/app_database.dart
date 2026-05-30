@@ -41,6 +41,13 @@ class AppDatabase extends _$AppDatabase {
   @override
   int get schemaVersion => 8;
 
+  Future<void> clearAllData() => transaction(() async {
+    await delete(podcasts).go();
+    await delete(podcastFolders).go();
+    await delete(quickActionConfigs).go();
+    await delete(appSettings).go();
+  });
+
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {

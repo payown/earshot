@@ -80,7 +80,8 @@ class _RouterNotifier extends ChangeNotifier {
         );
         final isAllowedDuringOnboarding =
             state.matchedLocation.startsWith(AppRoutes.search) ||
-            state.matchedLocation.startsWith(AppRoutes.addPodcast);
+            state.matchedLocation.startsWith(AppRoutes.addPodcast) ||
+            state.matchedLocation.startsWith(AppRoutes.settingsImportOpml);
         if (!done && !atOnboarding && !isAllowedDuringOnboarding)
           return AppRoutes.onboarding;
         if (done && atOnboarding) return AppRoutes.subscriptions;
@@ -165,7 +166,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: 'import-opml',
             parentNavigatorKey: _rootKey,
-            builder: (_, __) => const OpmlImportScreen(),
+            builder: (_, state) => OpmlImportScreen(
+              fromOnboarding: state.extra == true,
+            ),
           ),
           GoRoute(
             path: 'stats',

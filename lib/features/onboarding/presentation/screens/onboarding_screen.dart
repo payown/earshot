@@ -341,6 +341,18 @@ class _AddFirstPodcastPage extends ConsumerWidget {
               if (done == true) onPodcastAdded();
             },
           ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.upload_file),
+            label: const Text('Import OPML'),
+            onPressed: () async {
+              final done = await context.push<bool>(
+                AppRoutes.settingsImportOpml,
+                extra: true,
+              );
+              if (done == true) onPodcastAdded();
+            },
+          ),
         ],
       ),
     );
