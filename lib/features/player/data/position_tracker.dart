@@ -22,6 +22,7 @@ class PositionTracker {
   int? _lastPositionSeconds;
   double _lastSpeed = 1.0;
   int _periodicTicks = 0;
+  int _lastStateTimestampMs = 0;
 
   void attach(
     Stream<PlaybackState> playbackStateStream,
@@ -45,6 +46,7 @@ class PositionTracker {
       _lastSpeed = state.speed;
       _isPlaying = state.playing;
       _currentPositionSeconds = position;
+      _lastStateTimestampMs = DateTime.now().millisecondsSinceEpoch;
 
       final isPaused =
           !state.playing &&
@@ -72,10 +74,19 @@ class PositionTracker {
       _periodicTicks++;
       if (_periodicTicks >= 3) {
         _periodicTicks = 0;
-        await _recordSession(id, _currentPositionSeconds);
-        _lastPositionSeconds = _currentPositionSeconds;
+        final pos = _interpolatedPositionSeconds;
+        await _recordSession(id, pos);
+        _lastPositionSeconds = pos;
       }
     });
+  }
+
+  int get _interpolatedPositionSeconds {
+    if (!_isPlaying || _lastStateTimestampMs == 0)
+      return _currentPositionSeconds;
+    final elapsedMs =
+        DateTime.now().millisecondsSinceEpoch - _lastStateTimestampMs;
+    return _currentPositionSeconds + (elapsedMs / 1000 * _lastSpeed).round();
   }
 
   Future<void> savePositionNow(int episodeId, Duration position) =>
