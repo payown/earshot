@@ -8,9 +8,9 @@ final statsRepositoryProvider = Provider<StatsRepository>(
   (ref) => StatsRepositoryImpl(database: ref.watch(appDatabaseProvider)),
 );
 
-final statsProvider = FutureProvider.family<ListeningStats, StatsPeriod>((
+final statsProvider = StreamProvider.family<ListeningStats, StatsPeriod>((
   ref,
   period,
 ) {
-  return ref.watch(statsRepositoryProvider).getStats(period);
+  return ref.watch(statsRepositoryProvider).watchStats(period);
 });
