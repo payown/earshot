@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../core/constants/urls.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/bookmarks/presentation/providers/bookmarks_providers.dart';
 import '../../../../features/downloads/data/download_manager.dart';
@@ -320,7 +322,18 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
         ),
         EpisodeAction.share => EpisodeQuickActionItem(
           label: action.label,
-          onInvoke: () {},
+          onInvoke: () async {
+            final handler = ref.read(audioHandlerProvider);
+            final currentEpisodeId =
+                handler.mediaItem.value?.extras?['episodeId'] as int?;
+            final positionSeconds = currentEpisodeId == episode.id
+                ? handler.position.inSeconds
+                : episode.positionSeconds;
+            final url = '$kEpisodeBaseUrl/${episode.id}?t=$positionSeconds';
+            await SharePlus.instance.share(
+              ShareParams(text: url, subject: episode.title),
+            );
+          },
         ),
       };
     }).toList();
