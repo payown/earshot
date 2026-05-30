@@ -102,8 +102,9 @@ class _QuickActionConfiguratorScreenState
                   isFirst: index == 0,
                   onMoveUp: index > 0
                       ? () => setState(() {
-                          _orderedKeys = List.from(keys)
-                            ..insert(index - 1, (keys..removeAt(index)).first);
+                          final item = keys.removeAt(index);
+                          keys.insert(index - 1, item);
+                          _orderedKeys = List.from(keys);
                         })
                       : null,
                   onMoveDown: index < keys.length - 1
@@ -130,17 +131,17 @@ class _QuickActionConfiguratorScreenState
           .map((k) => EpisodeAction.values.firstWhere((a) => a.key == k))
           .toList();
       await repo.saveEpisodeActions(actions);
+      if (!mounted) return;
+      await ref.refresh(episodeActionsProvider.future).then<void>((_) {});
     } else {
       final actions = keys
           .map((k) => PodcastAction.values.firstWhere((a) => a.key == k))
           .toList();
       await repo.savePodcastActions(actions);
+      if (!mounted) return;
+      await ref.refresh(podcastActionsProvider.future).then<void>((_) {});
     }
-    if (mounted) {
-      ref.invalidate(episodeActionsProvider);
-      ref.invalidate(podcastActionsProvider);
-      Navigator.of(context).pop();
-    }
+    if (mounted) Navigator.of(context).pop();
   }
 }
 
