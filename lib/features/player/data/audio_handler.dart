@@ -128,16 +128,15 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _log.info('Skip silence: $enabled');
   }
 
-  // Volume boost + Android dynamic compression.
-  // iOS gets a 1.5× volume boost; Android also gets loudness normalization
-  // via AndroidLoudnessEnhancer (targetGain 500 millibels ≈ +5 dB).
+  // Android only: loudness normalization via AndroidLoudnessEnhancer.
+  // iOS Voice Boost is not shown in the UI (AVQueuePlayer cannot host
+  // AVAudioEngine EQ nodes). This method is therefore only called on Android.
   Future<void> setVoiceEnhance(bool enabled) async {
-    await _player.setVolume(enabled ? 1.5 : 1.0);
     try {
       await _loudnessEnhancer.setEnabled(enabled);
       if (enabled) await _loudnessEnhancer.setTargetGain(500);
     } on Exception {
-      // AndroidLoudnessEnhancer is a no-op on iOS; swallow the error.
+      _log.warning('setVoiceEnhance failed: $enabled');
     }
     _log.info('Voice enhance: $enabled');
   }
