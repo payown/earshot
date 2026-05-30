@@ -76,6 +76,51 @@ class QueueRepositoryImpl implements QueueRepository {
   }
 
   @override
+  Future<void> moveToBottom(int episodeId) async {
+    final max = await _maxPosition();
+    await (_db.update(_db.queueItems)
+          ..where((q) => q.episodeId.equals(episodeId)))
+        .write(QueueItemsCompanion(position: Value(max + 1)));
+    await _compactPositions();
+  }
+
+  @override
+  Future<void> moveUp(int episodeId) async {
+    final rows = await (_db.select(
+      _db.queueItems,
+    )..orderBy([(q) => OrderingTerm.asc(q.position)])).get();
+    final idx = rows.indexWhere((r) => r.episodeId == episodeId);
+    if (idx <= 0) return;
+    await _db.transaction(() async {
+      await (_db.update(_db.queueItems)
+            ..where((q) => q.id.equals(rows[idx].id)))
+          .write(QueueItemsCompanion(position: Value(rows[idx - 1].position)));
+      await (_db.update(_db.queueItems)
+            ..where((q) => q.id.equals(rows[idx - 1].id)))
+          .write(QueueItemsCompanion(position: Value(rows[idx].position)));
+    });
+    await _compactPositions();
+  }
+
+  @override
+  Future<void> moveDown(int episodeId) async {
+    final rows = await (_db.select(
+      _db.queueItems,
+    )..orderBy([(q) => OrderingTerm.asc(q.position)])).get();
+    final idx = rows.indexWhere((r) => r.episodeId == episodeId);
+    if (idx < 0 || idx >= rows.length - 1) return;
+    await _db.transaction(() async {
+      await (_db.update(_db.queueItems)
+            ..where((q) => q.id.equals(rows[idx].id)))
+          .write(QueueItemsCompanion(position: Value(rows[idx + 1].position)));
+      await (_db.update(_db.queueItems)
+            ..where((q) => q.id.equals(rows[idx + 1].id)))
+          .write(QueueItemsCompanion(position: Value(rows[idx].position)));
+    });
+    await _compactPositions();
+  }
+
+  @override
   Future<void> reorder(int episodeId, int newPosition) async {
     await (_db.update(_db.queueItems)
           ..where((q) => q.episodeId.equals(episodeId)))

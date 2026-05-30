@@ -12,6 +12,12 @@ abstract interface class QueueRepository {
 
   Future<void> moveToTop(int episodeId);
 
+  Future<void> moveToBottom(int episodeId);
+
+  Future<void> moveUp(int episodeId);
+
+  Future<void> moveDown(int episodeId);
+
   Future<void> reorder(int episodeId, int newPosition);
 
   Stream<List<Episode>> watchQueue();
