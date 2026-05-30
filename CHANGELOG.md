@@ -72,7 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Phase 6 complete — Search, OPML import/export, podcast discovery
 
-- Search icon in Subscriptions opens podcast directory search (Apple Podcasts / iTunes API)
+- Search icon in Subscriptions opens podcast directory search (Podcast Index API)
 - Debounced search (300ms), result list with per-row Subscribe buttons
 - Subscribe confirmation announced via SemanticsService
 - OPML import: file picker → bulk subscribe with live progress as semantic live region
