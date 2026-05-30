@@ -58,11 +58,12 @@ class QueueScreen extends ConsumerWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        Icons.queue_music,
-                        size: 64,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        semanticLabel: '',
+                      ExcludeSemantics(
+                        child: Icon(
+                          Icons.queue_music,
+                          size: 64,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       Text(
@@ -91,25 +92,73 @@ class QueueScreen extends ConsumerWidget {
                 },
                 itemBuilder: (context, index) {
                   final episode = episodes[index];
-                  // container: false lets our label and custom actions merge UP
-                  // into the _ReorderableItem semantic node that Flutter creates
-                  // around each item. The list-slot boundary still gives each
-                  // episode exactly one VoiceOver focus stop, now carrying the
-                  // full label + all reorder and custom actions together.
-                  // ExcludeSemantics on the ListTile prevents any residual child
-                  // nodes from creating extra focus stops.
+                  final total = episodes.length;
+                  final position = index + 1;
+                  final isFirst = index == 0;
+                  final isLast = index == total - 1;
+
                   return Semantics(
                     key: ValueKey(episode.id),
-                    container: false,
+                    container: true,
                     label:
-                        '${episode.title}, In queue, position ${index + 1} of ${episodes.length}',
+                        '${episode.title}, In queue, position $position of $total',
                     customSemanticsActions: {
                       const CustomSemanticsAction(label: 'Play'): () =>
                           _playEpisode(ref, episode),
-                      const CustomSemanticsAction(label: 'Move to top'): () =>
-                          ref
+                      const CustomSemanticsAction(
+                        label: 'Move to top',
+                      ): () async {
+                        final view = View.of(context);
+                        await ref
+                            .read(queueRepositoryProvider)
+                            .moveToTop(episode.id);
+                        SemanticsService.sendAnnouncement(
+                          view,
+                          'Moved to top, now position 1 of $total',
+                          TextDirection.ltr,
+                        );
+                      },
+                      const CustomSemanticsAction(
+                        label: 'Move to bottom',
+                      ): () async {
+                        final view = View.of(context);
+                        await ref
+                            .read(queueRepositoryProvider)
+                            .moveToBottom(episode.id);
+                        SemanticsService.sendAnnouncement(
+                          view,
+                          'Moved to bottom, now position $total of $total',
+                          TextDirection.ltr,
+                        );
+                      },
+                      if (!isFirst)
+                        const CustomSemanticsAction(
+                          label: 'Move up',
+                        ): () async {
+                          final view = View.of(context);
+                          await ref
                               .read(queueRepositoryProvider)
-                              .moveToTop(episode.id),
+                              .moveUp(episode.id);
+                          SemanticsService.sendAnnouncement(
+                            view,
+                            'Moved up, now position ${position - 1} of $total',
+                            TextDirection.ltr,
+                          );
+                        },
+                      if (!isLast)
+                        const CustomSemanticsAction(
+                          label: 'Move down',
+                        ): () async {
+                          final view = View.of(context);
+                          await ref
+                              .read(queueRepositoryProvider)
+                              .moveDown(episode.id);
+                          SemanticsService.sendAnnouncement(
+                            view,
+                            'Moved down, now position ${position + 1} of $total',
+                            TextDirection.ltr,
+                          );
+                        },
                       const CustomSemanticsAction(
                         label: 'Remove from queue',
                       ): () => ref
@@ -119,7 +168,7 @@ class QueueScreen extends ConsumerWidget {
                     child: ExcludeSemantics(
                       child: ListTile(
                         leading: Text(
-                          '${index + 1}',
+                          '$position',
                           style: Theme.of(context).textTheme.labelLarge,
                         ),
                         title: Text(
@@ -160,6 +209,40 @@ class QueueScreen extends ConsumerWidget {
                               onPressed: () => _playEpisode(ref, episode),
                             ),
                             IconButton(
+                              icon: const Icon(Icons.arrow_upward),
+                              tooltip: 'Move up',
+                              onPressed: isFirst
+                                  ? null
+                                  : () async {
+                                      final view = View.of(context);
+                                      await ref
+                                          .read(queueRepositoryProvider)
+                                          .moveUp(episode.id);
+                                      SemanticsService.sendAnnouncement(
+                                        view,
+                                        'Moved up, now position ${position - 1} of $total',
+                                        TextDirection.ltr,
+                                      );
+                                    },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.arrow_downward),
+                              tooltip: 'Move down',
+                              onPressed: isLast
+                                  ? null
+                                  : () async {
+                                      final view = View.of(context);
+                                      await ref
+                                          .read(queueRepositoryProvider)
+                                          .moveDown(episode.id);
+                                      SemanticsService.sendAnnouncement(
+                                        view,
+                                        'Moved down, now position ${position + 1} of $total',
+                                        TextDirection.ltr,
+                                      );
+                                    },
+                            ),
+                            IconButton(
                               icon: const Icon(Icons.remove_circle_outline),
                               tooltip: 'Remove from queue',
                               onPressed: () => ref
@@ -170,7 +253,11 @@ class QueueScreen extends ConsumerWidget {
                               index: index,
                               child: const Tooltip(
                                 message: 'Reorder',
-                                child: Icon(Icons.drag_handle),
+                                child: SizedBox(
+                                  width: 44,
+                                  height: 44,
+                                  child: Icon(Icons.drag_handle),
+                                ),
                               ),
                             ),
                           ],
@@ -180,8 +267,18 @@ class QueueScreen extends ConsumerWidget {
                   );
                 },
               ),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        loading: () => Center(
+          child: Semantics(
+            label: 'Loading queue',
+            child: const CircularProgressIndicator(),
+          ),
+        ),
+        error: (_, __) => Center(
+          child: Text(
+            'Could not load queue. Please try again.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
       ),
     );
   }
