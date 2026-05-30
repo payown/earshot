@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/folders/presentation/providers/folders_providers.dart';
@@ -187,9 +188,17 @@ class SettingsScreen extends ConsumerWidget {
               child: _SectionHeader(label: 'About'),
             ),
           ),
-          const ListTile(
-            title: Text('Version'),
-            subtitle: Text('Phase 6 build'),
+          ListTile(
+            title: const Text('Version'),
+            subtitle: Text(
+              ref
+                  .watch(packageInfoProvider)
+                  .when(
+                    data: (info) => '${info.version} (${info.buildNumber})',
+                    loading: () => 'Loading',
+                    error: (_, __) => 'Version unavailable',
+                  ),
+            ),
           ),
           const ListTile(
             title: Text('Podcast search powered by Podcast Index'),
