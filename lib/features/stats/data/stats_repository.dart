@@ -6,6 +6,8 @@ import '../domain/stats_period.dart';
 abstract interface class StatsRepository {
   Future<ListeningStats> getStats(StatsPeriod period);
 
+  Stream<ListeningStats> watchStats(StatsPeriod period);
+
   Future<void> applyRetentionPolicy(int? retentionDays);
 
   Future<void> deleteAllHistory();
@@ -64,6 +66,15 @@ class StatsRepositoryImpl implements StatsRepository {
       episodesCompleted: episodesCompleted,
       perPodcast: perPodcast,
     );
+  }
+
+  @override
+  Stream<ListeningStats> watchStats(StatsPeriod period) {
+    final query = _db.select(_db.listeningSessions);
+    if (period.since != null) {
+      query.where((s) => s.date.isBiggerOrEqualValue(period.since!));
+    }
+    return query.watch().asyncMap((_) => getStats(period));
   }
 
   @override
