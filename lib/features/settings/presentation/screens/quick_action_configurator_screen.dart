@@ -38,24 +38,37 @@ class _QuickActionConfiguratorScreenState
     return PodcastAction.values.firstWhere((a) => a.key == key).label;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final stored = _isEpisode
-        ? ref.watch(episodeActionsProvider)
-        : ref.watch(podcastActionsProvider);
+  void _reorder(int oldIndex, int newIndex) {
+    final newKeys = List<String>.from(_orderedKeys ?? _allKeys);
+    final item = newKeys.removeAt(oldIndex);
+    newKeys.insert(newIndex, item);
+    setState(() => _orderedKeys = newKeys);
+  }
 
-    if (_orderedKeys == null) {
+  @override
+  void initState() {
+    super.initState();
+    // Load stored order once on first build via a post-frame callback so we
+    // can call setState safely after the initial build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_orderedKeys != null || !mounted) return;
+      final stored = _isEpisode
+          ? ref.read(episodeActionsProvider)
+          : ref.read(podcastActionsProvider);
       stored.whenData((actions) {
-        _orderedKeys = actions
+        final keys = actions
             .map((a) => a is EpisodeAction ? a.key : (a as PodcastAction).key)
             .toList();
-        // Append any actions not yet in the stored list
         for (final key in _allKeys) {
-          if (!_orderedKeys!.contains(key)) _orderedKeys!.add(key);
+          if (!keys.contains(key)) keys.add(key);
         }
+        setState(() => _orderedKeys = keys);
       });
-    }
+    });
+  }
 
+  @override
+  Widget build(BuildContext context) {
     final keys = _orderedKeys ?? _allKeys;
 
     return Scaffold(
@@ -84,13 +97,7 @@ class _QuickActionConfiguratorScreenState
           Expanded(
             child: ReorderableListView.builder(
               itemCount: keys.length,
-              onReorderItem: (oldIndex, newIndex) {
-                setState(() {
-                  final item = keys.removeAt(oldIndex);
-                  keys.insert(newIndex, item);
-                  _orderedKeys = List.from(keys);
-                });
-              },
+              onReorderItem: _reorder,
               itemBuilder: (context, index) {
                 final key = keys[index];
                 final label = _labelFor(key);
@@ -100,19 +107,9 @@ class _QuickActionConfiguratorScreenState
                   index: index,
                   total: keys.length,
                   isFirst: index == 0,
-                  onMoveUp: index > 0
-                      ? () => setState(() {
-                          final item = keys.removeAt(index);
-                          keys.insert(index - 1, item);
-                          _orderedKeys = List.from(keys);
-                        })
-                      : null,
+                  onMoveUp: index > 0 ? () => _reorder(index, index - 1) : null,
                   onMoveDown: index < keys.length - 1
-                      ? () => setState(() {
-                          final item = keys.removeAt(index);
-                          keys.insert(index + 1, item);
-                          _orderedKeys = List.from(keys);
-                        })
+                      ? () => _reorder(index, index + 1)
                       : null,
                 );
               },
