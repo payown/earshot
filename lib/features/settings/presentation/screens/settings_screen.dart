@@ -13,6 +13,7 @@ import '../../../../data/db/enums.dart';
 import '../../../../features/folders/presentation/providers/folders_providers.dart';
 import '../../../../features/player/presentation/providers/player_providers.dart';
 import '../../../../features/search/presentation/providers/search_providers.dart';
+import '../../../../features/settings/data/app_settings_repository.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 
@@ -229,18 +230,7 @@ class SettingsScreen extends ConsumerWidget {
               child: _SectionHeader(label: 'About'),
             ),
           ),
-          ListTile(
-            title: const Text('Version'),
-            subtitle: Text(
-              ref
-                  .watch(packageInfoProvider)
-                  .when(
-                    data: (info) => '${info.version} (${info.buildNumber})',
-                    loading: () => 'Loading',
-                    error: (_, __) => 'Version unavailable',
-                  ),
-            ),
-          ),
+          const _VersionTile(),
           const ListTile(
             title: Text('Podcast search powered by Podcast Index'),
             subtitle: Text('podcastindex.org'),
@@ -311,6 +301,147 @@ class SettingsScreen extends ConsumerWidget {
         ),
       );
     }
+  }
+}
+
+class _VersionTile extends ConsumerStatefulWidget {
+  const _VersionTile();
+
+  @override
+  ConsumerState<_VersionTile> createState() => _VersionTileState();
+}
+
+class _VersionTileState extends ConsumerState<_VersionTile> {
+  int _tapCount = 0;
+
+  static const _countdownMessages = {
+    3: 'Tap 4 more times to enable developer mode',
+    4: 'Tap 3 more times to enable developer mode',
+    5: 'Tap 2 more times to enable developer mode',
+    6: 'Tap 1 more time to enable developer mode',
+  };
+
+  void _onTap() {
+    final newCount = _tapCount + 1;
+    setState(() => _tapCount = newCount);
+
+    final message = _countdownMessages[newCount];
+    if (message != null) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(message),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        message,
+        TextDirection.ltr,
+      );
+      return;
+    }
+
+    if (newCount < 7) return;
+    setState(() => _tapCount = 0);
+    ScaffoldMessenger.of(context).clearSnackBars();
+    _showDeveloperModeSheet();
+  }
+
+  void _showDeveloperModeSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      barrierLabel: 'Dismiss developer mode',
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: Semantics(
+                header: true,
+                label: 'Developer Mode',
+                child: ExcludeSemantics(
+                  child: Text(
+                    'Developer Mode',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const ExcludeSemantics(
+                child: Icon(Icons.restart_alt),
+              ),
+              title: const Text('Reset Onboarding'),
+              subtitle: const Text('Show onboarding again on next launch'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _confirmResetOnboarding();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmResetOnboarding() async {
+    if (!context.mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierLabel: 'Dismiss reset onboarding dialog',
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reset Onboarding'),
+        content: const Text(
+          'This resets the onboarding flow. Restart the app to see it again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    await AppSettingsRepositoryImpl(
+      database: ref.read(appDatabaseProvider),
+    ).setOnboardingComplete(complete: false);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Onboarding reset — restart to see it')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      title: const Text('Version'),
+      subtitle: Text(
+        ref
+            .watch(packageInfoProvider)
+            .when(
+              data: (info) => '${info.version} (${info.buildNumber})',
+              loading: () => 'Loading',
+              error: (_, __) => 'Version unavailable',
+            ),
+      ),
+      onTap: _onTap,
+    );
   }
 }
 
