@@ -62,6 +62,7 @@ class SubscriptionsScreen extends ConsumerWidget {
                     button: true,
                     label:
                         'All Podcasts, $totalCount podcast${totalCount == 1 ? '' : 's'}',
+                    onTap: () => context.push(AppRoutes.allPodcasts),
                     child: ExcludeSemantics(
                       child: ListTile(
                         leading: Container(
@@ -171,6 +172,8 @@ class SubscriptionsScreen extends ConsumerWidget {
   void _showAddPodcastSheet(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       barrierLabel: 'Dismiss Add Podcast options',
       builder: (sheetContext) => SafeArea(
         child: Column(

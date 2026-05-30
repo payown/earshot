@@ -63,14 +63,21 @@ class _AddPodcastScreenState extends ConsumerState<AddPodcastScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _isLoading ? null : _submit,
-              child: _isLoading
-                  ? const SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Add Podcast'),
+            Semantics(
+              button: true,
+              enabled: !_isLoading,
+              label: _isLoading ? 'Adding podcast, please wait' : 'Add Podcast',
+              child: ExcludeSemantics(
+                child: FilledButton(
+                  onPressed: _isLoading ? null : _submit,
+                  child: _isLoading
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Add Podcast'),
+                ),
+              ),
             ),
           ],
         ),
@@ -95,6 +102,11 @@ class _AddPodcastScreenState extends ConsumerState<AddPodcastScreen> {
       _isLoading = true;
       _error = null;
     });
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Adding podcast, please wait',
+      TextDirection.ltr,
+    );
 
     try {
       final podcast = await ref.read(podcastRepositoryProvider).subscribe(url);
