@@ -116,12 +116,12 @@ class _EmptySearch extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'Search Apple Podcasts',
+              'Search for podcasts',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
             Text(
-              'Type a podcast name or topic to discover shows.',
+              'Type a podcast name or topic to find shows.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
