@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -661,16 +663,22 @@ class _AudioExtrasRow extends ConsumerWidget {
             await ref.read(audioHandlerProvider).setSkipSilenceEnabled(v);
           },
         ),
-        const SizedBox(width: 12),
-        _ToggleChip(
-          label: 'Voice Boost',
-          icon: Icons.spatial_audio,
-          enabled: voiceEnhance,
-          onToggle: (v) async {
-            await ref.read(voiceEnhanceProvider.notifier).set(v);
-            await ref.read(audioHandlerProvider).setVoiceEnhance(v);
-          },
-        ),
+        // Voice Boost requires AVAudioEngine EQ insertion, which just_audio's
+        // iOS backend (AVQueuePlayer) does not support. Hidden on iOS until
+        // https://github.com/ryanheise/just_audio/pull/784 lands or a native
+        // plugin is built. Android works via AndroidLoudnessEnhancer.
+        if (!Platform.isIOS) ...[
+          const SizedBox(width: 12),
+          _ToggleChip(
+            label: 'Voice Boost',
+            icon: Icons.spatial_audio,
+            enabled: voiceEnhance,
+            onToggle: (v) async {
+              await ref.read(voiceEnhanceProvider.notifier).set(v);
+              await ref.read(audioHandlerProvider).setVoiceEnhance(v);
+            },
+          ),
+        ],
       ],
     );
   }
