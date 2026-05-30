@@ -13,7 +13,9 @@ import '../providers/search_providers.dart';
 final _log = Logger('OpmlImport');
 
 class OpmlImportScreen extends ConsumerStatefulWidget {
-  const OpmlImportScreen({super.key});
+  const OpmlImportScreen({super.key, this.fromOnboarding = false});
+
+  final bool fromOnboarding;
 
   @override
   ConsumerState<OpmlImportScreen> createState() => _OpmlImportScreenState();
@@ -24,6 +26,7 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
   int _total = 0;
   int _done = 0;
   int _skipped = 0;
+  int _followed = 0;
   String? _error;
 
   @override
@@ -71,11 +74,18 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
               if (_done > 0) ...[
                 const SizedBox(height: 16),
                 Text(
-                  'Import complete: $_done followed'
+                  'Import complete: $_followed followed'
                   '${_skipped > 0 ? ", $_skipped already following" : ""}.',
                   style: Theme.of(context).textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
+                if (widget.fromOnboarding) ...[
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(_followed > 0),
+                    child: const Text('Done'),
+                  ),
+                ],
               ],
               if (_error != null) ...[
                 const SizedBox(height: 12),
@@ -109,13 +119,27 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
     try {
       content = await File(path).readAsString();
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not read file.');
+      if (mounted) {
+        setState(() => _error = 'Could not read file.');
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Error: Could not read file.',
+          TextDirection.ltr,
+        );
+      }
       return;
     }
 
     final parsed = ref.read(opmlServiceProvider).parse(content);
     if (parsed.feedUrls.isEmpty) {
-      if (mounted) setState(() => _error = 'No podcast feeds found in file.');
+      if (mounted) {
+        setState(() => _error = 'No podcast feeds found in file.');
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'No podcast feeds found in file.',
+          TextDirection.ltr,
+        );
+      }
       return;
     }
 
@@ -124,6 +148,7 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
       _total = parsed.feedUrls.length;
       _done = 0;
       _skipped = 0;
+      _followed = 0;
       _error = null;
     });
 
@@ -132,7 +157,10 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
       try {
         await repo.subscribe(url);
         if (mounted) {
-          setState(() => _done++);
+          setState(() {
+            _done++;
+            _followed++;
+          });
           SemanticsService.sendAnnouncement(
             View.of(context),
             'Followed $_done of $_total',
@@ -151,6 +179,14 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
       }
     }
 
-    if (mounted) setState(() => _importing = false);
+    if (mounted) {
+      setState(() => _importing = false);
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Import complete. Followed $_followed podcast${_followed == 1 ? "" : "s"}'
+        '${_skipped > 0 ? ", $_skipped already following" : ""}.',
+        TextDirection.ltr,
+      );
+    }
   }
 }
