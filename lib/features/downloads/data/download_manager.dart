@@ -38,7 +38,10 @@ class DownloadManager {
 
   final Map<int, CancelToken> _cancelTokens = {};
 
-  Future<DownloadStartResult> downloadEpisode(int episodeId) async {
+  Future<DownloadStartResult> downloadEpisode(
+    int episodeId, {
+    void Function(String message)? onComplete,
+  }) async {
     final row = await (_db.select(
       _db.episodes,
     )..where((e) => e.id.equals(episodeId))).getSingleOrNull();
@@ -60,7 +63,7 @@ class DownloadManager {
     final cancelToken = CancelToken();
     _cancelTokens[episodeId] = cancelToken;
     await _setStatus(episodeId, DownloadStatus.pending);
-    unawaited(_runDownload(episodeId, row.audioUrl, cancelToken));
+    unawaited(_runDownload(episodeId, row.audioUrl, cancelToken, onComplete));
     return DownloadStartResult.started;
   }
 
@@ -68,6 +71,7 @@ class DownloadManager {
     int episodeId,
     String audioUrl,
     CancelToken cancelToken,
+    void Function(String message)? onComplete,
   ) async {
     final file = await _destinationFile(episodeId, audioUrl);
     try {
@@ -80,6 +84,7 @@ class DownloadManager {
         audioUrl,
         file.path,
         cancelToken: cancelToken,
+        options: Options(receiveTimeout: null),
       );
       await _db.transaction(() async {
         await _setStatus(episodeId, DownloadStatus.downloaded);
@@ -87,6 +92,7 @@ class DownloadManager {
             .write(EpisodesCompanion(downloadPath: Value(file.path)));
       });
       _log.info('Downloaded episode $episodeId to ${file.path}');
+      onComplete?.call('Download complete');
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) {
         _log.fine('Download cancelled for episode $episodeId');
@@ -95,10 +101,12 @@ class DownloadManager {
       } else {
         _log.warning('Download failed for episode $episodeId: ${e.message}');
         await _setStatus(episodeId, DownloadStatus.failed);
+        onComplete?.call('Download failed');
       }
     } catch (e, st) {
       _log.warning('Unexpected download error for $episodeId: $e\n$st');
       await _setStatus(episodeId, DownloadStatus.failed);
+      onComplete?.call('Download failed');
     } finally {
       _cancelTokens.remove(episodeId);
     }
@@ -151,7 +159,7 @@ class DownloadManager {
       final cancelToken = CancelToken();
       _cancelTokens[ep.id] = cancelToken;
       await _setStatus(ep.id, DownloadStatus.pending);
-      await _runDownload(ep.id, ep.audioUrl, cancelToken);
+      await _runDownload(ep.id, ep.audioUrl, cancelToken, null);
     }
   }
 

@@ -25,7 +25,6 @@ class PodcastDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final podcastAsync = ref.watch(podcastProvider(podcastId));
-    final episodes = ref.watch(episodesProvider(podcastId));
 
     return podcastAsync.when(
       loading: () => const Scaffold(
@@ -42,23 +41,16 @@ class PodcastDetailScreen extends ConsumerWidget {
             body: const Center(child: Text('Podcast not found.')),
           );
         }
-        return _PodcastDetailView(
-          podcast: podcast,
-          episodes: episodes,
-        );
+        return _PodcastDetailView(podcast: podcast);
       },
     );
   }
 }
 
 class _PodcastDetailView extends ConsumerStatefulWidget {
-  const _PodcastDetailView({
-    required this.podcast,
-    required this.episodes,
-  });
+  const _PodcastDetailView({required this.podcast});
 
   final Podcast podcast;
-  final AsyncValue<List<Episode>> episodes;
 
   @override
   ConsumerState<_PodcastDetailView> createState() => _PodcastDetailViewState();
@@ -68,10 +60,10 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
   bool _showUnplayedOnly = false;
 
   Podcast get podcast => widget.podcast;
-  AsyncValue<List<Episode>> get episodes => widget.episodes;
 
   @override
   Widget build(BuildContext context) {
+    final episodes = ref.watch(episodesProvider(widget.podcast.id));
     return Scaffold(
       body: CustomScrollView(
         slivers: [
@@ -299,7 +291,14 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
                 }
               case DownloadStatus.none:
               case DownloadStatus.failed:
-                final result = await mgr.downloadEpisode(episode.id);
+                final result = await mgr.downloadEpisode(
+                  episode.id,
+                  onComplete: (message) => SemanticsService.sendAnnouncement(
+                    view,
+                    message,
+                    TextDirection.ltr,
+                  ),
+                );
                 if (!context.mounted) return;
                 SemanticsService.sendAnnouncement(
                   view,
