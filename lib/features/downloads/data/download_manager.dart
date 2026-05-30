@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -12,6 +13,15 @@ import '../../../data/db/enums.dart';
 import '../../../features/settings/data/app_settings_repository.dart';
 
 final _log = Logger('DownloadManager');
+
+enum DownloadStartResult {
+  started,
+  skippedNoWifi,
+  alreadyDownloaded,
+  alreadyDownloading,
+  notFound,
+  failed,
+}
 
 class DownloadManager {
   DownloadManager({
@@ -28,30 +38,46 @@ class DownloadManager {
 
   final Map<int, CancelToken> _cancelTokens = {};
 
-  Future<void> downloadEpisode(int episodeId) async {
+  Future<DownloadStartResult> downloadEpisode(int episodeId) async {
     final row = await (_db.select(
       _db.episodes,
     )..where((e) => e.id.equals(episodeId))).getSingleOrNull();
 
-    if (row == null) return;
-    if (row.downloadStatus == DownloadStatus.downloaded) return;
-    if (row.downloadStatus == DownloadStatus.downloading) return;
+    if (row == null) return DownloadStartResult.notFound;
+    if (row.downloadStatus == DownloadStatus.downloaded) {
+      return DownloadStartResult.alreadyDownloaded;
+    }
+    if (row.downloadStatus == DownloadStatus.downloading ||
+        row.downloadStatus == DownloadStatus.pending) {
+      return DownloadStartResult.alreadyDownloading;
+    }
 
     if (!await _isWifiAvailable()) {
       _log.info('Download skipped — not on Wi-Fi');
-      return;
+      return DownloadStartResult.skippedNoWifi;
     }
 
-    await _setStatus(episodeId, DownloadStatus.pending);
-
-    final file = await _destinationFile(episodeId, row.audioUrl);
     final cancelToken = CancelToken();
     _cancelTokens[episodeId] = cancelToken;
+    await _setStatus(episodeId, DownloadStatus.pending);
+    unawaited(_runDownload(episodeId, row.audioUrl, cancelToken));
+    return DownloadStartResult.started;
+  }
 
+  Future<void> _runDownload(
+    int episodeId,
+    String audioUrl,
+    CancelToken cancelToken,
+  ) async {
+    final file = await _destinationFile(episodeId, audioUrl);
     try {
+      if (cancelToken.isCancelled) {
+        await _setStatus(episodeId, DownloadStatus.none);
+        return;
+      }
       await _setStatus(episodeId, DownloadStatus.downloading);
       await _dio.download(
-        row.audioUrl,
+        audioUrl,
         file.path,
         cancelToken: cancelToken,
       );
@@ -70,6 +96,9 @@ class DownloadManager {
         _log.warning('Download failed for episode $episodeId: ${e.message}');
         await _setStatus(episodeId, DownloadStatus.failed);
       }
+    } catch (e, st) {
+      _log.warning('Unexpected download error for $episodeId: $e\n$st');
+      await _setStatus(episodeId, DownloadStatus.failed);
     } finally {
       _cancelTokens.remove(episodeId);
     }
@@ -110,7 +139,19 @@ class DownloadManager {
             .get();
 
     for (final ep in episodes) {
-      await downloadEpisode(ep.id);
+      if (ep.downloadStatus == DownloadStatus.downloaded ||
+          ep.downloadStatus == DownloadStatus.downloading ||
+          ep.downloadStatus == DownloadStatus.pending) {
+        continue;
+      }
+      if (!await _isWifiAvailable()) {
+        _log.info('Batch download stopped — not on Wi-Fi');
+        return;
+      }
+      final cancelToken = CancelToken();
+      _cancelTokens[ep.id] = cancelToken;
+      await _setStatus(ep.id, DownloadStatus.pending);
+      await _runDownload(ep.id, ep.audioUrl, cancelToken);
     }
   }
 
