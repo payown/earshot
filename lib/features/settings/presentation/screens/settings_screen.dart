@@ -13,6 +13,7 @@ import '../../../../data/db/enums.dart';
 import '../../../../features/folders/presentation/providers/folders_providers.dart';
 import '../../../../features/player/presentation/providers/player_providers.dart';
 import '../../../../features/search/presentation/providers/search_providers.dart';
+import '../../../../features/settings/data/app_settings_repository.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 
@@ -229,18 +230,7 @@ class SettingsScreen extends ConsumerWidget {
               child: _SectionHeader(label: 'About'),
             ),
           ),
-          ListTile(
-            title: const Text('Version'),
-            subtitle: Text(
-              ref
-                  .watch(packageInfoProvider)
-                  .when(
-                    data: (info) => '${info.version} (${info.buildNumber})',
-                    loading: () => 'Loading',
-                    error: (_, __) => 'Version unavailable',
-                  ),
-            ),
-          ),
+          const _VersionTile(),
           const ListTile(
             title: Text('Podcast search powered by Podcast Index'),
             subtitle: Text('podcastindex.org'),
@@ -311,6 +301,75 @@ class SettingsScreen extends ConsumerWidget {
         ),
       );
     }
+  }
+}
+
+class _VersionTile extends ConsumerStatefulWidget {
+  const _VersionTile();
+
+  @override
+  ConsumerState<_VersionTile> createState() => _VersionTileState();
+}
+
+class _VersionTileState extends ConsumerState<_VersionTile> {
+  int _tapCount = 0;
+
+  Future<void> _onTap() async {
+    final newCount = _tapCount + 1;
+    setState(() => _tapCount = newCount);
+    if (newCount < 7) return;
+    setState(() => _tapCount = 0);
+
+    if (!context.mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierLabel: 'Dismiss developer options',
+      builder: (_) => AlertDialog(
+        title: const Text('Reset Onboarding'),
+        content: const Text(
+          'This resets the onboarding flow. Restart the app to see it again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    await AppSettingsRepositoryImpl(
+      database: ref.read(appDatabaseProvider),
+    ).setOnboardingComplete(complete: false);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Onboarding reset — restart to see it')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      title: const Text('Version'),
+      subtitle: Text(
+        ref
+            .watch(packageInfoProvider)
+            .when(
+              data: (info) => '${info.version} (${info.buildNumber})',
+              loading: () => 'Loading',
+              error: (_, __) => 'Version unavailable',
+            ),
+      ),
+      onTap: _onTap,
+    );
   }
 }
 
