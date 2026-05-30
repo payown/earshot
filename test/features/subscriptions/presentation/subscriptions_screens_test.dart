@@ -160,15 +160,13 @@ void main() {
       );
     });
 
-    testWidgets('FABs have accessible labels', (tester) async {
+    testWidgets('FAB has accessible label', (tester) async {
       when(() => repo.watchSubscriptions()).thenAnswer((_) => Stream.value([]));
 
       await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
       await tester.pump();
 
-      // Both FABs must have tooltips for VoiceOver/TalkBack.
-      expect(find.byTooltip('Search podcasts'), findsOneWidget);
-      expect(find.byTooltip('Add podcast by URL'), findsOneWidget);
+      expect(find.byTooltip('Add podcast'), findsOneWidget);
     });
 
     testWidgets('tapping All Podcasts entry navigates to all podcasts screen', (
@@ -186,18 +184,23 @@ void main() {
       expect(find.text('All Podcasts Screen'), findsOneWidget);
     });
 
-    testWidgets('tapping add-by-URL FAB navigates to add podcast screen', (
-      tester,
-    ) async {
-      when(() => repo.watchSubscriptions()).thenAnswer((_) => Stream.value([]));
+    testWidgets(
+      'tapping Add by URL in the sheet navigates to add podcast screen',
+      (tester) async {
+        when(
+          () => repo.watchSubscriptions(),
+        ).thenAnswer((_) => Stream.value([]));
 
-      await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
-      await tester.pump();
-      await tester.tap(find.byTooltip('Add podcast by URL'));
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
+        await tester.pump();
+        await tester.tap(find.byTooltip('Add podcast'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add by URL'));
+        await tester.pumpAndSettle();
 
-      expect(find.byType(AddPodcastScreen), findsOneWidget);
-    });
+        expect(find.byType(AddPodcastScreen), findsOneWidget);
+      },
+    );
   });
 
   group('AddPodcastScreen', () {
@@ -237,7 +240,7 @@ void main() {
       await tester.pump();
 
       expect(
-        find.text("You're already subscribed to this podcast."),
+        find.text("You're already following this podcast."),
         findsOneWidget,
       );
     });
@@ -318,7 +321,7 @@ void main() {
       await tester.pumpWidget(
         _buildApp(const PodcastDetailScreen(podcastId: 1), repo),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.text('Episode 1'), findsOneWidget);
     });
@@ -332,7 +335,7 @@ void main() {
       await tester.pumpWidget(
         _buildApp(const PodcastDetailScreen(podcastId: 1), repo),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(
         tester.getSemantics(find.text('Episodes')),
@@ -353,7 +356,7 @@ void main() {
       await tester.pumpWidget(
         _buildApp(const PodcastDetailScreen(podcastId: 1), repo),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       final semantics = tester.getSemantics(find.text('Episode 1'));
       expect(semantics.label, contains('Episode 1'));
