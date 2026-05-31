@@ -37,19 +37,21 @@ class _AppInitializer extends ConsumerWidget {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await BackgroundTaskService.initialize();
-  await BackgroundTaskService.scheduleAll();
-
-  final audioHandler = await AudioService.init(
-    builder: EarshotAudioHandler.new,
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'media.payown.earshot.audio',
-      androidNotificationChannelName: 'Earshot',
-      androidNotificationOngoing: true,
-      fastForwardInterval: kSkipForwardDuration,
-      rewindInterval: kSkipBackDuration,
+  final (_, audioHandler) = await (
+    BackgroundTaskService.initialize().then(
+      (_) => BackgroundTaskService.scheduleAll(),
     ),
-  );
+    AudioService.init(
+      builder: EarshotAudioHandler.new,
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'media.payown.earshot.audio',
+        androidNotificationChannelName: 'Earshot',
+        androidNotificationOngoing: true,
+        fastForwardInterval: kSkipForwardDuration,
+        rewindInterval: kSkipBackDuration,
+      ),
+    ),
+  ).wait;
 
   if (_posthogApiKey.isNotEmpty) {
     final config = PostHogConfig(_posthogApiKey)..host = _posthogHost;
