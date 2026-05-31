@@ -77,6 +77,35 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  Future<void> loadEpisode(
+    MediaItem item, {
+    int resumePositionSeconds = 0,
+  }) async {
+    _log.info('Restoring: ${item.title}');
+    mediaItem.add(item);
+    queue.add([item]);
+
+    final episodeId = item.extras?['episodeId'] as int?;
+    _episodeIdController.add(episodeId);
+
+    final speedOverride = item.extras?['speedOverride'] as double?;
+    if (speedOverride != null) {
+      await _player.setSpeed(speedOverride);
+      playbackState.add(playbackState.value.copyWith(speed: speedOverride));
+    }
+
+    try {
+      await _player.setUrl(item.id);
+      if (resumePositionSeconds > 0) {
+        await _player.seek(Duration(seconds: resumePositionSeconds));
+      }
+    } on Exception catch (e) {
+      _log.severe('Failed to restore "${item.title}": $e');
+      mediaItem.add(null);
+      await stop();
+    }
+  }
+
   // AirPods double-click fires skipToNext(). Remap to seek +30 s.
   @override
   Future<void> skipToNext() => _seekBy(kSkipForwardDuration);

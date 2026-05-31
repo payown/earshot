@@ -30,6 +30,8 @@ class _AppInitializer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(positionTrackerProvider);
     ref.watch(queueAutoAdvanceProvider);
+    ref.watch(episodeIdPersistenceProvider);
+    ref.watch(playbackRestorationProvider);
     return const EarshotApp();
   }
 }

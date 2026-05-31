@@ -59,6 +59,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyDirectTouch = 'direct_touch_enabled';
   static const _keyInboxOptInOnly = 'inbox_opt_in_only';
   static const _keyWifiOnlyDownloads = 'wifi_only_downloads';
+  static const _keyLastPlayingEpisodeId = 'last_playing_episode_id';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
 
@@ -160,6 +161,23 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setWifiOnlyDownloads({required bool value}) =>
       _set(_keyWifiOnlyDownloads, value.toString());
+
+  Future<int?> getLastPlayingEpisodeId() async {
+    final row = await (_db.select(
+      _db.appSettings,
+    )..where((s) => s.key.equals(_keyLastPlayingEpisodeId))).getSingleOrNull();
+    return row == null ? null : int.tryParse(row.value);
+  }
+
+  Future<void> setLastPlayingEpisodeId(int? id) async {
+    if (id == null) {
+      await (_db.delete(
+        _db.appSettings,
+      )..where((s) => s.key.equals(_keyLastPlayingEpisodeId))).go();
+    } else {
+      await _set(_keyLastPlayingEpisodeId, id.toString());
+    }
+  }
 
   Future<bool> _getBool(String key, {required bool defaultValue}) async {
     final row = await (_db.select(
