@@ -18,13 +18,14 @@ cd "$REPO_ROOT"
 
 ASC_APP_ID="6770760602"
 GROUP="Internal Testing Group"
+SUBMIT_FOR_REVIEW=false
 NOTES=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --notes|-n) NOTES="$2"; shift 2 ;;
-    --public)   GROUP="Public Testers"; shift ;;
-    --both)     GROUP="Internal Testing Group,Public Testers"; shift ;;
+    --public)   GROUP="Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
+    --both)     GROUP="Internal Testing Group,Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
@@ -68,7 +69,8 @@ flutter build ipa --release
 # ── Upload ────────────────────────────────────────────────────────────────────
 echo "▶ Uploading to TestFlight..."
 EXTRA_FLAGS=()
-[[ -n "$NOTES" ]] && EXTRA_FLAGS+=(--test-notes "$NOTES" --locale en-US)
+[[ -n "$NOTES" ]]          && EXTRA_FLAGS+=(--test-notes "$NOTES" --locale en-US)
+[[ "$SUBMIT_FOR_REVIEW" == true ]] && EXTRA_FLAGS+=(--submit --confirm)
 
 asc publish testflight \
   --app "$ASC_APP_ID" \
