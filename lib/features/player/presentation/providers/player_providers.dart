@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/providers/core_providers.dart';
+import '../../../../data/db/enums.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../../data/audio_handler.dart';
@@ -95,6 +98,63 @@ final directTouchEnabledProvider =
         write: (r, v) => r.setDirectTouchEnabled(v),
       ),
     );
+
+// Watches episodeIdStream and persists the current episode ID so it can be
+// restored after a force quit.
+final episodeIdPersistenceProvider = Provider<void>((ref) {
+  final handler = ref.read(audioHandlerProvider);
+  final db = ref.read(appDatabaseProvider);
+  final settings = AppSettingsRepositoryImpl(database: db);
+
+  final sub = handler.episodeIdStream.listen((id) {
+    unawaited(settings.setLastPlayingEpisodeId(id));
+  });
+
+  ref.onDispose(sub.cancel);
+});
+
+// Runs once on cold start. Reads the last playing episode from app_settings,
+// fetches its episode + podcast rows, and calls loadEpisode() so the mini
+// player reappears paused at the saved position.
+final playbackRestorationProvider = FutureProvider<void>((ref) async {
+  final db = ref.read(appDatabaseProvider);
+  final settings = AppSettingsRepositoryImpl(database: db);
+
+  final lastEpisodeId = await settings.getLastPlayingEpisodeId();
+  if (lastEpisodeId == null) return;
+
+  final episode = await (db.select(
+    db.episodes,
+  )..where((e) => e.id.equals(lastEpisodeId))).getSingleOrNull();
+
+  if (episode == null || episode.status == EpisodeStatus.played) return;
+
+  final podcast = await (db.select(
+    db.podcasts,
+  )..where((p) => p.id.equals(episode.podcastId))).getSingleOrNull();
+
+  final handler = ref.read(audioHandlerProvider);
+  await handler.loadEpisode(
+    MediaItem(
+      id: episode.audioUrl,
+      title: episode.title,
+      album: podcast?.title,
+      artUri: podcast?.artworkUrl != null
+          ? Uri.tryParse(podcast!.artworkUrl!)
+          : null,
+      duration: episode.durationSeconds != null
+          ? Duration(seconds: episode.durationSeconds!)
+          : null,
+      extras: {
+        'episodeId': episode.id,
+        'podcastId': episode.podcastId,
+        if (podcast?.speedOverride != null)
+          'speedOverride': podcast!.speedOverride!,
+      },
+    ),
+    resumePositionSeconds: episode.positionSeconds,
+  );
+});
 
 final queueAutoAdvanceProvider = Provider<void>((ref) {
   final handler = ref.read(audioHandlerProvider);
