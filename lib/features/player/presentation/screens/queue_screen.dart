@@ -82,190 +82,193 @@ class QueueScreen extends ConsumerWidget {
                   ),
                 ),
               )
-            : ReorderableListView.builder(
-                buildDefaultDragHandles: false,
-                itemCount: episodes.length,
-                onReorderItem: (oldIndex, newIndex) async {
-                  await ref
-                      .read(queueRepositoryProvider)
-                      .reorder(episodes[oldIndex].id, newIndex);
-                },
-                itemBuilder: (context, index) {
-                  final episode = episodes[index];
-                  final total = episodes.length;
-                  final position = index + 1;
-                  final isFirst = index == 0;
-                  final isLast = index == total - 1;
-
-                  return Semantics(
-                    key: ValueKey(episode.id),
-                    container: true,
-                    label:
-                        '${episode.title}, In queue, position $position of $total',
-                    customSemanticsActions: {
-                      const CustomSemanticsAction(label: 'Play'): () =>
-                          _playEpisode(ref, episode),
-                      const CustomSemanticsAction(
-                        label: 'Move to top',
-                      ): () async {
-                        final view = View.of(context);
-                        await ref
-                            .read(queueRepositoryProvider)
-                            .moveToTop(episode.id);
-                        SemanticsService.sendAnnouncement(
-                          view,
-                          'Moved to top, now position 1 of $total',
-                          TextDirection.ltr,
-                        );
-                      },
-                      const CustomSemanticsAction(
-                        label: 'Move to bottom',
-                      ): () async {
-                        final view = View.of(context);
-                        await ref
-                            .read(queueRepositoryProvider)
-                            .moveToBottom(episode.id);
-                        SemanticsService.sendAnnouncement(
-                          view,
-                          'Moved to bottom, now position $total of $total',
-                          TextDirection.ltr,
-                        );
-                      },
-                      if (!isFirst)
-                        const CustomSemanticsAction(
-                          label: 'Move up',
-                        ): () async {
-                          final view = View.of(context);
-                          await ref
-                              .read(queueRepositoryProvider)
-                              .moveUp(episode.id);
-                          SemanticsService.sendAnnouncement(
-                            view,
-                            'Moved up, now position ${position - 1} of $total',
-                            TextDirection.ltr,
-                          );
-                        },
-                      if (!isLast)
-                        const CustomSemanticsAction(
-                          label: 'Move down',
-                        ): () async {
-                          final view = View.of(context);
-                          await ref
-                              .read(queueRepositoryProvider)
-                              .moveDown(episode.id);
-                          SemanticsService.sendAnnouncement(
-                            view,
-                            'Moved down, now position ${position + 1} of $total',
-                            TextDirection.ltr,
-                          );
-                        },
-                      const CustomSemanticsAction(
-                        label: 'Remove from queue',
-                      ): () => ref
+            : CustomScrollView(
+                slivers: [
+                  SliverReorderableList(
+                    itemCount: episodes.length,
+                    onReorderItem: (oldIndex, newIndex) async {
+                      await ref
                           .read(queueRepositoryProvider)
-                          .cancelFromQueue(episode.id),
+                          .reorder(episodes[oldIndex].id, newIndex);
                     },
-                    child: ExcludeSemantics(
-                      child: ListTile(
-                        leading: Text(
-                          '$position',
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        title: Text(
-                          episode.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Wrap(
-                            children: [
-                              Chip(
-                                label: const Text('In queue'),
-                                visualDensity: VisualDensity.compact,
-                                backgroundColor: Theme.of(
-                                  context,
-                                ).colorScheme.secondaryContainer,
-                                labelStyle: Theme.of(context)
-                                    .textTheme
-                                    .labelSmall
-                                    ?.copyWith(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSecondaryContainer,
-                                    ),
-                                padding: EdgeInsets.zero,
+                    itemBuilder: (context, index) {
+                      final episode = episodes[index];
+                      final total = episodes.length;
+                      final position = index + 1;
+                      final isFirst = index == 0;
+                      final isLast = index == total - 1;
+
+                      return Semantics(
+                        key: ValueKey(episode.id),
+                        container: true,
+                        label:
+                            '${episode.title}, In queue, position $position of $total',
+                        customSemanticsActions: {
+                          const CustomSemanticsAction(label: 'Play'): () =>
+                              _playEpisode(ref, episode),
+                          const CustomSemanticsAction(
+                            label: 'Move to top',
+                          ): () async {
+                            final view = View.of(context);
+                            await ref
+                                .read(queueRepositoryProvider)
+                                .moveToTop(episode.id);
+                            SemanticsService.sendAnnouncement(
+                              view,
+                              'Moved to top, now position 1 of $total',
+                              TextDirection.ltr,
+                            );
+                          },
+                          const CustomSemanticsAction(
+                            label: 'Move to bottom',
+                          ): () async {
+                            final view = View.of(context);
+                            await ref
+                                .read(queueRepositoryProvider)
+                                .moveToBottom(episode.id);
+                            SemanticsService.sendAnnouncement(
+                              view,
+                              'Moved to bottom, now position $total of $total',
+                              TextDirection.ltr,
+                            );
+                          },
+                          if (!isFirst)
+                            const CustomSemanticsAction(
+                              label: 'Move up',
+                            ): () async {
+                              final view = View.of(context);
+                              await ref
+                                  .read(queueRepositoryProvider)
+                                  .moveUp(episode.id);
+                              SemanticsService.sendAnnouncement(
+                                view,
+                                'Moved up, now position ${position - 1} of $total',
+                                TextDirection.ltr,
+                              );
+                            },
+                          if (!isLast)
+                            const CustomSemanticsAction(
+                              label: 'Move down',
+                            ): () async {
+                              final view = View.of(context);
+                              await ref
+                                  .read(queueRepositoryProvider)
+                                  .moveDown(episode.id);
+                              SemanticsService.sendAnnouncement(
+                                view,
+                                'Moved down, now position ${position + 1} of $total',
+                                TextDirection.ltr,
+                              );
+                            },
+                          const CustomSemanticsAction(
+                            label: 'Remove from queue',
+                          ): () => ref
+                              .read(queueRepositoryProvider)
+                              .cancelFromQueue(episode.id),
+                        },
+                        child: ExcludeSemantics(
+                          child: ListTile(
+                            leading: Text(
+                              '$position',
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                            title: Text(
+                              episode.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Wrap(
+                                children: [
+                                  Chip(
+                                    label: const Text('In queue'),
+                                    visualDensity: VisualDensity.compact,
+                                    backgroundColor: Theme.of(
+                                      context,
+                                    ).colorScheme.secondaryContainer,
+                                    labelStyle: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSecondaryContainer,
+                                        ),
+                                    padding: EdgeInsets.zero,
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.play_arrow),
+                                  tooltip: 'Play',
+                                  onPressed: () => _playEpisode(ref, episode),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_upward),
+                                  tooltip: 'Move up',
+                                  onPressed: isFirst
+                                      ? null
+                                      : () async {
+                                          final view = View.of(context);
+                                          await ref
+                                              .read(queueRepositoryProvider)
+                                              .moveUp(episode.id);
+                                          SemanticsService.sendAnnouncement(
+                                            view,
+                                            'Moved up, now position ${position - 1} of $total',
+                                            TextDirection.ltr,
+                                          );
+                                        },
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_downward),
+                                  tooltip: 'Move down',
+                                  onPressed: isLast
+                                      ? null
+                                      : () async {
+                                          final view = View.of(context);
+                                          await ref
+                                              .read(queueRepositoryProvider)
+                                              .moveDown(episode.id);
+                                          SemanticsService.sendAnnouncement(
+                                            view,
+                                            'Moved down, now position ${position + 1} of $total',
+                                            TextDirection.ltr,
+                                          );
+                                        },
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.remove_circle_outline),
+                                  tooltip: 'Remove from queue',
+                                  onPressed: () => ref
+                                      .read(queueRepositoryProvider)
+                                      .cancelFromQueue(episode.id),
+                                ),
+                                ReorderableDragStartListener(
+                                  index: index,
+                                  child: const Tooltip(
+                                    message: 'Reorder',
+                                    child: SizedBox(
+                                      width: 44,
+                                      height: 44,
+                                      child: Icon(Icons.drag_handle),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.play_arrow),
-                              tooltip: 'Play',
-                              onPressed: () => _playEpisode(ref, episode),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.arrow_upward),
-                              tooltip: 'Move up',
-                              onPressed: isFirst
-                                  ? null
-                                  : () async {
-                                      final view = View.of(context);
-                                      await ref
-                                          .read(queueRepositoryProvider)
-                                          .moveUp(episode.id);
-                                      SemanticsService.sendAnnouncement(
-                                        view,
-                                        'Moved up, now position ${position - 1} of $total',
-                                        TextDirection.ltr,
-                                      );
-                                    },
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.arrow_downward),
-                              tooltip: 'Move down',
-                              onPressed: isLast
-                                  ? null
-                                  : () async {
-                                      final view = View.of(context);
-                                      await ref
-                                          .read(queueRepositoryProvider)
-                                          .moveDown(episode.id);
-                                      SemanticsService.sendAnnouncement(
-                                        view,
-                                        'Moved down, now position ${position + 1} of $total',
-                                        TextDirection.ltr,
-                                      );
-                                    },
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.remove_circle_outline),
-                              tooltip: 'Remove from queue',
-                              onPressed: () => ref
-                                  .read(queueRepositoryProvider)
-                                  .cancelFromQueue(episode.id),
-                            ),
-                            ReorderableDragStartListener(
-                              index: index,
-                              child: const Tooltip(
-                                message: 'Reorder',
-                                child: SizedBox(
-                                  width: 44,
-                                  height: 44,
-                                  child: Icon(Icons.drag_handle),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
+                      );
+                    },
+                  ),
+                ],
               ),
         loading: () => Center(
           child: Semantics(
