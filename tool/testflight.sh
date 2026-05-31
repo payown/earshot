@@ -19,6 +19,7 @@ NOTES=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --notes|-n) NOTES="$2"; shift 2 ;;
+    --public)   GROUP="Public Testers"; shift ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
