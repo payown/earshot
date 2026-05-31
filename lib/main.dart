@@ -6,6 +6,8 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'core/background/background_tasks.dart';
 import 'core/constants/playback.dart';
+import 'core/logging/log_providers.dart';
+import 'core/logging/log_service.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/player/data/audio_handler.dart';
@@ -39,7 +41,7 @@ class _AppInitializer extends ConsumerWidget {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final (_, audioHandler) = await (
+  final (_, audioHandler, logService) = await (
     BackgroundTaskService.initialize().then(
       (_) => BackgroundTaskService.scheduleAll(),
     ),
@@ -53,6 +55,7 @@ Future<void> main() async {
         rewindInterval: kSkipBackDuration,
       ),
     ),
+    LogService.init(),
   ).wait;
 
   if (_posthogApiKey.isNotEmpty) {
@@ -62,7 +65,10 @@ Future<void> main() async {
 
   void launchApp() => runApp(
     ProviderScope(
-      overrides: [audioHandlerProvider.overrideWithValue(audioHandler)],
+      overrides: [
+        audioHandlerProvider.overrideWithValue(audioHandler),
+        logServiceProvider.overrideWithValue(logService),
+      ],
       child: const _AppInitializer(),
     ),
   );

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../data/db/enums.dart';
 import '../../features/downloads/presentation/screens/downloads_screen.dart';
 import '../../features/downloads/presentation/screens/inbox_screen.dart';
+import '../../features/feedback/presentation/screens/bug_report_screen.dart';
 import '../../features/onboarding/presentation/screens/onboarding_screen.dart';
 import '../../features/player/presentation/screens/player_screen.dart';
 import '../../features/player/presentation/screens/queue_screen.dart';
@@ -46,6 +47,7 @@ abstract final class AppRoutes {
   static const settingsPrivacy = '/settings/privacy';
   static String settingsQuickActions(String type) =>
       '/settings/quick-actions/$type';
+  static const bugReport = '/bug-report';
 }
 
 // ── Onboarding state ─────────────────────────────────────────────────────────
@@ -157,6 +159,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.player,
         parentNavigatorKey: _rootKey,
         builder: (_, __) => const PlayerScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.bugReport,
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const BugReportScreen(),
       ),
       GoRoute(
         path: AppRoutes.settings,
