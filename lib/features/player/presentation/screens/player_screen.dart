@@ -447,7 +447,8 @@ class _SpeedSelector extends StatelessWidget {
   final double speed;
   final ValueChanged<double> onSpeedChanged;
 
-  static const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0];
+  // 0.5x to 5.0x in 0.1x increments (46 speeds)
+  static final _speeds = [for (int i = 5; i <= 50; i++) i / 10.0];
 
   @override
   Widget build(BuildContext context) {
@@ -505,7 +506,7 @@ class _SpeedSelector extends StatelessWidget {
     return best;
   }
 
-  String _label(double s) => s == s.roundToDouble() ? '${s.toInt()}x' : '${s}x';
+  String _label(double s) => '${s.toStringAsFixed(1)}x';
 }
 
 class _SleepTimerControls extends ConsumerWidget {
