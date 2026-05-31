@@ -69,9 +69,10 @@ class QueueRepositoryImpl implements QueueRepository {
 
   @override
   Future<void> moveToTop(int episodeId) async {
+    // Use -1 so _compactPositions sorts this item before anything at position 0.
     await (_db.update(_db.queueItems)
           ..where((q) => q.episodeId.equals(episodeId)))
-        .write(const QueueItemsCompanion(position: Value(0)));
+        .write(const QueueItemsCompanion(position: Value(-1)));
     await _compactPositions();
   }
 
