@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Deploy to TestFlight.
-# Usage: testflight [--notes "What to test"]
+# Usage: testflight [--notes "What to test"] [--public] [--both]
+#
+#   (no flag)  Upload to Internal Testing Group only
+#   --public   Upload to Public Testers only
+#   --both     Upload to both groups in a single build (same build number)
 #
 # What this does:
 #   1. Verifies the working tree is clean and in sync with remote
 #   2. Bumps the build number in pubspec.yaml and commits it
 #   3. Builds a release IPA
-#   4. Uploads to the Internal Testing Group on TestFlight
+#   4. Uploads to the specified TestFlight group(s)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,6 +23,8 @@ NOTES=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --notes|-n) NOTES="$2"; shift 2 ;;
+    --public)   GROUP="Public Testers"; shift ;;
+    --both)     GROUP="Internal Testing Group,Public Testers"; shift ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
