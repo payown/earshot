@@ -12,7 +12,7 @@ class _TestSpeedSelector extends StatelessWidget {
   final double speed;
   final ValueChanged<double> onSpeedChanged;
 
-  static const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0];
+  static final _speeds = [for (int i = 5; i <= 50; i++) i / 10.0];
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +64,7 @@ class _TestSpeedSelector extends StatelessWidget {
     return best;
   }
 
-  String _label(double s) => s == s.roundToDouble() ? '${s.toInt()}x' : '${s}x';
+  String _label(double s) => '${s.toStringAsFixed(1)}x';
 }
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
@@ -90,12 +90,12 @@ void main() {
           tester.getSemantics(_speedFinder()),
           matchesSemantics(
             label: 'Playback speed',
-            value: '1x',
+            value: '1.0x',
             isSlider: true,
             hasIncreaseAction: true,
             hasDecreaseAction: true,
-            increasedValue: '1.25x',
-            decreasedValue: '0.75x',
+            increasedValue: '1.1x',
+            decreasedValue: '0.9x',
           ),
         );
 
@@ -120,7 +120,7 @@ void main() {
           );
       await tester.pump();
 
-      expect(selected, 1.25);
+      expect(selected, 1.1);
       handle.dispose();
     });
 
@@ -141,7 +141,7 @@ void main() {
           );
       await tester.pump();
 
-      expect(selected, 0.75);
+      expect(selected, 0.9);
       handle.dispose();
     });
 
@@ -150,7 +150,7 @@ void main() {
 
       await tester.pumpWidget(
         _wrap(
-          _TestSpeedSelector(speed: 3.0, onSpeedChanged: (_) {}),
+          _TestSpeedSelector(speed: 5.0, onSpeedChanged: (_) {}),
         ),
       );
 
@@ -158,7 +158,7 @@ void main() {
         tester.getSemantics(_speedFinder()),
         matchesSemantics(
           label: 'Playback speed',
-          value: '3x',
+          value: '5.0x',
           isSlider: true,
           hasIncreaseAction: false,
           hasDecreaseAction: true,
