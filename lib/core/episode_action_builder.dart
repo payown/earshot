@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_html/flutter_html.dart';
@@ -11,6 +13,7 @@ import '../features/downloads/data/download_manager.dart';
 import '../features/downloads/presentation/providers/downloads_providers.dart';
 import '../features/player/presentation/providers/player_providers.dart';
 import '../features/settings/domain/quick_action_definition.dart';
+import '../features/settings/presentation/providers/settings_providers.dart';
 import '../features/subscriptions/domain/episode.dart';
 import '../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../features/subscriptions/presentation/widgets/episode_list_tile.dart';
@@ -61,6 +64,9 @@ EpisodeQuickActionItem? _buildItem(
         label: alreadyQueued ? 'Move to play next' : action.label,
         onInvoke: () async {
           await ref.read(queueRepositoryProvider).addAfterCurrent(episode.id);
+          if (!alreadyQueued) {
+            _triggerQueueDownloadIfEnabled(episode, ref, context);
+          }
           if (context.mounted) {
             SemanticsService.sendAnnouncement(
               View.of(context),
@@ -91,6 +97,7 @@ EpisodeQuickActionItem? _buildItem(
         label: action.label,
         onInvoke: () async {
           await ref.read(queueRepositoryProvider).addToQueue(episode.id);
+          _triggerQueueDownloadIfEnabled(episode, ref, context);
           if (context.mounted) {
             SemanticsService.sendAnnouncement(
               View.of(context),
@@ -248,4 +255,39 @@ EpisodeQuickActionItem? _buildItem(
         },
       );
   }
+}
+
+// Downloads the episode if auto-download-queue is on and the episode is not
+// already downloaded or actively downloading.
+void _triggerQueueDownloadIfEnabled(
+  Episode episode,
+  WidgetRef ref,
+  BuildContext context,
+) {
+  final autoDownload = ref.read(autoDownloadQueueProvider).value ?? false;
+  if (!autoDownload) return;
+  final status = episode.downloadStatus;
+  if (status == DownloadStatus.downloaded ||
+      status == DownloadStatus.downloading ||
+      status == DownloadStatus.pending) {
+    return;
+  }
+  unawaited(
+    ref
+        .read(downloadManagerProvider)
+        .downloadEpisode(
+          episode.id,
+          onComplete: (message) {
+            if (context.mounted) {
+              SemanticsService.sendAnnouncement(
+                View.of(context),
+                message == 'Download complete'
+                    ? '${episode.title} downloaded'
+                    : 'Download failed for ${episode.title}',
+                TextDirection.ltr,
+              );
+            }
+          },
+        ),
+  );
 }

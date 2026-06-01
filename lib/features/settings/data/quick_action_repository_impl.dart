@@ -12,51 +12,47 @@ class QuickActionRepositoryImpl implements QuickActionRepository {
   final AppDatabase _db;
 
   @override
-  Future<List<EpisodeAction>> getEpisodeActions() async {
-    final rows =
-        await (_db.select(_db.quickActionConfigs)
-              ..where(
-                (q) => q.contentType.equals(
-                  QuickActionContentType.episode.name,
-                ),
-              )
-              ..orderBy([(q) => OrderingTerm.asc(q.sortOrder)]))
-            .get();
-
-    if (rows.isEmpty) return defaultEpisodeActions;
-
-    return rows.map((r) {
-      // Migrate legacy "addToQueue" key (renamed to addToEndOfQueue).
-      final key = r.actionKey == 'addToQueue' ? 'addToEndOfQueue' : r.actionKey;
-      return EpisodeAction.values.firstWhere(
-        (a) => a.key == key,
-        orElse: () => EpisodeAction.playNow,
-      );
-    }).toList();
+  Stream<List<EpisodeAction>> watchEpisodeActions() {
+    return (_db.select(_db.quickActionConfigs)
+          ..where(
+            (q) => q.contentType.equals(QuickActionContentType.episode.name),
+          )
+          ..orderBy([(q) => OrderingTerm.asc(q.sortOrder)]))
+        .watch()
+        .map((rows) {
+          if (rows.isEmpty) return defaultEpisodeActions;
+          return rows.map((r) {
+            // Migrate legacy "addToQueue" key (renamed to addToEndOfQueue).
+            final key = r.actionKey == 'addToQueue'
+                ? 'addToEndOfQueue'
+                : r.actionKey;
+            return EpisodeAction.values.firstWhere(
+              (a) => a.key == key,
+              orElse: () => EpisodeAction.playNow,
+            );
+          }).toList();
+        });
   }
 
   @override
-  Future<List<PodcastAction>> getPodcastActions() async {
-    final rows =
-        await (_db.select(_db.quickActionConfigs)
-              ..where(
-                (q) => q.contentType.equals(
-                  QuickActionContentType.podcast.name,
+  Stream<List<PodcastAction>> watchPodcastActions() {
+    return (_db.select(_db.quickActionConfigs)
+          ..where(
+            (q) => q.contentType.equals(QuickActionContentType.podcast.name),
+          )
+          ..orderBy([(q) => OrderingTerm.asc(q.sortOrder)]))
+        .watch()
+        .map((rows) {
+          if (rows.isEmpty) return defaultPodcastActions;
+          return rows
+              .map(
+                (r) => PodcastAction.values.firstWhere(
+                  (a) => a.key == r.actionKey,
+                  orElse: () => PodcastAction.open,
                 ),
               )
-              ..orderBy([(q) => OrderingTerm.asc(q.sortOrder)]))
-            .get();
-
-    if (rows.isEmpty) return defaultPodcastActions;
-
-    return rows
-        .map(
-          (r) => PodcastAction.values.firstWhere(
-            (a) => a.key == r.actionKey,
-            orElse: () => PodcastAction.open,
-          ),
-        )
-        .toList();
+              .toList();
+        });
   }
 
   @override

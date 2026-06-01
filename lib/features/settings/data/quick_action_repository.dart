@@ -1,9 +1,9 @@
 import '../domain/quick_action_definition.dart';
 
 abstract interface class QuickActionRepository {
-  Future<List<EpisodeAction>> getEpisodeActions();
+  Stream<List<EpisodeAction>> watchEpisodeActions();
 
-  Future<List<PodcastAction>> getPodcastActions();
+  Stream<List<PodcastAction>> watchPodcastActions();
 
   Future<void> saveEpisodeActions(List<EpisodeAction> actions);
 

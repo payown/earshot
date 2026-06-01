@@ -4,10 +4,21 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/episode_action_builder.dart';
 import '../../../../core/router/app_router.dart';
+import '../../../../features/settings/domain/quick_action_definition.dart';
+import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../providers/player_providers.dart';
+
+const _queueAllowedActions = {
+  EpisodeAction.markPlayed,
+  EpisodeAction.openShowNotes,
+  EpisodeAction.bookmark,
+  EpisodeAction.download,
+  EpisodeAction.share,
+};
 
 String? _semanticDuration(Episode ep) {
   if (ep.durationSeconds == null) return null;
@@ -65,6 +76,9 @@ class QueueScreen extends ConsumerWidget {
       if (subs != null)
         for (final p in subs) p.id: p.title,
     };
+    final actionOrder =
+        ref.watch(episodeActionsProvider).asData?.value ??
+        defaultEpisodeActions;
 
     return Scaffold(
       appBar: AppBar(
@@ -127,6 +141,14 @@ class QueueScreen extends ConsumerWidget {
                     if (durationLabel != null) durationLabel,
                   ];
                   final queueLabel = labelParts.join(', ');
+                  final episodeActions = buildEpisodeActions(
+                    episode: episode,
+                    order: actionOrder,
+                    context: context,
+                    ref: ref,
+                    onPlay: () => _playEpisode(ref, episode),
+                    allowedActions: _queueAllowedActions,
+                  );
                   return Semantics(
                     key: ValueKey(episode.id),
                     container: true,
@@ -193,6 +215,8 @@ class QueueScreen extends ConsumerWidget {
                       ): () => ref
                           .read(queueRepositoryProvider)
                           .cancelFromQueue(episode.id),
+                      for (final item in episodeActions)
+                        CustomSemanticsAction(label: item.label): item.onInvoke,
                     },
                     child: ExcludeSemantics(
                       child: ListTile(
