@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Deploy to TestFlight.
-# Usage: testflight [--notes "What to test"]
+# Usage: testflight [--notes "What to test"] [--public] [--both]
+#
+#   (no flag)  Upload to Internal Testing Group only
+#   --public   Upload to Public Testers only
+#   --both     Upload to both groups in a single build (same build number)
 #
 # What this does:
 #   1. Verifies the working tree is clean and in sync with remote
 #   2. Bumps the build number in pubspec.yaml and commits it
 #   3. Builds a release IPA
-#   4. Uploads to the Internal Testing Group on TestFlight
+#   4. Uploads to the specified TestFlight group(s)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,11 +18,14 @@ cd "$REPO_ROOT"
 
 ASC_APP_ID="6770760602"
 GROUP="Internal Testing Group"
+SUBMIT_FOR_REVIEW=false
 NOTES=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --notes|-n) NOTES="$2"; shift 2 ;;
+    --public)   GROUP="Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
+    --both)     GROUP="Internal Testing Group,Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
@@ -62,7 +69,8 @@ flutter build ipa --release
 # ── Upload ────────────────────────────────────────────────────────────────────
 echo "▶ Uploading to TestFlight..."
 EXTRA_FLAGS=()
-[[ -n "$NOTES" ]] && EXTRA_FLAGS+=(--test-notes "$NOTES" --locale en-US)
+[[ -n "$NOTES" ]]          && EXTRA_FLAGS+=(--test-notes "$NOTES" --locale en-US)
+[[ "$SUBMIT_FOR_REVIEW" == true ]] && EXTRA_FLAGS+=(--submit --confirm)
 
 asc publish testflight \
   --app "$ASC_APP_ID" \

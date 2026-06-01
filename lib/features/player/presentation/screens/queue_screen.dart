@@ -82,14 +82,8 @@ class QueueScreen extends ConsumerWidget {
                   ),
                 ),
               )
-            : ReorderableListView.builder(
-                buildDefaultDragHandles: false,
+            : ListView.builder(
                 itemCount: episodes.length,
-                onReorderItem: (oldIndex, newIndex) async {
-                  await ref
-                      .read(queueRepositoryProvider)
-                      .reorder(episodes[oldIndex].id, newIndex);
-                },
                 itemBuilder: (context, index) {
                   final episode = episodes[index];
                   final total = episodes.length;
@@ -248,17 +242,6 @@ class QueueScreen extends ConsumerWidget {
                               onPressed: () => ref
                                   .read(queueRepositoryProvider)
                                   .cancelFromQueue(episode.id),
-                            ),
-                            ReorderableDragStartListener(
-                              index: index,
-                              child: const Tooltip(
-                                message: 'Reorder',
-                                child: SizedBox(
-                                  width: 44,
-                                  height: 44,
-                                  child: Icon(Icons.drag_handle),
-                                ),
-                              ),
                             ),
                           ],
                         ),
