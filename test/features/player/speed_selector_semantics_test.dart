@@ -12,7 +12,9 @@ class _TestSpeedSelector extends StatelessWidget {
   final double speed;
   final ValueChanged<double> onSpeedChanged;
 
-  static final _speeds = [for (int i = 5; i <= 50; i++) i / 10.0];
+  static final List<double> _speeds = List.unmodifiable([
+    for (int i = 5; i <= 50; i++) i / 10.0,
+  ]);
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +66,11 @@ class _TestSpeedSelector extends StatelessWidget {
     return best;
   }
 
-  String _label(double s) => '${s.toStringAsFixed(1)}x';
+  String _label(double s) {
+    final tenths = (s * 10).round();
+    if ((tenths / 10.0 - s).abs() < 1e-9) return '${s.toStringAsFixed(1)}x';
+    return '${s.toStringAsFixed(2)}x';
+  }
 }
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
@@ -161,6 +167,31 @@ void main() {
           value: '5.0x',
           isSlider: true,
           hasIncreaseAction: false,
+          hasDecreaseAction: true,
+        ),
+      );
+
+      handle.dispose();
+    });
+
+    testWidgets('legacy 1.25x speed displays as 1.25x not 1.3x', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+
+      await tester.pumpWidget(
+        _wrap(
+          _TestSpeedSelector(speed: 1.25, onSpeedChanged: (_) {}),
+        ),
+      );
+
+      expect(
+        tester.getSemantics(_speedFinder()),
+        matchesSemantics(
+          label: 'Playback speed',
+          value: '1.25x',
+          isSlider: true,
+          hasIncreaseAction: true,
           hasDecreaseAction: true,
         ),
       );
