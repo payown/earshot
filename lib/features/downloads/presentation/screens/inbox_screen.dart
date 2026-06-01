@@ -22,6 +22,11 @@ class InboxScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // All episodes across all podcasts with newEpisode status, newest first.
     final allEpisodes = ref.watch(_inboxEpisodesProvider);
+    final subs = ref.watch(subscriptionsProvider).asData?.value;
+    final podcastTitles = <int, String>{
+      if (subs != null)
+        for (final p in subs) p.id: p.title,
+    };
 
     return Scaffold(
       appBar: AppBar(
@@ -47,6 +52,7 @@ class InboxScreen extends ConsumerWidget {
                 itemCount: episodes.length,
                 itemBuilder: (context, index) => _InboxEpisodeTile(
                   episode: episodes[index],
+                  podcastTitle: podcastTitles[episodes[index].podcastId],
                   onPlay: () => _playEpisode(context, episodes[index], ref),
                   onAddToQueue: () => unawaited(
                     ref
@@ -313,9 +319,11 @@ class _InboxEpisodeTile extends StatelessWidget {
     required this.onAddToQueue,
     required this.onMarkPlayed,
     required this.onDelete,
+    this.podcastTitle,
   });
 
   final Episode episode;
+  final String? podcastTitle;
   final VoidCallback onPlay;
   final VoidCallback onAddToQueue;
   final VoidCallback onMarkPlayed;
@@ -323,10 +331,18 @@ class _InboxEpisodeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final durationLabel = _semanticDuration(episode);
+    final parts = [
+      episode.title,
+      if (podcastTitle != null) podcastTitle!,
+      'New episode',
+      if (durationLabel != null) durationLabel,
+    ];
+    final label = parts.join(', ');
     return Semantics(
       button: true,
       onTap: onPlay,
-      label: '${episode.title}, New episode',
+      label: label,
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Add to queue'): onAddToQueue,
         const CustomSemanticsAction(label: 'Mark as played'): onMarkPlayed,
@@ -389,5 +405,27 @@ class _InboxEpisodeTile extends StatelessWidget {
     if (diff.inDays == 1) return 'Yesterday';
     if (diff.inDays < 7) return '${diff.inDays} days ago';
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String? _semanticDuration(Episode ep) {
+    if (ep.durationSeconds == null) return null;
+    final total = ep.durationSeconds!;
+    final position = ep.positionSeconds;
+    if (position > 0 && position < (total * 0.95).round()) {
+      return '${_verboseDuration(total - position)} remaining';
+    }
+    return _verboseDuration(total);
+  }
+
+  String _verboseDuration(int totalSeconds) {
+    final h = totalSeconds ~/ 3600;
+    final m = (totalSeconds % 3600) ~/ 60;
+    final s = totalSeconds % 60;
+    final parts = <String>[];
+    if (h > 0) parts.add('$h ${h == 1 ? 'hour' : 'hours'}');
+    if (m > 0) parts.add('$m ${m == 1 ? 'minute' : 'minutes'}');
+    if (s > 0 || parts.isEmpty)
+      parts.add('$s ${s == 1 ? 'second' : 'seconds'}');
+    return parts.join(', ');
   }
 }
