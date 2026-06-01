@@ -1,6 +1,7 @@
 enum EpisodeAction {
   playNow,
-  addToQueue,
+  playNext,
+  addToEndOfQueue,
   markPlayed,
   openShowNotes,
   bookmark,
@@ -9,7 +10,8 @@ enum EpisodeAction {
 
   String get label => switch (this) {
     EpisodeAction.playNow => 'Play now',
-    EpisodeAction.addToQueue => 'Add to queue',
+    EpisodeAction.playNext => 'Play next',
+    EpisodeAction.addToEndOfQueue => 'Add to end of queue',
     EpisodeAction.markPlayed => 'Mark as played',
     EpisodeAction.openShowNotes => 'Open show notes',
     EpisodeAction.bookmark => 'Bookmark current spot',
@@ -44,7 +46,8 @@ enum PodcastAction {
 
 const defaultEpisodeActions = [
   EpisodeAction.playNow,
-  EpisodeAction.addToQueue,
+  EpisodeAction.playNext,
+  EpisodeAction.addToEndOfQueue,
   EpisodeAction.markPlayed,
   EpisodeAction.openShowNotes,
   EpisodeAction.bookmark,
