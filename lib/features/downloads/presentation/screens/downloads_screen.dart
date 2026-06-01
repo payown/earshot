@@ -1,15 +1,35 @@
+import 'dart:async';
+
+import 'package:audio_service/audio_service.dart';
 import 'package:drift/drift.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/episode_action_builder.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../data/db/app_database.dart';
 import '../../../../data/db/enums.dart';
+import '../../../player/presentation/providers/player_providers.dart';
+import '../../../settings/domain/quick_action_definition.dart';
+import '../../../settings/presentation/providers/settings_providers.dart';
 import '../../../subscriptions/domain/episode.dart';
+import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
+import '../../../subscriptions/presentation/widgets/episode_list_tile.dart';
 import '../providers/downloads_providers.dart';
+
+// Bookmark excluded — requires active playback.
+const _downloadsAllowedActions = {
+  EpisodeAction.playNow,
+  EpisodeAction.playNext,
+  EpisodeAction.addToEndOfQueue,
+  EpisodeAction.markPlayed,
+  EpisodeAction.openShowNotes,
+  EpisodeAction.download,
+  EpisodeAction.share,
+};
 
 class DownloadsScreen extends ConsumerWidget {
   const DownloadsScreen({super.key});
@@ -20,6 +40,15 @@ class DownloadsScreen extends ConsumerWidget {
     final queueDownloads = ref.watch(_queueDownloadsProvider);
     final libraryDownloads = ref.watch(_libraryDownloadsProvider);
     final recentlyExpired = ref.watch(recentlyExpiredProvider);
+
+    final actionOrder =
+        ref.watch(episodeActionsProvider).asData?.value ??
+        defaultEpisodeActions;
+    final subs = ref.watch(subscriptionsProvider).asData?.value;
+    final podcastTitles = <int, String>{
+      if (subs != null)
+        for (final p in subs) p.id: p.title,
+    };
 
     final anyLoading =
         inboxDownloads.isLoading ||
@@ -58,18 +87,24 @@ class DownloadsScreen extends ConsumerWidget {
             ref: ref,
             label: 'Inbox',
             data: inboxDownloads,
+            actionOrder: actionOrder,
+            podcastTitles: podcastTitles,
           ),
           ..._buildSection(
             context: context,
             ref: ref,
             label: 'Queue',
             data: queueDownloads,
+            actionOrder: actionOrder,
+            podcastTitles: podcastTitles,
           ),
           ..._buildSection(
             context: context,
             ref: ref,
             label: 'Library',
             data: libraryDownloads,
+            actionOrder: actionOrder,
+            podcastTitles: podcastTitles,
           ),
           SliverToBoxAdapter(
             child: Padding(
@@ -115,11 +150,48 @@ class DownloadsScreen extends ConsumerWidget {
   }
 }
 
+void _playEpisode(BuildContext context, Episode episode, WidgetRef ref) {
+  final resumePosition =
+      episode.positionSeconds > 0 &&
+          episode.durationSeconds != null &&
+          episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
+      ? episode.positionSeconds
+      : 0;
+  final speedOverride = ref
+      .read(podcastProvider(episode.podcastId))
+      .value
+      ?.speedOverride;
+  unawaited(
+    ref
+        .read(audioHandlerProvider)
+        .playEpisode(
+          MediaItem(
+            id: episode.audioUrl,
+            title: episode.title,
+            artUri: episode.artworkUrl != null
+                ? Uri.tryParse(episode.artworkUrl!)
+                : null,
+            duration: episode.durationSeconds != null
+                ? Duration(seconds: episode.durationSeconds!)
+                : null,
+            extras: {
+              'episodeId': episode.id,
+              'podcastId': episode.podcastId,
+              if (speedOverride != null) 'speedOverride': speedOverride,
+            },
+          ),
+          resumePositionSeconds: resumePosition,
+        ),
+  );
+}
+
 List<Widget> _buildSection({
   required BuildContext context,
   required WidgetRef ref,
   required String label,
   required AsyncValue<List<Episode>> data,
+  required List<EpisodeAction> actionOrder,
+  required Map<int, String> podcastTitles,
 }) {
   final episodes = data.value;
   if (episodes == null || episodes.isEmpty) return const [];
@@ -141,13 +213,26 @@ List<Widget> _buildSection({
     ),
     SliverList.builder(
       itemCount: episodes.length,
-      itemBuilder: (context, index) => _DownloadTile(
-        episode: episodes[index],
-        sectionLabel: label,
-        onDelete: () => ref
-            .read(downloadManagerProvider)
-            .deleteDownload(episodes[index].id),
-      ),
+      itemBuilder: (context, index) {
+        final episode = episodes[index];
+        final actions = buildEpisodeActions(
+          episode: episode,
+          order: actionOrder,
+          context: context,
+          ref: ref,
+          onPlay: () => _playEpisode(context, episode, ref),
+          allowedActions: _downloadsAllowedActions,
+        );
+        return _DownloadTile(
+          episode: episode,
+          sectionLabel: label,
+          podcastTitle: podcastTitles[episode.podcastId],
+          quickActions: actions,
+          onDelete: () => ref
+              .read(downloadManagerProvider)
+              .deleteDownload(episodes[index].id),
+        );
+      },
     ),
   ];
 }
@@ -227,22 +312,39 @@ class _DownloadTile extends StatelessWidget {
     required this.episode,
     required this.sectionLabel,
     required this.onDelete,
+    this.podcastTitle,
+    this.quickActions = const [],
   });
 
   final Episode episode;
   final String sectionLabel;
+  final String? podcastTitle;
+  final List<EpisodeQuickActionItem> quickActions;
   final VoidCallback onDelete;
+
+  VoidCallback? get _defaultTap =>
+      quickActions.isNotEmpty ? quickActions[0].onInvoke : null;
 
   @override
   Widget build(BuildContext context) {
+    final labelParts = [
+      episode.title,
+      if (podcastTitle != null) podcastTitle!,
+      '$sectionLabel download',
+    ];
+
     return Semantics(
-      container: true,
-      label: '${episode.title}, $sectionLabel download',
+      button: _defaultTap != null,
+      onTap: _defaultTap,
+      label: labelParts.join(', '),
       customSemanticsActions: {
+        for (final a in quickActions)
+          CustomSemanticsAction(label: a.label): a.onInvoke,
         const CustomSemanticsAction(label: 'Delete download'): onDelete,
       },
       child: ExcludeSemantics(
         child: ListTile(
+          onTap: _defaultTap,
           leading: Icon(
             Icons.download_done,
             color: Theme.of(context).colorScheme.primary,

@@ -22,6 +22,7 @@ class QuickActionConfiguratorScreen extends ConsumerStatefulWidget {
 class _QuickActionConfiguratorScreenState
     extends ConsumerState<QuickActionConfiguratorScreen> {
   List<String>? _activeKeys;
+  bool _initialized = false;
 
   bool get _isEpisode => widget.contentType == QuickActionContentType.episode;
 
@@ -68,24 +69,23 @@ class _QuickActionConfiguratorScreenState
   }
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_activeKeys != null || !mounted) return;
-      final stored = _isEpisode
-          ? ref.read(episodeActionsProvider)
-          : ref.read(podcastActionsProvider);
-      stored.whenData((actions) {
-        final keys = actions
-            .map((a) => a is EpisodeAction ? a.key : (a as PodcastAction).key)
-            .toList();
-        setState(() => _activeKeys = keys);
-      });
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
+    // Initialize _activeKeys from the provider once on first data. ref.watch
+    // ensures a rebuild when the stream emits so the assignment below runs.
+    if (!_initialized) {
+      (_isEpisode
+              ? ref.watch(episodeActionsProvider)
+              : ref.watch(podcastActionsProvider))
+          .whenData((actions) {
+            _initialized = true;
+            _activeKeys = actions
+                .map(
+                  (a) => a is EpisodeAction ? a.key : (a as PodcastAction).key,
+                )
+                .toList();
+          });
+    }
+
     final active = _activeKeys ?? _allKeys;
     final inactive = _inactiveKeys;
 
