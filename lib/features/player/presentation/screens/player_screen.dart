@@ -313,8 +313,13 @@ class _ProgressBar extends StatelessWidget {
     final increased = _clamp(position + _kStep);
     final decreased = _clamp(position - _kStep);
 
+    final remaining = duration > position ? duration - position : Duration.zero;
+    final semanticLabel = duration.inSeconds > 0
+        ? '${_formatNatural(remaining)} remaining, ${_formatNatural(duration)} total'
+        : 'Playback position: $posLabel';
+
     return Semantics(
-      label: 'Playback position: $posLabel of $durLabel',
+      label: semanticLabel,
       slider: true,
       value: posLabel,
       increasedValue: _format(increased),
@@ -364,6 +369,18 @@ class _ProgressBar extends StatelessWidget {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
+  String _formatNatural(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    if (h > 0 && m > 0) {
+      return '$h ${h == 1 ? 'hour' : 'hours'} $m ${m == 1 ? 'minute' : 'minutes'}';
+    }
+    if (h > 0) return '$h ${h == 1 ? 'hour' : 'hours'}';
+    if (m > 0) return '$m ${m == 1 ? 'minute' : 'minutes'}';
+    return '$s ${s == 1 ? 'second' : 'seconds'}';
   }
 }
 
