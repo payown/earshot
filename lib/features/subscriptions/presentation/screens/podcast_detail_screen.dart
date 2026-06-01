@@ -180,19 +180,38 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
           label: action.label,
           onInvoke: () => _play(episode),
         ),
-        EpisodeAction.addToQueue => EpisodeQuickActionItem(
-          label: action.label,
-          onInvoke: () async {
-            await ref.read(queueRepositoryProvider).addToQueue(episode.id);
-            if (context.mounted) {
-              SemanticsService.sendAnnouncement(
-                View.of(context),
-                'Added to queue',
-                TextDirection.ltr,
-              );
-            }
-          },
-        ),
+        EpisodeAction.addToQueue =>
+          episode.status == EpisodeStatus.inQueue
+              ? EpisodeQuickActionItem(
+                  label: 'Remove from queue',
+                  onInvoke: () async {
+                    await ref
+                        .read(queueRepositoryProvider)
+                        .cancelFromQueue(episode.id);
+                    if (context.mounted) {
+                      SemanticsService.sendAnnouncement(
+                        View.of(context),
+                        'Removed from queue',
+                        TextDirection.ltr,
+                      );
+                    }
+                  },
+                )
+              : EpisodeQuickActionItem(
+                  label: action.label,
+                  onInvoke: () async {
+                    await ref
+                        .read(queueRepositoryProvider)
+                        .addToQueue(episode.id);
+                    if (context.mounted) {
+                      SemanticsService.sendAnnouncement(
+                        View.of(context),
+                        'Added to queue',
+                        TextDirection.ltr,
+                      );
+                    }
+                  },
+                ),
         EpisodeAction.markPlayed => EpisodeQuickActionItem(
           label: episode.status == EpisodeStatus.played
               ? 'Mark as unplayed'
