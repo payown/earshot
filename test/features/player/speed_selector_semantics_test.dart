@@ -174,6 +174,31 @@ void main() {
       handle.dispose();
     });
 
+    testWidgets('legacy 1.25x speed displays as 1.25x not 1.3x', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+
+      await tester.pumpWidget(
+        _wrap(
+          _TestSpeedSelector(speed: 1.25, onSpeedChanged: (_) {}),
+        ),
+      );
+
+      expect(
+        tester.getSemantics(_speedFinder()),
+        matchesSemantics(
+          label: 'Playback speed',
+          value: '1.25x',
+          isSlider: true,
+          hasIncreaseAction: true,
+          hasDecreaseAction: true,
+        ),
+      );
+
+      handle.dispose();
+    });
+
     testWidgets('no decrease action at minimum speed', (tester) async {
       final handle = tester.ensureSemantics();
 
