@@ -12,7 +12,9 @@ class _TestSpeedSelector extends StatelessWidget {
   final double speed;
   final ValueChanged<double> onSpeedChanged;
 
-  static final _speeds = [for (int i = 5; i <= 50; i++) i / 10.0];
+  static final List<double> _speeds = List.unmodifiable([
+    for (int i = 5; i <= 50; i++) i / 10.0,
+  ]);
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +66,11 @@ class _TestSpeedSelector extends StatelessWidget {
     return best;
   }
 
-  String _label(double s) => '${s.toStringAsFixed(1)}x';
+  String _label(double s) {
+    final tenths = (s * 10).round();
+    if ((tenths / 10.0 - s).abs() < 1e-9) return '${s.toStringAsFixed(1)}x';
+    return '${s.toStringAsFixed(2)}x';
+  }
 }
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
