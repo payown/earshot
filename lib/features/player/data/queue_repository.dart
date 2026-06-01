@@ -3,6 +3,10 @@ import '../../subscriptions/domain/episode.dart';
 abstract interface class QueueRepository {
   Future<void> addToQueue(int episodeId);
 
+  // Inserts after the currently playing item (position 1). If the episode is
+  // already in the queue, moves it there instead.
+  Future<void> addAfterCurrent(int episodeId);
+
   // Internal removal used by auto-advance. Does NOT revert episode status.
   Future<void> removeFromQueue(int episodeId);
 

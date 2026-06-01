@@ -25,14 +25,14 @@ class QuickActionRepositoryImpl implements QuickActionRepository {
 
     if (rows.isEmpty) return defaultEpisodeActions;
 
-    return rows
-        .map(
-          (r) => EpisodeAction.values.firstWhere(
-            (a) => a.key == r.actionKey,
-            orElse: () => EpisodeAction.playNow,
-          ),
-        )
-        .toList();
+    return rows.map((r) {
+      // Migrate legacy "addToQueue" key (renamed to addToEndOfQueue).
+      final key = r.actionKey == 'addToQueue' ? 'addToEndOfQueue' : r.actionKey;
+      return EpisodeAction.values.firstWhere(
+        (a) => a.key == key,
+        orElse: () => EpisodeAction.playNow,
+      );
+    }).toList();
   }
 
   @override

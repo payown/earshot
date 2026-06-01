@@ -7,13 +7,28 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/episode_action_builder.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../data/db/enums.dart';
 import '../../../player/presentation/providers/player_providers.dart';
+import '../../../settings/domain/quick_action_definition.dart';
+import '../../../settings/presentation/providers/settings_providers.dart';
 import '../../../subscriptions/domain/episode.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
+import '../../../subscriptions/presentation/widgets/episode_list_tile.dart';
 import '../providers/downloads_providers.dart';
+
+// Inbox does not expose bookmark (requires active playback).
+const _inboxAllowedActions = {
+  EpisodeAction.playNow,
+  EpisodeAction.playNext,
+  EpisodeAction.addToEndOfQueue,
+  EpisodeAction.markPlayed,
+  EpisodeAction.openShowNotes,
+  EpisodeAction.download,
+  EpisodeAction.share,
+};
 
 class InboxScreen extends ConsumerWidget {
   const InboxScreen({super.key});
@@ -27,6 +42,9 @@ class InboxScreen extends ConsumerWidget {
       if (subs != null)
         for (final p in subs) p.id: p.title,
     };
+    final actionOrder =
+        ref.watch(episodeActionsProvider).asData?.value ??
+        defaultEpisodeActions;
 
     return Scaffold(
       appBar: AppBar(
@@ -50,27 +68,25 @@ class InboxScreen extends ConsumerWidget {
             ? _EmptyInbox()
             : ListView.builder(
                 itemCount: episodes.length,
-                itemBuilder: (context, index) => _InboxEpisodeTile(
-                  episode: episodes[index],
-                  podcastTitle: podcastTitles[episodes[index].podcastId],
-                  onPlay: () => _playEpisode(context, episodes[index], ref),
-                  onAddToQueue: () => unawaited(
-                    ref
-                        .read(queueRepositoryProvider)
-                        .addToQueue(episodes[index].id),
-                  ),
-                  onMarkPlayed: () => unawaited(
-                    ref
-                        .read(podcastRepositoryProvider)
-                        .updateEpisodeStatus(
-                          episodes[index].id,
-                          EpisodeStatus.played,
-                        ),
-                  ),
-                  onDelete: () => unawaited(
-                    _confirmDelete(context, ref, episodes[index]),
-                  ),
-                ),
+                itemBuilder: (context, index) {
+                  final episode = episodes[index];
+                  final actions = buildEpisodeActions(
+                    episode: episode,
+                    order: actionOrder,
+                    context: context,
+                    ref: ref,
+                    onPlay: () => _playEpisode(context, episode, ref),
+                    allowedActions: _inboxAllowedActions,
+                  );
+                  return _InboxEpisodeTile(
+                    episode: episode,
+                    podcastTitle: podcastTitles[episode.podcastId],
+                    quickActions: actions,
+                    onDelete: () => unawaited(
+                      _confirmDelete(context, ref, episode),
+                    ),
+                  );
+                },
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
@@ -315,19 +331,21 @@ class _EmptyInbox extends StatelessWidget {
 class _InboxEpisodeTile extends StatelessWidget {
   const _InboxEpisodeTile({
     required this.episode,
-    required this.onPlay,
-    required this.onAddToQueue,
-    required this.onMarkPlayed,
+    required this.quickActions,
     required this.onDelete,
     this.podcastTitle,
   });
 
   final Episode episode;
   final String? podcastTitle;
-  final VoidCallback onPlay;
-  final VoidCallback onAddToQueue;
-  final VoidCallback onMarkPlayed;
+  final List<EpisodeQuickActionItem> quickActions;
   final VoidCallback onDelete;
+
+  VoidCallback? get _defaultTap =>
+      quickActions.isNotEmpty ? quickActions[0].onInvoke : null;
+
+  VoidCallback? _findAction(String label) =>
+      quickActions.where((a) => a.label == label).firstOrNull?.onInvoke;
 
   @override
   Widget build(BuildContext context) {
@@ -339,18 +357,29 @@ class _InboxEpisodeTile extends StatelessWidget {
       if (durationLabel != null) durationLabel,
     ];
     final label = parts.join(', ');
+
+    final semanticActions = <CustomSemanticsAction, VoidCallback>{
+      for (final a in quickActions)
+        CustomSemanticsAction(label: a.label): a.onInvoke,
+      const CustomSemanticsAction(label: 'Delete'): onDelete,
+    };
+
+    // Trailing icon buttons: queue action + mark played (sighted affordance).
+    final queueCallback =
+        _findAction('Add to end of queue') ??
+        _findAction('Play next') ??
+        _findAction('Remove from queue');
+    final markPlayedCallback =
+        _findAction('Mark as played') ?? _findAction('Mark as unplayed');
+
     return Semantics(
-      button: true,
-      onTap: onPlay,
+      button: _defaultTap != null,
+      onTap: _defaultTap,
       label: label,
-      customSemanticsActions: {
-        const CustomSemanticsAction(label: 'Add to queue'): onAddToQueue,
-        const CustomSemanticsAction(label: 'Mark as played'): onMarkPlayed,
-        const CustomSemanticsAction(label: 'Delete'): onDelete,
-      },
+      customSemanticsActions: semanticActions,
       child: ExcludeSemantics(
         child: ListTile(
-          onTap: onPlay,
+          onTap: _defaultTap,
           title: Text(
             episode.title,
             maxLines: 2,
@@ -382,16 +411,18 @@ class _InboxEpisodeTile extends StatelessWidget {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: const Icon(Icons.queue_music),
-                onPressed: onAddToQueue,
-                tooltip: 'Add to queue',
-              ),
-              IconButton(
-                icon: const Icon(Icons.check),
-                onPressed: onMarkPlayed,
-                tooltip: 'Mark as played',
-              ),
+              if (queueCallback != null)
+                IconButton(
+                  icon: const Icon(Icons.queue_music),
+                  onPressed: queueCallback,
+                  tooltip: 'Add to end of queue',
+                ),
+              if (markPlayedCallback != null)
+                IconButton(
+                  icon: const Icon(Icons.check),
+                  onPressed: markPlayedCallback,
+                  tooltip: 'Mark as played',
+                ),
             ],
           ),
         ),
