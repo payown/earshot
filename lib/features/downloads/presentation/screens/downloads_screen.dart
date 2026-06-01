@@ -16,8 +16,20 @@ class DownloadsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final downloads = ref.watch(_downloadedEpisodesProvider);
+    final inboxDownloads = ref.watch(_inboxDownloadsProvider);
+    final queueDownloads = ref.watch(_queueDownloadsProvider);
+    final libraryDownloads = ref.watch(_libraryDownloadsProvider);
     final recentlyExpired = ref.watch(recentlyExpiredProvider);
+
+    final anyLoading =
+        inboxDownloads.isLoading ||
+        queueDownloads.isLoading ||
+        libraryDownloads.isLoading;
+    final allEmpty =
+        !anyLoading &&
+        (inboxDownloads.value?.isEmpty ?? true) &&
+        (queueDownloads.value?.isEmpty ?? true) &&
+        (libraryDownloads.value?.isEmpty ?? true);
 
     return Scaffold(
       appBar: AppBar(
@@ -32,40 +44,44 @@ class DownloadsScreen extends ConsumerWidget {
       ),
       body: CustomScrollView(
         slivers: [
-          downloads.when(
-            data: (episodes) => episodes.isEmpty
-                ? const SliverToBoxAdapter(
-                    child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: Text('No downloaded episodes.')),
-                    ),
-                  )
-                : SliverList.builder(
-                    itemCount: episodes.length,
-                    itemBuilder: (context, index) => _DownloadTile(
-                      episode: episodes[index],
-                      onDelete: () => ref
-                          .read(downloadManagerProvider)
-                          .deleteDownload(episodes[index].id),
-                    ),
-                  ),
-            loading: () =>
-                const SliverToBoxAdapter(child: LinearProgressIndicator()),
-            error: (e, _) => SliverToBoxAdapter(
+          if (anyLoading)
+            const SliverToBoxAdapter(child: LinearProgressIndicator()),
+          if (allEmpty)
+            const SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text('Error: $e'),
+                padding: EdgeInsets.all(24),
+                child: Center(child: Text('No downloaded episodes.')),
               ),
             ),
+          ..._buildSection(
+            context: context,
+            ref: ref,
+            label: 'Inbox',
+            data: inboxDownloads,
+          ),
+          ..._buildSection(
+            context: context,
+            ref: ref,
+            label: 'Queue',
+            data: queueDownloads,
+          ),
+          ..._buildSection(
+            context: context,
+            ref: ref,
+            label: 'Library',
+            data: libraryDownloads,
           ),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
               child: Semantics(
                 header: true,
-                child: Text(
-                  'Recently Expired',
-                  style: Theme.of(context).textTheme.titleMedium,
+                label: 'Recently Expired',
+                child: ExcludeSemantics(
+                  child: Text(
+                    'Recently Expired',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ),
             ),
@@ -99,10 +115,86 @@ class DownloadsScreen extends ConsumerWidget {
   }
 }
 
-final _downloadedEpisodesProvider = StreamProvider<List<Episode>>((ref) {
+List<Widget> _buildSection({
+  required BuildContext context,
+  required WidgetRef ref,
+  required String label,
+  required AsyncValue<List<Episode>> data,
+}) {
+  final episodes = data.value;
+  if (episodes == null || episodes.isEmpty) return const [];
+  return [
+    SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+        child: Semantics(
+          header: true,
+          label: label,
+          child: ExcludeSemantics(
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+        ),
+      ),
+    ),
+    SliverList.builder(
+      itemCount: episodes.length,
+      itemBuilder: (context, index) => _DownloadTile(
+        episode: episodes[index],
+        sectionLabel: label,
+        onDelete: () => ref
+            .read(downloadManagerProvider)
+            .deleteDownload(episodes[index].id),
+      ),
+    ),
+  ];
+}
+
+// Three stream providers split by where the downloaded episode lives.
+// Inbox: new, not dismissed, downloaded.
+// Queue: in queue, downloaded.
+// Library: downloaded, played (or any other status).
+
+final _inboxDownloadsProvider = StreamProvider<List<Episode>>((ref) {
   final db = ref.watch(appDatabaseProvider);
   return (db.select(db.episodes)
-        ..where((e) => e.downloadStatus.equals(DownloadStatus.downloaded.name))
+        ..where(
+          (e) =>
+              e.downloadStatus.equals(DownloadStatus.downloaded.name) &
+              e.status.equals(EpisodeStatus.newEpisode.name) &
+              e.inboxDismissed.equals(false),
+        )
+        ..orderBy([(e) => OrderingTerm.desc(e.pubDate)]))
+      .watch()
+      .map((rows) => rows.map(_toEpisode).toList());
+});
+
+final _queueDownloadsProvider = StreamProvider<List<Episode>>((ref) {
+  final db = ref.watch(appDatabaseProvider);
+  return (db.select(db.episodes)
+        ..where(
+          (e) =>
+              e.downloadStatus.equals(DownloadStatus.downloaded.name) &
+              e.status.equals(EpisodeStatus.inQueue.name),
+        )
+        ..orderBy([(e) => OrderingTerm.desc(e.pubDate)]))
+      .watch()
+      .map((rows) => rows.map(_toEpisode).toList());
+});
+
+final _libraryDownloadsProvider = StreamProvider<List<Episode>>((ref) {
+  final db = ref.watch(appDatabaseProvider);
+  return (db.select(db.episodes)
+        ..where(
+          (e) =>
+              e.downloadStatus.equals(DownloadStatus.downloaded.name) &
+              e.status.isNotIn([
+                EpisodeStatus.newEpisode.name,
+                EpisodeStatus.inQueue.name,
+              ]),
+        )
         ..orderBy([(e) => OrderingTerm.desc(e.pubDate)]))
       .watch()
       .map((rows) => rows.map(_toEpisode).toList());
@@ -131,42 +223,40 @@ Episode _toEpisode(EpisodeRow r) => Episode(
 );
 
 class _DownloadTile extends StatelessWidget {
-  const _DownloadTile({required this.episode, required this.onDelete});
+  const _DownloadTile({
+    required this.episode,
+    required this.sectionLabel,
+    required this.onDelete,
+  });
 
   final Episode episode;
+  final String sectionLabel;
   final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: '${episode.title}, downloaded',
+      container: true,
+      label: '${episode.title}, $sectionLabel download',
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Delete download'): onDelete,
       },
-      child: ListTile(
-        leading: ExcludeSemantics(
-          child: Icon(
+      child: ExcludeSemantics(
+        child: ListTile(
+          leading: Icon(
             Icons.download_done,
             color: Theme.of(context).colorScheme.primary,
           ),
-        ),
-        title: ExcludeSemantics(
-          child: Text(
+          title: Text(
             episode.title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.titleSmall,
           ),
-        ),
-        trailing: Semantics(
-          button: true,
-          label: 'Delete download',
-          child: ExcludeSemantics(
-            child: IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: onDelete,
-              tooltip: 'Delete download',
-            ),
+          trailing: IconButton(
+            icon: const Icon(Icons.delete_outline),
+            onPressed: onDelete,
+            tooltip: 'Delete download',
           ),
         ),
       ),
@@ -183,37 +273,28 @@ class _RecentlyExpiredTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Semantics(
+      container: true,
       label: 'Expired episode, episode ID ${row.episodeId}',
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Restore to queue'): onRestore,
       },
-      child: ListTile(
-        leading: ExcludeSemantics(
-          child: Icon(
+      child: ExcludeSemantics(
+        child: ListTile(
+          leading: Icon(
             Icons.history,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
-        ),
-        title: ExcludeSemantics(
-          child: Text(
+          title: Text(
             'Episode ${row.episodeId}',
             style: Theme.of(context).textTheme.titleSmall,
           ),
-        ),
-        subtitle: ExcludeSemantics(
-          child: Text(
+          subtitle: Text(
             'Expired ${_daysAgo(row.expiredAt)}',
             style: Theme.of(context).textTheme.bodySmall,
           ),
-        ),
-        trailing: Semantics(
-          button: true,
-          label: 'Restore to queue',
-          child: ExcludeSemantics(
-            child: TextButton(
-              onPressed: onRestore,
-              child: const Text('Restore'),
-            ),
+          trailing: TextButton(
+            onPressed: onRestore,
+            child: const Text('Restore'),
           ),
         ),
       ),

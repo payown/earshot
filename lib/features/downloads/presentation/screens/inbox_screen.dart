@@ -45,6 +45,7 @@ class InboxScreen extends ConsumerWidget {
     final actionOrder =
         ref.watch(episodeActionsProvider).asData?.value ??
         defaultEpisodeActions;
+    final autoDownload = ref.watch(autoDownloadInboxProvider).value ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -63,33 +64,83 @@ class InboxScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: allEpisodes.when(
-        data: (episodes) => episodes.isEmpty
-            ? _EmptyInbox()
-            : ListView.builder(
-                itemCount: episodes.length,
-                itemBuilder: (context, index) {
-                  final episode = episodes[index];
-                  final actions = buildEpisodeActions(
-                    episode: episode,
-                    order: actionOrder,
-                    context: context,
-                    ref: ref,
-                    onPlay: () => _playEpisode(context, episode, ref),
-                    allowedActions: _inboxAllowedActions,
-                  );
-                  return _InboxEpisodeTile(
-                    episode: episode,
-                    podcastTitle: podcastTitles[episode.podcastId],
-                    quickActions: actions,
-                    onDelete: () => unawaited(
-                      _confirmDelete(context, ref, episode),
-                    ),
-                  );
-                },
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: SwitchListTile(
+              title: const Text('Auto-download new episodes'),
+              subtitle: const Text(
+                'Episodes are downloaded as they arrive in your inbox',
               ),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+              value: autoDownload,
+              onChanged: ref.watch(autoDownloadInboxProvider).isLoading
+                  ? null
+                  : (val) async {
+                      try {
+                        await ref
+                            .read(autoDownloadInboxProvider.notifier)
+                            .set(val);
+                        if (val) {
+                          unawaited(
+                            ref
+                                .read(downloadManagerProvider)
+                                .downloadInboxEpisodes(),
+                          );
+                        }
+                        if (context.mounted) {
+                          SemanticsService.sendAnnouncement(
+                            View.of(context),
+                            val
+                                ? 'Auto-download enabled'
+                                : 'Auto-download disabled',
+                            TextDirection.ltr,
+                          );
+                        }
+                      } catch (_) {
+                        if (context.mounted) {
+                          SemanticsService.sendAnnouncement(
+                            View.of(context),
+                            'Could not update auto-download setting',
+                            TextDirection.ltr,
+                          );
+                        }
+                      }
+                    },
+            ),
+          ),
+          allEpisodes.when(
+            data: (episodes) => episodes.isEmpty
+                ? SliverToBoxAdapter(child: _EmptyInbox())
+                : SliverList.builder(
+                    itemCount: episodes.length,
+                    itemBuilder: (context, index) {
+                      final episode = episodes[index];
+                      final actions = buildEpisodeActions(
+                        episode: episode,
+                        order: actionOrder,
+                        context: context,
+                        ref: ref,
+                        onPlay: () => _playEpisode(context, episode, ref),
+                        allowedActions: _inboxAllowedActions,
+                      );
+                      return _InboxEpisodeTile(
+                        episode: episode,
+                        podcastTitle: podcastTitles[episode.podcastId],
+                        quickActions: actions,
+                        onDelete: () => unawaited(
+                          _confirmDelete(context, ref, episode),
+                        ),
+                      );
+                    },
+                  ),
+            loading: () => const SliverToBoxAdapter(
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (e, _) => SliverToBoxAdapter(
+              child: Center(child: Text('Error: $e')),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -130,6 +181,15 @@ class InboxScreen extends ConsumerWidget {
     unawaited(
       ref.read(queueRepositoryProvider).addToQueue(episode.id),
     );
+    // Trigger queue auto-download if enabled and episode is not already
+    // downloaded or in progress.
+    final autoDownloadQueue =
+        ref.read(autoDownloadQueueProvider).value ?? false;
+    if (autoDownloadQueue &&
+        (episode.downloadStatus == DownloadStatus.none ||
+            episode.downloadStatus == DownloadStatus.failed)) {
+      unawaited(ref.read(downloadManagerProvider).downloadEpisode(episode.id));
+    }
     unawaited(
       ref
           .read(podcastRepositoryProvider)
@@ -350,11 +410,13 @@ class _InboxEpisodeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final durationLabel = _semanticDuration(episode);
+    final downloadLabel = _downloadStatusLabel(episode.downloadStatus);
     final parts = [
       episode.title,
       if (podcastTitle != null) podcastTitle!,
       'New episode',
       if (durationLabel != null) durationLabel,
+      if (downloadLabel != null) downloadLabel,
     ];
     final label = parts.join(', ');
 
@@ -390,16 +452,81 @@ class _InboxEpisodeTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Chip(
-                label: const Text('New'),
-                visualDensity: VisualDensity.compact,
-                backgroundColor: Theme.of(
-                  context,
-                ).colorScheme.primaryContainer,
-                labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onPrimaryContainer,
-                ),
-                padding: EdgeInsets.zero,
+              Wrap(
+                spacing: 4,
+                runSpacing: 0,
+                children: [
+                  Chip(
+                    label: const Text('New'),
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.primaryContainer,
+                    labelStyle:
+                        Theme.of(
+                          context,
+                        ).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onPrimaryContainer,
+                        ),
+                    padding: EdgeInsets.zero,
+                  ),
+                  if (episode.downloadStatus == DownloadStatus.downloaded)
+                    Chip(
+                      avatar: ExcludeSemantics(
+                        child: Icon(
+                          Icons.download_done,
+                          size: 14,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSecondaryContainer,
+                        ),
+                      ),
+                      label: const Text('Downloaded'),
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.secondaryContainer,
+                      labelStyle:
+                          Theme.of(
+                            context,
+                          ).textTheme.labelSmall?.copyWith(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSecondaryContainer,
+                          ),
+                      padding: EdgeInsets.zero,
+                    )
+                  else if (episode.downloadStatus ==
+                          DownloadStatus.downloading ||
+                      episode.downloadStatus == DownloadStatus.pending)
+                    Chip(
+                      avatar: ExcludeSemantics(
+                        child: Icon(
+                          Icons.downloading,
+                          size: 14,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSecondaryContainer,
+                        ),
+                      ),
+                      label: const Text('Downloading'),
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.secondaryContainer,
+                      labelStyle:
+                          Theme.of(
+                            context,
+                          ).textTheme.labelSmall?.copyWith(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSecondaryContainer,
+                          ),
+                      padding: EdgeInsets.zero,
+                    ),
+                ],
               ),
               if (episode.pubDate != null)
                 Text(
@@ -429,6 +556,13 @@ class _InboxEpisodeTile extends StatelessWidget {
       ),
     );
   }
+
+  String? _downloadStatusLabel(DownloadStatus status) => switch (status) {
+    DownloadStatus.downloaded => 'downloaded',
+    DownloadStatus.downloading || DownloadStatus.pending => 'downloading',
+    DownloadStatus.failed => 'download failed',
+    DownloadStatus.none => null,
+  };
 
   String _formatDate(DateTime date) {
     final diff = DateTime.now().difference(date);

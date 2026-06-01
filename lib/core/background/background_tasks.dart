@@ -52,18 +52,35 @@ Future<bool> _runEpisodeDownloads() async {
   final db = AppDatabase();
   try {
     final settings = AppSettingsRepositoryImpl(database: db);
-    final downloadCount = await settings.getAutoDownloadCount();
-    final autoQueuePodcasts = await (db.select(
-      db.podcasts,
-    )..where((p) => p.autoQueue.equals(true))).get();
     final manager = DownloadManager(
       database: db,
       dio: _buildDio(),
       settings: settings,
     );
+
+    // Per-podcast auto-queue downloads (existing behaviour).
+    final downloadCount = await settings.getAutoDownloadCount();
+    final autoQueuePodcasts = await (db.select(
+      db.podcasts,
+    )..where((p) => p.autoQueue.equals(true))).get();
     for (final podcast in autoQueuePodcasts) {
       await manager.downloadRecentEpisodes(podcast.id, downloadCount);
     }
+
+    // Inbox and Queue auto-download.
+    if (await settings.isAutoDownloadInbox()) {
+      await manager.downloadInboxEpisodes();
+    }
+    if (await settings.isAutoDownloadQueue()) {
+      await manager.downloadQueueEpisodes();
+    }
+
+    // Download retention cleanup.
+    final retentionDays = await settings.getDownloadRetentionDays();
+    if (retentionDays != null) {
+      await manager.applyDownloadRetention(retentionDays);
+    }
+
     return true;
   } catch (e, st) {
     _log.severe('Episode download background task failed', e, st);
