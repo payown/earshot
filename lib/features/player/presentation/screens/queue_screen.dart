@@ -6,7 +6,29 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/router/app_router.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
+import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../providers/player_providers.dart';
+
+String? _semanticDuration(Episode ep) {
+  if (ep.durationSeconds == null) return null;
+  final total = ep.durationSeconds!;
+  final position = ep.positionSeconds;
+  if (position > 0 && position < (total * 0.95).round()) {
+    return '${_verboseDuration(total - position)} remaining';
+  }
+  return _verboseDuration(total);
+}
+
+String _verboseDuration(int totalSeconds) {
+  final h = totalSeconds ~/ 3600;
+  final m = (totalSeconds % 3600) ~/ 60;
+  final s = totalSeconds % 60;
+  final parts = <String>[];
+  if (h > 0) parts.add('$h ${h == 1 ? 'hour' : 'hours'}');
+  if (m > 0) parts.add('$m ${m == 1 ? 'minute' : 'minutes'}');
+  if (s > 0 || parts.isEmpty) parts.add('$s ${s == 1 ? 'second' : 'seconds'}');
+  return parts.join(', ');
+}
 
 void _playEpisode(WidgetRef ref, Episode episode) {
   final handler = ref.read(audioHandlerProvider);
@@ -38,6 +60,11 @@ class QueueScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final queue = ref.watch(queueProvider);
+    final subs = ref.watch(subscriptionsProvider).asData?.value;
+    final podcastTitles = <int, String>{
+      if (subs != null)
+        for (final p in subs) p.id: p.title,
+    };
 
     return Scaffold(
       appBar: AppBar(
@@ -91,11 +118,19 @@ class QueueScreen extends ConsumerWidget {
                   final isFirst = index == 0;
                   final isLast = index == total - 1;
 
+                  final durationLabel = _semanticDuration(episode);
+                  final podcastTitle = podcastTitles[episode.podcastId];
+                  final labelParts = [
+                    episode.title,
+                    if (podcastTitle != null) podcastTitle,
+                    'In queue, position $position of $total',
+                    if (durationLabel != null) durationLabel,
+                  ];
+                  final queueLabel = labelParts.join(', ');
                   return Semantics(
                     key: ValueKey(episode.id),
                     container: true,
-                    label:
-                        '${episode.title}, In queue, position $position of $total',
+                    label: queueLabel,
                     customSemanticsActions: {
                       const CustomSemanticsAction(label: 'Play'): () =>
                           _playEpisode(ref, episode),
