@@ -30,11 +30,25 @@ const _inboxAllowedActions = {
   EpisodeAction.share,
 };
 
-class InboxScreen extends ConsumerWidget {
+class InboxScreen extends ConsumerStatefulWidget {
   const InboxScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<InboxScreen> createState() => _InboxScreenState();
+}
+
+class _InboxScreenState extends ConsumerState<InboxScreen> {
+  final _refreshKey = GlobalKey<RefreshIndicatorState>();
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     // All episodes across all podcasts with newEpisode status, newest first.
     final allEpisodes = ref.watch(_inboxEpisodesProvider);
     final subs = ref.watch(subscriptionsProvider).asData?.value;
@@ -64,94 +78,108 @@ class InboxScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await ref.read(podcastRepositoryProvider).refreshAllFeeds();
-          if (context.mounted) {
-            SemanticsService.sendAnnouncement(
-              View.of(context),
-              'Inbox refreshed',
-              TextDirection.ltr,
-            );
+      body: Semantics(
+        onScrollDown: () {
+          if (_scrollController.hasClients && _scrollController.offset <= 0.0) {
+            _refreshKey.currentState?.show();
           }
         },
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: SwitchListTile(
-                title: const Text('Auto-download new episodes'),
-                subtitle: const Text(
-                  'Episodes are downloaded as they arrive in your inbox',
+        customSemanticsActions: {
+          const CustomSemanticsAction(label: 'Refresh'): () {
+            _refreshKey.currentState?.show();
+          },
+        },
+        child: RefreshIndicator(
+          key: _refreshKey,
+          onRefresh: () async {
+            await ref.read(podcastRepositoryProvider).refreshAllFeeds();
+            if (context.mounted) {
+              SemanticsService.sendAnnouncement(
+                View.of(context),
+                'Inbox refreshed',
+                TextDirection.ltr,
+              );
+            }
+          },
+          child: CustomScrollView(
+            controller: _scrollController,
+            slivers: [
+              SliverToBoxAdapter(
+                child: SwitchListTile(
+                  title: const Text('Auto-download new episodes'),
+                  subtitle: const Text(
+                    'Episodes are downloaded as they arrive in your inbox',
+                  ),
+                  value: autoDownload,
+                  onChanged: ref.watch(autoDownloadInboxProvider).isLoading
+                      ? null
+                      : (val) async {
+                          try {
+                            await ref
+                                .read(autoDownloadInboxProvider.notifier)
+                                .set(val);
+                            if (val) {
+                              unawaited(
+                                ref
+                                    .read(downloadManagerProvider)
+                                    .downloadInboxEpisodes(),
+                              );
+                            }
+                            if (context.mounted) {
+                              SemanticsService.sendAnnouncement(
+                                View.of(context),
+                                val
+                                    ? 'Auto-download enabled'
+                                    : 'Auto-download disabled',
+                                TextDirection.ltr,
+                              );
+                            }
+                          } catch (_) {
+                            if (context.mounted) {
+                              SemanticsService.sendAnnouncement(
+                                View.of(context),
+                                'Could not update auto-download setting',
+                                TextDirection.ltr,
+                              );
+                            }
+                          }
+                        },
                 ),
-                value: autoDownload,
-                onChanged: ref.watch(autoDownloadInboxProvider).isLoading
-                    ? null
-                    : (val) async {
-                        try {
-                          await ref
-                              .read(autoDownloadInboxProvider.notifier)
-                              .set(val);
-                          if (val) {
-                            unawaited(
-                              ref
-                                  .read(downloadManagerProvider)
-                                  .downloadInboxEpisodes(),
-                            );
-                          }
-                          if (context.mounted) {
-                            SemanticsService.sendAnnouncement(
-                              View.of(context),
-                              val
-                                  ? 'Auto-download enabled'
-                                  : 'Auto-download disabled',
-                              TextDirection.ltr,
-                            );
-                          }
-                        } catch (_) {
-                          if (context.mounted) {
-                            SemanticsService.sendAnnouncement(
-                              View.of(context),
-                              'Could not update auto-download setting',
-                              TextDirection.ltr,
-                            );
-                          }
-                        }
-                      },
               ),
-            ),
-            allEpisodes.when(
-              data: (episodes) => episodes.isEmpty
-                  ? SliverToBoxAdapter(child: _EmptyInbox())
-                  : SliverList.builder(
-                      itemCount: episodes.length,
-                      itemBuilder: (context, index) {
-                        final episode = episodes[index];
-                        final actions = buildEpisodeActions(
-                          episode: episode,
-                          order: actionOrder,
-                          context: context,
-                          ref: ref,
-                          onPlay: () => _playEpisode(context, episode, ref),
-                          allowedActions: _inboxAllowedActions,
-                        );
-                        return _InboxEpisodeTile(
-                          episode: episode,
-                          podcastTitle: podcastTitles[episode.podcastId],
-                          quickActions: actions,
-                          onDelete: () => unawaited(
-                            _confirmDelete(context, ref, episode),
-                          ),
-                        );
-                      },
-                    ),
-              loading: () => const SliverToBoxAdapter(
-                child: Center(child: CircularProgressIndicator()),
+              allEpisodes.when(
+                data: (episodes) => episodes.isEmpty
+                    ? SliverToBoxAdapter(child: _EmptyInbox())
+                    : SliverList.builder(
+                        itemCount: episodes.length,
+                        itemBuilder: (context, index) {
+                          final episode = episodes[index];
+                          final actions = buildEpisodeActions(
+                            episode: episode,
+                            order: actionOrder,
+                            context: context,
+                            ref: ref,
+                            onPlay: () => _playEpisode(context, episode, ref),
+                            allowedActions: _inboxAllowedActions,
+                          );
+                          return _InboxEpisodeTile(
+                            episode: episode,
+                            podcastTitle: podcastTitles[episode.podcastId],
+                            quickActions: actions,
+                            onDelete: () => unawaited(
+                              _confirmDelete(context, ref, episode),
+                            ),
+                          );
+                        },
+                      ),
+                loading: () => const SliverToBoxAdapter(
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (e, _) => SliverToBoxAdapter(
+                  child: Center(child: Text('Error: $e')),
+                ),
               ),
-              error: (e, _) => SliverToBoxAdapter(
-                child: Center(child: Text('Error: $e')),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
