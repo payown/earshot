@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -51,7 +52,16 @@ class _SubscriptionsScreenState extends ConsumerState<SubscriptionsScreen> {
             builder: (_) => const CreateFolderDialog(),
           ),
         ),
-        title: const Text('Library'),
+        title: Semantics(
+          // VoiceOver: focus the 'Library' heading, swipe down in the actions
+          // rotor to invoke 'Refresh library'. Sighted users still have pull-
+          // to-refresh on the list below.
+          customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
+            const CustomSemanticsAction(label: 'Refresh library'): () =>
+                _refreshKey.currentState?.show(),
+          },
+          child: const Text('Library'),
+        ),
         centerTitle: true,
         actions: [
           IconButton(
