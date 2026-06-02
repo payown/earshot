@@ -13,6 +13,7 @@ import '../../../../features/downloads/presentation/providers/downloads_provider
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
+import '../../domain/queue_group.dart';
 import '../providers/player_providers.dart';
 
 String? _semanticDuration(Episode ep) {
@@ -75,22 +76,71 @@ void _playEpisode(WidgetRef ref, Episode episode) {
   );
 }
 
+Future<void> _shuffleGroup(WidgetRef ref, List<Episode> episodes) async {
+  final shuffled = [...episodes]..shuffle();
+  await ref
+      .read(queueRepositoryProvider)
+      .sortGroup(shuffled.map((e) => e.id).toList());
+}
+
+Future<void> _playNewestFirst(WidgetRef ref, List<Episode> episodes) async {
+  final sorted = [...episodes]
+    ..sort((a, b) {
+      final aDate = a.pubDate ?? DateTime(0);
+      final bDate = b.pubDate ?? DateTime(0);
+      return bDate.compareTo(aDate);
+    });
+  await ref
+      .read(queueRepositoryProvider)
+      .sortGroup(sorted.map((e) => e.id).toList());
+}
+
+Future<void> _playOldestFirst(WidgetRef ref, List<Episode> episodes) async {
+  final sorted = [...episodes]
+    ..sort((a, b) {
+      final aDate = a.pubDate ?? DateTime(0);
+      final bDate = b.pubDate ?? DateTime(0);
+      return aDate.compareTo(bDate);
+    });
+  await ref
+      .read(queueRepositoryProvider)
+      .sortGroup(sorted.map((e) => e.id).toList());
+}
+
 class QueueScreen extends ConsumerWidget {
   const QueueScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final queue = ref.watch(queueProvider);
-    final subs = ref.watch(subscriptionsProvider).asData?.value;
-    final podcastTitles = <int, String>{
-      if (subs != null)
-        for (final p in subs) p.id: p.title,
-    };
+    final groupingEnabled =
+        ref.watch(groupQueueEpisodesProvider).value ?? false;
     final autoDownload = ref.watch(autoDownloadQueueProvider).value ?? false;
+    final currentEpisodeId =
+        ref.watch(mediaItemProvider).value?.extras?['episodeId'] as int?;
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: Icon(
+            groupingEnabled ? Icons.dynamic_feed : Icons.view_list,
+          ),
+          tooltip: groupingEnabled
+              ? 'Group by podcast: on'
+              : 'Group by podcast: off',
+          onPressed: () async {
+            final view = View.of(context);
+            final newValue = !groupingEnabled;
+            await ref.read(groupQueueEpisodesProvider.notifier).set(newValue);
+            SemanticsService.sendAnnouncement(
+              view,
+              newValue ? 'Queue grouped by podcast' : 'Queue ungrouped',
+              TextDirection.ltr,
+            );
+          },
+        ),
         title: const Text('Queue'),
+        centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
@@ -143,313 +193,643 @@ class QueueScreen extends ConsumerWidget {
                     },
             ),
           ),
-          queue.when(
-            data: (episodes) => episodes.isEmpty
-                ? SliverToBoxAdapter(
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            ExcludeSemantics(
-                              child: Icon(
-                                Icons.queue_music,
-                                size: 64,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'Queue is empty',
-                              style: Theme.of(context).textTheme.headlineSmall,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Add episodes to play them in order.',
-                              style:
-                                  Theme.of(
-                                    context,
-                                  ).textTheme.bodyMedium?.copyWith(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ),
+          if (groupingEnabled)
+            _buildGroupedBody(context, ref, currentEpisodeId)
+          else
+            _buildFlatBody(context, ref, queue, currentEpisodeId),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFlatBody(
+    BuildContext context,
+    WidgetRef ref,
+    AsyncValue<List<Episode>> queue,
+    int? currentEpisodeId,
+  ) {
+    final subs = ref.watch(subscriptionsProvider).asData?.value;
+    final podcastTitles = <int, String>{
+      if (subs != null)
+        for (final p in subs) p.id: p.title,
+    };
+
+    return queue.when(
+      data: (episodes) {
+        if (episodes.isEmpty) {
+          return SliverToBoxAdapter(child: _emptyState(context));
+        }
+
+        // Pin the now-playing episode to the top of the display list.
+        Episode? nowPlaying;
+        if (currentEpisodeId != null) {
+          for (final ep in episodes) {
+            if (ep.id == currentEpisodeId) {
+              nowPlaying = ep;
+              break;
+            }
+          }
+        }
+
+        final displayEpisodes = [
+          if (nowPlaying != null) nowPlaying,
+          for (final ep in episodes)
+            if (ep.id != currentEpisodeId) ep,
+        ];
+        final total = episodes.length;
+
+        return SliverList.builder(
+          itemCount: displayEpisodes.length,
+          itemBuilder: (context, displayIndex) {
+            final episode = displayEpisodes[displayIndex];
+            final isNowPlaying =
+                nowPlaying != null && episode.id == currentEpisodeId;
+            final queueIndex = episodes.indexOf(episode);
+            final position = queueIndex + 1;
+            final isFirst = queueIndex == 0;
+            final isLast = queueIndex == total - 1;
+
+            final durationLabel = _semanticDuration(episode);
+            final downloadLabel = _downloadStatusLabel(episode.downloadStatus);
+            final podcastTitle = podcastTitles[episode.podcastId];
+
+            final labelParts = isNowPlaying
+                ? [
+                    'Now playing',
+                    episode.title,
+                    if (podcastTitle != null) podcastTitle,
+                    if (durationLabel != null) durationLabel,
+                    if (downloadLabel != null) downloadLabel,
+                  ]
+                : [
+                    episode.title,
+                    if (podcastTitle != null) podcastTitle,
+                    'In queue, position $position of $total',
+                    if (durationLabel != null) durationLabel,
+                    if (downloadLabel != null) downloadLabel,
+                  ];
+
+            return _buildEpisodeRow(
+              context: context,
+              ref: ref,
+              episode: episode,
+              semanticLabel: labelParts.join(', '),
+              isFirst: isFirst,
+              isLast: isLast,
+              total: total,
+              position: position,
+              isNowPlaying: isNowPlaying,
+            );
+          },
+        );
+      },
+      loading: () => SliverToBoxAdapter(
+        child: Center(
+          child: Semantics(
+            label: 'Loading queue',
+            child: const CircularProgressIndicator(),
+          ),
+        ),
+      ),
+      error: (_, __) => SliverToBoxAdapter(
+        child: Center(
+          child: Text(
+            'Could not load queue. Please try again.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupedBody(
+    BuildContext context,
+    WidgetRef ref,
+    int? currentEpisodeId,
+  ) {
+    final grouped = ref.watch(groupedQueueProvider);
+
+    return grouped.when(
+      data: (groups) {
+        if (groups.isEmpty) {
+          return SliverToBoxAdapter(child: _emptyState(context));
+        }
+
+        // Locate the now-playing episode across all groups.
+        Episode? nowPlayingEp;
+        String nowPlayingPodcastName = '';
+        if (currentEpisodeId != null) {
+          outer:
+          for (final group in groups) {
+            for (final ep in group.episodes) {
+              if (ep.id == currentEpisodeId) {
+                nowPlayingEp = ep;
+                nowPlayingPodcastName = group.podcastName;
+                break outer;
+              }
+            }
+          }
+        }
+
+        // Remove the now-playing episode from its group; drop the group if
+        // it becomes empty so sighted users don't see an orphaned header.
+        final adjustedGroups = nowPlayingEp != null
+            ? groups
+                  .map(
+                    (g) => QueueGroup(
+                      podcastId: g.podcastId,
+                      podcastName: g.podcastName,
+                      episodes: g.episodes
+                          .where((e) => e.id != nowPlayingEp!.id)
+                          .toList(),
                     ),
                   )
-                : SliverList.builder(
-                    itemCount: episodes.length,
-                    itemBuilder: (context, index) {
-                      final episode = episodes[index];
-                      final total = episodes.length;
-                      final position = index + 1;
-                      final isFirst = index == 0;
-                      final isLast = index == total - 1;
+                  .where((g) => g.episodes.isNotEmpty)
+                  .toList()
+            : groups;
 
-                      final durationLabel = _semanticDuration(episode);
-                      final downloadLabel = _downloadStatusLabel(
-                        episode.downloadStatus,
-                      );
-                      final podcastTitle = podcastTitles[episode.podcastId];
-                      final labelParts = [
-                        episode.title,
-                        if (podcastTitle != null) podcastTitle,
-                        'In queue, position $position of $total',
-                        if (durationLabel != null) durationLabel,
-                        if (downloadLabel != null) downloadLabel,
-                      ];
-                      final queueLabel = labelParts.join(', ');
+        // Non-lazy list so all Semantics(header: true) nodes are in the tree
+        // immediately, ensuring the VoiceOver headings rotor is populated on
+        // first focus without requiring scroll.
+        final items = <Widget>[];
 
-                      final downloadAction = _buildDownloadAction(
-                        episode,
-                        ref,
-                        context,
-                      );
-
-                      return Semantics(
-                        key: ValueKey(episode.id),
-                        container: true,
-                        label: queueLabel,
-                        customSemanticsActions: {
-                          const CustomSemanticsAction(label: 'Play'): () =>
-                              _playEpisode(ref, episode),
-                          const CustomSemanticsAction(
-                            label: 'Move to top',
-                          ): () async {
-                            final view = View.of(context);
-                            await ref
-                                .read(queueRepositoryProvider)
-                                .moveToTop(episode.id);
-                            SemanticsService.sendAnnouncement(
-                              view,
-                              'Moved to top, now position 1 of $total',
-                              TextDirection.ltr,
-                            );
-                          },
-                          const CustomSemanticsAction(
-                            label: 'Move to bottom',
-                          ): () async {
-                            final view = View.of(context);
-                            await ref
-                                .read(queueRepositoryProvider)
-                                .moveToBottom(episode.id);
-                            SemanticsService.sendAnnouncement(
-                              view,
-                              'Moved to bottom, now position $total of $total',
-                              TextDirection.ltr,
-                            );
-                          },
-                          if (!isFirst)
-                            const CustomSemanticsAction(
-                              label: 'Move up',
-                            ): () async {
-                              final view = View.of(context);
-                              await ref
-                                  .read(queueRepositoryProvider)
-                                  .moveUp(episode.id);
-                              SemanticsService.sendAnnouncement(
-                                view,
-                                'Moved up, now position ${position - 1} of $total',
-                                TextDirection.ltr,
-                              );
-                            },
-                          if (!isLast)
-                            const CustomSemanticsAction(
-                              label: 'Move down',
-                            ): () async {
-                              final view = View.of(context);
-                              await ref
-                                  .read(queueRepositoryProvider)
-                                  .moveDown(episode.id);
-                              SemanticsService.sendAnnouncement(
-                                view,
-                                'Moved down, now position ${position + 1} of $total',
-                                TextDirection.ltr,
-                              );
-                            },
-                          const CustomSemanticsAction(
-                            label: 'Remove from queue',
-                          ): () => ref
-                              .read(queueRepositoryProvider)
-                              .cancelFromQueue(episode.id),
-                          if (downloadAction != null)
-                            CustomSemanticsAction(
-                              label: downloadAction.label,
-                            ): downloadAction.onInvoke,
-                        },
-                        child: ExcludeSemantics(
-                          child: ListTile(
-                            leading: Text(
-                              '$position',
-                              style: Theme.of(context).textTheme.labelLarge,
-                            ),
-                            title: Text(
-                              episode.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleSmall,
-                            ),
-                            subtitle: Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Wrap(
-                                spacing: 4,
-                                children: [
-                                  Chip(
-                                    label: const Text('In queue'),
-                                    visualDensity: VisualDensity.compact,
-                                    backgroundColor: Theme.of(
-                                      context,
-                                    ).colorScheme.secondaryContainer,
-                                    labelStyle: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSecondaryContainer,
-                                        ),
-                                    padding: EdgeInsets.zero,
-                                  ),
-                                  if (episode.downloadStatus ==
-                                      DownloadStatus.downloaded)
-                                    Chip(
-                                      avatar: ExcludeSemantics(
-                                        child: Icon(
-                                          Icons.download_done,
-                                          size: 14,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSecondaryContainer,
-                                        ),
-                                      ),
-                                      label: const Text('Downloaded'),
-                                      visualDensity: VisualDensity.compact,
-                                      backgroundColor: Theme.of(
-                                        context,
-                                      ).colorScheme.secondaryContainer,
-                                      labelStyle: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSecondaryContainer,
-                                          ),
-                                      padding: EdgeInsets.zero,
-                                    )
-                                  else if (episode.downloadStatus ==
-                                          DownloadStatus.downloading ||
-                                      episode.downloadStatus ==
-                                          DownloadStatus.pending)
-                                    Chip(
-                                      avatar: ExcludeSemantics(
-                                        child: Icon(
-                                          Icons.downloading,
-                                          size: 14,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSecondaryContainer,
-                                        ),
-                                      ),
-                                      label: const Text('Downloading'),
-                                      visualDensity: VisualDensity.compact,
-                                      backgroundColor: Theme.of(
-                                        context,
-                                      ).colorScheme.secondaryContainer,
-                                      labelStyle: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSecondaryContainer,
-                                          ),
-                                      padding: EdgeInsets.zero,
-                                    ),
-                                ],
-                              ),
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.play_arrow),
-                                  tooltip: 'Play',
-                                  onPressed: () => _playEpisode(ref, episode),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.arrow_upward),
-                                  tooltip: 'Move up',
-                                  onPressed: isFirst
-                                      ? null
-                                      : () async {
-                                          final view = View.of(context);
-                                          await ref
-                                              .read(queueRepositoryProvider)
-                                              .moveUp(episode.id);
-                                          SemanticsService.sendAnnouncement(
-                                            view,
-                                            'Moved up, now position ${position - 1} of $total',
-                                            TextDirection.ltr,
-                                          );
-                                        },
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.arrow_downward),
-                                  tooltip: 'Move down',
-                                  onPressed: isLast
-                                      ? null
-                                      : () async {
-                                          final view = View.of(context);
-                                          await ref
-                                              .read(queueRepositoryProvider)
-                                              .moveDown(episode.id);
-                                          SemanticsService.sendAnnouncement(
-                                            view,
-                                            'Moved down, now position ${position + 1} of $total',
-                                            TextDirection.ltr,
-                                          );
-                                        },
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.remove_circle_outline),
-                                  tooltip: 'Remove from queue',
-                                  onPressed: () => ref
-                                      .read(queueRepositoryProvider)
-                                      .cancelFromQueue(episode.id),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-            loading: () => SliverToBoxAdapter(
-              child: Center(
-                child: Semantics(
-                  label: 'Loading queue',
-                  child: const CircularProgressIndicator(),
-                ),
-              ),
+        // Pin now-playing to the top, above all group headers.
+        if (nowPlayingEp != null) {
+          final allEps = groups.expand((g) => g.episodes).toList();
+          final queueIndex = allEps.indexWhere((e) => e.id == nowPlayingEp!.id);
+          final total = allEps.length;
+          final durationLabel = _semanticDuration(nowPlayingEp);
+          final downloadLabel = _downloadStatusLabel(
+            nowPlayingEp.downloadStatus,
+          );
+          final labelParts = [
+            'Now playing',
+            nowPlayingEp.title,
+            nowPlayingPodcastName,
+            if (durationLabel != null) durationLabel,
+            if (downloadLabel != null) downloadLabel,
+          ];
+          items.add(
+            _buildEpisodeRow(
+              context: context,
+              ref: ref,
+              episode: nowPlayingEp,
+              semanticLabel: labelParts.join(', '),
+              isFirst: queueIndex <= 0,
+              isLast: queueIndex == total - 1,
+              total: total,
+              position: queueIndex + 1,
+              isNowPlaying: true,
             ),
-            error: (_, __) => SliverToBoxAdapter(
-              child: Center(
-                child: Text(
-                  'Could not load queue. Please try again.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
+          );
+        }
+
+        final collapsed = ref.watch(collapsedQueueGroupsProvider);
+
+        for (final group in adjustedGroups) {
+          final isCollapsed = collapsed.contains(group.podcastId);
+          items.add(_buildGroupHeader(context, ref, group, isCollapsed));
+          // When collapsed, episodes are not rendered at all so neither
+          // sighted users nor VoiceOver encounter them. The headings rotor
+          // still finds the group header.
+          if (isCollapsed) continue;
+          for (var i = 0; i < group.episodes.length; i++) {
+            final ep = group.episodes[i];
+            final posInGroup = i + 1;
+            final durationLabel = _semanticDuration(ep);
+            final downloadLabel = _downloadStatusLabel(ep.downloadStatus);
+            final labelParts = [
+              ep.title,
+              group.podcastName,
+              'episode $posInGroup of ${group.episodes.length} in this group',
+              if (durationLabel != null) durationLabel,
+              if (downloadLabel != null) downloadLabel,
+            ];
+            items.add(
+              _buildEpisodeRow(
+                context: context,
+                ref: ref,
+                episode: ep,
+                semanticLabel: labelParts.join(', '),
+                isFirst: posInGroup == 1,
+                isLast: posInGroup == group.episodes.length,
+                total: group.episodes.length,
+                position: posInGroup,
               ),
+            );
+          }
+        }
+
+        return SliverList(
+          delegate: SliverChildListDelegate(items),
+        );
+      },
+      loading: () => SliverToBoxAdapter(
+        child: Center(
+          child: Semantics(
+            label: 'Loading queue',
+            child: const CircularProgressIndicator(),
+          ),
+        ),
+      ),
+      error: (_, __) => SliverToBoxAdapter(
+        child: Center(
+          child: Text(
+            'Could not load queue. Please try again.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupHeader(
+    BuildContext context,
+    WidgetRef ref,
+    QueueGroup group,
+    bool isCollapsed,
+  ) {
+    void playFirst() {
+      if (group.episodes.isEmpty) return;
+      _playEpisode(ref, group.episodes.first);
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Playing ${group.podcastName}',
+        TextDirection.ltr,
+      );
+    }
+
+    void toggleCollapsed() {
+      final view = View.of(context);
+      final willCollapse = !isCollapsed;
+      ref.read(collapsedQueueGroupsProvider.notifier).toggle(group.podcastId);
+      SemanticsService.sendAnnouncement(
+        view,
+        willCollapse
+            ? '${group.podcastName} collapsed'
+            : '${group.podcastName} expanded',
+        TextDirection.ltr,
+      );
+    }
+
+    Future<void> shuffle() async {
+      final view = View.of(context);
+      await _shuffleGroup(ref, group.episodes);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        SemanticsService.sendAnnouncement(
+          view,
+          '${group.podcastName} shuffled',
+          TextDirection.ltr,
+        );
+      });
+    }
+
+    Future<void> sortNewest() async {
+      final view = View.of(context);
+      await _playNewestFirst(ref, group.episodes);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        SemanticsService.sendAnnouncement(
+          view,
+          '${group.podcastName} sorted newest first',
+          TextDirection.ltr,
+        );
+      });
+    }
+
+    Future<void> sortOldest() async {
+      final view = View.of(context);
+      await _playOldestFirst(ref, group.episodes);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        SemanticsService.sendAnnouncement(
+          view,
+          '${group.podcastName} sorted oldest first',
+          TextDirection.ltr,
+        );
+      });
+    }
+
+    final episodeCount = group.episodes.length;
+    final episodeCountLabel =
+        '$episodeCount ${episodeCount == 1 ? 'episode' : 'episodes'}';
+    final stateLabel = isCollapsed ? 'collapsed' : 'expanded';
+
+    // Single Semantics node owns the header. No nested InkWell — a second
+    // tap node next to the outer Semantics creates an unlabeled VoiceOver
+    // stop AND can swallow customSemanticsActions. GestureDetector inside
+    // ExcludeSemantics gives sighted users a tap surface without adding a
+    // sibling semantics node.
+    //
+    // Default action (onTap / "Activate" / double-tap) toggles expand/collapse.
+    // Custom actions (rotor flick) are listed Play first so a single flick
+    // down lands on Play group.
+    return Semantics(
+      container: true,
+      header: true,
+      button: true,
+      enabled: true,
+      label: '${group.podcastName}, $episodeCountLabel, $stateLabel',
+      hint:
+          'Double tap to ${isCollapsed ? 'expand' : 'collapse'}. '
+          'Use the actions rotor for play, shuffle, or sort.',
+      onTap: toggleCollapsed,
+      customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
+        const CustomSemanticsAction(label: 'Play group'): playFirst,
+        const CustomSemanticsAction(label: 'Shuffle group'): () {
+          unawaited(shuffle());
+        },
+        const CustomSemanticsAction(label: 'Sort newest first'): () {
+          unawaited(sortNewest());
+        },
+        const CustomSemanticsAction(label: 'Sort oldest first'): () {
+          unawaited(sortOldest());
+        },
+      },
+      child: ExcludeSemantics(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: toggleCollapsed,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(right: 16),
+                  child: Icon(Icons.podcasts),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        group.podcastName,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      Text(
+                        episodeCountLabel,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  isCollapsed ? Icons.expand_more : Icons.expand_less,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ],
             ),
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEpisodeRow({
+    required BuildContext context,
+    required WidgetRef ref,
+    required Episode episode,
+    required String semanticLabel,
+    required bool isFirst,
+    required bool isLast,
+    required int total,
+    required int position,
+    bool isNowPlaying = false,
+  }) {
+    final downloadAction = _buildDownloadAction(episode, ref, context);
+
+    return Semantics(
+      key: ValueKey(episode.id),
+      container: true,
+      button: true,
+      label: semanticLabel,
+      hint: 'Double tap to play. Use the actions rotor for more options.',
+      onTap: () => _playEpisode(ref, episode),
+      customSemanticsActions: {
+        const CustomSemanticsAction(label: 'Play'): () =>
+            _playEpisode(ref, episode),
+        const CustomSemanticsAction(label: 'Move to top'): () async {
+          final view = View.of(context);
+          await ref.read(queueRepositoryProvider).moveToTop(episode.id);
+          SemanticsService.sendAnnouncement(
+            view,
+            'Moved to top, now position 1 of $total',
+            TextDirection.ltr,
+          );
+        },
+        const CustomSemanticsAction(label: 'Move to bottom'): () async {
+          final view = View.of(context);
+          await ref.read(queueRepositoryProvider).moveToBottom(episode.id);
+          SemanticsService.sendAnnouncement(
+            view,
+            'Moved to bottom, now position $total of $total',
+            TextDirection.ltr,
+          );
+        },
+        if (!isFirst)
+          const CustomSemanticsAction(label: 'Move up'): () async {
+            final view = View.of(context);
+            await ref.read(queueRepositoryProvider).moveUp(episode.id);
+            SemanticsService.sendAnnouncement(
+              view,
+              'Moved up, now position ${position - 1} of $total',
+              TextDirection.ltr,
+            );
+          },
+        if (!isLast)
+          const CustomSemanticsAction(label: 'Move down'): () async {
+            final view = View.of(context);
+            await ref.read(queueRepositoryProvider).moveDown(episode.id);
+            SemanticsService.sendAnnouncement(
+              view,
+              'Moved down, now position ${position + 1} of $total',
+              TextDirection.ltr,
+            );
+          },
+        const CustomSemanticsAction(label: 'Remove from queue'): () async {
+          final view = View.of(context);
+          final title = episode.title;
+          await ref.read(queueRepositoryProvider).cancelFromQueue(episode.id);
+          SemanticsService.sendAnnouncement(
+            view,
+            '$title removed from queue',
+            TextDirection.ltr,
+          );
+        },
+        if (downloadAction != null)
+          CustomSemanticsAction(label: downloadAction.label):
+              downloadAction.onInvoke,
+      },
+      child: ExcludeSemantics(
+        child: ListTile(
+          leading: isNowPlaying
+              ? Icon(
+                  Icons.graphic_eq,
+                  color: Theme.of(context).colorScheme.primary,
+                )
+              : Text(
+                  '$position',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+          title: Text(
+            episode.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Wrap(
+              spacing: 4,
+              children: [
+                Chip(
+                  label: Text(isNowPlaying ? 'Now Playing' : 'In queue'),
+                  visualDensity: VisualDensity.compact,
+                  backgroundColor: isNowPlaying
+                      ? Theme.of(context).colorScheme.primaryContainer
+                      : Theme.of(context).colorScheme.secondaryContainer,
+                  labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: isNowPlaying
+                        ? Theme.of(context).colorScheme.onPrimaryContainer
+                        : Theme.of(context).colorScheme.onSecondaryContainer,
+                  ),
+                  padding: EdgeInsets.zero,
+                ),
+                if (episode.downloadStatus == DownloadStatus.downloaded)
+                  Chip(
+                    avatar: ExcludeSemantics(
+                      child: Icon(
+                        Icons.download_done,
+                        size: 14,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                    label: const Text('Downloaded'),
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.secondaryContainer,
+                    labelStyle: Theme.of(context).textTheme.labelSmall
+                        ?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSecondaryContainer,
+                        ),
+                    padding: EdgeInsets.zero,
+                  )
+                else if (episode.downloadStatus == DownloadStatus.downloading ||
+                    episode.downloadStatus == DownloadStatus.pending)
+                  Chip(
+                    avatar: ExcludeSemantics(
+                      child: Icon(
+                        Icons.downloading,
+                        size: 14,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                    label: const Text('Downloading'),
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.secondaryContainer,
+                    labelStyle: Theme.of(context).textTheme.labelSmall
+                        ?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSecondaryContainer,
+                        ),
+                    padding: EdgeInsets.zero,
+                  ),
+              ],
+            ),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.play_arrow),
+                tooltip: 'Play',
+                onPressed: () => _playEpisode(ref, episode),
+              ),
+              IconButton(
+                icon: const Icon(Icons.arrow_upward),
+                tooltip: 'Move up',
+                onPressed: isFirst
+                    ? null
+                    : () async {
+                        final view = View.of(context);
+                        await ref
+                            .read(queueRepositoryProvider)
+                            .moveUp(episode.id);
+                        SemanticsService.sendAnnouncement(
+                          view,
+                          'Moved up, now position ${position - 1} of $total',
+                          TextDirection.ltr,
+                        );
+                      },
+              ),
+              IconButton(
+                icon: const Icon(Icons.arrow_downward),
+                tooltip: 'Move down',
+                onPressed: isLast
+                    ? null
+                    : () async {
+                        final view = View.of(context);
+                        await ref
+                            .read(queueRepositoryProvider)
+                            .moveDown(episode.id);
+                        SemanticsService.sendAnnouncement(
+                          view,
+                          'Moved down, now position ${position + 1} of $total',
+                          TextDirection.ltr,
+                        );
+                      },
+              ),
+              IconButton(
+                icon: const Icon(Icons.remove_circle_outline),
+                tooltip: 'Remove from queue',
+                onPressed: () => ref
+                    .read(queueRepositoryProvider)
+                    .cancelFromQueue(episode.id),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyState(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ExcludeSemantics(
+              child: Icon(
+                Icons.queue_music,
+                size: 64,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Queue is empty',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add episodes to play them in order.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -459,7 +839,6 @@ class QueueScreen extends ConsumerWidget {
     WidgetRef ref,
     BuildContext context,
   ) {
-    final view = View.of(context);
     switch (episode.downloadStatus) {
       case DownloadStatus.none:
       case DownloadStatus.failed:
@@ -472,15 +851,19 @@ class QueueScreen extends ConsumerWidget {
                 .read(downloadManagerProvider)
                 .downloadEpisode(
                   episode.id,
-                  onComplete: (msg) => SemanticsService.sendAnnouncement(
-                    view,
-                    msg,
-                    TextDirection.ltr,
-                  ),
+                  onComplete: (msg) {
+                    if (context.mounted) {
+                      SemanticsService.sendAnnouncement(
+                        View.of(context),
+                        msg,
+                        TextDirection.ltr,
+                      );
+                    }
+                  },
                 );
             if (!context.mounted) return;
             SemanticsService.sendAnnouncement(
-              view,
+              View.of(context),
               switch (result) {
                 DownloadStartResult.started => 'Download started',
                 DownloadStartResult.skippedNoWifi => 'Download requires Wi-Fi',

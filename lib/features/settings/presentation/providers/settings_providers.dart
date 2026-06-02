@@ -73,6 +73,14 @@ final autoDownloadQueueProvider =
       ),
     );
 
+final groupQueueEpisodesProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.isGroupQueueEpisodes(),
+        write: (r, v) => r.setGroupQueueEpisodes(enabled: v),
+      ),
+    );
+
 class _RetentionSettingNotifier extends AsyncNotifier<int?> {
   @override
   Future<int?> build() async {

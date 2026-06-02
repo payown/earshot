@@ -187,6 +187,40 @@ class QueueRepositoryImpl implements QueueRepository {
   }
 
   @override
+  Future<void> sortGroup(List<int> episodeIdsInOrder) async {
+    if (episodeIdsInOrder.length < 2) return;
+    await _db.transaction(() async {
+      final rows = await (_db.select(
+        _db.queueItems,
+      )..orderBy([(q) => OrderingTerm.asc(q.position)])).get();
+
+      final idSet = episodeIdsInOrder.toSet();
+
+      // Collect the positions currently held by this group, in queue order.
+      final slots = <int>[
+        for (final row in rows)
+          if (idSet.contains(row.episodeId)) row.position,
+      ];
+
+      // Move to temp positions first to avoid conflicts during reassignment.
+      const tempBase = 1000000;
+      for (var i = 0; i < episodeIdsInOrder.length; i++) {
+        await (_db.update(_db.queueItems)
+              ..where((q) => q.episodeId.equals(episodeIdsInOrder[i])))
+            .write(QueueItemsCompanion(position: Value(tempBase + i)));
+      }
+
+      // Assign each episode to its target slot.
+      for (var i = 0; i < episodeIdsInOrder.length; i++) {
+        await (_db.update(_db.queueItems)
+              ..where((q) => q.episodeId.equals(episodeIdsInOrder[i])))
+            .write(QueueItemsCompanion(position: Value(slots[i])));
+      }
+    });
+    await _compactPositions();
+  }
+
+  @override
   Stream<List<Episode>> watchQueue() {
     final query = _db.select(_db.queueItems).join([
       innerJoin(
