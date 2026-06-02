@@ -26,6 +26,19 @@ class EpisodeListTile extends StatelessWidget {
   VoidCallback? get _defaultTap =>
       quickActions.isNotEmpty ? quickActions[0].onInvoke : null;
 
+  void _showActionsSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      barrierLabel: 'Dismiss episode actions',
+      builder: (_) => _EpisodeActionsSheet(
+        episodeTitle: episode.title,
+        actions: quickActions,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final duration = _formatDuration(episode.durationSeconds);
@@ -40,64 +53,86 @@ class EpisodeListTile extends StatelessWidget {
     ];
     final semanticLabel = '${episode.title}, ${semanticParts.join(', ')}';
 
+    // Only expose rotor actions when there are multiple — the single-action
+    // case is already covered by the default tap.
     final semanticActions = <CustomSemanticsAction, VoidCallback>{
-      for (final action in quickActions)
-        CustomSemanticsAction(label: action.label): action.onInvoke,
+      if (quickActions.length > 1)
+        for (final action in quickActions)
+          CustomSemanticsAction(label: action.label): action.onInvoke,
     };
 
-    return Semantics(
-      label: semanticLabel,
-      button: _defaultTap != null,
-      customSemanticsActions: semanticActions,
-      child: ExcludeSemantics(
-        child: InkWell(
-          onTap: _defaultTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+    final hasMoreActions = quickActions.length > 1;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Semantics(
+            label: semanticLabel,
+            button: _defaultTap != null,
+            customSemanticsActions: semanticActions,
+            child: ExcludeSemantics(
+              child: InkWell(
+                onTap: _defaultTap,
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: 16,
+                    top: 12,
+                    bottom: 12,
+                    right: hasMoreActions ? 4 : 16,
+                  ),
+                  child: Row(
                     children: [
-                      Text(
-                        episode.title,
-                        style: Theme.of(context).textTheme.titleSmall,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      _StatusChip(status: episode.status),
-                      if (duration != null || date != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          [
-                            if (duration != null) duration,
-                            if (date != null) date,
-                          ].join(' · '),
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              episode.title,
+                              style: Theme.of(context).textTheme.titleSmall,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            _StatusChip(status: episode.status),
+                            if (duration != null || date != null) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                [
+                                  if (duration != null) duration,
+                                  if (date != null) date,
+                                ].join(' · '),
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
                               ),
+                            ],
+                          ],
                         ),
-                      ],
+                      ),
+                      if (_defaultTap != null)
+                        Icon(
+                          Icons.play_circle_outline,
+                          size: 32,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
                     ],
                   ),
                 ),
-                if (_defaultTap != null)
-                  Icon(
-                    Icons.play_circle_outline,
-                    size: 32,
-                    color: Theme.of(context).colorScheme.primary,
-                    semanticLabel: '',
-                  ),
-              ],
+              ),
             ),
           ),
         ),
-      ),
+        if (hasMoreActions)
+          IconButton(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'More actions',
+            onPressed: () => _showActionsSheet(context),
+          ),
+      ],
     );
   }
 
@@ -147,6 +182,85 @@ class EpisodeListTile extends StatelessWidget {
     if (diff.inDays == 1) return 'Yesterday';
     if (diff.inDays < 7) return '${diff.inDays} days ago';
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+}
+
+class _EpisodeActionsSheet extends StatefulWidget {
+  const _EpisodeActionsSheet({
+    required this.episodeTitle,
+    required this.actions,
+  });
+
+  final String episodeTitle;
+  final List<EpisodeQuickActionItem> actions;
+
+  @override
+  State<_EpisodeActionsSheet> createState() => _EpisodeActionsSheetState();
+}
+
+class _EpisodeActionsSheetState extends State<_EpisodeActionsSheet> {
+  bool _announced = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_announced) {
+      _announced = true;
+      final view = View.of(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          SemanticsService.sendAnnouncement(
+            view,
+            widget.episodeTitle,
+            TextDirection.ltr,
+          );
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      scopesRoute: true,
+      explicitChildNodes: true,
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Semantics(
+                header: true,
+                label: widget.episodeTitle,
+                child: ExcludeSemantics(
+                  child: Text(
+                    widget.episodeTitle,
+                    style: Theme.of(context).textTheme.titleSmall,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            for (final action in widget.actions)
+              Semantics(
+                hint: 'Closes this menu and performs the action',
+                child: ListTile(
+                  title: Text(action.label),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    action.onInvoke();
+                  },
+                ),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 }
 
