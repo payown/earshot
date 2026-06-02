@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -43,16 +42,18 @@ class _SubscriptionsScreenState extends ConsumerState<SubscriptionsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Library'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.create_new_folder_outlined),
-            tooltip: 'Create folder',
-            onPressed: () => showDialog<void>(
-              context: context,
-              builder: (_) => const CreateFolderDialog(),
-            ),
+        automaticallyImplyLeading: false,
+        leading: IconButton(
+          icon: const Icon(Icons.create_new_folder_outlined),
+          tooltip: 'Create folder',
+          onPressed: () => showDialog<void>(
+            context: context,
+            builder: (_) => const CreateFolderDialog(),
           ),
+        ),
+        title: const Text('Library'),
+        centerTitle: true,
+        actions: [
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Settings',
@@ -68,117 +69,104 @@ class _SubscriptionsScreenState extends ConsumerState<SubscriptionsScreen> {
             );
           }
 
-          return Semantics(
-            onScrollDown: () {
-              if (_scrollController.hasClients &&
-                  _scrollController.offset <= 0.0) {
-                _refreshKey.currentState?.show();
-              }
-            },
-            customSemanticsActions: {
-              const CustomSemanticsAction(label: 'Refresh'): () {
-                _refreshKey.currentState?.show();
-              },
-            },
-            child: RefreshIndicator(
-              key: _refreshKey,
-              onRefresh: () => _refreshAll(podcasts),
-              child: CustomScrollView(
-                controller: _scrollController,
-                slivers: [
-                  // ── All Podcasts entry ───────────────────────────────────────
+          return RefreshIndicator(
+            key: _refreshKey,
+            onRefresh: () => _refreshAll(podcasts),
+            child: CustomScrollView(
+              controller: _scrollController,
+              slivers: [
+                // ── All Podcasts entry ───────────────────────────────────────
+                SliverToBoxAdapter(
+                  child: Semantics(
+                    button: true,
+                    label:
+                        'All Podcasts, $totalCount podcast${totalCount == 1 ? '' : 's'}',
+                    onTap: () => context.push(AppRoutes.allPodcasts),
+                    child: ExcludeSemantics(
+                      child: ListTile(
+                        leading: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            Icons.podcasts,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                        title: Text(
+                          'All Podcasts',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        subtitle: Text(
+                          '$totalCount podcast${totalCount == 1 ? '' : 's'}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => context.push(AppRoutes.allPodcasts),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // ── Folders section ──────────────────────────────────────────
+                if (folderList.isNotEmpty) ...[
                   SliverToBoxAdapter(
                     child: Semantics(
-                      button: true,
-                      label:
-                          'All Podcasts, $totalCount podcast${totalCount == 1 ? '' : 's'}',
-                      onTap: () => context.push(AppRoutes.allPodcasts),
+                      header: true,
+                      label: 'Folders',
                       child: ExcludeSemantics(
-                        child: ListTile(
-                          leading: Container(
-                            width: 56,
-                            height: 56,
-                            decoration: BoxDecoration(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.primaryContainer,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.podcasts,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onPrimaryContainer,
-                            ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                          child: Text(
+                            'Folders',
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.primary,
+                                ),
                           ),
-                          title: Text(
-                            'All Podcasts',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          subtitle: Text(
-                            '$totalCount podcast${totalCount == 1 ? '' : 's'}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => context.push(AppRoutes.allPodcasts),
                         ),
                       ),
                     ),
                   ),
-
-                  // ── Folders section ──────────────────────────────────────────
-                  if (folderList.isNotEmpty) ...[
-                    SliverToBoxAdapter(
-                      child: Semantics(
-                        header: true,
-                        label: 'Folders',
-                        child: ExcludeSemantics(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                            child: Text(
-                              'Folders',
-                              style: Theme.of(context).textTheme.labelLarge
-                                  ?.copyWith(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
-                                  ),
-                            ),
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (ctx, index) {
+                        final folder = folderList[index];
+                        final count =
+                            podcastsInFolders[folder.id]
+                                ?.asData
+                                ?.value
+                                .length ??
+                            0;
+                        return FolderListTile(
+                          folder: folder,
+                          podcastCount: count,
+                          onTap: () => context.push(
+                            AppRoutes.folderDetail(folder.id),
                           ),
-                        ),
-                      ),
-                    ),
-                    SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (ctx, index) {
-                          final folder = folderList[index];
-                          final count =
-                              podcastsInFolders[folder.id]
-                                  ?.asData
-                                  ?.value
-                                  .length ??
-                              0;
-                          return FolderListTile(
-                            folder: folder,
-                            podcastCount: count,
-                            onTap: () => context.push(
-                              AppRoutes.folderDetail(folder.id),
+                          quickActions: [
+                            FolderQuickActionItem(
+                              label: 'Delete folder',
+                              onInvoke: () =>
+                                  _confirmDeleteFolder(context, folder),
                             ),
-                            quickActions: [
-                              FolderQuickActionItem(
-                                label: 'Delete folder',
-                                onInvoke: () =>
-                                    _confirmDeleteFolder(context, folder),
-                              ),
-                            ],
-                          );
-                        },
-                        childCount: folderList.length,
-                      ),
+                          ],
+                        );
+                      },
+                      childCount: folderList.length,
                     ),
-                  ],
+                  ),
                 ],
-              ),
+              ],
             ),
           );
         },
