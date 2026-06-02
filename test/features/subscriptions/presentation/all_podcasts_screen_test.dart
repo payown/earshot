@@ -1,5 +1,7 @@
 import 'package:earshot/features/folders/data/folder_repository.dart';
 import 'package:earshot/features/folders/presentation/providers/folders_providers.dart';
+import 'package:earshot/features/settings/domain/quick_action_definition.dart';
+import 'package:earshot/features/settings/presentation/providers/settings_providers.dart';
 import 'package:earshot/features/subscriptions/data/podcast_repository.dart';
 import 'package:earshot/features/subscriptions/domain/podcast.dart';
 import 'package:earshot/features/subscriptions/presentation/providers/subscriptions_providers.dart';
@@ -53,6 +55,9 @@ Widget _buildApp(MockPodcastRepository repo) {
     overrides: [
       podcastRepositoryProvider.overrideWithValue(repo),
       folderRepositoryProvider.overrideWithValue(fr),
+      podcastActionsProvider.overrideWith(
+        (_) => Stream.value(defaultPodcastActions),
+      ),
     ],
     child: MaterialApp.router(routerConfig: router),
   );

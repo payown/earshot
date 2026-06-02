@@ -6,6 +6,8 @@ import 'package:earshot/features/downloads/data/download_manager.dart';
 import 'package:earshot/features/downloads/presentation/providers/downloads_providers.dart';
 import 'package:earshot/features/folders/data/folder_repository.dart';
 import 'package:earshot/features/folders/presentation/providers/folders_providers.dart';
+import 'package:earshot/features/settings/domain/quick_action_definition.dart';
+import 'package:earshot/features/settings/presentation/providers/settings_providers.dart';
 import 'package:earshot/features/subscriptions/data/podcast_exception.dart';
 import 'package:earshot/features/subscriptions/data/podcast_repository.dart';
 import 'package:earshot/features/subscriptions/domain/episode.dart';
@@ -103,6 +105,12 @@ Widget _buildApp(
     overrides: [
       podcastRepositoryProvider.overrideWithValue(repo),
       folderRepositoryProvider.overrideWithValue(fr),
+      episodeActionsProvider.overrideWith(
+        (_) => Stream.value(defaultEpisodeActions),
+      ),
+      podcastActionsProvider.overrideWith(
+        (_) => Stream.value(defaultPodcastActions),
+      ),
     ],
     child: MaterialApp.router(routerConfig: router),
   );
@@ -360,7 +368,7 @@ void main() {
 
       final semantics = tester.getSemantics(find.text('Episode 1'));
       expect(semantics.label, contains('Episode 1'));
-      expect(semantics.label, contains('1 hr'));
+      expect(semantics.label, contains('1 hour'));
     });
   });
 }
