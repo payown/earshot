@@ -25,10 +25,12 @@ class NowPlayingBar extends ConsumerWidget {
 
     final isPlaying = playbackState.playing;
     final colorScheme = Theme.of(context).colorScheme;
+    final album = mediaItem.album;
+    final hasAlbum = album != null && album.isNotEmpty;
 
     return Semantics(
       header: true,
-      label: isPlaying ? 'Now Playing' : 'Paused',
+      label: 'Now Playing',
       child: Material(
         color: colorScheme.surfaceContainerHigh,
         child: Padding(
@@ -41,8 +43,9 @@ class NowPlayingBar extends ConsumerWidget {
               Expanded(
                 child: Semantics(
                   button: true,
-                  label:
-                      '${isPlaying ? 'Now playing' : 'Paused'}: ${mediaItem.title}',
+                  label: hasAlbum
+                      ? '${mediaItem.title}, $album'
+                      : mediaItem.title,
                   hint: 'Opens full player',
                   onTap: () => _openPlayer(context),
                   child: ExcludeSemantics(
@@ -64,9 +67,9 @@ class NowPlayingBar extends ConsumerWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                if (mediaItem.album != null)
+                                if (hasAlbum)
                                   Text(
-                                    mediaItem.album!,
+                                    album,
                                     style: Theme.of(context).textTheme.bodySmall
                                         ?.copyWith(
                                           color: colorScheme.onSurfaceVariant,
@@ -75,6 +78,13 @@ class NowPlayingBar extends ConsumerWidget {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                               ],
+                            ),
+                          ),
+                          ExcludeSemantics(
+                            child: Icon(
+                              Icons.keyboard_arrow_up,
+                              size: 20,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
