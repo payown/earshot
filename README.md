@@ -42,7 +42,7 @@ Prerequisites:
 - CocoaPods (`sudo gem install cocoapods`)
 
 ```bash
-git clone https://github.com/payownmedia/earshot.git
+git clone https://github.com/payown/earshot.git
 cd earshot
 flutter pub get
 flutter run
@@ -70,6 +70,6 @@ Earshot exists because of the people who taught me what accessible software actu
 
 ## Contact
 
-- Project: [github.com/payownmedia/earshot](https://github.com/payownmedia/earshot)
+- Project: [github.com/payown/earshot](https://github.com/payown/earshot)
 - Maintainer: Michael Babcock (michael@payown.media)
 - Payown Media: [payown.media](https://payown.media)

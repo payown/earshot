@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -10,11 +11,26 @@ import '../../../../features/folders/presentation/widgets/folder_list_tile.dart'
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
 
-class SubscriptionsScreen extends ConsumerWidget {
+class SubscriptionsScreen extends ConsumerStatefulWidget {
   const SubscriptionsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SubscriptionsScreen> createState() =>
+      _SubscriptionsScreenState();
+}
+
+class _SubscriptionsScreenState extends ConsumerState<SubscriptionsScreen> {
+  final _refreshKey = GlobalKey<RefreshIndicatorState>();
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final allPodcasts = ref.watch(subscriptionsProvider);
     final folders = ref.watch(foldersProvider);
     final podcastsInFolders = {
@@ -52,100 +68,117 @@ class SubscriptionsScreen extends ConsumerWidget {
             );
           }
 
-          return RefreshIndicator(
-            onRefresh: () => _refreshAll(ref, podcasts),
-            child: CustomScrollView(
-              slivers: [
-                // ── All Podcasts entry ───────────────────────────────────────
-                SliverToBoxAdapter(
-                  child: Semantics(
-                    button: true,
-                    label:
-                        'All Podcasts, $totalCount podcast${totalCount == 1 ? '' : 's'}',
-                    onTap: () => context.push(AppRoutes.allPodcasts),
-                    child: ExcludeSemantics(
-                      child: ListTile(
-                        leading: Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Icon(
-                            Icons.podcasts,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onPrimaryContainer,
-                          ),
-                        ),
-                        title: Text(
-                          'All Podcasts',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        subtitle: Text(
-                          '$totalCount podcast${totalCount == 1 ? '' : 's'}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => context.push(AppRoutes.allPodcasts),
-                      ),
-                    ),
-                  ),
-                ),
-
-                // ── Folders section ──────────────────────────────────────────
-                if (folderList.isNotEmpty) ...[
+          return Semantics(
+            onScrollDown: () {
+              if (_scrollController.hasClients &&
+                  _scrollController.offset <= 0.0) {
+                _refreshKey.currentState?.show();
+              }
+            },
+            customSemanticsActions: {
+              const CustomSemanticsAction(label: 'Refresh'): () {
+                _refreshKey.currentState?.show();
+              },
+            },
+            child: RefreshIndicator(
+              key: _refreshKey,
+              onRefresh: () => _refreshAll(podcasts),
+              child: CustomScrollView(
+                controller: _scrollController,
+                slivers: [
+                  // ── All Podcasts entry ───────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Semantics(
-                      header: true,
-                      label: 'Folders',
+                      button: true,
+                      label:
+                          'All Podcasts, $totalCount podcast${totalCount == 1 ? '' : 's'}',
+                      onTap: () => context.push(AppRoutes.allPodcasts),
                       child: ExcludeSemantics(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                          child: Text(
-                            'Folders',
-                            style: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
+                        child: ListTile(
+                          leading: Container(
+                            width: 56,
+                            height: 56,
+                            decoration: BoxDecoration(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.podcasts,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onPrimaryContainer,
+                            ),
                           ),
+                          title: Text(
+                            'All Podcasts',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          subtitle: Text(
+                            '$totalCount podcast${totalCount == 1 ? '' : 's'}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => context.push(AppRoutes.allPodcasts),
                         ),
                       ),
                     ),
                   ),
-                  SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (ctx, index) {
-                        final folder = folderList[index];
-                        final count =
-                            podcastsInFolders[folder.id]
-                                ?.asData
-                                ?.value
-                                .length ??
-                            0;
-                        return FolderListTile(
-                          folder: folder,
-                          podcastCount: count,
-                          onTap: () => context.push(
-                            AppRoutes.folderDetail(folder.id),
-                          ),
-                          quickActions: [
-                            FolderQuickActionItem(
-                              label: 'Delete folder',
-                              onInvoke: () =>
-                                  _confirmDeleteFolder(context, ref, folder),
+
+                  // ── Folders section ──────────────────────────────────────────
+                  if (folderList.isNotEmpty) ...[
+                    SliverToBoxAdapter(
+                      child: Semantics(
+                        header: true,
+                        label: 'Folders',
+                        child: ExcludeSemantics(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                            child: Text(
+                              'Folders',
+                              style: Theme.of(context).textTheme.labelLarge
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                  ),
                             ),
-                          ],
-                        );
-                      },
-                      childCount: folderList.length,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (ctx, index) {
+                          final folder = folderList[index];
+                          final count =
+                              podcastsInFolders[folder.id]
+                                  ?.asData
+                                  ?.value
+                                  .length ??
+                              0;
+                          return FolderListTile(
+                            folder: folder,
+                            podcastCount: count,
+                            onTap: () => context.push(
+                              AppRoutes.folderDetail(folder.id),
+                            ),
+                            quickActions: [
+                              FolderQuickActionItem(
+                                label: 'Delete folder',
+                                onInvoke: () =>
+                                    _confirmDeleteFolder(context, folder),
+                              ),
+                            ],
+                          );
+                        },
+                        childCount: folderList.length,
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           );
         },
@@ -219,7 +252,6 @@ class SubscriptionsScreen extends ConsumerWidget {
 
   Future<void> _confirmDeleteFolder(
     BuildContext context,
-    WidgetRef ref,
     PodcastFolder folder,
   ) async {
     final confirmed = await showDialog<bool>(
@@ -246,7 +278,7 @@ class SubscriptionsScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _refreshAll(WidgetRef ref, List<Podcast> podcasts) async {
+  Future<void> _refreshAll(List<Podcast> podcasts) async {
     final repo = ref.read(podcastRepositoryProvider);
     await Future.wait(podcasts.map((p) => repo.refreshFeed(p.id)));
   }
