@@ -22,7 +22,7 @@ class QuickActionConfiguratorScreen extends ConsumerStatefulWidget {
 class _QuickActionConfiguratorScreenState
     extends ConsumerState<QuickActionConfiguratorScreen> {
   List<String>? _activeKeys;
-  bool _initialized = false;
+  bool _dirty = false;
 
   bool get _isEpisode => widget.contentType == QuickActionContentType.episode;
 
@@ -53,37 +53,40 @@ class _QuickActionConfiguratorScreenState
     final newKeys = List<String>.from(_activeKeys ?? _allKeys);
     final item = newKeys.removeAt(oldIndex);
     newKeys.insert(newIndex, item);
-    setState(() => _activeKeys = newKeys);
+    setState(() {
+      _dirty = true;
+      _activeKeys = newKeys;
+    });
   }
 
   void _removeAction(String key) {
     setState(() {
+      _dirty = true;
       _activeKeys = List<String>.from(_activeKeys ?? [])..remove(key);
     });
   }
 
   void _addAction(String key) {
     setState(() {
+      _dirty = true;
       _activeKeys = [...(_activeKeys ?? []), key];
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Initialize _activeKeys from the provider once on first data. ref.watch
-    // ensures a rebuild when the stream emits so the assignment below runs.
-    if (!_initialized) {
-      (_isEpisode
-              ? ref.watch(episodeActionsProvider)
-              : ref.watch(podcastActionsProvider))
-          .whenData((actions) {
-            _initialized = true;
-            _activeKeys = actions
-                .map(
-                  (a) => a is EpisodeAction ? a.key : (a as PodcastAction).key,
-                )
-                .toList();
-          });
+    // Sync from the provider whenever the user hasn't made local edits yet.
+    // Using _dirty instead of _initialized so a re-open after save always picks
+    // up the freshly written value rather than Riverpod's stale cache.
+    final actionsAsync = _isEpisode
+        ? ref.watch(episodeActionsProvider)
+        : ref.watch(podcastActionsProvider);
+    if (!_dirty) {
+      actionsAsync.whenData((actions) {
+        _activeKeys = actions
+            .map((a) => a is EpisodeAction ? a.key : (a as PodcastAction).key)
+            .toList();
+      });
     }
 
     final active = _activeKeys ?? _allKeys;
