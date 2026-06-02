@@ -26,100 +26,105 @@ class NowPlayingBar extends ConsumerWidget {
     final isPlaying = playbackState.playing;
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Material(
-      color: colorScheme.surfaceContainerHigh,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          children: [
-            // Tappable area: artwork + title opens the full player.
-            // ExcludeSemantics only covers this section — controls remain
-            // individually accessible outside it.
-            Expanded(
-              child: Semantics(
-                button: true,
-                label:
-                    '${isPlaying ? 'Now playing' : 'Paused'}: ${mediaItem.title}',
-                hint: 'Opens full player',
-                onTap: () => _openPlayer(context),
-                child: ExcludeSemantics(
-                  child: InkWell(
-                    onTap: () => _openPlayer(context),
-                    child: Row(
-                      children: [
-                        _Artwork(artUri: mediaItem.artUri),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                mediaItem.title,
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(fontWeight: FontWeight.w600),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              if (mediaItem.album != null)
+    return Semantics(
+      header: true,
+      label: isPlaying ? 'Now Playing' : 'Paused',
+      child: Material(
+        color: colorScheme.surfaceContainerHigh,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              // Tappable area: artwork + title opens the full player.
+              // ExcludeSemantics only covers this section — controls remain
+              // individually accessible outside it.
+              Expanded(
+                child: Semantics(
+                  button: true,
+                  label:
+                      '${isPlaying ? 'Now playing' : 'Paused'}: ${mediaItem.title}',
+                  hint: 'Opens full player',
+                  onTap: () => _openPlayer(context),
+                  child: ExcludeSemantics(
+                    child: InkWell(
+                      onTap: () => _openPlayer(context),
+                      child: Row(
+                        children: [
+                          _Artwork(artUri: mediaItem.artUri),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 Text(
-                                  mediaItem.album!,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: colorScheme.onSurfaceVariant,
-                                      ),
+                                  mediaItem.title,
+                                  style: Theme.of(context).textTheme.bodyMedium
+                                      ?.copyWith(fontWeight: FontWeight.w600),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                            ],
+                                if (mediaItem.album != null)
+                                  Text(
+                                    mediaItem.album!,
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            _ControlButton(
-              icon: Icons.replay_30,
-              tooltip: 'Skip back ${kSkipBackDuration.inSeconds} seconds',
-              onPressed: () => ref.read(audioHandlerProvider).rewind(),
-            ),
-            _ControlButton(
-              icon: isPlaying ? Icons.pause : Icons.play_arrow,
-              tooltip: isPlaying ? 'Pause' : 'Play',
-              onPressed: () => isPlaying
-                  ? ref.read(audioHandlerProvider).pause()
-                  : ref.read(audioHandlerProvider).play(),
-            ),
-            if (timerState?.isActive == true)
-              Semantics(
-                button: true,
-                label: 'Extend sleep timer by 5 minutes',
-                child: ExcludeSemantics(
-                  child: TextButton(
-                    onPressed: () {
-                      ref.read(audioHandlerProvider).sleepTimer.extend();
-                      SemanticsService.sendAnnouncement(
-                        View.of(context),
-                        'Sleep timer extended by 5 minutes',
-                        TextDirection.ltr,
-                      );
-                    },
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: const Size(48, 48),
+              _ControlButton(
+                icon: Icons.replay_30,
+                tooltip: 'Skip back ${kSkipBackDuration.inSeconds} seconds',
+                onPressed: () => ref.read(audioHandlerProvider).rewind(),
+              ),
+              _ControlButton(
+                icon: isPlaying ? Icons.pause : Icons.play_arrow,
+                tooltip: isPlaying ? 'Pause' : 'Play',
+                onPressed: () => isPlaying
+                    ? ref.read(audioHandlerProvider).pause()
+                    : ref.read(audioHandlerProvider).play(),
+              ),
+              if (timerState?.isActive == true)
+                Semantics(
+                  button: true,
+                  label: 'Extend sleep timer by 5 minutes',
+                  child: ExcludeSemantics(
+                    child: TextButton(
+                      onPressed: () {
+                        ref.read(audioHandlerProvider).sleepTimer.extend();
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          'Sleep timer extended by 5 minutes',
+                          TextDirection.ltr,
+                        );
+                      },
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(48, 48),
+                      ),
+                      child: const Text('+5 min'),
                     ),
-                    child: const Text('+5 min'),
                   ),
                 ),
+              _ControlButton(
+                icon: Icons.forward_30,
+                tooltip:
+                    'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
+                onPressed: () => ref.read(audioHandlerProvider).fastForward(),
               ),
-            _ControlButton(
-              icon: Icons.forward_30,
-              tooltip: 'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
-              onPressed: () => ref.read(audioHandlerProvider).fastForward(),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
