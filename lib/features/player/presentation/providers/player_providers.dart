@@ -137,7 +137,8 @@ final playbackRestorationProvider = FutureProvider<void>((ref) async {
   await handler.loadEpisode(
     MediaItem(
       id: episode.audioUrl,
-      title: episode.title,
+      title: podcast?.title ?? episode.title,
+      artist: episode.title,
       album: podcast?.title,
       artUri: podcast?.artworkUrl != null
           ? Uri.tryParse(podcast!.artworkUrl!)
@@ -168,15 +169,26 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     }
     final next = queue.first;
     await queueRepo.removeFromQueue(next.id);
+    final db = ref.read(appDatabaseProvider);
+    final nextPodcast = await (db.select(
+      db.podcasts,
+    )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
     await handler.playEpisode(
       MediaItem(
         id: next.audioUrl,
-        title: next.title,
+        title: nextPodcast?.title ?? next.title,
+        artist: next.title,
+        album: nextPodcast?.title,
         artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
         duration: next.durationSeconds != null
             ? Duration(seconds: next.durationSeconds!)
             : null,
-        extras: {'episodeId': next.id},
+        extras: {
+          'episodeId': next.id,
+          'podcastId': next.podcastId,
+          if (nextPodcast?.speedOverride != null)
+            'speedOverride': nextPodcast!.speedOverride!,
+        },
       ),
       resumePositionSeconds: next.positionSeconds,
     );

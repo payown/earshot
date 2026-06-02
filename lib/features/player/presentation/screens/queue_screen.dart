@@ -45,6 +45,7 @@ String? _downloadStatusLabel(DownloadStatus status) => switch (status) {
 
 void _playEpisode(WidgetRef ref, Episode episode) {
   final handler = ref.read(audioHandlerProvider);
+  final podcast = ref.read(podcastProvider(episode.podcastId)).value;
   final resumePosition =
       episode.positionSeconds > 0 &&
           episode.durationSeconds != null &&
@@ -54,14 +55,21 @@ void _playEpisode(WidgetRef ref, Episode episode) {
   handler.playEpisode(
     MediaItem(
       id: episode.audioUrl,
-      title: episode.title,
+      title: podcast?.title ?? episode.title,
+      artist: episode.title,
+      album: podcast?.title,
       artUri: episode.artworkUrl != null
           ? Uri.parse(episode.artworkUrl!)
           : null,
       duration: episode.durationSeconds != null
           ? Duration(seconds: episode.durationSeconds!)
           : null,
-      extras: {'episodeId': episode.id, 'podcastId': episode.podcastId},
+      extras: {
+        'episodeId': episode.id,
+        'podcastId': episode.podcastId,
+        if (podcast?.speedOverride != null)
+          'speedOverride': podcast!.speedOverride!,
+      },
     ),
     resumePositionSeconds: resumePosition,
   );

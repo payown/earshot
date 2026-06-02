@@ -11,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/router/app_router.dart';
 import '../../../player/presentation/providers/player_providers.dart';
+import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../../subscriptions/presentation/widgets/podcast_list_tile.dart';
 import '../providers/folders_providers.dart';
 import '../widgets/folder_podcast_picker_sheet.dart';
@@ -152,6 +153,7 @@ class FolderDetailScreen extends ConsumerWidget {
     );
 
     final first = episodes.first;
+    final firstPodcast = ref.read(podcastProvider(first.podcastId)).value;
     final resumePos =
         first.positionSeconds > 0 &&
             first.durationSeconds != null &&
@@ -163,14 +165,21 @@ class FolderDetailScreen extends ConsumerWidget {
         .playEpisode(
           MediaItem(
             id: first.audioUrl,
-            title: first.title,
+            title: firstPodcast?.title ?? first.title,
+            artist: first.title,
+            album: firstPodcast?.title,
             artUri: first.artworkUrl != null
-                ? Uri.parse(first.artworkUrl!)
+                ? Uri.tryParse(first.artworkUrl!)
                 : null,
             duration: first.durationSeconds != null
                 ? Duration(seconds: first.durationSeconds!)
                 : null,
-            extras: {'episodeId': first.id, 'podcastId': first.podcastId},
+            extras: {
+              'episodeId': first.id,
+              'podcastId': first.podcastId,
+              if (firstPodcast?.speedOverride != null)
+                'speedOverride': firstPodcast!.speedOverride!,
+            },
           ),
           resumePositionSeconds: resumePos,
         );

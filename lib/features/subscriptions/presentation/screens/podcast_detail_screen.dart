@@ -215,10 +215,11 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
     handler.playEpisode(
       MediaItem(
         id: episode.audioUrl,
-        title: episode.title,
+        title: podcast.title,
+        artist: episode.title,
         album: podcast.title,
         artUri: podcast.artworkUrl != null
-            ? Uri.parse(podcast.artworkUrl!)
+            ? Uri.tryParse(podcast.artworkUrl!)
             : null,
         duration: episode.durationSeconds != null
             ? Duration(seconds: episode.durationSeconds!)

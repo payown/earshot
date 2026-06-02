@@ -72,12 +72,17 @@ EXTRA_FLAGS=()
 [[ -n "$NOTES" ]]          && EXTRA_FLAGS+=(--test-notes "$NOTES" --locale en-US)
 [[ "$SUBMIT_FOR_REVIEW" == true ]] && EXTRA_FLAGS+=(--submit --confirm)
 
+TMP_OUTPUT=$(mktemp)
 asc publish testflight \
   --app "$ASC_APP_ID" \
   --ipa "build/ios/ipa/earshot.ipa" \
   --group "$GROUP" \
   --wait \
   --notify \
-  "${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"}"
+  "${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"}" | tee "$TMP_OUTPUT"
 
-echo "✅ Build $NEXT_BUILD deployed. Check TestFlight on your phone."
+ASC_BUILD=$(grep -o '"buildNumber":"[0-9]*"' "$TMP_OUTPUT" | grep -o '[0-9]*' | tail -1)
+rm "$TMP_OUTPUT"
+ASC_BUILD=${ASC_BUILD:-$NEXT_BUILD}
+
+echo "✅ Build $ASC_BUILD deployed. Check TestFlight on your phone."
