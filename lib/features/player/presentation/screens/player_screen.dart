@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/playback.dart';
 import '../../../../core/constants/spacing.dart';
+import '../../../../core/constants/urls.dart';
+import '../../../../features/bookmarks/presentation/providers/bookmarks_providers.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/sleep_timer.dart';
 import '../providers/player_providers.dart';
@@ -275,9 +278,229 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               const SizedBox(height: Spacing.md),
               _AudioExtrasRow(),
               const SizedBox(height: Spacing.sm),
+              if (mediaItem.extras?['episodeId'] is int)
+                _BookmarksSection(
+                  episodeId: mediaItem.extras!['episodeId'] as int,
+                ),
               _ShowNotesSection(description: description),
               const SizedBox(height: Spacing.md),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BookmarksSection extends ConsumerStatefulWidget {
+  const _BookmarksSection({required this.episodeId});
+
+  final int episodeId;
+
+  @override
+  ConsumerState<_BookmarksSection> createState() => _BookmarksSectionState();
+}
+
+class _BookmarksSectionState extends ConsumerState<_BookmarksSection> {
+  bool _expanded = false;
+
+  String _formatPosition(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$s' : '$m:$s';
+  }
+
+  Future<void> _seekTo(int positionSeconds) async {
+    await ref
+        .read(audioHandlerProvider)
+        .seek(Duration(seconds: positionSeconds));
+    if (mounted) {
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Jumped to ${_formatPosition(positionSeconds)}',
+        TextDirection.ltr,
+      );
+    }
+  }
+
+  Future<void> _delete(int bookmarkId, int positionSeconds) async {
+    await ref.read(bookmarkRepositoryProvider).deleteBookmark(bookmarkId);
+    if (mounted) {
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Bookmark at ${_formatPosition(positionSeconds)} deleted',
+        TextDirection.ltr,
+      );
+    }
+  }
+
+  Future<void> _share(int positionSeconds) async {
+    final url = '$kEpisodeBaseUrl/${widget.episodeId}?t=$positionSeconds';
+    await SharePlus.instance.share(ShareParams(text: url));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bookmarks = ref
+        .watch(bookmarksForEpisodeProvider(widget.episodeId))
+        .asData
+        ?.value;
+
+    if (bookmarks == null || bookmarks.isEmpty) return const SizedBox.shrink();
+
+    final disableAnimations = MediaQuery.of(context).disableAnimations;
+    final theme = Theme.of(context);
+    final count = bookmarks.length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const ExcludeSemantics(child: Divider(height: 1)),
+        Semantics(
+          button: true,
+          expanded: _expanded,
+          label: _expanded
+              ? 'Bookmarks, $count ${count == 1 ? 'item' : 'items'}, expanded'
+              : 'Bookmarks, $count ${count == 1 ? 'item' : 'items'}, collapsed',
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: ExcludeSemantics(
+            child: GestureDetector(
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: Spacing.sm),
+                child: Row(
+                  children: [
+                    Text(
+                      'Bookmarks ($count)',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    const Spacer(),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: disableAnimations
+                          ? Duration.zero
+                          : const Duration(milliseconds: 200),
+                      child: const Icon(Icons.expand_more),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          child: _expanded
+              ? Column(
+                  children: [
+                    for (final bookmark in bookmarks)
+                      _BookmarkRow(
+                        positionLabel: _formatPosition(
+                          bookmark.positionSeconds,
+                        ),
+                        note: bookmark.note,
+                        onSeek: () => _seekTo(bookmark.positionSeconds),
+                        onDelete: () =>
+                            _delete(bookmark.id, bookmark.positionSeconds),
+                        onShare: () => _share(bookmark.positionSeconds),
+                      ),
+                    const SizedBox(height: Spacing.xs),
+                  ],
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+}
+
+class _BookmarkRow extends StatelessWidget {
+  const _BookmarkRow({
+    required this.positionLabel,
+    required this.note,
+    required this.onSeek,
+    required this.onDelete,
+    required this.onShare,
+  });
+
+  final String positionLabel;
+  final String note;
+  final VoidCallback onSeek;
+  final VoidCallback onDelete;
+  final VoidCallback onShare;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final trimmedNote = note.trim();
+    final semanticLabel = trimmedNote.isNotEmpty
+        ? 'Bookmark at $positionLabel: $trimmedNote'
+        : 'Bookmark at $positionLabel';
+
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      hint: 'Jump to this position',
+      customSemanticsActions: {
+        const CustomSemanticsAction(label: 'Delete bookmark'): onDelete,
+        const CustomSemanticsAction(label: 'Share bookmark'): onShare,
+      },
+      child: ExcludeSemantics(
+        child: GestureDetector(
+          onTap: onSeek,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: Spacing.sm),
+            child: Row(
+              children: [
+                Text(
+                  positionLabel,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                if (trimmedNote.isNotEmpty) ...[
+                  const SizedBox(width: Spacing.sm),
+                  Expanded(
+                    child: Text(
+                      trimmedNote,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ] else
+                  const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.share_outlined),
+                  iconSize: 20,
+                  tooltip: 'Share bookmark',
+                  onPressed: onShare,
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
+                  padding: EdgeInsets.zero,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  iconSize: 20,
+                  tooltip: 'Delete bookmark',
+                  onPressed: onDelete,
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
+                  padding: EdgeInsets.zero,
+                ),
+              ],
+            ),
           ),
         ),
       ),
