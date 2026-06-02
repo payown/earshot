@@ -169,17 +169,16 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
             episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
         ? episode.positionSeconds
         : 0;
-    final speedOverride = ref
-        .read(podcastProvider(episode.podcastId))
-        .value
-        ?.speedOverride;
+    final podcast = ref.read(podcastProvider(episode.podcastId)).value;
     unawaited(
       ref
           .read(audioHandlerProvider)
           .playEpisode(
             MediaItem(
               id: episode.audioUrl,
-              title: episode.title,
+              title: podcast?.title ?? episode.title,
+              artist: episode.title,
+              album: podcast?.title,
               artUri: episode.artworkUrl != null
                   ? Uri.tryParse(episode.artworkUrl!)
                   : null,
@@ -189,7 +188,8 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
               extras: {
                 'episodeId': episode.id,
                 'podcastId': episode.podcastId,
-                if (speedOverride != null) 'speedOverride': speedOverride,
+                if (podcast?.speedOverride != null)
+                  'speedOverride': podcast!.speedOverride!,
               },
             ),
             resumePositionSeconds: resumePosition,

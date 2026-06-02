@@ -249,6 +249,7 @@ class _SearchResultDetailScreenState
                     itemCount: pod.episodes.length,
                     itemBuilder: (context, i) => _PreviewEpisodeTile(
                       episode: pod.episodes[i],
+                      podcastTitle: result.title,
                       podcastArtworkUrl: result.artworkUrl,
                       speedOverride: subscribedPodcast?.speedOverride,
                     ),
@@ -343,11 +344,13 @@ class _Artwork extends StatelessWidget {
 class _PreviewEpisodeTile extends ConsumerWidget {
   const _PreviewEpisodeTile({
     required this.episode,
+    this.podcastTitle,
     this.podcastArtworkUrl,
     this.speedOverride,
   });
 
   final ParsedEpisode episode;
+  final String? podcastTitle;
   final String? podcastArtworkUrl;
   final double? speedOverride;
 
@@ -359,7 +362,9 @@ class _PreviewEpisodeTile extends ConsumerWidget {
           .playEpisode(
             MediaItem(
               id: episode.audioUrl,
-              title: episode.title,
+              title: podcastTitle ?? episode.title,
+              artist: episode.title,
+              album: podcastTitle,
               artUri: artworkUrl != null ? Uri.tryParse(artworkUrl) : null,
               duration: episode.durationSeconds != null
                   ? Duration(seconds: episode.durationSeconds!)
