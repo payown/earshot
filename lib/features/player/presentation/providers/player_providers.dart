@@ -50,6 +50,29 @@ final queueProvider = StreamProvider<List<Episode>>(
   (ref) => ref.watch(queueRepositoryProvider).watchQueue(),
 );
 
+// Session-only set of podcast IDs whose queue groups are collapsed. Default
+// is empty — every group expanded — so the queue looks unchanged the first
+// time grouping is enabled. Not persisted; resets on app restart.
+class CollapsedQueueGroupsNotifier extends Notifier<Set<int>> {
+  @override
+  Set<int> build() => <int>{};
+
+  void toggle(int podcastId) {
+    final next = {...state};
+    if (next.contains(podcastId)) {
+      next.remove(podcastId);
+    } else {
+      next.add(podcastId);
+    }
+    state = next;
+  }
+}
+
+final collapsedQueueGroupsProvider =
+    NotifierProvider<CollapsedQueueGroupsNotifier, Set<int>>(
+      CollapsedQueueGroupsNotifier.new,
+    );
+
 final groupedQueueProvider = Provider<AsyncValue<List<QueueGroup>>>((ref) {
   final episodes = ref.watch(queueProvider);
   final subs = ref.watch(subscriptionsProvider);
@@ -200,8 +223,16 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
       await handler.stop();
       return;
     }
-    final next = queue.first;
-    await queueRepo.removeFromQueue(next.id);
+    final currentEpisodeId =
+        handler.mediaItem.value?.extras?['episodeId'] as int?;
+    final currentIndex = currentEpisodeId != null
+        ? queue.indexWhere((e) => e.id == currentEpisodeId)
+        : -1;
+    if (currentIndex >= queue.length - 1) {
+      await handler.stop();
+      return;
+    }
+    final next = currentIndex >= 0 ? queue[currentIndex + 1] : queue.first;
     final db = ref.read(appDatabaseProvider);
     final nextPodcast = await (db.select(
       db.podcasts,

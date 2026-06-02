@@ -24,6 +24,11 @@ abstract interface class QueueRepository {
 
   Future<void> reorder(int episodeId, int newPosition);
 
+  // Reorders a subset of queue items in-place. Each episode in
+  // [episodeIdsInOrder] is assigned to the slot (position) that its
+  // counterpart currently occupies, preserving every other episode's position.
+  Future<void> sortGroup(List<int> episodeIdsInOrder);
+
   Stream<List<Episode>> watchQueue();
 
   Future<void> clearQueue();

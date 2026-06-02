@@ -306,6 +306,58 @@ void main() {
     });
   });
 
+  // ── sortGroup ─────────────────────────────────────────────────────────────
+
+  group('sortGroup', () {
+    test('reorders episodes within their existing queue slots', () async {
+      final podA = await _addPodcast();
+      final podB = await _addPodcast();
+      // Queue order: A1, B1, A2, A3, B2 — A occupies positions 0, 2, 3.
+      final a1 = await _addEpisode(podA);
+      final b1 = await _addEpisode(podB);
+      final a2 = await _addEpisode(podA);
+      final a3 = await _addEpisode(podA);
+      final b2 = await _addEpisode(podB);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(b1);
+      await repo.addToQueue(a2);
+      await repo.addToQueue(a3);
+      await repo.addToQueue(b2);
+
+      // Desired group A order: a3, a2, a1.
+      await repo.sortGroup([a3, a2, a1]);
+
+      // B episodes keep their slots; A episodes reorder into A's slots.
+      expect(await _queueOrder(), [a3, b1, a2, a1, b2]);
+    });
+
+    test('shuffles all members of a contiguous group', () async {
+      final podA = await _addPodcast();
+      final a1 = await _addEpisode(podA);
+      final a2 = await _addEpisode(podA);
+      final a3 = await _addEpisode(podA);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(a2);
+      await repo.addToQueue(a3);
+
+      await repo.sortGroup([a3, a1, a2]);
+
+      expect(await _queueOrder(), [a3, a1, a2]);
+    });
+
+    test('no-op when fewer than two episodes are passed', () async {
+      final podA = await _addPodcast();
+      final a1 = await _addEpisode(podA);
+      final a2 = await _addEpisode(podA);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(a2);
+
+      await repo.sortGroup([a1]);
+
+      expect(await _queueOrder(), [a1, a2]);
+    });
+  });
+
   // ── watchQueue ────────────────────────────────────────────────────────────
 
   group('watchQueue', () {
