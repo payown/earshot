@@ -169,7 +169,7 @@ class FolderDetailScreen extends ConsumerWidget {
             artist: first.title,
             album: firstPodcast?.title,
             artUri: first.artworkUrl != null
-                ? Uri.parse(first.artworkUrl!)
+                ? Uri.tryParse(first.artworkUrl!)
                 : null,
             duration: first.durationSeconds != null
                 ? Duration(seconds: first.durationSeconds!)

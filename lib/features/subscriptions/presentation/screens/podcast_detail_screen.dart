@@ -219,7 +219,7 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
         artist: episode.title,
         album: podcast.title,
         artUri: podcast.artworkUrl != null
-            ? Uri.parse(podcast.artworkUrl!)
+            ? Uri.tryParse(podcast.artworkUrl!)
             : null,
         duration: episode.durationSeconds != null
             ? Duration(seconds: episode.durationSeconds!)
