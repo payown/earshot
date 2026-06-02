@@ -46,7 +46,17 @@ class _MainShellState extends ConsumerState<MainShell> {
   @override
   void initState() {
     super.initState();
-    _shakeDetector = ShakeDetector.autoStart(onPhoneShake: _onShake);
+    // Shake package defaults (single jerk, 2.7g threshold) fire on casual
+    // movement like pocketing the phone. Require three distinct jerks within
+    // one second, each at least 100 ms apart, and at 4.0g — a deliberate
+    // shake gesture, not an accidental bump.
+    _shakeDetector = ShakeDetector.autoStart(
+      onPhoneShake: _onShake,
+      minimumShakeCount: 3,
+      shakeSlopTimeMS: 100,
+      shakeCountResetTime: 1000,
+      shakeThresholdGravity: 4.5,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       ref.read(queueExpirationServiceProvider).runExpiration();
       await _applyHistoryRetention();
