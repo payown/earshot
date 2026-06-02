@@ -2,6 +2,7 @@ import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shake/shake.dart';
 
 import '../../data/db/enums.dart';
 import '../../features/downloads/presentation/providers/downloads_providers.dart';
@@ -9,6 +10,7 @@ import '../../features/player/presentation/widgets/now_playing_bar.dart';
 import '../../features/settings/data/app_settings_repository.dart';
 import '../../features/stats/data/stats_repository.dart';
 import '../providers/core_providers.dart';
+import '../router/app_router.dart';
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({required this.shell, super.key});
@@ -20,6 +22,19 @@ class MainShell extends ConsumerStatefulWidget {
 }
 
 class _MainShellState extends ConsumerState<MainShell> {
+  ShakeDetector? _shakeDetector;
+  DateTime? _lastShake;
+
+  void _onShake() {
+    final now = DateTime.now();
+    if (_lastShake != null &&
+        now.difference(_lastShake!) < const Duration(seconds: 3)) {
+      return;
+    }
+    _lastShake = now;
+    if (mounted) context.push(AppRoutes.bugReport);
+  }
+
   Future<void> _applyHistoryRetention() async {
     final db = ref.read(appDatabaseProvider);
     final days = await AppSettingsRepositoryImpl(
@@ -31,10 +46,17 @@ class _MainShellState extends ConsumerState<MainShell> {
   @override
   void initState() {
     super.initState();
+    _shakeDetector = ShakeDetector.autoStart(onPhoneShake: _onShake);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       ref.read(queueExpirationServiceProvider).runExpiration();
       await _applyHistoryRetention();
     });
+  }
+
+  @override
+  void dispose() {
+    _shakeDetector?.stopListening();
+    super.dispose();
   }
 
   @override
