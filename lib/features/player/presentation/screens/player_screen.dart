@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/playback.dart';
 import '../../../../core/constants/spacing.dart';
@@ -106,6 +108,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final position = ref.watch(positionProvider).asData?.value ?? Duration.zero;
     final directTouchEnabled =
         ref.watch(directTouchEnabledProvider).value ?? false;
+    final description = ref
+        .watch(currentEpisodeDescriptionProvider)
+        .asData
+        ?.value;
 
     // Stop rotor fast-forward if the setting is turned off mid-session.
     ref.listen<AsyncValue<bool>>(directTouchEnabledProvider, (_, next) {
@@ -125,6 +131,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final isBuffering =
         playbackState?.processingState == AudioProcessingState.buffering;
 
+    final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Now Playing'),
@@ -135,12 +145,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         ),
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(Spacing.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
+              SizedBox(
+                height: 200,
                 child: Semantics(
                   // Label change on fast-forward state forces VoiceOver to
                   // refresh customSemanticsActions (workaround for Flutter
@@ -222,26 +233,138 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     ref.read(audioHandlerProvider).fastForward(),
               ),
               const SizedBox(height: Spacing.md),
-              _SpeedSelector(
-                speed: playbackState?.speed ?? 1.0,
-                onSpeedChanged: (speed) {
-                  ref.read(audioHandlerProvider).setSpeed(speed);
-                  final podcastId = mediaItem.extras?['podcastId'] as int?;
-                  if (podcastId != null) {
-                    ref
-                        .read(podcastRepositoryProvider)
-                        .updateSpeedOverride(podcastId, speed);
-                  }
-                },
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      children: [
+                        ExcludeSemantics(
+                          child: Text('Speed', style: labelStyle),
+                        ),
+                        const SizedBox(height: Spacing.xs),
+                        _SpeedSelector(
+                          speed: playbackState?.speed ?? 1.0,
+                          onSpeedChanged: (speed) {
+                            ref.read(audioHandlerProvider).setSpeed(speed);
+                            final podcastId =
+                                mediaItem.extras?['podcastId'] as int?;
+                            if (podcastId != null) {
+                              ref
+                                  .read(podcastRepositoryProvider)
+                                  .updateSpeedOverride(podcastId, speed);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        ExcludeSemantics(
+                          child: Text('Sleep timer', style: labelStyle),
+                        ),
+                        const SizedBox(height: Spacing.xs),
+                        _SleepTimerControls(),
+                      ],
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: Spacing.md),
               _AudioExtrasRow(),
+              const SizedBox(height: Spacing.sm),
+              _ShowNotesSection(description: description),
               const SizedBox(height: Spacing.md),
-              _SleepTimerControls(),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ShowNotesSection extends StatefulWidget {
+  const _ShowNotesSection({required this.description});
+
+  final String? description;
+
+  @override
+  State<_ShowNotesSection> createState() => _ShowNotesSectionState();
+}
+
+class _ShowNotesSectionState extends State<_ShowNotesSection> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final disableAnimations = MediaQuery.of(context).disableAnimations;
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 1),
+        Semantics(
+          button: true,
+          expanded: _expanded,
+          label: 'Show notes',
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: ExcludeSemantics(
+            child: InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: Spacing.sm),
+                child: Row(
+                  children: [
+                    Text('Show notes', style: theme.textTheme.titleSmall),
+                    const Spacer(),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: disableAnimations
+                          ? Duration.zero
+                          : const Duration(milliseconds: 200),
+                      child: const Icon(Icons.expand_more),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          child: _expanded
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: Spacing.sm),
+                  child: widget.description != null
+                      ? Html(
+                          data: widget.description!,
+                          onLinkTap: (url, _, __) async {
+                            if (url == null) return;
+                            final uri = Uri.tryParse(url);
+                            if (uri != null) await launchUrl(uri);
+                          },
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: Spacing.sm,
+                          ),
+                          child: Text(
+                            'No show notes available.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
     );
   }
 }
@@ -572,7 +695,9 @@ class _SleepTimerControls extends ConsumerWidget {
         handler.sleepTimer.set(p);
         SemanticsService.sendAnnouncement(
           View.of(context),
-          'Sleep timer set for ${p.label}',
+          timerState.isActive
+              ? 'Sleep timer set for ${p.label}'
+              : 'Sleep timer set for ${p.label}. Extend by 5 minutes button now available.',
           TextDirection.ltr,
         );
       }
@@ -580,14 +705,15 @@ class _SleepTimerControls extends ConsumerWidget {
 
     final canExtend = timerState.isActive && !timerState.endOfEpisode;
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Semantics(
           label: 'Sleep timer',
           slider: true,
-          value: _label(currentPreset),
+          value: timerState.isActive && !timerState.endOfEpisode
+              ? '${_label(currentPreset)}, ${_formatRemaining(timerState.remaining)} remaining'
+              : _label(currentPreset),
           decreasedValue: idx > 0 ? _label(prev) : null,
           increasedValue: next != null ? _label(next) : null,
           onDecrease: idx > 0 ? () => applyPreset(prev) : null,
@@ -602,7 +728,7 @@ class _SleepTimerControls extends ConsumerWidget {
                 onPressed: idx > 0 ? () => applyPreset(prev) : null,
               ),
               SizedBox(
-                width: 112,
+                width: 80,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
