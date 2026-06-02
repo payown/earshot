@@ -48,7 +48,7 @@ class _MainShellState extends ConsumerState<MainShell> {
     super.initState();
     // Shake package defaults (single jerk, 2.7g threshold) fire on casual
     // movement like pocketing the phone. Require three distinct jerks within
-    // one second, each at least 100 ms apart, and at 4.0g — a deliberate
+    // one second, each at least 100 ms apart, and at 4.5g — a deliberate
     // shake gesture, not an accidental bump.
     _shakeDetector = ShakeDetector.autoStart(
       onPhoneShake: _onShake,
