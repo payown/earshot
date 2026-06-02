@@ -360,7 +360,7 @@ class QueueScreen extends ConsumerWidget {
             TextDirection.ltr,
           );
         },
-        const CustomSemanticsAction(label: 'Play newest first'): () async {
+        const CustomSemanticsAction(label: 'Sort newest first'): () async {
           final view = View.of(context);
           await _playNewestFirst(ref, group.episodes);
           SemanticsService.sendAnnouncement(
@@ -369,7 +369,7 @@ class QueueScreen extends ConsumerWidget {
             TextDirection.ltr,
           );
         },
-        const CustomSemanticsAction(label: 'Play oldest first'): () async {
+        const CustomSemanticsAction(label: 'Sort oldest first'): () async {
           final view = View.of(context);
           await _playOldestFirst(ref, group.episodes);
           SemanticsService.sendAnnouncement(
