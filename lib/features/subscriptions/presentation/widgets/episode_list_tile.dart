@@ -31,13 +31,14 @@ class EpisodeListTile extends StatelessWidget {
     final duration = _formatDuration(episode.durationSeconds);
     final date = _formatDate(episode.pubDate);
     final statusText = _statusLabel(episode.status);
+    final semanticDuration = _semanticDuration(episode);
 
-    final parts = [
+    final semanticParts = [
       statusText,
-      if (duration != null) duration,
+      if (semanticDuration != null) semanticDuration,
       if (date != null) date,
     ];
-    final semanticLabel = '${episode.title}, ${parts.join(', ')}';
+    final semanticLabel = '${episode.title}, ${semanticParts.join(', ')}';
 
     final semanticActions = <CustomSemanticsAction, VoidCallback>{
       for (final action in quickActions)
@@ -114,6 +115,28 @@ class EpisodeListTile extends StatelessWidget {
     if (h > 0) return '$h hr ${m > 0 ? "$m min" : ""}'.trim();
     if (m > 0) return '$m min';
     return '${seconds % 60} sec';
+  }
+
+  String? _semanticDuration(Episode ep) {
+    if (ep.durationSeconds == null) return null;
+    final total = ep.durationSeconds!;
+    final position = ep.positionSeconds;
+    if (position > 0 && position < (total * 0.95).round()) {
+      return '${_verboseDuration(total - position)} remaining';
+    }
+    return _verboseDuration(total);
+  }
+
+  String _verboseDuration(int totalSeconds) {
+    final h = totalSeconds ~/ 3600;
+    final m = (totalSeconds % 3600) ~/ 60;
+    final s = totalSeconds % 60;
+    final parts = <String>[];
+    if (h > 0) parts.add('$h ${h == 1 ? 'hour' : 'hours'}');
+    if (m > 0) parts.add('$m ${m == 1 ? 'minute' : 'minutes'}');
+    if (s > 0 || parts.isEmpty)
+      parts.add('$s ${s == 1 ? 'second' : 'seconds'}');
+    return parts.join(', ');
   }
 
   String? _formatDate(DateTime? date) {

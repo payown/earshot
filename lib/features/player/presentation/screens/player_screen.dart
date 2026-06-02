@@ -313,8 +313,13 @@ class _ProgressBar extends StatelessWidget {
     final increased = _clamp(position + _kStep);
     final decreased = _clamp(position - _kStep);
 
+    final remaining = duration > position ? duration - position : Duration.zero;
+    final semanticLabel = duration.inSeconds > 0
+        ? '${_formatNatural(remaining)} remaining, ${_formatNatural(duration)} total'
+        : 'Playback position: $posLabel';
+
     return Semantics(
-      label: 'Playback position: $posLabel of $durLabel',
+      label: semanticLabel,
       slider: true,
       value: posLabel,
       increasedValue: _format(increased),
@@ -364,6 +369,18 @@ class _ProgressBar extends StatelessWidget {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
+  String _formatNatural(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    if (h > 0 && m > 0) {
+      return '$h ${h == 1 ? 'hour' : 'hours'} $m ${m == 1 ? 'minute' : 'minutes'}';
+    }
+    if (h > 0) return '$h ${h == 1 ? 'hour' : 'hours'}';
+    if (m > 0) return '$m ${m == 1 ? 'minute' : 'minutes'}';
+    return '$s ${s == 1 ? 'second' : 'seconds'}';
   }
 }
 
@@ -448,7 +465,9 @@ class _SpeedSelector extends StatelessWidget {
   final ValueChanged<double> onSpeedChanged;
 
   // 0.5x to 5.0x in 0.1x increments (46 speeds)
-  static final _speeds = [for (int i = 5; i <= 50; i++) i / 10.0];
+  static final List<double> _speeds = List.unmodifiable([
+    for (int i = 5; i <= 50; i++) i / 10.0,
+  ]);
 
   @override
   Widget build(BuildContext context) {
@@ -506,7 +525,13 @@ class _SpeedSelector extends StatelessWidget {
     return best;
   }
 
-  String _label(double s) => '${s.toStringAsFixed(1)}x';
+  String _label(double s) {
+    // If s is on the 0.1 grid (within float epsilon), one decimal is exact.
+    // Legacy persisted speeds (e.g. 1.25x) fall through to two decimals.
+    final tenths = (s * 10).round();
+    if ((tenths / 10.0 - s).abs() < 1e-9) return '${s.toStringAsFixed(1)}x';
+    return '${s.toStringAsFixed(2)}x';
+  }
 }
 
 class _SleepTimerControls extends ConsumerWidget {

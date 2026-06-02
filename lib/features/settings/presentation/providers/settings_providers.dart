@@ -10,12 +10,12 @@ final quickActionRepositoryProvider = Provider<QuickActionRepository>(
   (ref) => QuickActionRepositoryImpl(database: ref.watch(appDatabaseProvider)),
 );
 
-final episodeActionsProvider = FutureProvider<List<EpisodeAction>>(
-  (ref) => ref.watch(quickActionRepositoryProvider).getEpisodeActions(),
+final episodeActionsProvider = StreamProvider<List<EpisodeAction>>(
+  (ref) => ref.watch(quickActionRepositoryProvider).watchEpisodeActions(),
 );
 
-final podcastActionsProvider = FutureProvider<List<PodcastAction>>(
-  (ref) => ref.watch(quickActionRepositoryProvider).getPodcastActions(),
+final podcastActionsProvider = StreamProvider<List<PodcastAction>>(
+  (ref) => ref.watch(quickActionRepositoryProvider).watchPodcastActions(),
 );
 
 class _BoolSettingNotifier extends AsyncNotifier<bool> {
@@ -55,4 +55,41 @@ final wifiOnlyDownloadsProvider =
         read: (r) => r.isWifiOnlyDownloads(),
         write: (r, v) => r.setWifiOnlyDownloads(value: v),
       ),
+    );
+
+final autoDownloadInboxProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.isAutoDownloadInbox(),
+        write: (r, v) => r.setAutoDownloadInbox(value: v),
+      ),
+    );
+
+final autoDownloadQueueProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.isAutoDownloadQueue(),
+        write: (r, v) => r.setAutoDownloadQueue(value: v),
+      ),
+    );
+
+class _RetentionSettingNotifier extends AsyncNotifier<int?> {
+  @override
+  Future<int?> build() async {
+    final db = ref.watch(appDatabaseProvider);
+    return AppSettingsRepositoryImpl(database: db).getDownloadRetentionDays();
+  }
+
+  Future<void> set(int? days) async {
+    state = AsyncData(days);
+    final db = ref.read(appDatabaseProvider);
+    await AppSettingsRepositoryImpl(
+      database: db,
+    ).setDownloadRetentionDays(days);
+  }
+}
+
+final downloadRetentionDaysProvider =
+    AsyncNotifierProvider<_RetentionSettingNotifier, int?>(
+      _RetentionSettingNotifier.new,
     );

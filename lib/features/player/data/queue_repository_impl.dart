@@ -41,6 +41,63 @@ class QueueRepositoryImpl implements QueueRepository {
   }
 
   @override
+  Future<void> addAfterCurrent(int episodeId) async {
+    await _db.transaction(() async {
+      final rows = await (_db.select(
+        _db.queueItems,
+      )..orderBy([(q) => OrderingTerm.asc(q.position)])).get();
+
+      final alreadyQueued = rows.any((r) => r.episodeId == episodeId);
+      final insertAt = rows.isEmpty ? 0 : 1;
+
+      if (alreadyQueued) {
+        // Remove from current slot without touching episode status.
+        await (_db.delete(
+          _db.queueItems,
+        )..where((q) => q.episodeId.equals(episodeId))).go();
+      }
+
+      // Re-fetch after possible removal so positions are current.
+      final fresh = alreadyQueued
+          ? await (_db.select(
+              _db.queueItems,
+            )..orderBy([(q) => OrderingTerm.asc(q.position)])).get()
+          : rows;
+
+      // Shift items from insertAt onwards up by 1 (iterate in reverse to avoid
+      // collisions when two rows temporarily share the same position value).
+      for (final row in fresh.reversed) {
+        if (row.position >= insertAt) {
+          await (_db.update(_db.queueItems)..where((q) => q.id.equals(row.id)))
+              .write(QueueItemsCompanion(position: Value(row.position + 1)));
+        }
+      }
+
+      await _db
+          .into(_db.queueItems)
+          .insert(
+            QueueItemsCompanion.insert(
+              episodeId: episodeId,
+              position: insertAt,
+            ),
+          );
+
+      if (!alreadyQueued) {
+        await (_db.update(_db.episodes)..where(
+              (e) =>
+                  e.id.equals(episodeId) &
+                  e.status.equals(EpisodeStatus.newEpisode.name),
+            ))
+            .write(
+              const EpisodesCompanion(status: Value(EpisodeStatus.inQueue)),
+            );
+      }
+    });
+    await _compactPositions();
+    _log.fine('Added episode $episodeId to queue after current');
+  }
+
+  @override
   Future<void> removeFromQueue(int episodeId) async {
     await (_db.delete(
       _db.queueItems,
@@ -69,9 +126,10 @@ class QueueRepositoryImpl implements QueueRepository {
 
   @override
   Future<void> moveToTop(int episodeId) async {
+    // Use -1 so _compactPositions sorts this item before anything at position 0.
     await (_db.update(_db.queueItems)
           ..where((q) => q.episodeId.equals(episodeId)))
-        .write(const QueueItemsCompanion(position: Value(0)));
+        .write(const QueueItemsCompanion(position: Value(-1)));
     await _compactPositions();
   }
 

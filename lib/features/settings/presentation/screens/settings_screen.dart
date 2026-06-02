@@ -195,6 +195,24 @@ class SettingsScreen extends ConsumerWidget {
                     }
                   },
           ),
+          ListTile(
+            title: const Text('Keep downloads for'),
+            subtitle: Text(
+              ref
+                  .watch(downloadRetentionDaysProvider)
+                  .when(
+                    data: _retentionLabel,
+                    loading: () => 'Loading...',
+                    error: (_, __) => 'Unknown',
+                  ),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showRetentionPicker(
+              context,
+              ref,
+              ref.read(downloadRetentionDaysProvider).value,
+            ),
+          ),
           const Divider(),
           Semantics(
             header: true,
@@ -302,6 +320,79 @@ class SettingsScreen extends ConsumerWidget {
       );
     }
   }
+}
+
+String _retentionLabel(int? days) => switch (days) {
+  7 => '1 week',
+  14 => '2 weeks',
+  30 => '1 month',
+  90 => '3 months',
+  _ => 'Forever',
+};
+
+void _showRetentionPicker(BuildContext context, WidgetRef ref, int? current) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    barrierLabel: 'Dismiss keep downloads picker',
+    builder: (_) {
+      final options = <(int?, String)>[
+        (7, '1 week'),
+        (14, '2 weeks'),
+        (30, '1 month'),
+        (90, '3 months'),
+        (null, 'Forever'),
+      ];
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: Semantics(
+                header: true,
+                label: 'Keep downloads for',
+                child: ExcludeSemantics(
+                  child: Text(
+                    'Keep downloads for',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+              ),
+            ),
+            RadioGroup<int?>(
+              groupValue: current,
+              onChanged: (val) async {
+                Navigator.of(context).pop();
+                final label = _retentionLabel(val);
+                await ref.read(downloadRetentionDaysProvider.notifier).set(val);
+                if (context.mounted) {
+                  SemanticsService.sendAnnouncement(
+                    View.of(context),
+                    'Keep downloads set to $label',
+                    TextDirection.ltr,
+                  );
+                }
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final (days, label) in options)
+                    RadioListTile<int?>(
+                      title: Text(label),
+                      value: days,
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+    },
+  );
 }
 
 class _VersionTile extends ConsumerStatefulWidget {
