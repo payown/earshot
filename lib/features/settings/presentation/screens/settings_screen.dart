@@ -121,6 +121,43 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(),
           Semantics(
             header: true,
+            label: 'Queue',
+            child: const ExcludeSemantics(
+              child: _SectionHeader(label: 'Queue'),
+            ),
+          ),
+          SwitchListTile(
+            title: const Text('Group episodes by podcast'),
+            subtitle: const Text('Groups your queue by show'),
+            value: ref.watch(groupQueueEpisodesProvider).value ?? false,
+            onChanged: ref.watch(groupQueueEpisodesProvider).isLoading
+                ? null
+                : (val) async {
+                    try {
+                      await ref
+                          .read(groupQueueEpisodesProvider.notifier)
+                          .set(val);
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          val ? 'Queue grouped by podcast' : 'Queue ungrouped',
+                          TextDirection.ltr,
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          'Could not update queue setting',
+                          TextDirection.ltr,
+                        );
+                      }
+                    }
+                  },
+          ),
+          const Divider(),
+          Semantics(
+            header: true,
             label: 'Stats',
             child: const ExcludeSemantics(
               child: _SectionHeader(label: 'Stats'),

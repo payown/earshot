@@ -7,6 +7,8 @@ import '../../../../core/providers/core_providers.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
+import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
+import '../../domain/queue_group.dart';
 import '../../data/audio_handler.dart';
 import '../../data/position_tracker.dart';
 import '../../data/queue_repository.dart';
@@ -47,6 +49,37 @@ final queueRepositoryProvider = Provider<QueueRepository>(
 final queueProvider = StreamProvider<List<Episode>>(
   (ref) => ref.watch(queueRepositoryProvider).watchQueue(),
 );
+
+final groupedQueueProvider = Provider<AsyncValue<List<QueueGroup>>>((ref) {
+  final episodes = ref.watch(queueProvider);
+  final subs = ref.watch(subscriptionsProvider);
+
+  return episodes.whenData((eps) {
+    final pods = subs.asData?.value;
+    final podcastTitles = <int, String>{
+      if (pods != null)
+        for (final p in pods) p.id: p.title,
+    };
+    final groups = <int, List<Episode>>{};
+    final groupOrder = <int>[];
+    for (final ep in eps) {
+      if (!groups.containsKey(ep.podcastId)) {
+        groups[ep.podcastId] = [];
+        groupOrder.add(ep.podcastId);
+      }
+      groups[ep.podcastId]!.add(ep);
+    }
+    return groupOrder
+        .map(
+          (id) => QueueGroup(
+            podcastId: id,
+            podcastName: podcastTitles[id] ?? 'Unknown podcast',
+            episodes: groups[id]!,
+          ),
+        )
+        .toList();
+  });
+});
 
 final sleepTimerStateProvider = StreamProvider<SleepTimerState>(
   (ref) => ref.watch(audioHandlerProvider).sleepTimer.stateStream,
