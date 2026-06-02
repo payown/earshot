@@ -418,6 +418,7 @@ class _PlaybackControls extends StatelessWidget {
           ),
         ),
         Semantics(
+          key: const ValueKey('player_play_pause'),
           button: true,
           label: isPlaying ? 'Pause' : 'Play',
           onTap: onPlayPause,
