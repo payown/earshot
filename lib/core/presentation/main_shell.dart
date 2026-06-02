@@ -55,7 +55,7 @@ class _MainShellState extends ConsumerState<MainShell> {
       minimumShakeCount: 3,
       shakeSlopTimeMS: 100,
       shakeCountResetTime: 1000,
-      shakeThresholdGravity: 4.0,
+      shakeThresholdGravity: 4.5,
     );
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       ref.read(queueExpirationServiceProvider).runExpiration();
