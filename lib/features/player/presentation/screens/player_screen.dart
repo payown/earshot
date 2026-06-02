@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/playback.dart';
 import '../../../../core/constants/spacing.dart';
@@ -30,6 +32,50 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       ref.read(audioHandlerProvider).setSpeed(_speedBeforeHold!);
     }
     super.dispose();
+  }
+
+  void _showNotesDialog(
+    BuildContext context, {
+    required String title,
+    required String? description,
+  }) {
+    showDialog<void>(
+      context: context,
+      barrierLabel: 'Dismiss show notes',
+      builder: (_) => AlertDialog(
+        title: Semantics(
+          header: true,
+          label: title,
+          child: ExcludeSemantics(child: Text(title)),
+        ),
+        content: SingleChildScrollView(
+          child: description != null
+              ? Html(
+                  data: description,
+                  onLinkTap: (url, _, __) async {
+                    if (url == null) return;
+                    final uri = Uri.tryParse(url);
+                    if (uri != null) await launchUrl(uri);
+                  },
+                )
+              : const Text('No show notes available.'),
+        ),
+        actions: [
+          Semantics(
+            button: true,
+            label: 'Close',
+            hint: 'Dismisses the show notes',
+            onTap: () => Navigator.of(context).pop(),
+            child: ExcludeSemantics(
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── GestureDetector paths (sighted users) ────────────────────────────────
@@ -106,6 +152,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final position = ref.watch(positionProvider).asData?.value ?? Duration.zero;
     final directTouchEnabled =
         ref.watch(directTouchEnabledProvider).value ?? false;
+    final description = ref
+        .watch(currentEpisodeDescriptionProvider)
+        .asData
+        ?.value;
 
     // Stop rotor fast-forward if the setting is turned off mid-session.
     ref.listen<AsyncValue<bool>>(directTouchEnabledProvider, (_, next) {
@@ -204,7 +254,33 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
-              const SizedBox(height: Spacing.md),
+              const SizedBox(height: Spacing.sm),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Semantics(
+                  button: true,
+                  label: description != null
+                      ? 'Show notes'
+                      : 'Show notes, none available',
+                  onTap: () => _showNotesDialog(
+                    context,
+                    title: mediaItem.title,
+                    description: description,
+                  ),
+                  child: ExcludeSemantics(
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.article_outlined, size: 18),
+                      label: const Text('Show notes'),
+                      onPressed: () => _showNotesDialog(
+                        context,
+                        title: mediaItem.title,
+                        description: description,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: Spacing.sm),
               _ProgressBar(
                 position: position,
                 duration: duration,

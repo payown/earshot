@@ -155,6 +155,16 @@ final directTouchEnabledProvider =
       ),
     );
 
+final currentEpisodeDescriptionProvider = StreamProvider<String?>((ref) {
+  final episodeId =
+      ref.watch(mediaItemProvider).asData?.value?.extras?['episodeId'] as int?;
+  if (episodeId == null) return Stream.value(null);
+  final db = ref.watch(appDatabaseProvider);
+  return (db.select(db.episodes)..where((e) => e.id.equals(episodeId)))
+      .watchSingleOrNull()
+      .map((row) => row?.description);
+});
+
 // Watches episodeIdStream and persists the current episode ID so it can be
 // restored after a force quit.
 final episodeIdPersistenceProvider = Provider<void>((ref) {
