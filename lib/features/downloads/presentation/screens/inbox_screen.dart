@@ -7,21 +7,50 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/episode_action_builder.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../data/db/enums.dart';
 import '../../../player/presentation/providers/player_providers.dart';
+import '../../../settings/domain/quick_action_definition.dart';
+import '../../../settings/presentation/providers/settings_providers.dart';
 import '../../../subscriptions/domain/episode.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
+import '../../../subscriptions/presentation/widgets/episode_list_tile.dart';
 import '../providers/downloads_providers.dart';
 
-class InboxScreen extends ConsumerWidget {
+// Inbox does not expose bookmark (requires active playback).
+const _inboxAllowedActions = {
+  EpisodeAction.playNow,
+  EpisodeAction.playNext,
+  EpisodeAction.addToEndOfQueue,
+  EpisodeAction.markPlayed,
+  EpisodeAction.openShowNotes,
+  EpisodeAction.download,
+  EpisodeAction.share,
+};
+
+class InboxScreen extends ConsumerStatefulWidget {
   const InboxScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<InboxScreen> createState() => _InboxScreenState();
+}
+
+class _InboxScreenState extends ConsumerState<InboxScreen> {
+  @override
+  Widget build(BuildContext context) {
     // All episodes across all podcasts with newEpisode status, newest first.
     final allEpisodes = ref.watch(_inboxEpisodesProvider);
+    final subs = ref.watch(subscriptionsProvider).asData?.value;
+    final podcastTitles = <int, String>{
+      if (subs != null)
+        for (final p in subs) p.id: p.title,
+    };
+    final actionOrder =
+        ref.watch(episodeActionsProvider).asData?.value ??
+        defaultEpisodeActions;
+    final autoDownload = ref.watch(autoDownloadInboxProvider).value ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -40,34 +69,95 @@ class InboxScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: allEpisodes.when(
-        data: (episodes) => episodes.isEmpty
-            ? _EmptyInbox()
-            : ListView.builder(
-                itemCount: episodes.length,
-                itemBuilder: (context, index) => _InboxEpisodeTile(
-                  episode: episodes[index],
-                  onPlay: () => _playEpisode(context, episodes[index], ref),
-                  onAddToQueue: () => unawaited(
-                    ref
-                        .read(queueRepositoryProvider)
-                        .addToQueue(episodes[index].id),
-                  ),
-                  onMarkPlayed: () => unawaited(
-                    ref
-                        .read(podcastRepositoryProvider)
-                        .updateEpisodeStatus(
-                          episodes[index].id,
-                          EpisodeStatus.played,
-                        ),
-                  ),
-                  onDelete: () => unawaited(
-                    _confirmDelete(context, ref, episodes[index]),
-                  ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await ref.read(podcastRepositoryProvider).refreshAllFeeds();
+          if (context.mounted) {
+            SemanticsService.sendAnnouncement(
+              View.of(context),
+              'Inbox refreshed',
+              TextDirection.ltr,
+            );
+          }
+        },
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: SwitchListTile(
+                title: const Text('Auto-download new episodes'),
+                subtitle: const Text(
+                  'Episodes are downloaded as they arrive in your inbox',
                 ),
+                value: autoDownload,
+                onChanged: ref.watch(autoDownloadInboxProvider).isLoading
+                    ? null
+                    : (val) async {
+                        try {
+                          await ref
+                              .read(autoDownloadInboxProvider.notifier)
+                              .set(val);
+                          if (val) {
+                            unawaited(
+                              ref
+                                  .read(downloadManagerProvider)
+                                  .downloadInboxEpisodes(),
+                            );
+                          }
+                          if (context.mounted) {
+                            SemanticsService.sendAnnouncement(
+                              View.of(context),
+                              val
+                                  ? 'Auto-download enabled'
+                                  : 'Auto-download disabled',
+                              TextDirection.ltr,
+                            );
+                          }
+                        } catch (_) {
+                          if (context.mounted) {
+                            SemanticsService.sendAnnouncement(
+                              View.of(context),
+                              'Could not update auto-download setting',
+                              TextDirection.ltr,
+                            );
+                          }
+                        }
+                      },
               ),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+            ),
+            allEpisodes.when(
+              data: (episodes) => episodes.isEmpty
+                  ? SliverToBoxAdapter(child: _EmptyInbox())
+                  : SliverList.builder(
+                      itemCount: episodes.length,
+                      itemBuilder: (context, index) {
+                        final episode = episodes[index];
+                        final actions = buildEpisodeActions(
+                          episode: episode,
+                          order: actionOrder,
+                          context: context,
+                          ref: ref,
+                          onPlay: () => _playEpisode(context, episode, ref),
+                          allowedActions: _inboxAllowedActions,
+                        );
+                        return _InboxEpisodeTile(
+                          episode: episode,
+                          podcastTitle: podcastTitles[episode.podcastId],
+                          quickActions: actions,
+                          onDelete: () => unawaited(
+                            _confirmDelete(context, ref, episode),
+                          ),
+                        );
+                      },
+                    ),
+              loading: () => const SliverToBoxAdapter(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (e, _) => SliverToBoxAdapter(
+                child: Center(child: Text('Error: $e')),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -108,6 +198,15 @@ class InboxScreen extends ConsumerWidget {
     unawaited(
       ref.read(queueRepositoryProvider).addToQueue(episode.id),
     );
+    // Trigger queue auto-download if enabled and episode is not already
+    // downloaded or in progress.
+    final autoDownloadQueue =
+        ref.read(autoDownloadQueueProvider).value ?? false;
+    if (autoDownloadQueue &&
+        (episode.downloadStatus == DownloadStatus.none ||
+            episode.downloadStatus == DownloadStatus.failed)) {
+      unawaited(ref.read(downloadManagerProvider).downloadEpisode(episode.id));
+    }
     unawaited(
       ref
           .read(podcastRepositoryProvider)
@@ -309,32 +408,57 @@ class _EmptyInbox extends StatelessWidget {
 class _InboxEpisodeTile extends StatelessWidget {
   const _InboxEpisodeTile({
     required this.episode,
-    required this.onPlay,
-    required this.onAddToQueue,
-    required this.onMarkPlayed,
+    required this.quickActions,
     required this.onDelete,
+    this.podcastTitle,
   });
 
   final Episode episode;
-  final VoidCallback onPlay;
-  final VoidCallback onAddToQueue;
-  final VoidCallback onMarkPlayed;
+  final String? podcastTitle;
+  final List<EpisodeQuickActionItem> quickActions;
   final VoidCallback onDelete;
+
+  VoidCallback? get _defaultTap =>
+      quickActions.isNotEmpty ? quickActions[0].onInvoke : null;
+
+  VoidCallback? _findAction(String label) =>
+      quickActions.where((a) => a.label == label).firstOrNull?.onInvoke;
 
   @override
   Widget build(BuildContext context) {
+    final durationLabel = _semanticDuration(episode);
+    final downloadLabel = _downloadStatusLabel(episode.downloadStatus);
+    final parts = [
+      episode.title,
+      if (podcastTitle != null) podcastTitle!,
+      'New episode',
+      if (durationLabel != null) durationLabel,
+      if (downloadLabel != null) downloadLabel,
+    ];
+    final label = parts.join(', ');
+
+    final semanticActions = <CustomSemanticsAction, VoidCallback>{
+      for (final a in quickActions)
+        CustomSemanticsAction(label: a.label): a.onInvoke,
+      const CustomSemanticsAction(label: 'Delete'): onDelete,
+    };
+
+    // Trailing icon buttons: queue action + mark played (sighted affordance).
+    final queueCallback =
+        _findAction('Add to end of queue') ??
+        _findAction('Play next') ??
+        _findAction('Remove from queue');
+    final markPlayedCallback =
+        _findAction('Mark as played') ?? _findAction('Mark as unplayed');
+
     return Semantics(
-      button: true,
-      onTap: onPlay,
-      label: '${episode.title}, New episode',
-      customSemanticsActions: {
-        const CustomSemanticsAction(label: 'Add to queue'): onAddToQueue,
-        const CustomSemanticsAction(label: 'Mark as played'): onMarkPlayed,
-        const CustomSemanticsAction(label: 'Delete'): onDelete,
-      },
+      button: _defaultTap != null,
+      onTap: _defaultTap,
+      label: label,
+      customSemanticsActions: semanticActions,
       child: ExcludeSemantics(
         child: ListTile(
-          onTap: onPlay,
+          onTap: _defaultTap,
           title: Text(
             episode.title,
             maxLines: 2,
@@ -345,16 +469,81 @@ class _InboxEpisodeTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Chip(
-                label: const Text('New'),
-                visualDensity: VisualDensity.compact,
-                backgroundColor: Theme.of(
-                  context,
-                ).colorScheme.primaryContainer,
-                labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onPrimaryContainer,
-                ),
-                padding: EdgeInsets.zero,
+              Wrap(
+                spacing: 4,
+                runSpacing: 0,
+                children: [
+                  Chip(
+                    label: const Text('New'),
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.primaryContainer,
+                    labelStyle:
+                        Theme.of(
+                          context,
+                        ).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onPrimaryContainer,
+                        ),
+                    padding: EdgeInsets.zero,
+                  ),
+                  if (episode.downloadStatus == DownloadStatus.downloaded)
+                    Chip(
+                      avatar: ExcludeSemantics(
+                        child: Icon(
+                          Icons.download_done,
+                          size: 14,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSecondaryContainer,
+                        ),
+                      ),
+                      label: const Text('Downloaded'),
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.secondaryContainer,
+                      labelStyle:
+                          Theme.of(
+                            context,
+                          ).textTheme.labelSmall?.copyWith(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSecondaryContainer,
+                          ),
+                      padding: EdgeInsets.zero,
+                    )
+                  else if (episode.downloadStatus ==
+                          DownloadStatus.downloading ||
+                      episode.downloadStatus == DownloadStatus.pending)
+                    Chip(
+                      avatar: ExcludeSemantics(
+                        child: Icon(
+                          Icons.downloading,
+                          size: 14,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSecondaryContainer,
+                        ),
+                      ),
+                      label: const Text('Downloading'),
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.secondaryContainer,
+                      labelStyle:
+                          Theme.of(
+                            context,
+                          ).textTheme.labelSmall?.copyWith(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSecondaryContainer,
+                          ),
+                      padding: EdgeInsets.zero,
+                    ),
+                ],
               ),
               if (episode.pubDate != null)
                 Text(
@@ -366,16 +555,18 @@ class _InboxEpisodeTile extends StatelessWidget {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: const Icon(Icons.queue_music),
-                onPressed: onAddToQueue,
-                tooltip: 'Add to queue',
-              ),
-              IconButton(
-                icon: const Icon(Icons.check),
-                onPressed: onMarkPlayed,
-                tooltip: 'Mark as played',
-              ),
+              if (queueCallback != null)
+                IconButton(
+                  icon: const Icon(Icons.queue_music),
+                  onPressed: queueCallback,
+                  tooltip: 'Add to end of queue',
+                ),
+              if (markPlayedCallback != null)
+                IconButton(
+                  icon: const Icon(Icons.check),
+                  onPressed: markPlayedCallback,
+                  tooltip: 'Mark as played',
+                ),
             ],
           ),
         ),
@@ -383,11 +574,40 @@ class _InboxEpisodeTile extends StatelessWidget {
     );
   }
 
+  String? _downloadStatusLabel(DownloadStatus status) => switch (status) {
+    DownloadStatus.downloaded => 'downloaded',
+    DownloadStatus.downloading || DownloadStatus.pending => 'downloading',
+    DownloadStatus.failed => 'download failed',
+    DownloadStatus.none => null,
+  };
+
   String _formatDate(DateTime date) {
     final diff = DateTime.now().difference(date);
     if (diff.inDays == 0) return 'Today';
     if (diff.inDays == 1) return 'Yesterday';
     if (diff.inDays < 7) return '${diff.inDays} days ago';
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String? _semanticDuration(Episode ep) {
+    if (ep.durationSeconds == null) return null;
+    final total = ep.durationSeconds!;
+    final position = ep.positionSeconds;
+    if (position > 0 && position < (total * 0.95).round()) {
+      return '${_verboseDuration(total - position)} remaining';
+    }
+    return _verboseDuration(total);
+  }
+
+  String _verboseDuration(int totalSeconds) {
+    final h = totalSeconds ~/ 3600;
+    final m = (totalSeconds % 3600) ~/ 60;
+    final s = totalSeconds % 60;
+    final parts = <String>[];
+    if (h > 0) parts.add('$h ${h == 1 ? 'hour' : 'hours'}');
+    if (m > 0) parts.add('$m ${m == 1 ? 'minute' : 'minutes'}');
+    if (s > 0 || parts.isEmpty)
+      parts.add('$s ${s == 1 ? 'second' : 'seconds'}');
+    return parts.join(', ');
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../data/db/enums.dart';
@@ -20,7 +21,8 @@ class QuickActionConfiguratorScreen extends ConsumerStatefulWidget {
 
 class _QuickActionConfiguratorScreenState
     extends ConsumerState<QuickActionConfiguratorScreen> {
-  List<String>? _orderedKeys;
+  List<String>? _activeKeys;
+  bool _dirty = false;
 
   bool get _isEpisode => widget.contentType == QuickActionContentType.episode;
 
@@ -31,6 +33,9 @@ class _QuickActionConfiguratorScreenState
       ? EpisodeAction.values.map((a) => a.key).toList()
       : PodcastAction.values.map((a) => a.key).toList();
 
+  List<String> get _inactiveKeys =>
+      _allKeys.where((k) => !(_activeKeys ?? []).contains(k)).toList();
+
   String _labelFor(String key) {
     if (_isEpisode) {
       return EpisodeAction.values.firstWhere((a) => a.key == key).label;
@@ -38,38 +43,54 @@ class _QuickActionConfiguratorScreenState
     return PodcastAction.values.firstWhere((a) => a.key == key).label;
   }
 
-  void _reorder(int oldIndex, int newIndex) {
-    final newKeys = List<String>.from(_orderedKeys ?? _allKeys);
-    final item = newKeys.removeAt(oldIndex);
-    newKeys.insert(newIndex, item);
-    setState(() => _orderedKeys = newKeys);
+  // Called by SliverReorderableList via onReorderItem — index is already adjusted.
+  void _onDragReorder(int oldIndex, int newIndex) {
+    _moveItem(oldIndex, newIndex);
   }
 
-  @override
-  void initState() {
-    super.initState();
-    // Load stored order once on first build via a post-frame callback so we
-    // can call setState safely after the initial build.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_orderedKeys != null || !mounted) return;
-      final stored = _isEpisode
-          ? ref.read(episodeActionsProvider)
-          : ref.read(podcastActionsProvider);
-      stored.whenData((actions) {
-        final keys = actions
-            .map((a) => a is EpisodeAction ? a.key : (a as PodcastAction).key)
-            .toList();
-        for (final key in _allKeys) {
-          if (!keys.contains(key)) keys.add(key);
-        }
-        setState(() => _orderedKeys = keys);
-      });
+  // Called by up/down buttons — newIndex is the final target index.
+  void _moveItem(int oldIndex, int newIndex) {
+    final newKeys = List<String>.from(_activeKeys ?? _allKeys);
+    final item = newKeys.removeAt(oldIndex);
+    newKeys.insert(newIndex, item);
+    setState(() {
+      _dirty = true;
+      _activeKeys = newKeys;
+    });
+  }
+
+  void _removeAction(String key) {
+    setState(() {
+      _dirty = true;
+      _activeKeys = List<String>.from(_activeKeys ?? [])..remove(key);
+    });
+  }
+
+  void _addAction(String key) {
+    setState(() {
+      _dirty = true;
+      _activeKeys = [...(_activeKeys ?? []), key];
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final keys = _orderedKeys ?? _allKeys;
+    // Sync from the provider whenever the user hasn't made local edits yet.
+    // Using _dirty instead of _initialized so a re-open after save always picks
+    // up the freshly written value rather than Riverpod's stale cache.
+    final actionsAsync = _isEpisode
+        ? ref.watch(episodeActionsProvider)
+        : ref.watch(podcastActionsProvider);
+    if (!_dirty) {
+      actionsAsync.whenData((actions) {
+        _activeKeys = actions
+            .map((a) => a is EpisodeAction ? a.key : (a as PodcastAction).key)
+            .toList();
+      });
+    }
+
+    final active = _activeKeys ?? _allKeys;
+    final inactive = _inactiveKeys;
 
     return Scaffold(
       appBar: AppBar(
@@ -81,75 +102,118 @@ class _QuickActionConfiguratorScreenState
           ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Text(
-              'The first action is the default double-tap action. '
-              'Use the up/down buttons to reorder.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text(
+                'The first active action is the default double-tap action. '
+                'Use the up/down buttons or drag to reorder. '
+                'Tap Remove to hide an action; tap Add to restore it.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),
-          Expanded(
-            child: ReorderableListView.builder(
-              itemCount: keys.length,
-              onReorderItem: _reorder,
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Semantics(
+                header: true,
+                label: 'Active actions',
+                child: ExcludeSemantics(
+                  child: Text(
+                    'Active',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SliverReorderableList(
+            itemCount: active.length,
+            onReorderItem: _onDragReorder,
+            itemBuilder: (context, index) {
+              final key = active[index];
+              final label = _labelFor(key);
+              return _ActiveActionRow(
+                key: ValueKey(key),
+                label: label,
+                index: index,
+                total: active.length,
+                isFirst: index == 0,
+                onMoveUp: index > 0 ? () => _moveItem(index, index - 1) : null,
+                onMoveDown: index < active.length - 1
+                    ? () => _moveItem(index, index + 1)
+                    : null,
+                onRemove: () => _removeAction(key),
+              );
+            },
+          ),
+          if (inactive.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                child: Semantics(
+                  header: true,
+                  label: 'Available actions',
+                  child: ExcludeSemantics(
+                    child: Text(
+                      'Available',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            SliverList.builder(
+              itemCount: inactive.length,
               itemBuilder: (context, index) {
-                final key = keys[index];
+                final key = inactive[index];
                 final label = _labelFor(key);
-                return _ActionRow(
-                  key: ValueKey(key),
+                return _InactiveActionRow(
+                  key: ValueKey('inactive_$key'),
                   label: label,
-                  index: index,
-                  total: keys.length,
-                  isFirst: index == 0,
-                  onMoveUp: index > 0 ? () => _reorder(index, index - 1) : null,
-                  onMoveDown: index < keys.length - 1
-                      ? () => _reorder(index, index + 1)
-                      : null,
+                  onAdd: () => _addAction(key),
                 );
               },
             ),
-          ),
+          ],
+          const SliverToBoxAdapter(child: SizedBox(height: 32)),
         ],
       ),
     );
   }
 
   Future<void> _save() async {
-    final keys = _orderedKeys ?? _allKeys;
+    final keys = _activeKeys ?? _allKeys;
     final repo = ref.read(quickActionRepositoryProvider);
     if (_isEpisode) {
       final actions = keys
           .map((k) => EpisodeAction.values.firstWhere((a) => a.key == k))
           .toList();
       await repo.saveEpisodeActions(actions);
-      if (!mounted) return;
-      await ref.refresh(episodeActionsProvider.future).then<void>((_) {});
     } else {
       final actions = keys
           .map((k) => PodcastAction.values.firstWhere((a) => a.key == k))
           .toList();
       await repo.savePodcastActions(actions);
-      if (!mounted) return;
-      await ref.refresh(podcastActionsProvider.future).then<void>((_) {});
     }
     if (mounted) Navigator.of(context).pop();
   }
 }
 
-class _ActionRow extends StatelessWidget {
-  const _ActionRow({
+class _ActiveActionRow extends StatelessWidget {
+  const _ActiveActionRow({
     required this.label,
     required this.index,
     required this.total,
     required this.isFirst,
     required this.onMoveUp,
     required this.onMoveDown,
+    required this.onRemove,
     super.key,
   });
 
@@ -159,14 +223,22 @@ class _ActionRow extends StatelessWidget {
   final bool isFirst;
   final VoidCallback? onMoveUp;
   final VoidCallback? onMoveDown;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
     final position = 'Position ${index + 1} of $total';
-    final defaultLabel = isFirst ? ' (default action)' : '';
+    final defaultSuffix = isFirst ? ', default action' : '';
 
     return Semantics(
-      label: '$label$defaultLabel, $position',
+      label: '$label$defaultSuffix, $position',
+      customSemanticsActions: {
+        if (onMoveUp != null)
+          const CustomSemanticsAction(label: 'Move up'): onMoveUp!,
+        if (onMoveDown != null)
+          const CustomSemanticsAction(label: 'Move down'): onMoveDown!,
+        const CustomSemanticsAction(label: 'Remove'): onRemove,
+      },
       child: ListTile(
         title: ExcludeSemantics(
           child: Row(
@@ -198,26 +270,70 @@ class _ActionRow extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Semantics(
-                button: true,
-                label: 'Move $label up',
-                child: IconButton(
-                  icon: const Icon(Icons.arrow_upward),
-                  onPressed: onMoveUp,
-                  tooltip: 'Move up',
-                ),
+              IconButton(
+                icon: const Icon(Icons.arrow_upward),
+                onPressed: onMoveUp,
+                tooltip: 'Move up',
               ),
-              Semantics(
-                button: true,
-                label: 'Move $label down',
-                child: IconButton(
-                  icon: const Icon(Icons.arrow_downward),
-                  onPressed: onMoveDown,
-                  tooltip: 'Move down',
-                ),
+              IconButton(
+                icon: const Icon(Icons.arrow_downward),
+                onPressed: onMoveDown,
+                tooltip: 'Move down',
               ),
-              const Icon(Icons.drag_handle),
+              IconButton(
+                icon: Icon(
+                  Icons.remove_circle_outline,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                onPressed: onRemove,
+                tooltip: 'Remove',
+              ),
+              ReorderableDragStartListener(
+                index: index,
+                child: const Icon(Icons.drag_handle),
+              ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InactiveActionRow extends StatelessWidget {
+  const _InactiveActionRow({
+    required this.label,
+    required this.onAdd,
+    super.key,
+  });
+
+  final String label;
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '$label, not active',
+      customSemanticsActions: {
+        const CustomSemanticsAction(label: 'Add'): onAdd,
+      },
+      child: ListTile(
+        title: ExcludeSemantics(
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        trailing: ExcludeSemantics(
+          child: IconButton(
+            icon: Icon(
+              Icons.add_circle_outline,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            onPressed: onAdd,
+            tooltip: 'Add',
           ),
         ),
       ),

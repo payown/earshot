@@ -41,6 +41,19 @@ abstract interface class AppSettingsRepository {
   Future<bool> isWifiOnlyDownloads();
 
   Future<void> setWifiOnlyDownloads({required bool value});
+
+  Future<bool> isAutoDownloadInbox();
+
+  Future<void> setAutoDownloadInbox({required bool value});
+
+  Future<bool> isAutoDownloadQueue();
+
+  Future<void> setAutoDownloadQueue({required bool value});
+
+  // null = keep forever
+  Future<int?> getDownloadRetentionDays();
+
+  Future<void> setDownloadRetentionDays(int? days);
 }
 
 class AppSettingsRepositoryImpl implements AppSettingsRepository {
@@ -59,6 +72,9 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyDirectTouch = 'direct_touch_enabled';
   static const _keyInboxOptInOnly = 'inbox_opt_in_only';
   static const _keyWifiOnlyDownloads = 'wifi_only_downloads';
+  static const _keyAutoDownloadInbox = 'auto_download_inbox';
+  static const _keyAutoDownloadQueue = 'auto_download_queue';
+  static const _keyDownloadRetentionDays = 'download_retention_days';
   static const _keyLastPlayingEpisodeId = 'last_playing_episode_id';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
@@ -161,6 +177,36 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setWifiOnlyDownloads({required bool value}) =>
       _set(_keyWifiOnlyDownloads, value.toString());
+
+  @override
+  Future<bool> isAutoDownloadInbox() =>
+      _getBool(_keyAutoDownloadInbox, defaultValue: false);
+
+  @override
+  Future<void> setAutoDownloadInbox({required bool value}) =>
+      _set(_keyAutoDownloadInbox, value.toString());
+
+  @override
+  Future<bool> isAutoDownloadQueue() =>
+      _getBool(_keyAutoDownloadQueue, defaultValue: false);
+
+  @override
+  Future<void> setAutoDownloadQueue({required bool value}) =>
+      _set(_keyAutoDownloadQueue, value.toString());
+
+  @override
+  Future<int?> getDownloadRetentionDays() async {
+    final row = await (_db.select(
+      _db.appSettings,
+    )..where((s) => s.key.equals(_keyDownloadRetentionDays))).getSingleOrNull();
+    if (row == null) return null;
+    if (row.value == 'null') return null;
+    return int.tryParse(row.value);
+  }
+
+  @override
+  Future<void> setDownloadRetentionDays(int? days) =>
+      _set(_keyDownloadRetentionDays, days?.toString() ?? 'null');
 
   Future<int?> getLastPlayingEpisodeId() async {
     final row = await (_db.select(

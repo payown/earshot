@@ -138,6 +138,94 @@ class DownloadManager {
     _log.info('Deleted download for episode $episodeId');
   }
 
+  Future<void> downloadInboxEpisodes() async {
+    final episodes =
+        await (_db.select(_db.episodes)..where(
+              (e) =>
+                  e.status.equals(EpisodeStatus.newEpisode.name) &
+                  e.inboxDismissed.equals(false) &
+                  e.downloadStatus.isNotIn([
+                    DownloadStatus.downloaded.name,
+                    DownloadStatus.downloading.name,
+                    DownloadStatus.pending.name,
+                  ]),
+            ))
+            .get();
+
+    for (final ep in episodes) {
+      if (!await _isWifiAvailable()) {
+        _log.info('Inbox batch download stopped — not on Wi-Fi');
+        return;
+      }
+      final cancelToken = CancelToken();
+      _cancelTokens[ep.id] = cancelToken;
+      await _setStatus(ep.id, DownloadStatus.pending);
+      unawaited(_runDownload(ep.id, ep.audioUrl, cancelToken, null));
+    }
+  }
+
+  Future<void> downloadQueueEpisodes() async {
+    final query = _db.select(_db.queueItems).join([
+      innerJoin(
+        _db.episodes,
+        _db.episodes.id.equalsExp(_db.queueItems.episodeId),
+      ),
+    ])..orderBy([OrderingTerm.asc(_db.queueItems.position)]);
+
+    final rows = await query.get();
+    final episodes = rows
+        .map((r) => r.readTable(_db.episodes))
+        .where(
+          (ep) =>
+              ep.downloadStatus != DownloadStatus.downloaded &&
+              ep.downloadStatus != DownloadStatus.downloading &&
+              ep.downloadStatus != DownloadStatus.pending,
+        )
+        .toList();
+
+    for (final ep in episodes) {
+      if (!await _isWifiAvailable()) {
+        _log.info('Queue batch download stopped — not on Wi-Fi');
+        return;
+      }
+      final cancelToken = CancelToken();
+      _cancelTokens[ep.id] = cancelToken;
+      await _setStatus(ep.id, DownloadStatus.pending);
+      unawaited(_runDownload(ep.id, ep.audioUrl, cancelToken, null));
+    }
+  }
+
+  // Deletes downloaded audio files and resets status for played episodes
+  // whose playedAt timestamp is older than [days] days.
+  Future<void> applyDownloadRetention(int days) async {
+    final cutoff = DateTime.now().toUtc().subtract(Duration(days: days));
+    final expired =
+        await (_db.select(_db.episodes)..where(
+              (e) =>
+                  e.downloadStatus.equals(DownloadStatus.downloaded.name) &
+                  e.playedAt.isSmallerThanValue(cutoff),
+            ))
+            .get();
+
+    for (final ep in expired) {
+      if (ep.downloadPath case final path?) {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      }
+      await (_db.update(_db.episodes)..where((e) => e.id.equals(ep.id))).write(
+        const EpisodesCompanion(
+          downloadStatus: Value(DownloadStatus.none),
+          downloadPath: Value(null),
+        ),
+      );
+      _log.fine('Retention purge: deleted download for episode ${ep.id}');
+    }
+
+    if (expired.isNotEmpty) {
+      _log.info('Retention purge complete — ${expired.length} files removed');
+    }
+  }
+
   Future<void> downloadRecentEpisodes(int podcastId, int count) async {
     final episodes =
         await (_db.select(_db.episodes)
