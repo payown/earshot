@@ -13,8 +13,8 @@ import '../../../../features/downloads/presentation/providers/downloads_provider
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
-import '../providers/player_providers.dart';
 import '../../domain/queue_group.dart';
+import '../providers/player_providers.dart';
 
 String? _semanticDuration(Episode ep) {
   if (ep.durationSeconds == null) return null;
@@ -123,12 +123,11 @@ class QueueScreen extends ConsumerWidget {
               : 'Group by podcast: off',
           onPressed: () async {
             final view = View.of(context);
-            await ref
-                .read(groupQueueEpisodesProvider.notifier)
-                .set(!groupingEnabled);
+            final newValue = !groupingEnabled;
+            await ref.read(groupQueueEpisodesProvider.notifier).set(newValue);
             SemanticsService.sendAnnouncement(
               view,
-              groupingEnabled ? 'Queue ungrouped' : 'Queue grouped by podcast',
+              newValue ? 'Queue grouped by podcast' : 'Queue ungrouped',
               TextDirection.ltr,
             );
           },
@@ -344,41 +343,54 @@ class QueueScreen extends ConsumerWidget {
     return Semantics(
       header: true,
       label: group.podcastName,
-      // onTap gives VoiceOver an "Activate" entry in the actions rotor.
-      // Double-tapping the heading (or choosing Activate) starts the group.
+      // hint surfaces even when iOS suppresses the default "actions available"
+      // hint on header nodes (iOS 17+ behaviour).
+      hint: 'Use the actions rotor to play, shuffle, or sort',
+      // onTap registers "Activate" in the VoiceOver actions rotor so users
+      // can double-tap the heading or choose Activate to start playback.
       onTap: playFirst,
       customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
         // Play group plays the current first episode without reordering so that
-        // a prior "Play oldest first" / "Play newest first" order is respected.
+        // a prior "Sort oldest first" / "Sort newest first" order is respected.
         const CustomSemanticsAction(label: 'Play group'): playFirst,
         const CustomSemanticsAction(label: 'Shuffle group'): () async {
           final view = View.of(context);
           await _shuffleGroup(ref, group.episodes);
-          SemanticsService.sendAnnouncement(
-            view,
-            '${group.podcastName} shuffled',
-            TextDirection.ltr,
-          );
+          // Post-frame so the announcement fires after the list rebuilds with
+          // the new order, avoiding stale row labels during VoiceOver swipe.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            SemanticsService.sendAnnouncement(
+              view,
+              '${group.podcastName} shuffled',
+              TextDirection.ltr,
+            );
+          });
         },
         const CustomSemanticsAction(label: 'Sort newest first'): () async {
           final view = View.of(context);
           await _playNewestFirst(ref, group.episodes);
-          SemanticsService.sendAnnouncement(
-            view,
-            '${group.podcastName} reordered newest first',
-            TextDirection.ltr,
-          );
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            SemanticsService.sendAnnouncement(
+              view,
+              '${group.podcastName} sorted newest first',
+              TextDirection.ltr,
+            );
+          });
         },
         const CustomSemanticsAction(label: 'Sort oldest first'): () async {
           final view = View.of(context);
           await _playOldestFirst(ref, group.episodes);
-          SemanticsService.sendAnnouncement(
-            view,
-            '${group.podcastName} reordered oldest first',
-            TextDirection.ltr,
-          );
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            SemanticsService.sendAnnouncement(
+              view,
+              '${group.podcastName} sorted oldest first',
+              TextDirection.ltr,
+            );
+          });
         },
       },
+      // ListTile onTap is for sighted users; Semantics.onTap above handles
+      // VoiceOver. Both call the same playFirst function.
       child: ExcludeSemantics(
         child: ListTile(
           onTap: playFirst,
@@ -412,7 +424,10 @@ class QueueScreen extends ConsumerWidget {
     return Semantics(
       key: ValueKey(episode.id),
       container: true,
+      button: true,
       label: semanticLabel,
+      hint: 'Double tap to play. Use the actions rotor for more options.',
+      onTap: () => _playEpisode(ref, episode),
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Play'): () =>
             _playEpisode(ref, episode),
@@ -454,8 +469,16 @@ class QueueScreen extends ConsumerWidget {
               TextDirection.ltr,
             );
           },
-        const CustomSemanticsAction(label: 'Remove from queue'): () =>
-            ref.read(queueRepositoryProvider).cancelFromQueue(episode.id),
+        const CustomSemanticsAction(label: 'Remove from queue'): () async {
+          final view = View.of(context);
+          final title = episode.title;
+          await ref.read(queueRepositoryProvider).cancelFromQueue(episode.id);
+          SemanticsService.sendAnnouncement(
+            view,
+            '$title removed from queue',
+            TextDirection.ltr,
+          );
+        },
         if (downloadAction != null)
           CustomSemanticsAction(label: downloadAction.label):
               downloadAction.onInvoke,
@@ -634,7 +657,6 @@ class QueueScreen extends ConsumerWidget {
     WidgetRef ref,
     BuildContext context,
   ) {
-    final view = View.of(context);
     switch (episode.downloadStatus) {
       case DownloadStatus.none:
       case DownloadStatus.failed:
@@ -647,15 +669,19 @@ class QueueScreen extends ConsumerWidget {
                 .read(downloadManagerProvider)
                 .downloadEpisode(
                   episode.id,
-                  onComplete: (msg) => SemanticsService.sendAnnouncement(
-                    view,
-                    msg,
-                    TextDirection.ltr,
-                  ),
+                  onComplete: (msg) {
+                    if (context.mounted) {
+                      SemanticsService.sendAnnouncement(
+                        View.of(context),
+                        msg,
+                        TextDirection.ltr,
+                      );
+                    }
+                  },
                 );
             if (!context.mounted) return;
             SemanticsService.sendAnnouncement(
-              view,
+              View.of(context),
               switch (result) {
                 DownloadStartResult.started => 'Download started',
                 DownloadStartResult.skippedNoWifi => 'Download requires Wi-Fi',
