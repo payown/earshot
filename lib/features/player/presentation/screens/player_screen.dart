@@ -445,6 +445,7 @@ class _BookmarkRow extends StatelessWidget {
       button: true,
       label: semanticLabel,
       hint: 'Jump to this position',
+      onTap: onSeek,
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Delete bookmark'): onDelete,
         const CustomSemanticsAction(label: 'Share bookmark'): onShare,
