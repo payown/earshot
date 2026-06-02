@@ -326,34 +326,33 @@ class _ProgressBar extends StatelessWidget {
       decreasedValue: _format(decreased),
       onIncrease: () => onSeek(increased),
       onDecrease: () => onSeek(decreased),
-      child: ExcludeSemantics(
-        child: Column(
-          children: [
-            SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 4,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-              ),
-              child: Slider(
-                value: progress.clamp(0.0, 1.0),
-                onChanged: (value) {
-                  final ms = (value * duration.inMilliseconds).round();
-                  onSeek(Duration(milliseconds: ms));
-                },
-              ),
+      excludeSemantics: true,
+      child: Column(
+        children: [
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 4,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(posLabel, style: Theme.of(context).textTheme.bodySmall),
-                  Text(durLabel, style: Theme.of(context).textTheme.bodySmall),
-                ],
-              ),
+            child: Slider(
+              value: progress.clamp(0.0, 1.0),
+              onChanged: (value) {
+                final ms = (value * duration.inMilliseconds).round();
+                onSeek(Duration(milliseconds: ms));
+              },
             ),
-          ],
-        ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(posLabel, style: Theme.of(context).textTheme.bodySmall),
+                Text(durLabel, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -484,31 +483,30 @@ class _SpeedSelector extends StatelessWidget {
       increasedValue: next != null ? _label(next) : null,
       onDecrease: prev != null ? () => onSpeedChanged(prev) : null,
       onIncrease: next != null ? () => onSpeedChanged(next) : null,
-      child: ExcludeSemantics(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.chevron_left),
-              iconSize: 28,
-              onPressed: prev != null ? () => onSpeedChanged(prev) : null,
+      excludeSemantics: true,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left),
+            iconSize: 28,
+            onPressed: prev != null ? () => onSpeedChanged(prev) : null,
+          ),
+          SizedBox(
+            width: 56,
+            child: Text(
+              _label(speed),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-            SizedBox(
-              width: 56,
-              child: Text(
-                _label(speed),
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.chevron_right),
-              iconSize: 28,
-              onPressed: next != null ? () => onSpeedChanged(next) : null,
-            ),
-          ],
-        ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            iconSize: 28,
+            onPressed: next != null ? () => onSpeedChanged(next) : null,
+          ),
+        ],
       ),
     );
   }
@@ -594,44 +592,42 @@ class _SleepTimerControls extends ConsumerWidget {
           increasedValue: next != null ? _label(next) : null,
           onDecrease: idx > 0 ? () => applyPreset(prev) : null,
           onIncrease: next != null ? () => applyPreset(next) : null,
-          child: ExcludeSemantics(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
-                  iconSize: 28,
-                  onPressed: idx > 0 ? () => applyPreset(prev) : null,
-                ),
-                SizedBox(
-                  width: 112,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
+          excludeSemantics: true,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left),
+                iconSize: 28,
+                onPressed: idx > 0 ? () => applyPreset(prev) : null,
+              ),
+              SizedBox(
+                width: 112,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _label(currentPreset),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (timerState.isActive && !timerState.endOfEpisode)
                       Text(
-                        _label(currentPreset),
+                        _formatRemaining(timerState.remaining),
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      if (timerState.isActive && !timerState.endOfEpisode)
-                        Text(
-                          _formatRemaining(timerState.remaining),
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.chevron_right),
-                  iconSize: 28,
-                  onPressed: next != null ? () => applyPreset(next) : null,
-                ),
-              ],
-            ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_right),
+                iconSize: 28,
+                onPressed: next != null ? () => applyPreset(next) : null,
+              ),
+            ],
           ),
         ),
         if (canExtend)
