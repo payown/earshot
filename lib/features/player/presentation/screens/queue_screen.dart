@@ -76,13 +76,6 @@ void _playEpisode(WidgetRef ref, Episode episode) {
   );
 }
 
-Future<void> _playGroupOrdered(WidgetRef ref, List<Episode> episodes) async {
-  final repo = ref.read(queueRepositoryProvider);
-  for (final ep in episodes.reversed) {
-    await repo.addAfterCurrent(ep.id);
-  }
-}
-
 Future<void> _shuffleGroup(WidgetRef ref, List<Episode> episodes) async {
   final repo = ref.read(queueRepositoryProvider);
   final shuffled = [...episodes]..shuffle();
@@ -338,19 +331,26 @@ class QueueScreen extends ConsumerWidget {
     WidgetRef ref,
     QueueGroup group,
   ) {
+    void playFirst() {
+      if (group.episodes.isEmpty) return;
+      _playEpisode(ref, group.episodes.first);
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Playing ${group.podcastName}',
+        TextDirection.ltr,
+      );
+    }
+
     return Semantics(
       header: true,
       label: group.podcastName,
+      // onTap gives VoiceOver an "Activate" entry in the actions rotor.
+      // Double-tapping the heading (or choosing Activate) starts the group.
+      onTap: playFirst,
       customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
-        const CustomSemanticsAction(label: 'Play group'): () async {
-          final view = View.of(context);
-          await _playGroupOrdered(ref, group.episodes);
-          SemanticsService.sendAnnouncement(
-            view,
-            '${group.podcastName} queued to play next',
-            TextDirection.ltr,
-          );
-        },
+        // Play group plays the current first episode without reordering so that
+        // a prior "Play oldest first" / "Play newest first" order is respected.
+        const CustomSemanticsAction(label: 'Play group'): playFirst,
         const CustomSemanticsAction(label: 'Shuffle group'): () async {
           final view = View.of(context);
           await _shuffleGroup(ref, group.episodes);
@@ -365,7 +365,7 @@ class QueueScreen extends ConsumerWidget {
           await _playNewestFirst(ref, group.episodes);
           SemanticsService.sendAnnouncement(
             view,
-            '${group.podcastName} queued newest first',
+            '${group.podcastName} reordered newest first',
             TextDirection.ltr,
           );
         },
@@ -374,13 +374,14 @@ class QueueScreen extends ConsumerWidget {
           await _playOldestFirst(ref, group.episodes);
           SemanticsService.sendAnnouncement(
             view,
-            '${group.podcastName} queued oldest first',
+            '${group.podcastName} reordered oldest first',
             TextDirection.ltr,
           );
         },
       },
       child: ExcludeSemantics(
         child: ListTile(
+          onTap: playFirst,
           leading: const Icon(Icons.podcasts),
           title: Text(
             group.podcastName,
