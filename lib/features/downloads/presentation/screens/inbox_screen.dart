@@ -56,6 +56,11 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
       appBar: AppBar(
         title: const Text('Inbox'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh inbox',
+            onPressed: () => _refreshInbox(context, ref),
+          ),
           if (allEpisodes.asData?.value.isNotEmpty ?? false)
             IconButton(
               icon: const Icon(Icons.clear_all),
@@ -70,16 +75,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () async {
-          await ref.read(podcastRepositoryProvider).refreshAllFeeds();
-          if (context.mounted) {
-            SemanticsService.sendAnnouncement(
-              View.of(context),
-              'Inbox refreshed',
-              TextDirection.ltr,
-            );
-          }
-        },
+        onRefresh: () => _refreshInbox(context, ref),
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
@@ -160,6 +156,27 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _refreshInbox(BuildContext context, WidgetRef ref) async {
+    try {
+      await ref.read(podcastRepositoryProvider).refreshAllFeeds();
+      if (context.mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Inbox refreshed',
+          TextDirection.ltr,
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Could not refresh inbox. Try again.',
+          TextDirection.ltr,
+        );
+      }
+    }
   }
 
   void _playEpisode(BuildContext context, Episode episode, WidgetRef ref) {
