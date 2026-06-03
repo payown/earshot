@@ -27,6 +27,7 @@ Podcast _fakePodcast({int id = 1, String title = 'Test Podcast'}) => Podcast(
   autoQueue: false,
   notificationEnabled: false,
   inboxExcluded: false,
+  inboxIncluded: false,
   createdAt: _now,
 );
 
