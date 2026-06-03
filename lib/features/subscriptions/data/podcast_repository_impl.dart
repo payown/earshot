@@ -128,21 +128,42 @@ class PodcastRepositoryImpl implements PodcastRepository {
 
   Future<void> _applyInboxDismissals(List<PodcastRow> podcasts) async {
     final inboxOptInOnly = await _settings.isInboxOptInOnly();
+    final toExclude = <int>[];
+    final toInclude = <int>[];
     for (final podcast in podcasts) {
-      final dismissed = inboxOptInOnly
-          ? !podcast.inboxIncluded
-          : podcast.inboxExcluded;
-      if (dismissed) {
-        await (_db.update(_db.episodes)..where(
-              (e) =>
-                  e.podcastId.equals(podcast.id) &
-                  e.inboxDismissed.equals(false) &
-                  e.status.equals(EpisodeStatus.newEpisode.name),
-            ))
-            .write(const EpisodesCompanion(inboxDismissed: Value(true)));
+      if (inboxOptInOnly ? !podcast.inboxIncluded : podcast.inboxExcluded) {
+        toExclude.add(podcast.id);
+      } else if (inboxOptInOnly) {
+        // In opt-in mode, restore episodes for podcasts that are now included
+        // (e.g., user toggled them in during a prior session).
+        toInclude.add(podcast.id);
       }
     }
+    if (toExclude.isNotEmpty) {
+      await _setEpisodesDismissed(toExclude, dismissed: true);
+    }
+    if (toInclude.isNotEmpty) {
+      await _setEpisodesDismissed(toInclude, dismissed: false);
+    }
   }
+
+  Future<void> _setEpisodesDismissed(
+    List<int> podcastIds, {
+    required bool dismissed,
+  }) async {
+    await (_db.update(_db.episodes)..where(
+          (e) =>
+              e.podcastId.isIn(podcastIds) &
+              e.inboxDismissed.equals(!dismissed) &
+              e.status.equals(EpisodeStatus.newEpisode.name),
+        ))
+        .write(EpisodesCompanion(inboxDismissed: Value(dismissed)));
+  }
+
+  Future<void> _setEpisodeDismissed(
+    int podcastId, {
+    required bool dismissed,
+  }) => _setEpisodesDismissed([podcastId], dismissed: dismissed);
 
   @override
   Future<void> refreshFeed(int podcastId) async {
@@ -180,19 +201,10 @@ class PodcastRepositoryImpl implements PodcastRepository {
       inboxDismissed: dismissed,
     );
 
-    // Retroactively dismiss existing inbox episodes when this podcast is
-    // excluded (opt-in mode and not included, or explicitly excluded). The
-    // upsert above only sets inboxDismissed on new rows; existing rows keep
-    // their old value until this update runs.
-    if (dismissed) {
-      await (_db.update(_db.episodes)..where(
-            (e) =>
-                e.podcastId.equals(podcastId) &
-                e.inboxDismissed.equals(false) &
-                e.status.equals(EpisodeStatus.newEpisode.name),
-          ))
-          .write(const EpisodesCompanion(inboxDismissed: Value(true)));
-    }
+    // Retroactively apply dismissal to existing rows. _upsertEpisodes only
+    // sets inboxDismissed on newly-inserted rows; existing rows keep their
+    // previous value until this runs.
+    await _setEpisodeDismissed(podcastId, dismissed: dismissed);
 
     _log.info('Refreshed feed for podcast $podcastId');
   }
@@ -332,15 +344,10 @@ class PodcastRepositoryImpl implements PodcastRepository {
   Future<void> setInboxExcluded(int podcastId, {required bool excluded}) async {
     await (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId)))
         .write(PodcastsCompanion(inboxExcluded: Value(excluded)));
-    if (excluded) {
-      await (_db.update(_db.episodes)..where(
-            (e) =>
-                e.podcastId.equals(podcastId) &
-                e.inboxDismissed.equals(false) &
-                e.status.equals(EpisodeStatus.newEpisode.name),
-          ))
-          .write(const EpisodesCompanion(inboxDismissed: Value(true)));
-    }
+    // Mirror the flag change onto episodes immediately so the inbox updates
+    // without requiring a manual refresh. When un-excluding, restore episodes
+    // that were dismissed because of this setting.
+    await _setEpisodeDismissed(podcastId, dismissed: excluded);
     _log.fine('Inbox excluded for podcast $podcastId set to $excluded');
   }
 
@@ -348,19 +355,11 @@ class PodcastRepositoryImpl implements PodcastRepository {
   Future<void> setInboxIncluded(int podcastId, {required bool included}) async {
     await (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId)))
         .write(PodcastsCompanion(inboxIncluded: Value(included)));
-    if (!included) {
-      // In opt-in mode, removing a podcast from the include list means its
-      // episodes should leave the inbox immediately.
-      final inboxOptInOnly = await _settings.isInboxOptInOnly();
-      if (inboxOptInOnly) {
-        await (_db.update(_db.episodes)..where(
-              (e) =>
-                  e.podcastId.equals(podcastId) &
-                  e.inboxDismissed.equals(false) &
-                  e.status.equals(EpisodeStatus.newEpisode.name),
-            ))
-            .write(const EpisodesCompanion(inboxDismissed: Value(true)));
-      }
+    // In opt-in mode, mirror the flag change onto episodes immediately.
+    // Removing a podcast hides its episodes; adding it back restores them.
+    final inboxOptInOnly = await _settings.isInboxOptInOnly();
+    if (inboxOptInOnly) {
+      await _setEpisodeDismissed(podcastId, dismissed: !included);
     }
     _log.fine('Inbox included for podcast $podcastId set to $included');
   }
