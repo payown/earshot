@@ -54,9 +54,16 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        centerTitle: true,
+        leading: (allEpisodes.asData?.value.isNotEmpty ?? false)
+            ? IconButton(
+                icon: const Icon(Icons.clear_all),
+                tooltip: 'Clear inbox',
+                onPressed: () => _confirmClearInbox(context, ref),
+              )
+            : null,
         title: Semantics(
           header: true,
-          button: true,
           enabled: true,
           label: autoDownload
               ? 'Inbox, auto-download on'
@@ -79,12 +86,6 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
             tooltip: 'Refresh inbox',
             onPressed: () => _refreshInbox(context, ref),
           ),
-          if (allEpisodes.asData?.value.isNotEmpty ?? false)
-            IconButton(
-              icon: const Icon(Icons.clear_all),
-              tooltip: 'Clear inbox',
-              onPressed: () => _confirmClearInbox(context, ref),
-            ),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Settings',
