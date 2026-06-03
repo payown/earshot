@@ -29,6 +29,12 @@ abstract interface class QueueRepository {
   // counterpart currently occupies, preserving every other episode's position.
   Future<void> sortGroup(List<int> episodeIdsInOrder);
 
+  // Moves the given episodes to the front of the queue (positions 0..N-1) in
+  // the specified order, then appends all remaining episodes in their original
+  // relative order. Used by "Play group" so auto-advance stays within the
+  // group before continuing with other queue items.
+  Future<void> bringGroupToFront(List<int> episodeIdsInOrder);
+
   Stream<List<Episode>> watchQueue();
 
   Future<void> clearQueue();

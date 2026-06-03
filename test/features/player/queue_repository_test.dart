@@ -358,6 +358,53 @@ void main() {
     });
   });
 
+  // ── bringGroupToFront ─────────────────────────────────────────────────────
+
+  group('bringGroupToFront', () {
+    test(
+      'moves interleaved group episodes to front in specified order',
+      () async {
+        final podA = await _addPodcast();
+        final podB = await _addPodcast();
+        // Interleaved: A1, B1, A2, B2
+        final a1 = await _addEpisode(podA);
+        final b1 = await _addEpisode(podB);
+        final a2 = await _addEpisode(podA);
+        final b2 = await _addEpisode(podB);
+        await repo.addToQueue(a1);
+        await repo.addToQueue(b1);
+        await repo.addToQueue(a2);
+        await repo.addToQueue(b2);
+
+        // Play group A in reverse order (a2 first, then a1).
+        await repo.bringGroupToFront([a2, a1]);
+
+        // Group A at front in requested order; B episodes follow in original order.
+        expect(await _queueOrder(), [a2, a1, b1, b2]);
+      },
+    );
+
+    test(
+      'handles already-contiguous group without disturbing non-group order',
+      () async {
+        final podA = await _addPodcast();
+        final podB = await _addPodcast();
+        // Contiguous: A1, A2 at front, then B1.
+        final a1 = await _addEpisode(podA);
+        final a2 = await _addEpisode(podA);
+        final b1 = await _addEpisode(podB);
+        await repo.addToQueue(a1);
+        await repo.addToQueue(a2);
+        await repo.addToQueue(b1);
+
+        // Reverse the A group order.
+        await repo.bringGroupToFront([a2, a1]);
+
+        expect(await _queueOrder(), [a2, a1, b1]);
+      },
+    );
+  });
+
   // ── watchQueue ────────────────────────────────────────────────────────────
 
   group('watchQueue', () {
