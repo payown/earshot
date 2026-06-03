@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:background_downloader/background_downloader.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
@@ -26,17 +26,71 @@ enum DownloadStartResult {
 class DownloadManager {
   DownloadManager({
     required AppDatabase database,
-    required Dio dio,
     required AppSettingsRepository settings,
   }) : _db = database,
-       _dio = dio,
-       _settings = settings;
+       _settings = settings {
+    _updateSubscription = FileDownloader().updates.listen(_onTaskUpdate);
+    _resetStuckDownloads();
+  }
 
   final AppDatabase _db;
-  final Dio _dio;
   final AppSettingsRepository _settings;
+  StreamSubscription<TaskUpdate>? _updateSubscription;
 
-  final Map<int, CancelToken> _cancelTokens = {};
+  // Reconcile any rows left in downloading/pending from a previous session
+  // (e.g. from the old dio-based approach or a crash) that have no
+  // corresponding active task in background_downloader.
+  Future<void> _resetStuckDownloads() async {
+    final activeTasks = await FileDownloader().allTasks(allGroups: true);
+    final activeIds = activeTasks.map((t) => t.taskId).toSet();
+    final stuck =
+        await (_db.select(_db.episodes)..where(
+              (e) => e.downloadStatus.isIn([
+                DownloadStatus.downloading.name,
+                DownloadStatus.pending.name,
+              ]),
+            ))
+            .get();
+    for (final ep in stuck) {
+      if (!activeIds.contains(_taskId(ep.id))) {
+        await _setStatus(ep.id, DownloadStatus.failed);
+        _log.fine('Reset stuck download for episode ${ep.id}');
+      }
+    }
+  }
+
+  Future<void> _onTaskUpdate(TaskUpdate update) async {
+    if (update is! TaskStatusUpdate) return;
+    final episodeId = _episodeIdFromTaskId(update.task.taskId);
+    if (episodeId == null) return;
+
+    switch (update.status) {
+      case TaskStatus.complete:
+        final path = await update.task.filePath();
+        await _db.transaction(() async {
+          await _setStatus(episodeId, DownloadStatus.downloaded);
+          await (_db.update(_db.episodes)..where((e) => e.id.equals(episodeId)))
+              .write(EpisodesCompanion(downloadPath: Value(path)));
+        });
+        _log.info('Downloaded episode $episodeId to $path');
+      case TaskStatus.failed:
+      case TaskStatus.notFound:
+        await _setStatus(episodeId, DownloadStatus.failed);
+        _log.warning(
+          'Download failed for episode $episodeId: ${update.status}',
+        );
+      case TaskStatus.canceled:
+        final file = await _destinationFile(episodeId, update.task.url);
+        if (await file.exists()) await file.delete();
+        await _setStatus(episodeId, DownloadStatus.none);
+      case TaskStatus.running:
+        await _setStatus(episodeId, DownloadStatus.downloading);
+      case TaskStatus.enqueued:
+        await _setStatus(episodeId, DownloadStatus.pending);
+      default:
+        break;
+    }
+  }
 
   Future<DownloadStartResult> downloadEpisode(
     int episodeId, {
@@ -60,63 +114,34 @@ class DownloadManager {
       return DownloadStartResult.skippedNoWifi;
     }
 
-    final cancelToken = CancelToken();
-    _cancelTokens[episodeId] = cancelToken;
-    await _setStatus(episodeId, DownloadStatus.pending);
-    unawaited(_runDownload(episodeId, row.audioUrl, cancelToken, onComplete));
+    final file = await _destinationFile(episodeId, row.audioUrl);
+    final ext = p.extension(file.path);
+    final task = DownloadTask(
+      url: row.audioUrl,
+      taskId: _taskId(episodeId),
+      baseDirectory: BaseDirectory.applicationDocuments,
+      directory: 'downloads',
+      filename: 'ep_$episodeId$ext',
+      updates: Updates.status,
+    );
+
+    final enqueued = await FileDownloader().enqueue(task);
+    if (!enqueued) {
+      _log.warning('Failed to enqueue download for episode $episodeId');
+      return DownloadStartResult.failed;
+    }
+
+    _log.info('Enqueued background download for episode $episodeId');
     return DownloadStartResult.started;
   }
 
-  Future<void> _runDownload(
-    int episodeId,
-    String audioUrl,
-    CancelToken cancelToken,
-    void Function(String message)? onComplete,
-  ) async {
-    final file = await _destinationFile(episodeId, audioUrl);
-    try {
-      if (cancelToken.isCancelled) {
-        await _setStatus(episodeId, DownloadStatus.none);
-        return;
-      }
-      await _setStatus(episodeId, DownloadStatus.downloading);
-      await _dio.download(
-        audioUrl,
-        file.path,
-        cancelToken: cancelToken,
-        options: Options(receiveTimeout: null),
-      );
-      await _db.transaction(() async {
-        await _setStatus(episodeId, DownloadStatus.downloaded);
-        await (_db.update(_db.episodes)..where((e) => e.id.equals(episodeId)))
-            .write(EpisodesCompanion(downloadPath: Value(file.path)));
-      });
-      _log.info('Downloaded episode $episodeId to ${file.path}');
-      onComplete?.call('Download complete');
-    } on DioException catch (e) {
-      if (CancelToken.isCancel(e)) {
-        _log.fine('Download cancelled for episode $episodeId');
-        if (await file.exists()) await file.delete();
-        await _setStatus(episodeId, DownloadStatus.none);
-      } else {
-        _log.warning('Download failed for episode $episodeId: ${e.message}');
-        await _setStatus(episodeId, DownloadStatus.failed);
-        onComplete?.call('Download failed');
-      }
-    } catch (e, st) {
-      _log.warning('Unexpected download error for $episodeId: $e\n$st');
-      await _setStatus(episodeId, DownloadStatus.failed);
-      onComplete?.call('Download failed');
-    } finally {
-      _cancelTokens.remove(episodeId);
-    }
-  }
-
   Future<void> cancelDownload(int episodeId) async {
-    _cancelTokens[episodeId]?.cancel('User cancelled');
+    await FileDownloader().cancelTaskWithId(_taskId(episodeId));
   }
 
   Future<void> deleteDownload(int episodeId) async {
+    await FileDownloader().cancelTaskWithId(_taskId(episodeId));
+
     final row = await (_db.select(
       _db.episodes,
     )..where((e) => e.id.equals(episodeId))).getSingleOrNull();
@@ -157,10 +182,7 @@ class DownloadManager {
         _log.info('Inbox batch download stopped — not on Wi-Fi');
         return;
       }
-      final cancelToken = CancelToken();
-      _cancelTokens[ep.id] = cancelToken;
-      await _setStatus(ep.id, DownloadStatus.pending);
-      unawaited(_runDownload(ep.id, ep.audioUrl, cancelToken, null));
+      await _enqueueEpisode(ep);
     }
   }
 
@@ -188,10 +210,29 @@ class DownloadManager {
         _log.info('Queue batch download stopped — not on Wi-Fi');
         return;
       }
-      final cancelToken = CancelToken();
-      _cancelTokens[ep.id] = cancelToken;
-      await _setStatus(ep.id, DownloadStatus.pending);
-      unawaited(_runDownload(ep.id, ep.audioUrl, cancelToken, null));
+      await _enqueueEpisode(ep);
+    }
+  }
+
+  Future<void> downloadRecentEpisodes(int podcastId, int count) async {
+    final episodes =
+        await (_db.select(_db.episodes)
+              ..where((e) => e.podcastId.equals(podcastId))
+              ..orderBy([(e) => OrderingTerm.desc(e.pubDate)])
+              ..limit(count))
+            .get();
+
+    for (final ep in episodes) {
+      if (ep.downloadStatus == DownloadStatus.downloaded ||
+          ep.downloadStatus == DownloadStatus.downloading ||
+          ep.downloadStatus == DownloadStatus.pending) {
+        continue;
+      }
+      if (!await _isWifiAvailable()) {
+        _log.info('Batch download stopped — not on Wi-Fi');
+        return;
+      }
+      await _enqueueEpisode(ep);
     }
   }
 
@@ -226,28 +267,20 @@ class DownloadManager {
     }
   }
 
-  Future<void> downloadRecentEpisodes(int podcastId, int count) async {
-    final episodes =
-        await (_db.select(_db.episodes)
-              ..where((e) => e.podcastId.equals(podcastId))
-              ..orderBy([(e) => OrderingTerm.desc(e.pubDate)])
-              ..limit(count))
-            .get();
-
-    for (final ep in episodes) {
-      if (ep.downloadStatus == DownloadStatus.downloaded ||
-          ep.downloadStatus == DownloadStatus.downloading ||
-          ep.downloadStatus == DownloadStatus.pending) {
-        continue;
-      }
-      if (!await _isWifiAvailable()) {
-        _log.info('Batch download stopped — not on Wi-Fi');
-        return;
-      }
-      final cancelToken = CancelToken();
-      _cancelTokens[ep.id] = cancelToken;
-      await _setStatus(ep.id, DownloadStatus.pending);
-      await _runDownload(ep.id, ep.audioUrl, cancelToken, null);
+  Future<void> _enqueueEpisode(EpisodeRow ep) async {
+    final file = await _destinationFile(ep.id, ep.audioUrl);
+    final ext = p.extension(file.path);
+    final task = DownloadTask(
+      url: ep.audioUrl,
+      taskId: _taskId(ep.id),
+      baseDirectory: BaseDirectory.applicationDocuments,
+      directory: 'downloads',
+      filename: 'ep_${ep.id}$ext',
+      updates: Updates.status,
+    );
+    final enqueued = await FileDownloader().enqueue(task);
+    if (!enqueued) {
+      _log.warning('Failed to enqueue download for episode ${ep.id}');
     }
   }
 
@@ -269,5 +302,12 @@ class DownloadManager {
     await downloadsDir.create(recursive: true);
     final ext = p.extension(Uri.parse(url).path).split('?').first;
     return File(p.join(downloadsDir.path, 'ep_$episodeId$ext'));
+  }
+
+  static String _taskId(int episodeId) => 'ep_$episodeId';
+
+  static int? _episodeIdFromTaskId(String taskId) {
+    if (!taskId.startsWith('ep_')) return null;
+    return int.tryParse(taskId.substring(3));
   }
 }

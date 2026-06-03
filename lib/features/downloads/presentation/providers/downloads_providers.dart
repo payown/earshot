@@ -11,7 +11,6 @@ final downloadManagerProvider = Provider<DownloadManager>(
     final db = ref.watch(appDatabaseProvider);
     return DownloadManager(
       database: db,
-      dio: ref.watch(dioProvider),
       settings: AppSettingsRepositoryImpl(database: db),
     );
   },

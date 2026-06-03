@@ -54,7 +54,6 @@ Future<bool> _runEpisodeDownloads() async {
     final settings = AppSettingsRepositoryImpl(database: db);
     final manager = DownloadManager(
       database: db,
-      dio: _buildDio(),
       settings: settings,
     );
 
