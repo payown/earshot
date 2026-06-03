@@ -149,7 +149,9 @@ class PodcastRepositoryImpl implements PodcastRepository {
     );
 
     final inboxOptInOnly = await _settings.isInboxOptInOnly();
-    final dismissed = podcastRow.inboxExcluded || inboxOptInOnly;
+    final dismissed = inboxOptInOnly
+        ? !podcastRow.inboxIncluded
+        : podcastRow.inboxExcluded;
     await _upsertEpisodes(
       podcastId,
       feed.episodes,
@@ -298,6 +300,13 @@ class PodcastRepositoryImpl implements PodcastRepository {
     _log.fine('Inbox excluded for podcast $podcastId set to $excluded');
   }
 
+  @override
+  Future<void> setInboxIncluded(int podcastId, {required bool included}) async {
+    await (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId)))
+        .write(PodcastsCompanion(inboxIncluded: Value(included)));
+    _log.fine('Inbox included for podcast $podcastId set to $included');
+  }
+
   Podcast _podcastFromRow(PodcastRow row) => Podcast(
     id: row.id,
     rssUrl: row.rssUrl,
@@ -311,6 +320,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
     autoQueue: row.autoQueue,
     notificationEnabled: row.notificationEnabled,
     inboxExcluded: row.inboxExcluded,
+    inboxIncluded: row.inboxIncluded,
     speedOverride: row.speedOverride,
     queueAgeLimitDays: row.queueAgeLimitDays,
     createdAt: row.createdAt,

@@ -304,6 +304,7 @@ class FolderRepositoryImpl implements FolderRepository {
     autoQueue: row.autoQueue,
     notificationEnabled: row.notificationEnabled,
     inboxExcluded: row.inboxExcluded,
+    inboxIncluded: row.inboxIncluded,
     speedOverride: row.speedOverride,
     queueAgeLimitDays: row.queueAgeLimitDays,
     createdAt: row.createdAt,

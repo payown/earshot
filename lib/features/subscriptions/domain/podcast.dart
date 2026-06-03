@@ -6,6 +6,7 @@ class Podcast {
     required this.autoQueue,
     required this.notificationEnabled,
     required this.inboxExcluded,
+    required this.inboxIncluded,
     required this.createdAt,
     this.author,
     this.description,
@@ -30,6 +31,7 @@ class Podcast {
   final bool autoQueue;
   final bool notificationEnabled;
   final bool inboxExcluded;
+  final bool inboxIncluded;
   final double? speedOverride;
   final int? queueAgeLimitDays;
   final DateTime createdAt;

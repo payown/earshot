@@ -77,13 +77,16 @@ class _PodcastTileItem extends ConsumerStatefulWidget {
 }
 
 class _PodcastTileItemState extends ConsumerState<_PodcastTileItem> {
-  // Optimistic local state: flips the action label immediately on tap
-  // without waiting for the DB round-trip — same pattern as Follow/Unfollow.
-  // null = defer to podcast.inboxExcluded; true/false = local override.
+  // Optimistic local state for both inbox flags.
+  // null = defer to the podcast's current DB value.
   bool? _optimisticExcluded;
+  bool? _optimisticIncluded;
 
   bool get _effectiveExcluded =>
       _optimisticExcluded ?? widget.podcast.inboxExcluded;
+
+  bool get _effectiveIncluded =>
+      _optimisticIncluded ?? widget.podcast.inboxIncluded;
 
   Future<void> _toggleInboxExcluded() async {
     final excluded = !_effectiveExcluded;
@@ -104,6 +107,35 @@ class _PodcastTileItemState extends ConsumerState<_PodcastTileItem> {
         'Failed to toggle inbox excluded for ${widget.podcast.id}: $e',
       );
       setState(() => _optimisticExcluded = null);
+      if (mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Could not update inbox setting.',
+          TextDirection.ltr,
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleInboxIncluded() async {
+    final included = !_effectiveIncluded;
+    setState(() => _optimisticIncluded = included);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      included
+          ? '${widget.podcast.title} included in inbox.'
+          : '${widget.podcast.title} removed from inbox.',
+      TextDirection.ltr,
+    );
+    try {
+      await ref
+          .read(podcastRepositoryProvider)
+          .setInboxIncluded(widget.podcast.id, included: included);
+    } catch (e) {
+      _log.warning(
+        'Failed to toggle inbox included for ${widget.podcast.id}: $e',
+      );
+      setState(() => _optimisticIncluded = null);
       if (mounted) {
         SemanticsService.sendAnnouncement(
           View.of(context),
@@ -138,7 +170,10 @@ class _PodcastTileItemState extends ConsumerState<_PodcastTileItem> {
     }
   }
 
-  List<PodcastQuickActionItem> _buildActions(List<PodcastAction> order) {
+  List<PodcastQuickActionItem> _buildActions(
+    List<PodcastAction> order,
+    bool inboxOptInOnly,
+  ) {
     final podcast = widget.podcast;
     return order.map((action) {
       return switch (action) {
@@ -156,12 +191,20 @@ class _PodcastTileItemState extends ConsumerState<_PodcastTileItem> {
           label: podcast.autoQueue ? 'Disable auto-queue' : 'Enable auto-queue',
           onInvoke: () {},
         ),
-        PodcastAction.toggleInboxExcluded => PodcastQuickActionItem(
-          label: _effectiveExcluded
-              ? 'Include ${podcast.title} in inbox'
-              : 'Exclude ${podcast.title} from inbox',
-          onInvoke: _toggleInboxExcluded,
-        ),
+        PodcastAction.toggleInboxExcluded =>
+          inboxOptInOnly
+              ? PodcastQuickActionItem(
+                  label: _effectiveIncluded
+                      ? 'Remove ${podcast.title} from inbox'
+                      : 'Include ${podcast.title} in inbox',
+                  onInvoke: _toggleInboxIncluded,
+                )
+              : PodcastQuickActionItem(
+                  label: _effectiveExcluded
+                      ? 'Include ${podcast.title} in inbox'
+                      : 'Exclude ${podcast.title} from inbox',
+                  onInvoke: _toggleInboxExcluded,
+                ),
         PodcastAction.unsubscribe => PodcastQuickActionItem(
           label: action.label,
           onInvoke: _unfollow,
@@ -188,14 +231,20 @@ class _PodcastTileItemState extends ConsumerState<_PodcastTileItem> {
 
   @override
   Widget build(BuildContext context) {
-    // Include excluded state in the semantic label to force VoiceOver to
-    // refresh the node when the state changes (flutter/flutter#149613).
-    final semanticSuffix = _effectiveExcluded ? ', Excluded from inbox' : '';
+    final inboxOptInOnly = ref.watch(inboxOptInOnlyProvider).value ?? false;
+
+    // Force VoiceOver to refresh the node when inbox state changes
+    // (flutter/flutter#149613).
+    final semanticSuffix = inboxOptInOnly
+        ? (_effectiveIncluded
+              ? ', Included in inbox'
+              : ', Not included in inbox')
+        : (_effectiveExcluded ? ', Excluded from inbox' : '');
 
     return PodcastListTile(
       podcast: widget.podcast,
       onTap: () => context.push(AppRoutes.podcastDetail(widget.podcast.id)),
-      quickActions: _buildActions(widget.podcastActions),
+      quickActions: _buildActions(widget.podcastActions, inboxOptInOnly),
       semanticSuffix: semanticSuffix,
     );
   }
