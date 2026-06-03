@@ -221,6 +221,61 @@ class QueueRepositoryImpl implements QueueRepository {
   }
 
   @override
+  Future<void> bringGroupToFront(List<int> episodeIdsInOrder) async {
+    if (episodeIdsInOrder.isEmpty) return;
+    await _db.transaction(() async {
+      final rows = await (_db.select(
+        _db.queueItems,
+      )..orderBy([(q) => OrderingTerm.asc(q.position)])).get();
+
+      final idSet = episodeIdsInOrder.toSet();
+      final nonGroupRows = rows
+          .where((r) => !idSet.contains(r.episodeId))
+          .toList();
+
+      // Move everything to temp positions first to avoid unique-constraint
+      // collisions while reassigning. Same pattern as sortGroup().
+      const tempBase = 1000000;
+      for (var i = 0; i < episodeIdsInOrder.length; i++) {
+        await (_db.update(_db.queueItems)
+              ..where((q) => q.episodeId.equals(episodeIdsInOrder[i])))
+            .write(QueueItemsCompanion(position: Value(tempBase + i)));
+      }
+      for (var i = 0; i < nonGroupRows.length; i++) {
+        await (_db.update(
+          _db.queueItems,
+        )..where((q) => q.id.equals(nonGroupRows[i].id))).write(
+          QueueItemsCompanion(
+            position: Value(tempBase + episodeIdsInOrder.length + i),
+          ),
+        );
+      }
+
+      // Group episodes go to positions 0..N-1 in the requested order.
+      for (var i = 0; i < episodeIdsInOrder.length; i++) {
+        await (_db.update(_db.queueItems)
+              ..where((q) => q.episodeId.equals(episodeIdsInOrder[i])))
+            .write(QueueItemsCompanion(position: Value(i)));
+      }
+
+      // Non-group episodes follow at positions N..N+M-1, original order kept.
+      for (var i = 0; i < nonGroupRows.length; i++) {
+        await (_db.update(
+          _db.queueItems,
+        )..where((q) => q.id.equals(nonGroupRows[i].id))).write(
+          QueueItemsCompanion(
+            position: Value(episodeIdsInOrder.length + i),
+          ),
+        );
+      }
+    });
+    await _compactPositions();
+    _log.fine(
+      'Brought group of ${episodeIdsInOrder.length} episodes to front',
+    );
+  }
+
+  @override
   Stream<List<Episode>> watchQueue() {
     final query = _db.select(_db.queueItems).join([
       innerJoin(

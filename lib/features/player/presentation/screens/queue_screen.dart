@@ -456,11 +456,19 @@ class QueueScreen extends ConsumerWidget {
     QueueGroup group,
     bool isCollapsed,
   ) {
-    void playFirst() {
+    Future<void> playFirst() async {
       if (group.episodes.isEmpty) return;
+      final view = View.of(context);
+      // Bring all group episodes to the front of the flat queue (in the
+      // user's current sorted order) before starting playback. Without this,
+      // auto-advance uses flat-queue order and may jump to a different podcast
+      // when the first episode completes.
+      await ref
+          .read(queueRepositoryProvider)
+          .bringGroupToFront(group.episodes.map((e) => e.id).toList());
       _playEpisode(ref, group.episodes.first);
       SemanticsService.sendAnnouncement(
-        View.of(context),
+        view,
         'Playing ${group.podcastName}',
         TextDirection.ltr,
       );
@@ -540,7 +548,9 @@ class QueueScreen extends ConsumerWidget {
           'Use the actions rotor for play, shuffle, or sort.',
       onTap: toggleCollapsed,
       customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
-        const CustomSemanticsAction(label: 'Play group'): playFirst,
+        const CustomSemanticsAction(label: 'Play group'): () {
+          unawaited(playFirst());
+        },
         const CustomSemanticsAction(label: 'Shuffle group'): () {
           unawaited(shuffle());
         },
