@@ -603,64 +603,167 @@ class QueueScreen extends ConsumerWidget {
   }) {
     final downloadAction = _buildDownloadAction(episode, ref, context);
 
+    // Named closures shared by the actions rotor and the bottom sheet.
+    void play() => _playEpisode(ref, episode);
+    void moveToTop() => unawaited(
+      ref.read(queueRepositoryProvider).moveToTop(episode.id).then((_) {
+        if (context.mounted) {
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            'Moved to top, now position 1 of $total',
+            TextDirection.ltr,
+          );
+        }
+      }),
+    );
+    void moveToBottom() => unawaited(
+      ref.read(queueRepositoryProvider).moveToBottom(episode.id).then((_) {
+        if (context.mounted) {
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            'Moved to bottom, now position $total of $total',
+            TextDirection.ltr,
+          );
+        }
+      }),
+    );
+    void moveUp() => unawaited(
+      ref.read(queueRepositoryProvider).moveUp(episode.id).then((_) {
+        if (context.mounted) {
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            'Moved up, now position ${position - 1} of $total',
+            TextDirection.ltr,
+          );
+        }
+      }),
+    );
+    void moveDown() => unawaited(
+      ref.read(queueRepositoryProvider).moveDown(episode.id).then((_) {
+        if (context.mounted) {
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            'Moved down, now position ${position + 1} of $total',
+            TextDirection.ltr,
+          );
+        }
+      }),
+    );
+    void removeFromQueue() => unawaited(
+      ref.read(queueRepositoryProvider).cancelFromQueue(episode.id).then((_) {
+        if (context.mounted) {
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            '${episode.title} removed from queue',
+            TextDirection.ltr,
+          );
+        }
+      }),
+    );
+
+    void showActions() {
+      final textTheme = Theme.of(context).textTheme;
+      final colorScheme = Theme.of(context).colorScheme;
+      showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        barrierLabel: 'Dismiss episode actions',
+        builder: (sheetContext) => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Semantics(
+                header: true,
+                label: episode.title,
+                child: ExcludeSemantics(
+                  child: Text(
+                    episode.title,
+                    style: textTheme.titleMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              title: const Text('Play'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                play();
+              },
+            ),
+            ListTile(
+              title: const Text('Move to top'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                moveToTop();
+              },
+            ),
+            if (!isFirst)
+              ListTile(
+                title: const Text('Move up'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  moveUp();
+                },
+              ),
+            if (!isLast)
+              ListTile(
+                title: const Text('Move down'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  moveDown();
+                },
+              ),
+            ListTile(
+              title: const Text('Move to bottom'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                moveToBottom();
+              },
+            ),
+            if (downloadAction != null)
+              ListTile(
+                title: Text(downloadAction.label),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  downloadAction.onInvoke();
+                },
+              ),
+            ListTile(
+              title: Text(
+                'Remove from queue',
+                style: TextStyle(color: colorScheme.error),
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                removeFromQueue();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+    }
+
     return Semantics(
       key: ValueKey(episode.id),
       container: true,
       button: true,
       label: semanticLabel,
       hint: 'Double tap to play. Use the actions rotor for more options.',
-      onTap: () => _playEpisode(ref, episode),
+      onTap: play,
       customSemanticsActions: {
-        const CustomSemanticsAction(label: 'Play'): () =>
-            _playEpisode(ref, episode),
-        const CustomSemanticsAction(label: 'Move to top'): () async {
-          final view = View.of(context);
-          await ref.read(queueRepositoryProvider).moveToTop(episode.id);
-          SemanticsService.sendAnnouncement(
-            view,
-            'Moved to top, now position 1 of $total',
-            TextDirection.ltr,
-          );
-        },
-        const CustomSemanticsAction(label: 'Move to bottom'): () async {
-          final view = View.of(context);
-          await ref.read(queueRepositoryProvider).moveToBottom(episode.id);
-          SemanticsService.sendAnnouncement(
-            view,
-            'Moved to bottom, now position $total of $total',
-            TextDirection.ltr,
-          );
-        },
-        if (!isFirst)
-          const CustomSemanticsAction(label: 'Move up'): () async {
-            final view = View.of(context);
-            await ref.read(queueRepositoryProvider).moveUp(episode.id);
-            SemanticsService.sendAnnouncement(
-              view,
-              'Moved up, now position ${position - 1} of $total',
-              TextDirection.ltr,
-            );
-          },
-        if (!isLast)
-          const CustomSemanticsAction(label: 'Move down'): () async {
-            final view = View.of(context);
-            await ref.read(queueRepositoryProvider).moveDown(episode.id);
-            SemanticsService.sendAnnouncement(
-              view,
-              'Moved down, now position ${position + 1} of $total',
-              TextDirection.ltr,
-            );
-          },
-        const CustomSemanticsAction(label: 'Remove from queue'): () async {
-          final view = View.of(context);
-          final title = episode.title;
-          await ref.read(queueRepositoryProvider).cancelFromQueue(episode.id);
-          SemanticsService.sendAnnouncement(
-            view,
-            '$title removed from queue',
-            TextDirection.ltr,
-          );
-        },
+        const CustomSemanticsAction(label: 'Play'): play,
+        const CustomSemanticsAction(label: 'Move to top'): moveToTop,
+        const CustomSemanticsAction(label: 'Move to bottom'): moveToBottom,
+        if (!isFirst) const CustomSemanticsAction(label: 'Move up'): moveUp,
+        if (!isLast) const CustomSemanticsAction(label: 'Move down'): moveDown,
+        const CustomSemanticsAction(label: 'Remove from queue'):
+            removeFromQueue,
         if (downloadAction != null)
           CustomSemanticsAction(label: downloadAction.label):
               downloadAction.onInvoke,
@@ -752,56 +855,10 @@ class QueueScreen extends ConsumerWidget {
               ],
             ),
           ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.play_arrow),
-                tooltip: 'Play',
-                onPressed: () => _playEpisode(ref, episode),
-              ),
-              IconButton(
-                icon: const Icon(Icons.arrow_upward),
-                tooltip: 'Move up',
-                onPressed: isFirst
-                    ? null
-                    : () async {
-                        final view = View.of(context);
-                        await ref
-                            .read(queueRepositoryProvider)
-                            .moveUp(episode.id);
-                        SemanticsService.sendAnnouncement(
-                          view,
-                          'Moved up, now position ${position - 1} of $total',
-                          TextDirection.ltr,
-                        );
-                      },
-              ),
-              IconButton(
-                icon: const Icon(Icons.arrow_downward),
-                tooltip: 'Move down',
-                onPressed: isLast
-                    ? null
-                    : () async {
-                        final view = View.of(context);
-                        await ref
-                            .read(queueRepositoryProvider)
-                            .moveDown(episode.id);
-                        SemanticsService.sendAnnouncement(
-                          view,
-                          'Moved down, now position ${position + 1} of $total',
-                          TextDirection.ltr,
-                        );
-                      },
-              ),
-              IconButton(
-                icon: const Icon(Icons.remove_circle_outline),
-                tooltip: 'Remove from queue',
-                onPressed: () => ref
-                    .read(queueRepositoryProvider)
-                    .cancelFromQueue(episode.id),
-              ),
-            ],
+          trailing: IconButton(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'Episode actions',
+            onPressed: showActions,
           ),
         ),
       ),

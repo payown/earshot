@@ -445,8 +445,57 @@ class _InboxEpisodeTile extends StatelessWidget {
   VoidCallback? get _defaultTap =>
       quickActions.isNotEmpty ? quickActions[0].onInvoke : null;
 
-  VoidCallback? _findAction(String label) =>
-      quickActions.where((a) => a.label == label).firstOrNull?.onInvoke;
+  void _showActions(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      barrierLabel: 'Dismiss episode actions',
+      builder: (sheetContext) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Semantics(
+              header: true,
+              label: episode.title,
+              child: ExcludeSemantics(
+                child: Text(
+                  episode.title,
+                  style: textTheme.titleMedium,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          ...quickActions.map(
+            (action) => ListTile(
+              title: Text(action.label),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                action.onInvoke();
+              },
+            ),
+          ),
+          ListTile(
+            title: Text(
+              'Delete',
+              style: TextStyle(color: colorScheme.error),
+            ),
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              onDelete();
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -466,14 +515,6 @@ class _InboxEpisodeTile extends StatelessWidget {
         CustomSemanticsAction(label: a.label): a.onInvoke,
       const CustomSemanticsAction(label: 'Delete'): onDelete,
     };
-
-    // Trailing icon buttons: queue action + mark played (sighted affordance).
-    final queueCallback =
-        _findAction('Add to end of queue') ??
-        _findAction('Play next') ??
-        _findAction('Remove from queue');
-    final markPlayedCallback =
-        _findAction('Mark as played') ?? _findAction('Mark as unplayed');
 
     return Semantics(
       button: _defaultTap != null,
@@ -576,22 +617,10 @@ class _InboxEpisodeTile extends StatelessWidget {
                 ),
             ],
           ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (queueCallback != null)
-                IconButton(
-                  icon: const Icon(Icons.queue_music),
-                  onPressed: queueCallback,
-                  tooltip: 'Add to end of queue',
-                ),
-              if (markPlayedCallback != null)
-                IconButton(
-                  icon: const Icon(Icons.check),
-                  onPressed: markPlayedCallback,
-                  tooltip: 'Mark as played',
-                ),
-            ],
+          trailing: IconButton(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'Episode actions',
+            onPressed: () => _showActions(context),
           ),
         ),
       ),
