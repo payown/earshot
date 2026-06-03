@@ -50,13 +50,9 @@ Future<bool> _runFeedRefresh() async {
 
 Future<bool> _runEpisodeDownloads() async {
   final db = AppDatabase();
+  final settings = AppSettingsRepositoryImpl(database: db);
+  final manager = DownloadManager(database: db, settings: settings);
   try {
-    final settings = AppSettingsRepositoryImpl(database: db);
-    final manager = DownloadManager(
-      database: db,
-      settings: settings,
-    );
-
     // Per-podcast auto-queue downloads (existing behaviour).
     final downloadCount = await settings.getAutoDownloadCount();
     final autoQueuePodcasts = await (db.select(
@@ -85,6 +81,7 @@ Future<bool> _runEpisodeDownloads() async {
     _log.severe('Episode download background task failed', e, st);
     return false;
   } finally {
+    await manager.dispose();
     await db.close();
   }
 }

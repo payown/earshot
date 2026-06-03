@@ -30,12 +30,17 @@ class DownloadManager {
   }) : _db = database,
        _settings = settings {
     _updateSubscription = FileDownloader().updates.listen(_onTaskUpdate);
-    _resetStuckDownloads();
+    unawaited(_resetStuckDownloads());
   }
 
   final AppDatabase _db;
   final AppSettingsRepository _settings;
   StreamSubscription<TaskUpdate>? _updateSubscription;
+
+  Future<void> dispose() async {
+    await _updateSubscription?.cancel();
+    _updateSubscription = null;
+  }
 
   // Reconcile any rows left in downloading/pending from a previous session
   // (e.g. from the old dio-based approach or a crash) that have no
