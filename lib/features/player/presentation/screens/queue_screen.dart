@@ -16,6 +16,37 @@ import '../../../../features/subscriptions/presentation/providers/subscriptions_
 import '../../domain/queue_group.dart';
 import '../providers/player_providers.dart';
 
+void _toggleQueueAutoDownload(BuildContext context, WidgetRef ref, bool val) {
+  unawaited(
+    ref
+        .read(autoDownloadQueueProvider.notifier)
+        .set(val)
+        .then((_) {
+          if (val) {
+            unawaited(
+              ref.read(downloadManagerProvider).downloadQueueEpisodes(),
+            );
+          }
+          if (context.mounted) {
+            SemanticsService.sendAnnouncement(
+              View.of(context),
+              val ? 'Auto-download enabled' : 'Auto-download disabled',
+              TextDirection.ltr,
+            );
+          }
+        })
+        .catchError((_) {
+          if (context.mounted) {
+            SemanticsService.sendAnnouncement(
+              View.of(context),
+              'Could not update auto-download setting',
+              TextDirection.ltr,
+            );
+          }
+        }),
+  );
+}
+
 String? _semanticDuration(Episode ep) {
   if (ep.durationSeconds == null) return null;
   final total = ep.durationSeconds!;
@@ -139,7 +170,25 @@ class QueueScreen extends ConsumerWidget {
             );
           },
         ),
-        title: const Text('Queue'),
+        title: Semantics(
+          header: true,
+          button: true,
+          enabled: true,
+          label: autoDownload
+              ? 'Queue, auto-download on'
+              : 'Queue, auto-download off',
+          hint: 'Double-tap to toggle auto-download',
+          onTap: () => _toggleQueueAutoDownload(context, ref, !autoDownload),
+          customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
+            CustomSemanticsAction(
+              label: autoDownload
+                  ? 'Turn off auto-download'
+                  : 'Turn on auto-download',
+            ): () =>
+                _toggleQueueAutoDownload(context, ref, !autoDownload),
+          },
+          child: const ExcludeSemantics(child: Text('Queue')),
+        ),
         centerTitle: true,
         actions: [
           IconButton(
@@ -151,48 +200,6 @@ class QueueScreen extends ConsumerWidget {
       ),
       body: CustomScrollView(
         slivers: [
-          SliverToBoxAdapter(
-            child: SwitchListTile(
-              title: const Text('Auto-download new episodes'),
-              subtitle: const Text(
-                'Episodes are downloaded when you add them to your queue',
-              ),
-              value: autoDownload,
-              onChanged: ref.watch(autoDownloadQueueProvider).isLoading
-                  ? null
-                  : (val) async {
-                      try {
-                        await ref
-                            .read(autoDownloadQueueProvider.notifier)
-                            .set(val);
-                        if (val) {
-                          unawaited(
-                            ref
-                                .read(downloadManagerProvider)
-                                .downloadQueueEpisodes(),
-                          );
-                        }
-                        if (context.mounted) {
-                          SemanticsService.sendAnnouncement(
-                            View.of(context),
-                            val
-                                ? 'Auto-download enabled'
-                                : 'Auto-download disabled',
-                            TextDirection.ltr,
-                          );
-                        }
-                      } catch (_) {
-                        if (context.mounted) {
-                          SemanticsService.sendAnnouncement(
-                            View.of(context),
-                            'Could not update auto-download setting',
-                            TextDirection.ltr,
-                          );
-                        }
-                      }
-                    },
-            ),
-          ),
           if (groupingEnabled)
             _buildGroupedBody(context, ref, currentEpisodeId)
           else

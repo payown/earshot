@@ -54,7 +54,25 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Inbox'),
+        title: Semantics(
+          header: true,
+          button: true,
+          enabled: true,
+          label: autoDownload
+              ? 'Inbox, auto-download on'
+              : 'Inbox, auto-download off',
+          hint: 'Double-tap to toggle auto-download',
+          onTap: () => _toggleAutoDownload(context, ref, !autoDownload),
+          customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
+            CustomSemanticsAction(
+              label: autoDownload
+                  ? 'Turn off auto-download'
+                  : 'Turn on auto-download',
+            ): () =>
+                _toggleAutoDownload(context, ref, !autoDownload),
+          },
+          child: const ExcludeSemantics(child: Text('Inbox')),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -78,48 +96,6 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
         onRefresh: () => _refreshInbox(context, ref),
         child: CustomScrollView(
           slivers: [
-            SliverToBoxAdapter(
-              child: SwitchListTile(
-                title: const Text('Auto-download new episodes'),
-                subtitle: const Text(
-                  'Episodes are downloaded as they arrive in your inbox',
-                ),
-                value: autoDownload,
-                onChanged: ref.watch(autoDownloadInboxProvider).isLoading
-                    ? null
-                    : (val) async {
-                        try {
-                          await ref
-                              .read(autoDownloadInboxProvider.notifier)
-                              .set(val);
-                          if (val) {
-                            unawaited(
-                              ref
-                                  .read(downloadManagerProvider)
-                                  .downloadInboxEpisodes(),
-                            );
-                          }
-                          if (context.mounted) {
-                            SemanticsService.sendAnnouncement(
-                              View.of(context),
-                              val
-                                  ? 'Auto-download enabled'
-                                  : 'Auto-download disabled',
-                              TextDirection.ltr,
-                            );
-                          }
-                        } catch (_) {
-                          if (context.mounted) {
-                            SemanticsService.sendAnnouncement(
-                              View.of(context),
-                              'Could not update auto-download setting',
-                              TextDirection.ltr,
-                            );
-                          }
-                        }
-                      },
-              ),
-            ),
             allEpisodes.when(
               data: (episodes) => episodes.isEmpty
                   ? SliverToBoxAdapter(child: _EmptyInbox())
@@ -155,6 +131,37 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  void _toggleAutoDownload(BuildContext context, WidgetRef ref, bool val) {
+    unawaited(
+      ref
+          .read(autoDownloadInboxProvider.notifier)
+          .set(val)
+          .then((_) {
+            if (val) {
+              unawaited(
+                ref.read(downloadManagerProvider).downloadInboxEpisodes(),
+              );
+            }
+            if (context.mounted) {
+              SemanticsService.sendAnnouncement(
+                View.of(context),
+                val ? 'Auto-download enabled' : 'Auto-download disabled',
+                TextDirection.ltr,
+              );
+            }
+          })
+          .catchError((_) {
+            if (context.mounted) {
+              SemanticsService.sendAnnouncement(
+                View.of(context),
+                'Could not update auto-download setting',
+                TextDirection.ltr,
+              );
+            }
+          }),
     );
   }
 
