@@ -61,7 +61,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
         defaultEpisodeActions;
     final autoDownload = ref.watch(autoDownloadInboxProvider).value ?? false;
     final podcastNameFirst = ref.watch(podcastNameFirstProvider).value ?? false;
-    final tipSeen = ref.watch(podcastNameTipSeenProvider).value ?? true;
+    final tipSeen = ref.watch(podcastNameTipSeenProvider).value ?? false;
 
     return Scaffold(
       appBar: AppBar(
