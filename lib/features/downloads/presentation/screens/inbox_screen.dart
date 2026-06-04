@@ -39,6 +39,15 @@ class InboxScreen extends ConsumerStatefulWidget {
 
 class _InboxScreenState extends ConsumerState<InboxScreen> {
   @override
+  void initState() {
+    super.initState();
+    // Reset tip so it shows again for testing — remove after device verification.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(podcastNameTipSeenProvider.notifier).set(false);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     // All episodes across all podcasts with newEpisode status, newest first.
     final allEpisodes = ref.watch(_inboxEpisodesProvider);
@@ -102,6 +111,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
             if (!tipSeen)
               SliverToBoxAdapter(
                 child: _InboxTipCard(
+                  autofocus: true,
                   onDismiss: () => unawaited(
                     ref.read(podcastNameTipSeenProvider.notifier).set(true),
                   ),
@@ -682,10 +692,15 @@ class _InboxEpisodeTile extends StatelessWidget {
 }
 
 class _InboxTipCard extends StatelessWidget {
-  const _InboxTipCard({required this.onDismiss, required this.onGoToSettings});
+  const _InboxTipCard({
+    required this.onDismiss,
+    required this.onGoToSettings,
+    this.autofocus = false,
+  });
 
   final VoidCallback onDismiss;
   final VoidCallback onGoToSettings;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -731,6 +746,7 @@ class _InboxTipCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     TextButton(
+                      autofocus: autofocus,
                       onPressed: onGoToSettings,
                       style: TextButton.styleFrom(
                         padding: EdgeInsets.zero,
