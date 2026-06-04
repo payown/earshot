@@ -66,6 +66,10 @@ abstract interface class AppSettingsRepository {
 
   Future<void> setPodcastNameFirst({required bool value});
 
+  Future<bool> hasSeenPodcastNameTip();
+
+  Future<void> setHasSeenPodcastNameTip({required bool value});
+
   // null = keep forever
   Future<int?> getDownloadRetentionDays();
 
@@ -94,6 +98,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyContinueAfterQueue = 'continue_after_queue';
   static const _keyContinueAfterGroup = 'continue_after_group';
   static const _keyPodcastNameFirst = 'podcast_name_first';
+  static const _keyPodcastNameTipSeen = 'podcast_name_tip_seen';
   static const _keyDownloadRetentionDays = 'download_retention_days';
   static const _keyLastPlayingEpisodeId = 'last_playing_episode_id';
   static const _defaultAutoDownload = 3;
@@ -245,6 +250,14 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setPodcastNameFirst({required bool value}) =>
       _set(_keyPodcastNameFirst, value.toString());
+
+  @override
+  Future<bool> hasSeenPodcastNameTip() =>
+      _getBool(_keyPodcastNameTipSeen, defaultValue: false);
+
+  @override
+  Future<void> setHasSeenPodcastNameTip({required bool value}) =>
+      _set(_keyPodcastNameTipSeen, value.toString());
 
   @override
   Future<int?> getDownloadRetentionDays() async {
