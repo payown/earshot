@@ -69,6 +69,23 @@ cd ~/.claude/.a11y-agent-team-repo && bash install.sh
 - **No `print()`.** Use `package:logging` with a project logger.
 - **`const` constructors everywhere possible.**
 
+## iOS platform channel development
+
+When adding a new `.swift` file to `ios/Runner/`, Flutter does **not** auto-discover it. You must register it manually in `ios/Runner.xcodeproj/project.pbxproj` or the file will silently not compile (you'll get "Cannot find 'YourClass' in scope" at build time).
+
+Four places to edit in `project.pbxproj` — use the existing `AppDelegate.swift` / `SceneDelegate.swift` entries as the pattern, and generate two new UUIDs (24 hex chars each):
+
+1. **PBXBuildFile section** — `NEWUUID_A /* YourFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = NEWUUID_B /* YourFile.swift */; };`
+2. **PBXFileReference section** — `NEWUUID_B /* YourFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YourFile.swift; sourceTree = "<group>"; };`
+3. **Runner group children list** — add `NEWUUID_B /* YourFile.swift */,` alongside AppDelegate.swift
+4. **PBXSourcesBuildPhase files list** — add `NEWUUID_A /* YourFile.swift in Sources */,` alongside AppDelegate.swift in Sources
+
+Also: `registrar(forPlugin:)` on `FlutterPluginRegistry` returns an optional. Always unwrap with `guard let`:
+```swift
+guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "MyChannel") else { return }
+MyChannel.register(with: registrar.messenger())
+```
+
 ## Accessibility implementation requirements
 
 - Every interactive widget has a `Semantics` wrapper or built-in semantic properties
