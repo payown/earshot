@@ -466,6 +466,9 @@ class QueueScreen extends ConsumerWidget {
       await ref
           .read(queueRepositoryProvider)
           .bringGroupToFront(group.episodes.map((e) => e.id).toList());
+      ref
+          .read<ActiveGroupNotifier>(activeGroupPodcastIdProvider.notifier)
+          .set(group.podcastId);
       _playEpisode(ref, group.episodes.first);
       SemanticsService.sendAnnouncement(
         view,
