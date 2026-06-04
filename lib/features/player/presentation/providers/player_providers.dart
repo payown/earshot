@@ -231,26 +231,40 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
   handler.onEpisodeCompleted = () async {
     final continueAfterQueue =
         ref.read(continueAfterQueueProvider).value ?? false;
+
+    // Read queue BEFORE removing the completed episode so currentIndex is
+    // accurate. PositionTracker no longer removes from queueItems on
+    // completion; that deletion is owned here to eliminate the race condition.
     final queue = await queueRepo.watchQueue().first;
-    if (queue.isEmpty) {
-      await handler.stop();
-      return;
-    }
     final currentEpisodeId =
         handler.mediaItem.value?.extras?['episodeId'] as int?;
     final currentIndex = currentEpisodeId != null
         ? queue.indexWhere((e) => e.id == currentEpisodeId)
         : -1;
-    if (currentIndex >= queue.length - 1) {
+
+    if (currentEpisodeId != null) {
+      await queueRepo.removeFromQueue(currentEpisodeId);
+    }
+
+    final remaining = currentIndex >= 0
+        ? queue.length -
+              1 // one item removed
+        : queue.length;
+
+    if (remaining == 0 || currentIndex >= queue.length - 1) {
       if (!continueAfterQueue) {
         await handler.stop();
         return;
       }
       // Continue mode: loop back to the first episode in the queue.
     }
-    final next = currentIndex >= 0 && currentIndex < queue.length - 1
-        ? queue[currentIndex + 1]
-        : queue.first;
+
+    final updatedQueue = await queueRepo.watchQueue().first;
+    if (updatedQueue.isEmpty) {
+      await handler.stop();
+      return;
+    }
+    final next = updatedQueue.first;
     final db = ref.read(appDatabaseProvider);
     final nextPodcast = await (db.select(
       db.podcasts,
