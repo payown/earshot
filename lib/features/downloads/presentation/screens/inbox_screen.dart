@@ -65,8 +65,8 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
     final podcastNameFirst = ref.watch(podcastNameFirstProvider).value ?? false;
     final tipSeen = ref.watch(podcastNameTipSeenProvider).value ?? false;
 
-    // Announce the tip once via VoiceOver live region so users hear it
-    // without needing to navigate to the card manually.
+    // Announce the tip once and auto-dismiss so neither sighted nor VoiceOver
+    // users have to manually interact with the card.
     if (!tipSeen && !_tipAnnouncementPosted) {
       _tipAnnouncementPosted = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -75,9 +75,16 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
             SemanticsService.sendAnnouncement(
               View.of(context),
               'Tip: VoiceOver can announce the podcast name before the episode '
-              'title in this list. Swipe right to find the tip at the top.',
+              'title in this list. Find this setting in Settings under Inbox.',
               TextDirection.ltr,
             );
+          }
+        });
+        // Auto-dismiss after 5 seconds — enough for a sighted user to read
+        // and tap 'Go to Settings', no action needed from VoiceOver users.
+        Future.delayed(const Duration(seconds: 5), () {
+          if (mounted) {
+            ref.read(podcastNameTipSeenProvider.notifier).set(true);
           }
         });
       });
