@@ -38,13 +38,26 @@ class InboxScreen extends ConsumerStatefulWidget {
 }
 
 class _InboxScreenState extends ConsumerState<InboxScreen> {
+  final _tipFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
     // Reset tip so it shows again for testing — remove after device verification.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ref.read(podcastNameTipSeenProvider.notifier).set(false);
+      if (!mounted) return;
+      ref.read(podcastNameTipSeenProvider.notifier).set(false);
+      // Wait for VoiceOver to finish announcing the screen before moving focus.
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (mounted) _tipFocusNode.requestFocus();
+      });
     });
+  }
+
+  @override
+  void dispose() {
+    _tipFocusNode.dispose();
+    super.dispose();
   }
 
   @override
@@ -111,7 +124,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
             if (!tipSeen)
               SliverToBoxAdapter(
                 child: _InboxTipCard(
-                  autofocus: true,
+                  focusNode: _tipFocusNode,
                   onDismiss: () => unawaited(
                     ref.read(podcastNameTipSeenProvider.notifier).set(true),
                   ),
@@ -695,12 +708,12 @@ class _InboxTipCard extends StatelessWidget {
   const _InboxTipCard({
     required this.onDismiss,
     required this.onGoToSettings,
-    this.autofocus = false,
+    this.focusNode,
   });
 
   final VoidCallback onDismiss;
   final VoidCallback onGoToSettings;
-  final bool autofocus;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -746,7 +759,7 @@ class _InboxTipCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     TextButton(
-                      autofocus: autofocus,
+                      focusNode: focusNode,
                       onPressed: onGoToSettings,
                       style: TextButton.styleFrom(
                         padding: EdgeInsets.zero,
