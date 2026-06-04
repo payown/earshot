@@ -97,6 +97,14 @@ final continueAfterGroupEndsProvider =
       ),
     );
 
+final podcastNameFirstProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.isPodcastNameFirst(),
+        write: (r, v) => r.setPodcastNameFirst(value: v),
+      ),
+    );
+
 class _RetentionSettingNotifier extends AsyncNotifier<int?> {
   @override
   Future<int?> build() async {

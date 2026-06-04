@@ -51,6 +51,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
         ref.watch(episodeActionsProvider).asData?.value ??
         defaultEpisodeActions;
     final autoDownload = ref.watch(autoDownloadInboxProvider).value ?? false;
+    final podcastNameFirst = ref.watch(podcastNameFirstProvider).value ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -115,6 +116,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
                         return _InboxEpisodeTile(
                           episode: episode,
                           podcastTitle: podcastTitles[episode.podcastId],
+                          podcastNameFirst: podcastNameFirst,
                           quickActions: actions,
                           onDelete: () => unawaited(
                             _confirmDelete(context, ref, episode),
@@ -436,10 +438,12 @@ class _InboxEpisodeTile extends StatelessWidget {
     required this.quickActions,
     required this.onDelete,
     this.podcastTitle,
+    this.podcastNameFirst = false,
   });
 
   final Episode episode;
   final String? podcastTitle;
+  final bool podcastNameFirst;
   final List<EpisodeQuickActionItem> quickActions;
   final VoidCallback onDelete;
 
@@ -503,8 +507,9 @@ class _InboxEpisodeTile extends StatelessWidget {
     final durationLabel = _semanticDuration(episode);
     final downloadLabel = _downloadStatusLabel(episode.downloadStatus);
     final parts = [
+      if (podcastNameFirst && podcastTitle != null) podcastTitle!,
       episode.title,
-      if (podcastTitle != null) podcastTitle!,
+      if (!podcastNameFirst && podcastTitle != null) podcastTitle!,
       'New episode',
       if (durationLabel != null) durationLabel,
       if (downloadLabel != null) downloadLabel,
