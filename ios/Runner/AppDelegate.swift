@@ -15,9 +15,7 @@ import workmanager_apple
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    let messenger = engineBridge.pluginRegistry
-      .registrar(forPlugin: "ChapterChannel")
-      .messenger()
-    ChapterChannel.register(with: messenger)
+    guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ChapterChannel") else { return }
+    ChapterChannel.register(with: registrar.messenger())
   }
 }
