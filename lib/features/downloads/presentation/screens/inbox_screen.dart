@@ -41,15 +41,6 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
   bool _tipAnnouncementPosted = false;
 
   @override
-  void initState() {
-    super.initState();
-    // Reset tip so it shows again for testing — remove after device verification.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ref.read(podcastNameTipSeenProvider.notifier).set(false);
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     // All episodes across all podcasts with newEpisode status, newest first.
     final allEpisodes = ref.watch(_inboxEpisodesProvider);
