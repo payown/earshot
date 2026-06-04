@@ -158,9 +158,6 @@ class PositionTracker {
         playedAt: Value(DateTime.now().toUtc()),
       ),
     );
-    await (_db.delete(
-      _db.queueItems,
-    )..where((q) => q.episodeId.equals(episodeId))).go();
     _log.info('Marked episode $episodeId as played');
   }
 

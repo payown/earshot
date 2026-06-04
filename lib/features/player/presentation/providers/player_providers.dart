@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
+import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/queue_group.dart';
@@ -228,21 +229,42 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
   final queueRepo = ref.read(queueRepositoryProvider);
 
   handler.onEpisodeCompleted = () async {
+    final continueAfterQueue =
+        ref.read(continueAfterQueueProvider).value ?? false;
+
+    // Read queue BEFORE removing the completed episode so currentIndex is
+    // accurate. PositionTracker no longer removes from queueItems on
+    // completion; that deletion is owned here to eliminate the race condition.
     final queue = await queueRepo.watchQueue().first;
-    if (queue.isEmpty) {
-      await handler.stop();
-      return;
-    }
     final currentEpisodeId =
         handler.mediaItem.value?.extras?['episodeId'] as int?;
     final currentIndex = currentEpisodeId != null
         ? queue.indexWhere((e) => e.id == currentEpisodeId)
         : -1;
-    if (currentIndex >= queue.length - 1) {
+
+    if (currentEpisodeId != null) {
+      await queueRepo.removeFromQueue(currentEpisodeId);
+    }
+
+    final remaining = currentIndex >= 0
+        ? queue.length -
+              1 // one item removed
+        : queue.length;
+
+    if (remaining == 0 || currentIndex >= queue.length - 1) {
+      if (!continueAfterQueue) {
+        await handler.stop();
+        return;
+      }
+      // Continue mode: loop back to the first episode in the queue.
+    }
+
+    final updatedQueue = await queueRepo.watchQueue().first;
+    if (updatedQueue.isEmpty) {
       await handler.stop();
       return;
     }
-    final next = currentIndex >= 0 ? queue[currentIndex + 1] : queue.first;
+    final next = updatedQueue.first;
     final db = ref.read(appDatabaseProvider);
     final nextPodcast = await (db.select(
       db.podcasts,

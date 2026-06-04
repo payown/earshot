@@ -155,6 +155,39 @@ class SettingsScreen extends ConsumerWidget {
                     }
                   },
           ),
+          SwitchListTile(
+            title: const Text('Continue after queue ends'),
+            subtitle: const Text(
+              'When the queue finishes, keep playing instead of stopping',
+            ),
+            value: ref.watch(continueAfterQueueProvider).value ?? false,
+            onChanged: ref.watch(continueAfterQueueProvider).isLoading
+                ? null
+                : (val) async {
+                    try {
+                      await ref
+                          .read(continueAfterQueueProvider.notifier)
+                          .set(val);
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          val
+                              ? 'Playback will continue after queue ends'
+                              : 'Playback will stop at end of queue',
+                          TextDirection.ltr,
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          'Could not update queue setting',
+                          TextDirection.ltr,
+                        );
+                      }
+                    }
+                  },
+          ),
           const Divider(),
           Semantics(
             header: true,

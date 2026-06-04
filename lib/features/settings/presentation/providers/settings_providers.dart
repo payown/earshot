@@ -81,6 +81,14 @@ final groupQueueEpisodesProvider =
       ),
     );
 
+final continueAfterQueueProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.isContinueAfterQueue(),
+        write: (r, v) => r.setContinueAfterQueue(value: v),
+      ),
+    );
+
 class _RetentionSettingNotifier extends AsyncNotifier<int?> {
   @override
   Future<int?> build() async {
