@@ -38,6 +38,8 @@ class InboxScreen extends ConsumerStatefulWidget {
 }
 
 class _InboxScreenState extends ConsumerState<InboxScreen> {
+  bool _tipAnnouncementPosted = false;
+
   @override
   Widget build(BuildContext context) {
     // All episodes across all podcasts with newEpisode status, newest first.
@@ -51,6 +53,33 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
         ref.watch(episodeActionsProvider).asData?.value ??
         defaultEpisodeActions;
     final autoDownload = ref.watch(autoDownloadInboxProvider).value ?? false;
+    final podcastNameFirst = ref.watch(podcastNameFirstProvider).value ?? false;
+    final tipSeen = ref.watch(podcastNameTipSeenProvider).value ?? false;
+
+    // Announce the tip once and auto-dismiss so neither sighted nor VoiceOver
+    // users have to manually interact with the card.
+    if (!tipSeen && !_tipAnnouncementPosted) {
+      _tipAnnouncementPosted = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future.delayed(const Duration(milliseconds: 700), () {
+          if (mounted) {
+            SemanticsService.sendAnnouncement(
+              View.of(context),
+              'Tip: VoiceOver can announce the podcast name before the episode '
+              'title in this list. Find this setting in Settings under Inbox.',
+              TextDirection.ltr,
+            );
+          }
+        });
+        // Auto-dismiss after 5 seconds — enough for a sighted user to read
+        // and tap 'Go to Settings', no action needed from VoiceOver users.
+        Future.delayed(const Duration(seconds: 5), () {
+          if (mounted) {
+            ref.read(podcastNameTipSeenProvider.notifier).set(true);
+          }
+        });
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -97,6 +126,15 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
         onRefresh: () => _refreshInbox(context, ref),
         child: CustomScrollView(
           slivers: [
+            if (!tipSeen)
+              SliverToBoxAdapter(
+                child: _InboxTipCard(
+                  onDismiss: () => unawaited(
+                    ref.read(podcastNameTipSeenProvider.notifier).set(true),
+                  ),
+                  onGoToSettings: () => context.push(AppRoutes.settings),
+                ),
+              ),
             allEpisodes.when(
               data: (episodes) => episodes.isEmpty
                   ? SliverToBoxAdapter(child: _EmptyInbox())
@@ -115,6 +153,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
                         return _InboxEpisodeTile(
                           episode: episode,
                           podcastTitle: podcastTitles[episode.podcastId],
+                          podcastNameFirst: podcastNameFirst,
                           quickActions: actions,
                           onDelete: () => unawaited(
                             _confirmDelete(context, ref, episode),
@@ -436,10 +475,12 @@ class _InboxEpisodeTile extends StatelessWidget {
     required this.quickActions,
     required this.onDelete,
     this.podcastTitle,
+    this.podcastNameFirst = false,
   });
 
   final Episode episode;
   final String? podcastTitle;
+  final bool podcastNameFirst;
   final List<EpisodeQuickActionItem> quickActions;
   final VoidCallback onDelete;
 
@@ -503,8 +544,9 @@ class _InboxEpisodeTile extends StatelessWidget {
     final durationLabel = _semanticDuration(episode);
     final downloadLabel = _downloadStatusLabel(episode.downloadStatus);
     final parts = [
+      if (podcastNameFirst && podcastTitle != null) podcastTitle!,
       episode.title,
-      if (podcastTitle != null) podcastTitle!,
+      if (!podcastNameFirst && podcastTitle != null) podcastTitle!,
       'New episode',
       if (durationLabel != null) durationLabel,
       if (downloadLabel != null) downloadLabel,
@@ -663,5 +705,84 @@ class _InboxEpisodeTile extends StatelessWidget {
     if (s > 0 || parts.isEmpty)
       parts.add('$s ${s == 1 ? 'second' : 'seconds'}');
     return parts.join(', ');
+  }
+}
+
+class _InboxTipCard extends StatelessWidget {
+  const _InboxTipCard({
+    required this.onDismiss,
+    required this.onGoToSettings,
+  });
+
+  final VoidCallback onDismiss;
+  final VoidCallback onGoToSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Card(
+        color: colorScheme.secondaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: ExcludeSemantics(
+                  child: Icon(
+                    Icons.tips_and_updates_outlined,
+                    size: 20,
+                    color: colorScheme.onSecondaryContainer,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'VoiceOver tip',
+                      style: textTheme.labelMedium?.copyWith(
+                        color: colorScheme.onSecondaryContainer,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'VoiceOver can announce the podcast name before the episode title in this list. Turn it on in Settings › Inbox.',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    TextButton(
+                      onPressed: onGoToSettings,
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(0, 44),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        foregroundColor: colorScheme.onSecondaryContainer,
+                      ),
+                      child: const Text('Go to Settings'),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'Dismiss tip',
+                color: colorScheme.onSecondaryContainer,
+                onPressed: onDismiss,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

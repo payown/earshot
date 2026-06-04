@@ -118,6 +118,39 @@ class SettingsScreen extends ConsumerWidget {
                     }
                   },
           ),
+          SwitchListTile(
+            title: const Text('Announce podcast name first'),
+            subtitle: const Text(
+              'VoiceOver reads the show name before the episode title in the inbox',
+            ),
+            value: ref.watch(podcastNameFirstProvider).value ?? false,
+            onChanged: ref.watch(podcastNameFirstProvider).isLoading
+                ? null
+                : (val) async {
+                    try {
+                      await ref
+                          .read(podcastNameFirstProvider.notifier)
+                          .set(val);
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          val
+                              ? 'Podcast name will be announced first'
+                              : 'Episode title will be announced first',
+                          TextDirection.ltr,
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          'Could not update inbox setting',
+                          TextDirection.ltr,
+                        );
+                      }
+                    }
+                  },
+          ),
           const Divider(),
           Semantics(
             header: true,
