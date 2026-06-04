@@ -246,11 +246,11 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         await handler.stop();
         return;
       }
-      // TODO(#168): implement continue behavior (loop, or pull from subscriptions)
-      await handler.stop();
-      return;
+      // Continue mode: loop back to the first episode in the queue.
     }
-    final next = currentIndex >= 0 ? queue[currentIndex + 1] : queue.first;
+    final next = currentIndex >= 0 && currentIndex < queue.length - 1
+        ? queue[currentIndex + 1]
+        : queue.first;
     final db = ref.read(appDatabaseProvider);
     final nextPodcast = await (db.select(
       db.podcasts,
