@@ -38,26 +38,15 @@ class InboxScreen extends ConsumerStatefulWidget {
 }
 
 class _InboxScreenState extends ConsumerState<InboxScreen> {
-  final _tipFocusNode = FocusNode();
+  bool _tipAnnouncementPosted = false;
 
   @override
   void initState() {
     super.initState();
     // Reset tip so it shows again for testing — remove after device verification.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      ref.read(podcastNameTipSeenProvider.notifier).set(false);
-      // Wait for VoiceOver to finish announcing the screen before moving focus.
-      Future.delayed(const Duration(milliseconds: 600), () {
-        if (mounted) _tipFocusNode.requestFocus();
-      });
+      if (mounted) ref.read(podcastNameTipSeenProvider.notifier).set(false);
     });
-  }
-
-  @override
-  void dispose() {
-    _tipFocusNode.dispose();
-    super.dispose();
   }
 
   @override
@@ -75,6 +64,24 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
     final autoDownload = ref.watch(autoDownloadInboxProvider).value ?? false;
     final podcastNameFirst = ref.watch(podcastNameFirstProvider).value ?? false;
     final tipSeen = ref.watch(podcastNameTipSeenProvider).value ?? false;
+
+    // Announce the tip once via VoiceOver live region so users hear it
+    // without needing to navigate to the card manually.
+    if (!tipSeen && !_tipAnnouncementPosted) {
+      _tipAnnouncementPosted = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future.delayed(const Duration(milliseconds: 700), () {
+          if (mounted) {
+            SemanticsService.sendAnnouncement(
+              View.of(context),
+              'Tip: VoiceOver can announce the podcast name before the episode '
+              'title in this list. Swipe right to find the tip at the top.',
+              TextDirection.ltr,
+            );
+          }
+        });
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -124,7 +131,6 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
             if (!tipSeen)
               SliverToBoxAdapter(
                 child: _InboxTipCard(
-                  focusNode: _tipFocusNode,
                   onDismiss: () => unawaited(
                     ref.read(podcastNameTipSeenProvider.notifier).set(true),
                   ),
@@ -708,12 +714,10 @@ class _InboxTipCard extends StatelessWidget {
   const _InboxTipCard({
     required this.onDismiss,
     required this.onGoToSettings,
-    this.focusNode,
   });
 
   final VoidCallback onDismiss;
   final VoidCallback onGoToSettings;
-  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -759,7 +763,6 @@ class _InboxTipCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     TextButton(
-                      focusNode: focusNode,
                       onPressed: onGoToSettings,
                       style: TextButton.styleFrom(
                         padding: EdgeInsets.zero,
