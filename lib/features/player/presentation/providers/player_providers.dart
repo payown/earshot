@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
+import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/queue_group.dart';
@@ -228,6 +229,8 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
   final queueRepo = ref.read(queueRepositoryProvider);
 
   handler.onEpisodeCompleted = () async {
+    final continueAfterQueue =
+        ref.read(continueAfterQueueProvider).value ?? false;
     final queue = await queueRepo.watchQueue().first;
     if (queue.isEmpty) {
       await handler.stop();
@@ -239,6 +242,11 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         ? queue.indexWhere((e) => e.id == currentEpisodeId)
         : -1;
     if (currentIndex >= queue.length - 1) {
+      if (!continueAfterQueue) {
+        await handler.stop();
+        return;
+      }
+      // TODO(#168): implement continue behavior (loop, or pull from subscriptions)
       await handler.stop();
       return;
     }
