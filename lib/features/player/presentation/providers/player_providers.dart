@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
-import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/queue_group.dart';
@@ -73,6 +72,19 @@ final collapsedQueueGroupsProvider =
     NotifierProvider<CollapsedQueueGroupsNotifier, Set<int>>(
       CollapsedQueueGroupsNotifier.new,
     );
+
+// Tracks the podcast ID of the group being played via "Play Group". Null means
+// no group context — normal queue playback. Cleared when the group boundary is
+// crossed (whether playback stops or continues past the group).
+class ActiveGroupNotifier extends Notifier<int?> {
+  @override
+  int? build() => null;
+
+  void set(int? podcastId) => state = podcastId;
+}
+
+final activeGroupPodcastIdProvider =
+    NotifierProvider<ActiveGroupNotifier, int?>(ActiveGroupNotifier.new);
 
 final groupedQueueProvider = Provider<AsyncValue<List<QueueGroup>>>((ref) {
   final episodes = ref.watch(queueProvider);
@@ -229,8 +241,9 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
   final queueRepo = ref.read(queueRepositoryProvider);
 
   handler.onEpisodeCompleted = () async {
-    final continueAfterQueue =
-        ref.read(continueAfterQueueProvider).value ?? false;
+    final db = ref.read(appDatabaseProvider);
+    final settingsRepo = AppSettingsRepositoryImpl(database: db);
+    final continueAfterQueue = await settingsRepo.isContinueAfterQueue();
 
     // Read queue BEFORE removing the completed episode so currentIndex is
     // accurate. PositionTracker no longer removes from queueItems on
@@ -251,6 +264,29 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
               1 // one item removed
         : queue.length;
 
+    final updatedQueue = await queueRepo.watchQueue().first;
+
+    // Group-boundary check: if "Play Group" set an active group, detect when
+    // the queue moves past that group and apply the continueAfterGroupEnds
+    // setting before falling through to the normal end-of-queue check.
+    final activeGroupPodcastId = ref.read<int?>(activeGroupPodcastIdProvider);
+    if (activeGroupPodcastId != null) {
+      final groupEnded =
+          updatedQueue.isEmpty ||
+          updatedQueue.first.podcastId != activeGroupPodcastId;
+      if (groupEnded) {
+        ref
+            .read<ActiveGroupNotifier>(activeGroupPodcastIdProvider.notifier)
+            .set(null);
+        final continueAfterGroup = await settingsRepo
+            .isContinueAfterGroupEnds();
+        if (!continueAfterGroup) {
+          await handler.stop();
+          return;
+        }
+      }
+    }
+
     if (remaining == 0 || currentIndex >= queue.length - 1) {
       if (!continueAfterQueue) {
         await handler.stop();
@@ -259,13 +295,11 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
       // Continue mode: loop back to the first episode in the queue.
     }
 
-    final updatedQueue = await queueRepo.watchQueue().first;
     if (updatedQueue.isEmpty) {
       await handler.stop();
       return;
     }
     final next = updatedQueue.first;
-    final db = ref.read(appDatabaseProvider);
     final nextPodcast = await (db.select(
       db.podcasts,
     )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();

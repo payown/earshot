@@ -58,6 +58,10 @@ abstract interface class AppSettingsRepository {
 
   Future<void> setContinueAfterQueue({required bool value});
 
+  Future<bool> isContinueAfterGroupEnds();
+
+  Future<void> setContinueAfterGroupEnds({required bool value});
+
   // null = keep forever
   Future<int?> getDownloadRetentionDays();
 
@@ -84,6 +88,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyAutoDownloadQueue = 'auto_download_queue';
   static const _keyGroupQueueEpisodes = 'group_queue_episodes';
   static const _keyContinueAfterQueue = 'continue_after_queue';
+  static const _keyContinueAfterGroup = 'continue_after_group';
   static const _keyDownloadRetentionDays = 'download_retention_days';
   static const _keyLastPlayingEpisodeId = 'last_playing_episode_id';
   static const _defaultAutoDownload = 3;
@@ -219,6 +224,14 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setContinueAfterQueue({required bool value}) =>
       _set(_keyContinueAfterQueue, value.toString());
+
+  @override
+  Future<bool> isContinueAfterGroupEnds() =>
+      _getBool(_keyContinueAfterGroup, defaultValue: true);
+
+  @override
+  Future<void> setContinueAfterGroupEnds({required bool value}) =>
+      _set(_keyContinueAfterGroup, value.toString());
 
   @override
   Future<int?> getDownloadRetentionDays() async {

@@ -188,6 +188,39 @@ class SettingsScreen extends ConsumerWidget {
                     }
                   },
           ),
+          SwitchListTile(
+            title: const Text('Continue after group ends'),
+            subtitle: const Text(
+              'Keep playing when the group you started finishes',
+            ),
+            value: ref.watch(continueAfterGroupEndsProvider).value ?? true,
+            onChanged: ref.watch(continueAfterGroupEndsProvider).isLoading
+                ? null
+                : (val) async {
+                    try {
+                      await ref
+                          .read(continueAfterGroupEndsProvider.notifier)
+                          .set(val);
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          val
+                              ? 'Playback will continue after group ends'
+                              : 'Playback will stop at end of group',
+                          TextDirection.ltr,
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          'Could not update queue setting',
+                          TextDirection.ltr,
+                        );
+                      }
+                    }
+                  },
+          ),
           const Divider(),
           Semantics(
             header: true,
