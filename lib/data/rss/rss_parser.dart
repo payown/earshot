@@ -94,10 +94,12 @@ class RssParser {
   }
 
   // Returns the href attribute from a podcast-namespaced element.
+  // Falls back to prefix check in case namespace resolution returns null.
   String? _podcastText(XmlElement parent, String localName) {
     for (final el in parent.childElements) {
       if (el.localName == localName &&
-          (el.namespaceUri?.contains('podcastindex') ?? false)) {
+          ((el.namespaceUri?.contains('podcastindex') ?? false) ||
+              el.name.prefix == 'podcast')) {
         return el.getAttribute('url') ??
             el.getAttribute('href') ??
             el.innerText.trim().nullIfEmpty;
@@ -110,7 +112,8 @@ class RssParser {
   String? _podcastTranscriptUrl(XmlElement item) {
     for (final el in item.childElements) {
       if (el.localName == 'transcript' &&
-          (el.namespaceUri?.contains('podcastindex') ?? false)) {
+          ((el.namespaceUri?.contains('podcastindex') ?? false) ||
+              el.name.prefix == 'podcast')) {
         final type = el.getAttribute('type') ?? '';
         if (type.contains('vtt') ||
             type.contains('srt') ||

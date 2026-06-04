@@ -14,7 +14,9 @@ import '../../../../core/constants/urls.dart';
 import '../../../../features/bookmarks/presentation/providers/bookmarks_providers.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/sleep_timer.dart';
+import '../providers/chapter_providers.dart';
 import '../providers/player_providers.dart';
+import '../widgets/chapter_controls.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   const PlayerScreen({super.key});
@@ -28,6 +30,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   double? _speedBeforeHold;
   // Whether fast-forward is active via the VoiceOver rotor action path.
   bool _voFastForwardActive = false;
+  // Tracks which chapter index was most recently auto-skipped to avoid loops.
+  int? _lastAutoSkipFromChapterIndex;
 
   @override
   void dispose() {
@@ -123,6 +127,49 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       }
     });
 
+    // Auto-skip chapters the user has marked as skipped.
+    ref.listen<AsyncValue<Duration>>(positionProvider, (_, next) {
+      final position = next.asData?.value;
+      if (position == null) return;
+      final chapters = ref.read(chaptersProvider).asData?.value;
+      if (chapters == null || chapters.isEmpty) return;
+      final currentIndex = ref.read(currentChapterIndexProvider);
+      if (currentIndex == null) return;
+      final episodeId =
+          ref
+              .read(mediaItemProvider)
+              .asData
+              ?.value
+              ?.extras?['episodeId']
+              ?.toString() ??
+          '';
+      final skipped = ref.read(skippedChaptersProvider)[episodeId] ?? {};
+      if (!skipped.contains(currentIndex)) {
+        _lastAutoSkipFromChapterIndex = null;
+        return;
+      }
+      if (_lastAutoSkipFromChapterIndex == currentIndex) return;
+      for (var i = currentIndex + 1; i < chapters.length; i++) {
+        if (!skipped.contains(i)) {
+          _lastAutoSkipFromChapterIndex = currentIndex;
+          ref
+              .read(audioHandlerProvider)
+              .seek(
+                Duration(
+                  milliseconds: (chapters[i].startTime * 1000).round(),
+                ),
+              );
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            'Skipping chapter: ${chapters[currentIndex].title}',
+            TextDirection.ltr,
+          );
+          return;
+        }
+      }
+      _lastAutoSkipFromChapterIndex = currentIndex;
+    });
+
     if (mediaItem == null) {
       return const Scaffold(
         body: Center(child: Text('Nothing playing')),
@@ -153,8 +200,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(
-                height: 200,
+              AspectRatio(
+                aspectRatio: 1.0,
                 child: Semantics(
                   // Label change on fast-forward state forces VoiceOver to
                   // refresh customSemanticsActions (workaround for Flutter
@@ -224,6 +271,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 duration: duration,
                 onSeek: (p) => ref.read(audioHandlerProvider).seek(p),
               ),
+              const ChapterControls(),
               const SizedBox(height: Spacing.md),
               _PlaybackControls(
                 isPlaying: isPlaying,

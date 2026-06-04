@@ -109,7 +109,7 @@ SPEC CHECKSUMS:
   package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
   PostHog: f6da05611d29a8facb652f7e2ee8389bc3f96b67
   posthog_flutter: 03b15ff7a78e2a4162baaf11f8db37b079412106
-  sensors_plus: 809f7e76b18439344b148b2730634b59d645f7eb
+  sensors_plus: 6a11ed0c2e1d0bd0b20b4029d3bad27d96e0c65b
   Sentry: de29b881e83bd91cf99a927f82f1fd86bfb39db2
   sentry_flutter: cbb414ef141b64f901bc1ba32daa871349510ce4
   share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
