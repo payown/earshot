@@ -25,7 +25,7 @@ class _MainShellState extends ConsumerState<MainShell> {
   ShakeDetector? _shakeDetector;
   DateTime? _lastShake;
 
-  void _onShake() {
+  void _onShake(ShakeEvent _) {
     final now = DateTime.now();
     if (_lastShake != null &&
         now.difference(_lastShake!) < const Duration(seconds: 3)) {
