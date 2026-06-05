@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/constants/playback.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
@@ -230,6 +231,7 @@ final playbackRestorationProvider = FutureProvider<void>((ref) async {
         'podcastId': episode.podcastId,
         if (podcast?.speedOverride != null)
           'speedOverride': podcast!.speedOverride!,
+        if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
       },
     ),
     resumePositionSeconds: episode.positionSeconds,
@@ -240,14 +242,133 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
   final handler = ref.read(audioHandlerProvider);
   final queueRepo = ref.read(queueRepositoryProvider);
 
+  // Prevents the position listener from queuing redundant preload calls when
+  // the advance handler has already preloaded the next item.
+  var preloadScheduled = false;
+
+  MediaItem _buildMediaItem({
+    required Episode episode,
+    required String? podcastTitle,
+    required Uri? artUri,
+    required double? speedOverride,
+  }) {
+    return MediaItem(
+      id: episode.audioUrl,
+      title: podcastTitle ?? episode.title,
+      artist: episode.title,
+      album: podcastTitle,
+      artUri: artUri,
+      duration: episode.durationSeconds != null
+          ? Duration(seconds: episode.durationSeconds!)
+          : null,
+      extras: {
+        'episodeId': episode.id,
+        'podcastId': episode.podcastId,
+        if (speedOverride != null) 'speedOverride': speedOverride,
+        if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
+      },
+    );
+  }
+
+  Future<void> preloadNextEpisode() async {
+    final db = ref.read(appDatabaseProvider);
+    final queue = await queueRepo.watchQueue().first;
+    if (queue.length < 2) {
+      preloadScheduled = false;
+      return;
+    }
+    final next = queue[1];
+    final podcast = await (db.select(
+      db.podcasts,
+    )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
+    await handler.preloadNext(
+      _buildMediaItem(
+        episode: next,
+        podcastTitle: podcast?.title,
+        artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
+        speedOverride: podcast?.speedOverride,
+      ),
+    );
+  }
+
+  Future<bool> checkGroupBoundary(
+    List<Episode> updatedQueue,
+    AppSettingsRepositoryImpl settingsRepo,
+  ) async {
+    final activeGroupPodcastId = ref.read<int?>(activeGroupPodcastIdProvider);
+    if (activeGroupPodcastId == null) return false;
+    final groupEnded =
+        updatedQueue.isEmpty ||
+        updatedQueue.first.podcastId != activeGroupPodcastId;
+    if (!groupEnded) return false;
+    ref
+        .read<ActiveGroupNotifier>(activeGroupPodcastIdProvider.notifier)
+        .set(null);
+    final continueAfterGroup = await settingsRepo.isContinueAfterGroupEnds();
+    if (!continueAfterGroup) {
+      await handler.stop();
+      return true;
+    }
+    return false;
+  }
+
+  // Watches position and preloads the next queue episode when within
+  // kGaplessPreloadThreshold of the end, enabling gapless transitions.
+  final positionSub = handler.positionStream.listen((position) async {
+    if (preloadScheduled) return;
+    final duration = handler.mediaItem.value?.duration;
+    if (duration == null) return;
+    if (!shouldPreload(position, duration, kGaplessPreloadThreshold)) return;
+
+    // Set flag synchronously before any await so concurrent position events
+    // don't race in and schedule duplicate preloads.
+    preloadScheduled = true;
+
+    final db = ref.read(appDatabaseProvider);
+    final settingsRepo = AppSettingsRepositoryImpl(database: db);
+    final gaplessEnabled = await settingsRepo.isGaplessPlaybackEnabled();
+    if (!gaplessEnabled) {
+      preloadScheduled = false;
+      return;
+    }
+
+    unawaited(preloadNextEpisode());
+  });
+
+  // Called by the audio handler when a gapless transition occurs mid-playlist.
+  // Handles bookkeeping: remove completed episode, check group boundary,
+  // and preload the next-next episode to keep the gapless chain going.
+  handler.onEpisodeAdvanced = (int? previousEpisodeId) async {
+    preloadScheduled = false;
+
+    if (previousEpisodeId != null) {
+      await queueRepo.removeFromQueue(previousEpisodeId);
+    }
+
+    final db = ref.read(appDatabaseProvider);
+    final settingsRepo = AppSettingsRepositoryImpl(database: db);
+    final updatedQueue = await queueRepo.watchQueue().first;
+
+    final stopped = await checkGroupBoundary(updatedQueue, settingsRepo);
+    if (stopped) return;
+
+    // Preload the episode after the new current so the chain stays warm.
+    if (updatedQueue.length > 1) {
+      preloadScheduled = true;
+      unawaited(preloadNextEpisode());
+    }
+  };
+
+  // Called when the last episode in the playlist finishes (no preloaded next).
   handler.onEpisodeCompleted = () async {
+    preloadScheduled = false;
+
     final db = ref.read(appDatabaseProvider);
     final settingsRepo = AppSettingsRepositoryImpl(database: db);
     final continueAfterQueue = await settingsRepo.isContinueAfterQueue();
 
     // Read queue BEFORE removing the completed episode so currentIndex is
-    // accurate. PositionTracker no longer removes from queueItems on
-    // completion; that deletion is owned here to eliminate the race condition.
+    // accurate.
     final queue = await queueRepo.watchQueue().first;
     final currentEpisodeId =
         handler.mediaItem.value?.extras?['episodeId'] as int?;
@@ -259,70 +380,43 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
       await queueRepo.removeFromQueue(currentEpisodeId);
     }
 
-    final remaining = currentIndex >= 0
-        ? queue.length -
-              1 // one item removed
-        : queue.length;
+    final remaining = currentIndex >= 0 ? queue.length - 1 : queue.length;
 
     final updatedQueue = await queueRepo.watchQueue().first;
 
-    // Group-boundary check: if "Play Group" set an active group, detect when
-    // the queue moves past that group and apply the continueAfterGroupEnds
-    // setting before falling through to the normal end-of-queue check.
-    final activeGroupPodcastId = ref.read<int?>(activeGroupPodcastIdProvider);
-    if (activeGroupPodcastId != null) {
-      final groupEnded =
-          updatedQueue.isEmpty ||
-          updatedQueue.first.podcastId != activeGroupPodcastId;
-      if (groupEnded) {
-        ref
-            .read<ActiveGroupNotifier>(activeGroupPodcastIdProvider.notifier)
-            .set(null);
-        final continueAfterGroup = await settingsRepo
-            .isContinueAfterGroupEnds();
-        if (!continueAfterGroup) {
-          await handler.stop();
-          return;
-        }
-      }
-    }
+    final stopped = await checkGroupBoundary(updatedQueue, settingsRepo);
+    if (stopped) return;
 
     if (remaining == 0 || currentIndex >= queue.length - 1) {
       if (!continueAfterQueue) {
         await handler.stop();
         return;
       }
-      // Continue mode: loop back to the first episode in the queue.
     }
 
     if (updatedQueue.isEmpty) {
       await handler.stop();
       return;
     }
+
     final next = updatedQueue.first;
     final nextPodcast = await (db.select(
       db.podcasts,
     )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
     await handler.playEpisode(
-      MediaItem(
-        id: next.audioUrl,
-        title: nextPodcast?.title ?? next.title,
-        artist: next.title,
-        album: nextPodcast?.title,
+      _buildMediaItem(
+        episode: next,
+        podcastTitle: nextPodcast?.title,
         artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
-        duration: next.durationSeconds != null
-            ? Duration(seconds: next.durationSeconds!)
-            : null,
-        extras: {
-          'episodeId': next.id,
-          'podcastId': next.podcastId,
-          if (nextPodcast?.speedOverride != null)
-            'speedOverride': nextPodcast!.speedOverride!,
-        },
+        speedOverride: nextPodcast?.speedOverride,
       ),
       resumePositionSeconds: next.positionSeconds,
     );
   };
 
-  ref.onDispose(() => handler.onEpisodeCompleted = null);
+  ref.onDispose(() {
+    unawaited(positionSub.cancel());
+    handler.onEpisodeCompleted = null;
+    handler.onEpisodeAdvanced = null;
+  });
 });

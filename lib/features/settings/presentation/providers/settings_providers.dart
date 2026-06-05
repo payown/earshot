@@ -133,3 +133,19 @@ final downloadRetentionDaysProvider =
     AsyncNotifierProvider<_RetentionSettingNotifier, int?>(
       _RetentionSettingNotifier.new,
     );
+
+final gaplessPlaybackProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.isGaplessPlaybackEnabled(),
+        write: (r, v) => r.setGaplessPlaybackEnabled(value: v),
+      ),
+    );
+
+final gaplessTipSeenProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.hasSeenGaplessTip(),
+        write: (r, v) => r.setHasSeenGaplessTip(value: v),
+      ),
+    );

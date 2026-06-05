@@ -9,6 +9,21 @@ import '../domain/sleep_timer.dart';
 
 final _log = Logger('AudioHandler');
 
+/// Returns [AudioSource.file] when the item has a local [downloadPath] in its
+/// extras, otherwise falls back to streaming via [AudioSource.uri].
+AudioSource resolveAudioSource(MediaItem item) {
+  final downloadPath = item.extras?['downloadPath'] as String?;
+  if (downloadPath != null) {
+    return AudioSource.file(downloadPath);
+  }
+  return AudioSource.uri(Uri.parse(item.id));
+}
+
+/// Returns true when the player should preload the next episode.
+/// [position] >= [duration] - [threshold] triggers buffering.
+bool shouldPreload(Duration position, Duration duration, Duration threshold) =>
+    duration > Duration.zero && position >= duration - threshold;
+
 class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   EarshotAudioHandler() {
     _loudnessEnhancer = AndroidLoudnessEnhancer();
@@ -18,6 +33,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
       ),
     );
     _attachPlaybackListener();
+    _attachIndexListener();
     _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) unawaited(_onEpisodeCompleted());
     });
@@ -34,6 +50,21 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   late final SleepTimer sleepTimer;
   StreamSubscription<PlaybackState>? _playbackSubscription;
 
+  MediaItem? _currentMediaItem;
+  MediaItem? _nextMediaItem;
+
+  // Tracks previous index to detect forward advances in the playlist.
+  int? _lastKnownIndex;
+
+  // Prevents re-entrant processing when removeAudioSourceAt(0) fires a
+  // currentIndexStream event.
+  bool _isAdvancing = false;
+
+  /// Called when the playlist advances gaplessly to the next episode.
+  /// [previousEpisodeId] is the episode that just finished.
+  Future<void> Function(int? previousEpisodeId)? onEpisodeAdvanced;
+
+  /// Called when the last episode in the playlist finishes.
   Future<void> Function()? onEpisodeCompleted;
 
   void _attachPlaybackListener() {
@@ -42,33 +73,54 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
         .listen(playbackState.add);
   }
 
+  void _attachIndexListener() {
+    _player.currentIndexStream.listen((index) {
+      final last = _lastKnownIndex;
+      _lastKnownIndex = index;
+      if (index == null || last == null) return;
+      if (index > last && !_isAdvancing) {
+        _isAdvancing = true;
+        unawaited(_onGaplessAdvance());
+      }
+    });
+  }
+
   final StreamController<int?> _episodeIdController =
       StreamController<int?>.broadcast();
   Stream<int?> get episodeIdStream => _episodeIdController.stream;
+
+  AudioSource _resolveAudioSource(MediaItem item) => resolveAudioSource(item);
+
+  Future<void> _applySpeedOverride(MediaItem item) async {
+    final speedOverride = item.extras?['speedOverride'] as double?;
+    if (speedOverride != null) {
+      await _player.setSpeed(speedOverride);
+      playbackState.add(playbackState.value.copyWith(speed: speedOverride));
+    }
+  }
 
   Future<void> playEpisode(
     MediaItem item, {
     int resumePositionSeconds = 0,
   }) async {
     _log.info('Playing: ${item.title}');
+    _currentMediaItem = item;
+    _nextMediaItem = null;
+    _lastKnownIndex = 0;
     mediaItem.add(item);
     queue.add([item]);
 
     final episodeId = item.extras?['episodeId'] as int?;
     _episodeIdController.add(episodeId);
 
-    // Restore per-podcast speed override before playback starts.
-    final speedOverride = item.extras?['speedOverride'] as double?;
-    if (speedOverride != null) {
-      await _player.setSpeed(speedOverride);
-      playbackState.add(playbackState.value.copyWith(speed: speedOverride));
-    }
+    await _applySpeedOverride(item);
 
     try {
-      await _player.setUrl(item.id);
-      if (resumePositionSeconds > 0) {
-        await _player.seek(Duration(seconds: resumePositionSeconds));
-      }
+      await _player.setAudioSources(
+        [_resolveAudioSource(item)],
+        initialIndex: 0,
+        initialPosition: Duration(seconds: resumePositionSeconds),
+      );
       await _player.play();
     } on Exception catch (e) {
       _log.severe('Failed to load audio for "${item.title}": $e');
@@ -82,27 +134,72 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     int resumePositionSeconds = 0,
   }) async {
     _log.info('Restoring: ${item.title}');
+    _currentMediaItem = item;
+    _nextMediaItem = null;
+    _lastKnownIndex = 0;
     mediaItem.add(item);
     queue.add([item]);
 
     final episodeId = item.extras?['episodeId'] as int?;
     _episodeIdController.add(episodeId);
 
-    final speedOverride = item.extras?['speedOverride'] as double?;
-    if (speedOverride != null) {
-      await _player.setSpeed(speedOverride);
-      playbackState.add(playbackState.value.copyWith(speed: speedOverride));
-    }
+    await _applySpeedOverride(item);
 
     try {
-      await _player.setUrl(item.id);
-      if (resumePositionSeconds > 0) {
-        await _player.seek(Duration(seconds: resumePositionSeconds));
-      }
+      await _player.setAudioSources(
+        [_resolveAudioSource(item)],
+        initialIndex: 0,
+        initialPosition: Duration(seconds: resumePositionSeconds),
+      );
     } on Exception catch (e) {
       _log.severe('Failed to restore "${item.title}": $e');
       mediaItem.add(null);
       await stop();
+    }
+  }
+
+  /// Adds [item] as the next item in the playlist so just_audio can
+  /// buffer and transition gaplessly. Replaces any previously preloaded item.
+  Future<void> preloadNext(MediaItem item) async {
+    _nextMediaItem = item;
+    // Drop any stale preloaded item before adding the new one.
+    while (_player.audioSources.length > 1) {
+      await _player.removeAudioSourceAt(_player.audioSources.length - 1);
+    }
+    await _player.addAudioSource(_resolveAudioSource(item));
+    _log.info('Preloaded next: ${item.title}');
+  }
+
+  Future<void> _onGaplessAdvance() async {
+    _log.info(
+      'Gapless advance: ${_currentMediaItem?.title} → ${_nextMediaItem?.title}',
+    );
+    final previousEpisodeId = _currentMediaItem?.extras?['episodeId'] as int?;
+    final next = _nextMediaItem;
+
+    try {
+      if (next != null) {
+        _currentMediaItem = next;
+        _nextMediaItem = null;
+        mediaItem.add(next);
+
+        final episodeId = next.extras?['episodeId'] as int?;
+        _episodeIdController.add(episodeId);
+
+        await _applySpeedOverride(next);
+
+        // Remove the completed episode from the playlist head.
+        // This causes currentIndexStream to emit 0; _isAdvancing suppresses it.
+        await _player.removeAudioSourceAt(0);
+      }
+
+      sleepTimer.onEpisodeEnded();
+      final callback = onEpisodeAdvanced;
+      if (callback != null) {
+        await callback(previousEpisodeId);
+      }
+    } finally {
+      _isAdvancing = false;
     }
   }
 
@@ -132,6 +229,10 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> stop() async {
     await _playbackSubscription?.cancel();
     _playbackSubscription = null;
+    _currentMediaItem = null;
+    _nextMediaItem = null;
+    _lastKnownIndex = null;
+    _isAdvancing = false;
     await _player.stop();
     _episodeIdController.add(null);
     playbackState.add(

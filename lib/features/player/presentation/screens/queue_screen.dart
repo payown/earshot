@@ -101,6 +101,7 @@ void _playEpisode(WidgetRef ref, Episode episode) {
         'podcastId': episode.podcastId,
         if (podcast?.speedOverride != null)
           'speedOverride': podcast!.speedOverride!,
+        if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
       },
     ),
     resumePositionSeconds: resumePosition,
@@ -138,17 +139,48 @@ Future<void> _playOldestFirst(WidgetRef ref, List<Episode> episodes) async {
       .sortGroup(sorted.map((e) => e.id).toList());
 }
 
-class QueueScreen extends ConsumerWidget {
+class QueueScreen extends ConsumerStatefulWidget {
   const QueueScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<QueueScreen> createState() => _QueueScreenState();
+}
+
+class _QueueScreenState extends ConsumerState<QueueScreen> {
+  bool _tipAnnouncementPosted = false;
+
+  @override
+  Widget build(BuildContext context) {
     final queue = ref.watch(queueProvider);
     final groupingEnabled =
         ref.watch(groupQueueEpisodesProvider).value ?? false;
     final autoDownload = ref.watch(autoDownloadQueueProvider).value ?? false;
     final currentEpisodeId =
         ref.watch(mediaItemProvider).value?.extras?['episodeId'] as int?;
+    final tipSeen = ref.watch(gaplessTipSeenProvider).value ?? false;
+
+    // Announce the tip once and auto-dismiss so VoiceOver users hear it
+    // without having to find or dismiss the card.
+    if (!tipSeen && !_tipAnnouncementPosted) {
+      _tipAnnouncementPosted = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future.delayed(const Duration(milliseconds: 700), () {
+          if (mounted) {
+            SemanticsService.sendAnnouncement(
+              View.of(context),
+              'Tip: Earshot supports gapless playback between episodes. '
+              'Find this setting in Settings under Queue.',
+              TextDirection.ltr,
+            );
+          }
+        });
+        Future.delayed(const Duration(seconds: 5), () {
+          if (mounted) {
+            ref.read(gaplessTipSeenProvider.notifier).set(true);
+          }
+        });
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -200,6 +232,15 @@ class QueueScreen extends ConsumerWidget {
       ),
       body: CustomScrollView(
         slivers: [
+          if (!tipSeen)
+            SliverToBoxAdapter(
+              child: _QueueTipCard(
+                onDismiss: () => unawaited(
+                  ref.read(gaplessTipSeenProvider.notifier).set(true),
+                ),
+                onGoToSettings: () => context.push(AppRoutes.settings),
+              ),
+            ),
           if (groupingEnabled)
             _buildGroupedBody(context, ref, currentEpisodeId)
           else
@@ -975,4 +1016,83 @@ class _DownloadActionItem {
 
   final String label;
   final VoidCallback onInvoke;
+}
+
+class _QueueTipCard extends StatelessWidget {
+  const _QueueTipCard({
+    required this.onDismiss,
+    required this.onGoToSettings,
+  });
+
+  final VoidCallback onDismiss;
+  final VoidCallback onGoToSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Card(
+        color: colorScheme.secondaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: ExcludeSemantics(
+                  child: Icon(
+                    Icons.tips_and_updates_outlined,
+                    size: 20,
+                    color: colorScheme.onSecondaryContainer,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Playback tip',
+                      style: textTheme.labelMedium?.copyWith(
+                        color: colorScheme.onSecondaryContainer,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Earshot supports gapless playback so episodes flow seamlessly back to back. Turn it on or off in Settings › Queue.',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    TextButton(
+                      onPressed: onGoToSettings,
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(0, 44),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        foregroundColor: colorScheme.onSecondaryContainer,
+                      ),
+                      child: const Text('Go to Settings'),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'Dismiss tip',
+                color: colorScheme.onSecondaryContainer,
+                onPressed: onDismiss,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
