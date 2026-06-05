@@ -10,11 +10,13 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/episode_action_builder.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
+import '../../../../core/utils/time_format.dart';
 import '../../../../data/db/enums.dart';
 import '../../../player/presentation/providers/player_providers.dart';
 import '../../../settings/domain/quick_action_definition.dart';
 import '../../../settings/presentation/providers/settings_providers.dart';
 import '../../../subscriptions/domain/episode.dart';
+import '../../../subscriptions/domain/podcast.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../../subscriptions/presentation/widgets/episode_list_tile.dart';
 import '../providers/downloads_providers.dart';
@@ -64,6 +66,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
     final autoDownload = ref.watch(autoDownloadInboxProvider).value ?? false;
     final podcastNameFirst = ref.watch(podcastNameFirstProvider).value ?? false;
     final tipSeen = ref.watch(podcastNameTipSeenProvider).value ?? false;
+    final auditEnabled = ref.watch(downloadAuditEnabledProvider).value ?? false;
 
     // Announce the tip once and auto-dismiss so neither sighted nor VoiceOver
     // users have to manually interact with the card.
@@ -136,6 +139,10 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
         onRefresh: () => _refreshInbox(context, ref),
         child: CustomScrollView(
           slivers: [
+            if (auditEnabled)
+              SliverToBoxAdapter(
+                child: _FeedStatusCard(podcasts: subs ?? []),
+              ),
             if (!tipSeen)
               SliverToBoxAdapter(
                 child: _InboxTipCard(
@@ -717,6 +724,80 @@ class _InboxEpisodeTile extends StatelessWidget {
     if (s > 0 || parts.isEmpty)
       parts.add('$s ${s == 1 ? 'second' : 'seconds'}');
     return parts.join(', ');
+  }
+}
+
+class _FeedStatusCard extends StatelessWidget {
+  const _FeedStatusCard({required this.podcasts});
+
+  final List<Podcast> podcasts;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final labelStyle = textTheme.bodySmall?.copyWith(
+      color: colorScheme.onTertiaryContainer,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Card(
+        color: colorScheme.tertiaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Semantics(
+                header: true,
+                label: 'Feed status, developer info',
+                child: ExcludeSemantics(
+                  child: Text(
+                    'Feed status',
+                    style: textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: colorScheme.onTertiaryContainer,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (podcasts.isEmpty)
+                Text('No subscriptions', style: labelStyle)
+              else
+                ...podcasts.map(
+                  (p) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Semantics(
+                      label:
+                          '${p.title}, last checked ${formatRefreshTimestamp(p.refreshedAt)}',
+                      excludeSemantics: true,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              p.title,
+                              style: labelStyle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            formatRefreshTimestamp(p.refreshedAt),
+                            style: labelStyle,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
