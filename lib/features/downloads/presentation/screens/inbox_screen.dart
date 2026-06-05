@@ -254,6 +254,8 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
                 'podcastId': episode.podcastId,
                 if (podcast?.speedOverride != null)
                   'speedOverride': podcast!.speedOverride!,
+                if (episode.downloadPath != null)
+                  'downloadPath': episode.downloadPath!,
               },
             ),
             resumePositionSeconds: resumePosition,

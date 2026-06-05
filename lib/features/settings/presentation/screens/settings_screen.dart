@@ -254,6 +254,37 @@ class SettingsScreen extends ConsumerWidget {
                     }
                   },
           ),
+          SwitchListTile(
+            title: const Text('Gapless playback'),
+            subtitle: const Text(
+              'Seamlessly transitions between episodes with no silence between them',
+            ),
+            value: ref.watch(gaplessPlaybackProvider).value ?? true,
+            onChanged: ref.watch(gaplessPlaybackProvider).isLoading
+                ? null
+                : (val) async {
+                    try {
+                      await ref.read(gaplessPlaybackProvider.notifier).set(val);
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          val
+                              ? 'Gapless playback enabled'
+                              : 'Gapless playback disabled',
+                          TextDirection.ltr,
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          'Could not update playback setting',
+                          TextDirection.ltr,
+                        );
+                      }
+                    }
+                  },
+          ),
           const Divider(),
           Semantics(
             header: true,
