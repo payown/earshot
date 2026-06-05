@@ -177,28 +177,30 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     final previousEpisodeId = _currentMediaItem?.extras?['episodeId'] as int?;
     final next = _nextMediaItem;
 
-    if (next != null) {
-      _currentMediaItem = next;
-      _nextMediaItem = null;
-      mediaItem.add(next);
+    try {
+      if (next != null) {
+        _currentMediaItem = next;
+        _nextMediaItem = null;
+        mediaItem.add(next);
 
-      final episodeId = next.extras?['episodeId'] as int?;
-      _episodeIdController.add(episodeId);
+        final episodeId = next.extras?['episodeId'] as int?;
+        _episodeIdController.add(episodeId);
 
-      await _applySpeedOverride(next);
+        await _applySpeedOverride(next);
 
-      // Remove the completed episode from the playlist head.
-      // This causes currentIndexStream to emit 0; _isAdvancing suppresses it.
-      await _player.removeAudioSourceAt(0);
+        // Remove the completed episode from the playlist head.
+        // This causes currentIndexStream to emit 0; _isAdvancing suppresses it.
+        await _player.removeAudioSourceAt(0);
+      }
+
+      sleepTimer.onEpisodeEnded();
+      final callback = onEpisodeAdvanced;
+      if (callback != null) {
+        await callback(previousEpisodeId);
+      }
+    } finally {
+      _isAdvancing = false;
     }
-
-    sleepTimer.onEpisodeEnded();
-    final callback = onEpisodeAdvanced;
-    if (callback != null) {
-      await callback(previousEpisodeId);
-    }
-
-    _isAdvancing = false;
   }
 
   // AirPods double-click fires skipToNext(). Remap to seek +30 s.

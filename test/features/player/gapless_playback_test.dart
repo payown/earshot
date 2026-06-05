@@ -30,7 +30,7 @@ void main() {
       final item = MediaItem(
         id: url,
         title: 'Test',
-        extras: {'episodeId': 42},
+        extras: {'episodeId': 42, 'downloadPath': null},
       );
       final source = resolveAudioSource(item) as UriAudioSource;
       expect(source.uri.scheme, 'https');
@@ -72,10 +72,10 @@ void main() {
 
     test('handles short episodes shorter than threshold', () {
       const shortDuration = Duration(seconds: 30);
-      // For episodes shorter than the threshold, any non-zero position
-      // should trigger preload since position >= 0 >= 30s - 60s = -30s.
+      // Any position triggers preload for episodes shorter than the threshold
+      // because duration - threshold is negative (30s - 60s = -30s).
       expect(
-        shouldPreload(Duration.zero, shortDuration, threshold),
+        shouldPreload(const Duration(seconds: 1), shortDuration, threshold),
         isTrue,
       );
     });

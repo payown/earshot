@@ -273,7 +273,10 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
   Future<void> preloadNextEpisode() async {
     final db = ref.read(appDatabaseProvider);
     final queue = await queueRepo.watchQueue().first;
-    if (queue.length < 2) return;
+    if (queue.length < 2) {
+      preloadScheduled = false;
+      return;
+    }
     final next = queue[1];
     final podcast = await (db.select(
       db.podcasts,
@@ -317,12 +320,18 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     if (duration == null) return;
     if (!shouldPreload(position, duration, kGaplessPreloadThreshold)) return;
 
+    // Set flag synchronously before any await so concurrent position events
+    // don't race in and schedule duplicate preloads.
+    preloadScheduled = true;
+
     final db = ref.read(appDatabaseProvider);
     final settingsRepo = AppSettingsRepositoryImpl(database: db);
     final gaplessEnabled = await settingsRepo.isGaplessPlaybackEnabled();
-    if (!gaplessEnabled) return;
+    if (!gaplessEnabled) {
+      preloadScheduled = false;
+      return;
+    }
 
-    preloadScheduled = true;
     unawaited(preloadNextEpisode());
   });
 
