@@ -141,3 +141,11 @@ final gaplessPlaybackProvider =
         write: (r, v) => r.setGaplessPlaybackEnabled(value: v),
       ),
     );
+
+final gaplessTipSeenProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.hasSeenGaplessTip(),
+        write: (r, v) => r.setHasSeenGaplessTip(value: v),
+      ),
+    );

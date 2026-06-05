@@ -74,6 +74,10 @@ abstract interface class AppSettingsRepository {
 
   Future<void> setGaplessPlaybackEnabled({required bool value});
 
+  Future<bool> hasSeenGaplessTip();
+
+  Future<void> setHasSeenGaplessTip({required bool value});
+
   // null = keep forever
   Future<int?> getDownloadRetentionDays();
 
@@ -104,6 +108,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyPodcastNameFirst = 'podcast_name_first';
   static const _keyPodcastNameTipSeen = 'podcast_name_tip_seen';
   static const _keyGaplessPlayback = 'gapless_playback_enabled';
+  static const _keyGaplessTipSeen = 'gapless_tip_seen';
   static const _keyDownloadRetentionDays = 'download_retention_days';
   static const _keyLastPlayingEpisodeId = 'last_playing_episode_id';
   static const _defaultAutoDownload = 3;
@@ -285,6 +290,14 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setGaplessPlaybackEnabled({required bool value}) =>
       _set(_keyGaplessPlayback, value.toString());
+
+  @override
+  Future<bool> hasSeenGaplessTip() =>
+      _getBool(_keyGaplessTipSeen, defaultValue: false);
+
+  @override
+  Future<void> setHasSeenGaplessTip({required bool value}) =>
+      _set(_keyGaplessTipSeen, value.toString());
 
   Future<int?> getLastPlayingEpisodeId() async {
     final row = await (_db.select(
