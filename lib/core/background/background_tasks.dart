@@ -76,6 +76,12 @@ Future<bool> _runEpisodeDownloads() async {
       await manager.applyDownloadRetention(retentionDays);
     }
 
+    // Storage cap enforcement.
+    final capBytes = await settings.getStorageCapBytes();
+    if (capBytes != null) {
+      await manager.applyStorageCap(capBytes);
+    }
+
     return true;
   } catch (e, st) {
     _log.severe('Episode download background task failed', e, st);

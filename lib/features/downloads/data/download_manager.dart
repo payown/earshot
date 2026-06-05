@@ -254,6 +254,124 @@ class DownloadManager {
     }
   }
 
+  Future<void> deleteAllDownloads() async {
+    final episodes =
+        await (_db.select(_db.episodes)..where(
+              (e) => e.downloadStatus.equals(DownloadStatus.downloaded.name),
+            ))
+            .get();
+
+    for (final ep in episodes) {
+      await FileDownloader().cancelTaskWithId(_taskId(ep.id));
+      if (ep.downloadPath case final path?) {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      }
+    }
+
+    await (_db.update(_db.episodes)..where(
+          (e) => e.downloadStatus.equals(DownloadStatus.downloaded.name),
+        ))
+        .write(
+          const EpisodesCompanion(
+            downloadStatus: Value(DownloadStatus.none),
+            downloadPath: Value(null),
+          ),
+        );
+
+    _log.info('Deleted all downloads (${episodes.length} episodes)');
+  }
+
+  // Deletes downloaded episodes whose pubDate is older than [days] days,
+  // regardless of played status. Returns the number of episodes deleted.
+  Future<int> deleteDownloadsOlderThan(int days) async {
+    final cutoff = DateTime.now().toUtc().subtract(Duration(days: days));
+    final episodes =
+        await (_db.select(_db.episodes)..where(
+              (e) =>
+                  e.downloadStatus.equals(DownloadStatus.downloaded.name) &
+                  e.pubDate.isSmallerThanValue(cutoff),
+            ))
+            .get();
+
+    for (final ep in episodes) {
+      if (ep.downloadPath case final path?) {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      }
+      await (_db.update(_db.episodes)..where((e) => e.id.equals(ep.id))).write(
+        const EpisodesCompanion(
+          downloadStatus: Value(DownloadStatus.none),
+          downloadPath: Value(null),
+        ),
+      );
+    }
+
+    if (episodes.isNotEmpty) {
+      _log.info('Deleted ${episodes.length} downloads older than $days days');
+    }
+    return episodes.length;
+  }
+
+  Future<int> getTotalDownloadBytes() async {
+    final episodes =
+        await (_db.select(_db.episodes)..where(
+              (e) => e.downloadStatus.equals(DownloadStatus.downloaded.name),
+            ))
+            .get();
+
+    var total = 0;
+    for (final ep in episodes) {
+      if (ep.downloadPath case final path?) {
+        try {
+          final stat = await File(path).stat();
+          total += stat.size;
+        } catch (_) {
+          // File may be missing; skip it
+        }
+      }
+    }
+    return total;
+  }
+
+  // Deletes oldest-published episodes until total storage is under [maxBytes].
+  Future<void> applyStorageCap(int maxBytes) async {
+    var total = await getTotalDownloadBytes();
+    if (total <= maxBytes) return;
+
+    final episodes =
+        await (_db.select(_db.episodes)
+              ..where(
+                (e) => e.downloadStatus.equals(DownloadStatus.downloaded.name),
+              )
+              ..orderBy([(e) => OrderingTerm.asc(e.pubDate)]))
+            .get();
+
+    for (final ep in episodes) {
+      if (total <= maxBytes) break;
+      var fileSize = 0;
+      if (ep.downloadPath case final path?) {
+        final file = File(path);
+        if (await file.exists()) {
+          try {
+            fileSize = (await file.stat()).size;
+            await file.delete();
+          } catch (_) {}
+        }
+      }
+      await (_db.update(_db.episodes)..where((e) => e.id.equals(ep.id))).write(
+        const EpisodesCompanion(
+          downloadStatus: Value(DownloadStatus.none),
+          downloadPath: Value(null),
+        ),
+      );
+      total -= fileSize;
+      _log.fine('Storage cap: deleted download for episode ${ep.id}');
+    }
+
+    _log.info('Storage cap applied — ${total ~/ (1024 * 1024)} MB remaining');
+  }
+
   // Deletes downloaded audio files and resets status for played episodes
   // whose playedAt timestamp is older than [days] days.
   Future<void> applyDownloadRetention(int days) async {

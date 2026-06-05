@@ -86,6 +86,11 @@ abstract interface class AppSettingsRepository {
   Future<bool> isDownloadAuditEnabled();
 
   Future<void> setDownloadAuditEnabled({required bool value});
+
+  // null = no cap
+  Future<int?> getStorageCapBytes();
+
+  Future<void> setStorageCapBytes(int? bytes);
 }
 
 class AppSettingsRepositoryImpl implements AppSettingsRepository {
@@ -115,6 +120,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyGaplessTipSeen = 'gapless_tip_seen';
   static const _keyDownloadRetentionDays = 'download_retention_days';
   static const _keyDownloadAudit = 'download_audit_announcements';
+  static const _keyStorageCapBytes = 'storage_cap_bytes';
   static const _keyLastPlayingEpisodeId = 'last_playing_episode_id';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
@@ -311,6 +317,20 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setDownloadAuditEnabled({required bool value}) =>
       _set(_keyDownloadAudit, value.toString());
+
+  @override
+  Future<int?> getStorageCapBytes() async {
+    final row = await (_db.select(
+      _db.appSettings,
+    )..where((s) => s.key.equals(_keyStorageCapBytes))).getSingleOrNull();
+    if (row == null) return null;
+    if (row.value == 'null') return null;
+    return int.tryParse(row.value);
+  }
+
+  @override
+  Future<void> setStorageCapBytes(int? bytes) =>
+      _set(_keyStorageCapBytes, bytes?.toString() ?? 'null');
 
   Future<int?> getLastPlayingEpisodeId() async {
     final row = await (_db.select(

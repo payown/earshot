@@ -27,3 +27,7 @@ final queueExpirationServiceProvider = Provider<QueueExpirationService>(
 final recentlyExpiredProvider = StreamProvider<List<RecentlyExpiredRow>>(
   (ref) => ref.watch(queueExpirationServiceProvider).watchRecentlyExpired(),
 );
+
+final totalDownloadBytesProvider = FutureProvider<int>(
+  (ref) => ref.watch(downloadManagerProvider).getTotalDownloadBytes(),
+);
