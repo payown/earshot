@@ -1,6 +1,9 @@
+import 'package:logging/logging.dart';
 import 'package:xml/xml.dart';
 
 import 'parsed_feed.dart';
+
+final _log = Logger('RssParser');
 
 class RssParseException implements Exception {
   const RssParseException(this.message);
@@ -51,7 +54,13 @@ class RssParser {
     final audioUrl = _enclosureUrl(item);
     if (audioUrl == null) return null;
 
-    final guid = _directText(item, 'guid') ?? audioUrl;
+    final rawGuid = _directText(item, 'guid');
+    if (rawGuid == null) {
+      _log.warning(
+        'Episode missing <guid>; falling back to enclosure URL: $audioUrl',
+      );
+    }
+    final guid = rawGuid ?? audioUrl;
     final title = _directText(item, 'title') ?? '';
 
     return ParsedEpisode(

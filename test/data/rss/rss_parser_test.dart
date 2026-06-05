@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:earshot/data/rss/rss_parser.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:logging/logging.dart';
 
 void main() {
   late RssParser parser;
@@ -119,6 +120,61 @@ void main() {
         expect(
           feed.episodes[1].description,
           'The second episode, described in plain RSS.',
+        );
+      });
+    });
+
+    group('guid fallback', () {
+      test('uses explicit guid when present', () {
+        const xml = '''<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <title>T</title>
+  <item>
+    <title>Ep</title>
+    <guid>explicit-guid-123</guid>
+    <enclosure url="https://example.com/ep.mp3" type="audio/mpeg" length="1"/>
+  </item>
+</channel></rss>''';
+        final feed = parser.parse(xml);
+        expect(feed.episodes.single.guid, 'explicit-guid-123');
+      });
+
+      test('falls back to enclosure URL when guid is missing', () {
+        const xml = '''<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <title>T</title>
+  <item>
+    <title>Ep</title>
+    <enclosure url="https://example.com/ep.mp3" type="audio/mpeg" length="1"/>
+  </item>
+</channel></rss>''';
+        final feed = parser.parse(xml);
+        expect(feed.episodes.single.guid, 'https://example.com/ep.mp3');
+      });
+
+      test('logs a warning when guid is missing', () {
+        const xml = '''<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <title>T</title>
+  <item>
+    <title>Ep</title>
+    <enclosure url="https://example.com/ep.mp3" type="audio/mpeg" length="1"/>
+  </item>
+</channel></rss>''';
+        final warnings = <String>[];
+        final sub = Logger.root.onRecord
+            .where((r) => r.level >= Level.WARNING)
+            .listen((r) => warnings.add(r.message));
+        Logger.root.level = Level.ALL;
+
+        parser.parse(xml);
+        sub.cancel();
+
+        expect(
+          warnings,
+          contains(
+            contains('https://example.com/ep.mp3'),
+          ),
         );
       });
     });

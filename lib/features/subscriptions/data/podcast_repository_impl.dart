@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:logging/logging.dart';
 
+import '../../../core/utils/time_format.dart';
 import '../../../data/db/app_database.dart';
 import '../../../data/db/enums.dart';
 import '../../../data/rss/parsed_feed.dart';
@@ -15,7 +18,7 @@ import 'podcast_repository.dart';
 final _log = Logger('PodcastRepository');
 
 class PodcastRepositoryImpl implements PodcastRepository {
-  const PodcastRepositoryImpl({
+  PodcastRepositoryImpl({
     required AppDatabase database,
     required Dio dio,
     required RssParser rssParser,
@@ -29,6 +32,10 @@ class PodcastRepositoryImpl implements PodcastRepository {
   final Dio _dio;
   final RssParser _rssParser;
   final AppSettingsRepository _settings;
+  final _auditController = StreamController<String>.broadcast();
+
+  @override
+  Stream<String> get feedRefreshAuditEvents => _auditController.stream;
 
   @override
   Future<Podcast> subscribe(String rssUrl) async {
@@ -207,6 +214,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
     await _setEpisodeDismissed(podcastId, dismissed: dismissed);
 
     _log.info('Refreshed feed for podcast $podcastId');
+    _auditController.add('Feed checked at ${formatTimeOfDay(DateTime.now())}');
   }
 
   Future<ParsedPodcast> _fetchAndParse(String rssUrl) async {

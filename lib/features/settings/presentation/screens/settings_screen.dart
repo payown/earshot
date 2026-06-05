@@ -614,72 +614,91 @@ class _VersionTileState extends ConsumerState<_VersionTile> {
       isScrollControlled: true,
       useSafeArea: true,
       barrierLabel: 'Dismiss developer mode',
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-              child: Semantics(
-                header: true,
-                label: 'Developer Mode',
-                child: ExcludeSemantics(
-                  child: Text(
-                    'Developer Mode',
-                    style: Theme.of(context).textTheme.titleLarge,
+      builder: (sheetContext) => Consumer(
+        builder: (_, consumerRef, __) {
+          final auditEnabled =
+              consumerRef.watch(downloadAuditEnabledProvider).value ?? false;
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+                  child: Semantics(
+                    header: true,
+                    label: 'Developer Mode',
+                    child: ExcludeSemantics(
+                      child: Text(
+                        'Developer Mode',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            ListTile(
-              leading: const ExcludeSemantics(
-                child: Icon(Icons.restart_alt),
-              ),
-              title: const Text('Reset Onboarding'),
-              subtitle: const Text('Show onboarding again on next launch'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _confirmResetOnboarding();
-              },
-            ),
-            ListTile(
-              leading: const ExcludeSemantics(
-                child: Icon(Icons.tips_and_updates_outlined),
-              ),
-              title: const Text('Reset Tips'),
-              subtitle: const Text(
-                'Show tip cards again in Inbox and Queue',
-              ),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                unawaited(_resetTips());
-              },
-            ),
-            ListTile(
-              leading: ExcludeSemantics(
-                child: Icon(
-                  Icons.delete_forever,
-                  color: Theme.of(context).colorScheme.error,
+                ListTile(
+                  leading: const ExcludeSemantics(
+                    child: Icon(Icons.restart_alt),
+                  ),
+                  title: const Text('Reset Onboarding'),
+                  subtitle: const Text('Show onboarding again on next launch'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _confirmResetOnboarding();
+                  },
                 ),
-              ),
-              title: Text(
-                'Clear All App Data',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
+                ListTile(
+                  leading: const ExcludeSemantics(
+                    child: Icon(Icons.tips_and_updates_outlined),
+                  ),
+                  title: const Text('Reset Tips'),
+                  subtitle: const Text(
+                    'Show tip cards again in Inbox and Queue',
+                  ),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    unawaited(_resetTips());
+                  },
                 ),
-              ),
-              subtitle: const Text(
-                'Wipes everything and returns to onboarding',
-              ),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _confirmClearAllData();
-              },
+                ListTile(
+                  leading: ExcludeSemantics(
+                    child: Icon(
+                      Icons.delete_forever,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                  title: Text(
+                    'Clear All App Data',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Wipes everything and returns to onboarding',
+                  ),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _confirmClearAllData();
+                  },
+                ),
+                SwitchListTile(
+                  secondary: const ExcludeSemantics(
+                    child: Icon(Icons.volume_up_outlined),
+                  ),
+                  title: const Text('Download audit announcements'),
+                  subtitle: const Text(
+                    'Announce feed checks and completed downloads',
+                  ),
+                  value: auditEnabled,
+                  onChanged: (v) => consumerRef
+                      .read(downloadAuditEnabledProvider.notifier)
+                      .set(v),
+                ),
+                const SizedBox(height: 8),
+              ],
             ),
-            const SizedBox(height: 8),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

@@ -3,6 +3,8 @@ import '../domain/episode.dart';
 import '../domain/podcast.dart';
 
 abstract interface class PodcastRepository {
+  Stream<String> get feedRefreshAuditEvents;
+
   Future<Podcast> subscribe(String rssUrl);
 
   Future<void> unsubscribe(int podcastId);

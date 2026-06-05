@@ -42,4 +42,6 @@ class Episode {
   final int positionSeconds;
   final DateTime? playedAt;
   final DateTime createdAt;
+
+  bool get isDownloaded => downloadPath != null;
 }
