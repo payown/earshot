@@ -14,6 +14,7 @@ import '../../features/search/presentation/screens/opml_import_screen.dart';
 import '../../features/search/presentation/screens/search_result_detail_screen.dart';
 import '../../features/search/presentation/screens/search_screen.dart';
 import '../../features/settings/data/app_settings_repository.dart';
+import '../../features/settings/presentation/screens/downloads_settings_screen.dart';
 import '../../features/settings/presentation/screens/privacy_settings_screen.dart';
 import '../../features/settings/presentation/screens/quick_action_configurator_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
@@ -45,6 +46,7 @@ abstract final class AppRoutes {
   static const settingsImportOpml = '/settings/import-opml';
   static const settingsStats = '/settings/stats';
   static const settingsPrivacy = '/settings/privacy';
+  static const settingsDownloads = '/settings/downloads';
   static String settingsQuickActions(String type) =>
       '/settings/quick-actions/$type';
   static const bugReport = '/bug-report';
@@ -186,6 +188,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: 'privacy',
             parentNavigatorKey: _rootKey,
             builder: (_, __) => const PrivacySettingsScreen(),
+          ),
+          GoRoute(
+            path: 'downloads',
+            parentNavigatorKey: _rootKey,
+            builder: (_, __) => const DownloadsSettingsScreen(),
           ),
           GoRoute(
             path: 'quick-actions/:type',

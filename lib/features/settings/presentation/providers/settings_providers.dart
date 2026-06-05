@@ -157,3 +157,22 @@ final downloadAuditEnabledProvider =
         write: (r, v) => r.setDownloadAuditEnabled(value: v),
       ),
     );
+
+class _StorageCapNotifier extends AsyncNotifier<int?> {
+  @override
+  Future<int?> build() async {
+    final db = ref.watch(appDatabaseProvider);
+    return AppSettingsRepositoryImpl(database: db).getStorageCapBytes();
+  }
+
+  Future<void> set(int? bytes) async {
+    state = AsyncData(bytes);
+    final db = ref.read(appDatabaseProvider);
+    await AppSettingsRepositoryImpl(database: db).setStorageCapBytes(bytes);
+  }
+}
+
+final storageCapBytesProvider =
+    AsyncNotifierProvider<_StorageCapNotifier, int?>(
+      _StorageCapNotifier.new,
+    );
