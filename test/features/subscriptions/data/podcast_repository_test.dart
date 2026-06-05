@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
 import 'package:earshot/data/db/app_database.dart';
+import 'package:earshot/data/db/enums.dart';
 import 'package:earshot/data/rss/parsed_feed.dart';
 import 'package:earshot/data/rss/rss_parser.dart';
 import 'package:earshot/features/settings/data/app_settings_repository.dart';
@@ -202,5 +203,89 @@ void main() {
     test('does nothing for unknown podcast id', () async {
       await repo.refreshFeed(999);
     });
+
+    test('inserts new GUID with downloadStatus none', () async {
+      stubFeed(episodes: []);
+      final podcast = await repo.subscribe(_rssUrl);
+
+      const newEp = ParsedEpisode(
+        guid: 'brand-new-guid',
+        title: 'New Episode',
+        audioUrl: 'https://example.com/new.mp3',
+      );
+      when(() => parser.parse(any())).thenReturn(
+        const ParsedPodcast(title: 'Test Podcast', episodes: [newEp]),
+      );
+      await repo.refreshFeed(podcast.id);
+
+      final episodes = await repo.watchEpisodes(podcast.id).first;
+      expect(episodes.length, 1);
+      expect(episodes.first.guid, 'brand-new-guid');
+      expect(
+        episodes.first.downloadStatus,
+        equals(DownloadStatus.none),
+      );
+    });
+
+    test('does not duplicate episode when GUID already exists', () async {
+      stubFeed(episodes: [sampleEpisode]);
+      final podcast = await repo.subscribe(_rssUrl);
+
+      when(() => parser.parse(any())).thenReturn(
+        const ParsedPodcast(title: 'Test Podcast', episodes: [sampleEpisode]),
+      );
+      await repo.refreshFeed(podcast.id);
+
+      final episodes = await repo.watchEpisodes(podcast.id).first;
+      expect(episodes.length, 1);
+    });
+
+    test(
+      'preserves downloadStatus on refresh when GUID already exists',
+      () async {
+        stubFeed(episodes: [sampleEpisode]);
+        final podcast = await repo.subscribe(_rssUrl);
+
+        final before = (await repo.watchEpisodes(podcast.id).first).first;
+        expect(before.downloadStatus, DownloadStatus.none);
+
+        when(() => parser.parse(any())).thenReturn(
+          const ParsedPodcast(title: 'Test Podcast', episodes: [sampleEpisode]),
+        );
+        await repo.refreshFeed(podcast.id);
+
+        final after = (await repo.watchEpisodes(podcast.id).first).first;
+        expect(after.downloadStatus, DownloadStatus.none);
+      },
+    );
+
+    test(
+      'leaves DB episode intact when GUID is absent from refreshed feed',
+      () async {
+        stubFeed(
+          episodes: [
+            sampleEpisode,
+            const ParsedEpisode(
+              guid: 'ep-to-disappear',
+              title: 'Old Episode',
+              audioUrl: 'https://example.com/old.mp3',
+            ),
+          ],
+        );
+        final podcast = await repo.subscribe(_rssUrl);
+
+        when(() => parser.parse(any())).thenReturn(
+          const ParsedPodcast(title: 'Test Podcast', episodes: [sampleEpisode]),
+        );
+        await repo.refreshFeed(podcast.id);
+
+        final episodes = await repo.watchEpisodes(podcast.id).first;
+        expect(episodes.length, 2);
+        expect(
+          episodes.map((e) => e.guid),
+          containsAll(['ep-1', 'ep-to-disappear']),
+        );
+      },
+    );
   });
 }

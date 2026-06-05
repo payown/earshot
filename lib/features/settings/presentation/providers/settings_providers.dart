@@ -149,3 +149,11 @@ final gaplessTipSeenProvider =
         write: (r, v) => r.setHasSeenGaplessTip(value: v),
       ),
     );
+
+final downloadAuditEnabledProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.isDownloadAuditEnabled(),
+        write: (r, v) => r.setDownloadAuditEnabled(value: v),
+      ),
+    );

@@ -31,3 +31,7 @@ final episodesProvider = StreamProvider.family<List<Episode>, int>(
   (ref, podcastId) =>
       ref.watch(podcastRepositoryProvider).watchEpisodes(podcastId),
 );
+
+final feedRefreshAuditEventsProvider = StreamProvider<String>(
+  (ref) => ref.watch(podcastRepositoryProvider).feedRefreshAuditEvents,
+);

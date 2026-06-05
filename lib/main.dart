@@ -1,5 +1,6 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:posthog_flutter/posthog_flutter.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -10,8 +11,11 @@ import 'core/logging/log_providers.dart';
 import 'core/logging/log_service.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'features/downloads/presentation/providers/downloads_providers.dart';
 import 'features/player/data/audio_handler.dart';
 import 'features/player/presentation/providers/player_providers.dart';
+import 'features/settings/presentation/providers/settings_providers.dart';
+import 'features/subscriptions/presentation/providers/subscriptions_providers.dart';
 
 // Placeholder DSNs — replace with real values before beta build.
 // These are safe to leave empty; Sentry/PostHog silently no-op with empty DSN.
@@ -34,6 +38,29 @@ class _AppInitializer extends ConsumerWidget {
     ref.watch(queueAutoAdvanceProvider);
     ref.watch(episodeIdPersistenceProvider);
     ref.watch(playbackRestorationProvider);
+
+    void _announceIfAuditEnabled(AsyncValue<String> next) {
+      if (next case AsyncData(value: final message)) {
+        final enabled = ref.read(downloadAuditEnabledProvider).value ?? false;
+        if (enabled && context.mounted) {
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            message,
+            TextDirection.ltr,
+          );
+        }
+      }
+    }
+
+    ref.listen(
+      downloadAuditEventsProvider,
+      (_, next) => _announceIfAuditEnabled(next),
+    );
+    ref.listen(
+      feedRefreshAuditEventsProvider,
+      (_, next) => _announceIfAuditEnabled(next),
+    );
+
     return const EarshotApp();
   }
 }

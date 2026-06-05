@@ -8,6 +8,7 @@ import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../../core/utils/time_format.dart';
 import '../../../data/db/app_database.dart';
 import '../../../data/db/enums.dart';
 import '../../../features/settings/data/app_settings_repository.dart';
@@ -36,10 +37,14 @@ class DownloadManager {
   final AppDatabase _db;
   final AppSettingsRepository _settings;
   StreamSubscription<TaskUpdate>? _updateSubscription;
+  final _auditController = StreamController<String>.broadcast();
+
+  Stream<String> get downloadAuditEvents => _auditController.stream;
 
   Future<void> dispose() async {
     await _updateSubscription?.cancel();
     _updateSubscription = null;
+    await _auditController.close();
   }
 
   // Reconcile any rows left in downloading/pending from a previous session
@@ -72,12 +77,20 @@ class DownloadManager {
     switch (update.status) {
       case TaskStatus.complete:
         final path = await update.task.filePath();
+        final episodeRow = await (_db.select(
+          _db.episodes,
+        )..where((e) => e.id.equals(episodeId))).getSingleOrNull();
         await _db.transaction(() async {
           await _setStatus(episodeId, DownloadStatus.downloaded);
           await (_db.update(_db.episodes)..where((e) => e.id.equals(episodeId)))
               .write(EpisodesCompanion(downloadPath: Value(path)));
         });
         _log.info('Downloaded episode $episodeId to $path');
+        if (episodeRow != null) {
+          _auditController.add(
+            '${episodeRow.title} downloaded at ${formatTimeOfDay(DateTime.now())}',
+          );
+        }
       case TaskStatus.failed:
       case TaskStatus.notFound:
         await _setStatus(episodeId, DownloadStatus.failed);
