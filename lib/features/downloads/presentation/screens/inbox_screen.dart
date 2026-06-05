@@ -39,6 +39,15 @@ class InboxScreen extends ConsumerStatefulWidget {
 
 class _InboxScreenState extends ConsumerState<InboxScreen> {
   bool _tipAnnouncementPosted = false;
+  Timer? _tipAnnounceTimer;
+  Timer? _tipDismissTimer;
+
+  @override
+  void dispose() {
+    _tipAnnounceTimer?.cancel();
+    _tipDismissTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,8 +70,9 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
     if (!tipSeen && !_tipAnnouncementPosted) {
       _tipAnnouncementPosted = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        Future.delayed(const Duration(milliseconds: 700), () {
-          if (mounted) {
+        _tipAnnounceTimer = Timer(const Duration(milliseconds: 2500), () {
+          if (mounted &&
+              !(ref.read(podcastNameTipSeenProvider).value ?? false)) {
             SemanticsService.sendAnnouncement(
               View.of(context),
               'Tip: VoiceOver can announce the podcast name before the episode '
@@ -73,7 +83,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
         });
         // Auto-dismiss after 5 seconds — enough for a sighted user to read
         // and tap 'Go to Settings', no action needed from VoiceOver users.
-        Future.delayed(const Duration(seconds: 5), () {
+        _tipDismissTimer = Timer(const Duration(seconds: 5), () {
           if (mounted) {
             ref.read(podcastNameTipSeenProvider.notifier).set(true);
           }
@@ -747,25 +757,38 @@ class _InboxTipCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'VoiceOver tip',
-                      style: textTheme.labelMedium?.copyWith(
-                        color: colorScheme.onSecondaryContainer,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'VoiceOver can announce the podcast name before the episode title in this list. Turn it on in Settings › Inbox.',
-                      style: textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSecondaryContainer,
+                    Semantics(
+                      label:
+                          'Tip: VoiceOver can announce the podcast name '
+                          'before the episode title in this list. '
+                          'Turn it on in Settings, Inbox.',
+                      child: ExcludeSemantics(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'VoiceOver tip',
+                              style: textTheme.labelMedium?.copyWith(
+                                color: colorScheme.onSecondaryContainer,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'VoiceOver can announce the podcast name before the episode title in this list. Turn it on in Settings › Inbox.',
+                              style: textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSecondaryContainer,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 4),
                     TextButton(
                       onPressed: onGoToSettings,
                       style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
                         minimumSize: const Size(0, 44),
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         foregroundColor: colorScheme.onSecondaryContainer,
