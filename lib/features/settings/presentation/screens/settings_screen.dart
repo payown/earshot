@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -643,6 +644,19 @@ class _VersionTileState extends ConsumerState<_VersionTile> {
               },
             ),
             ListTile(
+              leading: const ExcludeSemantics(
+                child: Icon(Icons.tips_and_updates_outlined),
+              ),
+              title: const Text('Reset Tips'),
+              subtitle: const Text(
+                'Show tip cards again in Inbox and Queue',
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                unawaited(_resetTips());
+              },
+            ),
+            ListTile(
               leading: ExcludeSemantics(
                 child: Icon(
                   Icons.delete_forever,
@@ -668,6 +682,23 @@ class _VersionTileState extends ConsumerState<_VersionTile> {
         ),
       ),
     );
+  }
+
+  Future<void> _resetTips() async {
+    await ref.read(podcastNameTipSeenProvider.notifier).set(false);
+    await ref.read(gaplessTipSeenProvider.notifier).set(false);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tips reset — visit Inbox and Queue to see them'),
+        ),
+      );
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Tips reset',
+        TextDirection.ltr,
+      );
+    }
   }
 
   Future<void> _confirmResetOnboarding() async {
@@ -745,18 +776,30 @@ class _VersionTileState extends ConsumerState<_VersionTile> {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      title: const Text('Version'),
-      subtitle: Text(
-        ref
-            .watch(packageInfoProvider)
-            .when(
-              data: (info) => '${info.version} (${info.buildNumber})',
-              loading: () => 'Loading',
-              error: (_, __) => 'Version unavailable',
-            ),
-      ),
+    final versionText = ref
+        .watch(packageInfoProvider)
+        .when(
+          data: (info) => '${info.version} (${info.buildNumber})',
+          loading: () => 'Loading',
+          error: (_, __) => 'Version unavailable',
+        );
+
+    return Semantics(
+      button: true,
+      label: 'Version $versionText',
+      hint: 'Flick down to open developer menu',
       onTap: _onTap,
+      customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
+        const CustomSemanticsAction(label: 'Open developer menu'):
+            _showDeveloperModeSheet,
+      },
+      child: ExcludeSemantics(
+        child: ListTile(
+          title: const Text('Version'),
+          subtitle: Text(versionText),
+          onTap: _onTap,
+        ),
+      ),
     );
   }
 }
