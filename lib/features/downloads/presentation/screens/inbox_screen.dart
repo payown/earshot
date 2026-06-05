@@ -740,60 +740,63 @@ class _FeedStatusCard extends StatelessWidget {
       color: colorScheme.onTertiaryContainer,
     );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      child: Card(
-        color: colorScheme.tertiaryContainer,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Semantics(
-                header: true,
-                label: 'Feed status, developer info',
-                child: ExcludeSemantics(
-                  child: Text(
-                    'Feed status',
-                    style: textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: colorScheme.onTertiaryContainer,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (podcasts.isEmpty)
-                Text('No subscriptions', style: labelStyle)
-              else
-                ...podcasts.map(
-                  (p) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Semantics(
-                      label:
-                          '${p.title}, last checked ${formatRefreshTimestamp(p.refreshedAt)}',
-                      excludeSemantics: true,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              p.title,
-                              style: labelStyle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            formatRefreshTimestamp(p.refreshedAt),
-                            style: labelStyle,
-                          ),
-                        ],
+    return Semantics(
+      liveRegion: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+        child: Card(
+          color: colorScheme.tertiaryContainer,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Semantics(
+                  header: true,
+                  label: 'Feed status, developer info',
+                  child: ExcludeSemantics(
+                    child: Text(
+                      'Feed status',
+                      style: textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onTertiaryContainer,
                       ),
                     ),
                   ),
                 ),
-            ],
+                const SizedBox(height: 8),
+                if (podcasts.isEmpty)
+                  Text('No subscriptions', style: labelStyle)
+                else
+                  ...podcasts.map(
+                    (p) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Semantics(
+                        label:
+                            '${p.title}, last checked ${formatRefreshTimestamp(p.refreshedAt)}',
+                        excludeSemantics: true,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                p.title,
+                                style: labelStyle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              formatRefreshTimestamp(p.refreshedAt),
+                              style: labelStyle,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
