@@ -197,6 +197,15 @@ final currentEpisodeDescriptionProvider = StreamProvider<String?>((ref) {
       .map((row) => row?.description);
 });
 
+// Attaches AppSettingsRepository to the audio handler as soon as the DB is
+// available so _applyPlaybackSettings can read global speed + trim silence
+// without needing those values in every MediaItem's extras.
+final handlerSettingsAttachmentProvider = Provider<void>((ref) {
+  final handler = ref.read(audioHandlerProvider);
+  final db = ref.watch(appDatabaseProvider);
+  handler.attachSettings(AppSettingsRepositoryImpl(database: db));
+});
+
 // Watches episodeIdStream and persists the current episode ID so it can be
 // restored after a force quit.
 final episodeIdPersistenceProvider = Provider<void>((ref) {
@@ -231,9 +240,6 @@ final playbackRestorationProvider = FutureProvider<void>((ref) async {
     db.podcasts,
   )..where((p) => p.id.equals(episode.podcastId))).getSingleOrNull();
 
-  final globalSpeed = await settings.getGlobalSpeed();
-  final globalTrimSilence = await settings.isSkipSilenceEnabled();
-
   final handler = ref.read(audioHandlerProvider);
   await handler.loadEpisode(
     MediaItem(
@@ -250,8 +256,6 @@ final playbackRestorationProvider = FutureProvider<void>((ref) async {
       extras: {
         'episodeId': episode.id,
         'podcastId': episode.podcastId,
-        'globalSpeed': globalSpeed,
-        'globalTrimSilence': globalTrimSilence,
         if (podcast?.speedOverride != null)
           'speedOverride': podcast!.speedOverride!,
         if (podcast?.trimSilenceOverride != null)
@@ -277,8 +281,6 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     required Uri? artUri,
     required double? speedOverride,
     required bool? trimSilenceOverride,
-    required double globalSpeed,
-    required bool globalTrimSilence,
   }) {
     return MediaItem(
       id: episode.audioUrl,
@@ -292,8 +294,6 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
       extras: {
         'episodeId': episode.id,
         'podcastId': episode.podcastId,
-        'globalSpeed': globalSpeed,
-        'globalTrimSilence': globalTrimSilence,
         if (speedOverride != null) 'speedOverride': speedOverride,
         if (trimSilenceOverride != null)
           'trimSilenceOverride': trimSilenceOverride,
@@ -304,10 +304,6 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
 
   Future<void> preloadNextEpisode() async {
     final db = ref.read(appDatabaseProvider);
-    final settingsForPreload = AppSettingsRepositoryImpl(database: db);
-    final preloadGlobalSpeed = await settingsForPreload.getGlobalSpeed();
-    final preloadGlobalTrimSilence = await settingsForPreload
-        .isSkipSilenceEnabled();
     final queue = await queueRepo.watchQueue().first;
     if (queue.length < 2) {
       preloadScheduled = false;
@@ -324,8 +320,6 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
         speedOverride: podcast?.speedOverride,
         trimSilenceOverride: podcast?.trimSilenceOverride,
-        globalSpeed: preloadGlobalSpeed,
-        globalTrimSilence: preloadGlobalTrimSilence,
       ),
     );
   }
@@ -442,9 +436,6 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     final nextPodcast = await (db.select(
       db.podcasts,
     )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
-    final completedGlobalSpeed = await settingsRepo.getGlobalSpeed();
-    final completedGlobalTrimSilence = await settingsRepo
-        .isSkipSilenceEnabled();
     await handler.playEpisode(
       _buildMediaItem(
         episode: next,
@@ -452,8 +443,6 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
         speedOverride: nextPodcast?.speedOverride,
         trimSilenceOverride: nextPodcast?.trimSilenceOverride,
-        globalSpeed: completedGlobalSpeed,
-        globalTrimSilence: completedGlobalTrimSilence,
       ),
       resumePositionSeconds: next.positionSeconds,
     );

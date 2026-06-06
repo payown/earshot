@@ -5,6 +5,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:logging/logging.dart';
 
 import '../../../core/constants/playback.dart';
+import '../../../features/settings/data/app_settings_repository.dart';
 import '../domain/sleep_timer.dart';
 
 final _log = Logger('AudioHandler');
@@ -48,6 +49,15 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   late final AndroidLoudnessEnhancer _loudnessEnhancer;
   late final AudioPlayer _player;
   late final SleepTimer sleepTimer;
+
+  AppSettingsRepository? _settings;
+
+  // Called by the provider layer once the DB is available so _applyPlaybackSettings
+  // can read global speed + trim silence without relying on MediaItem extras.
+  void attachSettings(AppSettingsRepository settings) {
+    _settings = settings;
+  }
+
   StreamSubscription<PlaybackState>? _playbackSubscription;
 
   MediaItem? _currentMediaItem;
@@ -92,15 +102,14 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   AudioSource _resolveAudioSource(MediaItem item) => resolveAudioSource(item);
 
   Future<void> _applyPlaybackSettings(MediaItem item) async {
-    final speed =
-        (item.extras?['speedOverride'] as double?) ??
-        (item.extras?['globalSpeed'] as double? ?? 1.0);
+    final globalSpeed = await _settings?.getGlobalSpeed() ?? 1.0;
+    final speed = (item.extras?['speedOverride'] as double?) ?? globalSpeed;
     await _player.setSpeed(speed);
     playbackState.add(playbackState.value.copyWith(speed: speed));
 
+    final globalTrimSilence = await _settings?.isSkipSilenceEnabled() ?? false;
     final trimSilence =
-        (item.extras?['trimSilenceOverride'] as bool?) ??
-        (item.extras?['globalTrimSilence'] as bool? ?? false);
+        (item.extras?['trimSilenceOverride'] as bool?) ?? globalTrimSilence;
     await _player.setSkipSilenceEnabled(trimSilence);
   }
 
