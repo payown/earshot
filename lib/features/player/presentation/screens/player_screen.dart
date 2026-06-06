@@ -33,6 +33,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _voFastForwardActive = false;
   // Tracks which chapter index was most recently auto-skipped to avoid loops.
   int? _lastAutoSkipFromChapterIndex;
+  // Set to true before any speed change that is part of fast-forward so the
+  // playbackState listener skips the announcement (those paths announce their
+  // own state explicitly).
+  bool _suppressSpeedAnnouncement = false;
 
   @override
   void dispose() {
@@ -47,10 +51,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void _onHoldStart() {
     _speedBeforeHold =
         ref.read(playbackStateProvider).asData?.value.speed ?? 1.0;
+    _suppressSpeedAnnouncement = true;
     ref.read(audioHandlerProvider).setSpeed(4.0);
   }
 
   void _onHoldEnd() {
+    _suppressSpeedAnnouncement = true;
     ref.read(audioHandlerProvider).setSpeed(_speedBeforeHold ?? 1.0);
     _speedBeforeHold = null;
   }
@@ -69,6 +75,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void _startVoFastForward() {
     _speedBeforeHold =
         ref.read(playbackStateProvider).asData?.value.speed ?? 1.0;
+    _suppressSpeedAnnouncement = true;
     ref.read(audioHandlerProvider).setSpeed(4.0);
     setState(() => _voFastForwardActive = true);
     SemanticsService.sendAnnouncement(
@@ -79,6 +86,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _stopVoFastForward() {
+    _suppressSpeedAnnouncement = true;
     ref.read(audioHandlerProvider).setSpeed(_speedBeforeHold ?? 1.0);
     _speedBeforeHold = null;
     setState(() => _voFastForwardActive = false);
@@ -152,7 +160,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     // Announce speed changes to VoiceOver/TalkBack (covers both manual changes
     // and per-podcast override auto-applied on episode load).
+    // Fast-forward paths set _suppressSpeedAnnouncement before calling setSpeed
+    // so their own explicit announcements aren't duplicated here.
     ref.listen<AsyncValue<PlaybackState>>(playbackStateProvider, (prev, next) {
+      if (_suppressSpeedAnnouncement) {
+        _suppressSpeedAnnouncement = false;
+        return;
+      }
       final prevSpeed = prev?.asData?.value.speed;
       final nextSpeed = next.asData?.value.speed;
       if (prevSpeed != null && nextSpeed != null && nextSpeed != prevSpeed) {
