@@ -5,6 +5,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:logging/logging.dart';
 
 import '../../../core/constants/playback.dart';
+import '../../../data/db/app_database.dart';
 import '../../../features/settings/data/app_settings_repository.dart';
 import '../domain/sleep_timer.dart';
 
@@ -51,11 +52,16 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   late final SleepTimer sleepTimer;
 
   AppSettingsRepository? _settings;
+  AppDatabase? _db;
 
   // Called by the provider layer once the DB is available so _applyPlaybackSettings
   // can read global speed + trim silence without relying on MediaItem extras.
   void attachSettings(AppSettingsRepository settings) {
     _settings = settings;
+  }
+
+  void attachDatabase(AppDatabase db) {
+    _db = db;
   }
 
   StreamSubscription<PlaybackState>? _playbackSubscription;
@@ -102,15 +108,30 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   AudioSource _resolveAudioSource(MediaItem item) => resolveAudioSource(item);
 
   Future<void> _applyPlaybackSettings(MediaItem item) async {
+    // Read per-podcast overrides directly from the DB so we always get the
+    // freshest value regardless of what the caller put in extras. The extras
+    // extras can be stale when the Riverpod StreamProvider hasn't processed
+    // the latest DB write yet (AsyncLoading race on first read).
+    double? speedOverride;
+    bool? trimSilenceOverride;
+    final podcastId = item.extras?['podcastId'] as int?;
+    if (_db != null && podcastId != null) {
+      final row = await (_db!.select(
+        _db!.podcasts,
+      )..where((p) => p.id.equals(podcastId))).getSingleOrNull();
+      speedOverride = row?.speedOverride;
+      trimSilenceOverride = row?.trimSilenceOverride;
+    }
+
     final globalSpeed = await _settings?.getGlobalSpeed() ?? 1.0;
-    final speed = (item.extras?['speedOverride'] as double?) ?? globalSpeed;
+    final speed = speedOverride ?? globalSpeed;
     await _player.setSpeed(speed);
     playbackState.add(playbackState.value.copyWith(speed: speed));
 
     final globalTrimSilence = await _settings?.isSkipSilenceEnabled() ?? false;
-    final trimSilence =
-        (item.extras?['trimSilenceOverride'] as bool?) ?? globalTrimSilence;
-    await _player.setSkipSilenceEnabled(trimSilence);
+    await _player.setSkipSilenceEnabled(
+      trimSilenceOverride ?? globalTrimSilence,
+    );
   }
 
   Future<void> playEpisode(

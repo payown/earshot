@@ -204,6 +204,7 @@ final handlerSettingsAttachmentProvider = Provider<void>((ref) {
   final handler = ref.read(audioHandlerProvider);
   final db = ref.watch(appDatabaseProvider);
   handler.attachSettings(AppSettingsRepositoryImpl(database: db));
+  handler.attachDatabase(db);
 });
 
 // Watches episodeIdStream and persists the current episode ID so it can be
