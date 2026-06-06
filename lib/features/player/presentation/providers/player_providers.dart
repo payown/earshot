@@ -147,6 +147,24 @@ class _AudioSettingNotifier extends AsyncNotifier<bool> {
   }
 }
 
+class _GlobalSpeedNotifier extends AsyncNotifier<double> {
+  @override
+  Future<double> build() async {
+    final db = ref.watch(appDatabaseProvider);
+    return AppSettingsRepositoryImpl(database: db).getGlobalSpeed();
+  }
+
+  Future<void> set(double speed) async {
+    state = AsyncData(speed);
+    final db = ref.read(appDatabaseProvider);
+    await AppSettingsRepositoryImpl(database: db).setGlobalSpeed(speed);
+  }
+}
+
+final globalSpeedProvider = AsyncNotifierProvider<_GlobalSpeedNotifier, double>(
+  _GlobalSpeedNotifier.new,
+);
+
 final skipSilenceProvider = AsyncNotifierProvider<_AudioSettingNotifier, bool>(
   () => _AudioSettingNotifier(
     read: (r) => r.isSkipSilenceEnabled(),
@@ -177,6 +195,16 @@ final currentEpisodeDescriptionProvider = StreamProvider<String?>((ref) {
   return (db.select(db.episodes)..where((e) => e.id.equals(episodeId)))
       .watchSingleOrNull()
       .map((row) => row?.description);
+});
+
+// Attaches AppSettingsRepository to the audio handler as soon as the DB is
+// available so _applyPlaybackSettings can read global speed + trim silence
+// without needing those values in every MediaItem's extras.
+final handlerSettingsAttachmentProvider = Provider<void>((ref) {
+  final handler = ref.read(audioHandlerProvider);
+  final db = ref.watch(appDatabaseProvider);
+  handler.attachSettings(AppSettingsRepositoryImpl(database: db));
+  handler.attachDatabase(db);
 });
 
 // Watches episodeIdStream and persists the current episode ID so it can be
@@ -231,6 +259,8 @@ final playbackRestorationProvider = FutureProvider<void>((ref) async {
         'podcastId': episode.podcastId,
         if (podcast?.speedOverride != null)
           'speedOverride': podcast!.speedOverride!,
+        if (podcast?.trimSilenceOverride != null)
+          'trimSilenceOverride': podcast!.trimSilenceOverride!,
         if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
       },
     ),
@@ -251,6 +281,7 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     required String? podcastTitle,
     required Uri? artUri,
     required double? speedOverride,
+    required bool? trimSilenceOverride,
   }) {
     return MediaItem(
       id: episode.audioUrl,
@@ -265,6 +296,8 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         'episodeId': episode.id,
         'podcastId': episode.podcastId,
         if (speedOverride != null) 'speedOverride': speedOverride,
+        if (trimSilenceOverride != null)
+          'trimSilenceOverride': trimSilenceOverride,
         if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
       },
     );
@@ -287,6 +320,7 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         podcastTitle: podcast?.title,
         artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
         speedOverride: podcast?.speedOverride,
+        trimSilenceOverride: podcast?.trimSilenceOverride,
       ),
     );
   }
@@ -409,6 +443,7 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         podcastTitle: nextPodcast?.title,
         artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
         speedOverride: nextPodcast?.speedOverride,
+        trimSilenceOverride: nextPodcast?.trimSilenceOverride,
       ),
       resumePositionSeconds: next.positionSeconds,
     );

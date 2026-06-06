@@ -91,6 +91,10 @@ abstract interface class AppSettingsRepository {
   Future<int?> getStorageCapBytes();
 
   Future<void> setStorageCapBytes(int? bytes);
+
+  Future<double> getGlobalSpeed();
+
+  Future<void> setGlobalSpeed(double speed);
 }
 
 class AppSettingsRepositoryImpl implements AppSettingsRepository {
@@ -122,6 +126,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyDownloadAudit = 'download_audit_announcements';
   static const _keyStorageCapBytes = 'storage_cap_bytes';
   static const _keyLastPlayingEpisodeId = 'last_playing_episode_id';
+  static const _keyGlobalSpeed = 'global_speed';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
 
@@ -331,6 +336,19 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setStorageCapBytes(int? bytes) =>
       _set(_keyStorageCapBytes, bytes?.toString() ?? 'null');
+
+  @override
+  Future<double> getGlobalSpeed() async {
+    final row = await (_db.select(
+      _db.appSettings,
+    )..where((s) => s.key.equals(_keyGlobalSpeed))).getSingleOrNull();
+    if (row == null) return 1.0;
+    return double.tryParse(row.value) ?? 1.0;
+  }
+
+  @override
+  Future<void> setGlobalSpeed(double speed) =>
+      _set(_keyGlobalSpeed, speed.toString());
 
   Future<int?> getLastPlayingEpisodeId() async {
     final row = await (_db.select(

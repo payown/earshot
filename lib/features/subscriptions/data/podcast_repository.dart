@@ -28,4 +28,8 @@ abstract interface class PodcastRepository {
   Future<void> setInboxIncluded(int podcastId, {required bool included});
 
   Future<void> updateSpeedOverride(int podcastId, double? speed);
+
+  Future<void> updateTrimSilenceOverride(int podcastId, bool? trimSilence);
+
+  Future<void> disableCustomSettings(int podcastId);
 }

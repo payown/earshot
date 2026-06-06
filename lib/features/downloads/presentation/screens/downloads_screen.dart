@@ -178,6 +178,8 @@ void _playEpisode(BuildContext context, Episode episode, WidgetRef ref) {
               'podcastId': episode.podcastId,
               if (podcast?.speedOverride != null)
                 'speedOverride': podcast!.speedOverride!,
+              if (podcast?.trimSilenceOverride != null)
+                'trimSilenceOverride': podcast!.trimSilenceOverride!,
             },
           ),
           resumePositionSeconds: resumePosition,

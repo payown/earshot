@@ -179,6 +179,8 @@ class FolderDetailScreen extends ConsumerWidget {
               'podcastId': first.podcastId,
               if (firstPodcast?.speedOverride != null)
                 'speedOverride': firstPodcast!.speedOverride!,
+              if (firstPodcast?.trimSilenceOverride != null)
+                'trimSilenceOverride': firstPodcast!.trimSilenceOverride!,
             },
           ),
           resumePositionSeconds: resumePos,
