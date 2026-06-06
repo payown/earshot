@@ -12,6 +12,7 @@ import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../features/folders/presentation/providers/folders_providers.dart';
 import '../../../../features/player/presentation/providers/player_providers.dart';
+import '../../../../features/player/presentation/widgets/speed_selector.dart';
 import '../../../../features/search/presentation/providers/search_providers.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
@@ -283,6 +284,60 @@ class SettingsScreen extends ConsumerWidget {
                           TextDirection.ltr,
                         );
                       }
+                    }
+                  },
+          ),
+          const Divider(),
+          Semantics(
+            header: true,
+            label: 'Playback defaults',
+            child: const ExcludeSemantics(
+              child: _SectionHeader(label: 'Playback defaults'),
+            ),
+          ),
+          ListTile(
+            title: const Text('Default speed'),
+            subtitle: const Text(
+              'Used for podcasts with no per-podcast speed set',
+            ),
+            trailing: SizedBox(
+              width: 160,
+              child: SpeedSelector(
+                speed: ref.watch(globalSpeedProvider).asData?.value ?? 1.0,
+                onSpeedChanged: (speed) async {
+                  await ref.read(globalSpeedProvider.notifier).set(speed);
+                  if (context.mounted) {
+                    SemanticsService.sendAnnouncement(
+                      View.of(context),
+                      'Default speed set to ${SpeedSelector.formatSpeed(speed)}',
+                      TextDirection.ltr,
+                    );
+                  }
+                },
+              ),
+            ),
+          ),
+          SwitchListTile(
+            title: const Text('Trim silence by default'),
+            subtitle: const Text(
+              'Used for podcasts with no per-podcast trim-silence setting',
+            ),
+            value: ref.watch(skipSilenceProvider).asData?.value ?? false,
+            onChanged: ref.watch(skipSilenceProvider).isLoading
+                ? null
+                : (val) async {
+                    await ref.read(skipSilenceProvider.notifier).set(val);
+                    await ref
+                        .read(audioHandlerProvider)
+                        .setSkipSilenceEnabled(val);
+                    if (context.mounted) {
+                      SemanticsService.sendAnnouncement(
+                        View.of(context),
+                        val
+                            ? 'Trim silence enabled by default'
+                            : 'Trim silence disabled by default',
+                        TextDirection.ltr,
+                      );
                     }
                   },
           ),

@@ -101,6 +101,8 @@ void _playEpisode(WidgetRef ref, Episode episode) {
         'podcastId': episode.podcastId,
         if (podcast?.speedOverride != null)
           'speedOverride': podcast!.speedOverride!,
+        if (podcast?.trimSilenceOverride != null)
+          'trimSilenceOverride': podcast!.trimSilenceOverride!,
         if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
       },
     ),

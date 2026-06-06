@@ -239,6 +239,8 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
           'podcastId': podcast.id,
           if (podcast.speedOverride != null)
             'speedOverride': podcast.speedOverride!,
+          if (podcast.trimSilenceOverride != null)
+            'trimSilenceOverride': podcast.trimSilenceOverride!,
         },
       ),
       resumePositionSeconds: resumePosition,

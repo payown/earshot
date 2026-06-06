@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/spacing.dart';
+import '../../../../features/player/presentation/providers/player_providers.dart';
 import '../../../../features/player/presentation/widgets/speed_selector.dart';
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
@@ -109,5 +110,16 @@ class _PodcastSettingsView extends ConsumerWidget {
 
   Future<void> _resetSpeed(BuildContext context, WidgetRef ref) async {
     await ref.read(podcastRepositoryProvider).disableCustomSettings(podcast.id);
+    // If this podcast's episode is currently playing, apply the global values
+    // to the audio session immediately rather than waiting for the next load.
+    final currentPodcastId =
+        ref.read(mediaItemProvider).asData?.value?.extras?['podcastId'] as int?;
+    if (currentPodcastId == podcast.id) {
+      final handler = ref.read(audioHandlerProvider);
+      final globalSpeed = await ref.read(globalSpeedProvider.future);
+      final globalTrimSilence = await ref.read(skipSilenceProvider.future);
+      await handler.setSpeed(globalSpeed);
+      await handler.setSkipSilenceEnabled(globalTrimSilence);
+    }
   }
 }
