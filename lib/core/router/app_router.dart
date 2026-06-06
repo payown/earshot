@@ -23,6 +23,7 @@ import '../../features/folders/presentation/screens/folder_detail_screen.dart';
 import '../../features/subscriptions/presentation/screens/add_podcast_screen.dart';
 import '../../features/subscriptions/presentation/screens/all_podcasts_screen.dart';
 import '../../features/subscriptions/presentation/screens/podcast_detail_screen.dart';
+import '../../features/subscriptions/presentation/screens/podcast_settings_screen.dart';
 import '../../features/subscriptions/presentation/screens/subscriptions_screen.dart';
 import '../presentation/main_shell.dart';
 import '../providers/core_providers.dart';
@@ -36,6 +37,7 @@ abstract final class AppRoutes {
   static const subscriptions = '/subscriptions';
   static const allPodcasts = '/subscriptions/all';
   static String podcastDetail(int id) => '/subscriptions/$id';
+  static String podcastSettings(int id) => '/subscriptions/$id/settings';
   static String folderDetail(int id) => '/subscriptions/folders/$id';
   static const downloads = '/downloads';
   static const search = '/search';
@@ -247,6 +249,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                     builder: (_, state) => PodcastDetailScreen(
                       podcastId: int.parse(state.pathParameters['id']!),
                     ),
+                    routes: [
+                      GoRoute(
+                        path: 'settings',
+                        parentNavigatorKey: _rootKey,
+                        builder: (_, state) => PodcastSettingsScreen(
+                          podcastId: int.parse(state.pathParameters['id']!),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

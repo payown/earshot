@@ -17,6 +17,7 @@ import '../../domain/sleep_timer.dart';
 import '../providers/chapter_providers.dart';
 import '../providers/player_providers.dart';
 import '../widgets/chapter_controls.dart';
+import '../widgets/speed_selector.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   const PlayerScreen({super.key});
@@ -124,6 +125,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ref.listen<AsyncValue<bool>>(directTouchEnabledProvider, (_, next) {
       if (next.value == false && _voFastForwardActive) {
         _stopVoFastForward();
+      }
+    });
+
+    // Announce speed changes to VoiceOver/TalkBack (covers both manual changes
+    // and per-podcast override auto-applied on episode load).
+    ref.listen<AsyncValue<PlaybackState>>(playbackStateProvider, (prev, next) {
+      final prevSpeed = prev?.asData?.value.speed;
+      final nextSpeed = next.asData?.value.speed;
+      if (prevSpeed != null && nextSpeed != null && nextSpeed != prevSpeed) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Speed set to ${SpeedSelector.formatSpeed(nextSpeed)}',
+          TextDirection.ltr,
+        );
       }
     });
 
@@ -294,7 +309,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                           child: Text('Speed', style: labelStyle),
                         ),
                         const SizedBox(height: Spacing.xs),
-                        _SpeedSelector(
+                        SpeedSelector(
                           speed: playbackState?.speed ?? 1.0,
                           onSpeedChanged: (speed) {
                             ref.read(audioHandlerProvider).setSpeed(speed);
@@ -847,84 +862,6 @@ class _PlaybackControls extends StatelessWidget {
         ),
       ],
     );
-  }
-}
-
-class _SpeedSelector extends StatelessWidget {
-  const _SpeedSelector({
-    required this.speed,
-    required this.onSpeedChanged,
-  });
-
-  final double speed;
-  final ValueChanged<double> onSpeedChanged;
-
-  // 0.5x to 5.0x in 0.1x increments (46 speeds)
-  static final List<double> _speeds = List.unmodifiable([
-    for (int i = 5; i <= 50; i++) i / 10.0,
-  ]);
-
-  @override
-  Widget build(BuildContext context) {
-    final idx = _nearestIndex(speed);
-    final prev = idx > 0 ? _speeds[idx - 1] : null;
-    final next = idx < _speeds.length - 1 ? _speeds[idx + 1] : null;
-
-    return Semantics(
-      label: 'Playback speed',
-      slider: true,
-      value: _label(speed),
-      decreasedValue: prev != null ? _label(prev) : null,
-      increasedValue: next != null ? _label(next) : null,
-      onDecrease: prev != null ? () => onSpeedChanged(prev) : null,
-      onIncrease: next != null ? () => onSpeedChanged(next) : null,
-      excludeSemantics: true,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            iconSize: 28,
-            onPressed: prev != null ? () => onSpeedChanged(prev) : null,
-          ),
-          SizedBox(
-            width: 56,
-            child: Text(
-              _label(speed),
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            iconSize: 28,
-            onPressed: next != null ? () => onSpeedChanged(next) : null,
-          ),
-        ],
-      ),
-    );
-  }
-
-  int _nearestIndex(double s) {
-    var best = 0;
-    var bestDist = (s - _speeds[0]).abs();
-    for (var i = 1; i < _speeds.length; i++) {
-      final d = (s - _speeds[i]).abs();
-      if (d < bestDist) {
-        bestDist = d;
-        best = i;
-      }
-    }
-    return best;
-  }
-
-  String _label(double s) {
-    // If s is on the 0.1 grid (within float epsilon), one decimal is exact.
-    // Legacy persisted speeds (e.g. 1.25x) fall through to two decimals.
-    final tenths = (s * 10).round();
-    if ((tenths / 10.0 - s).abs() < 1e-9) return '${s.toStringAsFixed(1)}x';
-    return '${s.toStringAsFixed(2)}x';
   }
 }
 

@@ -2,8 +2,10 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/episode_action_builder.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/player/presentation/providers/player_providers.dart';
 import '../../../../features/settings/domain/quick_action_definition.dart';
@@ -98,6 +100,14 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
               SliverAppBar(
                 expandedHeight: 200,
                 pinned: true,
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.settings_outlined),
+                    tooltip: 'Podcast settings',
+                    onPressed: () =>
+                        context.push(AppRoutes.podcastSettings(podcast.id)),
+                  ),
+                ],
                 flexibleSpace: FlexibleSpaceBar(
                   title: Text(
                     podcast.title,
