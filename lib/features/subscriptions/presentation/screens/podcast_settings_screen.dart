@@ -43,6 +43,8 @@ class _PodcastSettingsView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final hasOverride = podcast.speedOverride != null;
+
     return Scaffold(
       appBar: AppBar(title: Text('${podcast.title} Settings')),
       body: ListView(
@@ -51,12 +53,31 @@ class _PodcastSettingsView extends ConsumerWidget {
           ListTile(
             title: const Text('Playback speed'),
             subtitle: Text(
-              podcast.speedOverride != null
-                  ? SpeedSelector.formatSpeed(podcast.speedOverride!)
+              hasOverride
+                  ? '${SpeedSelector.formatSpeed(podcast.speedOverride!)} (custom)'
                   : 'Global',
             ),
-            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
-            onTap: () => _showSpeedSheet(context, ref, podcast),
+            trailing: hasOverride
+                ? Semantics(
+                    button: true,
+                    label: 'Reset playback speed to global',
+                    child: ExcludeSemantics(
+                      child: OutlinedButton(
+                        onPressed: () => _resetSpeed(context, ref),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: Spacing.sm,
+                          ),
+                          minimumSize: const Size(
+                            Spacing.minTouchTarget,
+                            Spacing.minTouchTarget,
+                          ),
+                        ),
+                        child: const Text('Reset'),
+                      ),
+                    ),
+                  )
+                : null,
           ),
         ],
       ),
@@ -86,116 +107,9 @@ class _PodcastSettingsView extends ConsumerWidget {
     );
   }
 
-  Future<void> _showSpeedSheet(
-    BuildContext context,
-    WidgetRef ref,
-    Podcast podcast,
-  ) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      barrierLabel: 'Dismiss playback speed settings',
-      builder: (sheetContext) => _SpeedSheet(podcast: podcast),
-    );
-  }
-}
-
-class _SpeedSheet extends ConsumerStatefulWidget {
-  const _SpeedSheet({required this.podcast});
-
-  final Podcast podcast;
-
-  @override
-  ConsumerState<_SpeedSheet> createState() => _SpeedSheetState();
-}
-
-class _SpeedSheetState extends ConsumerState<_SpeedSheet> {
-  late double? _selectedSpeed;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedSpeed = widget.podcast.speedOverride;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final currentSpeed = _selectedSpeed ?? 1.0;
-
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          Spacing.md,
-          Spacing.lg,
-          Spacing.md,
-          Spacing.md,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Semantics(
-              header: true,
-              label: 'Playback speed',
-              child: ExcludeSemantics(
-                child: Text(
-                  'Playback speed',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-              ),
-            ),
-            const SizedBox(height: Spacing.xs),
-            Text(
-              'Override the global speed for this podcast only.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: Spacing.lg),
-            SpeedSelector(
-              speed: currentSpeed,
-              onSpeedChanged: (s) => setState(() => _selectedSpeed = s),
-            ),
-            const SizedBox(height: Spacing.lg),
-            Semantics(
-              button: true,
-              label: 'Save speed override',
-              child: ExcludeSemantics(
-                child: FilledButton(
-                  onPressed: () => _save(context),
-                  child: const Text('Save'),
-                ),
-              ),
-            ),
-            const SizedBox(height: Spacing.sm),
-            Semantics(
-              button: true,
-              label: 'Use global speed',
-              child: ExcludeSemantics(
-                child: TextButton(
-                  onPressed: () => _clearOverride(context),
-                  child: const Text('Use global speed'),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _save(BuildContext context) async {
+  Future<void> _resetSpeed(BuildContext context, WidgetRef ref) async {
     await ref
         .read(podcastRepositoryProvider)
-        .updateSpeedOverride(widget.podcast.id, _selectedSpeed);
-    if (context.mounted) Navigator.of(context).pop();
-  }
-
-  Future<void> _clearOverride(BuildContext context) async {
-    await ref
-        .read(podcastRepositoryProvider)
-        .updateSpeedOverride(widget.podcast.id, null);
-    if (context.mounted) Navigator.of(context).pop();
+        .updateSpeedOverride(podcast.id, null);
   }
 }

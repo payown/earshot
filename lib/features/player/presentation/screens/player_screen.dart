@@ -109,6 +109,28 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
+  Future<void> _saveSpeedForPodcast(
+    BuildContext context,
+    int podcastId,
+    double speed,
+  ) async {
+    await ref
+        .read(podcastRepositoryProvider)
+        .updateSpeedOverride(podcastId, speed);
+    if (!context.mounted) return;
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Speed saved for this podcast',
+      TextDirection.ltr,
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Speed saved for this podcast'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final mediaItem = ref.watch(mediaItemProvider).asData?.value;
@@ -195,6 +217,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final isPlaying = playbackState?.playing ?? false;
     final isBuffering =
         playbackState?.processingState == AudioProcessingState.buffering;
+
+    final podcastId = mediaItem.extras?['podcastId'] as int?;
 
     final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -311,17 +335,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                         const SizedBox(height: Spacing.xs),
                         SpeedSelector(
                           speed: playbackState?.speed ?? 1.0,
-                          onSpeedChanged: (speed) {
-                            ref.read(audioHandlerProvider).setSpeed(speed);
-                            final podcastId =
-                                mediaItem.extras?['podcastId'] as int?;
-                            if (podcastId != null) {
-                              ref
-                                  .read(podcastRepositoryProvider)
-                                  .updateSpeedOverride(podcastId, speed);
-                            }
-                          },
+                          onSpeedChanged: (speed) =>
+                              ref.read(audioHandlerProvider).setSpeed(speed),
                         ),
+                        if (podcastId != null) ...[
+                          const SizedBox(height: Spacing.xs),
+                          TextButton(
+                            onPressed: () => _saveSpeedForPodcast(
+                              context,
+                              podcastId,
+                              playbackState?.speed ?? 1.0,
+                            ),
+                            child: const Text('Save for this podcast'),
+                          ),
+                        ],
                       ],
                     ),
                   ),
