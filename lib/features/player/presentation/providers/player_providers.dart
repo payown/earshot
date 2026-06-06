@@ -147,6 +147,24 @@ class _AudioSettingNotifier extends AsyncNotifier<bool> {
   }
 }
 
+class _GlobalSpeedNotifier extends AsyncNotifier<double> {
+  @override
+  Future<double> build() async {
+    final db = ref.watch(appDatabaseProvider);
+    return AppSettingsRepositoryImpl(database: db).getGlobalSpeed();
+  }
+
+  Future<void> set(double speed) async {
+    state = AsyncData(speed);
+    final db = ref.read(appDatabaseProvider);
+    await AppSettingsRepositoryImpl(database: db).setGlobalSpeed(speed);
+  }
+}
+
+final globalSpeedProvider = AsyncNotifierProvider<_GlobalSpeedNotifier, double>(
+  _GlobalSpeedNotifier.new,
+);
+
 final skipSilenceProvider = AsyncNotifierProvider<_AudioSettingNotifier, bool>(
   () => _AudioSettingNotifier(
     read: (r) => r.isSkipSilenceEnabled(),
@@ -213,6 +231,9 @@ final playbackRestorationProvider = FutureProvider<void>((ref) async {
     db.podcasts,
   )..where((p) => p.id.equals(episode.podcastId))).getSingleOrNull();
 
+  final globalSpeed = await settings.getGlobalSpeed();
+  final globalTrimSilence = await settings.isSkipSilenceEnabled();
+
   final handler = ref.read(audioHandlerProvider);
   await handler.loadEpisode(
     MediaItem(
@@ -229,8 +250,12 @@ final playbackRestorationProvider = FutureProvider<void>((ref) async {
       extras: {
         'episodeId': episode.id,
         'podcastId': episode.podcastId,
+        'globalSpeed': globalSpeed,
+        'globalTrimSilence': globalTrimSilence,
         if (podcast?.speedOverride != null)
           'speedOverride': podcast!.speedOverride!,
+        if (podcast?.trimSilenceOverride != null)
+          'trimSilenceOverride': podcast!.trimSilenceOverride!,
         if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
       },
     ),
@@ -251,6 +276,9 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     required String? podcastTitle,
     required Uri? artUri,
     required double? speedOverride,
+    required bool? trimSilenceOverride,
+    required double globalSpeed,
+    required bool globalTrimSilence,
   }) {
     return MediaItem(
       id: episode.audioUrl,
@@ -264,7 +292,11 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
       extras: {
         'episodeId': episode.id,
         'podcastId': episode.podcastId,
+        'globalSpeed': globalSpeed,
+        'globalTrimSilence': globalTrimSilence,
         if (speedOverride != null) 'speedOverride': speedOverride,
+        if (trimSilenceOverride != null)
+          'trimSilenceOverride': trimSilenceOverride,
         if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
       },
     );
@@ -272,6 +304,10 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
 
   Future<void> preloadNextEpisode() async {
     final db = ref.read(appDatabaseProvider);
+    final settingsForPreload = AppSettingsRepositoryImpl(database: db);
+    final preloadGlobalSpeed = await settingsForPreload.getGlobalSpeed();
+    final preloadGlobalTrimSilence = await settingsForPreload
+        .isSkipSilenceEnabled();
     final queue = await queueRepo.watchQueue().first;
     if (queue.length < 2) {
       preloadScheduled = false;
@@ -287,6 +323,9 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         podcastTitle: podcast?.title,
         artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
         speedOverride: podcast?.speedOverride,
+        trimSilenceOverride: podcast?.trimSilenceOverride,
+        globalSpeed: preloadGlobalSpeed,
+        globalTrimSilence: preloadGlobalTrimSilence,
       ),
     );
   }
@@ -403,12 +442,18 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     final nextPodcast = await (db.select(
       db.podcasts,
     )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
+    final completedGlobalSpeed = await settingsRepo.getGlobalSpeed();
+    final completedGlobalTrimSilence = await settingsRepo
+        .isSkipSilenceEnabled();
     await handler.playEpisode(
       _buildMediaItem(
         episode: next,
         podcastTitle: nextPodcast?.title,
         artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
         speedOverride: nextPodcast?.speedOverride,
+        trimSilenceOverride: nextPodcast?.trimSilenceOverride,
+        globalSpeed: completedGlobalSpeed,
+        globalTrimSilence: completedGlobalTrimSilence,
       ),
       resumePositionSeconds: next.positionSeconds,
     );

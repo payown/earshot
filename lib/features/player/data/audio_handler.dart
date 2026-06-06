@@ -91,12 +91,17 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
 
   AudioSource _resolveAudioSource(MediaItem item) => resolveAudioSource(item);
 
-  Future<void> _applySpeedOverride(MediaItem item) async {
-    final speedOverride = item.extras?['speedOverride'] as double?;
-    if (speedOverride != null) {
-      await _player.setSpeed(speedOverride);
-      playbackState.add(playbackState.value.copyWith(speed: speedOverride));
-    }
+  Future<void> _applyPlaybackSettings(MediaItem item) async {
+    final speed =
+        (item.extras?['speedOverride'] as double?) ??
+        (item.extras?['globalSpeed'] as double? ?? 1.0);
+    await _player.setSpeed(speed);
+    playbackState.add(playbackState.value.copyWith(speed: speed));
+
+    final trimSilence =
+        (item.extras?['trimSilenceOverride'] as bool?) ??
+        (item.extras?['globalTrimSilence'] as bool? ?? false);
+    await _player.setSkipSilenceEnabled(trimSilence);
   }
 
   Future<void> playEpisode(
@@ -113,7 +118,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     final episodeId = item.extras?['episodeId'] as int?;
     _episodeIdController.add(episodeId);
 
-    await _applySpeedOverride(item);
+    await _applyPlaybackSettings(item);
 
     try {
       await _player.setAudioSources(
@@ -143,7 +148,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     final episodeId = item.extras?['episodeId'] as int?;
     _episodeIdController.add(episodeId);
 
-    await _applySpeedOverride(item);
+    await _applyPlaybackSettings(item);
 
     try {
       await _player.setAudioSources(
@@ -186,7 +191,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
         final episodeId = next.extras?['episodeId'] as int?;
         _episodeIdController.add(episodeId);
 
-        await _applySpeedOverride(next);
+        await _applyPlaybackSettings(next);
 
         // Remove the completed episode from the playlist head.
         // This causes currentIndexStream to emit 0; _isAdvancing suppresses it.

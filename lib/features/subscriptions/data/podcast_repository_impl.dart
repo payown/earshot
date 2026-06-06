@@ -349,6 +349,31 @@ class PodcastRepositoryImpl implements PodcastRepository {
   }
 
   @override
+  Future<void> updateTrimSilenceOverride(
+    int podcastId,
+    bool? trimSilence,
+  ) async {
+    await (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId)))
+        .write(PodcastsCompanion(trimSilenceOverride: Value(trimSilence)));
+    _log.fine(
+      'Trim silence override for podcast $podcastId set to $trimSilence',
+    );
+  }
+
+  @override
+  Future<void> disableCustomSettings(int podcastId) async {
+    await (_db.update(
+      _db.podcasts,
+    )..where((p) => p.id.equals(podcastId))).write(
+      const PodcastsCompanion(
+        speedOverride: Value(null),
+        trimSilenceOverride: Value(null),
+      ),
+    );
+    _log.fine('Custom settings cleared for podcast $podcastId');
+  }
+
+  @override
   Future<void> setInboxExcluded(int podcastId, {required bool excluded}) async {
     await (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId)))
         .write(PodcastsCompanion(inboxExcluded: Value(excluded)));
@@ -387,6 +412,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
     inboxExcluded: row.inboxExcluded,
     inboxIncluded: row.inboxIncluded,
     speedOverride: row.speedOverride,
+    trimSilenceOverride: row.trimSilenceOverride,
     queueAgeLimitDays: row.queueAgeLimitDays,
     createdAt: row.createdAt,
     refreshedAt: row.refreshedAt,

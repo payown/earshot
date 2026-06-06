@@ -15,6 +15,7 @@ class Podcast {
     this.language,
     this.category,
     this.speedOverride,
+    this.trimSilenceOverride,
     this.queueAgeLimitDays,
     this.refreshedAt,
   });
@@ -33,7 +34,11 @@ class Podcast {
   final bool inboxExcluded;
   final bool inboxIncluded;
   final double? speedOverride;
+  final bool? trimSilenceOverride;
   final int? queueAgeLimitDays;
   final DateTime createdAt;
   final DateTime? refreshedAt;
+
+  bool get hasCustomSettings =>
+      speedOverride != null || trimSilenceOverride != null;
 }

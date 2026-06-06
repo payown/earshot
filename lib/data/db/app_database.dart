@@ -39,7 +39,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   Future<void> clearAllData() => transaction(() async {
     await delete(podcasts).go();
@@ -79,6 +79,9 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 9) {
         await m.addColumn(podcasts, podcasts.inboxIncluded);
+      }
+      if (from < 10) {
+        await m.addColumn(podcasts, podcasts.trimSilenceOverride);
       }
     },
     beforeOpen: (_) async {

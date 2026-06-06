@@ -43,7 +43,7 @@ class _PodcastSettingsView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final hasOverride = podcast.speedOverride != null;
+    final hasOverride = podcast.hasCustomSettings;
 
     return Scaffold(
       appBar: AppBar(title: Text('${podcast.title} Settings')),
@@ -108,8 +108,6 @@ class _PodcastSettingsView extends ConsumerWidget {
   }
 
   Future<void> _resetSpeed(BuildContext context, WidgetRef ref) async {
-    await ref
-        .read(podcastRepositoryProvider)
-        .updateSpeedOverride(podcast.id, null);
+    await ref.read(podcastRepositoryProvider).disableCustomSettings(podcast.id);
   }
 }

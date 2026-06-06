@@ -27,6 +27,15 @@ final podcastProvider = StreamProvider.family<Podcast?, int>(
       ref.watch(podcastRepositoryProvider).watchPodcast(podcastId),
 );
 
+// Nullable-key variant used by screens that may not have a podcast in context
+// (e.g. the player screen when no podcast episode is loaded).
+final optionalPodcastProvider = StreamProvider.family<Podcast?, int?>(
+  (ref, podcastId) {
+    if (podcastId == null) return Stream.value(null);
+    return ref.watch(podcastRepositoryProvider).watchPodcast(podcastId);
+  },
+);
+
 final episodesProvider = StreamProvider.family<List<Episode>, int>(
   (ref, podcastId) =>
       ref.watch(podcastRepositoryProvider).watchEpisodes(podcastId),

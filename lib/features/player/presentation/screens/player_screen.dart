@@ -117,31 +117,39 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
-  Future<void> _saveSpeedForPodcast(
-    BuildContext context,
-    int podcastId,
-    double speed,
-  ) async {
-    await ref
-        .read(podcastRepositoryProvider)
-        .updateSpeedOverride(podcastId, speed);
-    if (!context.mounted) return;
-    SemanticsService.sendAnnouncement(
-      View.of(context),
-      'Speed saved for this podcast',
-      TextDirection.ltr,
-    );
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Speed saved for this podcast'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+  Future<void> _toggleCustomSettings({
+    required BuildContext context,
+    required int podcastId,
+    required bool enable,
+    required double currentSpeed,
+    required bool currentTrimSilence,
+  }) async {
+    final repo = ref.read(podcastRepositoryProvider);
+    final handler = ref.read(audioHandlerProvider);
+    if (enable) {
+      // Seed both overrides from whatever is active right now (Option A).
+      await repo.updateSpeedOverride(podcastId, currentSpeed);
+      await repo.updateTrimSilenceOverride(podcastId, currentTrimSilence);
+      // Values are already applied in the audio session — no re-apply needed.
+    } else {
+      await repo.disableCustomSettings(podcastId);
+      // Immediately restore global fallbacks.
+      final globalSpeed = await ref.read(globalSpeedProvider.future);
+      final globalTrimSilence = await ref.read(skipSilenceProvider.future);
+      _suppressSpeedAnnouncement = true;
+      await handler.setSpeed(globalSpeed);
+      await handler.setSkipSilenceEnabled(globalTrimSilence);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final mediaItem = ref.watch(mediaItemProvider).asData?.value;
+    final podcastId = mediaItem?.extras?['podcastId'] as int?;
+    final podcast = ref.watch(optionalPodcastProvider(podcastId)).asData?.value;
+    final hasCustomSettings = podcast?.hasCustomSettings ?? false;
+    final globalSkipSilence =
+        ref.watch(skipSilenceProvider).asData?.value ?? false;
     final playbackState = ref.watch(playbackStateProvider).asData?.value;
     final position = ref.watch(positionProvider).asData?.value ?? Duration.zero;
     final directTouchEnabled =
@@ -231,8 +239,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final isPlaying = playbackState?.playing ?? false;
     final isBuffering =
         playbackState?.processingState == AudioProcessingState.buffering;
-
-    final podcastId = mediaItem.extras?['podcastId'] as int?;
 
     final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -349,20 +355,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                         const SizedBox(height: Spacing.xs),
                         SpeedSelector(
                           speed: playbackState?.speed ?? 1.0,
-                          onSpeedChanged: (speed) =>
-                              ref.read(audioHandlerProvider).setSpeed(speed),
+                          onSpeedChanged: (speed) async {
+                            await ref
+                                .read(audioHandlerProvider)
+                                .setSpeed(speed);
+                            if (hasCustomSettings && podcastId != null) {
+                              await ref
+                                  .read(podcastRepositoryProvider)
+                                  .updateSpeedOverride(podcastId, speed);
+                            } else {
+                              await ref
+                                  .read(globalSpeedProvider.notifier)
+                                  .set(speed);
+                            }
+                          },
                         ),
-                        if (podcastId != null) ...[
-                          const SizedBox(height: Spacing.xs),
-                          TextButton(
-                            onPressed: () => _saveSpeedForPodcast(
-                              context,
-                              podcastId,
-                              playbackState?.speed ?? 1.0,
-                            ),
-                            child: const Text('Save for this podcast'),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -380,7 +387,30 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 ],
               ),
               const SizedBox(height: Spacing.md),
-              _AudioExtrasRow(),
+              _AudioExtrasRow(
+                podcastId: podcastId,
+                hasCustomSettings: hasCustomSettings,
+                podcastTrimSilence: podcast?.trimSilenceOverride,
+                globalTrimSilence: globalSkipSilence,
+              ),
+              if (podcastId != null) ...[
+                const SizedBox(height: Spacing.xs),
+                SwitchListTile.adaptive(
+                  value: hasCustomSettings,
+                  onChanged: (on) => _toggleCustomSettings(
+                    context: context,
+                    podcastId: podcastId,
+                    enable: on,
+                    currentSpeed: playbackState?.speed ?? 1.0,
+                    currentTrimSilence: hasCustomSettings
+                        ? (podcast?.trimSilenceOverride ?? globalSkipSilence)
+                        : globalSkipSilence,
+                  ),
+                  title: const Text('Custom playback settings'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                ),
+              ],
               const SizedBox(height: Spacing.sm),
               if (mediaItem.extras?['episodeId'] is int)
                 _BookmarksSection(
@@ -1045,9 +1075,23 @@ class _SleepTimerControls extends ConsumerWidget {
 }
 
 class _AudioExtrasRow extends ConsumerWidget {
+  const _AudioExtrasRow({
+    required this.podcastId,
+    required this.hasCustomSettings,
+    required this.podcastTrimSilence,
+    required this.globalTrimSilence,
+  });
+
+  final int? podcastId;
+  final bool hasCustomSettings;
+  final bool? podcastTrimSilence;
+  final bool globalTrimSilence;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final skipSilence = ref.watch(skipSilenceProvider).asData?.value ?? false;
+    final trimSilence = (hasCustomSettings && podcastTrimSilence != null)
+        ? podcastTrimSilence!
+        : globalTrimSilence;
     final voiceEnhance = ref.watch(voiceEnhanceProvider).asData?.value ?? false;
 
     return Row(
@@ -1056,9 +1100,15 @@ class _AudioExtrasRow extends ConsumerWidget {
         _ToggleChip(
           label: 'Trim Silence',
           icon: Icons.graphic_eq,
-          enabled: skipSilence,
+          enabled: trimSilence,
           onToggle: (v) async {
-            await ref.read(skipSilenceProvider.notifier).set(v);
+            if (hasCustomSettings && podcastId != null) {
+              await ref
+                  .read(podcastRepositoryProvider)
+                  .updateTrimSilenceOverride(podcastId!, v);
+            } else {
+              await ref.read(skipSilenceProvider.notifier).set(v);
+            }
             await ref.read(audioHandlerProvider).setSkipSilenceEnabled(v);
           },
         ),
