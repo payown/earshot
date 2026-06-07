@@ -96,6 +96,14 @@ abstract interface class AppSettingsRepository {
 
   Future<void> setGlobalSpeed(double speed);
 
+  Future<int> getSkipForwardSeconds();
+
+  Future<void> setSkipForwardSeconds(int seconds);
+
+  Future<int> getSkipBackSeconds();
+
+  Future<void> setSkipBackSeconds(int seconds);
+
   Future<DateTime?> getLastAutoRefreshAt();
 
   Future<void> setLastAutoRefreshAt(DateTime value);
@@ -131,6 +139,8 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyStorageCapBytes = 'storage_cap_bytes';
   static const _keyLastPlayingEpisodeId = 'last_playing_episode_id';
   static const _keyGlobalSpeed = 'global_speed';
+  static const _keySkipForwardSeconds = 'skip_forward_seconds';
+  static const _keySkipBackSeconds = 'skip_back_seconds';
   static const _keyLastAutoRefreshAt = 'last_auto_refresh_at';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
@@ -379,6 +389,30 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
     if (row == null) return defaultValue;
     return row.value == 'true';
   }
+
+  @override
+  Future<int> getSkipForwardSeconds() async {
+    final row = await (_db.select(
+      _db.appSettings,
+    )..where((s) => s.key.equals(_keySkipForwardSeconds))).getSingleOrNull();
+    return int.tryParse(row?.value ?? '') ?? 30;
+  }
+
+  @override
+  Future<void> setSkipForwardSeconds(int seconds) =>
+      _set(_keySkipForwardSeconds, seconds.toString());
+
+  @override
+  Future<int> getSkipBackSeconds() async {
+    final row = await (_db.select(
+      _db.appSettings,
+    )..where((s) => s.key.equals(_keySkipBackSeconds))).getSingleOrNull();
+    return int.tryParse(row?.value ?? '') ?? 15;
+  }
+
+  @override
+  Future<void> setSkipBackSeconds(int seconds) =>
+      _set(_keySkipBackSeconds, seconds.toString());
 
   @override
   Future<DateTime?> getLastAutoRefreshAt() async {

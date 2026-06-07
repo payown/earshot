@@ -36,6 +36,7 @@ class _AppInitializer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(handlerSettingsAttachmentProvider);
+    ref.watch(skipDurationsAttachmentProvider);
     ref.watch(positionTrackerProvider);
     ref.watch(queueAutoAdvanceProvider);
     ref.watch(episodeIdPersistenceProvider);

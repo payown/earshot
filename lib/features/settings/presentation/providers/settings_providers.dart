@@ -176,3 +176,41 @@ final storageCapBytesProvider =
     AsyncNotifierProvider<_StorageCapNotifier, int?>(
       _StorageCapNotifier.new,
     );
+
+class _IntSettingNotifier extends AsyncNotifier<int> {
+  _IntSettingNotifier({
+    required Future<int> Function(AppSettingsRepositoryImpl) read,
+    required Future<void> Function(AppSettingsRepositoryImpl, int) write,
+  }) : _read = read,
+       _write = write;
+
+  final Future<int> Function(AppSettingsRepositoryImpl) _read;
+  final Future<void> Function(AppSettingsRepositoryImpl, int) _write;
+
+  @override
+  Future<int> build() async {
+    final db = ref.watch(appDatabaseProvider);
+    return _read(AppSettingsRepositoryImpl(database: db));
+  }
+
+  Future<void> set(int value) async {
+    state = AsyncData(value);
+    final db = ref.read(appDatabaseProvider);
+    await _write(AppSettingsRepositoryImpl(database: db), value);
+  }
+}
+
+final skipForwardSecondsProvider =
+    AsyncNotifierProvider<_IntSettingNotifier, int>(
+      () => _IntSettingNotifier(
+        read: (r) => r.getSkipForwardSeconds(),
+        write: (r, v) => r.setSkipForwardSeconds(v),
+      ),
+    );
+
+final skipBackSecondsProvider = AsyncNotifierProvider<_IntSettingNotifier, int>(
+  () => _IntSettingNotifier(
+    read: (r) => r.getSkipBackSeconds(),
+    write: (r, v) => r.setSkipBackSeconds(v),
+  ),
+);

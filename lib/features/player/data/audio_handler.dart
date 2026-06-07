@@ -54,6 +54,9 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   AppSettingsRepository? _settings;
   AppDatabase? _db;
 
+  Duration _skipForwardDuration = kSkipForwardDuration;
+  Duration _skipBackDuration = kSkipBackDuration;
+
   // Called by the provider layer once the DB is available so _applyPlaybackSettings
   // can read global speed + trim silence without relying on MediaItem extras.
   void attachSettings(AppSettingsRepository settings) {
@@ -62,6 +65,11 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
 
   void attachDatabase(AppDatabase db) {
     _db = db;
+  }
+
+  void setSkipDurations({required Duration forward, required Duration back}) {
+    _skipForwardDuration = forward;
+    _skipBackDuration = back;
   }
 
   StreamSubscription<PlaybackState>? _playbackSubscription;
@@ -238,13 +246,19 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
-  // AirPods double-click fires skipToNext(). Remap to seek +30 s.
   @override
-  Future<void> skipToNext() => _seekBy(kSkipForwardDuration);
+  Future<void> fastForward() => _seekBy(_skipForwardDuration);
 
-  // AirPods triple-click fires skipToPrevious(). Remap to seek -15 s.
   @override
-  Future<void> skipToPrevious() => _seekBy(-kSkipBackDuration);
+  Future<void> rewind() => _seekBy(-_skipBackDuration);
+
+  // AirPods double-click fires skipToNext(). Remap to skip forward.
+  @override
+  Future<void> skipToNext() => _seekBy(_skipForwardDuration);
+
+  // AirPods triple-click fires skipToPrevious(). Remap to skip back.
+  @override
+  Future<void> skipToPrevious() => _seekBy(-_skipBackDuration);
 
   Future<void> _seekBy(Duration offset) async {
     var pos = _player.position + offset;

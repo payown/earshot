@@ -1,23 +1,14 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
-import '../../../../features/folders/presentation/providers/folders_providers.dart';
-import '../../../../features/player/presentation/providers/player_providers.dart';
-import '../../../../features/player/presentation/widgets/speed_selector.dart';
-import '../../../../features/search/presentation/providers/search_providers.dart';
-import '../../../../data/db/enums.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
-import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -28,405 +19,56 @@ class SettingsScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
-          Semantics(
-            header: true,
-            label: 'Subscriptions',
-            child: const ExcludeSemantics(
-              child: _SectionHeader(label: 'Subscriptions'),
-            ),
+          ListTile(
+            title: const Text('Subscriptions'),
+            subtitle: const Text('Import and export OPML'),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
+            onTap: () => context.push(AppRoutes.settingsSubscriptions),
           ),
           ListTile(
-            title: const Text('Import OPML'),
-            subtitle: const Text('Import subscriptions from another app'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push(AppRoutes.settingsImportOpml),
+            title: const Text('Quick Actions'),
+            subtitle: const Text('Episode and podcast quick actions'),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
+            onTap: () => context.push(AppRoutes.settingsQuickActionsMenu),
           ),
           ListTile(
-            title: const Text('Export OPML'),
-            subtitle: const Text('Share your subscriptions list'),
-            trailing: const Icon(Icons.share),
-            onTap: () => _exportOpml(context, ref),
+            title: const Text('Inbox'),
+            subtitle: const Text('Inbox filter and announcement order'),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
+            onTap: () => context.push(AppRoutes.settingsInbox),
           ),
           ListTile(
-            title: const Text('Export OPML with folders'),
-            subtitle: const Text('Share subscriptions grouped by folder'),
-            trailing: const Icon(Icons.share),
-            onTap: () => _exportOpmlWithFolders(context, ref),
-          ),
-          const Divider(),
-          Semantics(
-            header: true,
-            label: 'Quick Actions',
-            child: const ExcludeSemantics(
-              child: _SectionHeader(label: 'Quick Actions'),
-            ),
+            title: const Text('Playback'),
+            subtitle: const Text('Speed, skip intervals, queue, and gapless'),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
+            onTap: () => context.push(AppRoutes.settingsPlayback),
           ),
           ListTile(
-            title: const Text('Episode Quick Actions'),
-            subtitle: const Text('Choose and reorder actions on episodes'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push(
-              AppRoutes.settingsQuickActions(
-                QuickActionContentType.episode.name,
-              ),
-            ),
-          ),
-          ListTile(
-            title: const Text('Podcast Quick Actions'),
-            subtitle: const Text('Choose and reorder actions on podcasts'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push(
-              AppRoutes.settingsQuickActions(
-                QuickActionContentType.podcast.name,
-              ),
-            ),
-          ),
-          const Divider(),
-          Semantics(
-            header: true,
-            label: 'Inbox',
-            child: const ExcludeSemantics(
-              child: _SectionHeader(label: 'Inbox'),
-            ),
-          ),
-          SwitchListTile(
-            title: const Text('Inbox for included podcasts only'),
-            subtitle: const Text(
-              'Only show new episodes in the inbox for podcasts you explicitly include',
-            ),
-            value: ref.watch(inboxOptInOnlyProvider).value ?? false,
-            onChanged: ref.watch(inboxOptInOnlyProvider).isLoading
-                ? null
-                : (val) async {
-                    try {
-                      await ref.read(inboxOptInOnlyProvider.notifier).set(val);
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          val
-                              ? 'Inbox limited to included podcasts'
-                              : 'Inbox showing all podcasts',
-                          TextDirection.ltr,
-                        );
-                      }
-                    } catch (_) {
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          'Could not update inbox setting',
-                          TextDirection.ltr,
-                        );
-                      }
-                    }
-                  },
-          ),
-          SwitchListTile(
-            title: const Text('Announce podcast name first'),
-            subtitle: const Text(
-              'VoiceOver reads the show name before the episode title in the inbox',
-            ),
-            value: ref.watch(podcastNameFirstProvider).value ?? false,
-            onChanged: ref.watch(podcastNameFirstProvider).isLoading
-                ? null
-                : (val) async {
-                    try {
-                      await ref
-                          .read(podcastNameFirstProvider.notifier)
-                          .set(val);
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          val
-                              ? 'Podcast name will be announced first'
-                              : 'Episode title will be announced first',
-                          TextDirection.ltr,
-                        );
-                      }
-                    } catch (_) {
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          'Could not update inbox setting',
-                          TextDirection.ltr,
-                        );
-                      }
-                    }
-                  },
-          ),
-          const Divider(),
-          Semantics(
-            header: true,
-            label: 'Queue',
-            child: const ExcludeSemantics(
-              child: _SectionHeader(label: 'Queue'),
-            ),
-          ),
-          SwitchListTile(
-            title: const Text('Group episodes by podcast'),
-            subtitle: const Text('Groups your queue by show'),
-            value: ref.watch(groupQueueEpisodesProvider).value ?? false,
-            onChanged: ref.watch(groupQueueEpisodesProvider).isLoading
-                ? null
-                : (val) async {
-                    try {
-                      await ref
-                          .read(groupQueueEpisodesProvider.notifier)
-                          .set(val);
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          val ? 'Queue grouped by podcast' : 'Queue ungrouped',
-                          TextDirection.ltr,
-                        );
-                      }
-                    } catch (_) {
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          'Could not update queue setting',
-                          TextDirection.ltr,
-                        );
-                      }
-                    }
-                  },
-          ),
-          SwitchListTile(
-            title: const Text('Continue after queue ends'),
-            subtitle: const Text(
-              'When the queue finishes, keep playing instead of stopping',
-            ),
-            value: ref.watch(continueAfterQueueProvider).value ?? false,
-            onChanged: ref.watch(continueAfterQueueProvider).isLoading
-                ? null
-                : (val) async {
-                    try {
-                      await ref
-                          .read(continueAfterQueueProvider.notifier)
-                          .set(val);
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          val
-                              ? 'Playback will continue after queue ends'
-                              : 'Playback will stop at end of queue',
-                          TextDirection.ltr,
-                        );
-                      }
-                    } catch (_) {
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          'Could not update queue setting',
-                          TextDirection.ltr,
-                        );
-                      }
-                    }
-                  },
-          ),
-          SwitchListTile(
-            title: const Text('Continue after group ends'),
-            subtitle: const Text(
-              'Keep playing when the group you started finishes',
-            ),
-            value: ref.watch(continueAfterGroupEndsProvider).value ?? true,
-            onChanged: ref.watch(continueAfterGroupEndsProvider).isLoading
-                ? null
-                : (val) async {
-                    try {
-                      await ref
-                          .read(continueAfterGroupEndsProvider.notifier)
-                          .set(val);
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          val
-                              ? 'Playback will continue after group ends'
-                              : 'Playback will stop at end of group',
-                          TextDirection.ltr,
-                        );
-                      }
-                    } catch (_) {
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          'Could not update queue setting',
-                          TextDirection.ltr,
-                        );
-                      }
-                    }
-                  },
-          ),
-          SwitchListTile(
-            title: const Text('Gapless playback'),
-            subtitle: const Text(
-              'Seamlessly transitions between episodes with no silence between them',
-            ),
-            value: ref.watch(gaplessPlaybackProvider).value ?? true,
-            onChanged: ref.watch(gaplessPlaybackProvider).isLoading
-                ? null
-                : (val) async {
-                    try {
-                      await ref.read(gaplessPlaybackProvider.notifier).set(val);
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          val
-                              ? 'Gapless playback enabled'
-                              : 'Gapless playback disabled',
-                          TextDirection.ltr,
-                        );
-                      }
-                    } catch (_) {
-                      if (context.mounted) {
-                        SemanticsService.sendAnnouncement(
-                          View.of(context),
-                          'Could not update playback setting',
-                          TextDirection.ltr,
-                        );
-                      }
-                    }
-                  },
-          ),
-          const Divider(),
-          Semantics(
-            header: true,
-            label: 'Playback defaults',
-            child: const ExcludeSemantics(
-              child: _SectionHeader(label: 'Playback defaults'),
-            ),
-          ),
-          ListTile(
-            title: const Text('Default speed'),
-            subtitle: const Text(
-              'Used for podcasts with no per-podcast speed set',
-            ),
-            trailing: SizedBox(
-              width: 160,
-              child: SpeedSelector(
-                speed: ref.watch(globalSpeedProvider).asData?.value ?? 1.0,
-                onSpeedChanged: (speed) async {
-                  await ref.read(globalSpeedProvider.notifier).set(speed);
-                  if (context.mounted) {
-                    SemanticsService.sendAnnouncement(
-                      View.of(context),
-                      'Default speed set to ${SpeedSelector.formatSpeed(speed)}',
-                      TextDirection.ltr,
-                    );
-                  }
-                },
-              ),
-            ),
-          ),
-          SwitchListTile(
-            title: const Text('Trim silence by default'),
-            subtitle: const Text(
-              'Used for podcasts with no per-podcast trim-silence setting',
-            ),
-            value: ref.watch(skipSilenceProvider).asData?.value ?? false,
-            onChanged: ref.watch(skipSilenceProvider).isLoading
-                ? null
-                : (val) async {
-                    await ref.read(skipSilenceProvider.notifier).set(val);
-                    await ref
-                        .read(audioHandlerProvider)
-                        .setSkipSilenceEnabled(val);
-                    if (context.mounted) {
-                      SemanticsService.sendAnnouncement(
-                        View.of(context),
-                        val
-                            ? 'Trim silence enabled by default'
-                            : 'Trim silence disabled by default',
-                        TextDirection.ltr,
-                      );
-                    }
-                  },
-          ),
-          const Divider(),
-          Semantics(
-            header: true,
-            label: 'Stats',
-            child: const ExcludeSemantics(
-              child: _SectionHeader(label: 'Stats'),
-            ),
-          ),
-          ListTile(
-            title: const Text('Listening Stats'),
+            title: const Text('Stats'),
             subtitle: const Text('Time listened, speed savings, history'),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
             onTap: () => context.push(AppRoutes.settingsStats),
           ),
-          const Divider(),
-          Semantics(
-            header: true,
-            label: 'Privacy',
-            child: const ExcludeSemantics(
-              child: _SectionHeader(label: 'Privacy'),
-            ),
-          ),
           ListTile(
-            title: const Text('Privacy & History'),
+            title: const Text('Privacy'),
             subtitle: const Text('History retention, delete all data'),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
             onTap: () => context.push(AppRoutes.settingsPrivacy),
-          ),
-          const ListTile(
-            title: Text('Search Privacy'),
-            subtitle: Text(
-              'When you search for podcasts, your search terms are sent to '
-              'the Podcast Index API (podcastindex.org). No account or '
-              'personal information is shared.',
-            ),
-          ),
-          const Divider(),
-          Semantics(
-            header: true,
-            label: 'Downloads',
-            child: const ExcludeSemantics(
-              child: _SectionHeader(label: 'Downloads'),
-            ),
           ),
           ListTile(
             title: const Text('Downloads'),
             subtitle: const Text('Storage, cleanup, and Wi-Fi settings'),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
             onTap: () => context.push(AppRoutes.settingsDownloads),
           ),
-          const Divider(),
-          Semantics(
-            header: true,
-            label: 'Accessibility',
-            child: const ExcludeSemantics(
-              child: _SectionHeader(label: 'Accessibility'),
-            ),
-          ),
-          SwitchListTile(
-            title: const Text('Direct Touch Mode'),
-            subtitle: const Text(
-              'Enables gesture controls on the artwork area for VoiceOver and TalkBack users',
-            ),
-            value: ref.watch(directTouchEnabledProvider).value ?? false,
-            onChanged: ref.watch(directTouchEnabledProvider).isLoading
-                ? null
-                : (val) {
-                    ref.read(directTouchEnabledProvider.notifier).set(val);
-                    SemanticsService.sendAnnouncement(
-                      View.of(context),
-                      val
-                          ? 'Direct Touch Mode enabled'
-                          : 'Direct Touch Mode disabled',
-                      TextDirection.ltr,
-                    );
-                  },
+          ListTile(
+            title: const Text('Accessibility'),
+            subtitle: const Text('Direct Touch Mode and assistive options'),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
+            onTap: () => context.push(AppRoutes.settingsAccessibility),
           ),
           const Divider(),
-          Semantics(
-            header: true,
-            label: 'About',
-            child: const ExcludeSemantics(
-              child: _SectionHeader(label: 'About'),
-            ),
-          ),
-          const _VersionTile(),
+          _VersionTile(),
           const ListTile(
             title: Text('Podcast search powered by Podcast Index'),
             subtitle: Text('podcastindex.org'),
@@ -434,69 +76,6 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  Future<void> _exportOpmlWithFolders(
-    BuildContext context,
-    WidgetRef ref,
-  ) async {
-    final groups = await ref
-        .read(folderRepositoryProvider)
-        .getAllWithFolderStructure();
-
-    final hasContent = groups.any((g) => g.podcasts.isNotEmpty);
-    if (!hasContent) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No subscriptions to export.')),
-        );
-      }
-      return;
-    }
-
-    final xml = ref.read(opmlServiceProvider).generateWithFolders(groups);
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/earshot-subscriptions-folders.opml');
-    await file.writeAsString(xml);
-
-    if (context.mounted) {
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(file.path, mimeType: 'text/x-opml')],
-          subject: 'Earshot Subscriptions',
-        ),
-      );
-    }
-  }
-
-  Future<void> _exportOpml(BuildContext context, WidgetRef ref) async {
-    final podcasts = ref.read(subscriptionsProvider).asData?.value ?? [];
-    if (podcasts.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No subscriptions to export.')),
-        );
-      }
-      return;
-    }
-
-    final subs = podcasts
-        .map((p) => (rssUrl: p.rssUrl, title: p.title))
-        .toList();
-    final xml = ref.read(opmlServiceProvider).generate(subs);
-
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/earshot-subscriptions.opml');
-    await file.writeAsString(xml);
-
-    if (context.mounted) {
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(file.path, mimeType: 'text/x-opml')],
-          subject: 'Earshot Subscriptions',
-        ),
-      );
-    }
   }
 }
 
@@ -743,7 +322,7 @@ class _VersionTileState extends ConsumerState<_VersionTile> {
     return Semantics(
       button: true,
       label: 'Version $versionText',
-      hint: 'Flick down to open developer menu',
+      hint: 'Tap repeatedly to unlock developer menu',
       onTap: _onTap,
       customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
         const CustomSemanticsAction(label: 'Open developer menu'):
@@ -754,25 +333,6 @@ class _VersionTileState extends ConsumerState<_VersionTile> {
           title: const Text('Version'),
           subtitle: Text(versionText),
           onTap: _onTap,
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-          color: Theme.of(context).colorScheme.primary,
         ),
       ),
     );
