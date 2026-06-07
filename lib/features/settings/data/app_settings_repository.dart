@@ -390,29 +390,37 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
     return row.value == 'true';
   }
 
+  static const _validSkipSeconds = [10, 15, 30, 45, 60, 90];
+
+  static int _clampSkipSeconds(int? value, int defaultValue) {
+    if (value == null || !_validSkipSeconds.contains(value))
+      return defaultValue;
+    return value;
+  }
+
   @override
   Future<int> getSkipForwardSeconds() async {
     final row = await (_db.select(
       _db.appSettings,
     )..where((s) => s.key.equals(_keySkipForwardSeconds))).getSingleOrNull();
-    return int.tryParse(row?.value ?? '') ?? 30;
+    return _clampSkipSeconds(int.tryParse(row?.value ?? ''), 30);
   }
 
   @override
   Future<void> setSkipForwardSeconds(int seconds) =>
-      _set(_keySkipForwardSeconds, seconds.toString());
+      _set(_keySkipForwardSeconds, _clampSkipSeconds(seconds, 30).toString());
 
   @override
   Future<int> getSkipBackSeconds() async {
     final row = await (_db.select(
       _db.appSettings,
     )..where((s) => s.key.equals(_keySkipBackSeconds))).getSingleOrNull();
-    return int.tryParse(row?.value ?? '') ?? 15;
+    return _clampSkipSeconds(int.tryParse(row?.value ?? ''), 15);
   }
 
   @override
   Future<void> setSkipBackSeconds(int seconds) =>
-      _set(_keySkipBackSeconds, seconds.toString());
+      _set(_keySkipBackSeconds, _clampSkipSeconds(seconds, 15).toString());
 
   @override
   Future<DateTime?> getLastAutoRefreshAt() async {

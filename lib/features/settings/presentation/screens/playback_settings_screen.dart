@@ -70,13 +70,23 @@ class PlaybackSettingsScreen extends ConsumerWidget {
             label: 'Skip forward',
             currentSeconds: skipFwdSecs,
             onChanged: (secs) async {
-              await ref.read(skipForwardSecondsProvider.notifier).set(secs);
-              if (context.mounted) {
-                SemanticsService.sendAnnouncement(
-                  View.of(context),
-                  'Skip forward set to $secs seconds',
-                  TextDirection.ltr,
-                );
+              try {
+                await ref.read(skipForwardSecondsProvider.notifier).set(secs);
+                if (context.mounted) {
+                  SemanticsService.sendAnnouncement(
+                    View.of(context),
+                    'Skip forward set to $secs seconds',
+                    TextDirection.ltr,
+                  );
+                }
+              } catch (_) {
+                if (context.mounted) {
+                  SemanticsService.sendAnnouncement(
+                    View.of(context),
+                    'Could not update skip forward setting',
+                    TextDirection.ltr,
+                  );
+                }
               }
             },
           ),
@@ -84,13 +94,23 @@ class PlaybackSettingsScreen extends ConsumerWidget {
             label: 'Skip back',
             currentSeconds: skipBackSecs,
             onChanged: (secs) async {
-              await ref.read(skipBackSecondsProvider.notifier).set(secs);
-              if (context.mounted) {
-                SemanticsService.sendAnnouncement(
-                  View.of(context),
-                  'Skip back set to $secs seconds',
-                  TextDirection.ltr,
-                );
+              try {
+                await ref.read(skipBackSecondsProvider.notifier).set(secs);
+                if (context.mounted) {
+                  SemanticsService.sendAnnouncement(
+                    View.of(context),
+                    'Skip back set to $secs seconds',
+                    TextDirection.ltr,
+                  );
+                }
+              } catch (_) {
+                if (context.mounted) {
+                  SemanticsService.sendAnnouncement(
+                    View.of(context),
+                    'Could not update skip back setting',
+                    TextDirection.ltr,
+                  );
+                }
               }
             },
           ),
