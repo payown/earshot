@@ -43,12 +43,6 @@ class _QuickActionConfiguratorScreenState
     return PodcastAction.values.firstWhere((a) => a.key == key).label;
   }
 
-  // Called by SliverReorderableList via onReorderItem — index is already adjusted.
-  void _onDragReorder(int oldIndex, int newIndex) {
-    _moveItem(oldIndex, newIndex);
-  }
-
-  // Called by up/down buttons — newIndex is the final target index.
   void _moveItem(int oldIndex, int newIndex) {
     final newKeys = List<String>.from(_activeKeys ?? _allKeys);
     final item = newKeys.removeAt(oldIndex);
@@ -132,9 +126,8 @@ class _QuickActionConfiguratorScreenState
               ),
             ),
           ),
-          SliverReorderableList(
+          SliverList.builder(
             itemCount: active.length,
-            onReorderItem: _onDragReorder,
             itemBuilder: (context, index) {
               final key = active[index];
               final label = _labelFor(key);
@@ -232,6 +225,7 @@ class _ActiveActionRow extends StatelessWidget {
 
     return Semantics(
       label: '$label$defaultSuffix, $position',
+      button: true,
       customSemanticsActions: {
         if (onMoveUp != null)
           const CustomSemanticsAction(label: 'Move up'): onMoveUp!,
@@ -239,60 +233,58 @@ class _ActiveActionRow extends StatelessWidget {
           const CustomSemanticsAction(label: 'Move down'): onMoveDown!,
         const CustomSemanticsAction(label: 'Remove'): onRemove,
       },
-      child: ListTile(
-        title: ExcludeSemantics(
-          child: Row(
-            children: [
-              Text(label, style: Theme.of(context).textTheme.bodyLarge),
-              if (isFirst) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    'Default',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+      child: ExcludeSemantics(
+        child: ListTile(
+          title: ExcludeSemantics(
+            child: Row(
+              children: [
+                Text(label, style: Theme.of(context).textTheme.bodyLarge),
+                if (isFirst) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'Default',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      ),
                     ),
                   ),
+                ],
+              ],
+            ),
+          ),
+          trailing: ExcludeSemantics(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_upward),
+                  onPressed: onMoveUp,
+                  tooltip: 'Move up',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.arrow_downward),
+                  onPressed: onMoveDown,
+                  tooltip: 'Move down',
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.remove_circle_outline,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  onPressed: onRemove,
+                  tooltip: 'Remove',
                 ),
               ],
-            ],
-          ),
-        ),
-        trailing: ExcludeSemantics(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_upward),
-                onPressed: onMoveUp,
-                tooltip: 'Move up',
-              ),
-              IconButton(
-                icon: const Icon(Icons.arrow_downward),
-                onPressed: onMoveDown,
-                tooltip: 'Move down',
-              ),
-              IconButton(
-                icon: Icon(
-                  Icons.remove_circle_outline,
-                  color: Theme.of(context).colorScheme.error,
-                ),
-                onPressed: onRemove,
-                tooltip: 'Remove',
-              ),
-              ReorderableDragStartListener(
-                index: index,
-                child: const Icon(Icons.drag_handle),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -314,26 +306,29 @@ class _InactiveActionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       label: '$label, not active',
+      button: true,
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Add'): onAdd,
       },
-      child: ListTile(
-        title: ExcludeSemantics(
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+      child: ExcludeSemantics(
+        child: ListTile(
+          title: ExcludeSemantics(
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
-        ),
-        trailing: ExcludeSemantics(
-          child: IconButton(
-            icon: Icon(
-              Icons.add_circle_outline,
-              color: Theme.of(context).colorScheme.primary,
+          trailing: ExcludeSemantics(
+            child: IconButton(
+              icon: Icon(
+                Icons.add_circle_outline,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              onPressed: onAdd,
+              tooltip: 'Add',
             ),
-            onPressed: onAdd,
-            tooltip: 'Add',
           ),
         ),
       ),
