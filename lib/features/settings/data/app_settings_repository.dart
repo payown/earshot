@@ -95,6 +95,10 @@ abstract interface class AppSettingsRepository {
   Future<double> getGlobalSpeed();
 
   Future<void> setGlobalSpeed(double speed);
+
+  Future<DateTime?> getLastAutoRefreshAt();
+
+  Future<void> setLastAutoRefreshAt(DateTime value);
 }
 
 class AppSettingsRepositoryImpl implements AppSettingsRepository {
@@ -127,6 +131,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyStorageCapBytes = 'storage_cap_bytes';
   static const _keyLastPlayingEpisodeId = 'last_playing_episode_id';
   static const _keyGlobalSpeed = 'global_speed';
+  static const _keyLastAutoRefreshAt = 'last_auto_refresh_at';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
 
@@ -374,6 +379,19 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
     if (row == null) return defaultValue;
     return row.value == 'true';
   }
+
+  @override
+  Future<DateTime?> getLastAutoRefreshAt() async {
+    final row = await (_db.select(
+      _db.appSettings,
+    )..where((s) => s.key.equals(_keyLastAutoRefreshAt))).getSingleOrNull();
+    if (row == null) return null;
+    return DateTime.tryParse(row.value);
+  }
+
+  @override
+  Future<void> setLastAutoRefreshAt(DateTime value) =>
+      _set(_keyLastAutoRefreshAt, value.toUtc().toIso8601String());
 
   Future<void> _set(String key, String value) async {
     await _db
