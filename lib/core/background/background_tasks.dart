@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:drift/drift.dart';
 import 'package:logging/logging.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -55,9 +56,11 @@ Future<bool> _runEpisodeDownloads() async {
   try {
     // Per-podcast auto-queue downloads (existing behaviour).
     final downloadCount = await settings.getAutoDownloadCount();
-    final autoQueuePodcasts = await (db.select(
-      db.podcasts,
-    )..where((p) => p.autoQueue.equals(true))).get();
+    final autoQueuePodcasts =
+        await (db.select(db.podcasts)
+              ..where((p) => p.autoQueue.equals(true))
+              ..orderBy([(p) => OrderingTerm(expression: p.title.lower())]))
+            .get();
     for (final podcast in autoQueuePodcasts) {
       await manager.downloadRecentEpisodes(podcast.id, downloadCount);
     }

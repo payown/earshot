@@ -117,7 +117,9 @@ class PodcastRepositoryImpl implements PodcastRepository {
 
   @override
   Future<void> refreshAllFeeds() async {
-    final podcasts = await (_db.select(_db.podcasts)).get();
+    final podcasts = await (_db.select(
+      _db.podcasts,
+    )..orderBy([(p) => OrderingTerm(expression: p.title.lower())])).get();
     // Apply inbox filter settings as a DB-only operation first so episodes are
     // dismissed/shown correctly even if individual network fetches fail below.
     await _applyInboxDismissals(podcasts);
