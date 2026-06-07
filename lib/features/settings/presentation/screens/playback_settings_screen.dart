@@ -68,6 +68,7 @@ class PlaybackSettingsScreen extends ConsumerWidget {
           _sectionHeader(context, 'Skip intervals'),
           _SkipIntervalTile(
             label: 'Skip forward',
+            barrierLabel: 'Dismiss skip forward picker',
             currentSeconds: skipFwdSecs,
             onChanged: (secs) async {
               try {
@@ -92,6 +93,7 @@ class PlaybackSettingsScreen extends ConsumerWidget {
           ),
           _SkipIntervalTile(
             label: 'Skip back',
+            barrierLabel: 'Dismiss skip back picker',
             currentSeconds: skipBackSecs,
             onChanged: (secs) async {
               try {
@@ -268,54 +270,73 @@ class PlaybackSettingsScreen extends ConsumerWidget {
 class _SkipIntervalTile extends StatelessWidget {
   const _SkipIntervalTile({
     required this.label,
+    required this.barrierLabel,
     required this.currentSeconds,
     required this.onChanged,
   });
 
   final String label;
+  final String barrierLabel;
   final int currentSeconds;
   final Future<void> Function(int seconds) onChanged;
 
   static const _options = [10, 15, 30, 45, 60, 90];
 
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: '$label, $currentSeconds seconds',
-      button: true,
-      hint: 'Use the actions menu to change the interval',
-      onTap: () {
-        final nextIndex =
-            (_options.indexOf(currentSeconds) + 1) % _options.length;
-        onChanged(_options[nextIndex]);
-      },
-      customSemanticsActions: {
-        for (final secs in _options)
-          if (secs != currentSeconds)
-            CustomSemanticsAction(label: '$secs seconds'): () =>
-                onChanged(secs),
-      },
-      child: ExcludeSemantics(
-        child: ListTile(
-          title: Text(label),
-          subtitle: Text('$currentSeconds seconds'),
-          trailing: DropdownButton<int>(
-            value: currentSeconds,
-            underline: const SizedBox.shrink(),
-            items: _options
-                .map(
-                  (s) => DropdownMenuItem(
-                    value: s,
-                    child: Text('${s}s'),
+  Future<void> _showPicker(BuildContext context) async {
+    final chosen = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      barrierLabel: barrierLabel,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: Semantics(
+                header: true,
+                label: label,
+                child: ExcludeSemantics(
+                  child: Text(
+                    label,
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
-                )
-                .toList(),
-            onChanged: (secs) {
-              if (secs != null) onChanged(secs);
-            },
-          ),
+                ),
+              ),
+            ),
+            RadioGroup<int>(
+              groupValue: currentSeconds,
+              onChanged: (val) => Navigator.of(context).pop(val),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final secs in _options)
+                    RadioListTile<int>(
+                      title: Text('$secs seconds'),
+                      value: secs,
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
+    );
+
+    if (chosen == null || chosen == currentSeconds) return;
+    await onChanged(chosen);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      title: Text(label),
+      subtitle: Text('$currentSeconds seconds'),
+      trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
+      onTap: () => _showPicker(context),
     );
   }
 }
