@@ -76,6 +76,23 @@ class PodcastRepositoryImpl implements PodcastRepository {
       inboxLimit: 3,
     );
 
+    // Set the high-water mark so the first refresh doesn't re-surface the
+    // episodes inserted during subscribe as backlog.
+    final latestOnSubscribe = feed.episodes
+        .where((e) => e.pubDate != null)
+        .map((e) => e.pubDate!)
+        .fold<DateTime?>(
+          null,
+          (max, d) => max == null || d.isAfter(max) ? d : max,
+        );
+    if (latestOnSubscribe != null) {
+      await (_db.update(
+        _db.podcasts,
+      )..where((p) => p.id.equals(podcastId))).write(
+        PodcastsCompanion(lastSeenPubDate: Value(latestOnSubscribe)),
+      );
+    }
+
     _log.info('Subscribed to podcast: ${feed.title}');
 
     final row = await (_db.select(
@@ -135,7 +152,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
       'Background feed refresh complete for ${podcasts.length} podcasts',
     );
     _auditController.add(
-      'All feeds checked at ${formatTimeOfDay(batchStartedAt)}',
+      'All feeds checked at ${formatTimeOfDay(batchStartedAt.toLocal())}',
     );
   }
 
