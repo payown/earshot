@@ -39,7 +39,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   Future<void> clearAllData() => transaction(() async {
     await delete(podcasts).go();
@@ -82,6 +82,19 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 10) {
         await m.addColumn(podcasts, podcasts.trimSilenceOverride);
+      }
+      if (from < 11) {
+        await m.addColumn(podcasts, podcasts.lastSeenPubDate);
+        // Backfill: set the high-water mark to the newest episode pub date
+        // already in the DB for each podcast so existing episodes don't flood
+        // the inbox on the first refresh after this upgrade.
+        await customStatement('''
+          UPDATE podcasts
+          SET last_seen_pub_date = (
+            SELECT MAX(pub_date) FROM episodes
+            WHERE episodes.podcast_id = podcasts.id
+          )
+        ''');
       }
     },
     beforeOpen: (_) async {

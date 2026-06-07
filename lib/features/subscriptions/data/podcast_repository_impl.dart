@@ -117,6 +117,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
 
   @override
   Future<void> refreshAllFeeds() async {
+    final batchStartedAt = DateTime.now().toUtc();
     final podcasts = await (_db.select(
       _db.podcasts,
     )..orderBy([(p) => OrderingTerm(expression: p.title.lower())])).get();
@@ -125,13 +126,16 @@ class PodcastRepositoryImpl implements PodcastRepository {
     await _applyInboxDismissals(podcasts);
     for (final podcast in podcasts) {
       try {
-        await refreshFeed(podcast.id);
+        await refreshFeed(podcast.id, batchRefreshedAt: batchStartedAt);
       } catch (e) {
         _log.warning('Background refresh failed for podcast ${podcast.id}: $e');
       }
     }
     _log.info(
       'Background feed refresh complete for ${podcasts.length} podcasts',
+    );
+    _auditController.add(
+      'All feeds checked at ${formatTimeOfDay(batchStartedAt)}',
     );
   }
 
@@ -175,13 +179,14 @@ class PodcastRepositoryImpl implements PodcastRepository {
   }) => _setEpisodesDismissed([podcastId], dismissed: dismissed);
 
   @override
-  Future<void> refreshFeed(int podcastId) async {
+  Future<void> refreshFeed(int podcastId, {DateTime? batchRefreshedAt}) async {
     final podcastRow = await (_db.select(
       _db.podcasts,
     )..where((p) => p.id.equals(podcastId))).getSingleOrNull();
 
     if (podcastRow == null) return;
 
+    final refreshedAt = batchRefreshedAt ?? DateTime.now().toUtc();
     final feed = await _fetchAndParse(podcastRow.rssUrl);
 
     await (_db.update(
@@ -195,7 +200,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
         websiteUrl: Value(feed.websiteUrl),
         language: Value(feed.language),
         category: Value(feed.category),
-        refreshedAt: Value(DateTime.now().toUtc()),
+        refreshedAt: Value(refreshedAt),
       ),
     );
 
@@ -208,6 +213,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
       feed.episodes,
       preserveUserData: true,
       inboxDismissed: dismissed,
+      lastSeenPubDate: podcastRow.lastSeenPubDate,
     );
 
     // Retroactively apply dismissal to existing rows. _upsertEpisodes only
@@ -215,8 +221,24 @@ class PodcastRepositoryImpl implements PodcastRepository {
     // previous value until this runs.
     await _setEpisodeDismissed(podcastId, dismissed: dismissed);
 
+    // Advance the high-water mark to the newest pub date seen in this fetch.
+    final latestPubDate = feed.episodes
+        .where((e) => e.pubDate != null)
+        .map((e) => e.pubDate!)
+        .fold<DateTime?>(
+          null,
+          (max, d) => max == null || d.isAfter(max) ? d : max,
+        );
+    if (latestPubDate != null) {
+      final prev = podcastRow.lastSeenPubDate;
+      final newMark = prev == null || latestPubDate.isAfter(prev)
+          ? latestPubDate
+          : prev;
+      await (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId)))
+          .write(PodcastsCompanion(lastSeenPubDate: Value(newMark)));
+    }
+
     _log.info('Refreshed feed for podcast $podcastId');
-    _auditController.add('Feed checked at ${formatTimeOfDay(DateTime.now())}');
   }
 
   Future<ParsedPodcast> _fetchAndParse(String rssUrl) async {
@@ -248,6 +270,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
     required bool preserveUserData,
     int inboxLimit = 3,
     bool inboxDismissed = false,
+    DateTime? lastSeenPubDate,
   }) async {
     // On initial subscribe, sort newest-first so inboxLimit applies to the
     // most-recent episodes rather than arbitrary feed order.
@@ -268,6 +291,14 @@ class PodcastRepositoryImpl implements PodcastRepository {
           ? EpisodeStatus.newEpisode
           : EpisodeStatus.played;
 
+      // On refresh, episodes at or before the high-water mark are backlog —
+      // insert them as played/dismissed so they never surface in the inbox.
+      final isBacklog =
+          preserveUserData &&
+          lastSeenPubDate != null &&
+          ep.pubDate != null &&
+          !ep.pubDate!.isAfter(lastSeenPubDate);
+
       final companion = EpisodesCompanion.insert(
         podcastId: podcastId,
         guid: ep.guid,
@@ -281,8 +312,12 @@ class PodcastRepositoryImpl implements PodcastRepository {
         seasonNumber: Value(ep.seasonNumber),
         chapterUrl: Value(ep.chapterUrl),
         transcriptUrl: Value(ep.transcriptUrl),
-        status: preserveUserData ? const Value.absent() : Value(initialStatus),
-        inboxDismissed: Value(inboxDismissed),
+        status: preserveUserData
+            ? (isBacklog
+                  ? const Value(EpisodeStatus.played)
+                  : const Value.absent())
+            : Value(initialStatus),
+        inboxDismissed: isBacklog ? const Value(true) : Value(inboxDismissed),
       );
 
       if (preserveUserData) {
