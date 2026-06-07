@@ -77,7 +77,8 @@ class PodcastRepositoryImpl implements PodcastRepository {
     );
 
     // Set the high-water mark so the first refresh doesn't re-surface the
-    // episodes inserted during subscribe as backlog.
+    // episodes inserted during subscribe as backlog. Fall back to now() when
+    // no parseable pubDate exists in the feed so the gate is always seeded.
     final latestOnSubscribe = feed.episodes
         .where((e) => e.pubDate != null)
         .map((e) => e.pubDate!)
@@ -85,13 +86,13 @@ class PodcastRepositoryImpl implements PodcastRepository {
           null,
           (max, d) => max == null || d.isAfter(max) ? d : max,
         );
-    if (latestOnSubscribe != null) {
-      await (_db.update(
-        _db.podcasts,
-      )..where((p) => p.id.equals(podcastId))).write(
-        PodcastsCompanion(lastSeenPubDate: Value(latestOnSubscribe)),
-      );
-    }
+    await (_db.update(
+      _db.podcasts,
+    )..where((p) => p.id.equals(podcastId))).write(
+      PodcastsCompanion(
+        lastSeenPubDate: Value(latestOnSubscribe ?? DateTime.now().toUtc()),
+      ),
+    );
 
     _log.info('Subscribed to podcast: ${feed.title}');
 
@@ -233,10 +234,13 @@ class PodcastRepositoryImpl implements PodcastRepository {
       lastSeenPubDate: podcastRow.lastSeenPubDate,
     );
 
-    // Retroactively apply dismissal to existing rows. _upsertEpisodes only
-    // sets inboxDismissed on newly-inserted rows; existing rows keep their
-    // previous value until this runs.
-    await _setEpisodeDismissed(podcastId, dismissed: dismissed);
+    // Retroactively dismiss existing rows when this podcast is excluded from
+    // the inbox. The restore direction (dismissed=false) is handled by
+    // setInboxExcluded/setInboxIncluded at toggle time — running it here would
+    // silently undo any Clear Inbox the user performed.
+    if (dismissed) {
+      await _setEpisodeDismissed(podcastId, dismissed: true);
+    }
 
     // Advance the high-water mark to the newest pub date seen in this fetch.
     final latestPubDate = feed.episodes
@@ -310,11 +314,13 @@ class PodcastRepositoryImpl implements PodcastRepository {
 
       // On refresh, episodes at or before the high-water mark are backlog —
       // insert them as played/dismissed so they never surface in the inbox.
+      // Null pubDates are also treated as backlog once a mark exists: real new
+      // episodes from healthy feeds carry pubDates; items with no parseable
+      // date are overwhelmingly recycled backlog from feeds with unstable GUIDs.
       final isBacklog =
           preserveUserData &&
           lastSeenPubDate != null &&
-          ep.pubDate != null &&
-          !ep.pubDate!.isAfter(lastSeenPubDate);
+          (ep.pubDate == null || !ep.pubDate!.isAfter(lastSeenPubDate));
 
       final companion = EpisodesCompanion.insert(
         podcastId: podcastId,

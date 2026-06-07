@@ -39,7 +39,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   Future<void> clearAllData() => transaction(() async {
     await delete(podcasts).go();
@@ -94,6 +94,29 @@ class AppDatabase extends _$AppDatabase {
             SELECT MAX(pub_date) FROM episodes
             WHERE episodes.podcast_id = podcasts.id
           )
+        ''');
+      }
+      if (from < 12) {
+        // Drain stale inbox rows: any newEpisode row whose pubDate is at or
+        // before the high-water mark (or has no parseable date) was part of
+        // the pre-upgrade backlog. Set inboxDismissed=true so they leave the
+        // inbox immediately without changing playback status.
+        await customStatement('''
+          UPDATE episodes
+          SET inbox_dismissed = 1
+          WHERE status = 'newEpisode'
+            AND (
+              pub_date IS NULL
+              OR pub_date <= (
+                SELECT last_seen_pub_date FROM podcasts
+                WHERE podcasts.id = episodes.podcast_id
+              )
+            )
+            AND EXISTS (
+              SELECT 1 FROM podcasts
+              WHERE podcasts.id = episodes.podcast_id
+                AND podcasts.last_seen_pub_date IS NOT NULL
+            )
         ''');
       }
     },
