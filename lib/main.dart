@@ -7,6 +7,7 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'core/background/background_tasks.dart';
 import 'core/constants/playback.dart';
+import 'core/providers/auto_refresh_provider.dart';
 import 'core/logging/log_providers.dart';
 import 'core/logging/log_service.dart';
 import 'core/router/app_router.dart';
@@ -39,6 +40,7 @@ class _AppInitializer extends ConsumerWidget {
     ref.watch(queueAutoAdvanceProvider);
     ref.watch(episodeIdPersistenceProvider);
     ref.watch(playbackRestorationProvider);
+    ref.watch(autoRefreshProvider);
 
     void _announceIfAuditEnabled(AsyncValue<String> next) {
       if (next case AsyncData(value: final message)) {
