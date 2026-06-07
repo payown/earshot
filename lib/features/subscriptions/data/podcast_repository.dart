@@ -15,7 +15,7 @@ abstract interface class PodcastRepository {
 
   Stream<List<Episode>> watchEpisodes(int podcastId);
 
-  Future<void> refreshFeed(int podcastId);
+  Future<void> refreshFeed(int podcastId, {DateTime? batchRefreshedAt});
 
   Future<void> refreshAllFeeds();
 

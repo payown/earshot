@@ -165,6 +165,75 @@ void main() {
     });
   });
 
+  group('refreshAllFeeds', () {
+    test('processes feeds in case-insensitive alphabetical order', () async {
+      // Subscribe two feeds in reverse alphabetical order.
+      const zebraUrl = 'https://example.com/zebra.xml';
+      const alphaUrl = 'https://example.com/alpha.xml';
+
+      when(() => dio.get<String>(zebraUrl)).thenAnswer(
+        (_) async => Response(
+          data: '<rss/>',
+          requestOptions: RequestOptions(path: zebraUrl),
+          statusCode: 200,
+        ),
+      );
+      when(() => parser.parse(any())).thenReturn(
+        const ParsedPodcast(title: 'zebra cast', episodes: []),
+      );
+      await repo.subscribe(zebraUrl);
+
+      when(() => dio.get<String>(alphaUrl)).thenAnswer(
+        (_) async => Response(
+          data: '<rss/>',
+          requestOptions: RequestOptions(path: alphaUrl),
+          statusCode: 200,
+        ),
+      );
+      when(() => parser.parse(any())).thenReturn(
+        const ParsedPodcast(title: 'Alpha Cast', episodes: []),
+      );
+      await repo.subscribe(alphaUrl);
+
+      // Track the order URLs are fetched during refreshAllFeeds.
+      final fetchOrder = <String>[];
+      when(() => dio.get<String>(any())).thenAnswer((invocation) async {
+        fetchOrder.add(invocation.positionalArguments.first as String);
+        return Response(
+          data: '<rss/>',
+          requestOptions: RequestOptions(
+            path: invocation.positionalArguments.first as String,
+          ),
+          statusCode: 200,
+        );
+      });
+      when(() => parser.parse(any())).thenReturn(
+        const ParsedPodcast(title: 'irrelevant', episodes: []),
+      );
+
+      await repo.refreshAllFeeds();
+
+      expect(fetchOrder, [alphaUrl, zebraUrl]);
+    });
+
+    test(
+      'emits a single batch audit event after all feeds are refreshed',
+      () async {
+        stubFeed(episodes: [sampleEpisode]);
+        await repo.subscribe(_rssUrl);
+        when(() => parser.parse(any())).thenReturn(
+          const ParsedPodcast(title: 'Test Podcast', episodes: [sampleEpisode]),
+        );
+
+        // Subscribe before calling refreshAllFeeds so the listener is in place
+        // when the event fires at the end of the batch.
+        final eventFuture = repo.feedRefreshAuditEvents.first;
+        await repo.refreshAllFeeds();
+        expect(await eventFuture, startsWith('All feeds checked at '));
+      },
+    );
+  });
+
   group('refreshFeed', () {
     test('updates podcast metadata', () async {
       stubFeed(title: 'Old Title');
@@ -285,6 +354,89 @@ void main() {
           episodes.map((e) => e.guid),
           containsAll(['ep-1', 'ep-to-disappear']),
         );
+      },
+    );
+
+    test(
+      'inserts new GUID with pubDate before high-water mark as played+dismissed',
+      () async {
+        final anchor = DateTime(2024, 6, 1, 12);
+        stubFeed(
+          episodes: [
+            ParsedEpisode(
+              guid: 'old-guid',
+              title: 'Old Episode',
+              audioUrl: 'https://example.com/old.mp3',
+              pubDate: anchor,
+            ),
+          ],
+        );
+        final podcast = await repo.subscribe(_rssUrl);
+
+        // Second refresh: a new GUID but an older publish date.
+        const backlogGuid = 'backlog-guid';
+        when(() => parser.parse(any())).thenReturn(
+          ParsedPodcast(
+            title: 'Test Podcast',
+            episodes: [
+              ParsedEpisode(
+                guid: backlogGuid,
+                title: 'Backlog Episode',
+                audioUrl: 'https://example.com/backlog.mp3',
+                pubDate: DateTime(2024, 5, 1), // before anchor
+              ),
+            ],
+          ),
+        );
+        await repo.refreshFeed(podcast.id);
+
+        // Check the raw DB row — Episode domain model doesn't expose inboxDismissed.
+        final row = await (db.select(
+          db.episodes,
+        )..where((e) => e.guid.equals(backlogGuid))).getSingle();
+        expect(row.status, EpisodeStatus.played);
+        expect(row.inboxDismissed, isTrue);
+      },
+    );
+
+    test(
+      'inserts new GUID with pubDate after high-water mark as newEpisode',
+      () async {
+        final anchor = DateTime(2024, 6, 1, 12);
+        stubFeed(
+          episodes: [
+            ParsedEpisode(
+              guid: 'old-guid',
+              title: 'Old Episode',
+              audioUrl: 'https://example.com/old.mp3',
+              pubDate: anchor,
+            ),
+          ],
+        );
+        final podcast = await repo.subscribe(_rssUrl);
+
+        // Second refresh: a new GUID with a newer publish date.
+        const freshGuid = 'fresh-guid';
+        when(() => parser.parse(any())).thenReturn(
+          ParsedPodcast(
+            title: 'Test Podcast',
+            episodes: [
+              ParsedEpisode(
+                guid: freshGuid,
+                title: 'Fresh Episode',
+                audioUrl: 'https://example.com/fresh.mp3',
+                pubDate: anchor.add(const Duration(days: 1)),
+              ),
+            ],
+          ),
+        );
+        await repo.refreshFeed(podcast.id);
+
+        final row = await (db.select(
+          db.episodes,
+        )..where((e) => e.guid.equals(freshGuid))).getSingle();
+        expect(row.status, EpisodeStatus.newEpisode);
+        expect(row.inboxDismissed, isFalse);
       },
     );
   });

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
@@ -15,38 +17,44 @@ final autoRefreshProvider = NotifierProvider<_AutoRefreshNotifier, void>(
 );
 
 class _AutoRefreshNotifier extends Notifier<void> with WidgetsBindingObserver {
+  bool _refreshInFlight = false;
+
   @override
   void build() {
     WidgetsBinding.instance.addObserver(this);
     ref.onDispose(() => WidgetsBinding.instance.removeObserver(this));
-    _refresh();
+    unawaited(_refresh());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _refreshIfStale();
+      unawaited(_refreshIfStale());
     }
   }
 
   Future<void> _refresh() async {
+    if (_refreshInFlight) return;
+    _refreshInFlight = true;
     try {
       final settings = _settings();
       await ref.read(podcastRepositoryProvider).refreshAllFeeds();
       await settings.setLastAutoRefreshAt(DateTime.now().toUtc());
     } catch (e, st) {
       _log.warning('Auto-refresh failed', e, st);
+    } finally {
+      _refreshInFlight = false;
     }
   }
 
   Future<void> _refreshIfStale() async {
+    if (_refreshInFlight) return;
     try {
       final settings = _settings();
       final last = await settings.getLastAutoRefreshAt();
       final now = DateTime.now().toUtc();
       if (last == null || now.difference(last) >= _kAutoRefreshThreshold) {
-        await ref.read(podcastRepositoryProvider).refreshAllFeeds();
-        await settings.setLastAutoRefreshAt(now);
+        await _refresh();
       }
     } catch (e, st) {
       _log.warning('Auto-refresh (resume) failed', e, st);

@@ -23,4 +23,5 @@ class Podcasts extends Table {
       boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get refreshedAt => dateTime().nullable()();
+  DateTimeColumn get lastSeenPubDate => dateTime().nullable()();
 }
