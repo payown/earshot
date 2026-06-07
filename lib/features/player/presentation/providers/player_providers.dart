@@ -7,6 +7,7 @@ import '../../../../core/constants/playback.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../data/db/enums.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
+import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/queue_group.dart';
@@ -205,6 +206,18 @@ final handlerSettingsAttachmentProvider = Provider<void>((ref) {
   final db = ref.watch(appDatabaseProvider);
   handler.attachSettings(AppSettingsRepositoryImpl(database: db));
   handler.attachDatabase(db);
+});
+
+// Watches skip interval settings and syncs them to the audio handler so
+// AirPods clicks and lock screen controls use the user's chosen durations.
+final skipDurationsAttachmentProvider = Provider<void>((ref) {
+  final handler = ref.read(audioHandlerProvider);
+  final forwardSecs = ref.watch(skipForwardSecondsProvider).asData?.value ?? 30;
+  final backSecs = ref.watch(skipBackSecondsProvider).asData?.value ?? 15;
+  handler.setSkipDurations(
+    forward: Duration(seconds: forwardSecs),
+    back: Duration(seconds: backSecs),
+  );
 });
 
 // Watches episodeIdStream and persists the current episode ID so it can be

@@ -14,10 +14,15 @@ import '../../features/search/presentation/screens/opml_import_screen.dart';
 import '../../features/search/presentation/screens/search_result_detail_screen.dart';
 import '../../features/search/presentation/screens/search_screen.dart';
 import '../../features/settings/data/app_settings_repository.dart';
+import '../../features/settings/presentation/screens/accessibility_settings_screen.dart';
 import '../../features/settings/presentation/screens/downloads_settings_screen.dart';
+import '../../features/settings/presentation/screens/inbox_settings_screen.dart';
+import '../../features/settings/presentation/screens/playback_settings_screen.dart';
 import '../../features/settings/presentation/screens/privacy_settings_screen.dart';
 import '../../features/settings/presentation/screens/quick_action_configurator_screen.dart';
+import '../../features/settings/presentation/screens/quick_actions_settings_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
+import '../../features/settings/presentation/screens/subscriptions_settings_screen.dart';
 import '../../features/stats/presentation/screens/stats_screen.dart';
 import '../../features/folders/presentation/screens/folder_detail_screen.dart';
 import '../../features/subscriptions/presentation/screens/add_podcast_screen.dart';
@@ -46,6 +51,11 @@ abstract final class AppRoutes {
   static const player = '/player';
   static const settings = '/settings';
   static const settingsImportOpml = '/settings/import-opml';
+  static const settingsSubscriptions = '/settings/subscriptions';
+  static const settingsQuickActionsMenu = '/settings/quick-actions-menu';
+  static const settingsInbox = '/settings/inbox';
+  static const settingsPlayback = '/settings/playback';
+  static const settingsAccessibility = '/settings/accessibility';
   static const settingsStats = '/settings/stats';
   static const settingsPrivacy = '/settings/privacy';
   static const settingsDownloads = '/settings/downloads';
@@ -180,6 +190,31 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             builder: (_, state) => OpmlImportScreen(
               fromOnboarding: state.extra == true,
             ),
+          ),
+          GoRoute(
+            path: 'subscriptions',
+            parentNavigatorKey: _rootKey,
+            builder: (_, __) => const SubscriptionsSettingsScreen(),
+          ),
+          GoRoute(
+            path: 'quick-actions-menu',
+            parentNavigatorKey: _rootKey,
+            builder: (_, __) => const QuickActionsSettingsScreen(),
+          ),
+          GoRoute(
+            path: 'inbox',
+            parentNavigatorKey: _rootKey,
+            builder: (_, __) => const InboxSettingsScreen(),
+          ),
+          GoRoute(
+            path: 'playback',
+            parentNavigatorKey: _rootKey,
+            builder: (_, __) => const PlaybackSettingsScreen(),
+          ),
+          GoRoute(
+            path: 'accessibility',
+            parentNavigatorKey: _rootKey,
+            builder: (_, __) => const AccessibilitySettingsScreen(),
           ),
           GoRoute(
             path: 'stats',

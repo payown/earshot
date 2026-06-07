@@ -12,6 +12,7 @@ import '../../../../core/constants/playback.dart';
 import '../../../../core/constants/spacing.dart';
 import '../../../../core/constants/urls.dart';
 import '../../../../features/bookmarks/presentation/providers/bookmarks_providers.dart';
+import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../../domain/sleep_timer.dart';
 import '../providers/chapter_providers.dart';
@@ -100,19 +101,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // ── Shared ────────────────────────────────────────────────────────────────
 
   void _skipForward() {
+    final secs = ref.read(skipForwardSecondsProvider).value ?? 30;
     ref.read(audioHandlerProvider).fastForward();
     SemanticsService.sendAnnouncement(
       View.of(context),
-      'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
+      'Skip forward $secs seconds',
       TextDirection.ltr,
     );
   }
 
   void _skipBack() {
+    final secs = ref.read(skipBackSecondsProvider).value ?? 15;
     ref.read(audioHandlerProvider).rewind();
     SemanticsService.sendAnnouncement(
       View.of(context),
-      'Skip back ${kSkipBackDuration.inSeconds} seconds',
+      'Skip back $secs seconds',
       TextDirection.ltr,
     );
   }
@@ -148,6 +151,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final position = ref.watch(positionProvider).asData?.value ?? Duration.zero;
     final directTouchEnabled =
         ref.watch(directTouchEnabledProvider).value ?? false;
+    final skipFwdSecs = ref.watch(skipForwardSecondsProvider).value ?? 30;
+    final skipBackSecs = ref.watch(skipBackSecondsProvider).value ?? 15;
     final description = ref
         .watch(currentEpisodeDescriptionProvider)
         .asData
@@ -265,12 +270,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   customSemanticsActions: directTouchEnabled
                       ? {
                           CustomSemanticsAction(
-                            label:
-                                'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
+                            label: 'Skip forward $skipFwdSecs seconds',
                           ): _skipForward,
                           CustomSemanticsAction(
-                            label:
-                                'Skip back ${kSkipBackDuration.inSeconds} seconds',
+                            label: 'Skip back $skipBackSecs seconds',
                           ): _skipBack,
                           if (!_voFastForwardActive)
                             const CustomSemanticsAction(
@@ -329,6 +332,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               _PlaybackControls(
                 isPlaying: isPlaying,
                 isBuffering: isBuffering,
+                skipForwardSecs: skipFwdSecs,
+                skipBackSecs: skipBackSecs,
                 onRewind: () => ref.read(audioHandlerProvider).rewind(),
                 onPlayPause: () => isPlaying
                     ? ref.read(audioHandlerProvider).pause()
@@ -858,6 +863,8 @@ class _PlaybackControls extends StatelessWidget {
   const _PlaybackControls({
     required this.isPlaying,
     required this.isBuffering,
+    required this.skipForwardSecs,
+    required this.skipBackSecs,
     required this.onRewind,
     required this.onPlayPause,
     required this.onFastForward,
@@ -865,6 +872,8 @@ class _PlaybackControls extends StatelessWidget {
 
   final bool isPlaying;
   final bool isBuffering;
+  final int skipForwardSecs;
+  final int skipBackSecs;
   final VoidCallback onRewind;
   final VoidCallback onPlayPause;
   final VoidCallback onFastForward;
@@ -876,13 +885,13 @@ class _PlaybackControls extends StatelessWidget {
       children: [
         Semantics(
           button: true,
-          label: 'Skip back ${kSkipBackDuration.inSeconds} seconds',
+          label: 'Skip back $skipBackSecs seconds',
           onTap: onRewind,
           child: ExcludeSemantics(
             child: IconButton(
               icon: const Icon(Icons.replay_30),
               iconSize: 40,
-              tooltip: 'Skip back ${kSkipBackDuration.inSeconds} seconds',
+              tooltip: 'Skip back $skipBackSecs seconds',
               onPressed: onRewind,
             ),
           ),
@@ -910,13 +919,13 @@ class _PlaybackControls extends StatelessWidget {
         ),
         Semantics(
           button: true,
-          label: 'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
+          label: 'Skip forward $skipForwardSecs seconds',
           onTap: onFastForward,
           child: ExcludeSemantics(
             child: IconButton(
               icon: const Icon(Icons.forward_30),
               iconSize: 40,
-              tooltip: 'Skip forward ${kSkipForwardDuration.inSeconds} seconds',
+              tooltip: 'Skip forward $skipForwardSecs seconds',
               onPressed: onFastForward,
             ),
           ),
