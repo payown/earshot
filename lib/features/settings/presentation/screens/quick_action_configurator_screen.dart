@@ -43,12 +43,6 @@ class _QuickActionConfiguratorScreenState
     return PodcastAction.values.firstWhere((a) => a.key == key).label;
   }
 
-  // Called by SliverReorderableList via onReorderItem — index is already adjusted.
-  void _onDragReorder(int oldIndex, int newIndex) {
-    _moveItem(oldIndex, newIndex);
-  }
-
-  // Called by up/down buttons — newIndex is the final target index.
   void _moveItem(int oldIndex, int newIndex) {
     final newKeys = List<String>.from(_activeKeys ?? _allKeys);
     final item = newKeys.removeAt(oldIndex);
@@ -132,9 +126,8 @@ class _QuickActionConfiguratorScreenState
               ),
             ),
           ),
-          SliverReorderableList(
+          SliverList.builder(
             itemCount: active.length,
-            onReorderItem: _onDragReorder,
             itemBuilder: (context, index) {
               final key = active[index];
               final label = _labelFor(key);
@@ -289,10 +282,6 @@ class _ActiveActionRow extends StatelessWidget {
                   ),
                   onPressed: onRemove,
                   tooltip: 'Remove',
-                ),
-                ReorderableDragStartListener(
-                  index: index,
-                  child: const Icon(Icons.drag_handle),
                 ),
               ],
             ),
