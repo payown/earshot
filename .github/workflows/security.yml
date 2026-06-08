@@ -37,7 +37,7 @@ jobs:
 
       - name: Install OSV Scanner
         run: |
-          curl -Lo osv-scanner \
+          curl -fsSL -o osv-scanner \
             https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64
           chmod +x osv-scanner
 
@@ -85,8 +85,9 @@ jobs:
           echo "Scanning for raw SQL string patterns in lib/ ..."
           # app_database.dart is excluded: its customStatement calls are
           # all schema migrations with no user input (reviewed manually).
-          HITS=$(grep -rn "customStatement\|executeRaw\|rawQuery" lib/ --include="*.dart" \
-            | grep -v "app_database.dart" \
+          HITS=$(grep -rn "customStatement\|executeRaw\|rawQuery" lib/ \
+            --include="*.dart" \
+            --exclude="app_database.dart" \
             | grep -v "// security-ok" || true)
           if [ -n "$HITS" ]; then
             echo "::error::Raw SQL usage found — use Drift's typed query builder instead:"
