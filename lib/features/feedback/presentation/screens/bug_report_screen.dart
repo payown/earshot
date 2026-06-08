@@ -124,8 +124,9 @@ $happened
             children: [
               Text(
                 'Describe what happened. A debug log will be attached automatically. '
-                'The log includes episode titles, feed URLs, and playback events. '
-                'It does not include your email address or account information.',
+                'The log includes episode titles, feed URLs, audio stream URLs, and '
+                'playback events. It does not include your email address or account '
+                'information.',
                 style: theme.textTheme.bodyMedium,
               ),
               const SizedBox(height: 24),

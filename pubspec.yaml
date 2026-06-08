@@ -57,7 +57,7 @@ dependencies:
   connectivity_plus: ^7.1.1
   background_downloader: ^9.5.5
   shake: ^3.0.0
-  flutter_email_sender: ^6.0.3
+  flutter_email_sender: ^9.0.0
 
 
 dev_dependencies:
