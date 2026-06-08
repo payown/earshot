@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:logging/logging.dart';
 import 'package:xml/xml.dart';
 
@@ -194,7 +196,14 @@ class RssParser {
     final match = RegExp(
       r'\w+,\s+(\d{1,2})\s+(\w{3})\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})',
     ).firstMatch(trimmed);
-    if (match == null) return null;
+    if (match == null) {
+      // Last resort: try dart:io HttpDate for RFC 1123 / RFC 850 / asctime.
+      try {
+        return HttpDate.parse(trimmed).toUtc();
+      } catch (_) {
+        return null;
+      }
+    }
 
     const months = {
       'Jan': 1,
