@@ -16,6 +16,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Load secrets from .env.local if present (gitignored, never committed).
+if [[ -f "$REPO_ROOT/.env.local" ]]; then
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/.env.local"
+fi
+
 ASC_APP_ID="6770760602"
 GROUP="Internal Testing Group"
 SUBMIT_FOR_REVIEW=false
@@ -48,6 +54,13 @@ if [[ -n "$REMOTE_SHA" ]]; then
   fi
 fi
 
+# ── Credential check (before bumping build number) ───────────────────────────
+if [[ -z "${PODCAST_INDEX_API_KEY:-}" || -z "${PODCAST_INDEX_API_SECRET:-}" ]]; then
+  echo "❌ PODCAST_INDEX_API_KEY and PODCAST_INDEX_API_SECRET must be set."
+  echo "   Add them to .env.local in the repo root (see .env.local.example)."
+  exit 1
+fi
+
 # ── Bump build number ─────────────────────────────────────────────────────────
 CURRENT_VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
 MARKETING=$(echo "$CURRENT_VERSION" | cut -d'+' -f1)
@@ -63,12 +76,6 @@ git push origin "$BRANCH"
 echo "▶ Version: $NEW_VERSION"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
-if [[ -z "${PODCAST_INDEX_API_KEY:-}" || -z "${PODCAST_INDEX_API_SECRET:-}" ]]; then
-  echo "❌ PODCAST_INDEX_API_KEY and PODCAST_INDEX_API_SECRET must be set in your environment."
-  echo "   export PODCAST_INDEX_API_KEY=your_key"
-  echo "   export PODCAST_INDEX_API_SECRET=your_secret"
-  exit 1
-fi
 
 echo "▶ Building release IPA..."
 flutter build ipa --release \
