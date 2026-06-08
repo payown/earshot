@@ -213,6 +213,87 @@ void main() {
     });
   });
 
+  group('dismissFromInbox', () {
+    Future<EpisodeRow?> fetchEpisode(String guid) => (db.select(
+      db.episodes,
+    )..where((e) => e.guid.equals(guid))).getSingleOrNull();
+
+    test(
+      'sets inboxDismissed=true without changing status or playedAt',
+      () async {
+        final ep = ParsedEpisode(
+          guid: 'ep-dismiss-1',
+          title: 'Dismiss me',
+          audioUrl: 'https://example.com/ep1.mp3',
+          pubDate: DateTime(2024, 1, 1).toUtc(),
+        );
+        stubNetwork(episodes: [ep]);
+        final podcast = await repo.subscribe(_rssUrl);
+
+        final before = await fetchEpisode('ep-dismiss-1');
+        expect(before?.inboxDismissed, false);
+        expect(before?.status, EpisodeStatus.newEpisode);
+        expect(before?.playedAt, null);
+
+        await repo.dismissFromInbox(before!.id, alsoMarkPlayed: false);
+
+        final after = await fetchEpisode('ep-dismiss-1');
+        expect(
+          after?.inboxDismissed,
+          true,
+          reason: 'must be dismissed from inbox',
+        );
+        expect(
+          after?.status,
+          EpisodeStatus.newEpisode,
+          reason: 'status must not change when alsoMarkPlayed=false',
+        );
+        expect(
+          after?.playedAt,
+          null,
+          reason: 'playedAt must not change when alsoMarkPlayed=false',
+        );
+
+        // Inbox count must drop to zero.
+        expect(await inboxCount(podcast.id), 0);
+      },
+    );
+
+    test(
+      'sets inboxDismissed=true and marks played when alsoMarkPlayed=true',
+      () async {
+        final ep = ParsedEpisode(
+          guid: 'ep-dismiss-2',
+          title: 'Dismiss and mark played',
+          audioUrl: 'https://example.com/ep2.mp3',
+          pubDate: DateTime(2024, 2, 1).toUtc(),
+        );
+        stubNetwork(episodes: [ep]);
+        await repo.subscribe(_rssUrl);
+
+        final before = await fetchEpisode('ep-dismiss-2');
+        await repo.dismissFromInbox(before!.id, alsoMarkPlayed: true);
+
+        final after = await fetchEpisode('ep-dismiss-2');
+        expect(
+          after?.inboxDismissed,
+          true,
+          reason: 'must be dismissed from inbox',
+        );
+        expect(
+          after?.status,
+          EpisodeStatus.played,
+          reason: 'status must be played when alsoMarkPlayed=true',
+        );
+        expect(
+          after?.playedAt,
+          isA<DateTime>(),
+          reason: 'playedAt must be set when alsoMarkPlayed=true',
+        );
+      },
+    );
+  });
+
   group('Schema v12 migration SQL', () {
     test(
       'existing newEpisode rows at or before lastSeenPubDate get dismissed',

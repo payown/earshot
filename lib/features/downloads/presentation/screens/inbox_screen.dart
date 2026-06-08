@@ -377,8 +377,13 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
           }
         });
       }
-    } catch (e) {
+    } catch (_) {
       if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not clear episode from inbox. Try again.'),
+          ),
+        );
         SemanticsService.sendAnnouncement(
           View.of(context),
           'Could not clear episode from inbox. Try again.',
