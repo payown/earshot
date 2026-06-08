@@ -20,10 +20,16 @@ class _FakeLauncher extends Fake
 
 void main() {
   late _FakeLauncher fakeLauncher;
+  late UrlLauncherPlatform originalPlatform;
 
   setUp(() {
+    originalPlatform = UrlLauncherPlatform.instance;
     fakeLauncher = _FakeLauncher();
     UrlLauncherPlatform.instance = fakeLauncher;
+  });
+
+  tearDown(() {
+    UrlLauncherPlatform.instance = originalPlatform;
   });
 
   group('safeLaunchUrl', () {
@@ -62,7 +68,7 @@ void main() {
       expect(fakeLauncher.launched, isEmpty);
     });
 
-    test('silently ignores unparseable URLs', () async {
+    test('no-ops on unparseable URLs', () async {
       await safeLaunchUrl('not a url !!!');
       expect(fakeLauncher.launched, isEmpty);
     });

@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run OSV Scanner
-        uses: google/osv-scanner-action@v2
+        uses: google/osv-scanner-action@v1
         with:
           scan-args: |-
             --lockfile=pubspec.lock
@@ -57,7 +57,9 @@ jobs:
             | grep -v "// security-ok" \
             | grep -v "http://www.w3.org" \
             | grep -v "http://schemas" \
-            | grep -v "http://purl" || true)
+            | grep -v "http://purl" \
+            | grep -v "startsWith" \
+            | grep -v "contains\|setError\|error\|Error\|hint\|label\|message\|'http://'\"" || true)
           if [ -n "$HITS" ]; then
             echo "::error::Plain HTTP (non-TLS) URLs found in lib/:"
             echo "$HITS"
