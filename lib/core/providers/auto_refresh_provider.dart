@@ -17,6 +17,10 @@ final autoRefreshProvider = NotifierProvider<_AutoRefreshNotifier, bool>(
 );
 
 class _AutoRefreshNotifier extends Notifier<bool> with WidgetsBindingObserver {
+  // Stored so concurrent callers (e.g. pull-to-refresh during the on-open
+  // auto-refresh) join the in-flight operation rather than returning early.
+  Future<void>? _inFlight;
+
   @override
   bool build() {
     WidgetsBinding.instance.addObserver(this);
@@ -32,8 +36,12 @@ class _AutoRefreshNotifier extends Notifier<bool> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _refresh() async {
-    if (state) return;
+  Future<void> _refresh() {
+    _inFlight ??= _doRefresh().whenComplete(() => _inFlight = null);
+    return _inFlight!;
+  }
+
+  Future<void> _doRefresh() async {
     try {
       state = true;
       final settings = _settings();
