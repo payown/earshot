@@ -8,7 +8,7 @@ void main() {
   group('resolveAudioSource', () {
     test('returns file:// URI when downloadPath is set', () {
       const path = '/data/user/0/media.com.earshot/episode.mp3';
-      final item = MediaItem(
+      const item = MediaItem(
         id: 'https://example.com/episode.mp3',
         title: 'Test',
         extras: {'downloadPath': path},
@@ -19,7 +19,7 @@ void main() {
 
     test('returns https:// URI when downloadPath is absent', () {
       const url = 'https://example.com/episode.mp3';
-      final item = MediaItem(id: url, title: 'Test');
+      const item = MediaItem(id: url, title: 'Test');
       final source = resolveAudioSource(item) as UriAudioSource;
       expect(source.uri.scheme, 'https');
       expect(source.uri.host, 'example.com');
@@ -27,7 +27,7 @@ void main() {
 
     test('returns https:// URI when downloadPath is null in extras', () {
       const url = 'https://example.com/episode.mp3';
-      final item = MediaItem(
+      const item = MediaItem(
         id: url,
         title: 'Test',
         extras: {'episodeId': 42, 'downloadPath': null},

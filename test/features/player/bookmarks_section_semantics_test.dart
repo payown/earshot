@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // ── Mirrors of the private widgets ───────────────────────────────────────────
@@ -8,13 +7,9 @@ import 'package:flutter_test/flutter_test.dart';
 // _BookmarkRow without requiring Riverpod or the full player setup.
 
 class _BookmarkData {
-  const _BookmarkData({
-    required this.positionSeconds,
-    this.note = '',
-  });
+  const _BookmarkData({required this.positionSeconds});
 
   final int positionSeconds;
-  final String note;
 }
 
 class _TestBookmarksSection extends StatefulWidget {
@@ -77,7 +72,7 @@ class _TestBookmarksSectionState extends State<_TestBookmarksSection> {
               for (final b in widget.bookmarks)
                 _TestBookmarkRow(
                   positionLabel: _formatPosition(b.positionSeconds),
-                  note: b.note,
+                  note: '',
                   onSeek: () => widget.onSeek(b.positionSeconds),
                   onDelete: () => widget.onDelete(b.positionSeconds),
                   onShare: () => widget.onShare(b.positionSeconds),

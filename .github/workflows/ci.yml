@@ -29,6 +29,13 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Create api_keys.dart from secrets
+        run: |
+          cat > lib/core/config/api_keys.dart <<'EOF'
+          const podcastIndexApiKey = '${{ secrets.PODCAST_INDEX_API_KEY }}';
+          const podcastIndexApiSecret = '${{ secrets.PODCAST_INDEX_API_SECRET }}';
+          EOF
+
       - name: Generate code
         run: dart run build_runner build --delete-conflicting-outputs
 

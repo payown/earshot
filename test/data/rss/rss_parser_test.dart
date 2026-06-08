@@ -181,7 +181,7 @@ void main() {
 
     group('enclosure URL trimming', () {
       test('trims leading and trailing whitespace from enclosure url', () {
-        final xml = '''<?xml version="1.0"?>
+        const xml = '''<?xml version="1.0"?>
 <rss version="2.0"><channel>
   <title>T</title>
   <item>
@@ -196,7 +196,7 @@ void main() {
       test(
         'treats whitespace-only enclosure url as missing (episode skipped)',
         () {
-          final xml = '''<?xml version="1.0"?>
+          const xml = '''<?xml version="1.0"?>
 <rss version="2.0"><channel>
   <title>T</title>
   <item>

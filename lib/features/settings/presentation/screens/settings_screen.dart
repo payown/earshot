@@ -68,7 +68,7 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => context.push(AppRoutes.settingsAccessibility),
           ),
           const Divider(),
-          _VersionTile(),
+          const _VersionTile(),
           const ListTile(
             title: Text('Podcast search powered by Podcast Index'),
             subtitle: Text('podcastindex.org'),
