@@ -4,10 +4,12 @@ import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
 
-import '../../../core/config/api_keys.dart';
 import '../domain/search_result.dart';
 
 final _log = Logger('PodcastSearchService');
+
+const _apiKey = String.fromEnvironment('PODCAST_INDEX_API_KEY');
+const _apiSecret = String.fromEnvironment('PODCAST_INDEX_API_SECRET');
 
 class PodcastSearchService {
   const PodcastSearchService({required Dio dio}) : _dio = dio;
@@ -18,9 +20,13 @@ class PodcastSearchService {
 
   Future<List<PodcastSearchResult>> search(String query) async {
     if (query.trim().isEmpty) return [];
+    if (_apiKey.isEmpty || _apiSecret.isEmpty) {
+      _log.warning('Podcast Index credentials not configured; search disabled');
+      return [];
+    }
 
     final unixTime = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final hashInput = '$podcastIndexApiKey$podcastIndexApiSecret$unixTime';
+    final hashInput = '$_apiKey$_apiSecret$unixTime';
     final authHash = sha1.convert(utf8.encode(hashInput)).toString();
 
     try {
@@ -30,7 +36,7 @@ class PodcastSearchService {
         options: Options(
           responseType: ResponseType.plain,
           headers: {
-            'X-Auth-Key': podcastIndexApiKey,
+            'X-Auth-Key': _apiKey,
             'X-Auth-Date': unixTime.toString(),
             'Authorization': authHash,
             'User-Agent': 'Earshot/1.0 (+https://github.com/payown/earshot)',

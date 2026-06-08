@@ -1,4 +1,12 @@
-// Copy this file to api_keys.dart and fill in your values.
-// api_keys.dart is gitignored — never commit real credentials.
-const podcastIndexApiKey = 'YOUR_API_KEY_HERE';
-const podcastIndexApiSecret = 'YOUR_API_SECRET_HERE';
+// api_keys.dart is no longer used. Credentials are now injected at build time
+// via --dart-define so they never touch the filesystem.
+//
+// Local development:
+//   flutter run \
+//     --dart-define=PODCAST_INDEX_API_KEY=your_key \
+//     --dart-define=PODCAST_INDEX_API_SECRET=your_secret
+//
+// CI / release builds: secrets are stored in GitHub Actions and passed
+// automatically — see .github/workflows/ci.yml and release.yml.
+//
+// Get credentials at: https://podcastindex.org/apps/developers

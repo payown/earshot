@@ -51,7 +51,9 @@ jobs:
         run: |
           flutter build ios --release --no-codesign \
             --dart-define=SENTRY_DSN=${{ secrets.SENTRY_DSN }} \
-            --dart-define=POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}
+            --dart-define=POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }} \
+            --dart-define=PODCAST_INDEX_API_KEY=${{ secrets.PODCAST_INDEX_API_KEY }} \
+            --dart-define=PODCAST_INDEX_API_SECRET=${{ secrets.PODCAST_INDEX_API_SECRET }}
 
       - name: Upload iOS app
         uses: actions/upload-artifact@v4
@@ -84,7 +86,9 @@ jobs:
         run: |
           flutter build appbundle --release \
             --dart-define=SENTRY_DSN=${{ secrets.SENTRY_DSN }} \
-            --dart-define=POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}
+            --dart-define=POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }} \
+            --dart-define=PODCAST_INDEX_API_KEY=${{ secrets.PODCAST_INDEX_API_KEY }} \
+            --dart-define=PODCAST_INDEX_API_SECRET=${{ secrets.PODCAST_INDEX_API_SECRET }}
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
