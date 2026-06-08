@@ -1,0 +1,105 @@
+name: Security
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Run weekly on Monday at 08:00 UTC so dependency CVEs surface
+    # even when there are no active PRs.
+    - cron: '0 8 * * 1'
+
+jobs:
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so gitleaks can scan all commits
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependencies:
+    name: Dependency CVEs (osv-scanner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run OSV Scanner
+        uses: google/osv-scanner-action@v2
+        with:
+          scan-args: |-
+            --lockfile=pubspec.lock
+
+  static:
+    name: Flutter static security checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for plain HTTP URLs in Dart source
+        run: |
+          echo "Scanning for plain http:// URLs in lib/ ..."
+          HITS=$(grep -rn "http://" lib/ --include="*.dart" \
+            | grep -v "// security-ok" \
+            | grep -v "http://www.w3.org" \
+            | grep -v "http://schemas" \
+            | grep -v "http://purl" || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::Plain HTTP (non-TLS) URLs found in lib/:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "No plain HTTP URLs found."
+
+      - name: Check for insecure Random usage
+        run: |
+          echo "Scanning for math.Random (use dart:math Random.secure() for crypto)..."
+          HITS=$(grep -rn "math\.Random()" lib/ --include="*.dart" \
+            | grep -v "// security-ok" || true)
+          if [ -n "$HITS" ]; then
+            echo "::warning::math.Random() found — use Random.secure() for any security-sensitive value:"
+            echo "$HITS"
+          fi
+
+      - name: Check for raw SQL strings
+        run: |
+          echo "Scanning for raw SQL string patterns in lib/ ..."
+          HITS=$(grep -rn "customStatement\|executeRaw\|rawQuery" lib/ --include="*.dart" \
+            | grep -v "// security-ok" || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::Raw SQL usage found — use Drift's typed query builder instead:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "No raw SQL found."
+
+      - name: Check for sensitive keys in SharedPreferences
+        run: |
+          echo "Scanning for sensitive key names stored via SharedPreferences..."
+          HITS=$(grep -rn "_set\|prefs\.set" lib/ --include="*.dart" -A1 \
+            | grep -i "password\|secret\|token\|api_key\|apikey\|auth" \
+            | grep -v "// security-ok" || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::Potentially sensitive value stored in SharedPreferences (unencrypted):"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "No sensitive SharedPreferences keys found."
+
+      - name: Check for print() statements in lib/
+        run: |
+          echo "Scanning for print() in lib/ (use package:logging)..."
+          HITS=$(grep -rn "^\s*print(" lib/ --include="*.dart" \
+            | grep -v "// security-ok" || true)
+          if [ -n "$HITS" ]; then
+            echo "::warning::print() found — prefer package:logging to avoid accidental data exposure in release builds:"
+            echo "$HITS"
+          fi

@@ -66,6 +66,10 @@ abstract interface class AppSettingsRepository {
 
   Future<void> setPodcastNameFirst({required bool value});
 
+  Future<bool> isClearFromInboxAlsoMarksPlayed();
+
+  Future<void> setClearFromInboxAlsoMarksPlayed({required bool value});
+
   Future<bool> hasSeenPodcastNameTip();
 
   Future<void> setHasSeenPodcastNameTip({required bool value});
@@ -131,6 +135,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyContinueAfterQueue = 'continue_after_queue';
   static const _keyContinueAfterGroup = 'continue_after_group';
   static const _keyPodcastNameFirst = 'podcast_name_first';
+  static const _keyClearFromInboxMarksPlayed = 'clear_from_inbox_marks_played';
   static const _keyPodcastNameTipSeen = 'podcast_name_tip_seen';
   static const _keyGaplessPlayback = 'gapless_playback_enabled';
   static const _keyGaplessTipSeen = 'gapless_tip_seen';
@@ -291,6 +296,14 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setPodcastNameFirst({required bool value}) =>
       _set(_keyPodcastNameFirst, value.toString());
+
+  @override
+  Future<bool> isClearFromInboxAlsoMarksPlayed() =>
+      _getBool(_keyClearFromInboxMarksPlayed, defaultValue: false);
+
+  @override
+  Future<void> setClearFromInboxAlsoMarksPlayed({required bool value}) =>
+      _set(_keyClearFromInboxMarksPlayed, value.toString());
 
   @override
   Future<bool> hasSeenPodcastNameTip() =>

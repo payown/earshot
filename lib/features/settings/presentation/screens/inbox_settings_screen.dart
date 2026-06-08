@@ -77,6 +77,43 @@ class InboxSettingsScreen extends ConsumerWidget {
                     }
                   },
           ),
+          SwitchListTile(
+            title: const Text('Mark as played when clearing from inbox'),
+            subtitle: const Text(
+              'Clearing an episode also marks it played so it counts toward your history',
+            ),
+            value:
+                ref.watch(clearFromInboxAlsoMarksPlayedProvider).value ?? false,
+            onChanged:
+                ref.watch(clearFromInboxAlsoMarksPlayedProvider).isLoading
+                ? null
+                : (val) async {
+                    try {
+                      await ref
+                          .read(
+                            clearFromInboxAlsoMarksPlayedProvider.notifier,
+                          )
+                          .set(val);
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          val
+                              ? 'Clearing from inbox will also mark as played'
+                              : 'Clearing from inbox will not mark as played',
+                          TextDirection.ltr,
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        SemanticsService.sendAnnouncement(
+                          View.of(context),
+                          'Could not update inbox setting',
+                          TextDirection.ltr,
+                        );
+                      }
+                    }
+                  },
+          ),
         ],
       ),
     );

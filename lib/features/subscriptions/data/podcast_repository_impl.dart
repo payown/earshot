@@ -160,22 +160,17 @@ class PodcastRepositoryImpl implements PodcastRepository {
   Future<void> _applyInboxDismissals(List<PodcastRow> podcasts) async {
     final inboxOptInOnly = await _settings.isInboxOptInOnly();
     final toExclude = <int>[];
-    final toInclude = <int>[];
     for (final podcast in podcasts) {
       if (inboxOptInOnly ? !podcast.inboxIncluded : podcast.inboxExcluded) {
         toExclude.add(podcast.id);
-      } else if (inboxOptInOnly) {
-        // In opt-in mode, restore episodes for podcasts that are now included
-        // (e.g., user toggled them in during a prior session).
-        toInclude.add(podcast.id);
       }
     }
     if (toExclude.isNotEmpty) {
       await _setEpisodesDismissed(toExclude, dismissed: true);
     }
-    if (toInclude.isNotEmpty) {
-      await _setEpisodesDismissed(toInclude, dismissed: false);
-    }
+    // The restore direction (dismissed=false) is handled by setInboxIncluded at
+    // toggle time. Running it here on every refresh would undo clearInbox for
+    // opt-in mode users, mirroring the regression fixed in refreshFeed (#200).
   }
 
   Future<void> _setEpisodesDismissed(
@@ -370,6 +365,26 @@ class PodcastRepositoryImpl implements PodcastRepository {
             .insert(companion, mode: InsertMode.insertOrIgnore);
       }
     }
+  }
+
+  @override
+  Future<void> dismissFromInbox(
+    int episodeId, {
+    required bool alsoMarkPlayed,
+  }) async {
+    await (_db.update(
+      _db.episodes,
+    )..where((e) => e.id.equals(episodeId))).write(
+      EpisodesCompanion(
+        inboxDismissed: const Value(true),
+        status: alsoMarkPlayed
+            ? const Value(EpisodeStatus.played)
+            : const Value.absent(),
+        playedAt: alsoMarkPlayed
+            ? Value(DateTime.now().toUtc())
+            : const Value.absent(),
+      ),
+    );
   }
 
   @override
