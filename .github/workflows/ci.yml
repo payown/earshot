@@ -38,7 +38,7 @@ jobs:
         run: dart format --set-exit-if-changed lib/ test/
 
       - name: Analyze
-        run: flutter analyze --dart-define=PODCAST_INDEX_API_KEY=stub --dart-define=PODCAST_INDEX_API_SECRET=stub
+        run: flutter analyze
 
       - name: Run tests
         run: flutter test --coverage --dart-define=PODCAST_INDEX_API_KEY=stub --dart-define=PODCAST_INDEX_API_SECRET=stub

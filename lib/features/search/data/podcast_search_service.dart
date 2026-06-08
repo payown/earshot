@@ -8,8 +8,15 @@ import '../domain/search_result.dart';
 
 final _log = Logger('PodcastSearchService');
 
-const _apiKey = String.fromEnvironment('PODCAST_INDEX_API_KEY');
-const _apiSecret = String.fromEnvironment('PODCAST_INDEX_API_SECRET');
+const _apiKey = String.fromEnvironment(
+  'PODCAST_INDEX_API_KEY',
+  defaultValue: '',
+);
+const _apiSecret = String.fromEnvironment(
+  'PODCAST_INDEX_API_SECRET',
+  defaultValue: '',
+);
+bool _credentialWarningLogged = false;
 
 class PodcastSearchService {
   const PodcastSearchService({required Dio dio}) : _dio = dio;
@@ -21,7 +28,12 @@ class PodcastSearchService {
   Future<List<PodcastSearchResult>> search(String query) async {
     if (query.trim().isEmpty) return [];
     if (_apiKey.isEmpty || _apiSecret.isEmpty) {
-      _log.warning('Podcast Index credentials not configured; search disabled');
+      if (!_credentialWarningLogged) {
+        _log.warning(
+          'Podcast Index credentials not configured; search disabled',
+        );
+        _credentialWarningLogged = true;
+      }
       return [];
     }
 
