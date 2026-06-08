@@ -116,13 +116,26 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
     final path = file.path;
 
     const maxBytes = 5 * 1024 * 1024; // 5 MB — a valid OPML is well under 1 MB
-    final fileSize = await File(path).length();
+    int fileSize;
+    try {
+      fileSize = await File(path).length();
+    } on FileSystemException {
+      if (mounted) {
+        setState(() => _error = 'Could not read file.');
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Error: Could not read file.',
+          TextDirection.ltr,
+        );
+      }
+      return;
+    }
     if (fileSize > maxBytes) {
       if (mounted) {
         setState(() => _error = 'File is too large to import (max 5 MB).');
         SemanticsService.sendAnnouncement(
           View.of(context),
-          'Error: File is too large to import.',
+          'Error: File is too large to import (max 5 MB).',
           TextDirection.ltr,
         );
       }

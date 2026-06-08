@@ -15,6 +15,11 @@
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
+		<!-- NSAllowsArbitraryLoadsForMedia is intentional. Many independent
+		     podcast feeds serve audio over plain HTTP. Blocking them would
+		     prevent playback for a significant portion of our target audience.
+		     This applies to media only, not general networking.
+		     See docs/adr/001-http-media-allowed.md for the full decision. -->
 		<key>NSAllowsArbitraryLoadsForMedia</key>
 		<true/>
 	</dict>
