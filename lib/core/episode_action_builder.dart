@@ -5,7 +5,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:earshot/core/utils/url_launcher.dart';
 
 import '../data/db/enums.dart';
 import '../features/bookmarks/presentation/providers/bookmarks_providers.dart';
@@ -140,8 +140,7 @@ EpisodeQuickActionItem? _buildItem(
                       data: episode.description!,
                       onLinkTap: (url, _, __) async {
                         if (url == null) return;
-                        final uri = Uri.tryParse(url);
-                        if (uri != null) await launchUrl(uri);
+                        await safeLaunchUrl(url);
                       },
                     )
                   : const Text('No show notes available.'),

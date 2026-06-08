@@ -8,7 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
 
 import 'package:flutter_html/flutter_html.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:earshot/core/utils/url_launcher.dart';
 
 import '../../../../data/rss/parsed_feed.dart';
 import '../../../player/presentation/providers/player_providers.dart';
@@ -196,8 +196,7 @@ class _SearchResultDetailScreenState
                   data: description,
                   onLinkTap: (url, _, __) async {
                     if (url == null) return;
-                    final uri = Uri.tryParse(url);
-                    if (uri != null) await launchUrl(uri);
+                    await safeLaunchUrl(url);
                   },
                 ),
               ),
