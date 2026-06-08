@@ -16,7 +16,6 @@ const _apiSecret = String.fromEnvironment(
   'PODCAST_INDEX_API_SECRET',
   defaultValue: '',
 );
-bool _credentialWarningLogged = false;
 
 class PodcastSearchService {
   const PodcastSearchService({required Dio dio}) : _dio = dio;
@@ -28,13 +27,8 @@ class PodcastSearchService {
   Future<List<PodcastSearchResult>> search(String query) async {
     if (query.trim().isEmpty) return [];
     if (_apiKey.isEmpty || _apiSecret.isEmpty) {
-      if (!_credentialWarningLogged) {
-        _log.warning(
-          'Podcast Index credentials not configured; search disabled',
-        );
-        _credentialWarningLogged = true;
-      }
-      return [];
+      _log.warning('Podcast Index credentials not configured; search disabled');
+      throw const SearchUnavailableException();
     }
 
     final unixTime = DateTime.now().millisecondsSinceEpoch ~/ 1000;

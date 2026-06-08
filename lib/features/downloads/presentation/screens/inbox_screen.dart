@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/episode_action_builder.dart';
+import '../../../../core/providers/auto_refresh_provider.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/utils/time_format.dart';
@@ -55,6 +56,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
   Widget build(BuildContext context) {
     // All episodes across all podcasts with newEpisode status, newest first.
     final allEpisodes = ref.watch(_inboxEpisodesProvider);
+    final isRefreshing = ref.watch(autoRefreshProvider);
     final subs = ref.watch(subscriptionsProvider).asData?.value;
     final podcastTitles = <int, String>{
       if (subs != null)
@@ -154,7 +156,11 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
               ),
             allEpisodes.when(
               data: (episodes) => episodes.isEmpty
-                  ? SliverToBoxAdapter(child: _EmptyInbox())
+                  ? SliverToBoxAdapter(
+                      child: isRefreshing
+                          ? const _CheckingForEpisodes()
+                          : _EmptyInbox(),
+                    )
                   : SliverList.builder(
                       itemCount: episodes.length,
                       itemBuilder: (context, index) {
@@ -224,7 +230,7 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
 
   Future<void> _refreshInbox(BuildContext context, WidgetRef ref) async {
     try {
-      await ref.read(podcastRepositoryProvider).refreshAllFeeds();
+      await ref.read(autoRefreshProvider.notifier).refresh();
       if (context.mounted) {
         SemanticsService.sendAnnouncement(
           View.of(context),
@@ -464,6 +470,45 @@ class _EmptyInbox extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CheckingForEpisodes extends StatelessWidget {
+  const _CheckingForEpisodes();
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
+    return Semantics(
+      liveRegion: true,
+      label: 'Checking for new episodes',
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: ExcludeSemantics(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (reduceMotion)
+                  Icon(
+                    Icons.refresh,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  )
+                else
+                  const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+                Text(
+                  'Checking for new episodes…',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

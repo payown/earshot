@@ -12,43 +12,42 @@ final _log = Logger('AutoRefresh');
 
 const _kAutoRefreshThreshold = Duration(minutes: 15);
 
-final autoRefreshProvider = NotifierProvider<_AutoRefreshNotifier, void>(
+final autoRefreshProvider = NotifierProvider<_AutoRefreshNotifier, bool>(
   _AutoRefreshNotifier.new,
 );
 
-class _AutoRefreshNotifier extends Notifier<void> with WidgetsBindingObserver {
-  bool _refreshInFlight = false;
-
+class _AutoRefreshNotifier extends Notifier<bool> with WidgetsBindingObserver {
   @override
-  void build() {
+  bool build() {
     WidgetsBinding.instance.addObserver(this);
     ref.onDispose(() => WidgetsBinding.instance.removeObserver(this));
     unawaited(_refresh());
+    return false;
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
+    if (lifecycleState == AppLifecycleState.resumed) {
       unawaited(_refreshIfStale());
     }
   }
 
   Future<void> _refresh() async {
-    if (_refreshInFlight) return;
-    _refreshInFlight = true;
+    if (state) return;
     try {
+      state = true;
       final settings = _settings();
       await ref.read(podcastRepositoryProvider).refreshAllFeeds();
       await settings.setLastAutoRefreshAt(DateTime.now().toUtc());
     } catch (e, st) {
       _log.warning('Auto-refresh failed', e, st);
     } finally {
-      _refreshInFlight = false;
+      state = false;
     }
   }
 
   Future<void> _refreshIfStale() async {
-    if (_refreshInFlight) return;
+    if (state) return;
     try {
       final settings = _settings();
       final last = await settings.getLastAutoRefreshAt();
@@ -60,6 +59,8 @@ class _AutoRefreshNotifier extends Notifier<void> with WidgetsBindingObserver {
       _log.warning('Auto-refresh (resume) failed', e, st);
     }
   }
+
+  Future<void> refresh() => _refresh();
 
   AppSettingsRepository _settings() =>
       AppSettingsRepositoryImpl(database: ref.read(appDatabaseProvider));
