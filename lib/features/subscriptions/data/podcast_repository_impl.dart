@@ -160,14 +160,9 @@ class PodcastRepositoryImpl implements PodcastRepository {
   Future<void> _applyInboxDismissals(List<PodcastRow> podcasts) async {
     final inboxOptInOnly = await _settings.isInboxOptInOnly();
     final toExclude = <int>[];
-    final toInclude = <int>[];
     for (final podcast in podcasts) {
       if (inboxOptInOnly ? !podcast.inboxIncluded : podcast.inboxExcluded) {
         toExclude.add(podcast.id);
-      } else if (inboxOptInOnly) {
-        // In opt-in mode, restore episodes for podcasts that are now included
-        // (e.g., user toggled them in during a prior session).
-        toInclude.add(podcast.id);
       }
     }
     if (toExclude.isNotEmpty) {
