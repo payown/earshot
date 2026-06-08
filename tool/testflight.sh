@@ -63,8 +63,19 @@ git push origin "$BRANCH"
 echo "▶ Version: $NEW_VERSION"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
+if [[ -z "${PODCAST_INDEX_API_KEY:-}" || -z "${PODCAST_INDEX_API_SECRET:-}" ]]; then
+  echo "❌ PODCAST_INDEX_API_KEY and PODCAST_INDEX_API_SECRET must be set in your environment."
+  echo "   export PODCAST_INDEX_API_KEY=your_key"
+  echo "   export PODCAST_INDEX_API_SECRET=your_secret"
+  exit 1
+fi
+
 echo "▶ Building release IPA..."
-flutter build ipa --release
+flutter build ipa --release \
+  --dart-define=PODCAST_INDEX_API_KEY="$PODCAST_INDEX_API_KEY" \
+  --dart-define=PODCAST_INDEX_API_SECRET="$PODCAST_INDEX_API_SECRET" \
+  --dart-define=SENTRY_DSN="${SENTRY_DSN:-}" \
+  --dart-define=POSTHOG_API_KEY="${POSTHOG_API_KEY:-}"
 
 # ── Upload ────────────────────────────────────────────────────────────────────
 echo "▶ Uploading to TestFlight..."

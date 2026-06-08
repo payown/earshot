@@ -18,6 +18,8 @@ jobs:
     name: Analyze and test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
@@ -29,13 +31,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Create api_keys.dart from secrets
-        run: |
-          cat > lib/core/config/api_keys.dart <<'EOF'
-          const podcastIndexApiKey = '${{ secrets.PODCAST_INDEX_API_KEY }}';
-          const podcastIndexApiSecret = '${{ secrets.PODCAST_INDEX_API_SECRET }}';
-          EOF
-
       - name: Generate code
         run: dart run build_runner build --delete-conflicting-outputs
 
@@ -46,7 +41,7 @@ jobs:
         run: flutter analyze
 
       - name: Run tests
-        run: flutter test --coverage
+        run: flutter test --coverage --dart-define=PODCAST_INDEX_API_KEY=stub --dart-define=PODCAST_INDEX_API_SECRET=stub
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
