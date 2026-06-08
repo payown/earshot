@@ -113,6 +113,14 @@ final podcastNameTipSeenProvider =
       ),
     );
 
+final clearFromInboxAlsoMarksPlayedProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.isClearFromInboxAlsoMarksPlayed(),
+        write: (r, v) => r.setClearFromInboxAlsoMarksPlayed(value: v),
+      ),
+    );
+
 class _RetentionSettingNotifier extends AsyncNotifier<int?> {
   @override
   Future<int?> build() async {

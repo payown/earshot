@@ -172,8 +172,8 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
                           podcastTitle: podcastTitles[episode.podcastId],
                           podcastNameFirst: podcastNameFirst,
                           quickActions: actions,
-                          onDelete: () => unawaited(
-                            _confirmDelete(context, ref, episode),
+                          onClear: () => unawaited(
+                            _clearFromInbox(context, ref, episode),
                           ),
                         );
                       },
@@ -350,65 +350,40 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
     }
   }
 
-  Future<void> _confirmDelete(
+  Future<void> _clearFromInbox(
     BuildContext context,
     WidgetRef ref,
     Episode episode,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierLabel: 'Dismiss delete episode dialog',
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete episode?'),
-        content: Text('Remove "${episode.title}" from Inbox?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (!context.mounted) return;
-    if (confirmed == true) {
-      try {
-        await ref.read(downloadManagerProvider).deleteDownload(episode.id);
-      } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not delete the download file. Try again.'),
-            ),
-          );
-          SemanticsService.sendAnnouncement(
-            View.of(context),
-            'Could not delete the download file. Try again.',
-            TextDirection.ltr,
-          );
-        }
-        return;
+    final alsoMarkPlayed =
+        ref.read(clearFromInboxAlsoMarksPlayedProvider).value ?? false;
+    try {
+      await ref
+          .read(podcastRepositoryProvider)
+          .dismissFromInbox(episode.id, alsoMarkPlayed: alsoMarkPlayed);
+      if (context.mounted) {
+        final message = alsoMarkPlayed
+            ? 'Cleared "${episode.title}" from inbox. Marked as played.'
+            : 'Cleared "${episode.title}" from inbox.';
+        // Defer one frame so the list has updated before VoiceOver reads the
+        // announcement — avoids a ghost-focus on the tile as it unmounts.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (context.mounted) {
+            SemanticsService.sendAnnouncement(
+              View.of(context),
+              message,
+              TextDirection.ltr,
+            );
+          }
+        });
       }
-      try {
-        await ref
-            .read(podcastRepositoryProvider)
-            .updateEpisodeStatus(episode.id, EpisodeStatus.played);
-      } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not mark episode as played. Try again.'),
-            ),
-          );
-          SemanticsService.sendAnnouncement(
-            View.of(context),
-            'Could not mark episode as played. Try again.',
-            TextDirection.ltr,
-          );
-        }
+    } catch (e) {
+      if (context.mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Could not clear episode from inbox. Try again.',
+          TextDirection.ltr,
+        );
       }
     }
   }
@@ -494,7 +469,7 @@ class _InboxEpisodeTile extends StatelessWidget {
   const _InboxEpisodeTile({
     required this.episode,
     required this.quickActions,
-    required this.onDelete,
+    required this.onClear,
     this.podcastTitle,
     this.podcastNameFirst = false,
   });
@@ -503,14 +478,13 @@ class _InboxEpisodeTile extends StatelessWidget {
   final String? podcastTitle;
   final bool podcastNameFirst;
   final List<EpisodeQuickActionItem> quickActions;
-  final VoidCallback onDelete;
+  final VoidCallback onClear;
 
   VoidCallback? get _defaultTap =>
       quickActions.isNotEmpty ? quickActions[0].onInvoke : null;
 
   void _showActions(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final colorScheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
@@ -545,13 +519,10 @@ class _InboxEpisodeTile extends StatelessWidget {
             ),
           ),
           ListTile(
-            title: Text(
-              'Delete',
-              style: TextStyle(color: colorScheme.error),
-            ),
+            title: const Text('Clear from inbox'),
             onTap: () {
               Navigator.of(sheetContext).pop();
-              onDelete();
+              onClear();
             },
           ),
           const SizedBox(height: 8),
@@ -577,7 +548,7 @@ class _InboxEpisodeTile extends StatelessWidget {
     final semanticActions = <CustomSemanticsAction, VoidCallback>{
       for (final a in quickActions)
         CustomSemanticsAction(label: a.label): a.onInvoke,
-      const CustomSemanticsAction(label: 'Delete'): onDelete,
+      const CustomSemanticsAction(label: 'Clear from inbox'): onClear,
     };
 
     return Semantics(

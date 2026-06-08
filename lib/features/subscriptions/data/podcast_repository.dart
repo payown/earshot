@@ -21,6 +21,8 @@ abstract interface class PodcastRepository {
 
   Future<void> updateEpisodeStatus(int episodeId, EpisodeStatus status);
 
+  Future<void> dismissFromInbox(int episodeId, {required bool alsoMarkPlayed});
+
   Future<void> clearInbox();
 
   Future<void> setInboxExcluded(int podcastId, {required bool excluded});
