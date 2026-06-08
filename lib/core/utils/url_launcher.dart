@@ -6,8 +6,9 @@ final _log = Logger('UrlLauncher');
 const _allowedSchemes = {'http', 'https', 'mailto'};
 
 /// Launches [url] only when its scheme is http, https, or mailto.
-/// Silently drops anything else (intent://, tel:, custom app schemes, etc.)
-/// to prevent podcast-supplied links from triggering unintended behaviour.
+/// Logs a warning and no-ops for anything else (intent://, tel:, custom app
+/// schemes, etc.) to prevent podcast-supplied links from triggering unintended
+/// behaviour.
 Future<void> safeLaunchUrl(String url) async {
   final uri = Uri.tryParse(url);
   if (uri == null) return;
