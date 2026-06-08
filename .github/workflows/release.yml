@@ -9,6 +9,8 @@ jobs:
   verify:
     name: Verify
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +38,8 @@ jobs:
     name: Build iOS (no signing)
     runs-on: macos-latest
     needs: verify
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
@@ -66,6 +70,8 @@ jobs:
     name: Build Android App Bundle
     runs-on: ubuntu-latest
     needs: verify
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
