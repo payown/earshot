@@ -159,9 +159,11 @@ class PodcastRepositoryImpl implements PodcastRepository {
         batch.map((podcast) async {
           try {
             await refreshFeed(podcast.id, batchRefreshedAt: batchStartedAt);
-          } catch (e) {
+          } catch (e, st) {
             _log.warning(
-              'Background refresh failed for podcast ${podcast.id}: $e',
+              'Feed refresh failed for podcast ${podcast.id}',
+              e,
+              st,
             );
           }
         }),
