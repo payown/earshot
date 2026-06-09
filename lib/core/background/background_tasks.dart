@@ -39,7 +39,7 @@ Future<bool> _runFeedRefresh() async {
       rssParser: RssParser(),
       settings: AppSettingsRepositoryImpl(database: db),
     );
-    await repo.refreshAllFeeds();
+    await repo.refreshAllFeeds().timeout(const Duration(minutes: 8));
     return true;
   } catch (e, st) {
     _log.severe('Feed refresh background task failed', e, st);
