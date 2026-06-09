@@ -1,5 +1,8 @@
-import 'package:drift/drift.dart' hide Column;
+import 'dart:async';
+
+import 'package:drift/drift.dart' hide Column, View;
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shake/shake.dart';
@@ -60,6 +63,21 @@ class _MainShellState extends ConsumerState<MainShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       ref.read(queueExpirationServiceProvider).runExpiration();
       await _applyHistoryRetention();
+      // After the shell's first frame, nudge VoiceOver focus into app content.
+      // The GoRouter redirect from /loading -> initial tab resolves before
+      // Flutter posts its screen-changed notification, which leaves VoiceOver
+      // focus stranded on the iOS status bar. A zero-length announcement causes
+      // VoiceOver to re-evaluate focus and land on the first in-app element.
+      if (mounted) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        if (mounted) {
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            '',
+            TextDirection.ltr,
+          );
+        }
+      }
     });
   }
 

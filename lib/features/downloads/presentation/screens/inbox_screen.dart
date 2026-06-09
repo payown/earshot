@@ -41,13 +41,10 @@ class InboxScreen extends ConsumerStatefulWidget {
 }
 
 class _InboxScreenState extends ConsumerState<InboxScreen> {
-  bool _tipAnnouncementPosted = false;
-  Timer? _tipAnnounceTimer;
   Timer? _tipDismissTimer;
 
   @override
   void dispose() {
-    _tipAnnounceTimer?.cancel();
     _tipDismissTimer?.cancel();
     super.dispose();
   }
@@ -70,25 +67,12 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
     final tipSeen = ref.watch(podcastNameTipSeenProvider).value ?? false;
     final auditEnabled = ref.watch(downloadAuditEnabledProvider).value ?? false;
 
-    // Announce the tip once and auto-dismiss so neither sighted nor VoiceOver
-    // users have to manually interact with the card.
-    if (!tipSeen && !_tipAnnouncementPosted) {
-      _tipAnnouncementPosted = true;
+    // Auto-dismiss the tip card so sighted users don't have to interact.
+    // VoiceOver users encounter the card naturally through focus traversal —
+    // the mid-launch announcement it previously sent disrupted VoiceOver focus.
+    if (!tipSeen) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _tipAnnounceTimer = Timer(const Duration(milliseconds: 2500), () {
-          if (mounted &&
-              !(ref.read(podcastNameTipSeenProvider).value ?? false)) {
-            SemanticsService.sendAnnouncement(
-              View.of(context),
-              'Tip: VoiceOver can announce the podcast name before the episode '
-              'title in this list. Find this setting in Settings under Inbox.',
-              TextDirection.ltr,
-            );
-          }
-        });
-        // Auto-dismiss after 5 seconds — enough for a sighted user to read
-        // and tap 'Go to Settings', no action needed from VoiceOver users.
-        _tipDismissTimer = Timer(const Duration(seconds: 5), () {
+        _tipDismissTimer ??= Timer(const Duration(seconds: 5), () {
           if (mounted) {
             ref.read(podcastNameTipSeenProvider.notifier).set(true);
           }
@@ -483,7 +467,6 @@ class _CheckingForEpisodes extends StatelessWidget {
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.of(context).disableAnimations;
     return Semantics(
-      liveRegion: true,
       label: 'Checking for new episodes',
       child: Center(
         child: Padding(

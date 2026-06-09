@@ -11,6 +11,7 @@ import 'core_providers.dart';
 final _log = Logger('AutoRefresh');
 
 const _kAutoRefreshThreshold = Duration(minutes: 15);
+const _kAutoRefreshTimeout = Duration(seconds: 90);
 
 final autoRefreshProvider = NotifierProvider<_AutoRefreshNotifier, bool>(
   _AutoRefreshNotifier.new,
@@ -45,7 +46,10 @@ class _AutoRefreshNotifier extends Notifier<bool> with WidgetsBindingObserver {
     try {
       state = true;
       final settings = _settings();
-      await ref.read(podcastRepositoryProvider).refreshAllFeeds();
+      await ref
+          .read(podcastRepositoryProvider)
+          .refreshAllFeeds()
+          .timeout(_kAutoRefreshTimeout);
       await settings.setLastAutoRefreshAt(DateTime.now().toUtc());
     } catch (e, st) {
       _log.warning('Auto-refresh failed', e, st);

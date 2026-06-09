@@ -112,7 +112,8 @@ void main() {
       await tester.pumpWidget(_buildApp(repo));
       await tester.pumpAndSettle();
 
-      expect(find.text('Something went wrong. Pull to retry.'), findsOneWidget);
+      expect(find.text('Something went wrong.'), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
       // Raw exception text must not be shown directly in the UI.
       expect(find.text('Error: Exception: network error'), findsNothing);
     });

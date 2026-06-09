@@ -48,13 +48,44 @@ class AllPodcastsScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, stack) {
           _log.severe('Failed to load podcasts', e, stack);
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'Something went wrong. Pull to retry.',
-                textAlign: TextAlign.center,
-              ),
+          return RefreshIndicator(
+            onRefresh: () async => ref.invalidate(subscriptionsProvider),
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.5,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ExcludeSemantics(
+                            child: Icon(
+                              Icons.error_outline,
+                              size: 48,
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Something went wrong.',
+                            style: Theme.of(context).textTheme.bodyLarge,
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton.tonal(
+                            onPressed: () =>
+                                ref.invalidate(subscriptionsProvider),
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           );
         },
