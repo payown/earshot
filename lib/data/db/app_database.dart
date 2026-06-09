@@ -132,6 +132,17 @@ LazyDatabase _openConnection() {
   return LazyDatabase(() async {
     final dbFolder = await getApplicationDocumentsDirectory();
     final file = File(p.join(dbFolder.path, 'earshot.db'));
-    return NativeDatabase.createInBackground(file);
+    return NativeDatabase.createInBackground(
+      file,
+      setup: (db) {
+        // WAL mode allows the foreground app and the Workmanager background
+        // task (separate Dart engine) to access the same file concurrently:
+        // multiple readers and one writer can coexist without SQLITE_BUSY.
+        db.execute('PRAGMA journal_mode=WAL;');
+        // Give contending operations up to 3 seconds to retry before throwing,
+        // as a backstop for any remaining lock contention.
+        db.execute('PRAGMA busy_timeout=3000;');
+      },
+    );
   });
 }
