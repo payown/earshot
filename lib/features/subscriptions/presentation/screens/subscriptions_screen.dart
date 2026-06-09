@@ -307,8 +307,11 @@ class _SubscriptionsScreenState extends ConsumerState<SubscriptionsScreen> {
   }
 
   void _triggerRefresh() {
-    if (ref.read(subscriptionsProvider).hasValue) {
-      _refreshKey.currentState?.show();
+    // Check key presence rather than hasValue: hasValue is true even in an
+    // AsyncError-with-cached-value state, where _refreshKey.currentState is
+    // null because the error branch's RefreshIndicator is mounted instead.
+    if (_refreshKey.currentState != null) {
+      _refreshKey.currentState!.show();
     } else {
       ref.invalidate(subscriptionsProvider);
     }

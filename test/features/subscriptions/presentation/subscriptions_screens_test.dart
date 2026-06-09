@@ -210,6 +210,22 @@ void main() {
         expect(find.byType(AddPodcastScreen), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'error state shows message, Retry button, and RefreshIndicator',
+      (tester) async {
+        when(
+          () => repo.watchSubscriptions(),
+        ).thenAnswer((_) => Stream.error(Exception('network error')));
+
+        await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Something went wrong.'), findsOneWidget);
+        expect(find.text('Retry'), findsOneWidget);
+        expect(find.byType(RefreshIndicator), findsOneWidget);
+      },
+    );
   });
 
   group('AddPodcastScreen', () {

@@ -4,6 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:logging/logging.dart';
 import 'package:posthog_flutter/posthog_flutter.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
@@ -19,6 +20,8 @@ import 'features/player/data/audio_handler.dart';
 import 'features/player/presentation/providers/player_providers.dart';
 import 'features/settings/presentation/providers/settings_providers.dart';
 import 'features/subscriptions/presentation/providers/subscriptions_providers.dart';
+
+final _log = Logger('main');
 
 // Placeholder DSNs — replace with real values before beta build.
 // These are safe to leave empty; Sentry/PostHog silently no-op with empty DSN.
@@ -80,7 +83,9 @@ Future<void> main() async {
     BackgroundTaskService.initialize()
         .then((_) => BackgroundTaskService.scheduleAll())
         .timeout(const Duration(seconds: 5))
-        .catchError((Object _) {}),
+        .catchError((Object e) {
+          _log.warning('Background task registration failed or timed out', e);
+        }),
   );
 
   final (audioHandler, logService) = await (
