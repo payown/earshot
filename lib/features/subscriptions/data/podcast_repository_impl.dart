@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show min;
 
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
@@ -133,6 +134,10 @@ class PodcastRepositoryImpl implements PodcastRepository {
         .map((rows) => rows.map(_episodeFromRow).toList());
   }
 
+  // Fetch up to this many feeds concurrently. Higher values reduce total
+  // refresh time but increase peak network and CPU load.
+  static const _kRefreshConcurrency = 5;
+
   @override
   Future<void> refreshAllFeeds() async {
     final batchStartedAt = DateTime.now().toUtc();
@@ -142,13 +147,27 @@ class PodcastRepositoryImpl implements PodcastRepository {
     // Apply inbox filter settings as a DB-only operation first so episodes are
     // dismissed/shown correctly even if individual network fetches fail below.
     await _applyInboxDismissals(podcasts);
-    for (final podcast in podcasts) {
-      try {
-        await refreshFeed(podcast.id, batchRefreshedAt: batchStartedAt);
-      } catch (e) {
-        _log.warning('Background refresh failed for podcast ${podcast.id}: $e');
-      }
+
+    // Fetch feeds in parallel batches. With 50 feeds at ~2s each, serial takes
+    // ~100s; 5 concurrent cuts that to ~20s.
+    for (var i = 0; i < podcasts.length; i += _kRefreshConcurrency) {
+      final batch = podcasts.sublist(
+        i,
+        min(i + _kRefreshConcurrency, podcasts.length),
+      );
+      await Future.wait(
+        batch.map((podcast) async {
+          try {
+            await refreshFeed(podcast.id, batchRefreshedAt: batchStartedAt);
+          } catch (e) {
+            _log.warning(
+              'Background refresh failed for podcast ${podcast.id}: $e',
+            );
+          }
+        }),
+      );
     }
+
     _log.info(
       'Background feed refresh complete for ${podcasts.length} podcasts',
     );
