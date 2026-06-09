@@ -34,7 +34,7 @@ class PodcastSearchService {
         );
         _credentialWarningLogged = true;
       }
-      return [];
+      throw const SearchUnavailableException();
     }
 
     final unixTime = DateTime.now().millisecondsSinceEpoch ~/ 1000;

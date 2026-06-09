@@ -91,7 +91,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       fromOnboarding: widget.fromOnboarding,
                     ),
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Search error: $e')),
+              error: (e, _) => e is SearchUnavailableException
+                  ? const _SearchUnavailable()
+                  : Center(child: Text('Search error: $e')),
             ),
     );
   }
@@ -128,6 +130,50 @@ class _EmptySearch extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchUnavailable extends StatelessWidget {
+  const _SearchUnavailable();
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      liveRegion: true,
+      label:
+          'Search is unavailable. Please update the app or contact support if this persists.',
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: ExcludeSemantics(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.search_off,
+                  size: 64,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Search is unavailable',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Please update the app or contact support if this persists.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

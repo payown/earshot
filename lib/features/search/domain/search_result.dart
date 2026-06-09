@@ -1,3 +1,7 @@
+class SearchUnavailableException implements Exception {
+  const SearchUnavailableException();
+}
+
 class PodcastSearchResult {
   const PodcastSearchResult({
     required this.title,
