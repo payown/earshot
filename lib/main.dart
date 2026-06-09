@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -72,10 +74,16 @@ class _AppInitializer extends ConsumerWidget {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final (_, audioHandler, logService) = await (
-    BackgroundTaskService.initialize().then(
-      (_) => BackgroundTaskService.scheduleAll(),
-    ),
+  // BG task registration (Workmanager) can stall on new iOS versions — run
+  // fire-and-forget with a timeout so it never blocks the first frame.
+  unawaited(
+    BackgroundTaskService.initialize()
+        .then((_) => BackgroundTaskService.scheduleAll())
+        .timeout(const Duration(seconds: 5))
+        .catchError((Object _) {}),
+  );
+
+  final (audioHandler, logService) = await (
     AudioService.init(
       builder: EarshotAudioHandler.new,
       config: const AudioServiceConfig(
