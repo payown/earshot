@@ -91,7 +91,7 @@ void _playEpisode(WidgetRef ref, Episode episode) {
       artist: episode.title,
       album: podcast?.title,
       artUri: episode.artworkUrl != null
-          ? Uri.parse(episode.artworkUrl!)
+          ? Uri.tryParse(episode.artworkUrl!)
           : null,
       duration: episode.durationSeconds != null
           ? Duration(seconds: episode.durationSeconds!)
