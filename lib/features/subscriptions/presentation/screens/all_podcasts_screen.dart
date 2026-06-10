@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '../../../../core/router/app_router.dart';
 import '../../../../features/folders/presentation/widgets/folder_podcast_picker_sheet.dart';
@@ -19,6 +22,12 @@ class AllPodcastsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen(subscriptionsProvider, (_, next) {
+      if (next case AsyncError(:final error, :final stackTrace)) {
+        _log.severe('Failed to load podcasts', error, stackTrace);
+        unawaited(Sentry.captureException(error, stackTrace: stackTrace));
+      }
+    });
     final podcasts = ref.watch(subscriptionsProvider);
     final podcastActions =
         ref.watch(podcastActionsProvider).asData?.value ??
@@ -46,49 +55,46 @@ class AllPodcastsScreen extends ConsumerWidget {
                 ),
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, stack) {
-          _log.severe('Failed to load podcasts', e, stack);
-          return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(subscriptionsProvider),
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                SizedBox(
-                  height: MediaQuery.of(context).size.height * 0.5,
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ExcludeSemantics(
-                            child: Icon(
-                              Icons.error_outline,
-                              size: 48,
-                              color: Theme.of(context).colorScheme.error,
-                            ),
+        error: (_, __) => RefreshIndicator(
+          onRefresh: () async => ref.invalidate(subscriptionsProvider),
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              SizedBox(
+                height: MediaQuery.of(context).size.height * 0.5,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ExcludeSemantics(
+                          child: Icon(
+                            Icons.error_outline,
+                            size: 48,
+                            color: Theme.of(context).colorScheme.error,
                           ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Something went wrong.',
-                            style: Theme.of(context).textTheme.bodyLarge,
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 16),
-                          FilledButton.tonal(
-                            onPressed: () =>
-                                ref.invalidate(subscriptionsProvider),
-                            child: const Text('Retry'),
-                          ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Something went wrong.',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton.tonal(
+                          onPressed: () =>
+                              ref.invalidate(subscriptionsProvider),
+                          child: const Text('Retry'),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              ],
-            ),
-          );
-        },
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

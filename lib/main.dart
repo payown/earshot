@@ -35,6 +35,11 @@ const _posthogHost = String.fromEnvironment(
   defaultValue: 'https://app.posthog.com',
 );
 
+// AudioService.init registers the media session with the OS and has been
+// observed to stall on some devices; bound the wait so the app doesn't
+// appear to hang forever before the first frame.
+const _startupInitTimeout = Duration(seconds: 15);
+
 class _AppInitializer extends ConsumerWidget {
   const _AppInitializer();
 
@@ -96,45 +101,137 @@ Future<void> main() async {
         }),
   );
 
-  final audioHandler = await AudioService.init(
-    builder: EarshotAudioHandler.new,
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'media.payown.earshot.audio',
-      androidNotificationChannelName: 'Earshot',
-      androidNotificationOngoing: true,
-      fastForwardInterval: kSkipForwardDuration,
-      rewindInterval: kSkipBackDuration,
-    ),
-  );
+  // Initialize Sentry first (a no-op if SENTRY_DSN is unset) so that a
+  // failure or timeout during audio init below is still captured.
+  await SentryFlutter.init(
+    (options) {
+      options
+        ..dsn = _sentryDsn
+        ..tracesSampleRate = 0
+        ..attachScreenshot = false
+        ..sendDefaultPii = false;
+    },
+    appRunner: () async {
+      EarshotAudioHandler audioHandler;
+      try {
+        audioHandler = await AudioService.init(
+          builder: EarshotAudioHandler.new,
+          config: const AudioServiceConfig(
+            androidNotificationChannelId: 'media.payown.earshot.audio',
+            androidNotificationChannelName: 'Earshot',
+            androidNotificationOngoing: true,
+            fastForwardInterval: kSkipForwardDuration,
+            rewindInterval: kSkipBackDuration,
+          ),
+        ).timeout(_startupInitTimeout);
+      } catch (error, stackTrace) {
+        _log.severe(
+          'Audio engine failed to initialize within '
+          '${_startupInitTimeout.inSeconds}s',
+          error,
+          stackTrace,
+        );
+        await Sentry.captureException(error, stackTrace: stackTrace);
+        runApp(const _StartupErrorApp());
+        return;
+      }
 
-  if (_posthogApiKey.isNotEmpty) {
-    final config = PostHogConfig(_posthogApiKey)..host = _posthogHost;
-    await Posthog().setup(config);
+      if (_posthogApiKey.isNotEmpty) {
+        final config = PostHogConfig(_posthogApiKey)..host = _posthogHost;
+        await Posthog().setup(config);
+      }
+
+      runApp(
+        ProviderScope(
+          overrides: [
+            audioHandlerProvider.overrideWithValue(audioHandler),
+            logServiceProvider.overrideWithValue(logService),
+          ],
+          child: const _AppInitializer(),
+        ),
+      );
+    },
+  );
+}
+
+/// Shown when the audio engine failed to initialize within
+/// [_startupInitTimeout]. Without an [EarshotAudioHandler] the rest of the
+/// app cannot run, so this is the most the app can offer.
+class _StartupErrorApp extends StatefulWidget {
+  const _StartupErrorApp();
+
+  @override
+  State<_StartupErrorApp> createState() => _StartupErrorAppState();
+}
+
+class _StartupErrorAppState extends State<_StartupErrorApp> {
+  static const _title = "Earshot couldn't start.";
+  static const _body =
+      'Please close and reopen the app. If this keeps '
+      'happening, restarting your device may help.';
+
+  @override
+  void initState() {
+    super.initState();
+    // This is the very first (and only) screen the user sees, with no prior
+    // VoiceOver focus context, so announce it instead of waiting for a swipe.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        '$_title $_body',
+        TextDirection.ltr,
+      );
+    });
   }
 
-  void launchApp() => runApp(
-    ProviderScope(
-      overrides: [
-        audioHandlerProvider.overrideWithValue(audioHandler),
-        logServiceProvider.overrideWithValue(logService),
-      ],
-      child: const _AppInitializer(),
-    ),
-  );
-
-  if (_sentryDsn.isNotEmpty) {
-    await SentryFlutter.init(
-      (options) {
-        options
-          ..dsn = _sentryDsn
-          ..tracesSampleRate = 0
-          ..attachScreenshot = false
-          ..sendDefaultPii = false;
-      },
-      appRunner: launchApp,
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Earshot',
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      highContrastTheme: AppTheme.highContrastLight(),
+      highContrastDarkTheme: AppTheme.highContrastDark(),
+      themeMode: ThemeMode.system,
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ExcludeSemantics(
+                  child: Icon(
+                    Icons.error_outline,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Semantics(
+                  header: true,
+                  label: _title,
+                  child: ExcludeSemantics(
+                    child: Text(
+                      _title,
+                      style: Theme.of(context).textTheme.titleLarge,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _body,
+                  style: Theme.of(context).textTheme.bodyLarge,
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
-  } else {
-    launchApp();
   }
 }
 

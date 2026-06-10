@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:logging/logging.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '../../../../core/episode_action_builder.dart';
 import '../../../../core/episode_playback.dart';
@@ -20,6 +22,8 @@ import '../../../subscriptions/domain/episode.dart';
 import '../../../subscriptions/domain/podcast.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../providers/downloads_providers.dart';
+
+final _log = Logger('InboxScreen');
 
 // Inbox does not expose bookmark (requires active playback).
 const _inboxAllowedActions = {
@@ -50,6 +54,12 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(_inboxEpisodesProvider, (_, next) {
+      if (next case AsyncError(:final error, :final stackTrace)) {
+        _log.severe('_inboxEpisodesProvider error', error, stackTrace);
+        unawaited(Sentry.captureException(error, stackTrace: stackTrace));
+      }
+    });
     // All episodes across all podcasts with newEpisode status, newest first.
     final allEpisodes = ref.watch(_inboxEpisodesProvider);
     final isRefreshing = ref.watch(autoRefreshProvider);
