@@ -18,6 +18,11 @@ class PositionTracker {
 
   int? _currentEpisodeId;
   bool _isPlaying = false;
+
+  // True once real playback has been observed for the current episode.
+  // Gates the completed branch so a completion-on-load (restore at/past the
+  // media end) can't mark an episode played without any actual listening.
+  bool _hasPlayedSinceEpisodeChange = false;
   int _currentPositionSeconds = 0;
   int? _lastPositionSeconds;
   double _lastSpeed = 1.0;
@@ -36,6 +41,7 @@ class PositionTracker {
       _isPlaying = false;
       _currentPositionSeconds = 0;
       _periodicTicks = 0;
+      _hasPlayedSinceEpisodeChange = false;
     });
 
     _subscription = playbackStateStream.listen((state) async {
@@ -48,6 +54,11 @@ class PositionTracker {
       _currentPositionSeconds = position;
       _lastStateTimestampMs = DateTime.now().millisecondsSinceEpoch;
 
+      if (state.playing &&
+          state.processingState == AudioProcessingState.ready) {
+        _hasPlayedSinceEpisodeChange = true;
+      }
+
       final isPaused =
           !state.playing &&
           state.processingState != AudioProcessingState.idle &&
@@ -59,6 +70,13 @@ class PositionTracker {
       }
 
       if (state.processingState == AudioProcessingState.completed) {
+        if (!_hasPlayedSinceEpisodeChange) {
+          _log.warning(
+            'Ignoring completed state for episode $id: '
+            'no playback observed since the episode was loaded.',
+          );
+          return;
+        }
         await _recordSession(id, position);
         await _markPlayed(id, completionPosition: position);
       }

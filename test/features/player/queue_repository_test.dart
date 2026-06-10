@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNotNull;
 import 'package:drift/native.dart';
 import 'package:earshot/data/db/app_database.dart';
 import 'package:earshot/data/db/enums.dart';
@@ -144,6 +144,61 @@ void main() {
       await repo.removeFromQueue(ep2);
 
       expect(await _queueOrder(), [ep1, ep3]);
+    });
+  });
+
+  // ── markPlayedAndRemove ───────────────────────────────────────────────────
+
+  group('markPlayedAndRemove', () {
+    test('removes episode from queue and compacts positions', () async {
+      final podcastId = await _addPodcast();
+      final ep1 = await _addEpisode(podcastId);
+      final ep2 = await _addEpisode(podcastId);
+      final ep3 = await _addEpisode(podcastId);
+      await repo.addToQueue(ep1);
+      await repo.addToQueue(ep2);
+      await repo.addToQueue(ep3);
+
+      await repo.markPlayedAndRemove(ep2);
+
+      expect(await _queueOrder(), [ep1, ep3]);
+    });
+
+    test(
+      'marks the episode played with position reset and playedAt set',
+      () async {
+        final podcastId = await _addPodcast();
+        final epId = await _addEpisode(podcastId);
+        await repo.addToQueue(epId);
+        await (db.update(db.episodes)..where((e) => e.id.equals(epId))).write(
+          const EpisodesCompanion(positionSeconds: Value(1234)),
+        );
+
+        await repo.markPlayedAndRemove(epId);
+
+        final row = await (db.select(
+          db.episodes,
+        )..where((e) => e.id.equals(epId))).getSingle();
+        expect(row.status, EpisodeStatus.played);
+        expect(row.positionSeconds, 0);
+        expect(row.playedAt, isNotNull);
+      },
+    );
+
+    test('episode no longer matches the inbox predicate', () async {
+      final podcastId = await _addPodcast();
+      final epId = await _addEpisode(podcastId);
+      await repo.addToQueue(epId);
+
+      await repo.markPlayedAndRemove(epId);
+
+      // Inbox shows status == newEpisode && !inboxDismissed; a completed
+      // episode must not reappear there or be stranded at inQueue.
+      final row = await (db.select(
+        db.episodes,
+      )..where((e) => e.id.equals(epId))).getSingle();
+      expect(row.status, isNot(EpisodeStatus.newEpisode));
+      expect(row.status, isNot(EpisodeStatus.inQueue));
     });
   });
 

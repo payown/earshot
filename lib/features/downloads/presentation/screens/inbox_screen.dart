@@ -282,11 +282,6 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
             episode.downloadStatus == DownloadStatus.failed)) {
       unawaited(ref.read(downloadManagerProvider).downloadEpisode(episode.id));
     }
-    unawaited(
-      ref
-          .read(podcastRepositoryProvider)
-          .updateEpisodeStatus(episode.id, EpisodeStatus.played),
-    );
     SemanticsService.sendAnnouncement(
       View.of(context),
       'Playing ${episode.title}',
