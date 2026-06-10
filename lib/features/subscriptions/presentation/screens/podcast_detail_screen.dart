@@ -1,16 +1,14 @@
-import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/episode_action_builder.dart';
+import '../../../../core/episode_playback.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../data/db/enums.dart';
-import '../../../../features/player/presentation/providers/player_providers.dart';
 import '../../../../features/settings/domain/quick_action_definition.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
-import '../../domain/episode.dart';
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
 import '../widgets/episode_list_tile.dart';
@@ -191,7 +189,11 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
                                 order: actions,
                                 context: ctx,
                                 ref: ref,
-                                onPlay: () => _play(episode),
+                                onPlay: () => playEpisodeNow(
+                                  context: ctx,
+                                  ref: ref,
+                                  episode: episode,
+                                ),
                               ),
                             );
                           },
@@ -211,39 +213,6 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
           ),
         ),
       ),
-    );
-  }
-
-  void _play(Episode episode) {
-    final handler = ref.read(audioHandlerProvider);
-    final resumePosition =
-        episode.positionSeconds > 0 &&
-            episode.durationSeconds != null &&
-            episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
-        ? episode.positionSeconds
-        : 0;
-    handler.playEpisode(
-      MediaItem(
-        id: episode.audioUrl,
-        title: podcast.title,
-        artist: episode.title,
-        album: podcast.title,
-        artUri: podcast.artworkUrl != null
-            ? Uri.tryParse(podcast.artworkUrl!)
-            : null,
-        duration: episode.durationSeconds != null
-            ? Duration(seconds: episode.durationSeconds!)
-            : null,
-        extras: {
-          'episodeId': episode.id,
-          'podcastId': podcast.id,
-          if (podcast.speedOverride != null)
-            'speedOverride': podcast.speedOverride!,
-          if (podcast.trimSilenceOverride != null)
-            'trimSilenceOverride': podcast.trimSilenceOverride!,
-        },
-      ),
-      resumePositionSeconds: resumePosition,
     );
   }
 }

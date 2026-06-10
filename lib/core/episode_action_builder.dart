@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_html/flutter_html.dart';
@@ -13,11 +11,11 @@ import '../features/downloads/data/download_manager.dart';
 import '../features/downloads/presentation/providers/downloads_providers.dart';
 import '../features/player/presentation/providers/player_providers.dart';
 import '../features/settings/domain/quick_action_definition.dart';
-import '../features/settings/presentation/providers/settings_providers.dart';
 import '../features/subscriptions/domain/episode.dart';
 import '../features/subscriptions/presentation/providers/subscriptions_providers.dart';
-import '../features/subscriptions/presentation/widgets/episode_list_tile.dart';
 import 'constants/urls.dart';
+import 'episode_playback.dart';
+import 'presentation/widgets/episode_actions_sheet.dart';
 
 /// Builds the ordered list of [EpisodeQuickActionItem]s for a given episode.
 ///
@@ -65,7 +63,7 @@ EpisodeQuickActionItem? _buildItem(
         onInvoke: () async {
           await ref.read(queueRepositoryProvider).addAfterCurrent(episode.id);
           if (!alreadyQueued) {
-            _triggerQueueDownloadIfEnabled(episode, ref, context);
+            triggerQueueDownloadIfEnabled(episode, ref, context);
           }
           if (context.mounted) {
             SemanticsService.sendAnnouncement(
@@ -97,7 +95,7 @@ EpisodeQuickActionItem? _buildItem(
         label: action.label,
         onInvoke: () async {
           await ref.read(queueRepositoryProvider).addToQueue(episode.id);
-          _triggerQueueDownloadIfEnabled(episode, ref, context);
+          triggerQueueDownloadIfEnabled(episode, ref, context);
           if (context.mounted) {
             SemanticsService.sendAnnouncement(
               View.of(context),
@@ -129,30 +127,35 @@ EpisodeQuickActionItem? _buildItem(
     case EpisodeAction.openShowNotes:
       return EpisodeQuickActionItem(
         label: action.label,
-        onInvoke: () => showDialog<void>(
-          context: context,
-          barrierLabel: 'Dismiss show notes',
-          builder: (_) => AlertDialog(
-            title: Text(episode.title),
-            content: SingleChildScrollView(
-              child: episode.description != null
-                  ? Html(
-                      data: episode.description!,
-                      onLinkTap: (url, _, __) async {
-                        if (url == null) return;
-                        await safeLaunchUrl(url);
-                      },
-                    )
-                  : const Text('No show notes available.'),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Close'),
+        onInvoke: () {
+          // The sheet pops before invoking, so the captured tile context can
+          // be defunct by the time this runs (e.g. the row was rebuilt away).
+          if (!context.mounted) return;
+          showDialog<void>(
+            context: context,
+            barrierLabel: 'Dismiss show notes',
+            builder: (dialogContext) => AlertDialog(
+              title: Text(episode.title),
+              content: SingleChildScrollView(
+                child: episode.description != null
+                    ? Html(
+                        data: episode.description!,
+                        onLinkTap: (url, _, __) async {
+                          if (url == null) return;
+                          await safeLaunchUrl(url);
+                        },
+                      )
+                    : const Text('No show notes available.'),
               ),
-            ],
-          ),
-        ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          );
+        },
       );
 
     case EpisodeAction.bookmark:
@@ -254,39 +257,4 @@ EpisodeQuickActionItem? _buildItem(
         },
       );
   }
-}
-
-// Downloads the episode if auto-download-queue is on and the episode is not
-// already downloaded or actively downloading.
-void _triggerQueueDownloadIfEnabled(
-  Episode episode,
-  WidgetRef ref,
-  BuildContext context,
-) {
-  final autoDownload = ref.read(autoDownloadQueueProvider).value ?? false;
-  if (!autoDownload) return;
-  final status = episode.downloadStatus;
-  if (status == DownloadStatus.downloaded ||
-      status == DownloadStatus.downloading ||
-      status == DownloadStatus.pending) {
-    return;
-  }
-  unawaited(
-    ref
-        .read(downloadManagerProvider)
-        .downloadEpisode(
-          episode.id,
-          onComplete: (message) {
-            if (context.mounted) {
-              SemanticsService.sendAnnouncement(
-                View.of(context),
-                message == 'Download complete'
-                    ? '${episode.title} downloaded'
-                    : 'Download failed for ${episode.title}',
-                TextDirection.ltr,
-              );
-            }
-          },
-        ),
-  );
 }

@@ -1,4 +1,5 @@
 import 'package:audio_service/audio_service.dart';
+import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:earshot/core/providers/core_providers.dart';
 import 'package:earshot/data/db/app_database.dart';
@@ -6,6 +7,8 @@ import 'package:earshot/data/db/enums.dart';
 import 'package:earshot/features/player/data/audio_handler.dart';
 import 'package:earshot/features/player/presentation/providers/player_providers.dart';
 import 'package:earshot/features/player/presentation/screens/queue_screen.dart';
+import 'package:earshot/features/settings/domain/quick_action_definition.dart';
+import 'package:earshot/features/settings/presentation/providers/settings_providers.dart';
 import 'package:earshot/features/subscriptions/domain/episode.dart';
 import 'package:earshot/features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import 'package:flutter/material.dart';
@@ -39,7 +42,7 @@ void main() {
     registerFallbackValue(const MediaItem(id: 'fallback', title: 'fallback'));
   });
 
-  setUp(() {
+  setUp(() async {
     db = AppDatabase.forTesting(NativeDatabase.memory());
     handler = MockAudioHandler();
     when(
@@ -48,6 +51,28 @@ void main() {
         resumePositionSeconds: any(named: 'resumePositionSeconds'),
       ),
     ).thenAnswer((_) async {});
+
+    // playEpisodeNow calls addToQueue, which requires the episode to exist
+    // (queue_items.episode_id has a foreign key on episodes.id).
+    await db
+        .into(db.podcasts)
+        .insert(
+          PodcastsCompanion.insert(
+            rssUrl: 'https://example.com/feed.xml',
+            title: 'Test Podcast',
+          ),
+        );
+    await db
+        .into(db.episodes)
+        .insert(
+          EpisodesCompanion.insert(
+            podcastId: 1,
+            guid: 'ep-1',
+            title: 'Episode 1',
+            audioUrl: 'https://example.com/ep1.mp3',
+            status: const Value(EpisodeStatus.inQueue),
+          ),
+        );
   });
 
   tearDown(() async {
@@ -64,6 +89,9 @@ void main() {
           mediaItemProvider.overrideWith((_) => Stream.value(null)),
           subscriptionsProvider.overrideWith((_) => Stream.value(const [])),
           podcastProvider.overrideWith((_, __) => Stream.value(null)),
+          episodeActionsProvider.overrideWith(
+            (_) => Stream.value(defaultEpisodeActions),
+          ),
         ],
         child: const MaterialApp(home: QueueScreen()),
       ),

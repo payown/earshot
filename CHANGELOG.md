@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Episode actions are now identical across Inbox, Queue, Library, and Downloads.
+  Every tab uses one shared "Play now" path, one shared actions bottom sheet, and
+  the same VoiceOver rotor actions in the order set in Quick Actions settings.
+  Queue keeps its move/remove actions; Downloads tiles gain a "more actions"
+  button. Downloaded episodes now always play the local file instead of streaming.
+  Destructive actions (Remove from queue, Delete download) show a leading icon in
+  the sheet so danger is not signaled by color alone.
+
 ### Fixed
 - Search: fixed podcast search still returning no results. iTunes API returns
   `Content-Type: text/javascript`; response is now fetched as plain text and

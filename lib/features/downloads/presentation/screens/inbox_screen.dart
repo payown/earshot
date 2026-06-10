@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:audio_service/audio_service.dart';
 import 'package:drift/drift.dart' hide Column, View;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -8,18 +7,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/episode_action_builder.dart';
+import '../../../../core/episode_playback.dart';
+import '../../../../core/presentation/widgets/episode_actions_sheet.dart';
 import '../../../../core/providers/auto_refresh_provider.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/utils/time_format.dart';
 import '../../../../data/db/enums.dart';
-import '../../../player/presentation/providers/player_providers.dart';
 import '../../../settings/domain/quick_action_definition.dart';
 import '../../../settings/presentation/providers/settings_providers.dart';
 import '../../../subscriptions/domain/episode.dart';
 import '../../../subscriptions/domain/podcast.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
-import '../../../subscriptions/presentation/widgets/episode_list_tile.dart';
 import '../providers/downloads_providers.dart';
 
 // Inbox does not expose bookmark (requires active playback).
@@ -154,7 +153,11 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
                           order: actionOrder,
                           context: context,
                           ref: ref,
-                          onPlay: () => _playEpisode(context, episode, ref),
+                          onPlay: () => playEpisodeNow(
+                            context: context,
+                            ref: ref,
+                            episode: episode,
+                          ),
                           allowedActions: _inboxAllowedActions,
                         );
                         return _InboxEpisodeTile(
@@ -231,62 +234,6 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
         );
       }
     }
-  }
-
-  void _playEpisode(BuildContext context, Episode episode, WidgetRef ref) {
-    final resumePosition =
-        episode.positionSeconds > 0 &&
-            episode.durationSeconds != null &&
-            episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
-        ? episode.positionSeconds
-        : 0;
-    final podcast = ref.read(podcastProvider(episode.podcastId)).value;
-    unawaited(
-      ref
-          .read(audioHandlerProvider)
-          .playEpisode(
-            MediaItem(
-              id: episode.audioUrl,
-              title: podcast?.title ?? episode.title,
-              artist: episode.title,
-              album: podcast?.title,
-              artUri: episode.artworkUrl != null
-                  ? Uri.tryParse(episode.artworkUrl!)
-                  : null,
-              duration: episode.durationSeconds != null
-                  ? Duration(seconds: episode.durationSeconds!)
-                  : null,
-              extras: {
-                'episodeId': episode.id,
-                'podcastId': episode.podcastId,
-                if (podcast?.speedOverride != null)
-                  'speedOverride': podcast!.speedOverride!,
-                if (podcast?.trimSilenceOverride != null)
-                  'trimSilenceOverride': podcast!.trimSilenceOverride!,
-                if (episode.downloadPath != null)
-                  'downloadPath': episode.downloadPath!,
-              },
-            ),
-            resumePositionSeconds: resumePosition,
-          ),
-    );
-    unawaited(
-      ref.read(queueRepositoryProvider).addToQueue(episode.id),
-    );
-    // Trigger queue auto-download if enabled and episode is not already
-    // downloaded or in progress.
-    final autoDownloadQueue =
-        ref.read(autoDownloadQueueProvider).value ?? false;
-    if (autoDownloadQueue &&
-        (episode.downloadStatus == DownloadStatus.none ||
-            episode.downloadStatus == DownloadStatus.failed)) {
-      unawaited(ref.read(downloadManagerProvider).downloadEpisode(episode.id));
-    }
-    SemanticsService.sendAnnouncement(
-      View.of(context),
-      'Playing ${episode.title}',
-      TextDirection.ltr,
-    );
   }
 
   Future<void> _confirmClearInbox(
@@ -512,50 +459,13 @@ class _InboxEpisodeTile extends StatelessWidget {
       quickActions.isNotEmpty ? quickActions[0].onInvoke : null;
 
   void _showActions(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      barrierLabel: 'Dismiss episode actions',
-      builder: (sheetContext) => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Semantics(
-              header: true,
-              label: episode.title,
-              child: ExcludeSemantics(
-                child: Text(
-                  episode.title,
-                  style: textTheme.titleMedium,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
-          ),
-          const Divider(height: 1),
-          ...quickActions.map(
-            (action) => ListTile(
-              title: Text(action.label),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                action.onInvoke();
-              },
-            ),
-          ),
-          ListTile(
-            title: const Text('Clear from inbox'),
-            onTap: () {
-              Navigator.of(sheetContext).pop();
-              onClear();
-            },
-          ),
-          const SizedBox(height: 8),
-        ],
-      ),
+    showEpisodeActionsSheet(
+      context,
+      episodeTitle: episode.title,
+      actions: [
+        ...quickActions,
+        EpisodeQuickActionItem(label: 'Clear from inbox', onInvoke: onClear),
+      ],
     );
   }
 

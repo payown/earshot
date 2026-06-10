@@ -1,15 +1,17 @@
 import 'dart:async';
 
-import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/episode_action_builder.dart';
+import '../../../../core/episode_playback.dart';
+import '../../../../core/presentation/widgets/episode_actions_sheet.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../data/db/enums.dart';
-import '../../../../features/downloads/data/download_manager.dart';
 import '../../../../features/downloads/presentation/providers/downloads_providers.dart';
+import '../../../../features/settings/domain/quick_action_definition.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
@@ -75,41 +77,6 @@ String? _downloadStatusLabel(DownloadStatus status) => switch (status) {
   DownloadStatus.none => null,
 };
 
-void _playEpisode(WidgetRef ref, Episode episode) {
-  final handler = ref.read(audioHandlerProvider);
-  final podcast = ref.read(podcastProvider(episode.podcastId)).value;
-  final resumePosition =
-      episode.positionSeconds > 0 &&
-          episode.durationSeconds != null &&
-          episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
-      ? episode.positionSeconds
-      : 0;
-  handler.playEpisode(
-    MediaItem(
-      id: episode.audioUrl,
-      title: podcast?.title ?? episode.title,
-      artist: episode.title,
-      album: podcast?.title,
-      artUri: episode.artworkUrl != null
-          ? Uri.tryParse(episode.artworkUrl!)
-          : null,
-      duration: episode.durationSeconds != null
-          ? Duration(seconds: episode.durationSeconds!)
-          : null,
-      extras: {
-        'episodeId': episode.id,
-        'podcastId': episode.podcastId,
-        if (podcast?.speedOverride != null)
-          'speedOverride': podcast!.speedOverride!,
-        if (podcast?.trimSilenceOverride != null)
-          'trimSilenceOverride': podcast!.trimSilenceOverride!,
-        if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
-      },
-    ),
-    resumePositionSeconds: resumePosition,
-  );
-}
-
 Future<void> _shuffleGroup(WidgetRef ref, List<Episode> episodes) async {
   final shuffled = [...episodes]..shuffle();
   await ref
@@ -169,6 +136,9 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     final currentEpisodeId =
         ref.watch(mediaItemProvider).value?.extras?['episodeId'] as int?;
     final tipSeen = ref.watch(gaplessTipSeenProvider).value ?? false;
+    final actionOrder =
+        ref.watch(episodeActionsProvider).asData?.value ??
+        defaultEpisodeActions;
 
     // Announce the tip once and auto-dismiss so VoiceOver users hear it
     // without having to find or dismiss the card.
@@ -253,9 +223,9 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               ),
             ),
           if (groupingEnabled)
-            _buildGroupedBody(context, ref, currentEpisodeId)
+            _buildGroupedBody(context, ref, currentEpisodeId, actionOrder)
           else
-            _buildFlatBody(context, ref, queue, currentEpisodeId),
+            _buildFlatBody(context, ref, queue, currentEpisodeId, actionOrder),
         ],
       ),
     );
@@ -266,6 +236,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     WidgetRef ref,
     AsyncValue<List<Episode>> queue,
     int? currentEpisodeId,
+    List<EpisodeAction> actionOrder,
   ) {
     final subs = ref.watch(subscriptionsProvider).asData?.value;
     final podcastTitles = <int, String>{
@@ -337,6 +308,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               isLast: isLast,
               total: total,
               position: position,
+              actionOrder: actionOrder,
               isNowPlaying: isNowPlaying,
             );
           },
@@ -365,6 +337,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     BuildContext context,
     WidgetRef ref,
     int? currentEpisodeId,
+    List<EpisodeAction> actionOrder,
   ) {
     final grouped = ref.watch(groupedQueueProvider);
 
@@ -438,6 +411,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               isLast: queueIndex == total - 1,
               total: total,
               position: queueIndex + 1,
+              actionOrder: actionOrder,
               isNowPlaying: true,
             ),
           );
@@ -474,6 +448,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                 isLast: posInGroup == group.episodes.length,
                 total: group.episodes.length,
                 position: posInGroup,
+                actionOrder: actionOrder,
               ),
             );
           }
@@ -521,7 +496,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       ref
           .read<ActiveGroupNotifier>(activeGroupPodcastIdProvider.notifier)
           .set(group.podcastId);
-      _playEpisode(ref, group.episodes.first);
+      if (!context.mounted) return;
+      playEpisodeNow(
+        context: context,
+        ref: ref,
+        episode: group.episodes.first,
+        announce: false,
+      );
       SemanticsService.sendAnnouncement(
         view,
         'Playing ${group.podcastName}',
@@ -664,12 +645,23 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     required bool isLast,
     required int total,
     required int position,
+    required List<EpisodeAction> actionOrder,
     bool isNowPlaying = false,
   }) {
-    final downloadAction = _buildDownloadAction(episode, ref, context);
+    void play() => playEpisodeNow(context: context, ref: ref, episode: episode);
+
+    // Play and Download follow the user's Quick Actions ordering and
+    // settings; queue-specific moves and removal are appended below.
+    final commonActions = buildEpisodeActions(
+      episode: episode,
+      order: actionOrder,
+      context: context,
+      ref: ref,
+      onPlay: play,
+      allowedActions: const {EpisodeAction.playNow, EpisodeAction.download},
+    );
 
     // Named closures shared by the actions rotor and the bottom sheet.
-    void play() => _playEpisode(ref, episode);
     void moveToTop() => unawaited(
       ref.read(queueRepositoryProvider).moveToTop(episode.id).then((_) {
         if (context.mounted) {
@@ -726,93 +718,20 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       }),
     );
 
-    void showActions() {
-      final textTheme = Theme.of(context).textTheme;
-      final colorScheme = Theme.of(context).colorScheme;
-      showModalBottomSheet<void>(
-        context: context,
-        useSafeArea: true,
-        barrierLabel: 'Dismiss episode actions',
-        builder: (sheetContext) => Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Semantics(
-                header: true,
-                label: episode.title,
-                child: ExcludeSemantics(
-                  child: Text(
-                    episode.title,
-                    style: textTheme.titleMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              title: const Text('Play'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                play();
-              },
-            ),
-            ListTile(
-              title: const Text('Move to top'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                moveToTop();
-              },
-            ),
-            if (!isFirst)
-              ListTile(
-                title: const Text('Move up'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  moveUp();
-                },
-              ),
-            if (!isLast)
-              ListTile(
-                title: const Text('Move down'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  moveDown();
-                },
-              ),
-            ListTile(
-              title: const Text('Move to bottom'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                moveToBottom();
-              },
-            ),
-            if (downloadAction != null)
-              ListTile(
-                title: Text(downloadAction.label),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  downloadAction.onInvoke();
-                },
-              ),
-            ListTile(
-              title: Text(
-                'Remove from queue',
-                style: TextStyle(color: colorScheme.error),
-              ),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                removeFromQueue();
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      );
-    }
+    final queueActions = <EpisodeQuickActionItem>[
+      EpisodeQuickActionItem(label: 'Move to top', onInvoke: moveToTop),
+      if (!isFirst) EpisodeQuickActionItem(label: 'Move up', onInvoke: moveUp),
+      if (!isLast)
+        EpisodeQuickActionItem(label: 'Move down', onInvoke: moveDown),
+      EpisodeQuickActionItem(label: 'Move to bottom', onInvoke: moveToBottom),
+      EpisodeQuickActionItem(
+        label: 'Remove from queue',
+        onInvoke: removeFromQueue,
+        destructive: true,
+      ),
+    ];
+
+    final allActions = [...commonActions, ...queueActions];
 
     return Semantics(
       key: ValueKey(episode.id),
@@ -822,16 +741,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       hint: 'Double tap to play. Use the actions rotor for more options.',
       onTap: play,
       customSemanticsActions: {
-        const CustomSemanticsAction(label: 'Play'): play,
-        const CustomSemanticsAction(label: 'Move to top'): moveToTop,
-        const CustomSemanticsAction(label: 'Move to bottom'): moveToBottom,
-        if (!isFirst) const CustomSemanticsAction(label: 'Move up'): moveUp,
-        if (!isLast) const CustomSemanticsAction(label: 'Move down'): moveDown,
-        const CustomSemanticsAction(label: 'Remove from queue'):
-            removeFromQueue,
-        if (downloadAction != null)
-          CustomSemanticsAction(label: downloadAction.label):
-              downloadAction.onInvoke,
+        for (final action in allActions)
+          CustomSemanticsAction(label: action.label): action.onInvoke,
       },
       child: ExcludeSemantics(
         child: ListTile(
@@ -923,7 +834,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
           trailing: IconButton(
             icon: const Icon(Icons.more_vert),
             tooltip: 'Episode actions',
-            onPressed: showActions,
+            onPressed: () => showEpisodeActionsSheet(
+              context,
+              episodeTitle: episode.title,
+              actions: allActions,
+            ),
           ),
         ),
       ),
@@ -962,71 +877,6 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       ),
     );
   }
-
-  _DownloadActionItem? _buildDownloadAction(
-    Episode episode,
-    WidgetRef ref,
-    BuildContext context,
-  ) {
-    switch (episode.downloadStatus) {
-      case DownloadStatus.none:
-      case DownloadStatus.failed:
-        return _DownloadActionItem(
-          label: episode.downloadStatus == DownloadStatus.failed
-              ? 'Retry download'
-              : 'Download',
-          onInvoke: () async {
-            final result = await ref
-                .read(downloadManagerProvider)
-                .downloadEpisode(
-                  episode.id,
-                  onComplete: (msg) {
-                    if (context.mounted) {
-                      SemanticsService.sendAnnouncement(
-                        View.of(context),
-                        msg,
-                        TextDirection.ltr,
-                      );
-                    }
-                  },
-                );
-            if (!context.mounted) return;
-            SemanticsService.sendAnnouncement(
-              View.of(context),
-              switch (result) {
-                DownloadStartResult.started => 'Download started',
-                DownloadStartResult.skippedNoWifi => 'Download requires Wi-Fi',
-                DownloadStartResult.alreadyDownloaded => 'Already downloaded',
-                DownloadStartResult.alreadyDownloading => 'Already downloading',
-                DownloadStartResult.failed => 'Download failed',
-                DownloadStartResult.notFound => 'Episode unavailable',
-              },
-              TextDirection.ltr,
-            );
-          },
-        );
-      case DownloadStatus.downloading:
-      case DownloadStatus.pending:
-        return _DownloadActionItem(
-          label: 'Cancel download',
-          onInvoke: () =>
-              ref.read(downloadManagerProvider).cancelDownload(episode.id),
-        );
-      case DownloadStatus.downloaded:
-        return _DownloadActionItem(
-          label: 'Remove download',
-          onInvoke: () =>
-              ref.read(downloadManagerProvider).deleteDownload(episode.id),
-        );
-    }
-  }
-}
-
-class _DownloadActionItem {
-  const _DownloadActionItem({required this.label, required this.onInvoke});
-
-  final String label;
-  final VoidCallback onInvoke;
 }
 
 class _QueueTipCard extends StatelessWidget {
