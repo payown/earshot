@@ -151,9 +151,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: 'result',
             parentNavigatorKey: _rootKey,
+            // extra is lost on deep links and state restoration; fall back
+            // to the search screen instead of crashing on the cast below.
+            redirect: (_, state) => state.extra is (PodcastSearchResult, bool)
+                ? null
+                : AppRoutes.search,
             builder: (_, state) {
               final (result, fromOnboarding) =
-                  state.extra as (PodcastSearchResult, bool);
+                  state.extra! as (PodcastSearchResult, bool);
               return SearchResultDetailScreen(
                 result: result,
                 fromOnboarding: fromOnboarding,
@@ -234,9 +239,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: 'quick-actions/:type',
             parentNavigatorKey: _rootKey,
+            // values.byName throws on unknown names (bad or legacy deep
+            // links); send those to the quick actions menu instead.
+            redirect: (_, state) =>
+                QuickActionContentType.values.asNameMap().containsKey(
+                  state.pathParameters['type'],
+                )
+                ? null
+                : AppRoutes.settingsQuickActionsMenu,
             builder: (_, state) {
-              final type = state.pathParameters['type']!;
-              final contentType = QuickActionContentType.values.byName(type);
+              final contentType = QuickActionContentType.values
+                  .asNameMap()[state.pathParameters['type']]!;
               return QuickActionConfiguratorScreen(contentType: contentType);
             },
           ),
@@ -275,12 +288,24 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   ),
                   GoRoute(
                     path: 'folders/:id',
+                    // Non-numeric ids (bad deep links) crash int.parse;
+                    // fall back to the library root.
+                    redirect: (_, state) =>
+                        int.tryParse(state.pathParameters['id'] ?? '') == null
+                        ? AppRoutes.subscriptions
+                        : null,
                     builder: (_, state) => FolderDetailScreen(
                       folderId: int.parse(state.pathParameters['id']!),
                     ),
                   ),
                   GoRoute(
                     path: ':id',
+                    // Validates the shared :id for this route and its nested
+                    // settings route.
+                    redirect: (_, state) =>
+                        int.tryParse(state.pathParameters['id'] ?? '') == null
+                        ? AppRoutes.subscriptions
+                        : null,
                     builder: (_, state) => PodcastDetailScreen(
                       podcastId: int.parse(state.pathParameters['id']!),
                     ),
