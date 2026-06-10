@@ -185,4 +185,98 @@ void main() {
     final resume = capturedPlay()[1] as int;
     expect(resume, 600);
   });
+
+  /// Pumps a button that calls [playEpisodeNow] for [episode] when tapped,
+  /// with [mediaItemProvider] and [playbackStateProvider] overridden to
+  /// report [episode] as already loaded with [playing] state, then taps it
+  /// and settles.
+  Future<void> playCurrentEpisode(
+    WidgetTester tester,
+    Episode episode, {
+    required bool playing,
+  }) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appDatabaseProvider.overrideWithValue(db),
+          audioHandlerProvider.overrideWithValue(handler),
+          podcastProvider.overrideWith((_, __) => Stream.value(null)),
+          mediaItemProvider.overrideWith(
+            (_) => Stream.value(
+              MediaItem(
+                id: episode.audioUrl,
+                title: episode.title,
+                extras: {'episodeId': episode.id},
+              ),
+            ),
+          ),
+          playbackStateProvider.overrideWith(
+            (_) => Stream.value(PlaybackState(playing: playing)),
+          ),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Consumer(
+              builder: (context, ref, _) {
+                ref.watch(mediaItemProvider);
+                ref.watch(playbackStateProvider);
+                return ElevatedButton(
+                  onPressed: () => playEpisodeNow(
+                    context: context,
+                    ref: ref,
+                    episode: episode,
+                  ),
+                  child: const Text('Play'),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Play'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    're-tapping the current, paused episode resumes in place',
+    (tester) async {
+      when(() => handler.play()).thenAnswer((_) async {});
+
+      await playCurrentEpisode(
+        tester,
+        _episode(positionSeconds: 600, durationSeconds: 3600),
+        playing: false,
+      );
+
+      verifyNever(
+        () => handler.playEpisode(
+          any(),
+          resumePositionSeconds: any(named: 'resumePositionSeconds'),
+        ),
+      );
+      verify(() => handler.play()).called(1);
+    },
+  );
+
+  testWidgets(
+    're-tapping the current, already-playing episode does not reload or '
+    'reseek',
+    (tester) async {
+      await playCurrentEpisode(
+        tester,
+        _episode(positionSeconds: 600, durationSeconds: 3600),
+        playing: true,
+      );
+
+      verifyNever(
+        () => handler.playEpisode(
+          any(),
+          resumePositionSeconds: any(named: 'resumePositionSeconds'),
+        ),
+      );
+      verifyNever(() => handler.play());
+    },
+  );
 }
