@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:logging/logging.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '../../data/db/enums.dart';
 import '../../features/downloads/presentation/screens/downloads_screen.dart';
@@ -64,6 +68,8 @@ abstract final class AppRoutes {
   static const bugReport = '/bug-report';
 }
 
+final _log = Logger('AppRouter');
+
 // ── Onboarding state ─────────────────────────────────────────────────────────
 
 final isOnboardingCompleteProvider = FutureProvider<bool>((ref) async {
@@ -86,7 +92,15 @@ class _RouterNotifier extends ChangeNotifier {
     return async.when(
       // Stay on the loading screen while the DB check is in flight.
       loading: () => atLoading ? null : AppRoutes.loading,
-      error: (_, __) => AppRoutes.subscriptions,
+      error: (error, stackTrace) {
+        _log.severe(
+          'isOnboardingCompleteProvider failed; redirecting to subscriptions',
+          error,
+          stackTrace,
+        );
+        unawaited(Sentry.captureException(error, stackTrace: stackTrace));
+        return AppRoutes.subscriptions;
+      },
       data: (done) {
         if (atLoading) {
           return done ? AppRoutes.subscriptions : AppRoutes.onboarding;

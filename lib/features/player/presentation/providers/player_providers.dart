@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:logging/logging.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '../../../../core/constants/playback.dart';
 import '../../../../core/providers/core_providers.dart';
@@ -17,6 +19,8 @@ import '../../data/queue_repository.dart';
 import '../../data/queue_repository_impl.dart';
 import '../../domain/resume_position.dart';
 import '../../domain/sleep_timer.dart';
+
+final _log = Logger('PlayerProviders');
 
 // Overridden in main() after AudioService.init completes.
 final audioHandlerProvider = Provider<EarshotAudioHandler>(
@@ -239,50 +243,56 @@ final episodeIdPersistenceProvider = Provider<void>((ref) {
 // fetches its episode + podcast rows, and calls loadEpisode() so the mini
 // player reappears paused at the saved position.
 final playbackRestorationProvider = FutureProvider<void>((ref) async {
-  final db = ref.read(appDatabaseProvider);
-  final settings = AppSettingsRepositoryImpl(database: db);
+  try {
+    final db = ref.read(appDatabaseProvider);
+    final settings = AppSettingsRepositoryImpl(database: db);
 
-  final lastEpisodeId = await settings.getLastPlayingEpisodeId();
-  if (lastEpisodeId == null) return;
+    final lastEpisodeId = await settings.getLastPlayingEpisodeId();
+    if (lastEpisodeId == null) return;
 
-  final episode = await (db.select(
-    db.episodes,
-  )..where((e) => e.id.equals(lastEpisodeId))).getSingleOrNull();
+    final episode = await (db.select(
+      db.episodes,
+    )..where((e) => e.id.equals(lastEpisodeId))).getSingleOrNull();
 
-  if (episode == null || episode.status == EpisodeStatus.played) return;
+    if (episode == null || episode.status == EpisodeStatus.played) return;
 
-  final podcast = await (db.select(
-    db.podcasts,
-  )..where((p) => p.id.equals(episode.podcastId))).getSingleOrNull();
+    final podcast = await (db.select(
+      db.podcasts,
+    )..where((p) => p.id.equals(episode.podcastId))).getSingleOrNull();
 
-  final handler = ref.read(audioHandlerProvider);
-  await handler.loadEpisode(
-    MediaItem(
-      id: episode.audioUrl,
-      title: podcast?.title ?? episode.title,
-      artist: episode.title,
-      album: podcast?.title,
-      artUri: podcast?.artworkUrl != null
-          ? Uri.tryParse(podcast!.artworkUrl!)
-          : null,
-      duration: episode.durationSeconds != null
-          ? Duration(seconds: episode.durationSeconds!)
-          : null,
-      extras: {
-        'episodeId': episode.id,
-        'podcastId': episode.podcastId,
-        if (podcast?.speedOverride != null)
-          'speedOverride': podcast!.speedOverride!,
-        if (podcast?.trimSilenceOverride != null)
-          'trimSilenceOverride': podcast!.trimSilenceOverride!,
-        if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
-      },
-    ),
-    resumePositionSeconds: clampedResumePosition(
-      positionSeconds: episode.positionSeconds,
-      durationSeconds: episode.durationSeconds,
-    ),
-  );
+    final handler = ref.read(audioHandlerProvider);
+    await handler.loadEpisode(
+      MediaItem(
+        id: episode.audioUrl,
+        title: podcast?.title ?? episode.title,
+        artist: episode.title,
+        album: podcast?.title,
+        artUri: podcast?.artworkUrl != null
+            ? Uri.tryParse(podcast!.artworkUrl!)
+            : null,
+        duration: episode.durationSeconds != null
+            ? Duration(seconds: episode.durationSeconds!)
+            : null,
+        extras: {
+          'episodeId': episode.id,
+          'podcastId': episode.podcastId,
+          if (podcast?.speedOverride != null)
+            'speedOverride': podcast!.speedOverride!,
+          if (podcast?.trimSilenceOverride != null)
+            'trimSilenceOverride': podcast!.trimSilenceOverride!,
+          if (episode.downloadPath != null)
+            'downloadPath': episode.downloadPath!,
+        },
+      ),
+      resumePositionSeconds: clampedResumePosition(
+        positionSeconds: episode.positionSeconds,
+        durationSeconds: episode.durationSeconds,
+      ),
+    );
+  } catch (error, stackTrace) {
+    _log.severe('Failed to restore last playing episode', error, stackTrace);
+    await Sentry.captureException(error, stackTrace: stackTrace);
+  }
 });
 
 final queueAutoAdvanceProvider = Provider<void>((ref) {
