@@ -4,6 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:logging/logging.dart';
 import 'package:posthog_flutter/posthog_flutter.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
@@ -19,6 +20,8 @@ import 'features/player/data/audio_handler.dart';
 import 'features/player/presentation/providers/player_providers.dart';
 import 'features/settings/presentation/providers/settings_providers.dart';
 import 'features/subscriptions/presentation/providers/subscriptions_providers.dart';
+
+final _log = Logger('main');
 
 // Placeholder DSNs — replace with real values before beta build.
 // These are safe to leave empty; Sentry/PostHog silently no-op with empty DSN.
@@ -74,28 +77,35 @@ class _AppInitializer extends ConsumerWidget {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // LogService must initialize first so the log sink is attached before any
+  // fire-and-forget failures (below) can be logged.
+  final logService = await LogService.init();
+
   // BG task registration (Workmanager) can stall on new iOS versions — run
   // fire-and-forget with a timeout so it never blocks the first frame.
   unawaited(
     BackgroundTaskService.initialize()
         .then((_) => BackgroundTaskService.scheduleAll())
         .timeout(const Duration(seconds: 5))
-        .catchError((Object _) {}),
+        .catchError((Object e, StackTrace st) {
+          _log.warning(
+            'Background task registration failed or timed out',
+            e,
+            st,
+          );
+        }),
   );
 
-  final (audioHandler, logService) = await (
-    AudioService.init(
-      builder: EarshotAudioHandler.new,
-      config: const AudioServiceConfig(
-        androidNotificationChannelId: 'media.payown.earshot.audio',
-        androidNotificationChannelName: 'Earshot',
-        androidNotificationOngoing: true,
-        fastForwardInterval: kSkipForwardDuration,
-        rewindInterval: kSkipBackDuration,
-      ),
+  final audioHandler = await AudioService.init(
+    builder: EarshotAudioHandler.new,
+    config: const AudioServiceConfig(
+      androidNotificationChannelId: 'media.payown.earshot.audio',
+      androidNotificationChannelName: 'Earshot',
+      androidNotificationOngoing: true,
+      fastForwardInterval: kSkipForwardDuration,
+      rewindInterval: kSkipBackDuration,
     ),
-    LogService.init(),
-  ).wait;
+  );
 
   if (_posthogApiKey.isNotEmpty) {
     final config = PostHogConfig(_posthogApiKey)..host = _posthogHost;

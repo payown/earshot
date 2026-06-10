@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:logging/logging.dart';
 import 'package:shake/shake.dart';
 
 import '../../data/db/enums.dart';
@@ -14,6 +15,8 @@ import '../../features/settings/data/app_settings_repository.dart';
 import '../../features/stats/data/stats_repository.dart';
 import '../providers/core_providers.dart';
 import '../router/app_router.dart';
+
+final _log = Logger('MainShell');
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({required this.shell, super.key});
@@ -62,21 +65,25 @@ class _MainShellState extends ConsumerState<MainShell> {
     );
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       ref.read(queueExpirationServiceProvider).runExpiration();
-      await _applyHistoryRetention();
+      // Run history retention independently so a slow DB operation doesn't
+      // push the VoiceOver focus nudge past the window where it's effective.
+      unawaited(
+        _applyHistoryRetention().catchError((Object e, StackTrace st) {
+          _log.warning('History retention failed', e, st);
+        }),
+      );
       // After the shell's first frame, nudge VoiceOver focus into app content.
       // The GoRouter redirect from /loading -> initial tab resolves before
       // Flutter posts its screen-changed notification, which leaves VoiceOver
       // focus stranded on the iOS status bar. A zero-length announcement causes
       // VoiceOver to re-evaluate focus and land on the first in-app element.
+      await Future<void>.delayed(const Duration(milliseconds: 100));
       if (mounted) {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-        if (mounted) {
-          SemanticsService.sendAnnouncement(
-            View.of(context),
-            '',
-            TextDirection.ltr,
-          );
-        }
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          '',
+          TextDirection.ltr,
+        );
       }
     });
   }
