@@ -82,7 +82,9 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
           SwitchListTile(
             title: const Text('Crash reports'),
             subtitle: const Text(
-              'Anonymized crash data to help fix bugs. Never contains your podcasts or listening history.',
+              'Anonymized crash data to help fix bugs. Never contains your '
+              'podcasts or listening history. Takes effect next time you '
+              'restart Earshot.',
             ),
             value: _crashReporting,
             onChanged: (v) async {
@@ -95,7 +97,9 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
           SwitchListTile(
             title: const Text('Anonymous analytics'),
             subtitle: const Text(
-              'Feature usage counts only. Never contains search queries, episode titles, or personal data.',
+              'Feature usage counts only. Never contains search queries, '
+              'episode titles, or personal data. Takes effect next time you '
+              'restart Earshot.',
             ),
             value: _analytics,
             onChanged: (v) async {
