@@ -168,6 +168,10 @@ Future<void> _startApp({
       stackTrace,
     );
     await Sentry.captureException(error, stackTrace: stackTrace);
+    // No ProviderScope will be created on this path, so close the DB
+    // ourselves rather than leaving it open for the life of the error
+    // screen.
+    await db.close();
     runApp(const _StartupErrorApp());
     return;
   }
@@ -180,7 +184,13 @@ Future<void> _startApp({
   runApp(
     ProviderScope(
       overrides: [
-        appDatabaseProvider.overrideWithValue(db),
+        // overrideWith (not overrideWithValue) so ref.onDispose(db.close) is
+        // re-registered against this ProviderScope, matching
+        // appDatabaseProvider's own definition.
+        appDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(db.close);
+          return db;
+        }),
         audioHandlerProvider.overrideWithValue(audioHandler),
         logServiceProvider.overrideWithValue(logService),
       ],
