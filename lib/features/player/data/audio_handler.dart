@@ -27,13 +27,17 @@ bool shouldPreload(Duration position, Duration duration, Duration threshold) =>
     duration > Duration.zero && position >= duration - threshold;
 
 /// A completed event is only genuine when the player reached ready since the
-/// last load AND playback was requested. Completion-on-load (e.g. restoring
-/// at/past the media end after a crash) never satisfies both, so it must not
-/// mark the episode played or remove it from the queue.
+/// last load AND playback was requested since then. Completion-on-load (e.g.
+/// restoring at/past the media end after a crash) never satisfies both, so it
+/// must not mark the episode played or remove it from the queue.
+///
+/// [playRequestedSinceLoad] is a sticky flag rather than the player's
+/// instantaneous `playing` value so a pause landing at the exact media end
+/// can't suppress a genuine completion.
 bool shouldHonorCompleted({
   required bool readySinceLoad,
-  required bool playing,
-}) => readySinceLoad && playing;
+  required bool playRequestedSinceLoad,
+}) => readySinceLoad && playRequestedSinceLoad;
 
 class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   EarshotAudioHandler() {
@@ -50,7 +54,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
       if (state == ProcessingState.completed) {
         if (!shouldHonorCompleted(
           readySinceLoad: _readySinceLoad,
-          playing: _player.playing,
+          playRequestedSinceLoad: _playRequestedSinceLoad,
         )) {
           _log.warning(
             'Ignoring spurious completed event (no playback since load)',
@@ -109,6 +113,12 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   // completed listener so completion-on-load (restore at/past media end)
   // can't masquerade as a finished episode.
   bool _readySinceLoad = false;
+
+  // True once playback has been requested since the last load. Sticky on
+  // purpose: a pause arriving at the exact media end must not suppress a
+  // genuine completion, and loadEpisode never requests playback so a
+  // restore can never set it.
+  bool _playRequestedSinceLoad = false;
 
   /// Called when the playlist advances gaplessly to the next episode.
   /// [previousEpisodeId] is the episode that just finished.
@@ -174,6 +184,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   }) async {
     _log.info('Playing: ${item.title}');
     _readySinceLoad = false;
+    _playRequestedSinceLoad = false;
     _currentMediaItem = item;
     _nextMediaItem = null;
     _lastKnownIndex = 0;
@@ -191,6 +202,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
         initialIndex: 0,
         initialPosition: Duration(seconds: resumePositionSeconds),
       );
+      _playRequestedSinceLoad = true;
       await _player.play();
     } on Exception catch (e) {
       _log.severe('Failed to load audio for "${item.title}": $e');
@@ -205,6 +217,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   }) async {
     _log.info('Restoring: ${item.title}');
     _readySinceLoad = false;
+    _playRequestedSinceLoad = false;
     _currentMediaItem = item;
     _nextMediaItem = null;
     _lastKnownIndex = 0;
@@ -297,7 +310,10 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() {
+    _playRequestedSinceLoad = true;
+    return _player.play();
+  }
 
   @override
   Future<void> pause() => _player.pause();
@@ -311,6 +327,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _lastKnownIndex = null;
     _isAdvancing = false;
     _readySinceLoad = false;
+    _playRequestedSinceLoad = false;
     await _player.stop();
     _episodeIdController.add(null);
     playbackState.add(
