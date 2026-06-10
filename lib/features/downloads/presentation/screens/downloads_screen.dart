@@ -1,6 +1,3 @@
-import 'dart:async';
-
-import 'package:audio_service/audio_service.dart';
 import 'package:drift/drift.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -8,16 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/episode_action_builder.dart';
+import '../../../../core/episode_playback.dart';
+import '../../../../core/presentation/widgets/episode_actions_sheet.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../data/db/app_database.dart';
 import '../../../../data/db/enums.dart';
-import '../../../player/presentation/providers/player_providers.dart';
 import '../../../settings/domain/quick_action_definition.dart';
 import '../../../settings/presentation/providers/settings_providers.dart';
 import '../../../subscriptions/domain/episode.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
-import '../../../subscriptions/presentation/widgets/episode_list_tile.dart';
 import '../providers/downloads_providers.dart';
 
 // Bookmark excluded — requires active playback.
@@ -150,43 +147,6 @@ class DownloadsScreen extends ConsumerWidget {
   }
 }
 
-void _playEpisode(BuildContext context, Episode episode, WidgetRef ref) {
-  final resumePosition =
-      episode.positionSeconds > 0 &&
-          episode.durationSeconds != null &&
-          episode.positionSeconds < (episode.durationSeconds! * 0.95).round()
-      ? episode.positionSeconds
-      : 0;
-  final podcast = ref.read(podcastProvider(episode.podcastId)).value;
-  unawaited(
-    ref
-        .read(audioHandlerProvider)
-        .playEpisode(
-          MediaItem(
-            id: episode.audioUrl,
-            title: podcast?.title ?? episode.title,
-            artist: episode.title,
-            album: podcast?.title,
-            artUri: episode.artworkUrl != null
-                ? Uri.tryParse(episode.artworkUrl!)
-                : null,
-            duration: episode.durationSeconds != null
-                ? Duration(seconds: episode.durationSeconds!)
-                : null,
-            extras: {
-              'episodeId': episode.id,
-              'podcastId': episode.podcastId,
-              if (podcast?.speedOverride != null)
-                'speedOverride': podcast!.speedOverride!,
-              if (podcast?.trimSilenceOverride != null)
-                'trimSilenceOverride': podcast!.trimSilenceOverride!,
-            },
-          ),
-          resumePositionSeconds: resumePosition,
-        ),
-  );
-}
-
 List<Widget> _buildSection({
   required BuildContext context,
   required WidgetRef ref,
@@ -222,7 +182,8 @@ List<Widget> _buildSection({
           order: actionOrder,
           context: context,
           ref: ref,
-          onPlay: () => _playEpisode(context, episode, ref),
+          onPlay: () =>
+              playEpisodeNow(context: context, ref: ref, episode: episode),
           allowedActions: _downloadsAllowedActions,
         );
         return _DownloadTile(
@@ -327,6 +288,21 @@ class _DownloadTile extends StatelessWidget {
   VoidCallback? get _defaultTap =>
       quickActions.isNotEmpty ? quickActions[0].onInvoke : null;
 
+  void _showActions(BuildContext context) {
+    showEpisodeActionsSheet(
+      context,
+      episodeTitle: episode.title,
+      actions: [
+        ...quickActions,
+        EpisodeQuickActionItem(
+          label: 'Delete download',
+          onInvoke: onDelete,
+          destructive: true,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final labelParts = [
@@ -358,9 +334,9 @@ class _DownloadTile extends StatelessWidget {
             style: Theme.of(context).textTheme.titleSmall,
           ),
           trailing: IconButton(
-            icon: const Icon(Icons.delete_outline),
-            onPressed: onDelete,
-            tooltip: 'Delete download',
+            icon: const Icon(Icons.more_vert),
+            onPressed: () => _showActions(context),
+            tooltip: 'Episode actions',
           ),
         ),
       ),

@@ -1,15 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
+import '../../../../core/presentation/widgets/episode_actions_sheet.dart';
 import '../../../../data/db/enums.dart';
 import '../../domain/episode.dart';
-
-class EpisodeQuickActionItem {
-  const EpisodeQuickActionItem({required this.label, required this.onInvoke});
-
-  final String label;
-  final VoidCallback onInvoke;
-}
 
 class EpisodeListTile extends StatelessWidget {
   const EpisodeListTile({
@@ -27,15 +21,10 @@ class EpisodeListTile extends StatelessWidget {
       quickActions.isNotEmpty ? quickActions[0].onInvoke : null;
 
   void _showActionsSheet(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      barrierLabel: 'Dismiss episode actions',
-      builder: (_) => _EpisodeActionsSheet(
-        episodeTitle: episode.title,
-        actions: quickActions,
-      ),
+    showEpisodeActionsSheet(
+      context,
+      episodeTitle: episode.title,
+      actions: quickActions,
     );
   }
 
@@ -53,12 +42,12 @@ class EpisodeListTile extends StatelessWidget {
     ];
     final semanticLabel = '${episode.title}, ${semanticParts.join(', ')}';
 
-    // Only expose rotor actions when there are multiple — the single-action
-    // case is already covered by the default tap.
+    // Always expose rotor actions, matching every other tab; with a single
+    // action the rotor entry duplicates the default tap but keeps behavior
+    // predictable across screens.
     final semanticActions = <CustomSemanticsAction, VoidCallback>{
-      if (quickActions.length > 1)
-        for (final action in quickActions)
-          CustomSemanticsAction(label: action.label): action.onInvoke,
+      for (final action in quickActions)
+        CustomSemanticsAction(label: action.label): action.onInvoke,
     };
 
     final hasMoreActions = quickActions.length > 1;
@@ -68,6 +57,7 @@ class EpisodeListTile extends StatelessWidget {
       children: [
         Expanded(
           child: Semantics(
+            container: true,
             label: semanticLabel,
             button: _defaultTap != null,
             customSemanticsActions: semanticActions,
@@ -182,85 +172,6 @@ class EpisodeListTile extends StatelessWidget {
     if (diff.inDays == 1) return 'Yesterday';
     if (diff.inDays < 7) return '${diff.inDays} days ago';
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-  }
-}
-
-class _EpisodeActionsSheet extends StatefulWidget {
-  const _EpisodeActionsSheet({
-    required this.episodeTitle,
-    required this.actions,
-  });
-
-  final String episodeTitle;
-  final List<EpisodeQuickActionItem> actions;
-
-  @override
-  State<_EpisodeActionsSheet> createState() => _EpisodeActionsSheetState();
-}
-
-class _EpisodeActionsSheetState extends State<_EpisodeActionsSheet> {
-  bool _announced = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_announced) {
-      _announced = true;
-      final view = View.of(context);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          SemanticsService.sendAnnouncement(
-            view,
-            widget.episodeTitle,
-            TextDirection.ltr,
-          );
-        }
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      scopesRoute: true,
-      explicitChildNodes: true,
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Semantics(
-                header: true,
-                label: widget.episodeTitle,
-                child: ExcludeSemantics(
-                  child: Text(
-                    widget.episodeTitle,
-                    style: Theme.of(context).textTheme.titleSmall,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-            ),
-            const Divider(height: 1),
-            for (final action in widget.actions)
-              Semantics(
-                hint: 'Closes this menu and performs the action',
-                child: ListTile(
-                  title: Text(action.label),
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    action.onInvoke();
-                  },
-                ),
-              ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
   }
 }
 
