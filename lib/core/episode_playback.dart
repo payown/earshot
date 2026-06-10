@@ -16,10 +16,17 @@ import '../features/subscriptions/presentation/providers/subscriptions_providers
 /// Canonical "Play now" for an episode, shared by every screen.
 ///
 /// Behavior on every surface (Inbox, Queue, Library, Downloads):
-/// - Builds the MediaItem with episode artwork (podcast artwork fallback),
-///   per-podcast speed/trim overrides, and the local download path when the
-///   episode is downloaded, so downloaded episodes never stream.
-/// - Resumes from the saved position via [clampedResumePosition].
+/// - If [episode] is already loaded in the player, resumes in place instead
+///   of reloading: if paused, calls [EarshotAudioHandler.play] and announces
+///   "Playing {title}"; if already playing, announces "Already playing" so
+///   screen reader users get confirmation the activation was registered. This
+///   avoids reseeking to the last DB-saved position, which lags the live
+///   position by up to [PositionTracker]'s save interval and would otherwise
+///   replay a few seconds of audio on every re-tap.
+/// - Otherwise, builds the MediaItem with episode artwork (podcast artwork
+///   fallback), per-podcast speed/trim overrides, and the local download path
+///   when the episode is downloaded, so downloaded episodes never stream.
+///   Resumes from the saved position via [clampedResumePosition].
 /// - Adds the episode to the queue (no-op when already queued); entering the
 ///   queue is what removes it from the Inbox.
 /// - Triggers queue auto-download when that setting is on.
@@ -34,6 +41,30 @@ void playEpisodeNow({
   bool announce = true,
 }) {
   final handler = ref.read(audioHandlerProvider);
+
+  final currentEpisodeId =
+      ref.read(mediaItemProvider).value?.extras?['episodeId'] as int?;
+  if (currentEpisodeId == episode.id) {
+    final isPlaying = ref.read(playbackStateProvider).value?.playing ?? false;
+    if (!isPlaying) {
+      unawaited(handler.play());
+      if (announce && context.mounted) {
+        SemanticsService.sendAnnouncement(
+          View.of(context),
+          'Playing ${episode.title}',
+          TextDirection.ltr,
+        );
+      }
+    } else if (announce && context.mounted) {
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Already playing',
+        TextDirection.ltr,
+      );
+    }
+    return;
+  }
+
   final podcast = ref.read(podcastProvider(episode.podcastId)).value;
   final artworkUrl = episode.artworkUrl ?? podcast?.artworkUrl;
 
