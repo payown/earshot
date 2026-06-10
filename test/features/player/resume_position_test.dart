@@ -10,17 +10,21 @@ void main() {
       );
     });
 
-    test('returns 0 when duration is unknown', () {
+    test('resumes at the saved position when duration is unknown', () {
+      // Regression: feeds without itunes:duration restarted from 0 on every
+      // relaunch. The 95% rule can't apply, so trust the saved position;
+      // the completion-on-load case is covered by the playback-evidence
+      // gates in the audio handler and PositionTracker.
       expect(
         clampedResumePosition(positionSeconds: 500, durationSeconds: null),
-        0,
+        500,
       );
     });
 
-    test('returns 0 when duration is 0', () {
+    test('resumes at the saved position when duration is 0', () {
       expect(
         clampedResumePosition(positionSeconds: 500, durationSeconds: 0),
-        0,
+        500,
       );
     });
 
