@@ -26,6 +26,15 @@ AudioSource resolveAudioSource(MediaItem item) {
 bool shouldPreload(Duration position, Duration duration, Duration threshold) =>
     duration > Duration.zero && position >= duration - threshold;
 
+/// A completed event is only genuine when the player reached ready since the
+/// last load AND playback was requested. Completion-on-load (e.g. restoring
+/// at/past the media end after a crash) never satisfies both, so it must not
+/// mark the episode played or remove it from the queue.
+bool shouldHonorCompleted({
+  required bool readySinceLoad,
+  required bool playing,
+}) => readySinceLoad && playing;
+
 class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   EarshotAudioHandler() {
     _loudnessEnhancer = AndroidLoudnessEnhancer();
@@ -37,7 +46,19 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _attachPlaybackListener();
     _attachIndexListener();
     _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.completed) unawaited(_onEpisodeCompleted());
+      if (state == ProcessingState.ready) _readySinceLoad = true;
+      if (state == ProcessingState.completed) {
+        if (!shouldHonorCompleted(
+          readySinceLoad: _readySinceLoad,
+          playing: _player.playing,
+        )) {
+          _log.warning(
+            'Ignoring spurious completed event (no playback since load)',
+          );
+          return;
+        }
+        unawaited(_onEpisodeCompleted());
+      }
     });
 
     sleepTimer = SleepTimer(
@@ -83,6 +104,11 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   // Prevents re-entrant processing when removeAudioSourceAt(0) fires a
   // currentIndexStream event.
   bool _isAdvancing = false;
+
+  // True once the player has reached ready since the last load. Gates the
+  // completed listener so completion-on-load (restore at/past media end)
+  // can't masquerade as a finished episode.
+  bool _readySinceLoad = false;
 
   /// Called when the playlist advances gaplessly to the next episode.
   /// [previousEpisodeId] is the episode that just finished.
@@ -147,6 +173,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     int resumePositionSeconds = 0,
   }) async {
     _log.info('Playing: ${item.title}');
+    _readySinceLoad = false;
     _currentMediaItem = item;
     _nextMediaItem = null;
     _lastKnownIndex = 0;
@@ -177,6 +204,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     int resumePositionSeconds = 0,
   }) async {
     _log.info('Restoring: ${item.title}');
+    _readySinceLoad = false;
     _currentMediaItem = item;
     _nextMediaItem = null;
     _lastKnownIndex = 0;
@@ -282,6 +310,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _nextMediaItem = null;
     _lastKnownIndex = null;
     _isAdvancing = false;
+    _readySinceLoad = false;
     await _player.stop();
     _episodeIdController.add(null);
     playbackState.add(

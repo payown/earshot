@@ -15,6 +15,7 @@ import '../../data/audio_handler.dart';
 import '../../data/position_tracker.dart';
 import '../../data/queue_repository.dart';
 import '../../data/queue_repository_impl.dart';
+import '../../domain/resume_position.dart';
 import '../../domain/sleep_timer.dart';
 
 // Overridden in main() after AudioService.init completes.
@@ -277,7 +278,10 @@ final playbackRestorationProvider = FutureProvider<void>((ref) async {
         if (episode.downloadPath != null) 'downloadPath': episode.downloadPath!,
       },
     ),
-    resumePositionSeconds: episode.positionSeconds,
+    resumePositionSeconds: clampedResumePosition(
+      positionSeconds: episode.positionSeconds,
+      durationSeconds: episode.durationSeconds,
+    ),
   );
 });
 
@@ -389,7 +393,7 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     preloadScheduled = false;
 
     if (previousEpisodeId != null) {
-      await queueRepo.removeFromQueue(previousEpisodeId);
+      await queueRepo.markPlayedAndRemove(previousEpisodeId);
     }
 
     final db = ref.read(appDatabaseProvider);
@@ -424,7 +428,7 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         : -1;
 
     if (currentEpisodeId != null) {
-      await queueRepo.removeFromQueue(currentEpisodeId);
+      await queueRepo.markPlayedAndRemove(currentEpisodeId);
     }
 
     final remaining = currentIndex >= 0 ? queue.length - 1 : queue.length;
@@ -458,7 +462,10 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         speedOverride: nextPodcast?.speedOverride,
         trimSilenceOverride: nextPodcast?.trimSilenceOverride,
       ),
-      resumePositionSeconds: next.positionSeconds,
+      resumePositionSeconds: clampedResumePosition(
+        positionSeconds: next.positionSeconds,
+        durationSeconds: next.durationSeconds,
+      ),
     );
   };
 

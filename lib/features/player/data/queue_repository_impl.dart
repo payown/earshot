@@ -106,6 +106,26 @@ class QueueRepositoryImpl implements QueueRepository {
   }
 
   @override
+  Future<void> markPlayedAndRemove(int episodeId) async {
+    await _db.transaction(() async {
+      await (_db.delete(
+        _db.queueItems,
+      )..where((q) => q.episodeId.equals(episodeId))).go();
+      await _compactPositions();
+      await (_db.update(
+        _db.episodes,
+      )..where((e) => e.id.equals(episodeId))).write(
+        EpisodesCompanion(
+          status: const Value(EpisodeStatus.played),
+          positionSeconds: const Value(0),
+          playedAt: Value(DateTime.now().toUtc()),
+        ),
+      );
+    });
+    _log.fine('Marked episode $episodeId played and removed from queue');
+  }
+
+  @override
   Future<void> cancelFromQueue(int episodeId) async {
     await _db.transaction(() async {
       await (_db.delete(

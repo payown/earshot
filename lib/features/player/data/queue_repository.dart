@@ -7,8 +7,16 @@ abstract interface class QueueRepository {
   // already in the queue, moves it there instead.
   Future<void> addAfterCurrent(int episodeId);
 
-  // Internal removal used by auto-advance. Does NOT revert episode status.
+  // Internal removal that does NOT change episode status. Callers must set
+  // status themselves first, or the episode is stranded at inQueue and shows
+  // in neither the queue nor the inbox. Completion-driven removal should use
+  // markPlayedAndRemove instead.
   Future<void> removeFromQueue(int episodeId);
+
+  // Removal after genuine playback completion: removes the queue row and
+  // marks the episode played atomically, so it can never be stranded in the
+  // inQueue-but-not-in-queue ghost state.
+  Future<void> markPlayedAndRemove(int episodeId);
 
   // User-initiated removal. Reverts episode status to newEpisode so it
   // reappears in the inbox.
