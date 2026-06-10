@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Privacy: crash reporting and anonymous analytics now actually respect the
+  opt-out toggles in Privacy & History. Previously these toggles had no effect
+  on whether Sentry/PostHog initialized. Privacy settings note that changes
+  take effect on next app restart.
 - Search: fixed podcast search still returning no results. iTunes API returns
   `Content-Type: text/javascript`; response is now fetched as plain text and
   decoded manually, bypassing Dio's content-type-based auto-parsing entirely.

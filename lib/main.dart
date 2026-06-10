@@ -11,13 +11,16 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import 'core/background/background_tasks.dart';
 import 'core/constants/playback.dart';
 import 'core/providers/auto_refresh_provider.dart';
+import 'core/providers/core_providers.dart';
 import 'core/logging/log_providers.dart';
 import 'core/logging/log_service.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'data/db/app_database.dart';
 import 'features/downloads/presentation/providers/downloads_providers.dart';
 import 'features/player/data/audio_handler.dart';
 import 'features/player/presentation/providers/player_providers.dart';
+import 'features/settings/data/app_settings_repository.dart';
 import 'features/settings/presentation/providers/settings_providers.dart';
 import 'features/subscriptions/presentation/providers/subscriptions_providers.dart';
 
@@ -101,56 +104,98 @@ Future<void> main() async {
         }),
   );
 
-  // Initialize Sentry first (a no-op if SENTRY_DSN is unset) so that a
-  // failure or timeout during audio init below is still captured.
-  await SentryFlutter.init(
-    (options) {
-      options
-        ..dsn = _sentryDsn
-        ..tracesSampleRate = 0
-        ..attachScreenshot = false
-        ..sendDefaultPii = false;
-    },
-    appRunner: () async {
-      EarshotAudioHandler audioHandler;
-      try {
-        audioHandler = await AudioService.init(
-          builder: EarshotAudioHandler.new,
-          config: const AudioServiceConfig(
-            androidNotificationChannelId: 'media.payown.earshot.audio',
-            androidNotificationChannelName: 'Earshot',
-            androidNotificationOngoing: true,
-            fastForwardInterval: kSkipForwardDuration,
-            rewindInterval: kSkipBackDuration,
-          ),
-        ).timeout(_startupInitTimeout);
-      } catch (error, stackTrace) {
-        _log.severe(
-          'Audio engine failed to initialize within '
-          '${_startupInitTimeout.inSeconds}s',
-          error,
-          stackTrace,
-        );
-        await Sentry.captureException(error, stackTrace: stackTrace);
-        runApp(const _StartupErrorApp());
-        return;
-      }
+  // Crash reporting and analytics are opt-out (default on) per the privacy
+  // settings screen, so check the user's choice before initializing either
+  // SDK. The DB is opened here (lazily — cheap) and handed to the provider
+  // override below so it isn't opened twice.
+  final db = AppDatabase();
+  final settingsRepo = AppSettingsRepositoryImpl(database: db);
+  final crashReportingEnabled = await settingsRepo.isCrashReportingEnabled();
+  final analyticsEnabled = await settingsRepo.isAnalyticsEnabled();
 
-      if (_posthogApiKey.isNotEmpty) {
-        final config = PostHogConfig(_posthogApiKey)..host = _posthogHost;
-        await Posthog().setup(config);
-      }
+  if (crashReportingEnabled && _sentryDsn.isNotEmpty) {
+    // Initialize Sentry first so that a failure or timeout during audio init
+    // below is still captured.
+    await SentryFlutter.init(
+      (options) {
+        options
+          ..dsn = _sentryDsn
+          ..tracesSampleRate = 0
+          ..attachScreenshot = false
+          ..sendDefaultPii = false;
+      },
+      appRunner: () => _startApp(
+        db: db,
+        logService: logService,
+        analyticsEnabled: analyticsEnabled,
+      ),
+    );
+  } else {
+    await _startApp(
+      db: db,
+      logService: logService,
+      analyticsEnabled: analyticsEnabled,
+    );
+  }
+}
 
-      runApp(
-        ProviderScope(
-          overrides: [
-            audioHandlerProvider.overrideWithValue(audioHandler),
-            logServiceProvider.overrideWithValue(logService),
-          ],
-          child: const _AppInitializer(),
-        ),
-      );
-    },
+/// Initializes the audio engine, starts analytics if enabled, and runs the
+/// app. Runs inside [SentryFlutter.init]'s `appRunner` when crash reporting
+/// is enabled, or directly from [main] otherwise — [Sentry.captureException]
+/// below is a safe no-op in the latter case.
+Future<void> _startApp({
+  required AppDatabase db,
+  required LogService logService,
+  required bool analyticsEnabled,
+}) async {
+  EarshotAudioHandler audioHandler;
+  try {
+    audioHandler = await AudioService.init(
+      builder: EarshotAudioHandler.new,
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'media.payown.earshot.audio',
+        androidNotificationChannelName: 'Earshot',
+        androidNotificationOngoing: true,
+        fastForwardInterval: kSkipForwardDuration,
+        rewindInterval: kSkipBackDuration,
+      ),
+    ).timeout(_startupInitTimeout);
+  } catch (error, stackTrace) {
+    _log.severe(
+      'Audio engine failed to initialize within '
+      '${_startupInitTimeout.inSeconds}s',
+      error,
+      stackTrace,
+    );
+    await Sentry.captureException(error, stackTrace: stackTrace);
+    // No ProviderScope will be created on this path, so close the DB
+    // ourselves rather than leaving it open for the life of the error
+    // screen.
+    await db.close();
+    runApp(const _StartupErrorApp());
+    return;
+  }
+
+  if (_posthogApiKey.isNotEmpty && analyticsEnabled) {
+    final config = PostHogConfig(_posthogApiKey)..host = _posthogHost;
+    await Posthog().setup(config);
+  }
+
+  runApp(
+    ProviderScope(
+      overrides: [
+        // overrideWith (not overrideWithValue) so ref.onDispose(db.close) is
+        // re-registered against this ProviderScope, matching
+        // appDatabaseProvider's own definition.
+        appDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(db.close);
+          return db;
+        }),
+        audioHandlerProvider.overrideWithValue(audioHandler),
+        logServiceProvider.overrideWithValue(logService),
+      ],
+      child: const _AppInitializer(),
+    ),
   );
 }
 
