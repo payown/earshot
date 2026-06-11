@@ -17,14 +17,34 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final _pageController = PageController();
+  // One per page, except the last ("You're all set"), whose default VoiceOver
+  // focus order was already correct.
+  final List<FocusNode> _headingFocusNodes = List.generate(
+    6,
+    (_) => FocusNode(debugLabel: 'onboarding-heading'),
+  );
   int _currentPage = 0;
   bool _hasAddedPodcast = false;
 
   static const _totalPages = 7;
 
   @override
+  void initState() {
+    super.initState();
+    // Without this, VoiceOver's accessibility focus lands on the Next button
+    // on first load, so forward swipes skip the page content entirely.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _headingFocusNodes[0].requestFocus();
+    });
+  }
+
+  @override
   void dispose() {
     _pageController.dispose();
+    for (final node in _headingFocusNodes) {
+      node.dispose();
+    }
     super.dispose();
   }
 
@@ -77,43 +97,57 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     'Page ${i + 1} of $_totalPages: $title',
                     TextDirection.ltr,
                   );
+                  // Move VoiceOver focus to the new page's heading so forward
+                  // swipes move through its content, not back to the Next
+                  // button left over from the previous page.
+                  if (i < _headingFocusNodes.length) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      _headingFocusNodes[i].requestFocus();
+                    });
+                  }
                 },
                 children: [
-                  const _OnboardingPage(
+                  _OnboardingPage(
                     icon: Icons.headphones,
                     title: 'Welcome to Earshot',
                     body: 'A podcast player built for the way you listen.',
+                    headingFocusNode: _headingFocusNodes[0],
                   ),
-                  const _OnboardingPage(
+                  _OnboardingPage(
                     icon: Icons.move_down,
                     title: 'How your content flows',
                     body:
                         'Follow a podcast, and new episodes arrive in your Inbox. '
                         'Triage them into your Queue when you\'re ready to listen. '
                         'Mark a podcast as Auto-Queue and new episodes skip Inbox entirely.',
+                    headingFocusNode: _headingFocusNodes[1],
                   ),
-                  _PrivacyPage(),
-                  const _OnboardingPage(
+                  _PrivacyPage(headingFocusNode: _headingFocusNodes[2]),
+                  _OnboardingPage(
                     icon: Icons.swipe_up_alt,
                     title: 'Quick Actions',
                     body:
                         'Every episode and podcast has Quick Actions — shortcuts you can '
                         'reorder to match how you listen. On a screen reader, swipe up '
                         'or down to access them. You can customize the order in Settings.',
+                    headingFocusNode: _headingFocusNodes[3],
                   ),
-                  const _OnboardingPage(
+                  _OnboardingPage(
                     icon: Icons.timer_off,
                     title: 'Queue expiration',
                     body:
                         'Tired of stale news episodes piling up? Set a freshness limit '
                         'per podcast. A daily news show? Set it to 2 days. A weekly '
                         'deep-dive? Two weeks. Or leave it off entirely — it\'s up to you.',
+                    headingFocusNode: _headingFocusNodes[4],
                   ),
                   _AddFirstPodcastPage(
                     onPodcastAdded: () {
                       setState(() => _hasAddedPodcast = true);
                       _nextPage();
                     },
+                    headingFocusNode: _headingFocusNodes[5],
                   ),
                   const _OnboardingPage(
                     icon: Icons.check_circle_outline,
@@ -189,14 +223,30 @@ class _OnboardingPage extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.body,
+    this.headingFocusNode,
   });
 
   final IconData icon;
   final String title;
   final String body;
 
+  /// When set, VoiceOver/TalkBack focus is moved to this page's heading on
+  /// page change so forward swipes traverse the page content.
+  final FocusNode? headingFocusNode;
+
   @override
   Widget build(BuildContext context) {
+    final heading = Semantics(
+      header: true,
+      label: title,
+      child: ExcludeSemantics(
+        child: Text(
+          title,
+          style: Theme.of(context).textTheme.headlineSmall,
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(
@@ -208,17 +258,16 @@ class _OnboardingPage extends StatelessWidget {
             color: Theme.of(context).colorScheme.primary,
           ),
           const SizedBox(height: 32),
-          Semantics(
-            header: true,
-            label: title,
-            child: ExcludeSemantics(
-              child: Text(
-                title,
-                style: Theme.of(context).textTheme.headlineSmall,
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
+          headingFocusNode == null
+              ? heading
+              : Focus(
+                  focusNode: headingFocusNode,
+                  // Reachable via requestFocus() for screen readers, but not
+                  // a Tab/arrow-key stop for hardware-keyboard users since it
+                  // wraps inert heading text.
+                  skipTraversal: true,
+                  child: heading,
+                ),
           const SizedBox(height: 16),
           Text(
             body,
@@ -234,8 +283,25 @@ class _OnboardingPage extends StatelessWidget {
 }
 
 class _PrivacyPage extends StatelessWidget {
+  const _PrivacyPage({this.headingFocusNode});
+
+  /// When set, VoiceOver/TalkBack focus is moved to this page's heading on
+  /// page change so forward swipes traverse the page content.
+  final FocusNode? headingFocusNode;
+
   @override
   Widget build(BuildContext context) {
+    final heading = Semantics(
+      header: true,
+      label: 'Your Privacy',
+      child: ExcludeSemantics(
+        child: Text(
+          'Your Privacy',
+          style: Theme.of(context).textTheme.headlineSmall,
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(
@@ -247,17 +313,16 @@ class _PrivacyPage extends StatelessWidget {
             color: Theme.of(context).colorScheme.primary,
           ),
           const SizedBox(height: 32),
-          Semantics(
-            header: true,
-            label: 'Your Privacy',
-            child: ExcludeSemantics(
-              child: Text(
-                'Your Privacy',
-                style: Theme.of(context).textTheme.headlineSmall,
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
+          headingFocusNode == null
+              ? heading
+              : Focus(
+                  focusNode: headingFocusNode,
+                  // Reachable via requestFocus() for screen readers, but not
+                  // a Tab/arrow-key stop for hardware-keyboard users since it
+                  // wraps inert heading text.
+                  skipTraversal: true,
+                  child: heading,
+                ),
           const SizedBox(height: 16),
           Text(
             'Earshot collects crash reports and anonymous usage data to improve '
@@ -281,12 +346,30 @@ class _PrivacyPage extends StatelessWidget {
 }
 
 class _AddFirstPodcastPage extends ConsumerWidget {
-  const _AddFirstPodcastPage({required this.onPodcastAdded});
+  const _AddFirstPodcastPage({
+    required this.onPodcastAdded,
+    this.headingFocusNode,
+  });
 
   final VoidCallback onPodcastAdded;
 
+  /// When set, VoiceOver/TalkBack focus is moved to this page's heading on
+  /// page change so forward swipes traverse the page content.
+  final FocusNode? headingFocusNode;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final heading = Semantics(
+      header: true,
+      label: 'Add your first podcast',
+      child: ExcludeSemantics(
+        child: Text(
+          'Add your first podcast',
+          style: Theme.of(context).textTheme.headlineSmall,
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(
@@ -298,17 +381,16 @@ class _AddFirstPodcastPage extends ConsumerWidget {
             color: Theme.of(context).colorScheme.primary,
           ),
           const SizedBox(height: 32),
-          Semantics(
-            header: true,
-            label: 'Add your first podcast',
-            child: ExcludeSemantics(
-              child: Text(
-                'Add your first podcast',
-                style: Theme.of(context).textTheme.headlineSmall,
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
+          headingFocusNode == null
+              ? heading
+              : Focus(
+                  focusNode: headingFocusNode,
+                  // Reachable via requestFocus() for screen readers, but not
+                  // a Tab/arrow-key stop for hardware-keyboard users since it
+                  // wraps inert heading text.
+                  skipTraversal: true,
+                  child: heading,
+                ),
           const SizedBox(height: 16),
           Text(
             'Search for a podcast, paste an RSS URL, or import an OPML file.',
