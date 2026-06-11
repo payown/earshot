@@ -224,7 +224,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   Future<void> _finish() async {
     if (widget.replayMode) {
-      if (mounted) context.pop();
+      if (!mounted) return;
+      // Pop back to wherever Settings is on the stack. Fall back to
+      // navigating there directly in case /tutorial was ever reached
+      // without Settings beneath it (e.g. a future deep link).
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go(AppRoutes.settings);
+      }
       return;
     }
     final db = ref.read(appDatabaseProvider);

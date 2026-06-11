@@ -91,5 +91,39 @@ void main() {
         expect(find.text('Settings'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'falls back to navigating to Settings when there is nothing to pop',
+      (tester) async {
+        final router = GoRouter(
+          initialLocation: AppRoutes.tutorial,
+          routes: [
+            GoRoute(
+              path: AppRoutes.settings,
+              builder: (_, __) => const Scaffold(body: Text('Settings Screen')),
+            ),
+            GoRoute(
+              path: AppRoutes.tutorial,
+              builder: (_, __) => const OnboardingScreen(replayMode: true),
+            ),
+          ],
+        );
+
+        await tester.pumpWidget(_buildReplayApp(router));
+        await tester.pumpAndSettle();
+
+        // /tutorial is the only entry on the stack, so there's nothing to
+        // pop back to.
+        for (var i = 0; i < 6; i++) {
+          await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+          await tester.pumpAndSettle();
+        }
+        await tester.tap(find.widgetWithText(FilledButton, 'Done'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(OnboardingScreen), findsNothing);
+        expect(find.text('Settings Screen'), findsOneWidget);
+      },
+    );
   });
 }
