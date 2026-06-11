@@ -104,6 +104,53 @@ void main() {
       expect(find.text('Test Podcast'), findsOneWidget);
     });
 
+    testWidgets('alphabet index only shows letters that are present', (
+      tester,
+    ) async {
+      when(() => repo.watchSubscriptions()).thenAnswer(
+        (_) => Stream.value([
+          _fakePodcast(id: 1, title: 'Apple Cast'),
+          _fakePodcast(id: 2, title: 'Banana Cast'),
+        ]),
+      );
+
+      await tester.pumpWidget(_buildApp(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.bySemanticsLabel('Jump to A'), findsOneWidget);
+      expect(find.bySemanticsLabel('Jump to B'), findsOneWidget);
+      expect(find.bySemanticsLabel('Jump to C'), findsNothing);
+    });
+
+    testWidgets('tapping a letter scrolls its podcasts into view', (
+      tester,
+    ) async {
+      // Use a taller viewport so all 26 index letters are on-screen at once,
+      // matching a real phone rather than the small default test surface.
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final letters = List.generate(26, (i) => String.fromCharCode(65 + i));
+      when(() => repo.watchSubscriptions()).thenAnswer(
+        (_) => Stream.value([
+          for (var i = 0; i < letters.length; i++)
+            _fakePodcast(id: i + 1, title: '${letters[i]} Show'),
+        ]),
+      );
+
+      await tester.pumpWidget(_buildApp(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Z Show'), findsNothing);
+
+      await tester.tap(find.bySemanticsLabel('Jump to Z'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Z Show'), findsOneWidget);
+    });
+
     testWidgets('shows user-friendly message on error', (tester) async {
       when(
         () => repo.watchSubscriptions(),

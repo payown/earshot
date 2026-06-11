@@ -58,6 +58,7 @@ dependencies:
   background_downloader: ^9.5.5
   shake: ^3.0.0
   flutter_email_sender: ^9.0.0
+  scrollable_positioned_list: ^0.3.8
 
 
 dev_dependencies:
