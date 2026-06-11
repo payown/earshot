@@ -113,7 +113,7 @@ class PodcastRepositoryImpl implements PodcastRepository {
   @override
   Stream<List<Podcast>> watchSubscriptions() {
     return (_db.select(_db.podcasts)
-          ..orderBy([(p) => OrderingTerm.asc(p.title)]))
+          ..orderBy([(p) => OrderingTerm(expression: p.title.lower())]))
         .watch()
         .map((rows) => rows.map(_podcastFromRow).toList());
   }

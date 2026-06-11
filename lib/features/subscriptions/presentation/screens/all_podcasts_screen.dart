@@ -5,23 +5,47 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '../../../../core/router/app_router.dart';
 import '../../../../features/folders/presentation/widgets/folder_podcast_picker_sheet.dart';
 import '../../../../features/settings/domain/quick_action_definition.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
+import '../../domain/alphabet_index.dart';
 import '../../domain/podcast.dart';
 import '../providers/subscriptions_providers.dart';
+import '../widgets/alphabet_index_bar.dart';
 import '../widgets/podcast_list_tile.dart';
 
 final _log = Logger('AllPodcastsScreen');
 
-class AllPodcastsScreen extends ConsumerWidget {
+class AllPodcastsScreen extends ConsumerStatefulWidget {
   const AllPodcastsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AllPodcastsScreen> createState() => _AllPodcastsScreenState();
+}
+
+class _AllPodcastsScreenState extends ConsumerState<AllPodcastsScreen> {
+  final _itemScrollController = ItemScrollController();
+
+  void _onLetterSelected(AlphabetIndexEntry entry) {
+    if (MediaQuery.of(context).disableAnimations) {
+      _itemScrollController.jumpTo(index: entry.firstIndex);
+    } else {
+      unawaited(
+        _itemScrollController.scrollTo(
+          index: entry.firstIndex,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     ref.listen(subscriptionsProvider, (_, next) {
       if (next case AsyncError(:final error, :final stackTrace)) {
         _log.severe('Failed to load podcasts', error, stackTrace);
@@ -45,15 +69,30 @@ class AllPodcastsScreen extends ConsumerWidget {
         ],
       ),
       body: podcasts.when(
-        data: (list) => list.isEmpty
-            ? const Center(child: Text('No podcasts yet.'))
-            : ListView.builder(
-                itemCount: list.length,
-                itemBuilder: (ctx, index) => _PodcastTileItem(
-                  podcast: list[index],
-                  podcastActions: podcastActions,
+        data: (list) {
+          if (list.isEmpty) {
+            return const Center(child: Text('No podcasts yet.'));
+          }
+          final alphabetIndex = buildAlphabetIndex(list);
+          return Row(
+            children: [
+              Expanded(
+                child: ScrollablePositionedList.builder(
+                  itemScrollController: _itemScrollController,
+                  itemCount: list.length,
+                  itemBuilder: (ctx, index) => _PodcastTileItem(
+                    podcast: list[index],
+                    podcastActions: podcastActions,
+                  ),
                 ),
               ),
+              AlphabetIndexBar(
+                index: alphabetIndex,
+                onLetterSelected: _onLetterSelected,
+              ),
+            ],
+          );
+        },
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, __) => RefreshIndicator(
           onRefresh: () async => ref.invalidate(subscriptionsProvider),

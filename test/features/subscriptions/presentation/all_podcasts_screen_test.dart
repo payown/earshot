@@ -7,7 +7,9 @@ import 'package:earshot/features/subscriptions/domain/podcast.dart';
 import 'package:earshot/features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import 'package:earshot/features/subscriptions/presentation/screens/all_podcasts_screen.dart';
 import 'package:earshot/features/subscriptions/presentation/screens/podcast_detail_screen.dart';
+import 'package:earshot/features/subscriptions/presentation/widgets/alphabet_index_bar.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -103,6 +105,79 @@ void main() {
 
       expect(find.text('Test Podcast'), findsOneWidget);
     });
+
+    testWidgets(
+      'alphabet index is an adjustable element starting at the first letter',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+
+        when(() => repo.watchSubscriptions()).thenAnswer(
+          (_) => Stream.value([
+            _fakePodcast(id: 1, title: 'Apple Cast'),
+            _fakePodcast(id: 2, title: 'Banana Cast'),
+          ]),
+        );
+
+        await tester.pumpWidget(_buildApp(repo));
+        await tester.pumpAndSettle();
+
+        final node = tester.getSemantics(
+          find.bySemanticsLabel('Alphabet index'),
+        );
+        expect(node.value, 'A, 1 podcast');
+
+        RendererBinding.instance.renderViews.first.owner!.semanticsOwner!
+            .performAction(
+              node.id,
+              SemanticsAction.increase,
+            );
+        await tester.pump();
+
+        final updated = tester.getSemantics(
+          find.bySemanticsLabel('Alphabet index'),
+        );
+        expect(updated.value, 'B, 1 podcast');
+
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'tapping a letter in the index scrolls its podcasts into view',
+      (
+        tester,
+      ) async {
+        // Use a taller viewport so all 26 index letters are on-screen at once,
+        // matching a real phone rather than the small default test surface.
+        tester.view.physicalSize = const Size(800, 1600);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final letters = List.generate(26, (i) => String.fromCharCode(65 + i));
+        when(() => repo.watchSubscriptions()).thenAnswer(
+          (_) => Stream.value([
+            for (var i = 0; i < letters.length; i++)
+              _fakePodcast(id: i + 1, title: '${letters[i]} Show'),
+          ]),
+        );
+
+        await tester.pumpWidget(_buildApp(repo));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Z Show'), findsNothing);
+
+        await tester.tap(
+          find.descendant(
+            of: find.byType(AlphabetIndexBar),
+            matching: find.text('Z'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Z Show'), findsOneWidget);
+      },
+    );
 
     testWidgets('shows user-friendly message on error', (tester) async {
       when(
