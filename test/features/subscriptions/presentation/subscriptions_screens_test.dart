@@ -129,10 +129,13 @@ void main() {
       when(() => repo.watchSubscriptions()).thenAnswer((_) => Stream.value([]));
 
       await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.text('No podcasts yet'), findsOneWidget);
       expect(find.text('Add your first podcast'), findsOneWidget);
+      // The empty state's button already does this, so the FAB is hidden to
+      // avoid two controls with the same purpose.
+      expect(find.byTooltip('Add podcast'), findsNothing);
     });
 
     testWidgets(
@@ -170,7 +173,9 @@ void main() {
     });
 
     testWidgets('FAB has accessible label', (tester) async {
-      when(() => repo.watchSubscriptions()).thenAnswer((_) => Stream.value([]));
+      when(
+        () => repo.watchSubscriptions(),
+      ).thenAnswer((_) => Stream.value([_fakePodcast()]));
 
       await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
       await tester.pump();
@@ -198,7 +203,7 @@ void main() {
       (tester) async {
         when(
           () => repo.watchSubscriptions(),
-        ).thenAnswer((_) => Stream.value([]));
+        ).thenAnswer((_) => Stream.value([_fakePodcast()]));
 
         await tester.pumpWidget(_buildApp(const SubscriptionsScreen(), repo));
         await tester.pump();
