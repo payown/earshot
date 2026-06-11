@@ -60,6 +60,22 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
   Podcast get podcast => widget.podcast;
 
   @override
+  void initState() {
+    super.initState();
+    // Route pushes don't reliably trigger a VoiceOver announcement of the new
+    // screen, so announce the podcast name explicitly once the first frame
+    // is up.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        podcast.title,
+        TextDirection.ltr,
+      );
+    });
+  }
+
+  @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
@@ -69,70 +85,75 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
   Widget build(BuildContext context) {
     final episodes = ref.watch(episodesProvider(widget.podcast.id));
     return Scaffold(
-      body: Semantics(
-        onScrollDown: () {
-          if (_scrollController.hasClients && _scrollController.offset <= 0.0) {
-            _refreshKey.currentState?.show();
+      body: RefreshIndicator(
+        key: _refreshKey,
+        onRefresh: () async {
+          await ref.read(podcastRepositoryProvider).refreshFeed(podcast.id);
+          if (context.mounted) {
+            SemanticsService.sendAnnouncement(
+              View.of(context),
+              '${podcast.title} refreshed',
+              TextDirection.ltr,
+            );
           }
         },
-        customSemanticsActions: {
-          const CustomSemanticsAction(label: 'Refresh'): () {
-            _refreshKey.currentState?.show();
-          },
-        },
-        child: RefreshIndicator(
-          key: _refreshKey,
-          onRefresh: () async {
-            await ref.read(podcastRepositoryProvider).refreshFeed(podcast.id);
-            if (context.mounted) {
-              SemanticsService.sendAnnouncement(
-                View.of(context),
-                '${podcast.title} refreshed',
-                TextDirection.ltr,
-              );
-            }
-          },
-          child: CustomScrollView(
-            controller: _scrollController,
-            slivers: [
-              SliverAppBar(
-                expandedHeight: 200,
-                pinned: true,
-                actions: [
-                  IconButton(
-                    icon: const Icon(Icons.settings_outlined),
-                    tooltip: 'Podcast settings',
-                    onPressed: () =>
-                        context.push(AppRoutes.podcastSettings(podcast.id)),
-                  ),
-                ],
-                flexibleSpace: FlexibleSpaceBar(
-                  title: Text(
-                    podcast.title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                  background: _PodcastHeader(podcast: podcast),
+        child: CustomScrollView(
+          controller: _scrollController,
+          slivers: [
+            SliverAppBar(
+              expandedHeight: 200,
+              pinned: true,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Refresh podcast',
+                  onPressed: () => _refreshKey.currentState?.show(),
                 ),
-              ),
-              if (podcast.description != null)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                IconButton(
+                  icon: const Icon(Icons.settings_outlined),
+                  tooltip: 'Podcast settings',
+                  onPressed: () =>
+                      context.push(AppRoutes.podcastSettings(podcast.id)),
+                ),
+              ],
+              flexibleSpace: FlexibleSpaceBar(
+                title: Semantics(
+                  header: true,
+                  label: podcast.title,
+                  child: ExcludeSemantics(
                     child: Text(
-                      podcast.description!,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
+                      podcast.title,
+                      style:
+                          Theme.of(
+                            context,
+                          ).textTheme.titleMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
                     ),
                   ),
                 ),
+                background: _PodcastHeader(podcast: podcast),
+              ),
+            ),
+            if (podcast.description != null)
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                  child: Semantics(
-                    header: true,
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Text(
+                    podcast.description!,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                child: Semantics(
+                  header: true,
+                  label: 'Episodes',
+                  child: ExcludeSemantics(
                     child: Text(
                       'Episodes',
                       style: Theme.of(context).textTheme.titleLarge,
@@ -140,77 +161,74 @@ class _PodcastDetailViewState extends ConsumerState<_PodcastDetailView> {
                   ),
                 ),
               ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Semantics(
-                    label: 'Filter episodes',
-                    child: SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(value: false, label: Text('All')),
-                        ButtonSegment(value: true, label: Text('Unplayed')),
-                      ],
-                      selected: {_showUnplayedOnly},
-                      onSelectionChanged: (selection) =>
-                          setState(() => _showUnplayedOnly = selection.first),
-                    ),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Semantics(
+                  label: 'Filter episodes',
+                  child: SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: false, label: Text('All')),
+                      ButtonSegment(value: true, label: Text('Unplayed')),
+                    ],
+                    selected: {_showUnplayedOnly},
+                    onSelectionChanged: (selection) =>
+                        setState(() => _showUnplayedOnly = selection.first),
                   ),
                 ),
               ),
-              episodes.when(
-                data: (list) {
-                  final displayed = _showUnplayedOnly
-                      ? list
-                            .where((e) => e.status != EpisodeStatus.played)
-                            .toList()
-                      : list;
-                  return displayed.isEmpty
-                      ? const SliverToBoxAdapter(
-                          child: Padding(
-                            padding: EdgeInsets.all(24),
-                            child: Text('No episodes yet.'),
-                          ),
-                        )
-                      : SliverList.separated(
-                          itemCount: displayed.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
-                          itemBuilder: (ctx, index) {
-                            final episode = displayed[index];
-                            final actions =
-                                ref
-                                    .watch(episodeActionsProvider)
-                                    .asData
-                                    ?.value ??
-                                defaultEpisodeActions;
-                            return EpisodeListTile(
+            ),
+            episodes.when(
+              data: (list) {
+                final displayed = _showUnplayedOnly
+                    ? list
+                          .where((e) => e.status != EpisodeStatus.played)
+                          .toList()
+                    : list;
+                return displayed.isEmpty
+                    ? const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Text('No episodes yet.'),
+                        ),
+                      )
+                    : SliverList.separated(
+                        itemCount: displayed.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (ctx, index) {
+                          final episode = displayed[index];
+                          final actions =
+                              ref.watch(episodeActionsProvider).asData?.value ??
+                              defaultEpisodeActions;
+                          return EpisodeListTile(
+                            episode: episode,
+                            quickActions: buildEpisodeActions(
                               episode: episode,
-                              quickActions: buildEpisodeActions(
-                                episode: episode,
-                                order: actions,
+                              order: actions,
+                              context: ctx,
+                              ref: ref,
+                              onPlay: () => playEpisodeNow(
                                 context: ctx,
                                 ref: ref,
-                                onPlay: () => playEpisodeNow(
-                                  context: ctx,
-                                  ref: ref,
-                                  episode: episode,
-                                ),
+                                episode: episode,
                               ),
-                            );
-                          },
-                        );
-                },
-                loading: () => const SliverToBoxAdapter(
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-                error: (e, _) => SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text('Failed to load episodes: $e'),
-                  ),
+                            ),
+                          );
+                        },
+                      );
+              },
+              loading: () => const SliverToBoxAdapter(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (e, _) => SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text('Failed to load episodes: $e'),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
