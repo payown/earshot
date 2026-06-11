@@ -52,6 +52,9 @@ class _SubscriptionsScreenState extends ConsumerState<SubscriptionsScreen> {
 
     final totalCount = allPodcasts.asData?.value.length ?? 0;
     final folderList = folders.asData?.value ?? [];
+    // The empty state below has its own "Add your first podcast" button, so
+    // hide the FAB to avoid two controls that do the same thing.
+    final showAddPodcastFab = !(allPodcasts.asData?.value.isEmpty ?? false);
 
     return Scaffold(
       appBar: AppBar(
@@ -234,11 +237,13 @@ class _SubscriptionsScreenState extends ConsumerState<SubscriptionsScreen> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddPodcastSheet(context),
-        tooltip: 'Add podcast',
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: showAddPodcastFab
+          ? FloatingActionButton(
+              onPressed: () => _showAddPodcastSheet(context),
+              tooltip: 'Add podcast',
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 
