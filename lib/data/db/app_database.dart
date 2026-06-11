@@ -88,7 +88,8 @@ class AppDatabase extends _$AppDatabase {
         // Backfill: set the high-water mark to the newest episode pub date
         // already in the DB for each podcast so existing episodes don't flood
         // the inbox on the first refresh after this upgrade.
-        await customStatement(''' // security-ok: migration SQL, no user input
+        // security-ok: migration SQL, no user input
+        await customStatement('''
           UPDATE podcasts
           SET last_seen_pub_date = (
             SELECT MAX(pub_date) FROM episodes
@@ -101,7 +102,8 @@ class AppDatabase extends _$AppDatabase {
         // before the high-water mark (or has no parseable date) was part of
         // the pre-upgrade backlog. Set inboxDismissed=true so they leave the
         // inbox immediately without changing playback status.
-        await customStatement(''' // security-ok: migration SQL, no user input
+        // security-ok: migration SQL, no user input
+        await customStatement('''
           UPDATE episodes
           SET inbox_dismissed = 1
           WHERE status = 'newEpisode'
