@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:posthog_flutter/posthog_flutter.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
@@ -110,8 +113,41 @@ Future<void> main() async {
   // override below so it isn't opened twice.
   final db = AppDatabase();
   final settingsRepo = AppSettingsRepositoryImpl(database: db);
-  final crashReportingEnabled = await settingsRepo.isCrashReportingEnabled();
-  final analyticsEnabled = await settingsRepo.isAnalyticsEnabled();
+
+  bool crashReportingEnabled;
+  bool analyticsEnabled;
+  try {
+    // This is the first query against the database, so it's also where a
+    // failed schema migration from an older build would surface. Drift runs
+    // the entire onUpgrade chain on this first query regardless of which
+    // table it targets, and once a migration step fails, user_version never
+    // advances — the same failure repeats on every future launch until the
+    // db file is removed.
+    crashReportingEnabled = await settingsRepo.isCrashReportingEnabled();
+    analyticsEnabled = await settingsRepo.isAnalyticsEnabled();
+  } catch (error, stackTrace) {
+    _log.severe(
+      'Database failed to open or migrate on startup',
+      error,
+      stackTrace,
+    );
+    // Sentry isn't initialized on this path yet, so this is a safe no-op if
+    // the SDK hasn't been set up — same assumption as _startApp below.
+    await Sentry.captureException(error, stackTrace: stackTrace);
+    await db.close();
+    runApp(
+      const _StartupErrorApp(
+        title: "Earshot couldn't load your data.",
+        body:
+            "Earshot's local database could not be opened, possibly due to "
+            'a failed update. Resetting local data will clear your '
+            'subscriptions, queue, and listening history, but should let '
+            'the app start again.',
+        resetAction: _resetLocalDatabase,
+      ),
+    );
+    return;
+  }
 
   if (crashReportingEnabled && _sentryDsn.isNotEmpty) {
     // Initialize Sentry first so that a failure or timeout during audio init
@@ -172,7 +208,14 @@ Future<void> _startApp({
     // ourselves rather than leaving it open for the life of the error
     // screen.
     await db.close();
-    runApp(const _StartupErrorApp());
+    runApp(
+      const _StartupErrorApp(
+        title: "Earshot couldn't start.",
+        body:
+            'Please close and reopen the app. If this keeps '
+            'happening, restarting your device may help.',
+      ),
+    );
     return;
   }
 
@@ -199,21 +242,51 @@ Future<void> _startApp({
   );
 }
 
-/// Shown when the audio engine failed to initialize within
-/// [_startupInitTimeout]. Without an [EarshotAudioHandler] the rest of the
-/// app cannot run, so this is the most the app can offer.
+/// Deletes the on-disk database and its WAL/SHM/journal sidecar files so the
+/// next launch creates a fresh database via [AppDatabase.migration]'s
+/// `onCreate`. This is the recovery action offered when the database fails
+/// to open or migrate: once an `onUpgrade` step fails, `user_version` never
+/// advances, so the same failure repeats on every relaunch, and removing the
+/// file is the only way out short of reinstalling the app.
+Future<void> _resetLocalDatabase() async {
+  final dbFolder = await getApplicationDocumentsDirectory();
+  for (final suffix in ['', '-wal', '-shm', '-journal']) {
+    final file = File(p.join(dbFolder.path, 'earshot.db$suffix'));
+    if (file.existsSync()) {
+      await file.delete();
+    }
+  }
+}
+
+/// Shown when startup fails before the main app can run — either the audio
+/// engine timed out within [_startupInitTimeout], or the local database
+/// failed to open/migrate. Without these, the rest of the app cannot run, so
+/// this is the most the app can offer.
 class _StartupErrorApp extends StatefulWidget {
-  const _StartupErrorApp();
+  const _StartupErrorApp({
+    required this.title,
+    required this.body,
+    this.resetAction,
+  });
+
+  final String title;
+  final String body;
+
+  /// When non-null, shows a "Reset local data" action. Used for database
+  /// failures: the same migration would otherwise fail again on every
+  /// relaunch, and there is no way to recover without removing the db file.
+  final Future<void> Function()? resetAction;
 
   @override
   State<_StartupErrorApp> createState() => _StartupErrorAppState();
 }
 
 class _StartupErrorAppState extends State<_StartupErrorApp> {
-  static const _title = "Earshot couldn't start.";
-  static const _body =
-      'Please close and reopen the app. If this keeps '
-      'happening, restarting your device may help.';
+  static const _resetCompleteMessage =
+      'Local data has been reset. Close and reopen Earshot to continue.';
+
+  bool _resetting = false;
+  bool _resetComplete = false;
 
   @override
   void initState() {
@@ -224,14 +297,36 @@ class _StartupErrorAppState extends State<_StartupErrorApp> {
       if (!mounted) return;
       SemanticsService.sendAnnouncement(
         View.of(context),
-        '$_title $_body',
+        '${widget.title} ${widget.body}',
         TextDirection.ltr,
       );
     });
   }
 
+  Future<void> _handleReset() async {
+    setState(() => _resetting = true);
+    try {
+      await widget.resetAction!();
+      if (!mounted) return;
+      setState(() {
+        _resetting = false;
+        _resetComplete = true;
+      });
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        _resetCompleteMessage,
+        TextDirection.ltr,
+      );
+    } catch (error, stackTrace) {
+      _log.severe('Failed to reset local database', error, stackTrace);
+      if (!mounted) return;
+      setState(() => _resetting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final bodyText = _resetComplete ? _resetCompleteMessage : widget.body;
     return MaterialApp(
       title: 'Earshot',
       theme: AppTheme.light(),
@@ -256,10 +351,10 @@ class _StartupErrorAppState extends State<_StartupErrorApp> {
                 const SizedBox(height: 16),
                 Semantics(
                   header: true,
-                  label: _title,
+                  label: widget.title,
                   child: ExcludeSemantics(
                     child: Text(
-                      _title,
+                      widget.title,
                       style: Theme.of(context).textTheme.titleLarge,
                       textAlign: TextAlign.center,
                     ),
@@ -267,10 +362,19 @@ class _StartupErrorAppState extends State<_StartupErrorApp> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _body,
+                  bodyText,
                   style: Theme.of(context).textTheme.bodyLarge,
                   textAlign: TextAlign.center,
                 ),
+                if (widget.resetAction != null && !_resetComplete) ...[
+                  const SizedBox(height: 24),
+                  FilledButton(
+                    onPressed: _resetting ? null : _handleReset,
+                    child: Text(
+                      _resetting ? 'Resetting...' : 'Reset local data',
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
