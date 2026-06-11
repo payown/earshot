@@ -30,29 +30,18 @@ class AllPodcastsScreen extends ConsumerStatefulWidget {
 class _AllPodcastsScreenState extends ConsumerState<AllPodcastsScreen> {
   final _itemScrollController = ItemScrollController();
 
-  Future<void> _onLetterSelected(
-    String letter,
-    AlphabetIndexEntry entry,
-  ) async {
+  void _onLetterSelected(AlphabetIndexEntry entry) {
     if (MediaQuery.of(context).disableAnimations) {
       _itemScrollController.jumpTo(index: entry.firstIndex);
     } else {
-      await _itemScrollController.scrollTo(
-        index: entry.firstIndex,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
+      unawaited(
+        _itemScrollController.scrollTo(
+          index: entry.firstIndex,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        ),
       );
     }
-    if (!mounted) return;
-    final podcastWord = entry.count == 1 ? 'podcast' : 'podcasts';
-    final letterDescription = letter == '#'
-        ? 'podcasts starting with a number or symbol'
-        : letter;
-    SemanticsService.sendAnnouncement(
-      View.of(context),
-      'Jumped to $letterDescription, ${entry.count} $podcastWord',
-      TextDirection.ltr,
-    );
   }
 
   @override
@@ -98,17 +87,8 @@ class _AllPodcastsScreenState extends ConsumerState<AllPodcastsScreen> {
                 ),
               ),
               AlphabetIndexBar(
-                letters: alphabetIndex.keys.toList(),
-                onLetterSelected: (letter) {
-                  final entry = alphabetIndex[letter];
-                  if (entry == null) {
-                    _log.warning(
-                      'Alphabet index: no entry for letter $letter',
-                    );
-                    return;
-                  }
-                  unawaited(_onLetterSelected(letter, entry));
-                },
+                index: alphabetIndex,
+                onLetterSelected: _onLetterSelected,
               ),
             ],
           );
