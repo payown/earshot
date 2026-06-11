@@ -41,6 +41,7 @@ import '../providers/core_providers.dart';
 abstract final class AppRoutes {
   static const loading = '/loading';
   static const onboarding = '/onboarding';
+  static const tutorial = '/tutorial';
   static const inbox = '/inbox';
   static const queue = '/queue';
   static const subscriptions = '/subscriptions';
@@ -154,6 +155,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.onboarding,
         parentNavigatorKey: _rootKey,
         builder: (_, __) => const OnboardingScreen(),
+      ),
+      // Replays the onboarding tutorial from Settings without affecting the
+      // user's completed-onboarding state. Doesn't start with /onboarding,
+      // so the redirect above leaves it alone for users who are done.
+      GoRoute(
+        path: AppRoutes.tutorial,
+        parentNavigatorKey: _rootKey,
+        builder: (_, __) => const OnboardingScreen(replayMode: true),
       ),
       GoRoute(
         path: AppRoutes.search,

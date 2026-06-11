@@ -67,6 +67,12 @@ class SettingsScreen extends ConsumerWidget {
             trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
             onTap: () => context.push(AppRoutes.settingsAccessibility),
           ),
+          ListTile(
+            title: const Text('View Tutorial'),
+            subtitle: const Text('Replay the app introduction'),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
+            onTap: () => context.push(AppRoutes.tutorial),
+          ),
           const Divider(),
           const _VersionTile(),
           const ListTile(

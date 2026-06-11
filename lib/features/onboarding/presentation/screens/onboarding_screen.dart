@@ -9,7 +9,11 @@ import '../../../../core/router/app_router.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
-  const OnboardingScreen({super.key});
+  const OnboardingScreen({this.replayMode = false, super.key});
+
+  /// When true, this screen replays the tutorial from Settings. Finishing
+  /// just pops back to Settings instead of marking onboarding complete.
+  final bool replayMode;
 
   @override
   ConsumerState<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -175,12 +179,21 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                   const Spacer(),
                   if (_currentPage < _totalPages - 1)
                     Semantics(
-                      enabled: _currentPage != 5 || _hasAddedPodcast,
-                      hint: (_currentPage == 5 && !_hasAddedPodcast)
+                      enabled:
+                          _currentPage != 5 ||
+                          _hasAddedPodcast ||
+                          widget.replayMode,
+                      hint:
+                          (_currentPage == 5 &&
+                              !_hasAddedPodcast &&
+                              !widget.replayMode)
                           ? 'Add a podcast first to continue'
                           : null,
                       child: FilledButton(
-                        onPressed: (_currentPage == 5 && !_hasAddedPodcast)
+                        onPressed:
+                            (_currentPage == 5 &&
+                                !_hasAddedPodcast &&
+                                !widget.replayMode)
                             ? null
                             : _nextPage,
                         child: const Text('Next'),
@@ -189,7 +202,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                   else
                     FilledButton(
                       onPressed: _finish,
-                      child: const Text('Start Listening'),
+                      child: Text(
+                        widget.replayMode ? 'Done' : 'Start Listening',
+                      ),
                     ),
                 ],
               ),
@@ -208,6 +223,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   Future<void> _finish() async {
+    if (widget.replayMode) {
+      if (mounted) context.pop();
+      return;
+    }
     final db = ref.read(appDatabaseProvider);
     await AppSettingsRepositoryImpl(
       database: db,
