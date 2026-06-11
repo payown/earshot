@@ -38,6 +38,7 @@ class AlphabetIndexBar extends StatelessWidget {
             return Semantics(
               button: true,
               label: label,
+              onTap: () => onLetterSelected(letter),
               child: ExcludeSemantics(
                 child: Material(
                   type: MaterialType.transparency,
