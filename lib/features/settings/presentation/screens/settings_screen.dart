@@ -5,10 +5,37 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/constants/urls.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
+import '../../../../core/utils/url_launcher.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
+
+Future<void> _sendFeedback(BuildContext context, WidgetRef ref) async {
+  final packageInfo = await ref.read(packageInfoProvider.future);
+  final uri = Uri(
+    scheme: 'mailto',
+    path: kFeedbackEmail,
+    queryParameters: {
+      'subject':
+          'Earshot Feedback (v${packageInfo.version}+${packageInfo.buildNumber})',
+    },
+  );
+
+  final launched = await safeLaunchUrl(uri.toString());
+  if (!launched && context.mounted) {
+    const message = 'No email app found. Email us at $kFeedbackEmail';
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(message)),
+    );
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      message,
+      TextDirection.ltr,
+    );
+  }
+}
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -81,6 +108,12 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const Divider(),
           const _VersionTile(),
+          ListTile(
+            title: const Text('Send Feedback'),
+            subtitle: const Text('Email the developer with thoughts or ideas'),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
+            onTap: () => _sendFeedback(context, ref),
+          ),
           const ListTile(
             title: Text('Podcast search powered by Podcast Index'),
             subtitle: Text('podcastindex.org'),
