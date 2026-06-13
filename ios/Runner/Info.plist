@@ -8,6 +8,11 @@
 		<string>fetch</string>
 		<string>processing</string>
 	</array>
+	<!-- Makes AirPlay route suggestion available before the Dart-side
+	     AudioSession.configure call (see audio_session_config.dart) runs on
+	     first launch. -->
+	<key>AVInitialRouteSharingPolicy</key>
+	<string>LongFormAudio</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>media.payown.earshot.refreshFeeds</string>
