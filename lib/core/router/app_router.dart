@@ -166,6 +166,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: AppRoutes.loading,
     refreshListenable: notifier,
     redirect: notifier.redirect,
+    observers: [SentryNavigatorObserver()],
     routes: [
       // ── Loading screen (shown while onboarding state is resolving) ────────
       GoRoute(
