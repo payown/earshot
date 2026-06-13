@@ -345,6 +345,144 @@ class QueueRepositoryImpl implements QueueRepository {
   }
 
   @override
+  Future<void> bringGroupToBack(List<int> episodeIdsInOrder) async {
+    if (episodeIdsInOrder.isEmpty) return;
+    await _db.transaction(() async {
+      final rows = await (_db.select(
+        _db.queueItems,
+      )..orderBy([(q) => OrderingTerm.asc(q.position)])).get();
+
+      final idSet = episodeIdsInOrder.toSet();
+      final nonGroupRows = rows
+          .where((r) => !idSet.contains(r.episodeId))
+          .toList();
+
+      // Move everything to temp positions first to avoid unique-constraint
+      // collisions while reassigning. Same pattern as bringGroupToFront().
+      const tempBase = 1000000;
+      for (var i = 0; i < episodeIdsInOrder.length; i++) {
+        await (_db.update(_db.queueItems)
+              ..where((q) => q.episodeId.equals(episodeIdsInOrder[i])))
+            .write(QueueItemsCompanion(position: Value(tempBase + i)));
+      }
+      for (var i = 0; i < nonGroupRows.length; i++) {
+        await (_db.update(
+          _db.queueItems,
+        )..where((q) => q.id.equals(nonGroupRows[i].id))).write(
+          QueueItemsCompanion(
+            position: Value(tempBase + episodeIdsInOrder.length + i),
+          ),
+        );
+      }
+
+      // Non-group episodes keep positions 0..M-1 in their original order.
+      for (var i = 0; i < nonGroupRows.length; i++) {
+        await (_db.update(
+          _db.queueItems,
+        )..where((q) => q.id.equals(nonGroupRows[i].id))).write(
+          QueueItemsCompanion(position: Value(i)),
+        );
+      }
+
+      // Group episodes follow at positions M..M+N-1, in the requested order.
+      for (var i = 0; i < episodeIdsInOrder.length; i++) {
+        await (_db.update(
+          _db.queueItems,
+        )..where((q) => q.episodeId.equals(episodeIdsInOrder[i]))).write(
+          QueueItemsCompanion(position: Value(nonGroupRows.length + i)),
+        );
+      }
+    });
+    await _compactPositions();
+    _log.fine(
+      'Brought group of ${episodeIdsInOrder.length} episodes to back',
+    );
+  }
+
+  @override
+  Future<void> moveGroupUp(int podcastId) async {
+    final (groupOrder, groupEpisodeIds) = await _groupOrder();
+    final idx = groupOrder.indexOf(podcastId);
+    if (idx <= 0) return;
+    final newGroupOrder = [...groupOrder];
+    newGroupOrder[idx - 1] = groupOrder[idx];
+    newGroupOrder[idx] = groupOrder[idx - 1];
+    await _applyGroupOrder(newGroupOrder, groupEpisodeIds);
+    _log.fine('Moved group $podcastId up');
+  }
+
+  @override
+  Future<void> moveGroupDown(int podcastId) async {
+    final (groupOrder, groupEpisodeIds) = await _groupOrder();
+    final idx = groupOrder.indexOf(podcastId);
+    if (idx < 0 || idx >= groupOrder.length - 1) return;
+    final newGroupOrder = [...groupOrder];
+    newGroupOrder[idx + 1] = groupOrder[idx];
+    newGroupOrder[idx] = groupOrder[idx + 1];
+    await _applyGroupOrder(newGroupOrder, groupEpisodeIds);
+    _log.fine('Moved group $podcastId down');
+  }
+
+  // Computes the on-screen group order and per-group episode ordering,
+  // mirroring groupedQueueProvider: a group's order is determined by its
+  // first episode's position in the flat queue, but every episode for that
+  // podcast belongs to the group regardless of where it appears later in the
+  // flat list.
+  Future<(List<int>, Map<int, List<int>>)> _groupOrder() async {
+    final query = _db.select(_db.queueItems).join([
+      innerJoin(
+        _db.episodes,
+        _db.episodes.id.equalsExp(_db.queueItems.episodeId),
+      ),
+    ])..orderBy([OrderingTerm.asc(_db.queueItems.position)]);
+    final result = await query.get();
+
+    final groupOrder = <int>[];
+    final groupEpisodeIds = <int, List<int>>{};
+    for (final row in result) {
+      final item = row.readTable(_db.queueItems);
+      final podcastId = row.readTable(_db.episodes).podcastId;
+      final episodeIds = groupEpisodeIds.putIfAbsent(podcastId, () {
+        groupOrder.add(podcastId);
+        return [];
+      });
+      episodeIds.add(item.episodeId);
+    }
+    return (groupOrder, groupEpisodeIds);
+  }
+
+  // Rebuilds the entire flat queue order to match [newGroupOrder]: each
+  // group's episodes keep their existing relative order, but the groups
+  // themselves are concatenated in the new sequence. This is the only way to
+  // guarantee the resulting groupedQueueProvider order matches
+  // [newGroupOrder] even when groups' episodes are interleaved in the flat
+  // queue (a simple position swap between the two moved groups can leave a
+  // third group's episode stranded between them).
+  Future<void> _applyGroupOrder(
+    List<int> newGroupOrder,
+    Map<int, List<int>> groupEpisodeIds,
+  ) async {
+    final newFlatOrder = [
+      for (final podcastId in newGroupOrder) ...groupEpisodeIds[podcastId]!,
+    ];
+
+    await _db.transaction(() async {
+      const tempBase = 1000000;
+      for (var i = 0; i < newFlatOrder.length; i++) {
+        await (_db.update(_db.queueItems)
+              ..where((q) => q.episodeId.equals(newFlatOrder[i])))
+            .write(QueueItemsCompanion(position: Value(tempBase + i)));
+      }
+      for (var i = 0; i < newFlatOrder.length; i++) {
+        await (_db.update(_db.queueItems)
+              ..where((q) => q.episodeId.equals(newFlatOrder[i])))
+            .write(QueueItemsCompanion(position: Value(i)));
+      }
+    });
+    await _compactPositions();
+  }
+
+  @override
   Stream<List<Episode>> watchQueue() {
     final query = _db.select(_db.queueItems).join([
       innerJoin(

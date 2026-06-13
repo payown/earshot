@@ -559,6 +559,163 @@ void main() {
     );
   });
 
+  // ── bringGroupToBack ──────────────────────────────────────────────────────
+
+  group('bringGroupToBack', () {
+    test(
+      'moves interleaved group episodes to back in specified order',
+      () async {
+        final podA = await _addPodcast();
+        final podB = await _addPodcast();
+        // Interleaved: A1, B1, A2, B2
+        final a1 = await _addEpisode(podA);
+        final b1 = await _addEpisode(podB);
+        final a2 = await _addEpisode(podA);
+        final b2 = await _addEpisode(podB);
+        await repo.addToQueue(a1);
+        await repo.addToQueue(b1);
+        await repo.addToQueue(a2);
+        await repo.addToQueue(b2);
+
+        // Move group A to the back, in reverse order.
+        await repo.bringGroupToBack([a2, a1]);
+
+        // B episodes keep their relative order at the front; A episodes
+        // follow in the requested order.
+        expect(await _queueOrder(), [b1, b2, a2, a1]);
+      },
+    );
+
+    test(
+      'handles already-contiguous group without disturbing non-group order',
+      () async {
+        final podA = await _addPodcast();
+        final podB = await _addPodcast();
+        // Contiguous: B1 at front, then A1, A2.
+        final b1 = await _addEpisode(podB);
+        final a1 = await _addEpisode(podA);
+        final a2 = await _addEpisode(podA);
+        await repo.addToQueue(b1);
+        await repo.addToQueue(a1);
+        await repo.addToQueue(a2);
+
+        // Reverse the A group order.
+        await repo.bringGroupToBack([a2, a1]);
+
+        expect(await _queueOrder(), [b1, a2, a1]);
+      },
+    );
+
+    test('no-op when given an empty list', () async {
+      final podcastId = await _addPodcast();
+      final ep1 = await _addEpisode(podcastId);
+      final ep2 = await _addEpisode(podcastId);
+      await repo.addToQueue(ep1);
+      await repo.addToQueue(ep2);
+
+      await repo.bringGroupToBack([]);
+
+      expect(await _queueOrder(), [ep1, ep2]);
+    });
+  });
+
+  // ── moveGroupUp / moveGroupDown ───────────────────────────────────────────
+
+  group('moveGroupUp', () {
+    test('swaps with the group above, even when interleaved', () async {
+      final podA = await _addPodcast();
+      final podB = await _addPodcast();
+      final podC = await _addPodcast();
+      // Group order is A, B, C. B's episodes are interleaved with C's.
+      final a1 = await _addEpisode(podA);
+      final b1 = await _addEpisode(podB);
+      final c1 = await _addEpisode(podC);
+      final b2 = await _addEpisode(podB);
+      final c2 = await _addEpisode(podC);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(b1);
+      await repo.addToQueue(c1);
+      await repo.addToQueue(b2);
+      await repo.addToQueue(c2);
+
+      // Move group B above group A.
+      await repo.moveGroupUp(podB);
+
+      // The queue is re-flattened by new group order [B, A, C]: B's episodes
+      // come first, then A's, then C's, each preserving its existing
+      // relative order. Note C's c1 shifts from position 2 to 3 even though
+      // C's own ordering (c1 then c2) is unchanged.
+      expect(await _queueOrder(), [b1, b2, a1, c1, c2]);
+    });
+
+    test('no-op when the group is already first', () async {
+      final podA = await _addPodcast();
+      final podB = await _addPodcast();
+      final a1 = await _addEpisode(podA);
+      final b1 = await _addEpisode(podB);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(b1);
+
+      await repo.moveGroupUp(podA);
+
+      expect(await _queueOrder(), [a1, b1]);
+    });
+
+    test('no-op when the podcast has no episodes in the queue', () async {
+      final podA = await _addPodcast();
+      final podB = await _addPodcast();
+      final a1 = await _addEpisode(podA);
+      final b1 = await _addEpisode(podB);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(b1);
+
+      final podC = await _addPodcast();
+      await repo.moveGroupUp(podC);
+
+      expect(await _queueOrder(), [a1, b1]);
+    });
+  });
+
+  group('moveGroupDown', () {
+    test('swaps with the group below, even when interleaved', () async {
+      final podA = await _addPodcast();
+      final podB = await _addPodcast();
+      final podC = await _addPodcast();
+      // Group order is A, B, C. A's episodes are interleaved with B's.
+      final a1 = await _addEpisode(podA);
+      final b1 = await _addEpisode(podB);
+      final a2 = await _addEpisode(podA);
+      final b2 = await _addEpisode(podB);
+      final c1 = await _addEpisode(podC);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(b1);
+      await repo.addToQueue(a2);
+      await repo.addToQueue(b2);
+      await repo.addToQueue(c1);
+
+      // Move group A below group B.
+      await repo.moveGroupDown(podA);
+
+      // The queue is re-flattened by new group order [B, A, C]: B's episodes
+      // come first, then A's, then C's, each preserving its existing
+      // relative order. C's c1 happens to stay at the last position.
+      expect(await _queueOrder(), [b1, b2, a1, a2, c1]);
+    });
+
+    test('no-op when the group is already last', () async {
+      final podA = await _addPodcast();
+      final podB = await _addPodcast();
+      final a1 = await _addEpisode(podA);
+      final b1 = await _addEpisode(podB);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(b1);
+
+      await repo.moveGroupDown(podB);
+
+      expect(await _queueOrder(), [a1, b1]);
+    });
+  });
+
   // ── watchQueue ────────────────────────────────────────────────────────────
 
   group('watchQueue', () {

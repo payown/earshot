@@ -51,6 +51,20 @@ abstract interface class QueueRepository {
   // group before continuing with other queue items.
   Future<void> bringGroupToFront(List<int> episodeIdsInOrder);
 
+  // Mirror image of bringGroupToFront: moves the given episodes to the end of
+  // the queue in the specified order, preserving the relative order of all
+  // other episodes ahead of them.
+  Future<void> bringGroupToBack(List<int> episodeIdsInOrder);
+
+  // Group-level reorder for the "Group by podcast" Queue view. Swaps the
+  // entire group's queue positions with those of the group immediately
+  // above/below it in groupedQueueProvider's display order (group order is
+  // determined by each group's first episode's position in the flat queue).
+  // No-op if the group is already first/last.
+  Future<void> moveGroupUp(int podcastId);
+
+  Future<void> moveGroupDown(int podcastId);
+
   Stream<List<Episode>> watchQueue();
 
   Future<void> clearQueue();
