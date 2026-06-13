@@ -20,6 +20,7 @@ import '../../features/search/presentation/screens/search_screen.dart';
 import '../../features/settings/data/app_settings_repository.dart';
 import '../../features/settings/presentation/screens/accessibility_settings_screen.dart';
 import '../../features/settings/presentation/screens/downloads_settings_screen.dart';
+import '../../features/settings/presentation/screens/general_settings_screen.dart';
 import '../../features/settings/presentation/screens/inbox_settings_screen.dart';
 import '../../features/settings/presentation/screens/playback_settings_screen.dart';
 import '../../features/settings/presentation/screens/privacy_settings_screen.dart';
@@ -56,6 +57,7 @@ abstract final class AppRoutes {
   static const player = '/player';
   static const settings = '/settings';
   static const settingsImportOpml = '/settings/import-opml';
+  static const settingsGeneral = '/settings/general';
   static const settingsSubscriptions = '/settings/subscriptions';
   static const settingsQuickActionsMenu = '/settings/quick-actions-menu';
   static const settingsInbox = '/settings/inbox';
@@ -78,11 +80,27 @@ final isOnboardingCompleteProvider = FutureProvider<bool>((ref) async {
   return AppSettingsRepositoryImpl(database: db).isOnboardingComplete();
 });
 
+// ── Default launch screen ──────────────────────────────────────────────────
+
+final defaultLaunchRouteProvider = FutureProvider<String>((ref) async {
+  final db = ref.watch(appDatabaseProvider);
+  final screen = await AppSettingsRepositoryImpl(
+    database: db,
+  ).getDefaultLaunchScreen();
+  return switch (screen) {
+    LaunchScreen.inbox => AppRoutes.inbox,
+    LaunchScreen.queue => AppRoutes.queue,
+    LaunchScreen.library => AppRoutes.subscriptions,
+    LaunchScreen.downloads => AppRoutes.downloads,
+  };
+});
+
 // ── Router notifier (ChangeNotifier for GoRouter.refreshListenable) ───────────
 
 class _RouterNotifier extends ChangeNotifier {
   _RouterNotifier(this._ref) {
     _ref.listen(isOnboardingCompleteProvider, (_, __) => notifyListeners());
+    _ref.listen(defaultLaunchRouteProvider, (_, __) => notifyListeners());
   }
 
   final Ref _ref;
@@ -104,7 +122,15 @@ class _RouterNotifier extends ChangeNotifier {
       },
       data: (done) {
         if (atLoading) {
-          return done ? AppRoutes.subscriptions : AppRoutes.onboarding;
+          if (!done) return AppRoutes.onboarding;
+          return _ref
+              .read(defaultLaunchRouteProvider)
+              .when(
+                data: (route) => route,
+                // Stay on the loading screen until the setting is resolved.
+                loading: () => null,
+                error: (_, __) => AppRoutes.subscriptions,
+              );
         }
         final atOnboarding = state.matchedLocation.startsWith(
           AppRoutes.onboarding,
@@ -218,6 +244,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             builder: (_, state) => OpmlImportScreen(
               fromOnboarding: state.extra == true,
             ),
+          ),
+          GoRoute(
+            path: 'general',
+            parentNavigatorKey: _rootKey,
+            builder: (_, __) => const GeneralSettingsScreen(),
           ),
           GoRoute(
             path: 'subscriptions',

@@ -130,4 +130,46 @@ void main() {
       });
     },
   );
+
+  group('default launch screen', () {
+    testWidgets('defaults to library when no preference is set', (
+      tester,
+    ) async {
+      await pumpRouter(tester);
+
+      expect(currentLocation(), AppRoutes.subscriptions);
+    });
+
+    testWidgets('launches to inbox when set to inbox', (tester) async {
+      await AppSettingsRepositoryImpl(
+        database: db,
+      ).setDefaultLaunchScreen(LaunchScreen.inbox);
+
+      await pumpRouter(tester);
+
+      expect(currentLocation(), AppRoutes.inbox);
+    });
+
+    testWidgets('launches to queue when set to queue', (tester) async {
+      await AppSettingsRepositoryImpl(
+        database: db,
+      ).setDefaultLaunchScreen(LaunchScreen.queue);
+
+      await pumpRouter(tester);
+
+      expect(currentLocation(), AppRoutes.queue);
+    });
+
+    testWidgets('launches to downloads when set to downloads', (
+      tester,
+    ) async {
+      await AppSettingsRepositoryImpl(
+        database: db,
+      ).setDefaultLaunchScreen(LaunchScreen.downloads);
+
+      await pumpRouter(tester);
+
+      expect(currentLocation(), AppRoutes.downloads);
+    });
+  });
 }

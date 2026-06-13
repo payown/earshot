@@ -20,6 +20,12 @@ class SettingsScreen extends ConsumerWidget {
       body: ListView(
         children: [
           ListTile(
+            title: const Text('General'),
+            subtitle: const Text('Default launch screen'),
+            trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),
+            onTap: () => context.push(AppRoutes.settingsGeneral),
+          ),
+          ListTile(
             title: const Text('Subscriptions'),
             subtitle: const Text('Import and export OPML'),
             trailing: const ExcludeSemantics(child: Icon(Icons.chevron_right)),

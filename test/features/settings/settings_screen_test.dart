@@ -28,6 +28,10 @@ void main() {
           path: AppRoutes.tutorial,
           builder: (_, __) => const Scaffold(body: Text('Tutorial Screen')),
         ),
+        GoRoute(
+          path: AppRoutes.settingsGeneral,
+          builder: (_, __) => const Scaffold(body: Text('General Screen')),
+        ),
       ],
     );
     await tester.pumpWidget(
@@ -65,5 +69,22 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Tutorial Screen'), findsOneWidget);
+  });
+
+  testWidgets('shows a General entry', (tester) async {
+    await pumpScreen(tester);
+
+    expect(find.text('General'), findsOneWidget);
+  });
+
+  testWidgets('tapping General navigates to the general settings route', (
+    tester,
+  ) async {
+    await pumpScreen(tester);
+
+    await tester.tap(find.text('General'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('General Screen'), findsOneWidget);
   });
 }
