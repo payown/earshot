@@ -30,6 +30,14 @@ abstract interface class QueueRepository {
 
   Future<void> moveDown(int episodeId);
 
+  // Group-aware variants of moveUp/moveDown for the "Group by podcast" Queue
+  // view. Swap with the adjacent episode within the same podcast's group
+  // (by global position order), not the adjacent episode in the global flat
+  // queue. No-op if the episode is already first/last within its group.
+  Future<void> moveUpInGroup(int episodeId, int podcastId);
+
+  Future<void> moveDownInGroup(int episodeId, int podcastId);
+
   Future<void> reorder(int episodeId, int newPosition);
 
   // Reorders a subset of queue items in-place. Each episode in

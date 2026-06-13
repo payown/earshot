@@ -449,6 +449,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                 total: group.episodes.length,
                 position: posInGroup,
                 actionOrder: actionOrder,
+                useGroupAwareMove: true,
               ),
             );
           }
@@ -647,6 +648,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     required int position,
     required List<EpisodeAction> actionOrder,
     bool isNowPlaying = false,
+    bool useGroupAwareMove = false,
   }) {
     void play() => playEpisodeNow(context: context, ref: ref, episode: episode);
 
@@ -685,26 +687,36 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       }),
     );
     void moveUp() => unawaited(
-      ref.read(queueRepositoryProvider).moveUp(episode.id).then((_) {
-        if (context.mounted) {
-          SemanticsService.sendAnnouncement(
-            View.of(context),
-            'Moved up, now position ${position - 1} of $total',
-            TextDirection.ltr,
-          );
-        }
-      }),
+      (useGroupAwareMove
+              ? ref
+                    .read(queueRepositoryProvider)
+                    .moveUpInGroup(episode.id, episode.podcastId)
+              : ref.read(queueRepositoryProvider).moveUp(episode.id))
+          .then((_) {
+            if (context.mounted) {
+              SemanticsService.sendAnnouncement(
+                View.of(context),
+                'Moved up, now position ${position - 1} of $total',
+                TextDirection.ltr,
+              );
+            }
+          }),
     );
     void moveDown() => unawaited(
-      ref.read(queueRepositoryProvider).moveDown(episode.id).then((_) {
-        if (context.mounted) {
-          SemanticsService.sendAnnouncement(
-            View.of(context),
-            'Moved down, now position ${position + 1} of $total',
-            TextDirection.ltr,
-          );
-        }
-      }),
+      (useGroupAwareMove
+              ? ref
+                    .read(queueRepositoryProvider)
+                    .moveDownInGroup(episode.id, episode.podcastId)
+              : ref.read(queueRepositoryProvider).moveDown(episode.id))
+          .then((_) {
+            if (context.mounted) {
+              SemanticsService.sendAnnouncement(
+                View.of(context),
+                'Moved down, now position ${position + 1} of $total',
+                TextDirection.ltr,
+              );
+            }
+          }),
     );
     void removeFromQueue() => unawaited(
       ref.read(queueRepositoryProvider).cancelFromQueue(episode.id).then((_) {
