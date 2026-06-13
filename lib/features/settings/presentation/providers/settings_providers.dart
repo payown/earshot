@@ -231,9 +231,17 @@ class _LaunchScreenNotifier extends AsyncNotifier<LaunchScreen> {
   }
 
   Future<void> set(LaunchScreen value) async {
+    final previous = state;
     state = AsyncData(value);
     final db = ref.read(appDatabaseProvider);
-    await AppSettingsRepositoryImpl(database: db).setDefaultLaunchScreen(value);
+    try {
+      await AppSettingsRepositoryImpl(
+        database: db,
+      ).setDefaultLaunchScreen(value);
+    } catch (_) {
+      state = previous;
+      rethrow;
+    }
   }
 }
 
