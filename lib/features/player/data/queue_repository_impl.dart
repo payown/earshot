@@ -199,6 +199,55 @@ class QueueRepositoryImpl implements QueueRepository {
   }
 
   @override
+  Future<void> moveUpInGroup(int episodeId, int podcastId) async {
+    final rows = await _groupRows(podcastId);
+    final idx = rows.indexWhere((r) => r.episodeId == episodeId);
+    if (idx <= 0) return;
+    await _db.transaction(() async {
+      await (_db.update(_db.queueItems)
+            ..where((q) => q.id.equals(rows[idx].id)))
+          .write(QueueItemsCompanion(position: Value(rows[idx - 1].position)));
+      await (_db.update(_db.queueItems)
+            ..where((q) => q.id.equals(rows[idx - 1].id)))
+          .write(QueueItemsCompanion(position: Value(rows[idx].position)));
+    });
+    await _compactPositions();
+  }
+
+  @override
+  Future<void> moveDownInGroup(int episodeId, int podcastId) async {
+    final rows = await _groupRows(podcastId);
+    final idx = rows.indexWhere((r) => r.episodeId == episodeId);
+    if (idx < 0 || idx >= rows.length - 1) return;
+    await _db.transaction(() async {
+      await (_db.update(_db.queueItems)
+            ..where((q) => q.id.equals(rows[idx].id)))
+          .write(QueueItemsCompanion(position: Value(rows[idx + 1].position)));
+      await (_db.update(_db.queueItems)
+            ..where((q) => q.id.equals(rows[idx + 1].id)))
+          .write(QueueItemsCompanion(position: Value(rows[idx].position)));
+    });
+    await _compactPositions();
+  }
+
+  // Queue items for a single podcast's group, ordered by global queue
+  // position. Used by moveUpInGroup/moveDownInGroup to find the adjacent
+  // episode *within the group*, which may not be globally adjacent.
+  Future<List<QueueItemRow>> _groupRows(int podcastId) async {
+    final query =
+        _db.select(_db.queueItems).join([
+            innerJoin(
+              _db.episodes,
+              _db.episodes.id.equalsExp(_db.queueItems.episodeId),
+            ),
+          ])
+          ..where(_db.episodes.podcastId.equals(podcastId))
+          ..orderBy([OrderingTerm.asc(_db.queueItems.position)]);
+    final result = await query.get();
+    return result.map((row) => row.readTable(_db.queueItems)).toList();
+  }
+
+  @override
   Future<void> reorder(int episodeId, int newPosition) async {
     await (_db.update(_db.queueItems)
           ..where((q) => q.episodeId.equals(episodeId)))

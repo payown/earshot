@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Queue: "Move up"/"Move down" Quick Actions on a grouped episode now reliably
+  reorder it within its podcast group. Previously they swapped the episode's
+  position in the global flat queue, which could land on a different podcast's
+  episode and produce no visible change in the grouped view.
 - Privacy: crash reporting and anonymous analytics now actually respect the
   opt-out toggles in Privacy & History. Previously these toggles had no effect
   on whether Sentry/PostHog initialized. Privacy settings note that changes

@@ -341,6 +341,105 @@ void main() {
     });
   });
 
+  // ── moveUpInGroup / moveDownInGroup ──────────────────────────────────────
+
+  group('moveUpInGroup', () {
+    test(
+      'swaps with the previous episode in the same group, even when '
+      'interleaved with another group',
+      () async {
+        final podA = await _addPodcast();
+        final podB = await _addPodcast();
+        // Interleaved: A1, B1, A2, B2 — group A is [a1, a2].
+        final a1 = await _addEpisode(podA);
+        final b1 = await _addEpisode(podB);
+        final a2 = await _addEpisode(podA);
+        final b2 = await _addEpisode(podB);
+        await repo.addToQueue(a1);
+        await repo.addToQueue(b1);
+        await repo.addToQueue(a2);
+        await repo.addToQueue(b2);
+
+        await repo.moveUpInGroup(a2, podA);
+
+        // a1/a2 swap global positions; group B's episodes are untouched.
+        expect(await _queueOrder(), [a2, b1, a1, b2]);
+      },
+    );
+
+    test('no-op when episode is first in its group', () async {
+      final podA = await _addPodcast();
+      final podB = await _addPodcast();
+      final a1 = await _addEpisode(podA);
+      final b1 = await _addEpisode(podB);
+      final a2 = await _addEpisode(podA);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(b1);
+      await repo.addToQueue(a2);
+
+      await repo.moveUpInGroup(a1, podA);
+
+      expect(await _queueOrder(), [a1, b1, a2]);
+    });
+  });
+
+  group('moveDownInGroup', () {
+    test(
+      'swaps with the next episode in the same group, even when '
+      'interleaved with another group',
+      () async {
+        final podA = await _addPodcast();
+        final podB = await _addPodcast();
+        // Interleaved: A1, B1, A2, B2 — group A is [a1, a2].
+        final a1 = await _addEpisode(podA);
+        final b1 = await _addEpisode(podB);
+        final a2 = await _addEpisode(podA);
+        final b2 = await _addEpisode(podB);
+        await repo.addToQueue(a1);
+        await repo.addToQueue(b1);
+        await repo.addToQueue(a2);
+        await repo.addToQueue(b2);
+
+        await repo.moveDownInGroup(a1, podA);
+
+        // a1/a2 swap global positions; group B's episodes are untouched.
+        expect(await _queueOrder(), [a2, b1, a1, b2]);
+      },
+    );
+
+    test('no-op when episode is last in its group', () async {
+      final podA = await _addPodcast();
+      final podB = await _addPodcast();
+      final a1 = await _addEpisode(podA);
+      final b1 = await _addEpisode(podB);
+      final a2 = await _addEpisode(podA);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(b1);
+      await repo.addToQueue(a2);
+
+      await repo.moveDownInGroup(a2, podA);
+
+      expect(await _queueOrder(), [a1, b1, a2]);
+    });
+
+    test('does not change the relative order of other groups', () async {
+      final podA = await _addPodcast();
+      final podB = await _addPodcast();
+      final a1 = await _addEpisode(podA);
+      final a2 = await _addEpisode(podA);
+      final b1 = await _addEpisode(podB);
+      final b2 = await _addEpisode(podB);
+      await repo.addToQueue(a1);
+      await repo.addToQueue(a2);
+      await repo.addToQueue(b1);
+      await repo.addToQueue(b2);
+
+      await repo.moveDownInGroup(a1, podA);
+
+      expect(await _queueOrder(), [a2, a1, b1, b2]);
+    });
+  });
+
   // ── reorder ───────────────────────────────────────────────────────────────
 
   group('reorder', () {
