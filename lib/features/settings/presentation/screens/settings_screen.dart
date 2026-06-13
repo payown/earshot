@@ -14,14 +14,10 @@ import '../../../../features/settings/presentation/providers/settings_providers.
 
 Future<void> _sendFeedback(BuildContext context, WidgetRef ref) async {
   final packageInfo = await ref.read(packageInfoProvider.future);
-  final uri = Uri(
-    scheme: 'mailto',
-    path: kFeedbackEmail,
-    queryParameters: {
-      'subject':
-          'Earshot Feedback (v${packageInfo.version}+${packageInfo.buildNumber})',
-    },
+  final subject = Uri.encodeComponent(
+    'Earshot Feedback (v${packageInfo.version}+${packageInfo.buildNumber})',
   );
+  final uri = Uri.parse('mailto:$kFeedbackEmail?subject=$subject');
 
   final launched = await safeLaunchUrl(uri.toString());
   if (!launched && context.mounted) {

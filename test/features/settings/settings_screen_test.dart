@@ -164,7 +164,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(fakeLauncher.launched, hasLength(1));
-      final uri = Uri.parse(fakeLauncher.launched.single);
+      final raw = fakeLauncher.launched.single;
+      // Spaces and '+' must be percent-encoded as %20/%2B, not '+', so mail
+      // clients don't render literal '+' characters in the subject.
+      expect(
+        raw,
+        'mailto:michael@payown.media?subject=Earshot%20Feedback%20(v1.2.3%2B99)',
+      );
+      final uri = Uri.parse(raw);
       expect(uri.scheme, 'mailto');
       expect(uri.path, 'michael@payown.media');
       expect(
