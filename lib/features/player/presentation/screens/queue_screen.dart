@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -212,6 +212,12 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
         ],
       ),
       body: CustomScrollView(
+        // Default cache extent (250px) drops SemanticsNodes for rows/headers
+        // (in both slivers below) that scroll out of range, breaking the
+        // VoiceOver headings rotor when an earlier group is expanded (#263).
+        // A viewport-relative extent scales with screen size and with larger
+        // Dynamic Type sizes (taller rows, fewer fit per screen).
+        scrollCacheExtent: const ScrollCacheExtent.viewport(3),
         slivers: [
           if (!tipSeen)
             SliverToBoxAdapter(
