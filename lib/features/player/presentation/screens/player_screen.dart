@@ -651,6 +651,16 @@ class _ShowNotesSection extends StatefulWidget {
 class _ShowNotesSectionState extends State<_ShowNotesSection> {
   bool _expanded = false;
 
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+    if (!mounted) return;
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      _expanded ? 'Show notes expanded' : 'Show notes collapsed',
+      TextDirection.ltr,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final disableAnimations = MediaQuery.of(context).disableAnimations;
@@ -663,11 +673,11 @@ class _ShowNotesSectionState extends State<_ShowNotesSection> {
         Semantics(
           button: true,
           expanded: _expanded,
-          label: 'Show notes',
-          onTap: () => setState(() => _expanded = !_expanded),
+          label: _expanded ? 'Show notes, expanded' : 'Show notes, collapsed',
+          onTap: _toggle,
           child: ExcludeSemantics(
             child: InkWell(
-              onTap: () => setState(() => _expanded = !_expanded),
+              onTap: _toggle,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: Spacing.sm),
                 child: Row(
