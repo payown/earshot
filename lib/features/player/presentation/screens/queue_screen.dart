@@ -418,10 +418,26 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
         }
 
         final collapsed = ref.watch(collapsedQueueGroupsProvider);
+        // Use the unadjusted group list for index/count so they line up with
+        // QueueRepository's group ordering (which always includes the
+        // now-playing podcast's group), even though that group may be hidden
+        // from adjustedGroups when it becomes empty.
+        final totalGroups = groups.length;
 
         for (final group in adjustedGroups) {
           final isCollapsed = collapsed.contains(group.podcastId);
-          items.add(_buildGroupHeader(context, ref, group, isCollapsed));
+          final groupIndex =
+              groups.indexWhere((g) => g.podcastId == group.podcastId) + 1;
+          items.add(
+            _buildGroupHeader(
+              context,
+              ref,
+              group,
+              isCollapsed,
+              groupIndex: groupIndex,
+              totalGroups: totalGroups,
+            ),
+          );
           // When collapsed, episodes are not rendered at all so neither
           // sighted users nor VoiceOver encounter them. The headings rotor
           // still finds the group header.
@@ -482,8 +498,10 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     BuildContext context,
     WidgetRef ref,
     QueueGroup group,
-    bool isCollapsed,
-  ) {
+    bool isCollapsed, {
+    required int groupIndex,
+    required int totalGroups,
+  }) {
     Future<void> playFirst() async {
       if (group.episodes.isEmpty) return;
       final view = View.of(context);
@@ -560,6 +578,60 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       });
     }
 
+    final isFirstGroup = groupIndex == 1;
+    final isLastGroup = groupIndex == totalGroups;
+
+    Future<void> moveGroupToTop() async {
+      final view = View.of(context);
+      await ref
+          .read(queueRepositoryProvider)
+          .bringGroupToFront(group.episodes.map((e) => e.id).toList());
+      if (!context.mounted) return;
+      SemanticsService.sendAnnouncement(
+        view,
+        '${group.podcastName} moved to top, now group 1 of $totalGroups',
+        TextDirection.ltr,
+      );
+    }
+
+    Future<void> moveGroupToBottom() async {
+      final view = View.of(context);
+      await ref
+          .read(queueRepositoryProvider)
+          .bringGroupToBack(group.episodes.map((e) => e.id).toList());
+      if (!context.mounted) return;
+      SemanticsService.sendAnnouncement(
+        view,
+        '${group.podcastName} moved to bottom, now group $totalGroups '
+        'of $totalGroups',
+        TextDirection.ltr,
+      );
+    }
+
+    Future<void> moveGroupUp() async {
+      final view = View.of(context);
+      await ref.read(queueRepositoryProvider).moveGroupUp(group.podcastId);
+      if (!context.mounted) return;
+      SemanticsService.sendAnnouncement(
+        view,
+        '${group.podcastName} moved up, now group ${groupIndex - 1} '
+        'of $totalGroups',
+        TextDirection.ltr,
+      );
+    }
+
+    Future<void> moveGroupDown() async {
+      final view = View.of(context);
+      await ref.read(queueRepositoryProvider).moveGroupDown(group.podcastId);
+      if (!context.mounted) return;
+      SemanticsService.sendAnnouncement(
+        view,
+        '${group.podcastName} moved down, now group ${groupIndex + 1} '
+        'of $totalGroups',
+        TextDirection.ltr,
+      );
+    }
+
     final episodeCount = group.episodes.length;
     final episodeCountLabel =
         '$episodeCount ${episodeCount == 1 ? 'episode' : 'episodes'}';
@@ -596,6 +668,20 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
         },
         const CustomSemanticsAction(label: 'Sort oldest first'): () {
           unawaited(sortOldest());
+        },
+        const CustomSemanticsAction(label: 'Move group to top'): () {
+          unawaited(moveGroupToTop());
+        },
+        if (!isFirstGroup)
+          const CustomSemanticsAction(label: 'Move group up'): () {
+            unawaited(moveGroupUp());
+          },
+        if (!isLastGroup)
+          const CustomSemanticsAction(label: 'Move group down'): () {
+            unawaited(moveGroupDown());
+          },
+        const CustomSemanticsAction(label: 'Move group to bottom'): () {
+          unawaited(moveGroupToBottom());
         },
       },
       child: ExcludeSemantics(

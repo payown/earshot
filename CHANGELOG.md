@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Queue: in the "Group by podcast" view, each podcast group now has "Move
+  group to top/up/down/bottom" actions in the VoiceOver/TalkBack actions
+  rotor, mirroring the per-episode move actions.
+
 ### Changed
 - Episode actions are now identical across Inbox, Queue, Library, and Downloads.
   Every tab uses one shared "Play now" path, one shared actions bottom sheet, and
