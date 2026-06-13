@@ -654,7 +654,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       label: '${group.podcastName}, $episodeCountLabel, $stateLabel',
       hint:
           'Double tap to ${isCollapsed ? 'expand' : 'collapse'}. '
-          'Use the actions rotor for play, shuffle, or sort.',
+          'Use the actions rotor for play, shuffle, sort, or move.',
       onTap: toggleCollapsed,
       customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
         const CustomSemanticsAction(label: 'Play group'): () {

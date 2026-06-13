@@ -641,9 +641,10 @@ void main() {
       // Move group B above group A.
       await repo.moveGroupUp(podB);
 
-      // B's episodes (in their existing relative order) occupy the slots
-      // previously held by A and B combined; A's episode follows. C is
-      // untouched.
+      // The queue is re-flattened by new group order [B, A, C]: B's episodes
+      // come first, then A's, then C's, each preserving its existing
+      // relative order. Note C's c1 shifts from position 2 to 3 even though
+      // C's own ordering (c1 then c2) is unchanged.
       expect(await _queueOrder(), [b1, b2, a1, c1, c2]);
     });
 
@@ -695,9 +696,9 @@ void main() {
       // Move group A below group B.
       await repo.moveGroupDown(podA);
 
-      // B's episodes (in their existing relative order) occupy the earlier
-      // slots previously held by A and B combined; A's episodes follow. C is
-      // untouched.
+      // The queue is re-flattened by new group order [B, A, C]: B's episodes
+      // come first, then A's, then C's, each preserving its existing
+      // relative order. C's c1 happens to stay at the last position.
       expect(await _queueOrder(), [b1, b2, a1, a2, c1]);
     });
 
