@@ -222,3 +222,30 @@ final skipBackSecondsProvider = AsyncNotifierProvider<_IntSettingNotifier, int>(
     write: (r, v) => r.setSkipBackSeconds(v),
   ),
 );
+
+class _LaunchScreenNotifier extends AsyncNotifier<LaunchScreen> {
+  @override
+  Future<LaunchScreen> build() async {
+    final db = ref.watch(appDatabaseProvider);
+    return AppSettingsRepositoryImpl(database: db).getDefaultLaunchScreen();
+  }
+
+  Future<void> set(LaunchScreen value) async {
+    final previous = state;
+    state = AsyncData(value);
+    final db = ref.read(appDatabaseProvider);
+    try {
+      await AppSettingsRepositoryImpl(
+        database: db,
+      ).setDefaultLaunchScreen(value);
+    } catch (_) {
+      state = previous;
+      rethrow;
+    }
+  }
+}
+
+final defaultLaunchScreenProvider =
+    AsyncNotifierProvider<_LaunchScreenNotifier, LaunchScreen>(
+      _LaunchScreenNotifier.new,
+    );

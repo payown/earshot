@@ -1,5 +1,7 @@
 import '../../../data/db/app_database.dart';
 
+enum LaunchScreen { inbox, queue, library, downloads }
+
 abstract interface class AppSettingsRepository {
   Future<int> getAutoDownloadCount();
 
@@ -111,6 +113,10 @@ abstract interface class AppSettingsRepository {
   Future<DateTime?> getLastAutoRefreshAt();
 
   Future<void> setLastAutoRefreshAt(DateTime value);
+
+  Future<LaunchScreen> getDefaultLaunchScreen();
+
+  Future<void> setDefaultLaunchScreen(LaunchScreen screen);
 }
 
 class AppSettingsRepositoryImpl implements AppSettingsRepository {
@@ -147,6 +153,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keySkipForwardSeconds = 'skip_forward_seconds';
   static const _keySkipBackSeconds = 'skip_back_seconds';
   static const _keyLastAutoRefreshAt = 'last_auto_refresh_at';
+  static const _keyDefaultLaunchScreen = 'default_launch_screen';
   static const _defaultAutoDownload = 3;
   static const _defaultHistoryRetention = 90;
 
@@ -447,6 +454,19 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setLastAutoRefreshAt(DateTime value) =>
       _set(_keyLastAutoRefreshAt, value.toUtc().toIso8601String());
+
+  @override
+  Future<LaunchScreen> getDefaultLaunchScreen() async {
+    final row = await (_db.select(
+      _db.appSettings,
+    )..where((s) => s.key.equals(_keyDefaultLaunchScreen))).getSingleOrNull();
+    if (row == null) return LaunchScreen.library;
+    return LaunchScreen.values.asNameMap()[row.value] ?? LaunchScreen.library;
+  }
+
+  @override
+  Future<void> setDefaultLaunchScreen(LaunchScreen screen) =>
+      _set(_keyDefaultLaunchScreen, screen.name);
 
   Future<void> _set(String key, String value) async {
     await _db
