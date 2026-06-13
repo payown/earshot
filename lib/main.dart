@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +23,7 @@ import 'core/theme/app_theme.dart';
 import 'data/db/app_database.dart';
 import 'features/downloads/presentation/providers/downloads_providers.dart';
 import 'features/player/data/audio_handler.dart';
+import 'features/player/data/audio_session_config.dart';
 import 'features/player/presentation/providers/player_providers.dart';
 import 'features/settings/data/app_settings_repository.dart';
 import 'features/settings/presentation/providers/settings_providers.dart';
@@ -184,6 +186,18 @@ Future<void> _startApp({
   required LogService logService,
   required bool analyticsEnabled,
 }) async {
+  // Configure the audio session for long-form spoken audio with AirPlay
+  // enabled. Without this, iOS leaves the session on its default
+  // .soloAmbient category, which doesn't offer AirPlay devices as routes.
+  // Best-effort: a failure here shouldn't block startup since playback
+  // still works on the device speaker either way.
+  try {
+    final session = await AudioSession.instance;
+    await session.configure(earshotAudioSessionConfiguration);
+  } catch (error, stackTrace) {
+    _log.warning('Failed to configure audio session', error, stackTrace);
+  }
+
   EarshotAudioHandler audioHandler;
   try {
     audioHandler = await AudioService.init(

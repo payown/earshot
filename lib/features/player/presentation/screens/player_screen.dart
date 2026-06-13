@@ -16,6 +16,7 @@ import '../../../../features/subscriptions/presentation/providers/subscriptions_
 import '../../domain/sleep_timer.dart';
 import '../providers/chapter_providers.dart';
 import '../providers/player_providers.dart';
+import '../widgets/airplay_button.dart';
 import '../widgets/chapter_controls.dart';
 import '../widgets/speed_selector.dart';
 
@@ -250,6 +251,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           tooltip: 'Close player',
           onPressed: () => Navigator.of(context).pop(),
         ),
+        actions: const [AirPlayButton()],
       ),
       body: SafeArea(
         child: SingleChildScrollView(

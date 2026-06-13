@@ -17,5 +17,11 @@ import workmanager_apple
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ChapterChannel") else { return }
     ChapterChannel.register(with: registrar.messenger())
+
+    guard let airplayRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "AirPlayButton") else { return }
+    airplayRegistrar.register(
+      AirPlayButtonFactory(),
+      withId: "media.payown.earshot/airplay_button"
+    )
   }
 }
