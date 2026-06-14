@@ -650,6 +650,33 @@ class _ShowNotesSection extends StatefulWidget {
 
 class _ShowNotesSectionState extends State<_ShowNotesSection> {
   bool _expanded = false;
+  final FocusNode _contentFocusNode = FocusNode(
+    debugLabel: 'show-notes-content',
+  );
+
+  @override
+  void dispose() {
+    _contentFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+    if (!mounted) return;
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      _expanded ? 'Show notes expanded' : 'Show notes collapsed',
+      TextDirection.ltr,
+    );
+    if (_expanded) {
+      // AnimatedSize revealing a new subtree can cause VoiceOver to lose its
+      // accessibility focus and fall back to the first element on screen.
+      // Explicitly move focus to the top of the newly-revealed content.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _contentFocusNode.requestFocus();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -663,11 +690,11 @@ class _ShowNotesSectionState extends State<_ShowNotesSection> {
         Semantics(
           button: true,
           expanded: _expanded,
-          label: 'Show notes',
-          onTap: () => setState(() => _expanded = !_expanded),
+          label: _expanded ? 'Show notes, expanded' : 'Show notes, collapsed',
+          onTap: _toggle,
           child: ExcludeSemantics(
             child: InkWell(
-              onTap: () => setState(() => _expanded = !_expanded),
+              onTap: _toggle,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: Spacing.sm),
                 child: Row(
@@ -695,25 +722,53 @@ class _ShowNotesSectionState extends State<_ShowNotesSection> {
           child: _expanded
               ? Padding(
                   padding: const EdgeInsets.only(bottom: Spacing.sm),
-                  child: widget.description != null
-                      ? Html(
-                          data: widget.description!,
-                          onLinkTap: (url, _, __) async {
-                            if (url == null) return;
-                            await safeLaunchUrl(url);
-                          },
-                        )
-                      : Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: Spacing.sm,
-                          ),
-                          child: Text(
-                            'No show notes available.',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Focus(
+                        focusNode: _contentFocusNode,
+                        // Reachable via requestFocus() to direct VoiceOver
+                        // focus here on expand, but not a Tab/arrow-key stop
+                        // for hardware-keyboard users since it wraps inert
+                        // content.
+                        skipTraversal: true,
+                        child: widget.description != null
+                            ? Html(
+                                data: widget.description!,
+                                onLinkTap: (url, _, __) async {
+                                  if (url == null) return;
+                                  await safeLaunchUrl(url);
+                                },
+                              )
+                            : Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: Spacing.sm,
+                                ),
+                                child: Text(
+                                  'No show notes available.',
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                      ),
+                      const SizedBox(height: Spacing.sm),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Semantics(
+                          button: true,
+                          label: 'Collapse show notes',
+                          onTap: _toggle,
+                          child: ExcludeSemantics(
+                            child: TextButton(
+                              onPressed: _toggle,
+                              child: const Text('Collapse show notes'),
                             ),
                           ),
                         ),
+                      ),
+                    ],
+                  ),
                 )
               : const SizedBox.shrink(),
         ),
