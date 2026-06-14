@@ -4,8 +4,11 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
 
+import '../../../../core/router/app_router.dart';
+import '../../../../core/sharing/shared_file_provider.dart';
 import '../../../../features/subscriptions/data/podcast_exception.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../providers/search_providers.dart';
@@ -22,12 +25,27 @@ class OpmlImportScreen extends ConsumerStatefulWidget {
 }
 
 class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
+  /// Pause after the "Opened from share" announcement so VoiceOver finishes
+  /// speaking it before the import progress live region starts updating.
+  static const _shareAnnouncementDelay = Duration(milliseconds: 300);
+
   bool _importing = false;
   int _total = 0;
   int _done = 0;
   int _skipped = 0;
   int _followed = 0;
   String? _error;
+
+  /// Lets us move VoiceOver focus to the Done button once an import finishes,
+  /// so a screen reader user (especially one who arrived via the share sheet)
+  /// lands directly on the control that dismisses the screen.
+  final GlobalKey _doneButtonKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _processSharedQueue());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -79,13 +97,12 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
                   style: Theme.of(context).textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
-                if (widget.fromOnboarding) ...[
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () => Navigator.of(context).pop(_followed > 0),
-                    child: const Text('Done'),
-                  ),
-                ],
+                const SizedBox(height: 16),
+                FilledButton(
+                  key: _doneButtonKey,
+                  onPressed: _finishImport,
+                  child: const Text('Done'),
+                ),
               ],
               if (_error != null) ...[
                 const SizedBox(height: 12),
@@ -104,6 +121,47 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
     );
   }
 
+  /// Dismisses the screen after an import. The destination depends on how the
+  /// screen was reached: the onboarding flow expects a result, a normal push
+  /// (Settings) pops back, and a share that launched straight onto this screen
+  /// has nothing to pop to, so it goes to the subscriptions library.
+  void _finishImport() {
+    if (widget.fromOnboarding) {
+      Navigator.of(context).pop(_followed > 0);
+    } else if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go(AppRoutes.subscriptions);
+    }
+  }
+
+  /// Drains [sharedOpmlFilesProvider], importing each shared/opened OPML
+  /// file in turn. Runs on entry regardless of how this screen was reached.
+  Future<void> _processSharedQueue() async {
+    final queue = ref.read(sharedOpmlFilesProvider.notifier);
+    var path = queue.takeNext();
+    if (path == null || !mounted) return;
+
+    final total = ref.read(sharedOpmlFilesProvider).length + 1;
+    var index = 1;
+
+    while (path != null && mounted) {
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        total > 1
+            ? 'Opened from share. Importing file $index of $total.'
+            : 'Opened from share. Importing OPML file.',
+        TextDirection.ltr,
+      );
+      await Future<void>.delayed(_shareAnnouncementDelay);
+      if (!mounted) return;
+
+      await _importFromPath(path);
+      path = queue.takeNext();
+      index++;
+    }
+  }
+
   Future<void> _pickAndImport() async {
     const typeGroup = XTypeGroup(
       label: 'OPML',
@@ -112,9 +170,10 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
     );
     final file = await openFile(acceptedTypeGroups: [typeGroup]);
     if (file == null) return;
+    await _importFromPath(file.path);
+  }
 
-    final path = file.path;
-
+  Future<void> _importFromPath(String path) async {
     const maxBytes = 5 * 1024 * 1024; // 5 MB — a valid OPML is well under 1 MB
     int fileSize;
     try {
@@ -214,6 +273,14 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
         '${_skipped > 0 ? ", $_skipped already following" : ""}.',
         TextDirection.ltr,
       );
+      // Once the Done button has been laid out, move VoiceOver focus to it so
+      // the user lands on the way out rather than having to hunt for it.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _doneButtonKey.currentContext?.findRenderObject()?.sendSemanticsEvent(
+          const FocusSemanticEvent(),
+        );
+      });
     }
   }
 }
