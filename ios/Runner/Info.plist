@@ -80,6 +80,22 @@
 			<true/>
 		</dict>
 	</array>
+	<!-- The Share Extension saves the shared OPML to the app group, then
+	     reopens Earshot via share_handler by calling openURL on this custom
+	     scheme (ShareMedia-<bundle id>). Without this URL type registered,
+	     iOS has no handler for that scheme, so the share sheet just dismisses
+	     and the file never reaches the app. See share_handler iOS setup. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ShareMedia-$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

@@ -24,14 +24,29 @@ end
 
 require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
 
+# Xcode 16+ writes project.pbxproj with objectVersion 70, which the xcodeproj gem
+# bundled with current CocoaPods (1.16.2 / xcodeproj 1.27.0) doesn't recognize yet
+# (https://github.com/CocoaPods/CocoaPods/issues/12889). Teach it the compatibility
+# string so `pod install` doesn't raise. Remove once CocoaPods adds native support.
+compatibility_versions = Xcodeproj::Constants::COMPATIBILITY_VERSION_BY_OBJECT_VERSION
+unless compatibility_versions.key?(70)
+  Xcodeproj::Constants.send(:remove_const, :COMPATIBILITY_VERSION_BY_OBJECT_VERSION)
+  Xcodeproj::Constants.const_set(:COMPATIBILITY_VERSION_BY_OBJECT_VERSION, compatibility_versions.merge(70 => 'Xcode 16.0'))
+end
+
 flutter_ios_podfile_setup
 
 target 'Runner' do
   use_frameworks!
+  use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
   target 'RunnerTests' do
     inherit! :search_paths
+  end
+  target 'ShareExtension' do
+    inherit! :search_paths
+    pod 'share_handler_ios_models', :path => '.symlinks/plugins/share_handler_ios/ios/Models'
   end
 end
 
