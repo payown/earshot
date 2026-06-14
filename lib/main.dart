@@ -19,6 +19,8 @@ import 'core/providers/core_providers.dart';
 import 'core/logging/log_providers.dart';
 import 'core/logging/log_service.dart';
 import 'core/router/app_router.dart';
+import 'core/sharing/sharing_intent_gateway.dart';
+import 'core/sharing/shared_file_provider.dart';
 import 'core/theme/app_theme.dart';
 import 'data/db/app_database.dart';
 import 'features/downloads/presentation/providers/downloads_providers.dart';
@@ -238,6 +240,16 @@ Future<void> _startApp({
     await Posthog().setup(config);
   }
 
+  // Earshot may have been launched via "Open in Earshot" or "Share to
+  // Earshot" for an OPML file. Best-effort: a failure here shouldn't block
+  // startup, it just means the share is missed.
+  List<String> initialOpmlPaths = const [];
+  try {
+    initialOpmlPaths = await ShareHandlerGateway().getInitialSharedFiles();
+  } catch (error, stackTrace) {
+    _log.warning('Failed to read initial shared media', error, stackTrace);
+  }
+
   runApp(
     ProviderScope(
       overrides: [
@@ -250,6 +262,7 @@ Future<void> _startApp({
         }),
         audioHandlerProvider.overrideWithValue(audioHandler),
         logServiceProvider.overrideWithValue(logService),
+        initialSharedOpmlPathsProvider.overrideWithValue(initialOpmlPaths),
       ],
       child: const _AppInitializer(),
     ),

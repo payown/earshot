@@ -6,6 +6,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
 
+import '../../../../core/sharing/shared_file_provider.dart';
 import '../../../../features/subscriptions/data/podcast_exception.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../providers/search_providers.dart';
@@ -22,12 +23,22 @@ class OpmlImportScreen extends ConsumerStatefulWidget {
 }
 
 class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
+  /// Pause after the "Opened from share" announcement so VoiceOver finishes
+  /// speaking it before the import progress live region starts updating.
+  static const _shareAnnouncementDelay = Duration(milliseconds: 300);
+
   bool _importing = false;
   int _total = 0;
   int _done = 0;
   int _skipped = 0;
   int _followed = 0;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _processSharedQueue());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,6 +115,33 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
     );
   }
 
+  /// Drains [sharedOpmlFilesProvider], importing each shared/opened OPML
+  /// file in turn. Runs on entry regardless of how this screen was reached.
+  Future<void> _processSharedQueue() async {
+    final queue = ref.read(sharedOpmlFilesProvider.notifier);
+    var path = queue.takeNext();
+    if (path == null || !mounted) return;
+
+    final total = ref.read(sharedOpmlFilesProvider).length + 1;
+    var index = 1;
+
+    while (path != null && mounted) {
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        total > 1
+            ? 'Opened from share. Importing file $index of $total.'
+            : 'Opened from share. Importing OPML file.',
+        TextDirection.ltr,
+      );
+      await Future<void>.delayed(_shareAnnouncementDelay);
+      if (!mounted) return;
+
+      await _importFromPath(path);
+      path = queue.takeNext();
+      index++;
+    }
+  }
+
   Future<void> _pickAndImport() async {
     const typeGroup = XTypeGroup(
       label: 'OPML',
@@ -112,9 +150,10 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
     );
     final file = await openFile(acceptedTypeGroups: [typeGroup]);
     if (file == null) return;
+    await _importFromPath(file.path);
+  }
 
-    final path = file.path;
-
+  Future<void> _importFromPath(String path) async {
     const maxBytes = 5 * 1024 * 1024; // 5 MB — a valid OPML is well under 1 MB
     int fileSize;
     try {

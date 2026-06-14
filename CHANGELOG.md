@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Queue: in the "Group by podcast" view, each podcast group now has "Move
   group to top/up/down/bottom" actions in the VoiceOver/TalkBack actions
   rotor, mirroring the per-episode move actions.
+- OPML: Earshot now appears as "Open in Earshot" in Mail/Files and "Share to
+  Earshot" in the share sheet for `.opml` files exported from other podcast
+  apps (e.g. Castro, Overcast). Tapping or sharing an OPML file opens the
+  Import OPML screen pre-loaded with the file; multiple shared files are
+  imported one after another. (iOS only for now.)
 
 ### Changed
 - Episode actions are now identical across Inbox, Queue, Library, and Downloads.

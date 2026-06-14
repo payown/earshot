@@ -37,6 +37,7 @@ import '../../features/subscriptions/presentation/screens/podcast_settings_scree
 import '../../features/subscriptions/presentation/screens/subscriptions_screen.dart';
 import '../presentation/main_shell.dart';
 import '../providers/core_providers.dart';
+import '../sharing/shared_file_provider.dart';
 
 // Route path constants — single source of truth for all navigation.
 abstract final class AppRoutes {
@@ -101,6 +102,7 @@ class _RouterNotifier extends ChangeNotifier {
   _RouterNotifier(this._ref) {
     _ref.listen(isOnboardingCompleteProvider, (_, __) => notifyListeners());
     _ref.listen(defaultLaunchRouteProvider, (_, __) => notifyListeners());
+    _ref.listen(sharedOpmlFilesProvider, (_, __) => notifyListeners());
   }
 
   final Ref _ref;
@@ -121,6 +123,15 @@ class _RouterNotifier extends ChangeNotifier {
         return AppRoutes.subscriptions;
       },
       data: (done) {
+        final hasPendingSharedFile = _ref
+            .read(sharedOpmlFilesProvider)
+            .isNotEmpty;
+        final atImportOpml = state.matchedLocation.startsWith(
+          AppRoutes.settingsImportOpml,
+        );
+        if (hasPendingSharedFile && !atImportOpml) {
+          return AppRoutes.settingsImportOpml;
+        }
         if (atLoading) {
           if (!done) return AppRoutes.onboarding;
           return _ref
@@ -138,7 +149,7 @@ class _RouterNotifier extends ChangeNotifier {
         final isAllowedDuringOnboarding =
             state.matchedLocation.startsWith(AppRoutes.search) ||
             state.matchedLocation.startsWith(AppRoutes.addPodcast) ||
-            state.matchedLocation.startsWith(AppRoutes.settingsImportOpml);
+            atImportOpml;
         if (!done && !atOnboarding && !isAllowedDuringOnboarding)
           return AppRoutes.onboarding;
         if (done && atOnboarding) return AppRoutes.subscriptions;
