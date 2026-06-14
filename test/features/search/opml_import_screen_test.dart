@@ -107,6 +107,32 @@ void main() {
       );
     });
 
+    testWidgets('shows a Done button after a shared import completes', (
+      tester,
+    ) async {
+      final file = File('${tempDir.path}/shared.opml');
+      await tester.runAsync(
+        () => file.writeAsString(_opmlFor(['https://example.com/feed.xml'])),
+      );
+
+      when(
+        () => repo.subscribe('https://example.com/feed.xml'),
+      ).thenAnswer((_) async => _fakePodcast('https://example.com/feed.xml'));
+
+      await tester.runAsync(() async {
+        await tester.pumpWidget(_buildApp(repo, [file.path]));
+        for (var i = 0; i < 25; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await tester.pump();
+        }
+      });
+      await tester.pumpAndSettle();
+
+      // The share path (fromOnboarding == false) previously left the user
+      // stranded with no way off this screen. A Done button must now appear.
+      expect(find.widgetWithText(FilledButton, 'Done'), findsOneWidget);
+    });
+
     testWidgets('processes multiple shared files sequentially', (
       tester,
     ) async {
