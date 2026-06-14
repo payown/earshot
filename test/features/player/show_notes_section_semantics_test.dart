@@ -15,9 +15,23 @@ class _TestShowNotesSection extends StatefulWidget {
 
 class _TestShowNotesSectionState extends State<_TestShowNotesSection> {
   bool _expanded = false;
+  final FocusNode _contentFocusNode = FocusNode(
+    debugLabel: 'show-notes-content',
+  );
+
+  @override
+  void dispose() {
+    _contentFocusNode.dispose();
+    super.dispose();
+  }
 
   void _toggle() {
     setState(() => _expanded = !_expanded);
+    if (_expanded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _contentFocusNode.requestFocus();
+      });
+    }
   }
 
   @override
@@ -41,7 +55,27 @@ class _TestShowNotesSectionState extends State<_TestShowNotesSection> {
             ),
           ),
         ),
-        if (_expanded) const Text('Episode description goes here'),
+        if (_expanded) ...[
+          Focus(
+            focusNode: _contentFocusNode,
+            skipTraversal: true,
+            child: const Text('Episode description goes here'),
+          ),
+          Semantics(
+            button: true,
+            label: 'Collapse show notes',
+            onTap: _toggle,
+            child: ExcludeSemantics(
+              child: GestureDetector(
+                onTap: _toggle,
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text('Collapse show notes'),
+                ),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -132,6 +166,83 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Episode description goes here'), findsNothing);
+
+      handle.dispose();
+    });
+
+    testWidgets('shows a Collapse show notes control when expanded', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+
+      await tester.pumpWidget(_wrap(const _TestShowNotesSection()));
+
+      // Not present while collapsed.
+      expect(find.bySemanticsLabel('Collapse show notes'), findsNothing);
+
+      // Expand.
+      final nodeId = _findNode(tester, 'Show notes, collapsed').id;
+      _performAction(tester, nodeId, SemanticsAction.tap);
+      await tester.pump();
+
+      expect(
+        _findNode(tester, 'Collapse show notes'),
+        matchesSemantics(
+          label: 'Collapse show notes',
+          isButton: true,
+          hasTapAction: true,
+        ),
+      );
+
+      handle.dispose();
+    });
+
+    testWidgets(
+      'tapping Collapse show notes control collapses the section',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+
+        await tester.pumpWidget(_wrap(const _TestShowNotesSection()));
+
+        // Expand.
+        var nodeId = _findNode(tester, 'Show notes, collapsed').id;
+        _performAction(tester, nodeId, SemanticsAction.tap);
+        await tester.pump();
+
+        // Tap the Collapse show notes control.
+        nodeId = _findNode(tester, 'Collapse show notes').id;
+        _performAction(tester, nodeId, SemanticsAction.tap);
+        await tester.pump();
+
+        expect(
+          find.bySemanticsLabel('Show notes, collapsed'),
+          findsOneWidget,
+        );
+        expect(find.bySemanticsLabel('Collapse show notes'), findsNothing);
+        expect(find.text('Episode description goes here'), findsNothing);
+
+        handle.dispose();
+      },
+    );
+
+    testWidgets('moves focus to the show notes content on expand', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+
+      await tester.pumpWidget(_wrap(const _TestShowNotesSection()));
+
+      // Expand.
+      final nodeId = _findNode(tester, 'Show notes, collapsed').id;
+      _performAction(tester, nodeId, SemanticsAction.tap);
+      await tester.pump();
+      // Allow the post-frame callback to run.
+      await tester.pump();
+
+      final contentFocus = Focus.of(
+        tester.element(find.text('Episode description goes here')),
+      );
+      expect(contentFocus.hasFocus, isTrue);
 
       handle.dispose();
     });
