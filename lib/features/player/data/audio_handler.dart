@@ -190,7 +190,11 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   // Guards against re-entrant completion handling. _onEpisodeCompleted is
   // fired via unawaited(...) from the processing-state listener, so two
   // completed events in rapid succession could otherwise run it concurrently
-  // and restart whichever episode the first invocation just started.
+  // and restart whichever episode the first invocation just started. Set
+  // synchronously at the top of _onEpisodeCompleted and cleared only in its
+  // finally — never reset elsewhere, since clearing it mid-flight (e.g. when
+  // the awaited callback calls playEpisode/stop) would re-open the reentrancy
+  // window for an already-queued second invocation.
   bool _completionInProgress = false;
 
   /// Called when the playlist advances gaplessly to the next episode.
@@ -283,7 +287,6 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _log.info('Playing: ${item.title}');
     _readySinceLoad = false;
     _playRequestedSinceLoad = false;
-    _completionInProgress = false;
     _currentMediaItem = item;
     _nextMediaItem = null;
     _lastKnownIndex = 0;
@@ -431,7 +434,6 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _isAdvancing = false;
     _readySinceLoad = false;
     _playRequestedSinceLoad = false;
-    _completionInProgress = false;
     await _player.stop();
     _episodeIdController.add(null);
     playbackState.add(
