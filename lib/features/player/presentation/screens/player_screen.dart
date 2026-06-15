@@ -1059,6 +1059,7 @@ class _SleepTimerControls extends ConsumerWidget {
               IconButton(
                 icon: const Icon(Icons.chevron_left),
                 iconSize: 28,
+                style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
                 onPressed: idx > 0 ? () => applyPreset(prev) : null,
               ),
               SizedBox(
@@ -1085,6 +1086,7 @@ class _SleepTimerControls extends ConsumerWidget {
               IconButton(
                 icon: const Icon(Icons.chevron_right),
                 iconSize: 28,
+                style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
                 onPressed: next != null ? () => applyPreset(next) : null,
               ),
             ],
