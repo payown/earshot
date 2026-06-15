@@ -121,17 +121,17 @@ class _OpmlImportScreenState extends ConsumerState<OpmlImportScreen> {
     );
   }
 
-  /// Dismisses the screen after an import. The destination depends on how the
-  /// screen was reached: the onboarding flow expects a result, a normal push
-  /// (Settings) pops back, and a share that launched straight onto this screen
-  /// has nothing to pop to, so it goes to the subscriptions library.
+  /// Dismisses the screen after an import. The onboarding flow expects a pop
+  /// result; all other flows go to the user's default launch screen so they
+  /// land in the app rather than back in Settings.
   void _finishImport() {
     if (widget.fromOnboarding) {
       Navigator.of(context).pop(_followed > 0);
-    } else if (context.canPop()) {
-      context.pop();
     } else {
-      context.go(AppRoutes.subscriptions);
+      final launchRoute =
+          ref.read(defaultLaunchRouteProvider).asData?.value ??
+          AppRoutes.subscriptions;
+      context.go(launchRoute);
     }
   }
 
