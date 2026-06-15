@@ -59,8 +59,8 @@ class MagicTapHandler {
       await _pause();
       _announce('Paused');
     } else {
-      await _play();
       _announce('Playing');
+      await _play();
     }
   }
 
