@@ -310,6 +310,100 @@ void main() {
     });
 
     test(
+      'future-dated episode does not advance the high-water mark (#296)',
+      () async {
+        stubFeed(episodes: []);
+        final podcast = await repo.subscribe(_rssUrl);
+        final now = DateTime.now().toUtc();
+
+        final normalOld = ParsedEpisode(
+          guid: 'normal-old',
+          title: 'Normal old',
+          audioUrl: 'https://example.com/old.mp3',
+          pubDate: now.subtract(const Duration(days: 2)),
+        );
+        final future = ParsedEpisode(
+          guid: 'future',
+          title: 'Future dated',
+          audioUrl: 'https://example.com/future.mp3',
+          pubDate: now.add(const Duration(days: 30)),
+        );
+        when(() => parser.parse(any())).thenReturn(
+          ParsedPodcast(title: 'Test Podcast', episodes: [normalOld, future]),
+        );
+        await repo.refreshFeed(podcast.id);
+
+        final row = await (db.select(
+          db.podcasts,
+        )..where((p) => p.id.equals(podcast.id))).getSingle();
+        expect(row.lastSeenPubDate, isNotNull);
+        expect(
+          row.lastSeenPubDate!.isAfter(now),
+          isFalse,
+          reason: 'a future-dated episode must not push the mark ahead of now',
+        );
+      },
+    );
+
+    test(
+      'new episode still reaches the inbox after a future-dated item (#296)',
+      () async {
+        final now = DateTime.now().toUtc();
+        final normalOld = ParsedEpisode(
+          guid: 'normal-old',
+          title: 'Normal old',
+          audioUrl: 'https://example.com/old.mp3',
+          pubDate: now.subtract(const Duration(days: 2)),
+        );
+        final future = ParsedEpisode(
+          guid: 'future',
+          title: 'Future dated',
+          audioUrl: 'https://example.com/future.mp3',
+          pubDate: now.add(const Duration(days: 30)),
+        );
+
+        // Subscribe with a real past episode so the mark seeds to now - 2d.
+        stubFeed(episodes: [normalOld]);
+        final podcast = await repo.subscribe(_rssUrl);
+
+        // Refresh #1 introduces the future-dated item. Without the fix this
+        // poisons the mark (advancing it to now + 30d); with the fix the mark
+        // stays at the newest non-future date (now - 2d).
+        when(() => parser.parse(any())).thenReturn(
+          ParsedPodcast(title: 'Test Podcast', episodes: [normalOld, future]),
+        );
+        await repo.refreshFeed(podcast.id);
+
+        // Refresh #2 brings a genuinely new, correctly-dated episode. It must
+        // reach the inbox rather than being suppressed as backlog by a poisoned
+        // future mark.
+        final normalNew = ParsedEpisode(
+          guid: 'normal-new',
+          title: 'Normal new',
+          audioUrl: 'https://example.com/new.mp3',
+          pubDate: now.subtract(const Duration(hours: 1)),
+        );
+        when(() => parser.parse(any())).thenReturn(
+          ParsedPodcast(
+            title: 'Test Podcast',
+            episodes: [normalOld, future, normalNew],
+          ),
+        );
+        await repo.refreshFeed(podcast.id);
+
+        final newRow = await (db.select(
+          db.episodes,
+        )..where((e) => e.guid.equals('normal-new'))).getSingle();
+        expect(newRow.status, EpisodeStatus.newEpisode);
+        expect(
+          newRow.inboxDismissed,
+          isFalse,
+          reason: 'the new episode must not be suppressed as backlog',
+        );
+      },
+    );
+
+    test(
       'preserves downloadStatus on refresh when GUID already exists',
       () async {
         stubFeed(episodes: [sampleEpisode]);
