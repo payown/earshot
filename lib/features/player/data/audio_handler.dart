@@ -52,6 +52,47 @@ bool shouldHonorCompleted({
   required bool playRequestedSinceLoad,
 }) => readySinceLoad && playRequestedSinceLoad;
 
+/// True when the episode about to be played is the same one that just
+/// completed. This happens when `markPlayedAndRemove` silently no-ops (the
+/// episode was already removed by a concurrent gapless advance) and the
+/// completed episode is still at the head of the queue. In that case we must
+/// stop rather than restart it from the beginning.
+bool nextEqualsCompleted(int? nextEpisodeId, int? completedEpisodeId) =>
+    nextEpisodeId != null && nextEpisodeId == completedEpisodeId;
+
+/// How a `ProcessingState.completed` event should be handled.
+enum CompletedAction {
+  /// Process the completion: mark played, advance or stop.
+  honor,
+
+  /// A gapless advance is in flight; this completion belongs to the episode
+  /// being advanced past, not the newly-promoted current episode. Ignore it.
+  ignoreAdvancing,
+
+  /// Spurious completion with no genuine playback since the last load (e.g.
+  /// restoring at/past the media end after a crash). Ignore it.
+  ignoreSpurious,
+}
+
+/// Decides what to do with a `completed` event. Pure so the gating logic can
+/// be unit-tested without the platform player. The advance gate takes priority
+/// over the spurious gate: while [isAdvancing] is true the honor flags still
+/// reflect the previous (now-finished) episode, so they must not be consulted.
+CompletedAction classifyCompleted({
+  required bool isAdvancing,
+  required bool readySinceLoad,
+  required bool playRequestedSinceLoad,
+}) {
+  if (isAdvancing) return CompletedAction.ignoreAdvancing;
+  if (!shouldHonorCompleted(
+    readySinceLoad: readySinceLoad,
+    playRequestedSinceLoad: playRequestedSinceLoad,
+  )) {
+    return CompletedAction.ignoreSpurious;
+  }
+  return CompletedAction.honor;
+}
+
 class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   EarshotAudioHandler() {
     _loudnessEnhancer = AndroidLoudnessEnhancer();
@@ -146,6 +187,16 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   // restore can never set it.
   bool _playRequestedSinceLoad = false;
 
+  // Guards against re-entrant completion handling. _onEpisodeCompleted is
+  // fired via unawaited(...) from the processing-state listener, so two
+  // completed events in rapid succession could otherwise run it concurrently
+  // and restart whichever episode the first invocation just started. Set
+  // synchronously at the top of _onEpisodeCompleted and cleared only in its
+  // finally — never reset elsewhere, since clearing it mid-flight (e.g. when
+  // the awaited callback calls playEpisode/stop) would re-open the reentrancy
+  // window for an already-queued second invocation.
+  bool _completionInProgress = false;
+
   /// Called when the playlist advances gaplessly to the next episode.
   /// [previousEpisodeId] is the episode that just finished.
   Future<void> Function(int? previousEpisodeId)? onEpisodeAdvanced;
@@ -163,16 +214,23 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _processingStateSub = _player.processingStateStream.listen((state) {
       if (state == ProcessingState.ready) _readySinceLoad = true;
       if (state == ProcessingState.completed) {
-        if (!shouldHonorCompleted(
+        switch (classifyCompleted(
+          isAdvancing: _isAdvancing,
           readySinceLoad: _readySinceLoad,
           playRequestedSinceLoad: _playRequestedSinceLoad,
         )) {
-          _log.warning(
-            'Ignoring spurious completed event (no playback since load)',
-          );
-          return;
+          case CompletedAction.ignoreAdvancing:
+            // This completion belongs to the episode being advanced past, not
+            // the newly-promoted current episode. Honoring it would mark the
+            // new episode played and remove it from the queue mid-playback.
+            _log.warning('Ignoring completed event during gapless advance');
+          case CompletedAction.ignoreSpurious:
+            _log.warning(
+              'Ignoring spurious completed event (no playback since load)',
+            );
+          case CompletedAction.honor:
+            unawaited(_onEpisodeCompleted());
         }
-        unawaited(_onEpisodeCompleted());
       }
     });
   }
@@ -453,13 +511,22 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
       };
 
   Future<void> _onEpisodeCompleted() async {
-    _log.info('Episode completed: ${mediaItem.value?.title}');
-    sleepTimer.onEpisodeEnded();
-    final callback = onEpisodeCompleted;
-    if (callback != null) {
-      await callback();
-    } else {
-      await stop();
+    if (_completionInProgress) {
+      _log.warning('_onEpisodeCompleted called re-entrantly, ignoring');
+      return;
+    }
+    _completionInProgress = true;
+    try {
+      _log.info('Episode completed: ${mediaItem.value?.title}');
+      sleepTimer.onEpisodeEnded();
+      final callback = onEpisodeCompleted;
+      if (callback != null) {
+        await callback();
+      } else {
+        await stop();
+      }
+    } finally {
+      _completionInProgress = false;
     }
   }
 

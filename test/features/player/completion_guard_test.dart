@@ -51,4 +51,77 @@ void main() {
       );
     });
   });
+
+  group('nextEqualsCompleted', () {
+    test('true when the next episode is the one that just completed', () {
+      // markPlayedAndRemove no-opped and the completed episode is still at the
+      // queue head — playing it would restart it from the beginning.
+      expect(nextEqualsCompleted(42, 42), isTrue);
+    });
+
+    test('false when the next episode differs from the completed episode', () {
+      expect(nextEqualsCompleted(43, 42), isFalse);
+    });
+
+    test('false when the next episode id is null', () {
+      expect(nextEqualsCompleted(null, 42), isFalse);
+    });
+
+    test('false when the completed episode id is null', () {
+      expect(nextEqualsCompleted(42, null), isFalse);
+    });
+
+    test('false when both ids are null', () {
+      expect(nextEqualsCompleted(null, null), isFalse);
+    });
+  });
+
+  group('classifyCompleted', () {
+    test('honors a genuine completion when not advancing', () {
+      expect(
+        classifyCompleted(
+          isAdvancing: false,
+          readySinceLoad: true,
+          playRequestedSinceLoad: true,
+        ),
+        CompletedAction.honor,
+      );
+    });
+
+    test('ignores completion while a gapless advance is in flight', () {
+      // Even with both honor flags set (they still reflect the previous,
+      // now-finished episode), an advance in flight means this completion
+      // belongs to the episode being advanced past.
+      expect(
+        classifyCompleted(
+          isAdvancing: true,
+          readySinceLoad: true,
+          playRequestedSinceLoad: true,
+        ),
+        CompletedAction.ignoreAdvancing,
+      );
+    });
+
+    test('advance gate takes priority over the spurious gate', () {
+      expect(
+        classifyCompleted(
+          isAdvancing: true,
+          readySinceLoad: false,
+          playRequestedSinceLoad: false,
+        ),
+        CompletedAction.ignoreAdvancing,
+      );
+    });
+
+    test('ignores a spurious completion when not advancing', () {
+      expect(
+        classifyCompleted(
+          isAdvancing: false,
+          readySinceLoad: true,
+          playRequestedSinceLoad: false,
+        ),
+        CompletedAction.ignoreSpurious,
+      );
+    });
+  });
 }

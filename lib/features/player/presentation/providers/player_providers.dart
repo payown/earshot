@@ -489,6 +489,16 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     }
 
     final next = updatedQueue.first;
+    if (nextEqualsCompleted(next.id, currentEpisodeId)) {
+      // markPlayedAndRemove did not take effect (the episode was already
+      // removed by a concurrent gapless advance). The completed episode is
+      // still at the queue head — stop rather than restart it from the start.
+      _log.warning(
+        'onEpisodeCompleted: next episode equals completed episode, stopping',
+      );
+      await handler.stop();
+      return;
+    }
     final nextPodcast = await (db.select(
       db.podcasts,
     )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
