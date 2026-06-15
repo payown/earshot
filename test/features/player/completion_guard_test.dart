@@ -51,4 +51,28 @@ void main() {
       );
     });
   });
+
+  group('nextEqualsCompleted', () {
+    test('true when the next episode is the one that just completed', () {
+      // markPlayedAndRemove no-opped and the completed episode is still at the
+      // queue head — playing it would restart it from the beginning.
+      expect(nextEqualsCompleted(42, 42), isTrue);
+    });
+
+    test('false when the next episode differs from the completed episode', () {
+      expect(nextEqualsCompleted(43, 42), isFalse);
+    });
+
+    test('false when the next episode id is null', () {
+      expect(nextEqualsCompleted(null, 42), isFalse);
+    });
+
+    test('false when the completed episode id is null', () {
+      expect(nextEqualsCompleted(42, null), isFalse);
+    });
+
+    test('false when both ids are null', () {
+      expect(nextEqualsCompleted(null, null), isFalse);
+    });
+  });
 }

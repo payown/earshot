@@ -52,6 +52,14 @@ bool shouldHonorCompleted({
   required bool playRequestedSinceLoad,
 }) => readySinceLoad && playRequestedSinceLoad;
 
+/// True when the episode about to be played is the same one that just
+/// completed. This happens when `markPlayedAndRemove` silently no-ops (the
+/// episode was already removed by a concurrent gapless advance) and the
+/// completed episode is still at the head of the queue. In that case we must
+/// stop rather than restart it from the beginning.
+bool nextEqualsCompleted(int? nextEpisodeId, int? completedEpisodeId) =>
+    nextEpisodeId != null && nextEpisodeId == completedEpisodeId;
+
 class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   EarshotAudioHandler() {
     _loudnessEnhancer = AndroidLoudnessEnhancer();
@@ -146,6 +154,12 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   // restore can never set it.
   bool _playRequestedSinceLoad = false;
 
+  // Guards against re-entrant completion handling. _onEpisodeCompleted is
+  // fired via unawaited(...) from the processing-state listener, so two
+  // completed events in rapid succession could otherwise run it concurrently
+  // and restart whichever episode the first invocation just started.
+  bool _completionInProgress = false;
+
   /// Called when the playlist advances gaplessly to the next episode.
   /// [previousEpisodeId] is the episode that just finished.
   Future<void> Function(int? previousEpisodeId)? onEpisodeAdvanced;
@@ -163,6 +177,14 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _processingStateSub = _player.processingStateStream.listen((state) {
       if (state == ProcessingState.ready) _readySinceLoad = true;
       if (state == ProcessingState.completed) {
+        if (_isAdvancing) {
+          // A gapless advance is in flight: this completed event belongs to
+          // the episode being advanced past, not the newly-promoted current
+          // episode. Honoring it would mark the new episode played and remove
+          // it from the queue mid-playback.
+          _log.warning('Ignoring completed event during gapless advance');
+          return;
+        }
         if (!shouldHonorCompleted(
           readySinceLoad: _readySinceLoad,
           playRequestedSinceLoad: _playRequestedSinceLoad,
@@ -229,6 +251,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _log.info('Playing: ${item.title}');
     _readySinceLoad = false;
     _playRequestedSinceLoad = false;
+    _completionInProgress = false;
     _currentMediaItem = item;
     _nextMediaItem = null;
     _lastKnownIndex = 0;
@@ -376,6 +399,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _isAdvancing = false;
     _readySinceLoad = false;
     _playRequestedSinceLoad = false;
+    _completionInProgress = false;
     await _player.stop();
     _episodeIdController.add(null);
     playbackState.add(
@@ -453,13 +477,22 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
       };
 
   Future<void> _onEpisodeCompleted() async {
-    _log.info('Episode completed: ${mediaItem.value?.title}');
-    sleepTimer.onEpisodeEnded();
-    final callback = onEpisodeCompleted;
-    if (callback != null) {
-      await callback();
-    } else {
-      await stop();
+    if (_completionInProgress) {
+      _log.warning('_onEpisodeCompleted called re-entrantly, ignoring');
+      return;
+    }
+    _completionInProgress = true;
+    try {
+      _log.info('Episode completed: ${mediaItem.value?.title}');
+      sleepTimer.onEpisodeEnded();
+      final callback = onEpisodeCompleted;
+      if (callback != null) {
+        await callback();
+      } else {
+        await stop();
+      }
+    } finally {
+      _completionInProgress = false;
     }
   }
 
