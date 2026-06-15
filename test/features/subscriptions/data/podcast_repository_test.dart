@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:earshot/data/db/app_database.dart';
 import 'package:earshot/data/db/enums.dart';
@@ -399,6 +400,54 @@ void main() {
           newRow.inboxDismissed,
           isFalse,
           reason: 'the new episode must not be suppressed as backlog',
+        );
+      },
+    );
+
+    test(
+      'refresh clamps an already-future high-water mark back to now (#296)',
+      () async {
+        stubFeed(episodes: []);
+        final podcast = await repo.subscribe(_rssUrl);
+        final now = DateTime.now().toUtc();
+
+        // Simulate a podcast poisoned before the fix: mark sits in the future.
+        await (db.update(
+          db.podcasts,
+        )..where((p) => p.id.equals(podcast.id))).write(
+          PodcastsCompanion(
+            lastSeenPubDate: Value(now.add(const Duration(days: 30))),
+          ),
+        );
+
+        final normal = ParsedEpisode(
+          guid: 'normal',
+          title: 'Normal',
+          audioUrl: 'https://example.com/normal.mp3',
+          pubDate: now.subtract(const Duration(hours: 1)),
+        );
+        when(() => parser.parse(any())).thenReturn(
+          ParsedPodcast(title: 'Test Podcast', episodes: [normal]),
+        );
+        await repo.refreshFeed(podcast.id);
+        // Compare against a timestamp taken AFTER the refresh: the clamp uses
+        // refreshFeed's own DateTime.now(), which is slightly later than the
+        // `now` captured above, so comparing to `now` would be flaky.
+        final afterRefresh = DateTime.now().toUtc();
+
+        final row = await (db.select(
+          db.podcasts,
+        )..where((p) => p.id.equals(podcast.id))).getSingle();
+        expect(
+          row.lastSeenPubDate!.isAfter(afterRefresh),
+          isFalse,
+          reason: 'a future mark must be clamped back to now on refresh',
+        );
+        // And it was actually pulled back from the +30d poison, not left as-is.
+        expect(
+          row.lastSeenPubDate!.isBefore(now.add(const Duration(days: 1))),
+          isTrue,
+          reason: 'the future mark must be repaired, not preserved',
         );
       },
     );

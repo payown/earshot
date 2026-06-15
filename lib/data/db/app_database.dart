@@ -127,19 +127,21 @@ class AppDatabase extends _$AppDatabase {
         // later, correctly-dated episode as backlog. Reset any future mark to
         // the newest non-future pub date for that podcast (or now() if it has
         // none), so new episodes reach the inbox again. DateTimes are stored as
-        // unix seconds, matching strftime('%s','now').
+        // unix seconds, matching strftime('%s','now'). "now" is computed once in
+        // a CTE so every comparison in the statement uses the same instant.
         // security-ok: migration SQL, no user input
         await customStatement('''
+          WITH now_secs(v) AS (SELECT CAST(strftime('%s', 'now') AS INTEGER))
           UPDATE podcasts
           SET last_seen_pub_date = COALESCE(
             (
               SELECT MAX(pub_date) FROM episodes
               WHERE episodes.podcast_id = podcasts.id
-                AND pub_date <= CAST(strftime('%s', 'now') AS INTEGER)
+                AND pub_date <= (SELECT v FROM now_secs)
             ),
-            CAST(strftime('%s', 'now') AS INTEGER)
+            (SELECT v FROM now_secs)
           )
-          WHERE last_seen_pub_date > CAST(strftime('%s', 'now') AS INTEGER)
+          WHERE last_seen_pub_date > (SELECT v FROM now_secs)
         ''');
       }
     },

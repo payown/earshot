@@ -522,8 +522,26 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     );
   };
 
+  // Drop a stale gapless preload when the queue changes, so an episode that was
+  // removed (or reordered out of the next slot) can't still play gaplessly
+  // (#297). Clearing routes completion through onEpisodeCompleted, which
+  // consults the live queue; positionSub re-preloads the correct next when near
+  // the end again.
+  final queueReconcileSub = queueRepo.watchQueue().listen((queue) {
+    if (handler.isAdvancing) return;
+    final stale = preloadedNextIsStale(
+      preloadedNextEpisodeId: handler.preloadedNextEpisodeId,
+      currentEpisodeId: handler.currentEpisodeId,
+      queueEpisodeIds: queue.map((e) => e.id).toList(),
+    );
+    if (!stale) return;
+    unawaited(handler.clearPreloadedNext());
+    preloadScheduled = false;
+  });
+
   ref.onDispose(() {
     unawaited(positionSub.cancel());
+    unawaited(queueReconcileSub.cancel());
     handler.onEpisodeCompleted = null;
     handler.onEpisodeAdvanced = null;
   });
