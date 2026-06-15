@@ -117,7 +117,6 @@ class QueueRepositoryImpl implements QueueRepository {
       )..where((e) => e.id.equals(episodeId))).write(
         EpisodesCompanion(
           status: const Value(EpisodeStatus.played),
-          positionSeconds: const Value(0),
           playedAt: Value(DateTime.now().toUtc()),
         ),
       );

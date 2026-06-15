@@ -172,8 +172,12 @@ void main() {
     });
 
     test(
-      'marks the episode played with position reset and playedAt set',
+      'marks the episode played and sets playedAt but preserves position',
       () async {
+        // Regression (#293): a spurious/racing completion must not zero a
+        // listener's saved position. PositionTracker owns position-zeroing on
+        // a genuine completion (guarded by its near-end check); this method
+        // must leave positionSeconds untouched.
         final podcastId = await _addPodcast();
         final epId = await _addEpisode(podcastId);
         await repo.addToQueue(epId);
@@ -187,7 +191,7 @@ void main() {
           db.episodes,
         )..where((e) => e.id.equals(epId))).getSingle();
         expect(row.status, EpisodeStatus.played);
-        expect(row.positionSeconds, 0);
+        expect(row.positionSeconds, 1234);
         expect(row.playedAt, isNotNull);
       },
     );

@@ -1,3 +1,4 @@
+import 'package:earshot/data/db/enums.dart';
 import 'package:earshot/features/player/domain/resume_position.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -57,6 +58,47 @@ void main() {
       expect(
         clampedResumePosition(positionSeconds: 4000, durationSeconds: 3600),
         0,
+      );
+    });
+  });
+
+  group('shouldRestoreLastPlaying', () {
+    test('restores a non-played episode regardless of position', () {
+      expect(
+        shouldRestoreLastPlaying(
+          status: EpisodeStatus.inQueue,
+          positionSeconds: 0,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldRestoreLastPlaying(
+          status: EpisodeStatus.newEpisode,
+          positionSeconds: 1800,
+        ),
+        isTrue,
+      );
+    });
+
+    test('skips a genuinely finished (played, position 0) episode', () {
+      expect(
+        shouldRestoreLastPlaying(
+          status: EpisodeStatus.played,
+          positionSeconds: 0,
+        ),
+        isFalse,
+      );
+    });
+
+    test('restores a played episode that still has a saved position', () {
+      // A spurious completion marked it played mid-episode; the listener
+      // should get their place back rather than an empty mini player.
+      expect(
+        shouldRestoreLastPlaying(
+          status: EpisodeStatus.played,
+          positionSeconds: 1800,
+        ),
+        isTrue,
       );
     });
   });
