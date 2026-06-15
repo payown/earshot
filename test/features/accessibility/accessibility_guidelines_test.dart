@@ -52,6 +52,7 @@ void main() {
         tester,
       ) async {
         final handle = tester.ensureSemantics();
+        addTearDown(handle.dispose);
         await tester.pumpWidget(
           _wrap(
             entry.value,
@@ -65,14 +66,13 @@ void main() {
         await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
         await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
         await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
-
-        handle.dispose();
       });
 
       testWidgets('${entry.key} theme — multiple actions (more button)', (
         tester,
       ) async {
         final handle = tester.ensureSemantics();
+        addTearDown(handle.dispose);
         await tester.pumpWidget(
           _wrap(
             entry.value,
@@ -87,8 +87,6 @@ void main() {
         await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
         await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
         await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
-
-        handle.dispose();
       });
     }
   });
