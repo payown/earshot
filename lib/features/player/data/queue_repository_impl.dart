@@ -138,10 +138,13 @@ class QueueRepositoryImpl implements QueueRepository {
                 e.status.equals(EpisodeStatus.inQueue.name),
           ))
           .write(
-            const EpisodesCompanion(status: Value(EpisodeStatus.newEpisode)),
+            const EpisodesCompanion(
+              status: Value(EpisodeStatus.newEpisode),
+              inboxDismissed: Value(true),
+            ),
           );
     });
-    _log.fine('Cancelled episode $episodeId from queue, returned to inbox');
+    _log.fine('Cancelled episode $episodeId from queue, dismissed from inbox');
   }
 
   @override
@@ -505,7 +508,10 @@ class QueueRepositoryImpl implements QueueRepository {
       await (_db.update(
         _db.episodes,
       )..where((e) => e.status.equals(EpisodeStatus.inQueue.name))).write(
-        const EpisodesCompanion(status: Value(EpisodeStatus.newEpisode)),
+        const EpisodesCompanion(
+          status: Value(EpisodeStatus.newEpisode),
+          inboxDismissed: Value(true),
+        ),
       );
     });
   }
