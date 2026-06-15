@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Inbox: VoiceOver/TalkBack now reads a short show-notes preview for each
+  episode after its title, show, and status, so you can hear what an episode is
+  about while browsing without opening it. The full notes remain one rotor
+  action away via "Open show notes". HTML and entities are stripped so no markup
+  is read aloud.
 - Inbox: a podcast with a single mis-dated "future" episode no longer goes
   silent. Previously one episode dated in the future pushed that show's
   high-water mark ahead of real time, so every later, correctly-dated episode
