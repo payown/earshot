@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Player: the sleep timer's increase/decrease (chevron) buttons now meet the
+  minimum touch-target size on all platforms. They were slightly under the
+  Android 48dp minimum, making them harder to tap accurately.
 - Queue: removing the next episode while another is playing no longer lets the
   removed episode play anyway. Earshot preloads the next episode for gapless
   playback; if you removed or reordered that episode out of the next slot, the
