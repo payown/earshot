@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Show notes: opening an episode's show notes from the Inbox, Queue, Library, or
+  Downloads now announces "Show notes" to VoiceOver/TalkBack when it opens and
+  exposes the episode title as a heading, so screen reader users can read an
+  episode's notes while browsing without starting playback.
 - Inbox: a podcast with a single mis-dated "future" episode no longer goes
   silent. Previously one episode dated in the future pushed that show's
   high-water mark ahead of real time, so every later, correctly-dated episode
