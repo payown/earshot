@@ -46,47 +46,44 @@ void main() {
     'high contrast dark': AppTheme.highContrastDark(),
   };
 
+  // The semantics handle is disposed in a finally so a failing guideline
+  // assertion still releases it within the test body. (addTearDown runs too
+  // late: flutter_test verifies handle disposal at the end of the body, before
+  // tearDowns, so deferring dispose there fails every test.)
+  Future<void> expectTileMeetsGuidelines(
+    WidgetTester tester,
+    ThemeData theme,
+    List<EpisodeQuickActionItem> actions,
+  ) async {
+    final handle = tester.ensureSemantics();
+    try {
+      await tester.pumpWidget(_wrap(theme, actions: actions));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+    } finally {
+      handle.dispose();
+    }
+  }
+
   group('EpisodeListTile meets accessibility guidelines', () {
     for (final entry in themes.entries) {
       testWidgets('${entry.key} theme — single action (default tap)', (
         tester,
       ) async {
-        final handle = tester.ensureSemantics();
-        addTearDown(handle.dispose);
-        await tester.pumpWidget(
-          _wrap(
-            entry.value,
-            actions: [
-              EpisodeQuickActionItem(label: 'Play now', onInvoke: () {}),
-            ],
-          ),
-        );
-
-        await expectLater(tester, meetsGuideline(textContrastGuideline));
-        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
-        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
-        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+        await expectTileMeetsGuidelines(tester, entry.value, [
+          EpisodeQuickActionItem(label: 'Play now', onInvoke: () {}),
+        ]);
       });
 
       testWidgets('${entry.key} theme — multiple actions (more button)', (
         tester,
       ) async {
-        final handle = tester.ensureSemantics();
-        addTearDown(handle.dispose);
-        await tester.pumpWidget(
-          _wrap(
-            entry.value,
-            actions: [
-              EpisodeQuickActionItem(label: 'Play now', onInvoke: () {}),
-              EpisodeQuickActionItem(label: 'Add to queue', onInvoke: () {}),
-            ],
-          ),
-        );
-
-        await expectLater(tester, meetsGuideline(textContrastGuideline));
-        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
-        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
-        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+        await expectTileMeetsGuidelines(tester, entry.value, [
+          EpisodeQuickActionItem(label: 'Play now', onInvoke: () {}),
+          EpisodeQuickActionItem(label: 'Add to queue', onInvoke: () {}),
+        ]);
       });
     }
   });
