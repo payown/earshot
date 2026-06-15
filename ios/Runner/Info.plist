@@ -77,7 +77,7 @@
 				<string>org.opml.opml</string>
 			</array>
 			<key>LSSupportsOpeningDocumentsInPlace</key>
-			<true/>
+			<false/>
 		</dict>
 	</array>
 	<!-- The Share Extension saves the shared OPML to the app group, then
@@ -96,6 +96,11 @@
 			</array>
 		</dict>
 	</array>
+	<!-- ITMS-90737: top-level declaration required when CFBundleDocumentTypes is
+	     present. LSSupportsOpeningDocumentsInPlace = NO because Earshot reads the
+	     OPML file to import subscriptions and never modifies the original. -->
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
