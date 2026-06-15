@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Player: the sleep timer's increase/decrease (chevron) buttons now meet the
   minimum touch-target size on all platforms. They were slightly under the
   Android 48dp minimum, making them harder to tap accurately.
+- Queue: removing the next episode while another is playing no longer lets the
+  removed episode play anyway. Earshot preloads the next episode for gapless
+  playback; if you removed or reordered that episode out of the next slot, the
+  preloaded copy used to still play when the current one finished. It's now
+  dropped as soon as the queue changes, and the correct next episode plays.
+- Inbox: a podcast with a single mis-dated "future" episode no longer goes
+  silent. Previously one episode dated in the future pushed that show's
+  high-water mark ahead of real time, so every later, correctly-dated episode
+  was treated as old backlog and never reached the Inbox. Future-dated items are
+  now ignored when tracking what's new, and a one-time database fix repairs any
+  show already affected so new episodes start arriving again.
 - Queue: "Move up"/"Move down" Quick Actions on a grouped episode now reliably
   reorder it within its podcast group. Previously they swapped the episode's
   position in the global flat queue, which could land on a different podcast's

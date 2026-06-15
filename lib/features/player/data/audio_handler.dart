@@ -60,6 +60,30 @@ bool shouldHonorCompleted({
 bool nextEqualsCompleted(int? nextEpisodeId, int? completedEpisodeId) =>
     nextEpisodeId != null && nextEpisodeId == completedEpisodeId;
 
+/// Whether a preloaded next episode has gone stale and must be dropped so it
+/// can't play gaplessly. The preload is anchored to the episode that follows
+/// the currently-playing one in the live queue; if the queue changed so that
+/// the preloaded episode is no longer that next item (it was removed, or a
+/// reorder/edit changed what comes next), the preload is stale (#297).
+///
+/// Returns false (keep the preload) when nothing is preloaded, when the current
+/// episode is no longer in the queue (a separate concern), or when the
+/// preloaded episode is still the correct next one.
+bool preloadedNextIsStale({
+  required int? preloadedNextEpisodeId,
+  required int? currentEpisodeId,
+  required List<int> queueEpisodeIds,
+}) {
+  if (preloadedNextEpisodeId == null) return false;
+  if (currentEpisodeId == null) return false;
+  final currentIndex = queueEpisodeIds.indexOf(currentEpisodeId);
+  if (currentIndex < 0) return false;
+  final intendedNextId = currentIndex + 1 < queueEpisodeIds.length
+      ? queueEpisodeIds[currentIndex + 1]
+      : null;
+  return intendedNextId != preloadedNextEpisodeId;
+}
+
 /// How a `ProcessingState.completed` event should be handled.
 enum CompletedAction {
   /// Process the completion: mark played, advance or stop.
@@ -250,6 +274,28 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   final StreamController<int?> _episodeIdController =
       StreamController<int?>.broadcast();
   Stream<int?> get episodeIdStream => _episodeIdController.stream;
+
+  /// The episodeId of the currently-loaded episode, or null if none.
+  int? get currentEpisodeId => _currentMediaItem?.extras?['episodeId'] as int?;
+
+  /// The episodeId of the preloaded next episode, or null if nothing is
+  /// preloaded for a gapless transition.
+  int? get preloadedNextEpisodeId =>
+      _nextMediaItem?.extras?['episodeId'] as int?;
+
+  /// True while a gapless advance is in flight.
+  bool get isAdvancing => _isAdvancing;
+
+  /// Drops any preloaded next episode and removes its buffered audio source, so
+  /// it can't play gaplessly. Used when the queue changes and the preloaded
+  /// item is no longer the correct next episode (#297). The episode currently
+  /// playing (source at index 0) is untouched.
+  Future<void> clearPreloadedNext() async {
+    _nextMediaItem = null;
+    while (_player.audioSources.length > 1) {
+      await _player.removeAudioSourceAt(_player.audioSources.length - 1);
+    }
+  }
 
   AudioSource _resolveAudioSource(MediaItem item) => resolveAudioSource(item);
 

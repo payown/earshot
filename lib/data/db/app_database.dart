@@ -39,7 +39,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   Future<void> clearAllData() => transaction(() async {
     await delete(podcasts).go();
@@ -119,6 +119,29 @@ class AppDatabase extends _$AppDatabase {
               WHERE podcasts.id = episodes.podcast_id
                 AND podcasts.last_seen_pub_date IS NOT NULL
             )
+        ''');
+      }
+      if (from < 13) {
+        // Heal podcasts whose high-water mark was poisoned by a future-dated
+        // episode before #296 was fixed: a mark ahead of "now" suppresses every
+        // later, correctly-dated episode as backlog. Reset any future mark to
+        // the newest non-future pub date for that podcast (or now() if it has
+        // none), so new episodes reach the inbox again. DateTimes are stored as
+        // unix seconds, matching strftime('%s','now'). "now" is computed once in
+        // a CTE so every comparison in the statement uses the same instant.
+        // security-ok: migration SQL, no user input
+        await customStatement('''
+          WITH now_secs(v) AS (SELECT CAST(strftime('%s', 'now') AS INTEGER))
+          UPDATE podcasts
+          SET last_seen_pub_date = COALESCE(
+            (
+              SELECT MAX(pub_date) FROM episodes
+              WHERE episodes.podcast_id = podcasts.id
+                AND pub_date <= (SELECT v FROM now_secs)
+            ),
+            (SELECT v FROM now_secs)
+          )
+          WHERE last_seen_pub_date > (SELECT v FROM now_secs)
         ''');
       }
     },
