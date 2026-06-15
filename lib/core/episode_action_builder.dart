@@ -135,7 +135,16 @@ EpisodeQuickActionItem? _buildItem(
             context: context,
             barrierLabel: 'Dismiss show notes',
             builder: (dialogContext) => AlertDialog(
-              title: Text(episode.title),
+              // Announced by VoiceOver/TalkBack when the dialog opens so the
+              // user knows what surfaced.
+              semanticLabel: 'Show notes',
+              // The episode title heads the dialog so heading navigation lands
+              // on it; the open announcement above already says "Show notes".
+              title: Semantics(
+                header: true,
+                label: episode.title,
+                child: ExcludeSemantics(child: Text(episode.title)),
+              ),
               content: SingleChildScrollView(
                 child: episode.description != null
                     ? Html(
@@ -145,7 +154,15 @@ EpisodeQuickActionItem? _buildItem(
                           await safeLaunchUrl(url);
                         },
                       )
-                    : const Text('No show notes available.'),
+                    : Text(
+                        'No show notes available.',
+                        style: Theme.of(dialogContext).textTheme.bodyMedium
+                            ?.copyWith(
+                              color: Theme.of(
+                                dialogContext,
+                              ).colorScheme.onSurfaceVariant,
+                            ),
+                      ),
               ),
               actions: [
                 TextButton(
