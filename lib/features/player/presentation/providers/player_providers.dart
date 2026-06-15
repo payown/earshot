@@ -334,7 +334,11 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     final db = ref.read(appDatabaseProvider);
     final queue = await queueRepo.watchQueue().first;
     if (queue.length < 2) {
-      preloadScheduled = false;
+      // Leave preloadScheduled = true. No next episode exists, so there's
+      // nothing to preload. Resetting to false would cause positionSub to
+      // re-enter on every ~200ms tick for the rest of the episode — a hot
+      // DB-read loop that pegs the CPU. onEpisodeAdvanced/Completed will
+      // reset the flag when the episode actually finishes.
       return;
     }
     final next = queue[1];
@@ -389,7 +393,8 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     final settingsRepo = AppSettingsRepositoryImpl(database: db);
     final gaplessEnabled = await settingsRepo.isGaplessPlaybackEnabled();
     if (!gaplessEnabled) {
-      preloadScheduled = false;
+      // Leave preloadScheduled = true. Gapless is disabled, so we'll never
+      // preload for this episode. Same reasoning as preloadNextEpisode above.
       return;
     }
 
