@@ -49,21 +49,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     );
     _attachPlaybackListener();
     _attachIndexListener();
-    _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.ready) _readySinceLoad = true;
-      if (state == ProcessingState.completed) {
-        if (!shouldHonorCompleted(
-          readySinceLoad: _readySinceLoad,
-          playRequestedSinceLoad: _playRequestedSinceLoad,
-        )) {
-          _log.warning(
-            'Ignoring spurious completed event (no playback since load)',
-          );
-          return;
-        }
-        unawaited(_onEpisodeCompleted());
-      }
-    });
+    _attachProcessingStateListener();
 
     sleepTimer = SleepTimer(
       onExpired: () {
@@ -98,6 +84,8 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   StreamSubscription<PlaybackState>? _playbackSubscription;
+  StreamSubscription<ProcessingState>? _processingStateSub;
+  StreamSubscription<int?>? _indexSub;
 
   MediaItem? _currentMediaItem;
   MediaItem? _nextMediaItem;
@@ -133,8 +121,26 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
         .listen(playbackState.add);
   }
 
+  void _attachProcessingStateListener() {
+    _processingStateSub = _player.processingStateStream.listen((state) {
+      if (state == ProcessingState.ready) _readySinceLoad = true;
+      if (state == ProcessingState.completed) {
+        if (!shouldHonorCompleted(
+          readySinceLoad: _readySinceLoad,
+          playRequestedSinceLoad: _playRequestedSinceLoad,
+        )) {
+          _log.warning(
+            'Ignoring spurious completed event (no playback since load)',
+          );
+          return;
+        }
+        unawaited(_onEpisodeCompleted());
+      }
+    });
+  }
+
   void _attachIndexListener() {
-    _player.currentIndexStream.listen((index) {
+    _indexSub = _player.currentIndexStream.listen((index) {
       final last = _lastKnownIndex;
       _lastKnownIndex = index;
       if (index == null || last == null) return;
@@ -322,6 +328,10 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> stop() async {
     await _playbackSubscription?.cancel();
     _playbackSubscription = null;
+    await _processingStateSub?.cancel();
+    _processingStateSub = null;
+    await _indexSub?.cancel();
+    _indexSub = null;
     _currentMediaItem = null;
     _nextMediaItem = null;
     _lastKnownIndex = null;
@@ -337,6 +347,8 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
       ),
     );
     _attachPlaybackListener();
+    _attachIndexListener();
+    _attachProcessingStateListener();
   }
 
   @override
@@ -416,6 +428,8 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> dispose() async {
     sleepTimer.dispose();
     await _playbackSubscription?.cancel();
+    await _processingStateSub?.cancel();
+    await _indexSub?.cancel();
     await _episodeIdController.close();
     await _player.dispose();
   }
