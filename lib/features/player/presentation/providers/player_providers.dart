@@ -388,28 +388,39 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
   // kGaplessPreloadThreshold of the end, enabling gapless transitions.
   final positionSub = handler.positionStream.listen(
     (position) async {
-      if (preloadScheduled) return;
-      final duration = handler.mediaItem.value?.duration;
-      if (duration == null) return;
-      if (!shouldPreload(position, duration, kGaplessPreloadThreshold)) return;
+      try {
+        if (preloadScheduled) return;
+        final duration = handler.mediaItem.value?.duration;
+        if (duration == null) return;
+        if (!shouldPreload(position, duration, kGaplessPreloadThreshold))
+          return;
 
-      // Set flag synchronously before any await so concurrent position events
-      // don't race in and schedule duplicate preloads.
-      preloadScheduled = true;
+        // Set flag synchronously before any await so concurrent position events
+        // don't race in and schedule duplicate preloads.
+        preloadScheduled = true;
 
-      final db = ref.read(appDatabaseProvider);
-      final settingsRepo = AppSettingsRepositoryImpl(database: db);
-      final gaplessEnabled = await settingsRepo.isGaplessPlaybackEnabled();
-      if (!gaplessEnabled) {
-        // Leave preloadScheduled = true. Gapless is disabled, so we'll never
-        // preload for this episode. Same reasoning as preloadNextEpisode above.
-        return;
+        final db = ref.read(appDatabaseProvider);
+        final settingsRepo = AppSettingsRepositoryImpl(database: db);
+        final gaplessEnabled = await settingsRepo.isGaplessPlaybackEnabled();
+        if (!gaplessEnabled) {
+          // Leave preloadScheduled = true. Gapless is disabled, so we'll never
+          // preload for this episode. Same reasoning as preloadNextEpisode above.
+          return;
+        }
+
+        unawaited(preloadNextEpisode());
+      } catch (e, st) {
+        _log.warning('positionSub listener error', e, st);
+        unawaited(Sentry.captureException(e, stackTrace: st));
       }
-
-      unawaited(preloadNextEpisode());
     },
     onError: (Object e, StackTrace st) {
-      _log.warning('positionSub error', e, st);
+      // onError handles errors emitted by positionStream itself (not async
+      // listener throws — those are caught by the try/catch above). Providing
+      // onError here also prevents stream errors from escaping to the root zone,
+      // so we must capture to Sentry explicitly.
+      _log.warning('positionSub stream error', e, st);
+      unawaited(Sentry.captureException(e, stackTrace: st));
     },
   );
 

@@ -52,7 +52,7 @@ final chaptersProvider = FutureProvider<List<Chapter>>((ref) async {
   // no network pressure.
   final downloadPath = mediaItem?.extras?['downloadPath'] as String?;
   final chapterLookupUrl = downloadPath != null
-      ? 'file://$downloadPath'
+      ? Uri.file(downloadPath).toString()
       : mediaItem?.id;
   if (chapterLookupUrl != null) {
     final fromAudio = await ref.watch(
