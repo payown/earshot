@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Inbox: VoiceOver/TalkBack now reads a short show-notes preview for each
+  episode after its title, show, and status, so you can hear what an episode is
+  about while browsing without opening it. The full notes remain one rotor
+  action away via "Open show notes". HTML and entities are stripped so no markup
+  is read aloud.
 - Show notes: opening an episode's show notes from the Inbox, Queue, Library, or
   Downloads now announces "Show notes" to VoiceOver/TalkBack when it opens and
   exposes the episode title as a heading, so screen reader users can read an

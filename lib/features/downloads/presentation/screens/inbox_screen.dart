@@ -14,6 +14,7 @@ import '../../../../core/presentation/widgets/episode_actions_sheet.dart';
 import '../../../../core/providers/auto_refresh_provider.dart';
 import '../../../../core/providers/core_providers.dart';
 import '../../../../core/router/app_router.dart';
+import '../../../../core/utils/text_utils.dart';
 import '../../../../core/utils/time_format.dart';
 import '../../../../data/db/enums.dart';
 import '../../../settings/domain/quick_action_definition.dart';
@@ -483,6 +484,12 @@ class _InboxEpisodeTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final durationLabel = _semanticDuration(episode);
     final downloadLabel = _downloadStatusLabel(episode.downloadStatus);
+    // A short spoken preview of the show notes so VoiceOver users hear what an
+    // episode is about while browsing. The full notes stay one rotor action
+    // away via "Open show notes" (#311).
+    // Shorter cap than the default: each inbox row is read atomically, so keep
+    // the preview brief for fast browsing. Full notes are on the rotor.
+    final notesPreview = descriptionPreview(episode.description, maxChars: 140);
     final parts = [
       if (podcastNameFirst && podcastTitle != null) podcastTitle!,
       episode.title,
@@ -490,6 +497,7 @@ class _InboxEpisodeTile extends StatelessWidget {
       'New episode',
       if (durationLabel != null) durationLabel,
       if (downloadLabel != null) downloadLabel,
+      if (notesPreview.isNotEmpty) notesPreview,
     ];
     final label = parts.join(', ');
 
