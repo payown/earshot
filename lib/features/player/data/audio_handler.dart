@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
+import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:logging/logging.dart';
 
@@ -25,6 +27,17 @@ AudioSource resolveAudioSource(MediaItem item) {
 /// [position] >= [duration] - [threshold] triggers buffering.
 bool shouldPreload(Duration position, Duration duration, Duration threshold) =>
     duration > Duration.zero && position >= duration - threshold;
+
+/// Returns true when an audio interruption end event warrants resuming playback.
+///
+/// [wasPlaying] must reflect whether the player was actively playing when the
+/// interruption began, so a user-initiated pause before an alarm fires does not
+/// trigger an unwanted auto-resume when the alarm ends.
+@visibleForTesting
+bool shouldResumeAfterInterruption(
+  AudioInterruptionEvent event, {
+  required bool wasPlaying,
+}) => !event.begin && event.type == AudioInterruptionType.pause && wasPlaying;
 
 /// A completed event is only genuine when the player reached ready since the
 /// last load AND playback was requested since then. Completion-on-load (e.g.
@@ -56,6 +69,26 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
         pause();
       },
     );
+
+    AudioSession.instance.then((session) {
+      if (_disposed) return;
+      _interruptionSub = session.interruptionEventStream.listen((event) {
+        if (event.begin) {
+          _wasPlayingBeforeInterruption = _player.playing;
+          pause();
+        } else if (shouldResumeAfterInterruption(
+          event,
+          wasPlaying: _wasPlayingBeforeInterruption,
+        )) {
+          // iOS set AVAudioSessionInterruptionOptionShouldResume and we were
+          // actually playing when interrupted — safe to resume.
+          play();
+        }
+      });
+      _becomingNoisySub = session.becomingNoisyEventStream.listen((_) {
+        pause();
+      });
+    });
   }
 
   late final AndroidLoudnessEnhancer _loudnessEnhancer;
@@ -86,6 +119,11 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   StreamSubscription<PlaybackState>? _playbackSubscription;
   StreamSubscription<ProcessingState>? _processingStateSub;
   StreamSubscription<int?>? _indexSub;
+  StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
+  StreamSubscription<void>? _becomingNoisySub;
+
+  bool _disposed = false;
+  bool _wasPlayingBeforeInterruption = false;
 
   MediaItem? _currentMediaItem;
   MediaItem? _nextMediaItem;
@@ -426,10 +464,13 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> dispose() async {
+    _disposed = true;
     sleepTimer.dispose();
     await _playbackSubscription?.cancel();
     await _processingStateSub?.cancel();
     await _indexSub?.cancel();
+    await _interruptionSub?.cancel();
+    await _becomingNoisySub?.cancel();
     await _episodeIdController.close();
     await _player.dispose();
   }

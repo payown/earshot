@@ -1,4 +1,5 @@
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:earshot/core/constants/playback.dart';
 import 'package:earshot/features/player/data/audio_handler.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -77,6 +78,55 @@ void main() {
       expect(
         shouldPreload(const Duration(seconds: 1), shortDuration, threshold),
         isTrue,
+      );
+    });
+  });
+
+  group('shouldResumeAfterInterruption', () {
+    test(
+      'returns true when interrupted while playing and iOS signals resume',
+      () {
+        final event = AudioInterruptionEvent(
+          false,
+          AudioInterruptionType.pause,
+        );
+        expect(
+          shouldResumeAfterInterruption(event, wasPlaying: true),
+          isTrue,
+        );
+      },
+    );
+
+    test(
+      'returns false when interrupted while paused even if iOS signals resume',
+      () {
+        final event = AudioInterruptionEvent(
+          false,
+          AudioInterruptionType.pause,
+        );
+        expect(
+          shouldResumeAfterInterruption(event, wasPlaying: false),
+          isFalse,
+        );
+      },
+    );
+
+    test('returns false when iOS does not signal resume (unknown type)', () {
+      final event = AudioInterruptionEvent(
+        false,
+        AudioInterruptionType.unknown,
+      );
+      expect(
+        shouldResumeAfterInterruption(event, wasPlaying: true),
+        isFalse,
+      );
+    });
+
+    test('returns false for interruption begin events', () {
+      final event = AudioInterruptionEvent(true, AudioInterruptionType.pause);
+      expect(
+        shouldResumeAfterInterruption(event, wasPlaying: true),
+        isFalse,
       );
     });
   });
