@@ -15,7 +15,10 @@ abstract interface class QueueRepository {
 
   // Removal after genuine playback completion: removes the queue row and
   // marks the episode played atomically, so it can never be stranded in the
-  // inQueue-but-not-in-queue ghost state.
+  // inQueue-but-not-in-queue ghost state. Intentionally does NOT reset
+  // positionSeconds — PositionTracker owns position-zeroing (guarded by its
+  // near-end check), so a spurious/racing completion can never destroy a
+  // listener's saved place here.
   Future<void> markPlayedAndRemove(int episodeId);
 
   // User-initiated removal. Reverts episode status to newEpisode so it

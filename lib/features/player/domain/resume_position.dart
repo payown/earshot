@@ -1,3 +1,5 @@
+import '../../../data/db/enums.dart';
+
 /// Returns the position to resume playback from, or 0 to start over when the
 /// episode is effectively finished (>= 95% of the known duration).
 ///
@@ -18,3 +20,17 @@ int clampedResumePosition({
       ? positionSeconds
       : 0;
 }
+
+/// Whether the last-playing episode should be restored to the mini player on
+/// cold start.
+///
+/// A non-played episode is always restored. A `played` episode is normally
+/// skipped (it genuinely finished and PositionTracker zeroed its position),
+/// but is still restored when it retains a non-zero position: that only
+/// happens when a spurious/racing completion marked it played mid-episode, in
+/// which case the listener should get their place back rather than an empty
+/// mini player. See issue #293.
+bool shouldRestoreLastPlaying({
+  required EpisodeStatus status,
+  required int positionSeconds,
+}) => status != EpisodeStatus.played || positionSeconds > 0;
