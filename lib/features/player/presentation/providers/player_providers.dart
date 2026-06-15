@@ -331,25 +331,36 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
   }
 
   Future<void> preloadNextEpisode() async {
-    final db = ref.read(appDatabaseProvider);
-    final queue = await queueRepo.watchQueue().first;
-    if (queue.length < 2) {
-      preloadScheduled = false;
-      return;
+    try {
+      final db = ref.read(appDatabaseProvider);
+      final queue = await queueRepo.watchQueue().first;
+      if (queue.length < 2) {
+        // Leave preloadScheduled = true. No next episode exists, so there's
+        // nothing to preload. Resetting to false would cause positionSub to
+        // re-enter on every ~200ms tick for the rest of the episode — a hot
+        // DB-read loop that pegs the CPU. onEpisodeAdvanced/Completed will
+        // reset the flag when the episode actually finishes.
+        return;
+      }
+      final next = queue[1];
+      final podcast = await (db.select(
+        db.podcasts,
+      )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
+      await handler.preloadNext(
+        _buildMediaItem(
+          episode: next,
+          podcastTitle: podcast?.title,
+          artUri: next.artworkUrl != null
+              ? Uri.tryParse(next.artworkUrl!)
+              : null,
+          speedOverride: podcast?.speedOverride,
+          trimSilenceOverride: podcast?.trimSilenceOverride,
+        ),
+      );
+    } catch (e, st) {
+      _log.warning('Gapless preload failed', e, st);
+      unawaited(Sentry.captureException(e, stackTrace: st));
     }
-    final next = queue[1];
-    final podcast = await (db.select(
-      db.podcasts,
-    )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
-    await handler.preloadNext(
-      _buildMediaItem(
-        episode: next,
-        podcastTitle: podcast?.title,
-        artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
-        speedOverride: podcast?.speedOverride,
-        trimSilenceOverride: podcast?.trimSilenceOverride,
-      ),
-    );
   }
 
   Future<bool> checkGroupBoundary(
@@ -375,26 +386,43 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
 
   // Watches position and preloads the next queue episode when within
   // kGaplessPreloadThreshold of the end, enabling gapless transitions.
-  final positionSub = handler.positionStream.listen((position) async {
-    if (preloadScheduled) return;
-    final duration = handler.mediaItem.value?.duration;
-    if (duration == null) return;
-    if (!shouldPreload(position, duration, kGaplessPreloadThreshold)) return;
+  final positionSub = handler.positionStream.listen(
+    (position) async {
+      try {
+        if (preloadScheduled) return;
+        final duration = handler.mediaItem.value?.duration;
+        if (duration == null) return;
+        if (!shouldPreload(position, duration, kGaplessPreloadThreshold))
+          return;
 
-    // Set flag synchronously before any await so concurrent position events
-    // don't race in and schedule duplicate preloads.
-    preloadScheduled = true;
+        // Set flag synchronously before any await so concurrent position events
+        // don't race in and schedule duplicate preloads.
+        preloadScheduled = true;
 
-    final db = ref.read(appDatabaseProvider);
-    final settingsRepo = AppSettingsRepositoryImpl(database: db);
-    final gaplessEnabled = await settingsRepo.isGaplessPlaybackEnabled();
-    if (!gaplessEnabled) {
-      preloadScheduled = false;
-      return;
-    }
+        final db = ref.read(appDatabaseProvider);
+        final settingsRepo = AppSettingsRepositoryImpl(database: db);
+        final gaplessEnabled = await settingsRepo.isGaplessPlaybackEnabled();
+        if (!gaplessEnabled) {
+          // Leave preloadScheduled = true. Gapless is disabled, so we'll never
+          // preload for this episode. Same reasoning as preloadNextEpisode above.
+          return;
+        }
 
-    unawaited(preloadNextEpisode());
-  });
+        unawaited(preloadNextEpisode());
+      } catch (e, st) {
+        _log.warning('positionSub listener error', e, st);
+        unawaited(Sentry.captureException(e, stackTrace: st));
+      }
+    },
+    onError: (Object e, StackTrace st) {
+      // onError handles errors emitted by positionStream itself (not async
+      // listener throws — those are caught by the try/catch above). Providing
+      // onError here also prevents stream errors from escaping to the root zone,
+      // so we must capture to Sentry explicitly.
+      _log.warning('positionSub stream error', e, st);
+      unawaited(Sentry.captureException(e, stackTrace: st));
+    },
+  );
 
   // Called by the audio handler when a gapless transition occurs mid-playlist.
   // Handles bookkeeping: remove completed episode, check group boundary,

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
@@ -189,6 +190,26 @@ Future<void> _startApp({
   required LogService logService,
   required bool analyticsEnabled,
 }) async {
+  // Capture Flutter framework errors and unhandled async zone errors that
+  // would otherwise be silently dropped in release builds. Set regardless
+  // of whether Sentry initialized — they also write to the structured log
+  // buffer so the last error is captured before a crash.
+  FlutterError.onError = (details) {
+    _log.severe(
+      'FlutterError: ${details.exceptionAsString()}',
+      details.exception,
+      details.stack,
+    );
+    unawaited(
+      Sentry.captureException(details.exception, stackTrace: details.stack),
+    );
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    _log.severe('Unhandled async error', error, stack);
+    unawaited(Sentry.captureException(error, stackTrace: stack));
+    return true;
+  };
+
   // Configure the audio session for long-form spoken audio with AirPlay
   // enabled. Without this, iOS leaves the session on its default
   // .soloAmbient category, which doesn't offer AirPlay devices as routes.

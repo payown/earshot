@@ -45,10 +45,19 @@ final currentChapterUrlProvider = StreamProvider<String?>((ref) {
 final chaptersProvider = FutureProvider<List<Chapter>>((ref) async {
   final mediaItem = ref.watch(mediaItemProvider).asData?.value;
 
-  // Source 1 — native audio file chapters
-  final audioUrl = mediaItem?.id;
-  if (audioUrl != null) {
-    final fromAudio = await ref.watch(audioChaptersProvider(audioUrl).future);
+  // Source 1 — native audio file chapters.
+  // Prefer the local file path for downloaded episodes so ChapterChannel
+  // doesn't open a second network connection to the same URL that just_audio
+  // is already streaming. AVURLAsset with a file:// URL reads from disk with
+  // no network pressure.
+  final downloadPath = mediaItem?.extras?['downloadPath'] as String?;
+  final chapterLookupUrl = downloadPath != null
+      ? Uri.file(downloadPath).toString()
+      : mediaItem?.id;
+  if (chapterLookupUrl != null) {
+    final fromAudio = await ref.watch(
+      audioChaptersProvider(chapterLookupUrl).future,
+    );
     if (fromAudio.isNotEmpty) return fromAudio;
   }
 
