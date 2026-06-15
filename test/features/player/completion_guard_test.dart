@@ -75,4 +75,53 @@ void main() {
       expect(nextEqualsCompleted(null, null), isFalse);
     });
   });
+
+  group('classifyCompleted', () {
+    test('honors a genuine completion when not advancing', () {
+      expect(
+        classifyCompleted(
+          isAdvancing: false,
+          readySinceLoad: true,
+          playRequestedSinceLoad: true,
+        ),
+        CompletedAction.honor,
+      );
+    });
+
+    test('ignores completion while a gapless advance is in flight', () {
+      // Even with both honor flags set (they still reflect the previous,
+      // now-finished episode), an advance in flight means this completion
+      // belongs to the episode being advanced past.
+      expect(
+        classifyCompleted(
+          isAdvancing: true,
+          readySinceLoad: true,
+          playRequestedSinceLoad: true,
+        ),
+        CompletedAction.ignoreAdvancing,
+      );
+    });
+
+    test('advance gate takes priority over the spurious gate', () {
+      expect(
+        classifyCompleted(
+          isAdvancing: true,
+          readySinceLoad: false,
+          playRequestedSinceLoad: false,
+        ),
+        CompletedAction.ignoreAdvancing,
+      );
+    });
+
+    test('ignores a spurious completion when not advancing', () {
+      expect(
+        classifyCompleted(
+          isAdvancing: false,
+          readySinceLoad: true,
+          playRequestedSinceLoad: false,
+        ),
+        CompletedAction.ignoreSpurious,
+      );
+    });
+  });
 }
