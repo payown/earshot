@@ -430,14 +430,24 @@ void main() {
           ParsedPodcast(title: 'Test Podcast', episodes: [normal]),
         );
         await repo.refreshFeed(podcast.id);
+        // Compare against a timestamp taken AFTER the refresh: the clamp uses
+        // refreshFeed's own DateTime.now(), which is slightly later than the
+        // `now` captured above, so comparing to `now` would be flaky.
+        final afterRefresh = DateTime.now().toUtc();
 
         final row = await (db.select(
           db.podcasts,
         )..where((p) => p.id.equals(podcast.id))).getSingle();
         expect(
-          row.lastSeenPubDate!.isAfter(now),
+          row.lastSeenPubDate!.isAfter(afterRefresh),
           isFalse,
           reason: 'a future mark must be clamped back to now on refresh',
+        );
+        // And it was actually pulled back from the +30d poison, not left as-is.
+        expect(
+          row.lastSeenPubDate!.isBefore(now.add(const Duration(days: 1))),
+          isTrue,
+          reason: 'the future mark must be repaired, not preserved',
         );
       },
     );
