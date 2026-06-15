@@ -82,16 +82,15 @@ class PodcastRepositoryImpl implements PodcastRepository {
     // excluded so a misdated episode can't push the mark ahead of real new
     // episodes (#296). Fall back to now() when no usable pubDate exists in the
     // feed so the gate is always seeded.
+    final nowUtc = DateTime.now().toUtc();
     final latestOnSubscribe = _latestNonFuturePubDate(
       feed.episodes,
-      now: DateTime.now().toUtc(),
+      now: nowUtc,
     );
     await (_db.update(
       _db.podcasts,
     )..where((p) => p.id.equals(podcastId))).write(
-      PodcastsCompanion(
-        lastSeenPubDate: Value(latestOnSubscribe ?? DateTime.now().toUtc()),
-      ),
+      PodcastsCompanion(lastSeenPubDate: Value(latestOnSubscribe ?? nowUtc)),
     );
 
     _log.info('Subscribed to podcast: ${feed.title}');
@@ -261,15 +260,21 @@ class PodcastRepositoryImpl implements PodcastRepository {
     // this fetch. Future-dated items are ignored: letting one advance the mark
     // would make every later, correctly-dated episode look like backlog and be
     // silently dismissed from the inbox (#296).
-    final latestPubDate = _latestNonFuturePubDate(
-      feed.episodes,
-      now: DateTime.now().toUtc(),
-    );
-    if (latestPubDate != null) {
-      final prev = podcastRow.lastSeenPubDate;
-      final newMark = prev == null || latestPubDate.isAfter(prev)
-          ? latestPubDate
-          : prev;
+    final nowUtc = DateTime.now().toUtc();
+    final latestPubDate = _latestNonFuturePubDate(feed.episodes, now: nowUtc);
+    final prev = podcastRow.lastSeenPubDate;
+    // Clamp an already-future mark back to now so a podcast poisoned before this
+    // fix self-heals on its next refresh, not only via the v13 migration.
+    final clampedPrev = (prev != null && prev.isAfter(nowUtc)) ? nowUtc : prev;
+    final DateTime? newMark;
+    if (clampedPrev == null) {
+      newMark = latestPubDate;
+    } else if (latestPubDate == null || !latestPubDate.isAfter(clampedPrev)) {
+      newMark = clampedPrev;
+    } else {
+      newMark = latestPubDate;
+    }
+    if (newMark != null && newMark != prev) {
       await (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId)))
           .write(PodcastsCompanion(lastSeenPubDate: Value(newMark)));
     }
