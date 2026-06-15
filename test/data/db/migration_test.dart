@@ -139,4 +139,102 @@ void main() {
       await upgradedDb.close();
     });
   });
+
+  group('schema migration to version 13 heals a poisoned high-water mark', () {
+    late Directory tempDir;
+    late File dbFile;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('earshot_migration_v13');
+      dbFile = File('${tempDir.path}/earshot.db');
+    });
+
+    tearDown(() {
+      if (tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+    });
+
+    test('future-dated mark resets to newest non-future pub date', () async {
+      // Seed a current-schema DB, then roll user_version back to 12 so the next
+      // open runs onUpgrade(12, 13). v13 adds no columns, so the on-disk schema
+      // is already correct — only the from < 13 data fix needs to run.
+      final seedDb = AppDatabase.forTesting(NativeDatabase(dbFile));
+      final now = DateTime.now().toUtc();
+
+      // A tester poisoned by #296: the mark sits 30 days in the future.
+      final poisoned = await seedDb
+          .into(seedDb.podcasts)
+          .insert(
+            PodcastsCompanion.insert(
+              rssUrl: 'https://example.com/poisoned.xml',
+              title: 'Poisoned',
+              lastSeenPubDate: Value(now.add(const Duration(days: 30))),
+            ),
+          );
+      // A healthy podcast whose mark is already in the past.
+      final healthy = await seedDb
+          .into(seedDb.podcasts)
+          .insert(
+            PodcastsCompanion.insert(
+              rssUrl: 'https://example.com/healthy.xml',
+              title: 'Healthy',
+              lastSeenPubDate: Value(now.subtract(const Duration(days: 1))),
+            ),
+          );
+
+      // The true newest non-future episode for the poisoned podcast.
+      await seedDb
+          .into(seedDb.episodes)
+          .insert(
+            EpisodesCompanion.insert(
+              podcastId: poisoned,
+              guid: 'p-recent',
+              title: 'Recent',
+              audioUrl: 'https://example.com/p-recent.mp3',
+              pubDate: Value(now.subtract(const Duration(days: 2))),
+            ),
+          );
+      // A future-dated episode that must be ignored when recomputing the mark.
+      await seedDb
+          .into(seedDb.episodes)
+          .insert(
+            EpisodesCompanion.insert(
+              podcastId: poisoned,
+              guid: 'p-future',
+              title: 'Future',
+              audioUrl: 'https://example.com/p-future.mp3',
+              pubDate: Value(now.add(const Duration(days: 30))),
+            ),
+          );
+
+      await seedDb.customStatement('PRAGMA user_version = 12');
+      await seedDb.close();
+
+      final upgradedDb = AppDatabase.forTesting(NativeDatabase(dbFile));
+      final rows = await upgradedDb.select(upgradedDb.podcasts).get();
+
+      final poisonedRow = rows.firstWhere((p) => p.id == poisoned);
+      expect(poisonedRow.lastSeenPubDate, isNotNull);
+      expect(
+        poisonedRow.lastSeenPubDate!.isAfter(now),
+        isFalse,
+        reason: 'the poisoned future mark must be pulled back to <= now',
+      );
+      // Reset to the newest non-future pub date (now - 2d), not the future one.
+      final expectedMark = now.subtract(const Duration(days: 2));
+      expect(
+        poisonedRow.lastSeenPubDate!.difference(expectedMark).inSeconds.abs() <=
+            1,
+        isTrue,
+        reason: 'mark should equal the newest non-future episode pub date',
+      );
+
+      // A mark already in the past is left untouched.
+      final healthyRow = rows.firstWhere((p) => p.id == healthy);
+      expect(healthyRow.lastSeenPubDate!.isBefore(now), isTrue);
+
+      await upgradedDb.close();
+    });
+  });
 }
