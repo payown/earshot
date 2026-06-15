@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:logging/logging.dart';
 
@@ -56,6 +57,20 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
         pause();
       },
     );
+
+    AudioSession.instance.then((session) {
+      _interruptionSub = session.interruptionEventStream.listen((event) {
+        if (event.begin) {
+          pause();
+        } else if (event.type == AudioInterruptionType.pause) {
+          // iOS set AVAudioSessionInterruptionOptionShouldResume — safe to resume.
+          play();
+        }
+      });
+      _becomingNoisySub = session.becomingNoisyEventStream.listen((_) {
+        pause();
+      });
+    });
   }
 
   late final AndroidLoudnessEnhancer _loudnessEnhancer;
@@ -86,6 +101,8 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   StreamSubscription<PlaybackState>? _playbackSubscription;
   StreamSubscription<ProcessingState>? _processingStateSub;
   StreamSubscription<int?>? _indexSub;
+  StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
+  StreamSubscription<void>? _becomingNoisySub;
 
   MediaItem? _currentMediaItem;
   MediaItem? _nextMediaItem;
@@ -430,6 +447,8 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     await _playbackSubscription?.cancel();
     await _processingStateSub?.cancel();
     await _indexSub?.cancel();
+    await _interruptionSub?.cancel();
+    await _becomingNoisySub?.cancel();
     await _episodeIdController.close();
     await _player.dispose();
   }
