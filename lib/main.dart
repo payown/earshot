@@ -26,6 +26,7 @@ import 'data/db/app_database.dart';
 import 'features/downloads/presentation/providers/downloads_providers.dart';
 import 'features/player/data/audio_handler.dart';
 import 'features/player/data/audio_session_config.dart';
+import 'features/player/data/magic_tap_handler.dart';
 import 'features/player/presentation/providers/player_providers.dart';
 import 'features/settings/data/app_settings_repository.dart';
 import 'features/settings/presentation/providers/settings_providers.dart';
@@ -239,6 +240,17 @@ Future<void> _startApp({
     final config = PostHogConfig(_posthogApiKey)..host = _posthogHost;
     await Posthog().setup(config);
   }
+
+  // Wire the iOS VoiceOver magic tap (two-finger double-tap) to global
+  // play/pause. Flutter has no magic-tap API, so AppDelegate catches the
+  // gesture natively and forwards it here. The handler stays alive for the
+  // app's lifetime via the platform channel it registers.
+  MagicTapHandler(
+    hasMedia: () => audioHandler.mediaItem.value != null,
+    isPlaying: () => audioHandler.playbackState.value.playing,
+    play: audioHandler.play,
+    pause: audioHandler.pause,
+  );
 
   // Earshot may have been launched via "Open in Earshot" or "Share to
   // Earshot" for an OPML file. Best-effort: a failure here shouldn't block
