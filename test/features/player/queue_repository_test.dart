@@ -55,6 +55,13 @@ void main() {
     return row.status;
   }
 
+  Future<bool> _episodeInboxDismissed(int episodeId) async {
+    final row = await (db.select(
+      db.episodes,
+    )..where((e) => e.id.equals(episodeId))).getSingle();
+    return row.inboxDismissed;
+  }
+
   // ── addToQueue ────────────────────────────────────────────────────────────
 
   group('addToQueue', () {
@@ -234,6 +241,16 @@ void main() {
       await repo.cancelFromQueue(epId);
 
       expect(await _episodeStatus(epId), EpisodeStatus.played);
+    });
+
+    test('sets inboxDismissed so episode does not return to inbox', () async {
+      final podcastId = await _addPodcast();
+      final epId = await _addEpisode(podcastId);
+      await repo.addToQueue(epId);
+
+      await repo.cancelFromQueue(epId);
+
+      expect(await _episodeInboxDismissed(epId), isTrue);
     });
   });
 
@@ -775,5 +792,21 @@ void main() {
       expect(await _episodeStatus(ep1), EpisodeStatus.newEpisode);
       expect(await _episodeStatus(ep2), EpisodeStatus.newEpisode);
     });
+
+    test(
+      'sets inboxDismissed so cleared episodes do not return to inbox',
+      () async {
+        final podcastId = await _addPodcast();
+        final ep1 = await _addEpisode(podcastId);
+        final ep2 = await _addEpisode(podcastId);
+        await repo.addToQueue(ep1);
+        await repo.addToQueue(ep2);
+
+        await repo.clearQueue();
+
+        expect(await _episodeInboxDismissed(ep1), isTrue);
+        expect(await _episodeInboxDismissed(ep2), isTrue);
+      },
+    );
   });
 }
