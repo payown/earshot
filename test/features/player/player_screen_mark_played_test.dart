@@ -82,9 +82,6 @@ void main() {
           currentEpisodeDescriptionProvider.overrideWith(
             (_) => Stream<String?>.value(null),
           ),
-          currentEpisodeDownloadStatusProvider.overrideWith(
-            (_) => Stream<DownloadStatus?>.value(null),
-          ),
           bookmarksForEpisodeProvider.overrideWith(
             (_, __) => Stream.value(const <Bookmark>[]),
           ),

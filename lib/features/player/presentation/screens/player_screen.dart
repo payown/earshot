@@ -11,7 +11,6 @@ import 'package:earshot/core/utils/url_launcher.dart';
 
 import '../../../../core/constants/spacing.dart';
 import '../../../../core/constants/urls.dart';
-import '../../../../data/db/enums.dart';
 import '../../../../features/bookmarks/presentation/providers/bookmarks_providers.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/presentation/providers/subscriptions_providers.dart';
@@ -160,8 +159,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
-  /// Exports the current episode's downloaded audio file via the OS share sheet.
-  /// Only offered when the episode is downloaded (see the menu/rotor gates).
+  /// Exports the current episode's audio via the OS share sheet, downloading it
+  /// first in the background if it isn't downloaded yet (see [exportEpisodeAudio]).
   Future<void> _exportAudio(BuildContext context) async {
     final mediaItem = ref.read(mediaItemProvider).asData?.value;
     final episodeId = mediaItem?.extras?['episodeId'];
@@ -190,9 +189,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         .watch(currentEpisodeDescriptionProvider)
         .asData
         ?.value;
-    final isDownloaded =
-        ref.watch(currentEpisodeDownloadStatusProvider).asData?.value ==
-        DownloadStatus.downloaded;
 
     // Stop rotor fast-forward if the setting is turned off mid-session.
     ref.listen<AsyncValue<bool>>(directTouchEnabledProvider, (_, next) {
@@ -304,19 +300,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   child: const ExcludeSemantics(child: Text('Mark as played')),
                 ),
               ),
-              // Only when the episode is downloaded — export shares the local
-              // audio file via the OS share sheet (Save to Files, AirDrop, etc).
-              if (isDownloaded)
-                PopupMenuItem<void>(
-                  onTap: () => _exportAudio(context),
-                  child: Semantics(
-                    button: true,
-                    label: 'Export audio file',
-                    child: const ExcludeSemantics(
-                      child: Text('Export audio file'),
-                    ),
+              // Always available — exports the local audio via the share sheet,
+              // downloading first in the background if the episode isn't
+              // downloaded yet.
+              PopupMenuItem<void>(
+                onTap: () => _exportAudio(context),
+                child: Semantics(
+                  button: true,
+                  label: 'Export audio file',
+                  child: const ExcludeSemantics(
+                    child: Text('Export audio file'),
                   ),
                 ),
+              ),
             ],
           ),
         ],
@@ -345,11 +341,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   customSemanticsActions: {
                     const CustomSemanticsAction(label: 'Mark as played'): () =>
                         _markAsPlayed(context),
-                    if (isDownloaded)
-                      const CustomSemanticsAction(
-                        label: 'Export audio file',
-                      ): () =>
-                          _exportAudio(context),
+                    const CustomSemanticsAction(
+                      label: 'Export audio file',
+                    ): () =>
+                        _exportAudio(context),
                     if (directTouchEnabled) ...{
                       CustomSemanticsAction(
                         label: 'Skip forward $skipFwdSecs seconds',

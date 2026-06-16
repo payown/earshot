@@ -2,20 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 import 'package:earshot/core/utils/url_launcher.dart';
 
 import '../data/db/enums.dart';
 import '../features/bookmarks/presentation/providers/bookmarks_providers.dart';
 import '../features/downloads/data/download_manager.dart';
+import '../features/downloads/data/export_coordinator.dart';
 import '../features/downloads/presentation/providers/downloads_providers.dart';
 import '../features/player/data/audio_handler.dart';
 import '../features/player/data/queue_repository.dart';
 import '../features/player/presentation/providers/player_providers.dart';
 import '../features/settings/domain/quick_action_definition.dart';
+import '../features/settings/presentation/providers/settings_providers.dart';
 import '../features/subscriptions/domain/episode.dart';
 import '../features/subscriptions/presentation/providers/subscriptions_providers.dart';
+import 'audio_export.dart';
 import 'constants/urls.dart';
 import 'episode_playback.dart';
 import 'presentation/widgets/episode_actions_sheet.dart';
@@ -46,12 +48,10 @@ List<EpisodeQuickActionItem> buildEpisodeActions({
   }
 
   // "Export audio file" is intentionally not an [EpisodeAction] enum value (it
-  // would clutter the user-configurable Quick Actions list with a row that's
-  // hidden for most episodes). Append it directly, only when downloaded, so it
-  // shows in the actions sheet and VoiceOver rotor exactly when the file exists.
-  if (episode.downloadStatus == DownloadStatus.downloaded) {
-    items.add(_buildExportItem(episode, context, ref));
-  }
+  // would clutter the user-configurable Quick Actions list). It's always
+  // available: if the episode isn't downloaded yet, tapping it downloads in the
+  // background and shares when ready (see [exportEpisodeAudio]).
+  items.add(_buildExportItem(episode, context, ref));
 
   return items;
 }
@@ -72,14 +72,14 @@ EpisodeQuickActionItem _buildExportItem(
   );
 }
 
-/// Prepares the downloaded audio file for [episodeId] and hands it to the OS
-/// share sheet (Save to Files, AirDrop, open-in another app).
+/// Exports an episode's audio via the OS share sheet (Save to Files, AirDrop,
+/// open-in another app), downloading it first if needed.
 ///
-/// Shared by the episode actions list/rotor and the Now Playing player so both
-/// behave identically. Announces "Preparing export" before the (potentially
-/// slow) file copy, and "Export unavailable" if the episode isn't downloaded or
-/// the file is missing. Stays silent on success — the OS share sheet announces
-/// itself, so an extra announcement would just be noise.
+/// Shared by the episode actions list/rotor and the Now Playing player.
+/// - Already downloaded → announce "Preparing export" and share immediately.
+/// - Not downloaded → if on cellular, confirm once (overriding Wi-Fi-only),
+///   then hand off to [ExportCoordinator], which downloads in the background and
+///   opens the share sheet when ready (surfacing progress/errors app-wide).
 Future<void> exportEpisodeAudio({
   required int episodeId,
   required WidgetRef ref,
@@ -87,42 +87,68 @@ Future<void> exportEpisodeAudio({
   String? subject,
 }) async {
   final view = View.of(context);
-  SemanticsService.sendAnnouncement(
-    view,
-    'Preparing export',
-    TextDirection.ltr,
-  );
-  final file = await ref
-      .read(downloadManagerProvider)
-      .prepareExportFile(episodeId);
-  if (file == null) {
-    if (context.mounted) {
-      SemanticsService.sendAnnouncement(
-        view,
-        'Export unavailable',
-        TextDirection.ltr,
-      );
-    }
+  final manager = ref.read(downloadManagerProvider);
+
+  // Already downloaded → share now (prepareExportFile returns null otherwise).
+  final ready = await manager.prepareExportFile(episodeId);
+  if (ready != null) {
+    SemanticsService.sendAnnouncement(
+      view,
+      'Preparing export',
+      TextDirection.ltr,
+    );
+    await shareExportedAudioFile(ready, subject: subject);
     return;
   }
-  await SharePlus.instance.share(
-    ShareParams(
-      files: [
-        XFile(file.path, mimeType: _audioMimeForExt(p.extension(file.path))),
+
+  // Needs a download. An explicit Export tap overrides Wi-Fi-only, but confirm
+  // cellular use once.
+  if (await manager.isOnCellularConnection()) {
+    final confirmed = await ref.read(cellularExportConfirmedProvider.future);
+    if (!confirmed) {
+      if (!context.mounted) return;
+      final ok = await _confirmCellularExport(context);
+      if (ok != true) {
+        SemanticsService.sendAnnouncement(
+          view,
+          'Export cancelled',
+          TextDirection.ltr,
+        );
+        return;
+      }
+      await ref.read(cellularExportConfirmedProvider.notifier).set(true);
+    }
+  }
+
+  await ref
+      .read(exportCoordinatorProvider)
+      .requestExport(episodeId, subject: subject);
+}
+
+/// One-time "download on cellular?" confirmation. Mirrors the project's
+/// confirm-dialog pattern (showDialog<bool> + AlertDialog + barrierLabel).
+Future<bool?> _confirmCellularExport(BuildContext context) {
+  return showDialog<bool>(
+    context: context,
+    barrierLabel: 'Dismiss cellular download confirmation',
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Download on cellular?'),
+      content: const Text(
+        'Exporting this episode will download it now using cellular data.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('Continue'),
+        ),
       ],
-      subject: subject,
     ),
   );
 }
-
-String _audioMimeForExt(String ext) => switch (ext.toLowerCase()) {
-  '.mp3' => 'audio/mpeg',
-  '.m4a' || '.mp4' || '.aac' => 'audio/mp4',
-  '.ogg' || '.oga' => 'audio/ogg',
-  '.wav' => 'audio/wav',
-  '.flac' => 'audio/flac',
-  _ => 'audio/mpeg',
-};
 
 /// Removes an episode from the queue, choosing the right behavior for the
 /// currently-playing episode.

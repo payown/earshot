@@ -8,14 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Export downloaded audio: downloaded episodes now have an "Export audio file"
-  action that opens the share sheet, so you can save the audio to Files, AirDrop
-  it, or open it in another app. It's in the Now Playing player's "Episode
-  actions" menu (next to "Mark as played") and in the episode actions menu on
-  other screens, plus the VoiceOver/TalkBack actions rotor in both places. The
-  exported file keeps its original format and is named "Podcast name - Episode
-  title" instead of an internal filename. The action only shows once an episode
-  is downloaded.
+- Export audio file: every episode now has an "Export audio file" action that
+  opens the share sheet, so you can save the audio to Files, AirDrop it, or open
+  it in another app. It's in the Now Playing player's "Episode actions" menu
+  (next to "Mark as played") and the episode actions menu on other screens, plus
+  the VoiceOver/TalkBack actions rotor in both places. If the episode isn't
+  downloaded yet, tapping Export downloads it in the background and opens the
+  share sheet automatically when it's ready — even if you've moved to another
+  screen. On cellular it asks once before using mobile data. The exported file
+  keeps its original format and is named "Podcast name - Episode title" instead
+  of an internal filename. If a download fails you get a clear message with a way
+  to try again.
 - Inbox limits: each podcast can now cap how many episodes stay in the inbox and
   auto-remove episodes older than a set time (6 hours up to 2 weeks), both set on
   the podcast's settings page in the Library. A global "Default episodes per

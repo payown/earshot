@@ -24,6 +24,28 @@ enum DownloadStartResult {
   failed,
 }
 
+/// Why a download failed, used to tailor user-facing messaging.
+enum DownloadFailureReason {
+  /// The audio is gone or forbidden at the source (HTTP 403/404/410, bad URL).
+  /// Retrying won't help.
+  unavailable,
+
+  /// A transient/unknown failure (network drop, timeout, server 5xx). Worth a
+  /// retry.
+  networkOrUnknown,
+}
+
+/// Terminal outcome of a specific episode's download, so callers (e.g. the
+/// export flow) can react to one episode finishing or failing.
+class DownloadOutcome {
+  const DownloadOutcome.success(this.episodeId) : success = true, reason = null;
+  const DownloadOutcome.failure(this.episodeId, this.reason) : success = false;
+
+  final int episodeId;
+  final bool success;
+  final DownloadFailureReason? reason;
+}
+
 class DownloadManager {
   DownloadManager({
     required AppDatabase database,
@@ -38,13 +60,18 @@ class DownloadManager {
   final AppSettingsRepository _settings;
   StreamSubscription<TaskUpdate>? _updateSubscription;
   final _auditController = StreamController<String>.broadcast();
+  final _outcomeController = StreamController<DownloadOutcome>.broadcast();
 
   Stream<String> get downloadAuditEvents => _auditController.stream;
+
+  /// Per-episode terminal download outcomes (success / failure with a reason).
+  Stream<DownloadOutcome> get downloadOutcomes => _outcomeController.stream;
 
   Future<void> dispose() async {
     await _updateSubscription?.cancel();
     _updateSubscription = null;
     await _auditController.close();
+    await _outcomeController.close();
   }
 
   // Reconcile any rows left in downloading/pending from a previous session
@@ -91,11 +118,15 @@ class DownloadManager {
             '${episodeRow.title} downloaded at ${formatTimeOfDay(DateTime.now())}',
           );
         }
+        _outcomeController.add(DownloadOutcome.success(episodeId));
       case TaskStatus.failed:
       case TaskStatus.notFound:
         await _setStatus(episodeId, DownloadStatus.failed);
         _log.warning(
           'Download failed for episode $episodeId: ${update.status}',
+        );
+        _outcomeController.add(
+          DownloadOutcome.failure(episodeId, _classifyFailure(update)),
         );
       case TaskStatus.canceled:
         final file = await _destinationFile(episodeId, update.task.url);
@@ -113,6 +144,7 @@ class DownloadManager {
   Future<DownloadStartResult> downloadEpisode(
     int episodeId, {
     void Function(String message)? onComplete,
+    bool force = false,
   }) async {
     final row = await (_db.select(
       _db.episodes,
@@ -127,7 +159,10 @@ class DownloadManager {
       return DownloadStartResult.alreadyDownloading;
     }
 
-    if (!await _isWifiAvailable()) {
+    // [force] is set by the export flow: an explicit Export tap is treated as
+    // intent to download now, overriding the Wi-Fi-only setting (the caller has
+    // already confirmed cellular use).
+    if (!force && !await _isWifiAvailable()) {
       _log.info('Download skipped — not on Wi-Fi');
       return DownloadStartResult.skippedNoWifi;
     }
@@ -470,6 +505,30 @@ class DownloadManager {
     if (!wifiOnly) return true;
     final result = await Connectivity().checkConnectivity();
     return result.contains(ConnectivityResult.wifi);
+  }
+
+  /// True when the only active connection is cellular (mobile present, Wi-Fi
+  /// absent). Used to decide whether to prompt before a cellular export.
+  Future<bool> isOnCellularConnection() async {
+    final result = await Connectivity().checkConnectivity();
+    return result.contains(ConnectivityResult.mobile) &&
+        !result.contains(ConnectivityResult.wifi);
+  }
+
+  /// Maps a terminal task update to a user-facing failure reason. A definitive
+  /// "gone/forbidden" HTTP code or a malformed URL means retrying won't help.
+  DownloadFailureReason _classifyFailure(TaskStatusUpdate update) {
+    const goneOrForbidden = {403, 404, 410};
+    final code =
+        update.responseStatusCode ??
+        (update.exception is TaskHttpException
+            ? (update.exception! as TaskHttpException).httpResponseCode
+            : null);
+    if ((code != null && goneOrForbidden.contains(code)) ||
+        update.exception is TaskUrlException) {
+      return DownloadFailureReason.unavailable;
+    }
+    return DownloadFailureReason.networkOrUnknown;
   }
 
   Future<void> _setStatus(int episodeId, DownloadStatus status) async {

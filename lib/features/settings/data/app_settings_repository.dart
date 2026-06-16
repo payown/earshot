@@ -84,6 +84,13 @@ abstract interface class AppSettingsRepository {
 
   Future<void> setHasSeenGaplessTip({required bool value});
 
+  /// Whether the user has confirmed (once) that exporting an episode may
+  /// download over cellular. Set true after the first confirmation so we don't
+  /// ask again.
+  Future<bool> hasConfirmedCellularExport();
+
+  Future<void> setHasConfirmedCellularExport({required bool value});
+
   // null = keep forever
   Future<int?> getDownloadRetentionDays();
 
@@ -151,6 +158,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyPodcastNameTipSeen = 'podcast_name_tip_seen';
   static const _keyGaplessPlayback = 'gapless_playback_enabled';
   static const _keyGaplessTipSeen = 'gapless_tip_seen';
+  static const _keyConfirmedCellularExport = 'confirmed_cellular_export';
   static const _keyDownloadRetentionDays = 'download_retention_days';
   static const _keyInboxDefaultMaxEpisodes = 'inbox_default_max_episodes';
   static const _keyDownloadAudit = 'download_audit_announcements';
@@ -370,6 +378,14 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setHasSeenGaplessTip({required bool value}) =>
       _set(_keyGaplessTipSeen, value.toString());
+
+  @override
+  Future<bool> hasConfirmedCellularExport() =>
+      _getBool(_keyConfirmedCellularExport, defaultValue: false);
+
+  @override
+  Future<void> setHasConfirmedCellularExport({required bool value}) =>
+      _set(_keyConfirmedCellularExport, value.toString());
 
   @override
   Future<bool> isDownloadAuditEnabled() =>
