@@ -584,6 +584,28 @@ void main() {
     );
   });
 
+  group('per-podcast inbox limit setters', () {
+    test('round-trip inboxMaxEpisodes and inboxAgeLimitHours', () async {
+      stubFeed();
+      final p = await repo.subscribe(_rssUrl);
+      await repo.setInboxMaxEpisodes(p.id, 1);
+      await repo.setInboxAgeLimitHours(p.id, 24);
+      final subs = await repo.watchSubscriptions().first;
+      final updated = subs.firstWhere((e) => e.id == p.id);
+      expect(updated.inboxMaxEpisodes, 1);
+      expect(updated.inboxAgeLimitHours, 24);
+    });
+
+    test('null clears the per-podcast values', () async {
+      stubFeed();
+      final p = await repo.subscribe(_rssUrl);
+      await repo.setInboxMaxEpisodes(p.id, 5);
+      await repo.setInboxMaxEpisodes(p.id, null);
+      final subs = await repo.watchSubscriptions().first;
+      expect(subs.firstWhere((e) => e.id == p.id).inboxMaxEpisodes, isNull);
+    });
+  });
+
   group('republished episode resurrection (#298)', () {
     final now = DateTime.now().toUtc();
     final mark = now.subtract(const Duration(days: 10));
@@ -718,5 +740,154 @@ void main() {
       expect(row.status, EpisodeStatus.played);
       expect(row.inboxDismissed, isTrue);
     });
+
+    test(
+      'a republished episode beyond the count cap is re-trimmed in the same '
+      'refresh',
+      () async {
+        // cap = 1; an old auto-dismissed-backlog episode gets republished
+        // forward (#298 would resurface it), but a newer current inbox episode
+        // exists, so the cap must re-trim the republished one in the same pass.
+        final podcastId = await db
+            .into(db.podcasts)
+            .insert(
+              PodcastsCompanion.insert(
+                rssUrl: _rssUrl,
+                title: 'P',
+                lastSeenPubDate: Value(mark),
+                inboxMaxEpisodes: const Value(1),
+              ),
+            );
+        // Newest current inbox episode (keeps the single slot).
+        await db
+            .into(db.episodes)
+            .insert(
+              EpisodesCompanion.insert(
+                podcastId: podcastId,
+                guid: 'newest',
+                title: 'newest',
+                audioUrl: 'https://example.com/n.mp3',
+                pubDate: Value(now),
+              ),
+            );
+        // Auto-dismissed backlog that the feed now republishes forward.
+        final rerunId = await db
+            .into(db.episodes)
+            .insert(
+              EpisodesCompanion.insert(
+                podcastId: podcastId,
+                guid: 'rerun',
+                title: 'rerun',
+                audioUrl: 'https://example.com/r.mp3',
+                pubDate: Value(oldPub),
+                status: const Value(EpisodeStatus.played),
+                inboxDismissed: const Value(true),
+              ),
+            );
+        stubFeed(
+          episodes: [
+            ParsedEpisode(
+              guid: 'rerun',
+              title: 'rerun',
+              audioUrl: 'https://example.com/r.mp3',
+              pubDate: newPub, // newer than mark, older than 'newest'
+            ),
+          ],
+        );
+        await repo.refreshFeed(podcastId);
+        final rerun = await (db.select(
+          db.episodes,
+        )..where((e) => e.id.equals(rerunId))).getSingle();
+        // #298 resurrected it (newEpisode), but it's older than 'newest' and
+        // cap=1, so the trim re-dismisses it.
+        expect(rerun.status, EpisodeStatus.newEpisode);
+        expect(rerun.inboxDismissed, isTrue);
+      },
+    );
+  });
+
+  group('subscribe seeding honors the effective count cap', () {
+    test('seeds only the global default count when set', () async {
+      await AppSettingsRepositoryImpl(
+        database: db,
+      ).setInboxDefaultMaxEpisodes(1);
+      stubFeed(
+        episodes: [
+          ParsedEpisode(
+            guid: 'a',
+            title: 'a',
+            audioUrl: 'https://example.com/a.mp3',
+            pubDate: DateTime(2024, 3),
+          ),
+          ParsedEpisode(
+            guid: 'b',
+            title: 'b',
+            audioUrl: 'https://example.com/b.mp3',
+            pubDate: DateTime(2024, 2),
+          ),
+          ParsedEpisode(
+            guid: 'c',
+            title: 'c',
+            audioUrl: 'https://example.com/c.mp3',
+            pubDate: DateTime(2024),
+          ),
+        ],
+      );
+      final p = await repo.subscribe(_rssUrl);
+      final rows = await (db.select(
+        db.episodes,
+      )..where((e) => e.podcastId.equals(p.id))).get();
+      final inbox = rows
+          .where((e) => e.status == EpisodeStatus.newEpisode)
+          .toList();
+      expect(inbox, hasLength(1));
+    });
+  });
+
+  group('include/exclude restore re-applies inbox limits', () {
+    test(
+      're-including a capped podcast does not leave more than the cap',
+      () async {
+        await AppSettingsRepositoryImpl(
+          database: db,
+        ).setInboxOptInOnly(value: true);
+        stubFeed();
+        final p = await repo.subscribe(_rssUrl);
+        await repo.setInboxMaxEpisodes(p.id, 1);
+        // Two inbox episodes.
+        await db
+            .into(db.episodes)
+            .insert(
+              EpisodesCompanion.insert(
+                podcastId: p.id,
+                guid: 'a',
+                title: 'a',
+                audioUrl: 'https://example.com/a.mp3',
+                pubDate: Value(DateTime(2024, 2)),
+              ),
+            );
+        await db
+            .into(db.episodes)
+            .insert(
+              EpisodesCompanion.insert(
+                podcastId: p.id,
+                guid: 'b',
+                title: 'b',
+                audioUrl: 'https://example.com/b.mp3',
+                pubDate: Value(DateTime(2024)),
+              ),
+            );
+        await repo.setInboxIncluded(p.id, included: true);
+        final rows = await (db.select(
+          db.episodes,
+        )..where((e) => e.podcastId.equals(p.id))).get();
+        final visible = rows
+            .where(
+              (e) => !e.inboxDismissed && e.status == EpisodeStatus.newEpisode,
+            )
+            .toList();
+        expect(visible.length, lessThanOrEqualTo(1));
+      },
+    );
   });
 }

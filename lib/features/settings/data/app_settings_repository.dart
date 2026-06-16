@@ -89,6 +89,12 @@ abstract interface class AppSettingsRepository {
 
   Future<void> setDownloadRetentionDays(int? days);
 
+  // null = No limit (default). Number = keep at most N newest episodes per
+  // podcast in the inbox, unless the podcast overrides it.
+  Future<int?> getInboxDefaultMaxEpisodes();
+
+  Future<void> setInboxDefaultMaxEpisodes(int? max);
+
   Future<bool> isDownloadAuditEnabled();
 
   Future<void> setDownloadAuditEnabled({required bool value});
@@ -146,6 +152,7 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   static const _keyGaplessPlayback = 'gapless_playback_enabled';
   static const _keyGaplessTipSeen = 'gapless_tip_seen';
   static const _keyDownloadRetentionDays = 'download_retention_days';
+  static const _keyInboxDefaultMaxEpisodes = 'inbox_default_max_episodes';
   static const _keyDownloadAudit = 'download_audit_announcements';
   static const _keyStorageCapBytes = 'storage_cap_bytes';
   static const _keyLastPlayingEpisodeId = 'last_playing_episode_id';
@@ -333,6 +340,20 @@ class AppSettingsRepositoryImpl implements AppSettingsRepository {
   @override
   Future<void> setDownloadRetentionDays(int? days) =>
       _set(_keyDownloadRetentionDays, days?.toString() ?? 'null');
+
+  @override
+  Future<int?> getInboxDefaultMaxEpisodes() async {
+    final row =
+        await (_db.select(_db.appSettings)
+              ..where((s) => s.key.equals(_keyInboxDefaultMaxEpisodes)))
+            .getSingleOrNull();
+    if (row == null || row.value == 'null') return null;
+    return int.tryParse(row.value);
+  }
+
+  @override
+  Future<void> setInboxDefaultMaxEpisodes(int? max) =>
+      _set(_keyInboxDefaultMaxEpisodes, max?.toString() ?? 'null');
 
   @override
   Future<bool> isGaplessPlaybackEnabled() =>

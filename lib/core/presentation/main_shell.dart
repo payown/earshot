@@ -65,6 +65,9 @@ class _MainShellState extends ConsumerState<MainShell> {
     );
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       ref.read(queueExpirationServiceProvider).runExpiration();
+      // Apply inbox count caps and age limits. Early-outs cheaply when no limits
+      // are set, so the common no-limits case adds effectively no launch work.
+      unawaited(ref.read(inboxLimitServiceProvider).applyInboxLimits());
       // Run history retention independently so a slow DB operation doesn't
       // push the VoiceOver focus nudge past the window where it's effective.
       unawaited(

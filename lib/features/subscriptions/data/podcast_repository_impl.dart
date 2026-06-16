@@ -10,6 +10,7 @@ import '../../../data/db/app_database.dart';
 import '../../../data/db/enums.dart';
 import '../../../data/rss/parsed_feed.dart';
 import '../../../data/rss/rss_parser.dart';
+import '../../downloads/data/inbox_limit_service.dart';
 import '../../settings/data/app_settings_repository.dart';
 import '../domain/episode.dart';
 import '../domain/podcast.dart';
@@ -70,11 +71,14 @@ class PodcastRepositoryImpl implements PodcastRepository {
           ),
         );
 
+    // Seed the inbox using the effective count cap when a finite global default
+    // is set, otherwise keep the existing anti-flood default of 3 (No limit).
+    final seed = await _settings.getInboxDefaultMaxEpisodes() ?? 3;
     await _upsertEpisodes(
       podcastId,
       feed.episodes,
       preserveUserData: false,
-      inboxLimit: 3,
+      inboxLimit: seed,
     );
 
     // Set the high-water mark so the first refresh doesn't re-surface the
@@ -337,6 +341,15 @@ class PodcastRepositoryImpl implements PodcastRepository {
           .write(PodcastsCompanion(lastSeenPubDate: Value(newMark)));
     }
 
+    // Inbox limits run last so they see the final inbox state for this feed
+    // (after #298 resurrection and the high-water mark advance). A republished
+    // episode resurfaced by #298 that is now beyond the count cap or past the
+    // age cutoff is correctly re-trimmed in this same pass.
+    await InboxLimitService(
+      database: _db,
+      settings: _settings,
+    ).applyForPodcast(podcastId, now: nowUtc);
+
     _log.info('Refreshed feed for podcast $podcastId');
   }
 
@@ -565,6 +578,15 @@ class PodcastRepositoryImpl implements PodcastRepository {
     // without requiring a manual refresh. When un-excluding, restore episodes
     // that were dismissed because of this setting.
     await _setEpisodeDismissed(podcastId, dismissed: excluded);
+    // Re-including (un-excluding) clears inboxDismissed for the whole podcast,
+    // which would silently reverse a count/age trim. Re-apply the limits so the
+    // user never sees more than the cap after a restore.
+    if (!excluded) {
+      await InboxLimitService(
+        database: _db,
+        settings: _settings,
+      ).applyForPodcast(podcastId);
+    }
     _log.fine('Inbox excluded for podcast $podcastId set to $excluded');
   }
 
@@ -577,9 +599,30 @@ class PodcastRepositoryImpl implements PodcastRepository {
     final inboxOptInOnly = await _settings.isInboxOptInOnly();
     if (inboxOptInOnly) {
       await _setEpisodeDismissed(podcastId, dismissed: !included);
+      // Including a podcast clears inboxDismissed for its episodes, which would
+      // silently reverse a count/age trim. Re-apply the limits after the restore
+      // so caps aren't reversed by a re-include.
+      if (included) {
+        await InboxLimitService(
+          database: _db,
+          settings: _settings,
+        ).applyForPodcast(podcastId);
+      }
     }
     _log.fine('Inbox included for podcast $podcastId set to $included');
   }
+
+  @override
+  Future<void> setInboxMaxEpisodes(int podcastId, int? max) =>
+      (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId))).write(
+        PodcastsCompanion(inboxMaxEpisodes: Value(max)),
+      );
+
+  @override
+  Future<void> setInboxAgeLimitHours(int podcastId, int? hours) =>
+      (_db.update(_db.podcasts)..where((p) => p.id.equals(podcastId))).write(
+        PodcastsCompanion(inboxAgeLimitHours: Value(hours)),
+      );
 
   Podcast _podcastFromRow(PodcastRow row) => Podcast(
     id: row.id,
@@ -598,6 +641,8 @@ class PodcastRepositoryImpl implements PodcastRepository {
     speedOverride: row.speedOverride,
     trimSilenceOverride: row.trimSilenceOverride,
     queueAgeLimitDays: row.queueAgeLimitDays,
+    inboxMaxEpisodes: row.inboxMaxEpisodes,
+    inboxAgeLimitHours: row.inboxAgeLimitHours,
     createdAt: row.createdAt,
     refreshedAt: row.refreshedAt,
   );

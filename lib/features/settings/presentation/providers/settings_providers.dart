@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/providers/core_providers.dart';
+import '../../../downloads/presentation/providers/downloads_providers.dart';
 import '../../data/app_settings_repository.dart';
 import '../../data/quick_action_repository.dart';
 import '../../data/quick_action_repository_impl.dart';
@@ -140,6 +141,31 @@ class _RetentionSettingNotifier extends AsyncNotifier<int?> {
 final downloadRetentionDaysProvider =
     AsyncNotifierProvider<_RetentionSettingNotifier, int?>(
       _RetentionSettingNotifier.new,
+    );
+
+class InboxDefaultMaxEpisodesNotifier extends AsyncNotifier<int?> {
+  @override
+  Future<int?> build() async {
+    final db = ref.watch(appDatabaseProvider);
+    return AppSettingsRepositoryImpl(
+      database: db,
+    ).getInboxDefaultMaxEpisodes();
+  }
+
+  Future<void> set(int? max) async {
+    state = AsyncData(max);
+    final db = ref.read(appDatabaseProvider);
+    await AppSettingsRepositoryImpl(
+      database: db,
+    ).setInboxDefaultMaxEpisodes(max);
+    // Re-trim the inbox so the new default takes effect immediately.
+    await ref.read(inboxLimitServiceProvider).applyInboxLimits();
+  }
+}
+
+final inboxDefaultMaxEpisodesProvider =
+    AsyncNotifierProvider<InboxDefaultMaxEpisodesNotifier, int?>(
+      InboxDefaultMaxEpisodesNotifier.new,
     );
 
 final gaplessPlaybackProvider =

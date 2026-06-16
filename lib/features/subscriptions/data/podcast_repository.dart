@@ -29,6 +29,12 @@ abstract interface class PodcastRepository {
 
   Future<void> setInboxIncluded(int podcastId, {required bool included});
 
+  /// Per-podcast inbox count cap. null = use the global default.
+  Future<void> setInboxMaxEpisodes(int podcastId, int? max);
+
+  /// Per-podcast inbox age limit in hours. null = off.
+  Future<void> setInboxAgeLimitHours(int podcastId, int? hours);
+
   Future<void> updateSpeedOverride(int podcastId, double? speed);
 
   Future<void> updateTrimSilenceOverride(int podcastId, bool? trimSilence);

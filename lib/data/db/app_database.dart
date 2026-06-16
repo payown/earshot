@@ -39,7 +39,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   // Speeds up the inbox query and badge count, which filter
   // status + inbox_dismissed and order by pub_date. Created on fresh installs
@@ -158,6 +158,12 @@ class AppDatabase extends _$AppDatabase {
         // transform, so it cannot throw on a tester's aged data the way a
         // backfill could. IF NOT EXISTS keeps it idempotent.
         await customStatement(_createInboxIndex);
+      }
+      if (from < 15) {
+        // Per-podcast inbox limits (#319, #320). Additive nullable columns,
+        // no backfill (null = use global default / off).
+        await m.addColumn(podcasts, podcasts.inboxMaxEpisodes);
+        await m.addColumn(podcasts, podcasts.inboxAgeLimitHours);
       }
     },
     beforeOpen: (_) async {

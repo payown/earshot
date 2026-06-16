@@ -163,7 +163,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final mediaItem = ref.watch(mediaItemProvider).asData?.value;
     final podcastId = mediaItem?.extras?['podcastId'] as int?;
     final podcast = ref.watch(optionalPodcastProvider(podcastId)).asData?.value;
-    final hasCustomSettings = podcast?.hasCustomSettings ?? false;
+    final hasCustomSettings = podcast?.hasPlaybackOverride ?? false;
     final playbackState = ref.watch(playbackStateProvider).asData?.value;
     final position = ref.watch(positionProvider).asData?.value ?? Duration.zero;
     final directTouchEnabled =

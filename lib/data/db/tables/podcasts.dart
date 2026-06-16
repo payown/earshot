@@ -17,6 +17,8 @@ class Podcasts extends Table {
   RealColumn get speedOverride => real().nullable()();
   BoolColumn get trimSilenceOverride => boolean().nullable()();
   IntColumn get queueAgeLimitDays => integer().nullable()();
+  IntColumn get inboxMaxEpisodes => integer().nullable()();
+  IntColumn get inboxAgeLimitHours => integer().nullable()();
   BoolColumn get inboxExcluded =>
       boolean().withDefault(const Constant(false))();
   BoolColumn get inboxIncluded =>

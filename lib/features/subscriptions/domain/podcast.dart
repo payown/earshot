@@ -17,6 +17,8 @@ class Podcast {
     this.speedOverride,
     this.trimSilenceOverride,
     this.queueAgeLimitDays,
+    this.inboxMaxEpisodes,
+    this.inboxAgeLimitHours,
     this.refreshedAt,
   });
 
@@ -36,9 +38,22 @@ class Podcast {
   final double? speedOverride;
   final bool? trimSilenceOverride;
   final int? queueAgeLimitDays;
+  final int? inboxMaxEpisodes;
+  final int? inboxAgeLimitHours;
   final DateTime createdAt;
   final DateTime? refreshedAt;
 
-  bool get hasCustomSettings =>
+  /// True when this podcast has a playback override (speed or trim silence).
+  /// Drives the "Reset to global speed" affordances, which only clear playback
+  /// overrides — keep this separate from [hasCustomSettings] so adding an inbox
+  /// limit doesn't surface a speed-reset button (or null-bang a missing speed).
+  bool get hasPlaybackOverride =>
       speedOverride != null || trimSilenceOverride != null;
+
+  /// True when this podcast has any per-podcast override at all, including the
+  /// inbox count cap and age limit.
+  bool get hasCustomSettings =>
+      hasPlaybackOverride ||
+      inboxMaxEpisodes != null ||
+      inboxAgeLimitHours != null;
 }

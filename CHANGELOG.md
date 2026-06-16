@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Inbox limits: each podcast can now cap how many episodes stay in the inbox and
+  auto-remove episodes older than a set time (6 hours up to 2 weeks), both set on
+  the podcast's settings page in the Library. A global "Default episodes per
+  podcast in inbox" choice under Inbox settings sets the default (No limit by
+  default, so nothing changes unless you opt in). Trimmed episodes aren't
+  deleted; they stay unplayed in the show's episode list. Anything you've
+  played, started, or queued is never touched.
 - Now Playing: a "Mark as played" action lets you finish the current episode
   without listening to the end. It marks the episode played, removes it from
   the queue, and moves on to the next queued episode (or stops when the queue

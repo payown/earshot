@@ -97,6 +97,14 @@ void main() {
       await seedDb.customStatement(
         'ALTER TABLE podcasts DROP COLUMN last_seen_pub_date',
       );
+      // Columns added in later schema versions must also be dropped so the
+      // re-run of their addColumn migrations doesn't collide.
+      await seedDb.customStatement(
+        'ALTER TABLE podcasts DROP COLUMN inbox_max_episodes',
+      );
+      await seedDb.customStatement(
+        'ALTER TABLE podcasts DROP COLUMN inbox_age_limit_hours',
+      );
       await seedDb.customStatement('PRAGMA user_version = 10');
       await seedDb.close();
 
@@ -208,6 +216,12 @@ void main() {
             ),
           );
 
+      await seedDb.customStatement(
+        'ALTER TABLE podcasts DROP COLUMN inbox_max_episodes',
+      );
+      await seedDb.customStatement(
+        'ALTER TABLE podcasts DROP COLUMN inbox_age_limit_hours',
+      );
       await seedDb.customStatement('PRAGMA user_version = 12');
       await seedDb.close();
 
@@ -308,6 +322,12 @@ void main() {
               ),
             );
 
+        await seedDb.customStatement(
+          'ALTER TABLE podcasts DROP COLUMN inbox_max_episodes',
+        );
+        await seedDb.customStatement(
+          'ALTER TABLE podcasts DROP COLUMN inbox_age_limit_hours',
+        );
         await seedDb.customStatement('PRAGMA user_version = 13');
         await seedDb.close();
 
@@ -343,6 +363,48 @@ void main() {
       await db.select(db.podcasts).get();
       expect(await indexNames(db), contains('idx_episodes_inbox'));
       await db.close();
+    });
+  });
+
+  group('schema migration to version 15 adds inbox-limit columns', () {
+    late Directory tempDir;
+    late File dbFile;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('earshot_migration_v15');
+      dbFile = File('${tempDir.path}/earshot.db');
+    });
+    tearDown(() {
+      if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+    });
+
+    test('onUpgrade(14, 15) adds columns and keeps data', () async {
+      final seedDb = AppDatabase.forTesting(NativeDatabase(dbFile));
+      final podcastId = await seedDb
+          .into(seedDb.podcasts)
+          .insert(
+            PodcastsCompanion.insert(
+              rssUrl: 'https://example.com/a.xml',
+              title: 'A',
+            ),
+          );
+      // Drop the two columns and roll user_version back to 14.
+      await seedDb.customStatement(
+        'ALTER TABLE podcasts DROP COLUMN inbox_max_episodes',
+      );
+      await seedDb.customStatement(
+        'ALTER TABLE podcasts DROP COLUMN inbox_age_limit_hours',
+      );
+      await seedDb.customStatement('PRAGMA user_version = 14');
+      await seedDb.close();
+
+      final upgraded = AppDatabase.forTesting(NativeDatabase(dbFile));
+      final row = await (upgraded.select(
+        upgraded.podcasts,
+      )..where((p) => p.id.equals(podcastId))).getSingle();
+      expect(row.inboxMaxEpisodes, isNull);
+      expect(row.inboxAgeLimitHours, isNull);
+      await upgraded.close();
     });
   });
 }
