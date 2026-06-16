@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Export downloaded audio: downloaded episodes now have an "Export audio file"
+  action (in the "Episode actions" menu and the VoiceOver/TalkBack actions
+  rotor) that opens the share sheet, so you can save the audio to Files,
+  AirDrop it, or open it in another app. The exported file keeps its original
+  format and is named "Podcast name - Episode title" instead of an internal
+  filename. The action only shows once an episode is downloaded.
 - Inbox limits: each podcast can now cap how many episodes stay in the inbox and
   auto-remove episodes older than a set time (6 hours up to 2 weeks), both set on
   the podcast's settings page in the Library. A global "Default episodes per

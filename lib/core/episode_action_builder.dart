@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 import 'package:earshot/core/utils/url_launcher.dart';
 
@@ -44,8 +45,71 @@ List<EpisodeQuickActionItem> buildEpisodeActions({
     if (item != null) items.add(item);
   }
 
+  // "Export audio file" is intentionally not an [EpisodeAction] enum value (it
+  // would clutter the user-configurable Quick Actions list with a row that's
+  // hidden for most episodes). Append it directly, only when downloaded, so it
+  // shows in the actions sheet and VoiceOver rotor exactly when the file exists.
+  if (episode.downloadStatus == DownloadStatus.downloaded) {
+    items.add(_buildExportItem(episode, context, ref));
+  }
+
   return items;
 }
+
+EpisodeQuickActionItem _buildExportItem(
+  Episode episode,
+  BuildContext context,
+  WidgetRef ref,
+) {
+  return EpisodeQuickActionItem(
+    label: 'Export audio file',
+    onInvoke: () async {
+      final view = View.of(context);
+      // Copying a multi-hour episode to a temp file isn't instant; without this
+      // a VoiceOver user gets silence then a sudden jump when the share sheet
+      // takes focus. The success path stays silent after — the OS share sheet
+      // announces itself.
+      SemanticsService.sendAnnouncement(
+        view,
+        'Preparing export',
+        TextDirection.ltr,
+      );
+      final file = await ref
+          .read(downloadManagerProvider)
+          .prepareExportFile(episode.id);
+      if (file == null) {
+        if (context.mounted) {
+          SemanticsService.sendAnnouncement(
+            view,
+            'Export unavailable',
+            TextDirection.ltr,
+          );
+        }
+        return;
+      }
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile(
+              file.path,
+              mimeType: _audioMimeForExt(p.extension(file.path)),
+            ),
+          ],
+          subject: episode.title,
+        ),
+      );
+    },
+  );
+}
+
+String _audioMimeForExt(String ext) => switch (ext.toLowerCase()) {
+  '.mp3' => 'audio/mpeg',
+  '.m4a' || '.mp4' || '.aac' => 'audio/mp4',
+  '.ogg' || '.oga' => 'audio/ogg',
+  '.wav' => 'audio/wav',
+  '.flac' => 'audio/flac',
+  _ => 'audio/mpeg',
+};
 
 /// Removes an episode from the queue, choosing the right behavior for the
 /// currently-playing episode.

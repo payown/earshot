@@ -181,6 +181,51 @@ class DownloadManager {
     _log.info('Deleted download for episode $episodeId');
   }
 
+  /// Copies the downloaded audio for [episodeId] into the temp directory under a
+  /// human-readable name (`<Podcast> - <Title><ext>`) and returns that file,
+  /// ready to hand to the OS share sheet.
+  ///
+  /// Returns null if the episode isn't downloaded or the file is missing. The
+  /// copy is required because `share_plus` shares an on-disk file under its real
+  /// basename; sharing the stored `ep_<id><ext>` file directly would surface
+  /// that unfriendly name in "Save to Files".
+  Future<File?> prepareExportFile(int episodeId) async {
+    final ep = await (_db.select(
+      _db.episodes,
+    )..where((e) => e.id.equals(episodeId))).getSingleOrNull();
+
+    if (ep == null || ep.downloadStatus != DownloadStatus.downloaded) {
+      return null;
+    }
+    final path = ep.downloadPath;
+    if (path == null) return null;
+
+    final source = File(path);
+    if (!await source.exists()) return null;
+
+    final podcast = await (_db.select(
+      _db.podcasts,
+    )..where((p0) => p0.id.equals(ep.podcastId))).getSingleOrNull();
+
+    final ext = p.extension(path); // real extension, e.g. .mp3 / .m4a
+    final name = _sanitizeExportName(
+      '${podcast?.title ?? 'Podcast'} - ${ep.title}',
+    );
+    final tmpDir = await getTemporaryDirectory();
+    final dest = File(p.join(tmpDir.path, '$name$ext'));
+    return source.copy(dest.path);
+  }
+
+  /// Strips filesystem-illegal and control characters, collapses whitespace,
+  /// and caps length so the exported temp filename stays sane.
+  String _sanitizeExportName(String raw) {
+    final cleaned = raw
+        .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return cleaned.length > 120 ? cleaned.substring(0, 120).trim() : cleaned;
+  }
+
   Future<void> downloadInboxEpisodes() async {
     final episodes =
         await (_db.select(_db.episodes)..where(
