@@ -210,6 +210,48 @@ class PodcastRepositoryImpl implements PodcastRepository {
     required bool dismissed,
   }) => _setEpisodesDismissed([podcastId], dismissed: dismissed);
 
+  /// Returns auto-dismissed backlog episodes whose pubDate was just bumped past
+  /// the inbox high-water mark to the inbox (#298). Deliberately conservative:
+  /// every condition must hold, so a false negative (a real republish that
+  /// doesn't resurface) is preferred over a false positive (re-flooding the
+  /// inbox with episodes the user already finished).
+  ///
+  /// Eligibility — all required:
+  /// - `status == played` AND `inboxDismissed == true`: the durable marker that
+  ///   this row was auto-dismissed backlog, not user action (a user marking an
+  ///   inbox episode played leaves inboxDismissed false).
+  /// - `playedAt IS NULL`: a second, independent guard — every user play path
+  ///   stamps playedAt, the backlog insert does not.
+  /// - `positionSeconds == 0`: never started.
+  /// - not in the queue.
+  /// - `sinceMark < pubDate <= now`: genuinely newer than the old mark, and not
+  ///   future-dated (future items must not enter the inbox, #296).
+  Future<void> _resurrectRepublishedEpisodes(
+    int podcastId, {
+    required DateTime sinceMark,
+    required DateTime now,
+  }) async {
+    final queuedEpisodeIds = _db.selectOnly(_db.queueItems)
+      ..addColumns([_db.queueItems.episodeId]);
+    await (_db.update(_db.episodes)..where(
+          (e) =>
+              e.podcastId.equals(podcastId) &
+              e.status.equals(EpisodeStatus.played.name) &
+              e.inboxDismissed.equals(true) &
+              e.playedAt.isNull() &
+              e.positionSeconds.equals(0) &
+              e.pubDate.isBiggerThanValue(sinceMark) &
+              e.pubDate.isSmallerOrEqualValue(now) &
+              e.id.isNotInQuery(queuedEpisodeIds),
+        ))
+        .write(
+          const EpisodesCompanion(
+            status: Value(EpisodeStatus.newEpisode),
+            inboxDismissed: Value(false),
+          ),
+        );
+  }
+
   @override
   Future<void> refreshFeed(int podcastId, {DateTime? batchRefreshedAt}) async {
     final podcastRow = await (_db.select(
@@ -256,11 +298,27 @@ class PodcastRepositoryImpl implements PodcastRepository {
       await _setEpisodeDismissed(podcastId, dismissed: true);
     }
 
+    final nowUtc = DateTime.now().toUtc();
+
+    // Bring a republished episode back to the inbox: same GUID, but its pubDate
+    // was bumped past the high-water mark by this refresh (#298). Only episodes
+    // that were auto-dismissed backlog the user never touched are eligible;
+    // anything the user played, started, queued, or cleared is left alone.
+    // Skipped when the podcast is excluded from the inbox. Uses the pre-advance
+    // mark (the row's stored lastSeenPubDate, still unchanged here).
+    final oldMark = podcastRow.lastSeenPubDate;
+    if (!dismissed && oldMark != null) {
+      await _resurrectRepublishedEpisodes(
+        podcastId,
+        sinceMark: oldMark,
+        now: nowUtc,
+      );
+    }
+
     // Advance the high-water mark to the newest non-future pub date seen in
     // this fetch. Future-dated items are ignored: letting one advance the mark
     // would make every later, correctly-dated episode look like backlog and be
     // silently dismissed from the inbox (#296).
-    final nowUtc = DateTime.now().toUtc();
     final latestPubDate = _latestNonFuturePubDate(feed.episodes, now: nowUtc);
     final prev = podcastRow.lastSeenPubDate;
     // Clamp an already-future mark back to now so a podcast poisoned before this

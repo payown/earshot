@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Feeds: when a podcast republishes an episode under the same ID with a newer
+  date, it now returns to the Inbox instead of staying hidden — but only if it
+  was auto-filed backlog you never touched. Episodes you played, started,
+  queued, or cleared are left exactly as they were.
 - Queue: "Remove from queue" on the episode that's currently playing now marks it
   played, removes it, and moves on to the next episode, the same as the player's
   "Mark as played". Before, it appeared to do nothing (the playing episode stayed

@@ -583,4 +583,140 @@ void main() {
       },
     );
   });
+
+  group('republished episode resurrection (#298)', () {
+    final now = DateTime.now().toUtc();
+    final mark = now.subtract(const Duration(days: 10));
+    final oldPub = now.subtract(const Duration(days: 20));
+    final newPub = now.subtract(const Duration(days: 1)); // > mark, not future
+
+    // Seeds a podcast (with a high-water mark) and one existing episode, then
+    // refreshes the feed with the same GUID at [feedPubDate]. Returns the
+    // episode row after refresh.
+    Future<EpisodeRow> runRepublish({
+      required DateTime? feedPubDate,
+      EpisodeStatus status = EpisodeStatus.played,
+      bool inboxDismissed = true,
+      DateTime? playedAt,
+      int positionSeconds = 0,
+      bool inboxExcluded = false,
+      bool queued = false,
+    }) async {
+      final podcastId = await db
+          .into(db.podcasts)
+          .insert(
+            PodcastsCompanion.insert(
+              rssUrl: _rssUrl,
+              title: 'Test Podcast',
+              lastSeenPubDate: Value(mark),
+              inboxExcluded: Value(inboxExcluded),
+            ),
+          );
+      final episodeId = await db
+          .into(db.episodes)
+          .insert(
+            EpisodesCompanion.insert(
+              podcastId: podcastId,
+              guid: 'rerun',
+              title: 'Rerun',
+              audioUrl: 'https://example.com/rerun.mp3',
+              pubDate: Value(oldPub),
+              status: Value(status),
+              inboxDismissed: Value(inboxDismissed),
+              playedAt: Value(playedAt),
+              positionSeconds: Value(positionSeconds),
+            ),
+          );
+      if (queued) {
+        await db
+            .into(db.queueItems)
+            .insert(
+              QueueItemsCompanion.insert(episodeId: episodeId, position: 0),
+            );
+      }
+
+      stubFeed(
+        episodes: [
+          ParsedEpisode(
+            guid: 'rerun',
+            title: 'Rerun',
+            audioUrl: 'https://example.com/rerun.mp3',
+            pubDate: feedPubDate,
+          ),
+        ],
+      );
+      await repo.refreshFeed(podcastId);
+
+      return (db.select(
+        db.episodes,
+      )..where((e) => e.id.equals(episodeId))).getSingle();
+    }
+
+    test(
+      'untouched backlog with a newer pubDate returns to the inbox',
+      () async {
+        final row = await runRepublish(feedPubDate: newPub);
+        expect(row.status, EpisodeStatus.newEpisode);
+        expect(row.inboxDismissed, isFalse);
+      },
+    );
+
+    test('a user-played episode (playedAt set) is NOT resurfaced', () async {
+      final row = await runRepublish(feedPubDate: newPub, playedAt: oldPub);
+      expect(row.status, EpisodeStatus.played);
+      expect(row.inboxDismissed, isTrue);
+    });
+
+    test('an episode with a saved position is NOT resurfaced', () async {
+      final row = await runRepublish(feedPubDate: newPub, positionSeconds: 300);
+      expect(row.status, EpisodeStatus.played);
+      expect(row.inboxDismissed, isTrue);
+    });
+
+    test('a queued episode is NOT resurfaced', () async {
+      final row = await runRepublish(
+        feedPubDate: newPub,
+        status: EpisodeStatus.inQueue,
+        inboxDismissed: false,
+        queued: true,
+      );
+      expect(row.status, EpisodeStatus.inQueue);
+    });
+
+    test(
+      'aged user-finished row (played, no playedAt, not dismissed) is NOT '
+      'resurfaced when its pubDate did not move',
+      () async {
+        // Simulates an old build that marked played without stamping playedAt.
+        // inboxDismissed is false (user marked an inbox item played), and the
+        // feed keeps the same old pubDate, so it must not be touched.
+        final row = await runRepublish(
+          feedPubDate: oldPub,
+          inboxDismissed: false,
+        );
+        expect(row.status, EpisodeStatus.played);
+        expect(row.inboxDismissed, isFalse);
+      },
+    );
+
+    test('a pubDate still at or before the mark is NOT resurfaced', () async {
+      final stillOld = mark.subtract(const Duration(days: 1));
+      final row = await runRepublish(feedPubDate: stillOld);
+      expect(row.status, EpisodeStatus.played);
+      expect(row.inboxDismissed, isTrue);
+    });
+
+    test('a future-dated republish is NOT resurfaced', () async {
+      final future = now.add(const Duration(days: 5));
+      final row = await runRepublish(feedPubDate: future);
+      expect(row.status, EpisodeStatus.played);
+      expect(row.inboxDismissed, isTrue);
+    });
+
+    test('an inbox-excluded podcast is NOT resurfaced', () async {
+      final row = await runRepublish(feedPubDate: newPub, inboxExcluded: true);
+      expect(row.status, EpisodeStatus.played);
+      expect(row.inboxDismissed, isTrue);
+    });
+  });
 }
