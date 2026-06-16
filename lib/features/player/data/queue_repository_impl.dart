@@ -41,6 +41,38 @@ class QueueRepositoryImpl implements QueueRepository {
   }
 
   @override
+  Future<void> addToFrontIfAbsent(int episodeId) async {
+    await _db.transaction(() async {
+      final rows = await (_db.select(
+        _db.queueItems,
+      )..orderBy([(q) => OrderingTerm.asc(q.position)])).get();
+      final minPos = rows.isEmpty ? 0 : rows.first.position;
+      // insertOrIgnore keeps an already-queued episode where it is (the unique
+      // episodeId conflict is ignored), so order is preserved on a re-tap.
+      await _db
+          .into(_db.queueItems)
+          .insert(
+            QueueItemsCompanion.insert(
+              episodeId: episodeId,
+              position: minPos - 1,
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+      // Entering the queue clears a new episode from the inbox.
+      await (_db.update(_db.episodes)..where(
+            (e) =>
+                e.id.equals(episodeId) &
+                e.status.equals(EpisodeStatus.newEpisode.name),
+          ))
+          .write(
+            const EpisodesCompanion(status: Value(EpisodeStatus.inQueue)),
+          );
+      await _compactPositions();
+    });
+    _log.fine('Added episode $episodeId to front of queue (if absent)');
+  }
+
+  @override
   Future<void> addAfterCurrent(int episodeId) async {
     await _db.transaction(() async {
       final rows = await (_db.select(

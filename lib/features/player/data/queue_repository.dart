@@ -3,6 +3,12 @@ import '../../subscriptions/domain/episode.dart';
 abstract interface class QueueRepository {
   Future<void> addToQueue(int episodeId);
 
+  // Inserts at the front of the queue if the episode isn't already queued; if it
+  // is, leaves it where it sits (its order is preserved). Used by "Play now" so
+  // a brand-new episode plays and then flows into the existing queue, while a
+  // tap on an already-queued episode plays it in place.
+  Future<void> addToFrontIfAbsent(int episodeId);
+
   // Inserts after the currently playing item (position 1). If the episode is
   // already in the queue, moves it there instead.
   Future<void> addAfterCurrent(int episodeId);

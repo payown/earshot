@@ -79,19 +79,6 @@ final collapsedQueueGroupsProvider =
       CollapsedQueueGroupsNotifier.new,
     );
 
-// Tracks the podcast ID of the group being played via "Play Group". Null means
-// no group context — normal queue playback. Cleared when the group boundary is
-// crossed (whether playback stops or continues past the group).
-class ActiveGroupNotifier extends Notifier<int?> {
-  @override
-  int? build() => null;
-
-  void set(int? podcastId) => state = podcastId;
-}
-
-final activeGroupPodcastIdProvider =
-    NotifierProvider<ActiveGroupNotifier, int?>(ActiveGroupNotifier.new);
-
 final groupedQueueProvider = Provider<AsyncValue<List<QueueGroup>>>((ref) {
   final episodes = ref.watch(queueProvider);
   final subs = ref.watch(subscriptionsProvider);
@@ -125,6 +112,12 @@ final groupedQueueProvider = Provider<AsyncValue<List<QueueGroup>>>((ref) {
 
 final sleepTimerStateProvider = StreamProvider<SleepTimerState>(
   (ref) => ref.watch(audioHandlerProvider).sleepTimer.stateStream,
+);
+
+// Whether the one-off "Stop after this episode" toggle is on. In-memory only;
+// resets when the next episode completes or the app restarts.
+final stopAfterCurrentEpisodeProvider = StreamProvider<bool>(
+  (ref) => ref.watch(audioHandlerProvider).stopAfterCurrentEpisodeStream,
 );
 
 // ── Audio enhancement settings ────────────────────────────────────────────────
@@ -335,11 +328,21 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     );
   }
 
+  // Index of the currently-playing episode in [queue], or -1 if not present.
+  int currentIndexIn(List<Episode> queue) {
+    final id = handler.mediaItem.value?.extras?['episodeId'] as int?;
+    if (id == null) return -1;
+    return queue.indexWhere((e) => e.id == id);
+  }
+
   Future<void> preloadNextEpisode() async {
     try {
       final db = ref.read(appDatabaseProvider);
       final queue = await queueRepo.watchQueue().first;
-      if (queue.length < 2) {
+      // Preload the item that follows the CURRENT episode in true order (not the
+      // queue head), so gapless works when playing from a mid-queue position.
+      final i = currentIndexIn(queue);
+      if (i < 0 || i + 1 >= queue.length) {
         // Leave preloadScheduled = true. No next episode exists, so there's
         // nothing to preload. Resetting to false would cause positionSub to
         // re-enter on every ~200ms tick for the rest of the episode — a hot
@@ -347,7 +350,7 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
         // reset the flag when the episode actually finishes.
         return;
       }
-      final next = queue[1];
+      final next = queue[i + 1];
       final podcast = await (db.select(
         db.podcasts,
       )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
@@ -368,25 +371,25 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
     }
   }
 
-  Future<bool> checkGroupBoundary(
-    List<Episode> updatedQueue,
-    AppSettingsRepositoryImpl settingsRepo,
-  ) async {
-    final activeGroupPodcastId = ref.read<int?>(activeGroupPodcastIdProvider);
-    if (activeGroupPodcastId == null) return false;
-    final groupEnded =
-        updatedQueue.isEmpty ||
-        updatedQueue.first.podcastId != activeGroupPodcastId;
-    if (!groupEnded) return false;
-    ref
-        .read<ActiveGroupNotifier>(activeGroupPodcastIdProvider.notifier)
-        .set(null);
-    final continueAfterGroup = await settingsRepo.isContinueAfterGroupEnds();
-    if (!continueAfterGroup) {
-      await handler.stop();
-      return true;
-    }
-    return false;
+  // Loads and plays [next], resuming from its saved position.
+  Future<void> playNext(Episode next) async {
+    final db = ref.read(appDatabaseProvider);
+    final nextPodcast = await (db.select(
+      db.podcasts,
+    )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
+    await handler.playEpisode(
+      _buildMediaItem(
+        episode: next,
+        podcastTitle: nextPodcast?.title,
+        artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
+        speedOverride: nextPodcast?.speedOverride,
+        trimSilenceOverride: nextPodcast?.trimSilenceOverride,
+      ),
+      resumePositionSeconds: clampedResumePosition(
+        positionSeconds: next.positionSeconds,
+        durationSeconds: next.durationSeconds,
+      ),
+    );
   }
 
   // Watches position and preloads the next queue episode when within
@@ -413,6 +416,15 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
           return;
         }
 
+        // Only gapless-preload when group continuation is on and no stop is
+        // pending. Otherwise the completion needs a boundary/stop decision, so
+        // route it through onEpisodeCompleted (no gapless advance) instead.
+        final continueAfterGroup = await settingsRepo
+            .isContinueAfterGroupEnds();
+        if (handler.stopAfterCurrentEpisode || !continueAfterGroup) {
+          return;
+        }
+
         unawaited(preloadNextEpisode());
       } catch (e, st) {
         _log.warning('positionSub listener error', e, st);
@@ -430,8 +442,9 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
   );
 
   // Called by the audio handler when a gapless transition occurs mid-playlist.
-  // Handles bookkeeping: remove completed episode, check group boundary,
-  // and preload the next-next episode to keep the gapless chain going.
+  // Gapless only runs when group continuation is on (see the positionSub gate),
+  // so there is never a boundary stop to make here — just remove the finished
+  // episode and keep the chain warm.
   handler.onEpisodeAdvanced = (int? previousEpisodeId) async {
     preloadScheduled = false;
 
@@ -439,87 +452,95 @@ final queueAutoAdvanceProvider = Provider<void>((ref) {
       await queueRepo.markPlayedAndRemove(previousEpisodeId);
     }
 
-    final db = ref.read(appDatabaseProvider);
-    final settingsRepo = AppSettingsRepositoryImpl(database: db);
     final updatedQueue = await queueRepo.watchQueue().first;
 
-    final stopped = await checkGroupBoundary(updatedQueue, settingsRepo);
-    if (stopped) return;
-
     // Preload the episode after the new current so the chain stays warm.
-    if (updatedQueue.length > 1) {
+    if (currentIndexIn(updatedQueue) + 1 < updatedQueue.length) {
       preloadScheduled = true;
       unawaited(preloadNextEpisode());
     }
   };
 
-  // Called when the last episode in the playlist finishes (no preloaded next).
-  handler.onEpisodeCompleted = () async {
+  // Called when the current episode finishes with no preloaded gapless next.
+  // [stopAfter] is true when the one-off "Stop after this episode" toggle or the
+  // sleep timer's end-of-episode mode was active.
+  handler.onEpisodeCompleted = ({required bool stopAfter}) async {
     preloadScheduled = false;
 
-    final db = ref.read(appDatabaseProvider);
-    final settingsRepo = AppSettingsRepositoryImpl(database: db);
-    final continueAfterQueue = await settingsRepo.isContinueAfterQueue();
+    final settingsRepo = AppSettingsRepositoryImpl(
+      database: ref.read(appDatabaseProvider),
+    );
 
-    // Read queue BEFORE removing the completed episode so currentIndex is
-    // accurate.
+    // Read the queue BEFORE removing the completed episode so its index and
+    // podcast are accurate.
     final queue = await queueRepo.watchQueue().first;
     final currentEpisodeId =
         handler.mediaItem.value?.extras?['episodeId'] as int?;
     final currentIndex = currentEpisodeId != null
         ? queue.indexWhere((e) => e.id == currentEpisodeId)
         : -1;
+    final completedPodcastId = currentIndex >= 0
+        ? queue[currentIndex].podcastId
+        : null;
 
     if (currentEpisodeId != null) {
       await queueRepo.markPlayedAndRemove(currentEpisodeId);
     }
 
-    final remaining = currentIndex >= 0 ? queue.length - 1 : queue.length;
-
-    final updatedQueue = await queueRepo.watchQueue().first;
-
-    final stopped = await checkGroupBoundary(updatedQueue, settingsRepo);
-    if (stopped) return;
-
-    if (remaining == 0 || currentIndex >= queue.length - 1) {
-      if (!continueAfterQueue) {
-        await handler.stop();
-        return;
-      }
-    }
-
-    if (updatedQueue.isEmpty) {
+    // Stop after this episode (one-off toggle / sleep timer end-of-episode).
+    if (stopAfter) {
       await handler.stop();
       return;
     }
 
-    final next = updatedQueue.first;
+    final continueAfterQueue = await settingsRepo.isContinueAfterQueue();
+    final continueAfterGroup = await settingsRepo.isContinueAfterGroupEnds();
+
+    // Both switches off → stop after the current episode (no auto-advance).
+    if (!continueAfterQueue && !continueAfterGroup) {
+      await handler.stop();
+      return;
+    }
+
+    final updatedQueue = await queueRepo.watchQueue().first;
+
+    // Advance to the item that FOLLOWED the completed one in true order. After
+    // removal, that item now sits at currentIndex.
+    final hasNext = currentIndex >= 0 && currentIndex < updatedQueue.length;
+    if (!hasNext) {
+      // The completed episode was the last in true order (end of queue). Keep
+      // playing only if the user opted to continue past the queue; then fall
+      // back to whatever remains at the top.
+      if (continueAfterQueue && updatedQueue.isNotEmpty) {
+        await playNext(updatedQueue.first);
+      } else {
+        await handler.stop();
+      }
+      return;
+    }
+
+    final next = updatedQueue[currentIndex];
+
     if (nextEqualsCompleted(next.id, currentEpisodeId)) {
-      // markPlayedAndRemove did not take effect (the episode was already
-      // removed by a concurrent gapless advance). The completed episode is
-      // still at the queue head — stop rather than restart it from the start.
+      // markPlayedAndRemove did not take effect (a concurrent gapless advance
+      // already removed it). Stop rather than restart the same episode.
       _log.warning(
         'onEpisodeCompleted: next episode equals completed episode, stopping',
       );
       await handler.stop();
       return;
     }
-    final nextPodcast = await (db.select(
-      db.podcasts,
-    )..where((p) => p.id.equals(next.podcastId))).getSingleOrNull();
-    await handler.playEpisode(
-      _buildMediaItem(
-        episode: next,
-        podcastTitle: nextPodcast?.title,
-        artUri: next.artworkUrl != null ? Uri.tryParse(next.artworkUrl!) : null,
-        speedOverride: nextPodcast?.speedOverride,
-        trimSilenceOverride: nextPodcast?.trimSilenceOverride,
-      ),
-      resumePositionSeconds: clampedResumePosition(
-        positionSeconds: next.positionSeconds,
-        durationSeconds: next.durationSeconds,
-      ),
-    );
+
+    // Group boundary: the next item is a different podcast than the one that
+    // just finished. Gated by "Continue after group ends".
+    if (completedPodcastId != null &&
+        next.podcastId != completedPodcastId &&
+        !continueAfterGroup) {
+      await handler.stop();
+      return;
+    }
+
+    await playNext(next);
   };
 
   // Drop a stale gapless preload when the queue changes, so an episode that was
