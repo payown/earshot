@@ -576,6 +576,16 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  /// Marks the currently-playing episode as played and advances exactly as if
+  /// it had finished on its own: the episode is removed from the queue, its
+  /// saved position is cleared, and playback moves to the next queued episode
+  /// (or stops when the queue is empty). Used by the "Mark as played" action on
+  /// the Now Playing screen so the user doesn't have to let an episode run to
+  /// the end to be rid of it. Routes through the same completion path so the
+  /// re-entrancy guard, group boundaries, and continue-after-queue setting are
+  /// all honored.
+  Future<void> markCurrentEpisodePlayed() => _onEpisodeCompleted();
+
   Future<void> dispose() async {
     _disposed = true;
     sleepTimer.dispose();

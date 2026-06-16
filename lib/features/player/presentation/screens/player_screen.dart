@@ -141,6 +141,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
+  /// Marks the current episode as played and advances to the next queued
+  /// episode (or stops when the queue is empty), so the user can move on
+  /// without playing to the end. Reuses the handler's completion flow.
+  Future<void> _markAsPlayed(BuildContext context) async {
+    final hasEpisode =
+        ref.read(mediaItemProvider).asData?.value?.extras?['episodeId'] is int;
+    if (!hasEpisode) return;
+    await ref.read(audioHandlerProvider).markCurrentEpisodePlayed();
+    if (context.mounted) {
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Marked as played',
+        TextDirection.ltr,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final mediaItem = ref.watch(mediaItemProvider).asData?.value;
@@ -251,7 +268,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           tooltip: 'Close player',
           onPressed: () => Navigator.of(context).pop(),
         ),
-        actions: const [AirPlayButton()],
+        actions: [
+          const AirPlayButton(),
+          PopupMenuButton<void>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'Episode actions',
+            itemBuilder: (_) => [
+              PopupMenuItem<void>(
+                // Use the screen's context, not the menu builder's: the menu
+                // route is closing when onTap fires, so the builder context can
+                // already be unmounted and the announcement would be dropped.
+                onTap: () => _markAsPlayed(context),
+                child: Semantics(
+                  button: true,
+                  label: 'Mark as played',
+                  child: const ExcludeSemantics(child: Text('Mark as played')),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -268,24 +304,32 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   label: _voFastForwardActive
                       ? 'Artwork. Fast forward active.'
                       : 'Artwork',
-                  customSemanticsActions: directTouchEnabled
-                      ? {
-                          CustomSemanticsAction(
-                            label: 'Skip forward $skipFwdSecs seconds',
-                          ): _skipForward,
-                          CustomSemanticsAction(
-                            label: 'Skip back $skipBackSecs seconds',
-                          ): _skipBack,
-                          if (!_voFastForwardActive)
-                            const CustomSemanticsAction(
-                              label: 'Start Fast Forward',
-                            ): _startVoFastForward,
-                          if (_voFastForwardActive)
-                            const CustomSemanticsAction(
-                              label: 'Stop Fast Forward',
-                            ): _stopVoFastForward,
-                        }
-                      : null,
+                  // The Artwork node is this screen's actions host, so it always
+                  // carries Mark as played (exposed even when Direct Touch is
+                  // off). The skip / fast-forward actions are added on top only
+                  // when Direct Touch is enabled. Mark as played lives here
+                  // rather than on the title because a header node is not a
+                  // reliable place for VoiceOver rotor actions.
+                  customSemanticsActions: {
+                    const CustomSemanticsAction(label: 'Mark as played'): () =>
+                        _markAsPlayed(context),
+                    if (directTouchEnabled) ...{
+                      CustomSemanticsAction(
+                        label: 'Skip forward $skipFwdSecs seconds',
+                      ): _skipForward,
+                      CustomSemanticsAction(
+                        label: 'Skip back $skipBackSecs seconds',
+                      ): _skipBack,
+                      if (!_voFastForwardActive)
+                        const CustomSemanticsAction(
+                          label: 'Start Fast Forward',
+                        ): _startVoFastForward,
+                      if (_voFastForwardActive)
+                        const CustomSemanticsAction(
+                          label: 'Stop Fast Forward',
+                        ): _stopVoFastForward,
+                    },
+                  },
                   child: GestureDetector(
                     onLongPress: directTouchEnabled ? _onHoldStart : null,
                     onLongPressEnd: directTouchEnabled
