@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Queue: "Remove from queue" on the episode that's currently playing now marks it
+  played, removes it, and moves on to the next episode, the same as the player's
+  "Mark as played". Before, it appeared to do nothing (the playing episode stayed
+  pinned at the top) and wrongly reset its status. Removing any other queued
+  episode is unchanged.
 - Performance: the Inbox is now interactive immediately on cold launch instead
   of being unreachable for a minute or more on large libraries. The app no
   longer force-refreshes every feed on every cold start (it skips the refresh if
