@@ -97,7 +97,11 @@ void playEpisodeNow({
     ),
   );
 
-  unawaited(ref.read(queueRepositoryProvider).addToQueue(episode.id));
+  // Place the episode so playback flows correctly under the play-in-place /
+  // advance-downward model: a brand-new episode (from Inbox/Library/Downloads)
+  // goes to the front so it plays now and then continues into the queue, while
+  // an already-queued episode is left where it sits (order preserved).
+  unawaited(ref.read(queueRepositoryProvider).addToFrontIfAbsent(episode.id));
   triggerQueueDownloadIfEnabled(episode, ref, context);
 
   if (announce && context.mounted) {

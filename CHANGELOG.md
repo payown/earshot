@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Now Playing: a "Stop after this episode" action lets you stop playback when the
+  current episode finishes, just this once, without changing your settings. It's
+  in the "Episode actions" menu and the VoiceOver/TalkBack actions rotor, and it
+  clears itself after the episode ends (or when you play something else). Tip: if
+  you want to stop after every episode, turn both "Continue after…" switches off
+  in Playback settings.
 - Inbox limits: each podcast can now cap how many episodes stay in the inbox and
   auto-remove episodes older than a set time (6 hours up to 2 weeks), both set on
   the podcast's settings page in the Library. A global "Default episodes per
@@ -39,6 +45,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Playback: with both "Continue after…" switches off, playback now stops at the
+  end of the current episode instead of rolling on to another one. And when
+  playback does continue, finishing an episode you started from the middle of the
+  queue now moves to the next episode below it, not back to the top of the queue.
+  "Continue after group ends = off" now reliably stops when the next episode is a
+  different show, even when you started a single episode rather than a whole
+  group. (closes #327)
+- Queue: the playing episode now stays in its real position in the list with a
+  "Now playing" label, instead of being lifted to the top. The list reads in true
+  play order.
 - Feeds: when a podcast republishes an episode under the same ID with a newer
   date, it now returns to the Inbox instead of staying hidden — but only if it
   was auto-filed backlog you never touched. Episodes you played, started,

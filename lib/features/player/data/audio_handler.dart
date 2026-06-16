@@ -221,12 +221,33 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
   // window for an already-queued second invocation.
   bool _completionInProgress = false;
 
+  // One-off "stop after this episode" toggle. When set, the next completion
+  // stops playback instead of advancing, then clears. In-memory only (resets on
+  // app restart), like the sleep timer.
+  bool _stopAfterCurrentEpisode = false;
+  final _stopAfterController = StreamController<bool>.broadcast();
+
+  /// Whether playback will stop when the current episode finishes (the one-off
+  /// "Stop after this episode" toggle).
+  bool get stopAfterCurrentEpisode => _stopAfterCurrentEpisode;
+
+  /// Emits whenever the one-off "Stop after this episode" toggle changes.
+  Stream<bool> get stopAfterCurrentEpisodeStream => _stopAfterController.stream;
+
+  void setStopAfterCurrentEpisode({required bool value}) {
+    if (_stopAfterCurrentEpisode == value) return;
+    _stopAfterCurrentEpisode = value;
+    _stopAfterController.add(value);
+  }
+
   /// Called when the playlist advances gaplessly to the next episode.
   /// [previousEpisodeId] is the episode that just finished.
   Future<void> Function(int? previousEpisodeId)? onEpisodeAdvanced;
 
-  /// Called when the last episode in the playlist finishes.
-  Future<void> Function()? onEpisodeCompleted;
+  /// Called when the last episode in the playlist finishes. [stopAfter] is true
+  /// when playback should stop rather than advance (the one-off toggle or the
+  /// sleep timer's end-of-episode mode was active at completion).
+  Future<void> Function({required bool stopAfter})? onEpisodeCompleted;
 
   void _attachPlaybackListener() {
     _playbackSubscription = _player.playbackEventStream
@@ -564,10 +585,15 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     _completionInProgress = true;
     try {
       _log.info('Episode completed: ${mediaItem.value?.title}');
+      // Capture the stop decision BEFORE onEpisodeEnded(), which clears the
+      // sleep timer's end-of-episode flag.
+      final stopAfter = _stopAfterCurrentEpisode || sleepTimer.endOfEpisode;
       sleepTimer.onEpisodeEnded();
+      // The one-off is consumed by this completion.
+      setStopAfterCurrentEpisode(value: false);
       final callback = onEpisodeCompleted;
       if (callback != null) {
-        await callback();
+        await callback(stopAfter: stopAfter);
       } else {
         await stop();
       }
@@ -595,6 +621,7 @@ class EarshotAudioHandler extends BaseAudioHandler with SeekHandler {
     await _interruptionSub?.cancel();
     await _becomingNoisySub?.cancel();
     await _episodeIdController.close();
+    await _stopAfterController.close();
     await _player.dispose();
   }
 }
