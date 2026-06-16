@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Now Playing: a "Mark as played" action lets you finish the current episode
+  without listening to the end. It marks the episode played, removes it from
+  the queue, and moves on to the next queued episode (or stops when the queue
+  is empty). Available from the "Episode actions" menu and the
+  VoiceOver/TalkBack actions rotor on the artwork.
 - Queue: in the "Group by podcast" view, each podcast group now has "Move
   group to top/up/down/bottom" actions in the VoiceOver/TalkBack actions
   rotor, mirroring the per-episode move actions.
