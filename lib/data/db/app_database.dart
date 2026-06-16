@@ -39,7 +39,15 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
+
+  // Speeds up the inbox query and badge count, which filter
+  // status + inbox_dismissed and order by pub_date. Created on fresh installs
+  // (onCreate) and added to existing installs in the from < 14 migration.
+  // security-ok: fixed DDL, no user input
+  static const _createInboxIndex =
+      'CREATE INDEX IF NOT EXISTS idx_episodes_inbox '
+      'ON episodes (status, inbox_dismissed, pub_date)';
 
   Future<void> clearAllData() => transaction(() async {
     await delete(podcasts).go();
@@ -52,6 +60,7 @@ class AppDatabase extends _$AppDatabase {
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
       await m.createAll();
+      await customStatement(_createInboxIndex);
     },
     onUpgrade: (m, from, to) async {
       if (from < 2) {
@@ -143,6 +152,12 @@ class AppDatabase extends _$AppDatabase {
           )
           WHERE last_seen_pub_date > (SELECT v FROM now_secs)
         ''');
+      }
+      if (from < 14) {
+        // Add the inbox index. Pure additive DDL on existing columns — no data
+        // transform, so it cannot throw on a tester's aged data the way a
+        // backfill could. IF NOT EXISTS keeps it idempotent.
+        await customStatement(_createInboxIndex);
       }
     },
     beforeOpen: (_) async {

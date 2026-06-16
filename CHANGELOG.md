@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Performance: the Inbox is now interactive immediately on cold launch instead
+  of being unreachable for a minute or more on large libraries. The app no
+  longer force-refreshes every feed on every cold start (it skips the refresh if
+  the feeds were checked in the last 15 minutes, matching the on-resume
+  behavior), episode writes during a refresh are now batched, the inbox query
+  and unread badge are backed by a new database index, and the badge is counted
+  in the database instead of by loading every unread episode. Pull-to-refresh
+  still forces a full refresh.
 - Inbox: VoiceOver/TalkBack now reads a short show-notes preview for each
   episode after its title, show, and status, so you can hear what an episode is
   about while browsing without opening it. The full notes remain one rotor

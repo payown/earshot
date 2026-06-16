@@ -237,4 +237,112 @@ void main() {
       await upgradedDb.close();
     });
   });
+
+  group('schema migration to version 14 adds the inbox index', () {
+    late Directory tempDir;
+    late File dbFile;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('earshot_migration_v14');
+      dbFile = File('${tempDir.path}/earshot.db');
+    });
+
+    tearDown(() {
+      if (tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+    });
+
+    Future<List<String>> indexNames(AppDatabase db) async {
+      final rows = await db
+          .customSelect(
+            "SELECT name FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'idx_episodes_inbox'",
+          )
+          .get();
+      return rows.map((r) => r.read<String>('name')).toList();
+    }
+
+    test(
+      'onUpgrade(13, 14) creates idx_episodes_inbox without losing data',
+      () async {
+        // Seed a current-schema DB with realistic data, roll user_version back to
+        // 13 (v14 adds no columns, only the index), then reopen to run
+        // onUpgrade(13, 14).
+        final seedDb = AppDatabase.forTesting(NativeDatabase(dbFile));
+        final now = DateTime.now().toUtc();
+
+        final podcastId = await seedDb
+            .into(seedDb.podcasts)
+            .insert(
+              PodcastsCompanion.insert(
+                rssUrl: 'https://example.com/a.xml',
+                title: 'Podcast A',
+              ),
+            );
+        // An inbox episode that the index-backed query must still return.
+        await seedDb
+            .into(seedDb.episodes)
+            .insert(
+              EpisodesCompanion.insert(
+                podcastId: podcastId,
+                guid: 'inbox-1',
+                title: 'Inbox 1',
+                audioUrl: 'https://example.com/inbox-1.mp3',
+                pubDate: Value(now.subtract(const Duration(days: 1))),
+                status: const Value(EpisodeStatus.newEpisode),
+              ),
+            );
+        // A dismissed episode that must be filtered out.
+        await seedDb
+            .into(seedDb.episodes)
+            .insert(
+              EpisodesCompanion.insert(
+                podcastId: podcastId,
+                guid: 'dismissed-1',
+                title: 'Dismissed 1',
+                audioUrl: 'https://example.com/dismissed-1.mp3',
+                pubDate: Value(now.subtract(const Duration(days: 2))),
+                status: const Value(EpisodeStatus.newEpisode),
+                inboxDismissed: const Value(true),
+              ),
+            );
+
+        await seedDb.customStatement('PRAGMA user_version = 13');
+        await seedDb.close();
+
+        final upgradedDb = AppDatabase.forTesting(NativeDatabase(dbFile));
+
+        // The migration completed and the index now exists.
+        expect(await indexNames(upgradedDb), contains('idx_episodes_inbox'));
+
+        // Data survived and the inbox query still returns exactly the right rows.
+        final inbox =
+            await (upgradedDb.select(upgradedDb.episodes)..where(
+                  (e) =>
+                      e.status.equals(EpisodeStatus.newEpisode.name) &
+                      e.inboxDismissed.equals(false),
+                ))
+                .get();
+        expect(inbox, hasLength(1));
+        expect(inbox.single.guid, 'inbox-1');
+
+        await upgradedDb.close();
+      },
+    );
+
+    test('fresh onCreate database has the inbox index', () async {
+      final freshDir = Directory.systemTemp.createTempSync('earshot_v14_fresh');
+      addTearDown(() {
+        if (freshDir.existsSync()) freshDir.deleteSync(recursive: true);
+      });
+      final db = AppDatabase.forTesting(
+        NativeDatabase(File('${freshDir.path}/earshot.db')),
+      );
+      // Force the DB to open (runs onCreate) with a trivial query.
+      await db.select(db.podcasts).get();
+      expect(await indexNames(db), contains('idx_episodes_inbox'));
+      await db.close();
+    });
+  });
 }

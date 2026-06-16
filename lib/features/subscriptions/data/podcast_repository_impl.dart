@@ -344,73 +344,78 @@ class PodcastRepositoryImpl implements PodcastRepository {
             return b.pubDate!.compareTo(a.pubDate!);
           }));
 
-    for (var i = 0; i < ordered.length; i++) {
-      final ep = ordered[i];
+    // One batched write instead of an awaited INSERT per episode. A feed with
+    // 100 episodes was 100 sequential round-trips; multiplied across a large
+    // library during refresh this was a major contributor to the inbox being
+    // unreachable on cold launch (#278). Behavior per row is unchanged — only
+    // the execution is batched into a single prepared-statement transaction.
+    await _db.batch((b) {
+      for (var i = 0; i < ordered.length; i++) {
+        final ep = ordered[i];
 
-      // Historical episodes (beyond the inbox limit) are inserted as played
-      // so they don't flood the inbox on bulk imports like OPML.
-      final initialStatus = i < inboxLimit
-          ? EpisodeStatus.newEpisode
-          : EpisodeStatus.played;
+        // Historical episodes (beyond the inbox limit) are inserted as played
+        // so they don't flood the inbox on bulk imports like OPML.
+        final initialStatus = i < inboxLimit
+            ? EpisodeStatus.newEpisode
+            : EpisodeStatus.played;
 
-      // On refresh, episodes at or before the high-water mark are backlog —
-      // insert them as played/dismissed so they never surface in the inbox.
-      // Null pubDates are also treated as backlog once a mark exists: real new
-      // episodes from healthy feeds carry pubDates; items with no parseable
-      // date are overwhelmingly recycled backlog from feeds with unstable GUIDs.
-      final isBacklog =
-          preserveUserData &&
-          lastSeenPubDate != null &&
-          (ep.pubDate == null || !ep.pubDate!.isAfter(lastSeenPubDate));
+        // On refresh, episodes at or before the high-water mark are backlog —
+        // insert them as played/dismissed so they never surface in the inbox.
+        // Null pubDates are also treated as backlog once a mark exists: real new
+        // episodes from healthy feeds carry pubDates; items with no parseable
+        // date are overwhelmingly recycled backlog from feeds with unstable
+        // GUIDs.
+        final isBacklog =
+            preserveUserData &&
+            lastSeenPubDate != null &&
+            (ep.pubDate == null || !ep.pubDate!.isAfter(lastSeenPubDate));
 
-      final companion = EpisodesCompanion.insert(
-        podcastId: podcastId,
-        guid: ep.guid,
-        title: ep.title,
-        audioUrl: ep.audioUrl,
-        description: Value(ep.description),
-        durationSeconds: Value(ep.durationSeconds),
-        pubDate: Value(ep.pubDate),
-        artworkUrl: Value(ep.artworkUrl),
-        episodeNumber: Value(ep.episodeNumber),
-        seasonNumber: Value(ep.seasonNumber),
-        chapterUrl: Value(ep.chapterUrl),
-        transcriptUrl: Value(ep.transcriptUrl),
-        status: preserveUserData
-            ? (isBacklog
-                  ? const Value(EpisodeStatus.played)
-                  : const Value.absent())
-            : Value(initialStatus),
-        inboxDismissed: isBacklog ? const Value(true) : Value(inboxDismissed),
-      );
+        final companion = EpisodesCompanion.insert(
+          podcastId: podcastId,
+          guid: ep.guid,
+          title: ep.title,
+          audioUrl: ep.audioUrl,
+          description: Value(ep.description),
+          durationSeconds: Value(ep.durationSeconds),
+          pubDate: Value(ep.pubDate),
+          artworkUrl: Value(ep.artworkUrl),
+          episodeNumber: Value(ep.episodeNumber),
+          seasonNumber: Value(ep.seasonNumber),
+          chapterUrl: Value(ep.chapterUrl),
+          transcriptUrl: Value(ep.transcriptUrl),
+          status: preserveUserData
+              ? (isBacklog
+                    ? const Value(EpisodeStatus.played)
+                    : const Value.absent())
+              : Value(initialStatus),
+          inboxDismissed: isBacklog ? const Value(true) : Value(inboxDismissed),
+        );
 
-      if (preserveUserData) {
-        await _db
-            .into(_db.episodes)
-            .insert(
-              companion,
-              onConflict: DoUpdate(
-                (_) => EpisodesCompanion(
-                  title: Value(ep.title),
-                  audioUrl: Value(ep.audioUrl),
-                  description: Value(ep.description),
-                  durationSeconds: Value(ep.durationSeconds),
-                  pubDate: Value(ep.pubDate),
-                  artworkUrl: Value(ep.artworkUrl),
-                  episodeNumber: Value(ep.episodeNumber),
-                  seasonNumber: Value(ep.seasonNumber),
-                  chapterUrl: Value(ep.chapterUrl),
-                  transcriptUrl: Value(ep.transcriptUrl),
-                ),
-                target: [_db.episodes.podcastId, _db.episodes.guid],
+        if (preserveUserData) {
+          b.insert(
+            _db.episodes,
+            companion,
+            onConflict: DoUpdate(
+              (_) => EpisodesCompanion(
+                title: Value(ep.title),
+                audioUrl: Value(ep.audioUrl),
+                description: Value(ep.description),
+                durationSeconds: Value(ep.durationSeconds),
+                pubDate: Value(ep.pubDate),
+                artworkUrl: Value(ep.artworkUrl),
+                episodeNumber: Value(ep.episodeNumber),
+                seasonNumber: Value(ep.seasonNumber),
+                chapterUrl: Value(ep.chapterUrl),
+                transcriptUrl: Value(ep.transcriptUrl),
               ),
-            );
-      } else {
-        await _db
-            .into(_db.episodes)
-            .insert(companion, mode: InsertMode.insertOrIgnore);
+              target: [_db.episodes.podcastId, _db.episodes.guid],
+            ),
+          );
+        } else {
+          b.insert(_db.episodes, companion, mode: InsertMode.insertOrIgnore);
+        }
       }
-    }
+    });
   }
 
   @override

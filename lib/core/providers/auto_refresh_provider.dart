@@ -26,7 +26,14 @@ class _AutoRefreshNotifier extends Notifier<bool> with WidgetsBindingObserver {
   bool build() {
     WidgetsBinding.instance.addObserver(this);
     ref.onDispose(() => WidgetsBinding.instance.removeObserver(this));
-    unawaited(_refresh());
+    // Only refresh on cold start if the last refresh is stale. An unconditional
+    // refresh here fires hundreds of HTTP requests + DB writes before the inbox
+    // is interactive, leaving it unreachable for a minute or more on large
+    // libraries (#278). Pull-to-refresh and resume still refresh as before.
+    //
+    // Deferred to a microtask because _refreshIfStale reads `state`, which isn't
+    // available until build() returns and the notifier is initialized.
+    unawaited(Future.microtask(_refreshIfStale));
     return false;
   }
 

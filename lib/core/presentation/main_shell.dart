@@ -153,11 +153,16 @@ class _MainShellState extends ConsumerState<MainShell> {
 
 final _inboxCountProvider = StreamProvider<int>((ref) {
   final db = ref.watch(appDatabaseProvider);
-  return (db.select(db.episodes)..where(
-        (e) =>
-            e.status.equals(EpisodeStatus.newEpisode.name) &
-            e.inboxDismissed.equals(false),
-      ))
-      .watch()
-      .map((rows) => rows.length);
+  // Count in SQL rather than fetching every matching row and reading .length.
+  // This provider is alive app-wide (the bottom-nav badge) and re-fires on every
+  // episode change during a refresh, so fetching full rows just to count was a
+  // hot path on large libraries (#278). Backed by idx_episodes_inbox.
+  final count = db.episodes.id.count();
+  final query = db.selectOnly(db.episodes)
+    ..addColumns([count])
+    ..where(
+      db.episodes.status.equals(EpisodeStatus.newEpisode.name) &
+          db.episodes.inboxDismissed.equals(false),
+    );
+  return query.map((row) => row.read(count) ?? 0).watchSingle();
 });
