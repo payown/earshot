@@ -28,19 +28,29 @@ class ExportCoordinator {
     required DownloadManager downloadManager,
     required GlobalKey<ScaffoldMessengerState> messengerKey,
     Future<void> Function(File file, String? subject)? share,
+    void Function(String message)? announce,
   }) : _downloads = downloadManager,
        _messengerKey = messengerKey,
-       _share = share ?? _defaultShare {
+       _share = share ?? _defaultShare,
+       _injectedAnnounce = announce {
     _sub = _downloads.downloadOutcomes.listen(_onOutcome);
   }
 
   final DownloadManager _downloads;
   final GlobalKey<ScaffoldMessengerState> _messengerKey;
   final Future<void> Function(File file, String? subject) _share;
+  final void Function(String message)? _injectedAnnounce;
   late final StreamSubscription<DownloadOutcome> _sub;
 
   // episodeId -> share subject, for downloads in flight for export.
   final Map<int, String?> _pending = {};
+
+  // episodeId -> one-shot "still downloading" reminder timer.
+  final Map<int, Timer> _progressTimers = {};
+
+  /// How long an export download may run before the user gets a verbal
+  /// "still downloading" nudge (the initial SnackBar auto-hides before this).
+  static const _stillDownloadingAfter = Duration(seconds: 5);
 
   static const _unavailableMessage =
       "This episode can't be downloaded — the audio file may no longer be "
@@ -59,6 +69,13 @@ class ExportCoordinator {
       case DownloadStartResult.alreadyDownloading:
         _pending[episodeId] = subject;
         _show('Downloading for export…', announce: 'Downloading for export');
+        // A slow download outlives the initial SnackBar; reassure the user it's
+        // still working if it's been a while and hasn't finished.
+        _progressTimers[episodeId]?.cancel();
+        _progressTimers[episodeId] = Timer(_stillDownloadingAfter, () {
+          _progressTimers.remove(episodeId);
+          if (_pending.containsKey(episodeId)) _announce('Still downloading');
+        });
       case DownloadStartResult.notFound:
         _show(_unavailableMessage);
       case DownloadStartResult.failed:
@@ -71,6 +88,7 @@ class ExportCoordinator {
   void _onOutcome(DownloadOutcome outcome) {
     if (!_pending.containsKey(outcome.episodeId)) return;
     final subject = _pending.remove(outcome.episodeId);
+    _progressTimers.remove(outcome.episodeId)?.cancel();
     if (outcome.success) {
       unawaited(_shareNow(outcome.episodeId, subject));
       return;
@@ -96,6 +114,10 @@ class ExportCoordinator {
   // is also pushed through the screen reader explicitly. The coordinator has no
   // BuildContext of its own; it borrows the messenger's context for the View.
   void _announce(String message) {
+    if (_injectedAnnounce != null) {
+      _injectedAnnounce(message);
+      return;
+    }
     final ctx = _messengerKey.currentState?.context;
     if (ctx == null) return;
     SemanticsService.sendAnnouncement(View.of(ctx), message, TextDirection.ltr);
@@ -130,7 +152,13 @@ class ExportCoordinator {
     );
   }
 
-  void dispose() => unawaited(_sub.cancel());
+  void dispose() {
+    for (final timer in _progressTimers.values) {
+      timer.cancel();
+    }
+    _progressTimers.clear();
+    unawaited(_sub.cancel());
+  }
 }
 
 final exportCoordinatorProvider = Provider<ExportCoordinator>((ref) {

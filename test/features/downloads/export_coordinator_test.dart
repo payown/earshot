@@ -14,6 +14,7 @@ void main() {
   late StreamController<DownloadOutcome> outcomes;
   late GlobalKey<ScaffoldMessengerState> messengerKey;
   late List<(File, String?)> shared;
+  late List<String> announced;
   ExportCoordinator? coordinator;
 
   late File tempFile;
@@ -23,6 +24,7 @@ void main() {
     outcomes = StreamController<DownloadOutcome>.broadcast();
     messengerKey = GlobalKey<ScaffoldMessengerState>();
     shared = [];
+    announced = [];
     when(() => mgr.downloadOutcomes).thenAnswer((_) => outcomes.stream);
     tempFile = await File(
       '${Directory.systemTemp.path}/export_coord_${DateTime.now().microsecondsSinceEpoch}.mp3',
@@ -39,6 +41,7 @@ void main() {
     downloadManager: mgr,
     messengerKey: messengerKey,
     share: (file, subject) async => shared.add((file, subject)),
+    announce: announced.add,
   );
 
   group('without a mounted messenger (pure logic)', () {
@@ -117,6 +120,9 @@ void main() {
       await tester.pump();
 
       expect(find.text('Downloading for export…'), findsOneWidget);
+
+      // Fire (and complete) the still-downloading timer so none stays pending.
+      await tester.pump(const Duration(seconds: 5));
     });
 
     testWidgets('notFound shows the "can\'t be downloaded" message', (
@@ -160,6 +166,9 @@ void main() {
       // Retry re-invokes the forced download (once for the initial request,
       // once for the retry).
       verify(() => mgr.downloadEpisode(3, force: true)).called(2);
+
+      // Let the retry's still-downloading timer fire so none stays pending.
+      await tester.pump(const Duration(seconds: 5));
     });
 
     testWidgets('an "unavailable" failure shows the dead-URL message', (
@@ -177,6 +186,42 @@ void main() {
       await tester.pump();
 
       expect(find.textContaining("can't be downloaded"), findsOneWidget);
+    });
+
+    testWidgets('announces "Still downloading" when it runs past 5 seconds', (
+      tester,
+    ) async {
+      when(
+        () => mgr.downloadEpisode(1, force: true),
+      ).thenAnswer((_) async => DownloadStartResult.started);
+      await pumpMessenger(tester);
+
+      await build().requestExport(1);
+      await tester.pump();
+      expect(announced, contains('Downloading for export'));
+
+      await tester.pump(const Duration(seconds: 5));
+
+      expect(announced, contains('Still downloading'));
+    });
+
+    testWidgets('does not nag when the download finishes within 5 seconds', (
+      tester,
+    ) async {
+      when(
+        () => mgr.downloadEpisode(2, force: true),
+      ).thenAnswer((_) async => DownloadStartResult.started);
+      when(() => mgr.prepareExportFile(2)).thenAnswer((_) async => tempFile);
+      await pumpMessenger(tester);
+
+      await build().requestExport(2);
+      await tester.pump(const Duration(seconds: 3));
+      outcomes.add(const DownloadOutcome.success(2));
+      await tester.pump(); // share + cancel the timer
+      await tester.pump(const Duration(seconds: 5)); // past the original 5s
+
+      expect(announced, isNot(contains('Still downloading')));
+      expect(shared, contains((tempFile, null)));
     });
   });
 }
