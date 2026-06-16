@@ -7,6 +7,7 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '../../../../core/constants/playback.dart';
 import '../../../../core/providers/core_providers.dart';
+import '../../../../data/db/enums.dart';
 import '../../../../features/settings/data/app_settings_repository.dart';
 import '../../../../features/settings/presentation/providers/settings_providers.dart';
 import '../../../../features/subscriptions/domain/episode.dart';
@@ -200,6 +201,20 @@ final currentEpisodeDescriptionProvider = StreamProvider<String?>((ref) {
   return (db.select(db.episodes)..where((e) => e.id.equals(episodeId)))
       .watchSingleOrNull()
       .map((row) => row?.description);
+});
+
+/// Download status of the currently playing episode, used to gate the "Export
+/// audio file" action in the player (export only works for downloaded files).
+final currentEpisodeDownloadStatusProvider = StreamProvider<DownloadStatus?>((
+  ref,
+) {
+  final episodeId =
+      ref.watch(mediaItemProvider).asData?.value?.extras?['episodeId'] as int?;
+  if (episodeId == null) return Stream.value(null);
+  final db = ref.watch(appDatabaseProvider);
+  return (db.select(db.episodes)..where((e) => e.id.equals(episodeId)))
+      .watchSingleOrNull()
+      .map((row) => row?.downloadStatus);
 });
 
 // Attaches AppSettingsRepository to the audio handler as soon as the DB is

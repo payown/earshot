@@ -63,42 +63,55 @@ EpisodeQuickActionItem _buildExportItem(
 ) {
   return EpisodeQuickActionItem(
     label: 'Export audio file',
-    onInvoke: () async {
-      final view = View.of(context);
-      // Copying a multi-hour episode to a temp file isn't instant; without this
-      // a VoiceOver user gets silence then a sudden jump when the share sheet
-      // takes focus. The success path stays silent after — the OS share sheet
-      // announces itself.
+    onInvoke: () => exportEpisodeAudio(
+      episodeId: episode.id,
+      ref: ref,
+      context: context,
+      subject: episode.title,
+    ),
+  );
+}
+
+/// Prepares the downloaded audio file for [episodeId] and hands it to the OS
+/// share sheet (Save to Files, AirDrop, open-in another app).
+///
+/// Shared by the episode actions list/rotor and the Now Playing player so both
+/// behave identically. Announces "Preparing export" before the (potentially
+/// slow) file copy, and "Export unavailable" if the episode isn't downloaded or
+/// the file is missing. Stays silent on success — the OS share sheet announces
+/// itself, so an extra announcement would just be noise.
+Future<void> exportEpisodeAudio({
+  required int episodeId,
+  required WidgetRef ref,
+  required BuildContext context,
+  String? subject,
+}) async {
+  final view = View.of(context);
+  SemanticsService.sendAnnouncement(
+    view,
+    'Preparing export',
+    TextDirection.ltr,
+  );
+  final file = await ref
+      .read(downloadManagerProvider)
+      .prepareExportFile(episodeId);
+  if (file == null) {
+    if (context.mounted) {
       SemanticsService.sendAnnouncement(
         view,
-        'Preparing export',
+        'Export unavailable',
         TextDirection.ltr,
       );
-      final file = await ref
-          .read(downloadManagerProvider)
-          .prepareExportFile(episode.id);
-      if (file == null) {
-        if (context.mounted) {
-          SemanticsService.sendAnnouncement(
-            view,
-            'Export unavailable',
-            TextDirection.ltr,
-          );
-        }
-        return;
-      }
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [
-            XFile(
-              file.path,
-              mimeType: _audioMimeForExt(p.extension(file.path)),
-            ),
-          ],
-          subject: episode.title,
-        ),
-      );
-    },
+    }
+    return;
+  }
+  await SharePlus.instance.share(
+    ShareParams(
+      files: [
+        XFile(file.path, mimeType: _audioMimeForExt(p.extension(file.path))),
+      ],
+      subject: subject,
+    ),
   );
 }
 
