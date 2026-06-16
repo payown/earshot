@@ -811,11 +811,19 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
           }),
     );
     void removeFromQueue() => unawaited(
-      ref.read(queueRepositoryProvider).cancelFromQueue(episode.id).then((_) {
+      removeEpisodeFromQueue(
+        episodeId: episode.id,
+        currentEpisodeId:
+            ref.read(mediaItemProvider).value?.extras?['episodeId'] as int?,
+        handler: ref.read(audioHandlerProvider),
+        queueRepo: ref.read(queueRepositoryProvider),
+      ).then((markedPlayed) {
         if (context.mounted) {
           SemanticsService.sendAnnouncement(
             View.of(context),
-            '${episode.title} removed from queue',
+            markedPlayed
+                ? '${episode.title} marked as played and removed from queue'
+                : '${episode.title} removed from queue',
             TextDirection.ltr,
           );
         }

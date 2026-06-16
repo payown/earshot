@@ -9,6 +9,8 @@ import '../data/db/enums.dart';
 import '../features/bookmarks/presentation/providers/bookmarks_providers.dart';
 import '../features/downloads/data/download_manager.dart';
 import '../features/downloads/presentation/providers/downloads_providers.dart';
+import '../features/player/data/audio_handler.dart';
+import '../features/player/data/queue_repository.dart';
 import '../features/player/presentation/providers/player_providers.dart';
 import '../features/settings/domain/quick_action_definition.dart';
 import '../features/subscriptions/domain/episode.dart';
@@ -43,6 +45,29 @@ List<EpisodeQuickActionItem> buildEpisodeActions({
   }
 
   return items;
+}
+
+/// Removes an episode from the queue, choosing the right behavior for the
+/// currently-playing episode.
+///
+/// A plain `cancelFromQueue` on the episode that's playing does nothing visible
+/// — the Queue screen pins the now-playing episode from player state, not the
+/// queue table — and would mark a playing episode "new". So when [episodeId] is
+/// the [currentEpisodeId], finish it instead: mark played, remove, and advance,
+/// exactly like the player's "Mark as played" (#316). Returns true when that
+/// mark-played path was taken so callers can announce accordingly.
+Future<bool> removeEpisodeFromQueue({
+  required int episodeId,
+  required int? currentEpisodeId,
+  required EarshotAudioHandler handler,
+  required QueueRepository queueRepo,
+}) async {
+  if (episodeId == currentEpisodeId) {
+    await handler.markCurrentEpisodePlayed();
+    return true;
+  }
+  await queueRepo.cancelFromQueue(episodeId);
+  return false;
 }
 
 EpisodeQuickActionItem? _buildItem(
@@ -80,11 +105,20 @@ EpisodeQuickActionItem? _buildItem(
         return EpisodeQuickActionItem(
           label: 'Remove from queue',
           onInvoke: () async {
-            await ref.read(queueRepositoryProvider).cancelFromQueue(episode.id);
+            final markedPlayed = await removeEpisodeFromQueue(
+              episodeId: episode.id,
+              currentEpisodeId:
+                  ref.read(mediaItemProvider).value?.extras?['episodeId']
+                      as int?,
+              handler: ref.read(audioHandlerProvider),
+              queueRepo: ref.read(queueRepositoryProvider),
+            );
             if (context.mounted) {
               SemanticsService.sendAnnouncement(
                 View.of(context),
-                'Removed from queue',
+                markedPlayed
+                    ? 'Marked as played and removed from queue'
+                    : 'Removed from queue',
                 TextDirection.ltr,
               );
             }
