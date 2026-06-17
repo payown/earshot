@@ -256,31 +256,15 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
           return SliverToBoxAdapter(child: _emptyState(context));
         }
 
-        // Pin the now-playing episode to the top of the display list.
-        Episode? nowPlaying;
-        if (currentEpisodeId != null) {
-          for (final ep in episodes) {
-            if (ep.id == currentEpisodeId) {
-              nowPlaying = ep;
-              break;
-            }
-          }
-        }
-
-        final displayEpisodes = [
-          if (nowPlaying != null) nowPlaying,
-          for (final ep in episodes)
-            if (ep.id != currentEpisodeId) ep,
-        ];
+        // Show the queue in its true order; the currently-playing episode is
+        // marked "Now playing" in place rather than pinned to the top.
         final total = episodes.length;
 
         return SliverList.builder(
-          itemCount: displayEpisodes.length,
-          itemBuilder: (context, displayIndex) {
-            final episode = displayEpisodes[displayIndex];
-            final isNowPlaying =
-                nowPlaying != null && episode.id == currentEpisodeId;
-            final queueIndex = episodes.indexOf(episode);
+          itemCount: episodes.length,
+          itemBuilder: (context, queueIndex) {
+            final episode = episodes[queueIndex];
+            final isNowPlaying = episode.id == currentEpisodeId;
             final position = queueIndex + 1;
             final isFirst = queueIndex == 0;
             final isLast = queueIndex == total - 1;
@@ -294,6 +278,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                     'Now playing',
                     episode.title,
                     if (podcastTitle != null) podcastTitle,
+                    'position $position of $total',
                     if (durationLabel != null) durationLabel,
                     if (downloadLabel != null) downloadLabel,
                   ]
@@ -353,84 +338,17 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
           return SliverToBoxAdapter(child: _emptyState(context));
         }
 
-        // Locate the now-playing episode across all groups.
-        Episode? nowPlayingEp;
-        String nowPlayingPodcastName = '';
-        if (currentEpisodeId != null) {
-          outer:
-          for (final group in groups) {
-            for (final ep in group.episodes) {
-              if (ep.id == currentEpisodeId) {
-                nowPlayingEp = ep;
-                nowPlayingPodcastName = group.podcastName;
-                break outer;
-              }
-            }
-          }
-        }
-
-        // Remove the now-playing episode from its group; drop the group if
-        // it becomes empty so sighted users don't see an orphaned header.
-        final adjustedGroups = nowPlayingEp != null
-            ? groups
-                  .map(
-                    (g) => QueueGroup(
-                      podcastId: g.podcastId,
-                      podcastName: g.podcastName,
-                      episodes: g.episodes
-                          .where((e) => e.id != nowPlayingEp!.id)
-                          .toList(),
-                    ),
-                  )
-                  .where((g) => g.episodes.isNotEmpty)
-                  .toList()
-            : groups;
-
         // Non-lazy list so all Semantics(header: true) nodes are in the tree
         // immediately, ensuring the VoiceOver headings rotor is populated on
         // first focus without requiring scroll.
         final items = <Widget>[];
 
-        // Pin now-playing to the top, above all group headers.
-        if (nowPlayingEp != null) {
-          final allEps = groups.expand((g) => g.episodes).toList();
-          final queueIndex = allEps.indexWhere((e) => e.id == nowPlayingEp!.id);
-          final total = allEps.length;
-          final durationLabel = _semanticDuration(nowPlayingEp);
-          final downloadLabel = _downloadStatusLabel(
-            nowPlayingEp.downloadStatus,
-          );
-          final labelParts = [
-            'Now playing',
-            nowPlayingEp.title,
-            nowPlayingPodcastName,
-            if (durationLabel != null) durationLabel,
-            if (downloadLabel != null) downloadLabel,
-          ];
-          items.add(
-            _buildEpisodeRow(
-              context: context,
-              ref: ref,
-              episode: nowPlayingEp,
-              semanticLabel: labelParts.join(', '),
-              isFirst: queueIndex <= 0,
-              isLast: queueIndex == total - 1,
-              total: total,
-              position: queueIndex + 1,
-              actionOrder: actionOrder,
-              isNowPlaying: true,
-            ),
-          );
-        }
-
         final collapsed = ref.watch(collapsedQueueGroupsProvider);
-        // Use the unadjusted group list for index/count so they line up with
-        // QueueRepository's group ordering (which always includes the
-        // now-playing podcast's group), even though that group may be hidden
-        // from adjustedGroups when it becomes empty.
         final totalGroups = groups.length;
 
-        for (final group in adjustedGroups) {
+        // Show every group in true order; the currently-playing episode is
+        // marked "Now playing" in place within its group (not pinned to top).
+        for (final group in groups) {
           final isCollapsed = collapsed.contains(group.podcastId);
           final groupIndex =
               groups.indexWhere((g) => g.podcastId == group.podcastId) + 1;
@@ -451,9 +369,11 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
           for (var i = 0; i < group.episodes.length; i++) {
             final ep = group.episodes[i];
             final posInGroup = i + 1;
+            final isNowPlaying = ep.id == currentEpisodeId;
             final durationLabel = _semanticDuration(ep);
             final downloadLabel = _downloadStatusLabel(ep.downloadStatus);
             final labelParts = [
+              if (isNowPlaying) 'Now playing',
               ep.title,
               group.podcastName,
               'episode $posInGroup of ${group.episodes.length} in this group',
@@ -472,6 +392,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                 position: posInGroup,
                 actionOrder: actionOrder,
                 useGroupAwareMove: true,
+                isNowPlaying: isNowPlaying,
               ),
             );
           }
@@ -518,9 +439,6 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       await ref
           .read(queueRepositoryProvider)
           .bringGroupToFront(group.episodes.map((e) => e.id).toList());
-      ref
-          .read<ActiveGroupNotifier>(activeGroupPodcastIdProvider.notifier)
-          .set(group.podcastId);
       if (!context.mounted) return;
       playEpisodeNow(
         context: context,

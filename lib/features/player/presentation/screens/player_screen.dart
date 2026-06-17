@@ -173,6 +173,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
+  /// Toggles the one-off "Stop after this episode": when on, playback stops when
+  /// the current episode finishes instead of advancing, then clears itself.
+  void _toggleStopAfterEpisode(BuildContext context) {
+    final handler = ref.read(audioHandlerProvider);
+    final value = !handler.stopAfterCurrentEpisode;
+    handler.setStopAfterCurrentEpisode(value: value);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      value ? 'Will stop after this episode' : "Won't stop after this episode",
+      TextDirection.ltr,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final mediaItem = ref.watch(mediaItemProvider).asData?.value;
@@ -185,6 +198,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         ref.watch(directTouchEnabledProvider).value ?? false;
     final skipFwdSecs = ref.watch(skipForwardSecondsProvider).value ?? 30;
     final skipBackSecs = ref.watch(skipBackSecondsProvider).value ?? 15;
+    final stopAfterEpisode =
+        ref.watch(stopAfterCurrentEpisodeProvider).value ?? false;
     final description = ref
         .watch(currentEpisodeDescriptionProvider)
         .asData
@@ -313,6 +328,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   ),
                 ),
               ),
+              PopupMenuItem<void>(
+                onTap: () => _toggleStopAfterEpisode(context),
+                child: Semantics(
+                  button: true,
+                  label: stopAfterEpisode
+                      ? "Don't stop after this episode"
+                      : 'Stop after this episode',
+                  child: ExcludeSemantics(
+                    child: Text(
+                      stopAfterEpisode
+                          ? "Don't stop after this episode"
+                          : 'Stop after this episode',
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ],
@@ -326,12 +357,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               AspectRatio(
                 aspectRatio: 1.0,
                 child: Semantics(
-                  // Label change on fast-forward state forces VoiceOver to
-                  // refresh customSemanticsActions (workaround for Flutter
-                  // issue #149613 where rotor actions don't update otherwise).
-                  label: _voFastForwardActive
-                      ? 'Artwork. Fast forward active.'
-                      : 'Artwork',
+                  // Varying this label forces VoiceOver to refresh
+                  // customSemanticsActions (workaround for Flutter issue
+                  // #149613 where rotor actions don't update otherwise), so it
+                  // reflects both fast-forward and stop-after state — which also
+                  // announces that state when the artwork gains focus.
+                  label: [
+                    'Artwork',
+                    if (_voFastForwardActive) 'Fast forward active',
+                    if (stopAfterEpisode) 'Stopping after this episode',
+                  ].join('. '),
                   // The Artwork node is this screen's actions host, so it always
                   // carries Mark as played (exposed even when Direct Touch is
                   // off). The skip / fast-forward actions are added on top only
@@ -345,6 +380,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       label: 'Export audio file',
                     ): () =>
                         _exportAudio(context),
+                    CustomSemanticsAction(
+                      label: stopAfterEpisode
+                          ? "Don't stop after this episode"
+                          : 'Stop after this episode',
+                    ): () =>
+                        _toggleStopAfterEpisode(context),
                     if (directTouchEnabled) ...{
                       CustomSemanticsAction(
                         label: 'Skip forward $skipFwdSecs seconds',
