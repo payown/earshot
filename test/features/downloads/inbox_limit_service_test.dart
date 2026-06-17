@@ -264,7 +264,11 @@ void main() {
         guid: 'future',
         pubDate: now.add(const Duration(hours: 5)),
       );
-      await service.applyInboxLimits();
+      // Pass the test's captured `now` so the service shares one clock. Using
+      // applyInboxLimits() lets the service compute its own (later) `now`,
+      // nudging the cutoff past an episode dated exactly `now - 24h` and
+      // making this boundary case race the clock.
+      await service.applyForPodcast(p, now: now);
       expect(await dismissed(atCutoff), isFalse);
       expect(await dismissed(future), isFalse);
     },
