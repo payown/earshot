@@ -21,6 +21,10 @@ final downloadAuditEventsProvider = StreamProvider<String>(
   (ref) => ref.watch(downloadManagerProvider).downloadAuditEvents,
 );
 
+final downloadOutcomesProvider = StreamProvider<DownloadOutcome>(
+  (ref) => ref.watch(downloadManagerProvider).downloadOutcomes,
+);
+
 final queueExpirationServiceProvider = Provider<QueueExpirationService>(
   (ref) => QueueExpirationService(database: ref.watch(appDatabaseProvider)),
 );

@@ -8,13 +8,16 @@ import 'package:earshot/core/utils/url_launcher.dart';
 import '../data/db/enums.dart';
 import '../features/bookmarks/presentation/providers/bookmarks_providers.dart';
 import '../features/downloads/data/download_manager.dart';
+import '../features/downloads/data/export_coordinator.dart';
 import '../features/downloads/presentation/providers/downloads_providers.dart';
 import '../features/player/data/audio_handler.dart';
 import '../features/player/data/queue_repository.dart';
 import '../features/player/presentation/providers/player_providers.dart';
 import '../features/settings/domain/quick_action_definition.dart';
+import '../features/settings/presentation/providers/settings_providers.dart';
 import '../features/subscriptions/domain/episode.dart';
 import '../features/subscriptions/presentation/providers/subscriptions_providers.dart';
+import 'audio_export.dart';
 import 'constants/urls.dart';
 import 'episode_playback.dart';
 import 'presentation/widgets/episode_actions_sheet.dart';
@@ -44,7 +47,107 @@ List<EpisodeQuickActionItem> buildEpisodeActions({
     if (item != null) items.add(item);
   }
 
+  // "Export audio file" is intentionally not an [EpisodeAction] enum value (it
+  // would clutter the user-configurable Quick Actions list). It's always
+  // available: if the episode isn't downloaded yet, tapping it downloads in the
+  // background and shares when ready (see [exportEpisodeAudio]).
+  items.add(_buildExportItem(episode, context, ref));
+
   return items;
+}
+
+EpisodeQuickActionItem _buildExportItem(
+  Episode episode,
+  BuildContext context,
+  WidgetRef ref,
+) {
+  return EpisodeQuickActionItem(
+    label: 'Export audio file',
+    onInvoke: () => exportEpisodeAudio(
+      episodeId: episode.id,
+      ref: ref,
+      context: context,
+      subject: episode.title,
+    ),
+  );
+}
+
+/// Exports an episode's audio via the OS share sheet (Save to Files, AirDrop,
+/// open-in another app), downloading it first if needed.
+///
+/// Shared by the episode actions list/rotor and the Now Playing player.
+/// - Already downloaded → announce "Preparing export" and share immediately.
+/// - Not downloaded → if on cellular, confirm once (overriding Wi-Fi-only),
+///   then hand off to [ExportCoordinator], which downloads in the background and
+///   opens the share sheet when ready (surfacing progress/errors app-wide).
+Future<void> exportEpisodeAudio({
+  required int episodeId,
+  required WidgetRef ref,
+  required BuildContext context,
+  String? subject,
+}) async {
+  final view = View.of(context);
+  final manager = ref.read(downloadManagerProvider);
+
+  // Already downloaded → share now (prepareExportFile returns null otherwise).
+  final ready = await manager.prepareExportFile(episodeId);
+  if (ready != null) {
+    SemanticsService.sendAnnouncement(
+      view,
+      'Preparing export',
+      TextDirection.ltr,
+    );
+    await shareExportedAudioFile(ready, subject: subject);
+    return;
+  }
+
+  // Needs a download. An explicit Export tap overrides Wi-Fi-only, but confirm
+  // cellular use once.
+  if (await manager.isOnCellularConnection()) {
+    final confirmed = await ref.read(cellularExportConfirmedProvider.future);
+    if (!confirmed) {
+      if (!context.mounted) return;
+      final ok = await _confirmCellularExport(context);
+      if (ok != true) {
+        SemanticsService.sendAnnouncement(
+          view,
+          'Export cancelled',
+          TextDirection.ltr,
+        );
+        return;
+      }
+      await ref.read(cellularExportConfirmedProvider.notifier).set(true);
+    }
+  }
+
+  await ref
+      .read(exportCoordinatorProvider)
+      .requestExport(episodeId, subject: subject);
+}
+
+/// One-time "download on cellular?" confirmation. Mirrors the project's
+/// confirm-dialog pattern (showDialog<bool> + AlertDialog + barrierLabel).
+Future<bool?> _confirmCellularExport(BuildContext context) {
+  return showDialog<bool>(
+    context: context,
+    barrierLabel: 'Dismiss cellular download confirmation',
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Download on cellular?'),
+      content: const Text(
+        'Exporting this episode will download it now using cellular data.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('Continue'),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Removes an episode from the queue, choosing the right behavior for the

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Export audio file: every episode now has an "Export audio file" action that
+  opens the share sheet, so you can save the audio to Files, AirDrop it, or open
+  it in another app. It's in the Now Playing player's "Episode actions" menu
+  (next to "Mark as played") and the episode actions menu on other screens, plus
+  the VoiceOver/TalkBack actions rotor in both places. If the episode isn't
+  downloaded yet, tapping Export downloads it in the background and opens the
+  share sheet automatically when it's ready — even if you've moved to another
+  screen. On cellular it asks once before using mobile data. The exported file
+  keeps its original format and is named "Podcast name - Episode title" instead
+  of an internal filename. If a download fails you get a clear message with a way
+  to try again.
 - Now Playing: a "Stop after this episode" action lets you stop playback when the
   current episode finishes, just this once, without changing your settings. It's
   in the "Episode actions" menu and the VoiceOver/TalkBack actions rotor, and it

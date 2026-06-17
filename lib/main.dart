@@ -24,6 +24,7 @@ import 'core/sharing/sharing_intent_gateway.dart';
 import 'core/sharing/shared_file_provider.dart';
 import 'core/theme/app_theme.dart';
 import 'data/db/app_database.dart';
+import 'features/downloads/data/export_coordinator.dart';
 import 'features/downloads/presentation/providers/downloads_providers.dart';
 import 'features/player/data/audio_handler.dart';
 import 'features/player/data/audio_session_config.dart';
@@ -64,6 +65,9 @@ class _AppInitializer extends ConsumerWidget {
     ref.watch(episodeIdPersistenceProvider);
     ref.watch(playbackRestorationProvider);
     ref.watch(autoRefreshProvider);
+    // Instantiate the export coordinator so it listens for background download
+    // completions app-wide and opens the share sheet when an export is ready.
+    ref.watch(exportCoordinatorProvider);
 
     void _announceIfAuditEnabled(AsyncValue<String> next) {
       if (next case AsyncData(value: final message)) {
@@ -452,6 +456,7 @@ class EarshotApp extends ConsumerWidget {
     final router = ref.watch(appRouterProvider);
     return MaterialApp.router(
       title: 'Earshot',
+      scaffoldMessengerKey: ref.watch(scaffoldMessengerKeyProvider),
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       highContrastTheme: AppTheme.highContrastLight(),

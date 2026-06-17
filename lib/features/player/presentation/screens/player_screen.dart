@@ -6,6 +6,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:earshot/core/episode_action_builder.dart';
 import 'package:earshot/core/utils/url_launcher.dart';
 
 import '../../../../core/constants/spacing.dart';
@@ -158,6 +159,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
+  /// Exports the current episode's audio via the OS share sheet, downloading it
+  /// first in the background if it isn't downloaded yet (see [exportEpisodeAudio]).
+  Future<void> _exportAudio(BuildContext context) async {
+    final mediaItem = ref.read(mediaItemProvider).asData?.value;
+    final episodeId = mediaItem?.extras?['episodeId'];
+    if (episodeId is! int) return;
+    await exportEpisodeAudio(
+      episodeId: episodeId,
+      ref: ref,
+      context: context,
+      subject: mediaItem?.title,
+    );
+  }
+
   /// Toggles the one-off "Stop after this episode": when on, playback stops when
   /// the current episode finishes instead of advancing, then clears itself.
   void _toggleStopAfterEpisode(BuildContext context) {
@@ -300,6 +315,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   child: const ExcludeSemantics(child: Text('Mark as played')),
                 ),
               ),
+              // Always available — exports the local audio via the share sheet,
+              // downloading first in the background if the episode isn't
+              // downloaded yet.
+              PopupMenuItem<void>(
+                onTap: () => _exportAudio(context),
+                child: Semantics(
+                  button: true,
+                  label: 'Export audio file',
+                  child: const ExcludeSemantics(
+                    child: Text('Export audio file'),
+                  ),
+                ),
+              ),
               PopupMenuItem<void>(
                 onTap: () => _toggleStopAfterEpisode(context),
                 child: Semantics(
@@ -348,6 +376,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   customSemanticsActions: {
                     const CustomSemanticsAction(label: 'Mark as played'): () =>
                         _markAsPlayed(context),
+                    const CustomSemanticsAction(
+                      label: 'Export audio file',
+                    ): () =>
+                        _exportAudio(context),
                     CustomSemanticsAction(
                       label: stopAfterEpisode
                           ? "Don't stop after this episode"

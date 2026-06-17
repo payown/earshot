@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -22,6 +23,14 @@ final dioProvider = Provider<Dio>(
     ),
   ),
 );
+
+/// App-wide ScaffoldMessenger key, assigned to the root MaterialApp so global
+/// coordinators (e.g. the export flow) can show SnackBars without a screen
+/// context, on any route.
+final scaffoldMessengerKeyProvider =
+    Provider<GlobalKey<ScaffoldMessengerState>>(
+      (_) => GlobalKey<ScaffoldMessengerState>(),
+    );
 
 final rssParserProvider = Provider<RssParser>((_) => RssParser());
 

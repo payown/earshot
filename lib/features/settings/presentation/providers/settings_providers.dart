@@ -58,6 +58,15 @@ final wifiOnlyDownloadsProvider =
       ),
     );
 
+// One-time confirmation that an Export tap may download over cellular.
+final cellularExportConfirmedProvider =
+    AsyncNotifierProvider<_BoolSettingNotifier, bool>(
+      () => _BoolSettingNotifier(
+        read: (r) => r.hasConfirmedCellularExport(),
+        write: (r, v) => r.setHasConfirmedCellularExport(value: v),
+      ),
+    );
+
 final autoDownloadInboxProvider =
     AsyncNotifierProvider<_BoolSettingNotifier, bool>(
       () => _BoolSettingNotifier(
