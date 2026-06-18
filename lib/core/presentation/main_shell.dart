@@ -15,6 +15,7 @@ import '../../features/settings/data/app_settings_repository.dart';
 import '../../features/stats/data/stats_repository.dart';
 import '../providers/core_providers.dart';
 import '../router/app_router.dart';
+import 'widgets/accessible_nav_bar.dart';
 
 final _log = Logger('MainShell');
 
@@ -107,44 +108,36 @@ class _MainShellState extends ConsumerState<MainShell> {
         mainAxisSize: MainAxisSize.min,
         children: [
           const NowPlayingBar(),
-          NavigationBar(
+          AccessibleNavBar(
             selectedIndex: widget.shell.currentIndex,
             onDestinationSelected: (index) => widget.shell.goBranch(
               index,
               initialLocation: index == widget.shell.currentIndex,
             ),
             destinations: [
-              NavigationDestination(
-                icon: Badge(
-                  isLabelVisible: inboxCount > 0,
-                  label: Text('$inboxCount'),
-                  child: const Icon(Icons.inbox_outlined),
-                ),
-                selectedIcon: Badge(
-                  isLabelVisible: inboxCount > 0,
-                  label: Text('$inboxCount'),
-                  child: const Icon(Icons.inbox),
-                ),
+              AccessibleNavDestination(
+                icon: Icons.inbox_outlined,
+                selectedIcon: Icons.inbox,
                 label: 'Inbox',
-                tooltip: inboxCount > 0 ? 'Inbox, $inboxCount new' : 'Inbox',
+                semanticLabel: inboxCount > 0
+                    ? 'Inbox, $inboxCount new'
+                    : 'Inbox',
+                badgeCount: inboxCount,
               ),
-              const NavigationDestination(
-                icon: Icon(Icons.queue_music_outlined),
-                selectedIcon: Icon(Icons.queue_music),
+              const AccessibleNavDestination(
+                icon: Icons.queue_music_outlined,
+                selectedIcon: Icons.queue_music,
                 label: 'Queue',
-                tooltip: 'Queue',
               ),
-              const NavigationDestination(
-                icon: Icon(Icons.podcasts_outlined),
-                selectedIcon: Icon(Icons.podcasts),
+              const AccessibleNavDestination(
+                icon: Icons.podcasts_outlined,
+                selectedIcon: Icons.podcasts,
                 label: 'Library',
-                tooltip: 'Library',
               ),
-              const NavigationDestination(
-                icon: Icon(Icons.download_outlined),
-                selectedIcon: Icon(Icons.download),
+              const AccessibleNavDestination(
+                icon: Icons.download_outlined,
+                selectedIcon: Icons.download,
                 label: 'Downloads',
-                tooltip: 'Downloads',
               ),
             ],
           ),
