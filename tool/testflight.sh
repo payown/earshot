@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Deploy to TestFlight.
-# Usage: testflight [--notes "What to test"] [--public] [--both]
+# Usage: testflight [--notes "What to test"] [--public] [--both] [--no-crash-reporting]
 #
-#   (no flag)  Upload to Internal Testing Group only
-#   --public   Upload to Public Testers only
-#   --both     Upload to both groups in a single build (same build number)
+#   (no flag)            Upload to Internal Testing Group only
+#   --public             Upload to Public Testers only
+#   --both               Upload to both groups in a single build (same build number)
+#   --no-crash-reporting Build even though SENTRY_DSN is empty (crash reporting off)
 #
 # What this does:
 #   1. Verifies the working tree is clean and in sync with remote
@@ -26,12 +27,14 @@ ASC_APP_ID="6770760602"
 GROUP="Internal Testing Group"
 SUBMIT_FOR_REVIEW=false
 NOTES=""
+ALLOW_NO_CRASH_REPORTING=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --notes|-n) NOTES="$2"; shift 2 ;;
-    --public)   GROUP="Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
-    --both)     GROUP="Internal Testing Group,Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
+    --notes|-n)            NOTES="$2"; shift 2 ;;
+    --public)              GROUP="Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
+    --both)                GROUP="Internal Testing Group,Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
+    --no-crash-reporting)  ALLOW_NO_CRASH_REPORTING=true; shift ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
@@ -59,6 +62,26 @@ if [[ -z "${PODCAST_INDEX_API_KEY:-}" || -z "${PODCAST_INDEX_API_SECRET:-}" ]]; 
   echo "❌ PODCAST_INDEX_API_KEY and PODCAST_INDEX_API_SECRET must be set."
   echo "   Add them to .env.local in the repo root (see .env.local.example)."
   exit 1
+fi
+
+# Crash reporting depends on a real Sentry DSN reaching the build (#301). With an
+# empty DSN, SentryFlutter.init no-ops and the build ships with crash reporting
+# silently disabled — including the pre-runApp DB-migration recovery path. Refuse
+# by default so a release can't go out blind; --no-crash-reporting overrides.
+if [[ -z "${SENTRY_DSN:-}" ]]; then
+  if [[ "$ALLOW_NO_CRASH_REPORTING" == true ]]; then
+    echo "⚠️  SENTRY_DSN is empty — building with crash reporting DISABLED (--no-crash-reporting)."
+  else
+    echo "❌ SENTRY_DSN is empty. This release would ship with crash reporting disabled."
+    echo "   Add SENTRY_DSN to .env.local (see .env.local.example),"
+    echo "   or pass --no-crash-reporting to build anyway."
+    exit 1
+  fi
+fi
+
+# PostHog analytics is optional; warn but don't block.
+if [[ -z "${POSTHOG_API_KEY:-}" ]]; then
+  echo "⚠️  POSTHOG_API_KEY is empty — analytics will be disabled in this build."
 fi
 
 # ── Bump build number ─────────────────────────────────────────────────────────

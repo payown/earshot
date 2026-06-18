@@ -36,8 +36,11 @@ import 'features/subscriptions/presentation/providers/subscriptions_providers.da
 
 final _log = Logger('main');
 
-// Placeholder DSNs — replace with real values before beta build.
-// These are safe to leave empty; Sentry/PostHog silently no-op with empty DSN.
+// Compiled in via --dart-define at build time (see tool/testflight.sh).
+// An empty DSN makes Sentry no-op, so release builds must supply a real one —
+// testflight.sh refuses to build with an empty SENTRY_DSN unless overridden,
+// and main() logs a one-time warning if reporting is enabled but the DSN is
+// empty (#301).
 const _sentryDsn = String.fromEnvironment('SENTRY_DSN', defaultValue: '');
 const _posthogApiKey = String.fromEnvironment(
   'POSTHOG_API_KEY',
@@ -177,6 +180,15 @@ Future<void> main() async {
       ),
     );
   } else {
+    if (crashReportingEnabled && _sentryDsn.isEmpty) {
+      // Reporting is enabled by the user but no DSN was compiled in, so Sentry
+      // can't initialize. Surface it once at startup so a release that shipped
+      // without a DSN isn't blind without warning (#301).
+      _log.warning(
+        'Crash reporting is enabled but SENTRY_DSN is empty; Sentry will not '
+        'initialize and no crash reports will be sent.',
+      );
+    }
     await _startApp(
       db: db,
       logService: logService,
