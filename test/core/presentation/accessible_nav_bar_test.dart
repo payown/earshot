@@ -129,19 +129,75 @@ void main() {
     handle.dispose();
   });
 
-  testWidgets('every destination meets the 48dp minimum tap height', (
+  testWidgets(
+    'every destination holds the 48dp floor even at tiny text scale',
+    (
+      tester,
+    ) async {
+      // A small text scale shrinks the natural content below 48dp, so the test
+      // genuinely exercises the minHeight floor rather than incidental height.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(0.1)),
+            child: Scaffold(
+              bottomNavigationBar: AccessibleNavBar(
+                selectedIndex: 0,
+                destinations: destinations,
+                onDestinationSelected: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final taps = find.byType(InkWell);
+      expect(taps, findsNWidgets(4));
+      for (final tap in taps.evaluate()) {
+        expect(
+          tester.getSize(find.byWidget(tap.widget)).height,
+          greaterThanOrEqualTo(48.0),
+        );
+      }
+    },
+  );
+
+  testWidgets('the semantics tap action fires the callback exactly once', (
     tester,
   ) async {
-    await tester.pumpWidget(wrap(selectedIndex: 0));
+    final handle = tester.ensureSemantics();
+    var calls = 0;
+    await tester.pumpWidget(
+      wrap(selectedIndex: 0, onSelected: (_) => calls++),
+    );
 
-    final taps = find.byType(InkWell);
-    expect(taps, findsNWidgets(4));
-    for (final tap in taps.evaluate()) {
-      expect(
-        tester.getSize(find.byWidget(tap.widget)).height,
-        greaterThanOrEqualTo(48.0),
-      );
-    }
+    tester.semantics.tap(find.semantics.byLabel('Library'));
+    await tester.pump();
+
+    expect(calls, 1);
+    handle.dispose();
+  });
+
+  testWidgets('a large badge count collapses the visible badge to "99+"', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      wrap(
+        selectedIndex: 0,
+        items: const [
+          AccessibleNavDestination(
+            icon: Icons.inbox_outlined,
+            selectedIcon: Icons.inbox,
+            label: 'Inbox',
+            semanticLabel: 'Inbox, 247 new',
+            badgeCount: 247,
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text('99+'), findsOneWidget);
+    expect(find.text('247'), findsNothing);
   });
 
   testWidgets('tapping a destination reports its index', (tester) async {

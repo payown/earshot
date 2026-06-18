@@ -1,6 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
+// Material 3 bottom-nav metrics, named rather than inlined per flutter-style.md.
+const double _barVerticalPadding = 12;
+const double _indicatorWidth = 64;
+const double _indicatorHeight = 32;
+const double _iconLabelGap = 4;
+const double _minTapHeight = 48;
+const double _barElevation = 3;
+
+/// Above this the visible badge collapses to "99+"; the spoken label still
+/// carries the exact count (e.g. "Inbox, 247 new").
+const int _maxVisibleBadgeCount = 99;
+
 /// One destination in an [AccessibleNavBar].
 ///
 /// [label] is the visible text shown under the icon. [semanticLabel] is what
@@ -53,13 +65,16 @@ class AccessibleNavBar extends StatelessWidget {
       container: true,
       explicitChildNodes: true,
       child: Material(
+        // Match Material's NavigationBar default elevation so the bar keeps a
+        // shadow and doesn't blend into surface-toned body content.
+        elevation: _barElevation,
         color: colors.surfaceContainer,
         child: SafeArea(
           top: false,
           child: Padding(
-            // No fixed height: the bar grows with Dynamic Type so large text
-            // never clips the label.
-            padding: const EdgeInsets.symmetric(vertical: 12),
+            // No fixed height: the bar grows vertically with Dynamic Type so
+            // taller text isn't clipped; a long label in a narrow cell wraps.
+            padding: const EdgeInsets.symmetric(vertical: _barVerticalPadding),
             child: Row(
               children: [
                 for (var i = 0; i < destinations.length; i++)
@@ -102,7 +117,10 @@ class _NavItem extends StatelessWidget {
 
     Widget icon = Icon(iconData, color: iconColor);
     if (destination.badgeCount > 0) {
-      icon = Badge(label: Text('${destination.badgeCount}'), child: icon);
+      final badgeText = destination.badgeCount > _maxVisibleBadgeCount
+          ? '$_maxVisibleBadgeCount+'
+          : '${destination.badgeCount}';
+      icon = Badge(label: Text(badgeText), child: icon);
     }
 
     return Semantics(
@@ -125,15 +143,15 @@ class _NavItem extends StatelessWidget {
           // Guarantee at least a 48dp tappable height regardless of text size;
           // each item already fills its cell width via the parent Row/Expanded.
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 48),
+            constraints: const BoxConstraints(minHeight: _minTapHeight),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Material 3 selection pill (64x32) behind the selected icon.
+                // Material 3 selection pill behind the selected icon.
                 Container(
-                  width: 64,
-                  height: 32,
+                  width: _indicatorWidth,
+                  height: _indicatorHeight,
                   alignment: Alignment.center,
                   decoration: selected
                       ? ShapeDecoration(
@@ -143,7 +161,7 @@ class _NavItem extends StatelessWidget {
                       : null,
                   child: icon,
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: _iconLabelGap),
                 Text(
                   destination.label,
                   textAlign: TextAlign.center,
