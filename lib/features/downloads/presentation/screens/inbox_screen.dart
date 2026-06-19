@@ -26,18 +26,6 @@ import '../providers/downloads_providers.dart';
 
 final _log = Logger('InboxScreen');
 
-// Inbox does not expose bookmark (requires active playback).
-const _inboxAllowedActions = {
-  EpisodeAction.playNow,
-  EpisodeAction.playNext,
-  EpisodeAction.addToEndOfQueue,
-  EpisodeAction.markPlayed,
-  EpisodeAction.openShowNotes,
-  EpisodeAction.download,
-  EpisodeAction.share,
-  EpisodeAction.exportAudio,
-};
-
 class InboxScreen extends ConsumerStatefulWidget {
   const InboxScreen({super.key});
 
@@ -170,7 +158,6 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
                             ref: ref,
                             episode: episode,
                           ),
-                          allowedActions: _inboxAllowedActions,
                         );
                         return _InboxEpisodeTile(
                           episode: episode,

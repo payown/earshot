@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Episode _episode({String? description}) => Episode(
+Episode _episode({String? description, int positionSeconds = 0}) => Episode(
   id: 1,
   podcastId: 1,
   guid: 'g',
@@ -15,7 +15,7 @@ Episode _episode({String? description}) => Episode(
   artworkUrl: null,
   status: EpisodeStatus.newEpisode,
   downloadStatus: DownloadStatus.none,
-  positionSeconds: 0,
+  positionSeconds: positionSeconds,
   createdAt: DateTime(2024, 1, 1),
   durationSeconds: 60,
   pubDate: DateTime(2024, 1, 1),
@@ -50,11 +50,13 @@ Future<void> _pumpWithShowNotes(WidgetTester tester, Episode episode) {
   );
 }
 
-/// Builds episode actions with the given [order] and returns their labels.
+/// Builds episode actions with the given [order]/[actionContext] and returns
+/// their labels.
 Future<List<String>> _labelsFor(
   WidgetTester tester,
   List<EpisodeAction> order, {
-  Set<EpisodeAction>? allowedActions,
+  EpisodeActionContext actionContext = EpisodeActionContext.list,
+  int positionSeconds = 0,
 }) async {
   late List<String> labels;
   await tester.pumpWidget(
@@ -64,12 +66,12 @@ Future<List<String>> _labelsFor(
           body: Consumer(
             builder: (context, ref, _) {
               labels = buildEpisodeActions(
-                episode: _episode(),
+                episode: _episode(positionSeconds: positionSeconds),
                 order: order,
                 context: context,
                 ref: ref,
                 onPlay: () {},
-                allowedActions: allowedActions,
+                actionContext: actionContext,
               ).map((a) => a.label).toList();
               return const SizedBox();
             },
@@ -96,19 +98,49 @@ void main() {
     expect(labels, isNot(contains('Export audio file')));
   });
 
-  testWidgets('Export obeys allowedActions like every other action', (
+  testWidgets('queue context offers only playback and file actions', (
     tester,
   ) async {
     final labels = await _labelsFor(
       tester,
-      const [EpisodeAction.playNow, EpisodeAction.exportAudio],
-      allowedActions: const {EpisodeAction.playNow},
+      defaultEpisodeActions,
+      actionContext: EpisodeActionContext.queue,
+      positionSeconds: 120,
     );
-    expect(labels, isNot(contains('Export audio file')));
+    expect(labels, ['Play now', 'Download', 'Export audio file']);
+  });
+
+  testWidgets('list context offers Bookmark only when there is a position', (
+    tester,
+  ) async {
+    final atZero = await _labelsFor(tester, const [EpisodeAction.bookmark]);
+    expect(atZero, isEmpty);
+
+    final inProgress = await _labelsFor(
+      tester,
+      const [EpisodeAction.bookmark],
+      positionSeconds: 120,
+    );
+    expect(inProgress, ['Bookmark current spot']);
   });
 
   test('exportAudio is part of the default episode action set', () {
     expect(defaultEpisodeActions, contains(EpisodeAction.exportAudio));
+  });
+
+  test('list and queue share the same relative order for common actions', () {
+    // The eligible sets differ by context, but both derive from the one
+    // configured order, so shared actions never reorder between screens.
+    final ep = _episode(positionSeconds: 120);
+    final list = allowedEpisodeActions(EpisodeActionContext.list, ep);
+    final queue = allowedEpisodeActions(EpisodeActionContext.queue, ep);
+    final listOrder = defaultEpisodeActions.where(list.contains).toList();
+    final queueOrder = defaultEpisodeActions.where(queue.contains).toList();
+    expect(
+      listOrder.where(queue.contains).toList(),
+      queueOrder,
+      reason: 'shared actions keep the same order across contexts',
+    );
   });
 
   testWidgets('Open show notes opens an accessible dialog (#305)', (

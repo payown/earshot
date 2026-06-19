@@ -17,18 +17,6 @@ import '../../../subscriptions/domain/episode.dart';
 import '../../../subscriptions/presentation/providers/subscriptions_providers.dart';
 import '../providers/downloads_providers.dart';
 
-// Bookmark excluded — requires active playback.
-const _downloadsAllowedActions = {
-  EpisodeAction.playNow,
-  EpisodeAction.playNext,
-  EpisodeAction.addToEndOfQueue,
-  EpisodeAction.markPlayed,
-  EpisodeAction.openShowNotes,
-  EpisodeAction.download,
-  EpisodeAction.share,
-  EpisodeAction.exportAudio,
-};
-
 class DownloadsScreen extends ConsumerWidget {
   const DownloadsScreen({super.key});
 
@@ -185,7 +173,6 @@ List<Widget> _buildSection({
           ref: ref,
           onPlay: () =>
               playEpisodeNow(context: context, ref: ref, episode: episode),
-          allowedActions: _downloadsAllowedActions,
         );
         return _DownloadTile(
           episode: episode,

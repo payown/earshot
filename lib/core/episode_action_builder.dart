@@ -21,26 +21,77 @@ import 'episode_playback.dart';
 import 'presentation/widgets/episode_actions_sheet.dart';
 import 'presentation/widgets/show_notes_dialog.dart';
 
+/// Where an episode's action list is being shown.
+///
+/// This is the single source of truth for *which* actions an episode offers, so
+/// every screen stays consistent instead of each one hand-maintaining its own
+/// allowed-action set (which is how they drifted apart). The user's configured
+/// [order] still controls ordering and the default (first) action; the context
+/// only decides which actions are eligible.
+enum EpisodeActionContext {
+  /// General browse lists — inbox, library, podcast detail, downloads. Offers
+  /// every core action, filtered only by the episode's own state.
+  list,
+
+  /// The queue screen. The episode is already queued, so it offers playback and
+  /// file actions only; the caller appends the queue-management items
+  /// (move/remove) after these.
+  queue,
+}
+
+/// The actions eligible for [episode] in [actionContext]. State-based, not
+/// screen-based, so the same episode offers the same actions wherever it's
+/// shown.
+Set<EpisodeAction> allowedEpisodeActions(
+  EpisodeActionContext actionContext,
+  Episode episode,
+) {
+  switch (actionContext) {
+    case EpisodeActionContext.queue:
+      return const {
+        EpisodeAction.playNow,
+        EpisodeAction.download,
+        EpisodeAction.exportAudio,
+      };
+    case EpisodeActionContext.list:
+      return {
+        EpisodeAction.playNow,
+        EpisodeAction.playNext,
+        EpisodeAction.addToEndOfQueue,
+        EpisodeAction.markPlayed,
+        EpisodeAction.openShowNotes,
+        EpisodeAction.download,
+        EpisodeAction.share,
+        EpisodeAction.exportAudio,
+        // Bookmark only when there's a real position to bookmark, so it's never
+        // a dead "bookmark at 0:00" — applied uniformly across every list
+        // screen rather than excluded per-screen.
+        if (episode.positionSeconds > 0) EpisodeAction.bookmark,
+      };
+  }
+}
+
 /// Builds the ordered list of [EpisodeQuickActionItem]s for a given episode.
 ///
 /// [onPlay] is caller-supplied because play logic differs per screen
 /// (the podcast detail screen passes podcast artwork/speed; the inbox has its
 /// own resume logic). All other actions are handled here.
 ///
-/// Pass [allowedActions] to restrict which actions appear in a given context.
-/// When null every action in [order] is included.
+/// [actionContext] selects the eligible action set (see [allowedEpisodeActions]);
+/// the actions appear in the user's configured [order].
 List<EpisodeQuickActionItem> buildEpisodeActions({
   required Episode episode,
   required List<EpisodeAction> order,
   required BuildContext context,
   required WidgetRef ref,
   required VoidCallback onPlay,
-  Set<EpisodeAction>? allowedActions,
+  EpisodeActionContext actionContext = EpisodeActionContext.list,
 }) {
+  final allowed = allowedEpisodeActions(actionContext, episode);
   final items = <EpisodeQuickActionItem>[];
 
   for (final action in order) {
-    if (allowedActions != null && !allowedActions.contains(action)) continue;
+    if (!allowed.contains(action)) continue;
 
     final item = _buildItem(action, episode, context, ref, onPlay);
     if (item != null) items.add(item);
@@ -277,7 +328,15 @@ EpisodeQuickActionItem? _buildItem(
         label: action.label,
         onInvoke: () async {
           final handler = ref.read(audioHandlerProvider);
-          final pos = handler.position.inSeconds;
+          // Bookmark THIS episode's spot: the live player position only when
+          // it's the one playing, otherwise its saved position. Mirrors the
+          // share action so a bookmark from a list row never records the
+          // currently-playing episode's position by mistake.
+          final currentEpisodeId =
+              handler.mediaItem.value?.extras?['episodeId'] as int?;
+          final pos = currentEpisodeId == episode.id
+              ? handler.position.inSeconds
+              : episode.positionSeconds;
           await ref
               .read(bookmarkRepositoryProvider)
               .addBookmark(episode.id, pos);

@@ -670,11 +670,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       context: context,
       ref: ref,
       onPlay: play,
-      allowedActions: const {
-        EpisodeAction.playNow,
-        EpisodeAction.download,
-        EpisodeAction.exportAudio,
-      },
+      actionContext: EpisodeActionContext.queue,
     );
 
     // Named closures shared by the actions rotor and the bottom sheet.
