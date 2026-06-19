@@ -8,8 +8,11 @@ import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
 
 import 'package:flutter_html/flutter_html.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:earshot/core/utils/url_launcher.dart';
 
+import '../../../../core/presentation/widgets/episode_actions_sheet.dart';
+import '../../../../core/presentation/widgets/show_notes_dialog.dart';
 import '../../../../data/rss/parsed_feed.dart';
 import '../../../player/presentation/providers/player_providers.dart';
 import '../../../player/presentation/widgets/now_playing_bar.dart';
@@ -381,6 +384,38 @@ class _PreviewEpisodeTile extends ConsumerWidget {
     );
   }
 
+  void _share() {
+    // A search result isn't a persisted Earshot episode, so there's no
+    // earshot:// deep link to share; share the media URL itself so a recipient
+    // can still listen.
+    unawaited(
+      SharePlus.instance.share(
+        ShareParams(text: episode.audioUrl, subject: episode.title),
+      ),
+    );
+  }
+
+  /// The actions valid for a not-yet-subscribed preview episode. Queue,
+  /// download, mark-played and bookmark all require a persisted episode, so
+  /// they're intentionally omitted here (see #326) until the user subscribes.
+  List<EpisodeQuickActionItem> _actions(BuildContext context, WidgetRef ref) {
+    return [
+      EpisodeQuickActionItem(
+        label: 'Play now',
+        onInvoke: () => _play(context, ref),
+      ),
+      EpisodeQuickActionItem(
+        label: 'Open show notes',
+        onInvoke: () => showEpisodeShowNotesDialog(
+          context,
+          title: episode.title,
+          descriptionHtml: episode.description,
+        ),
+      ),
+      EpisodeQuickActionItem(label: 'Share', onInvoke: _share),
+    ];
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dateStr = episode.pubDate != null
@@ -397,30 +432,54 @@ class _PreviewEpisodeTile extends ConsumerWidget {
         ? episode.title
         : '${episode.title}, ${parts.join(', ')}';
 
-    return Semantics(
-      button: true,
-      onTap: () => _play(context, ref),
-      label: semanticLabel,
-      customSemanticsActions: {
-        const CustomSemanticsAction(label: 'Play'): () => _play(context, ref),
-      },
-      child: ExcludeSemantics(
-        child: ListTile(
-          onTap: () => _play(context, ref),
-          title: Text(
-            episode.title,
-            style: Theme.of(context).textTheme.titleSmall,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+    final actions = _actions(context, ref);
+    // The first action (Play now) is the default double-tap, matching every
+    // other episode list in the app.
+    final semanticActions = <CustomSemanticsAction, VoidCallback>{
+      for (final action in actions)
+        CustomSemanticsAction(label: action.label): action.onInvoke,
+    };
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Semantics(
+            container: true,
+            button: true,
+            label: semanticLabel,
+            onTap: actions.first.onInvoke,
+            customSemanticsActions: semanticActions,
+            child: ExcludeSemantics(
+              child: ListTile(
+                onTap: actions.first.onInvoke,
+                contentPadding: const EdgeInsets.only(left: 16, right: 4),
+                title: Text(
+                  episode.title,
+                  style: Theme.of(context).textTheme.titleSmall,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: parts.isNotEmpty
+                    ? Text(
+                        parts.join(' · '),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      )
+                    : null,
+              ),
+            ),
           ),
-          subtitle: parts.isNotEmpty
-              ? Text(
-                  parts.join(' · '),
-                  style: Theme.of(context).textTheme.bodySmall,
-                )
-              : null,
         ),
-      ),
+        IconButton(
+          icon: const Icon(Icons.more_vert),
+          tooltip: 'More actions',
+          onPressed: () => showEpisodeActionsSheet(
+            context,
+            episodeTitle: episode.title,
+            actions: actions,
+          ),
+        ),
+      ],
     );
   }
 

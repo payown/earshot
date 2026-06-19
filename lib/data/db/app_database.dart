@@ -39,7 +39,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.connection);
 
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 16;
 
   // Speeds up the inbox query and badge count, which filter
   // status + inbox_dismissed and order by pub_date. Created on fresh installs
@@ -164,6 +164,27 @@ class AppDatabase extends _$AppDatabase {
         // no backfill (null = use global default / off).
         await m.addColumn(podcasts, podcasts.inboxMaxEpisodes);
         await m.addColumn(podcasts, podcasts.inboxAgeLimitHours);
+      }
+      if (from < 16) {
+        // "Export audio file" became a first-class, configurable EpisodeAction.
+        // It used to be force-appended to every episode menu outside the config.
+        // Seed it onto the end of any user's saved episode Quick Actions so it
+        // doesn't silently vanish — now removable/reorderable like the rest.
+        // Only touches users who already customized (have episode rows); fresh
+        // installs and users with no saved config get defaultEpisodeActions,
+        // which already includes it. The aggregate-with-HAVING guard makes this
+        // a no-op when there are no episode rows or exportAudio is already saved,
+        // so it's idempotent and safe on aged data. quick_action_configs holds
+        // at most a handful of rows per user, so the subquery is trivial.
+        // security-ok: fixed DDL/DML, no user input
+        await customStatement('''
+          INSERT INTO quick_action_configs (content_type, action_key, sort_order)
+          SELECT 'episode', 'exportAudio', COALESCE(MAX(sort_order), -1) + 1
+          FROM quick_action_configs
+          WHERE content_type = 'episode'
+          HAVING COUNT(*) > 0
+            AND SUM(CASE WHEN action_key = 'exportAudio' THEN 1 ELSE 0 END) = 0
+        ''');
       }
     },
     beforeOpen: (_) async {

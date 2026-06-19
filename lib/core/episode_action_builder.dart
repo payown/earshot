@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
-import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:earshot/core/utils/url_launcher.dart';
 
 import '../data/db/enums.dart';
 import '../features/bookmarks/presentation/providers/bookmarks_providers.dart';
@@ -21,6 +19,7 @@ import 'audio_export.dart';
 import 'constants/urls.dart';
 import 'episode_playback.dart';
 import 'presentation/widgets/episode_actions_sheet.dart';
+import 'presentation/widgets/show_notes_dialog.dart';
 
 /// Builds the ordered list of [EpisodeQuickActionItem]s for a given episode.
 ///
@@ -47,22 +46,19 @@ List<EpisodeQuickActionItem> buildEpisodeActions({
     if (item != null) items.add(item);
   }
 
-  // "Export audio file" is intentionally not an [EpisodeAction] enum value (it
-  // would clutter the user-configurable Quick Actions list). It's always
-  // available: if the episode isn't downloaded yet, tapping it downloads in the
-  // background and shares when ready (see [exportEpisodeAudio]).
-  items.add(_buildExportItem(episode, context, ref));
-
   return items;
 }
 
+/// "Export audio file" — a first-class, user-configurable [EpisodeAction]
+/// like any other. If the episode isn't downloaded yet, tapping it downloads
+/// in the background and shares when ready (see [exportEpisodeAudio]).
 EpisodeQuickActionItem _buildExportItem(
   Episode episode,
   BuildContext context,
   WidgetRef ref,
 ) {
   return EpisodeQuickActionItem(
-    label: 'Export audio file',
+    label: EpisodeAction.exportAudio.label,
     onInvoke: () => exportEpisodeAudio(
       episodeId: episode.id,
       ref: ref,
@@ -268,46 +264,10 @@ EpisodeQuickActionItem? _buildItem(
           // The sheet pops before invoking, so the captured tile context can
           // be defunct by the time this runs (e.g. the row was rebuilt away).
           if (!context.mounted) return;
-          showDialog<void>(
-            context: context,
-            barrierLabel: 'Dismiss show notes',
-            builder: (dialogContext) => AlertDialog(
-              // Announced by VoiceOver/TalkBack when the dialog opens so the
-              // user knows what surfaced.
-              semanticLabel: 'Show notes',
-              // The episode title heads the dialog so heading navigation lands
-              // on it; the open announcement above already says "Show notes".
-              title: Semantics(
-                header: true,
-                label: episode.title,
-                child: ExcludeSemantics(child: Text(episode.title)),
-              ),
-              content: SingleChildScrollView(
-                child: episode.description != null
-                    ? Html(
-                        data: episode.description!,
-                        onLinkTap: (url, _, __) async {
-                          if (url == null) return;
-                          await safeLaunchUrl(url);
-                        },
-                      )
-                    : Text(
-                        'No show notes available.',
-                        style: Theme.of(dialogContext).textTheme.bodyMedium
-                            ?.copyWith(
-                              color: Theme.of(
-                                dialogContext,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                      ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('Close'),
-                ),
-              ],
-            ),
+          showEpisodeShowNotesDialog(
+            context,
+            title: episode.title,
+            descriptionHtml: episode.description,
           );
         },
       );
@@ -410,5 +370,8 @@ EpisodeQuickActionItem? _buildItem(
           );
         },
       );
+
+    case EpisodeAction.exportAudio:
+      return _buildExportItem(episode, context, ref);
   }
 }

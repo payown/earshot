@@ -50,7 +50,67 @@ Future<void> _pumpWithShowNotes(WidgetTester tester, Episode episode) {
   );
 }
 
+/// Builds episode actions with the given [order] and returns their labels.
+Future<List<String>> _labelsFor(
+  WidgetTester tester,
+  List<EpisodeAction> order, {
+  Set<EpisodeAction>? allowedActions,
+}) async {
+  late List<String> labels;
+  await tester.pumpWidget(
+    ProviderScope(
+      child: MaterialApp(
+        home: Scaffold(
+          body: Consumer(
+            builder: (context, ref, _) {
+              labels = buildEpisodeActions(
+                episode: _episode(),
+                order: order,
+                context: context,
+                ref: ref,
+                onPlay: () {},
+                allowedActions: allowedActions,
+              ).map((a) => a.label).toList();
+              return const SizedBox();
+            },
+          ),
+        ),
+      ),
+    ),
+  );
+  return labels;
+}
+
 void main() {
+  testWidgets('Export is a configurable action, surfaced via the enum order', (
+    tester,
+  ) async {
+    final labels = await _labelsFor(tester, const [EpisodeAction.exportAudio]);
+    expect(labels, ['Export audio file']);
+  });
+
+  testWidgets('Export is not force-appended when absent from the order', (
+    tester,
+  ) async {
+    final labels = await _labelsFor(tester, const [EpisodeAction.playNow]);
+    expect(labels, isNot(contains('Export audio file')));
+  });
+
+  testWidgets('Export obeys allowedActions like every other action', (
+    tester,
+  ) async {
+    final labels = await _labelsFor(
+      tester,
+      const [EpisodeAction.playNow, EpisodeAction.exportAudio],
+      allowedActions: const {EpisodeAction.playNow},
+    );
+    expect(labels, isNot(contains('Export audio file')));
+  });
+
+  test('exportAudio is part of the default episode action set', () {
+    expect(defaultEpisodeActions, contains(EpisodeAction.exportAudio));
+  });
+
   testWidgets('Open show notes opens an accessible dialog (#305)', (
     tester,
   ) async {

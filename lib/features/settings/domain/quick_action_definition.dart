@@ -6,7 +6,8 @@ enum EpisodeAction {
   openShowNotes,
   bookmark,
   download,
-  share;
+  share,
+  exportAudio;
 
   String get label => switch (this) {
     EpisodeAction.playNow => 'Play now',
@@ -17,6 +18,7 @@ enum EpisodeAction {
     EpisodeAction.bookmark => 'Bookmark current spot',
     EpisodeAction.download => 'Download',
     EpisodeAction.share => 'Share',
+    EpisodeAction.exportAudio => 'Export audio file',
   };
 
   String get key => name;
@@ -53,6 +55,7 @@ const defaultEpisodeActions = [
   EpisodeAction.bookmark,
   EpisodeAction.download,
   EpisodeAction.share,
+  EpisodeAction.exportAudio,
 ];
 
 const defaultPodcastActions = [

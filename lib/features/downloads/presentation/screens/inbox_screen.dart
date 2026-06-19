@@ -35,6 +35,7 @@ const _inboxAllowedActions = {
   EpisodeAction.openShowNotes,
   EpisodeAction.download,
   EpisodeAction.share,
+  EpisodeAction.exportAudio,
 };
 
 class InboxScreen extends ConsumerStatefulWidget {

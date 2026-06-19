@@ -26,6 +26,7 @@ const _downloadsAllowedActions = {
   EpisodeAction.openShowNotes,
   EpisodeAction.download,
   EpisodeAction.share,
+  EpisodeAction.exportAudio,
 };
 
 class DownloadsScreen extends ConsumerWidget {
