@@ -7,6 +7,7 @@ import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:earshot/core/episode_action_builder.dart';
+import 'package:earshot/core/utils/time_format.dart';
 import 'package:earshot/core/utils/url_launcher.dart';
 
 import '../../../../core/constants/spacing.dart';
@@ -952,8 +953,8 @@ class _ProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final posLabel = _format(position);
-    final durLabel = _format(duration);
+    final posLabel = formatDurationDigital(position);
+    final durLabel = formatDurationDigital(duration);
     final progress = duration.inMilliseconds > 0
         ? position.inMilliseconds / duration.inMilliseconds
         : 0.0;
@@ -962,16 +963,20 @@ class _ProgressBar extends StatelessWidget {
     final decreased = _clamp(position - _kStep);
 
     final remaining = duration > position ? duration - position : Duration.zero;
+    // One consistent spoken format across label, value, and the flick values so
+    // VoiceOver never switches between "42 hours" and "4:03" on the same control
+    // (#328). The label frames the value as the playback position.
     final semanticLabel = duration.inSeconds > 0
-        ? '${_formatNatural(remaining)} remaining, ${_formatNatural(duration)} total'
-        : 'Playback position: $posLabel';
+        ? 'Playback position, ${formatDurationSpoken(remaining)} remaining '
+              'of ${formatDurationSpoken(duration)}'
+        : 'Playback position';
 
     return Semantics(
       label: semanticLabel,
       slider: true,
-      value: posLabel,
-      increasedValue: _format(increased),
-      decreasedValue: _format(decreased),
+      value: formatDurationSpoken(position),
+      increasedValue: formatDurationSpoken(increased),
+      decreasedValue: formatDurationSpoken(decreased),
       onIncrease: () => onSeek(increased),
       onDecrease: () => onSeek(decreased),
       excludeSemantics: true,
@@ -1009,25 +1014,6 @@ class _ProgressBar extends StatelessWidget {
     if (d.isNegative) return Duration.zero;
     if (duration.inMilliseconds > 0 && d > duration) return duration;
     return d;
-  }
-
-  String _format(Duration d) {
-    final h = d.inHours;
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return h > 0 ? '$h:$m:$s' : '$m:$s';
-  }
-
-  String _formatNatural(Duration d) {
-    final h = d.inHours;
-    final m = d.inMinutes.remainder(60);
-    final s = d.inSeconds.remainder(60);
-    if (h > 0 && m > 0) {
-      return '$h ${h == 1 ? 'hour' : 'hours'} $m ${m == 1 ? 'minute' : 'minutes'}';
-    }
-    if (h > 0) return '$h ${h == 1 ? 'hour' : 'hours'}';
-    if (m > 0) return '$m ${m == 1 ? 'minute' : 'minutes'}';
-    return '$s ${s == 1 ? 'second' : 'seconds'}';
   }
 }
 
