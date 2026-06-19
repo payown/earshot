@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:logging/logging.dart';
 
+import '../../../../core/accessibility/announce.dart';
 import '../../../../data/db/enums.dart';
 import '../../domain/quick_action_definition.dart';
 import '../providers/settings_providers.dart';
+
+final _log = Logger('QuickActionConfigurator');
 
 class QuickActionConfiguratorScreen extends ConsumerStatefulWidget {
   const QuickActionConfiguratorScreen({
@@ -103,8 +107,11 @@ class _QuickActionConfiguratorScreenState
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: Text(
                 'The first active action is the default double-tap action. '
-                'Use the up/down buttons or drag to reorder. '
-                'Tap Remove to hide an action; tap Add to restore it.',
+                'Use the up and down buttons to reorder. '
+                'Tap Remove to hide an action; tap Add to restore it. '
+                'This order sets your default action and the order in the '
+                "actions menu. VoiceOver's Actions rotor uses a fixed built-in "
+                "order, so it isn't affected by changes here.",
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -183,18 +190,43 @@ class _QuickActionConfiguratorScreenState
   Future<void> _save() async {
     final keys = _activeKeys ?? _allKeys;
     final repo = ref.read(quickActionRepositoryProvider);
-    if (_isEpisode) {
-      final actions = keys
-          .map((k) => EpisodeAction.values.firstWhere((a) => a.key == k))
-          .toList();
-      await repo.saveEpisodeActions(actions);
-    } else {
-      final actions = keys
-          .map((k) => PodcastAction.values.firstWhere((a) => a.key == k))
-          .toList();
-      await repo.savePodcastActions(actions);
+    // Capture the view before the async gap so the announcement can fire after
+    // the screen pops and VoiceOver focus moves back to the trigger.
+    final view = View.of(context);
+    try {
+      if (_isEpisode) {
+        final actions = keys
+            .map((k) => EpisodeAction.values.firstWhere((a) => a.key == k))
+            .toList();
+        await repo.saveEpisodeActions(actions);
+      } else {
+        final actions = keys
+            .map((k) => PodcastAction.values.firstWhere((a) => a.key == k))
+            .toList();
+        await repo.savePodcastActions(actions);
+      }
+    } catch (error, stackTrace) {
+      _log.warning('Failed to save Quick actions', error, stackTrace);
+      const failureMessage = 'Could not save Quick actions. Please try again.';
+      // Still on screen, so a direct announcement is heard immediately.
+      SemanticsService.sendAnnouncement(
+        view,
+        failureMessage,
+        TextDirection.ltr,
+      );
+      // A visible signal too, so sighted users with VoiceOver off also see the
+      // failure (the screen stays open so they can retry).
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(failureMessage)),
+        );
+      }
+      return;
     }
+    // Pop first, then announce past the dismiss + focus settle so iOS VoiceOver
+    // doesn't discard the announcement mid focus-transition.
     if (mounted) Navigator.of(context).pop();
+    announceAfterDismiss(view, 'Quick actions saved');
   }
 }
 

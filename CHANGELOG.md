@@ -56,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Quick Actions: reordering your episode or podcast actions now saves reliably.
+  Some setups (carried over from an older app version) could hit a hidden
+  conflict that silently rolled back the save, so the order reverted every time
+  you reopened the app. The save now collapses that conflict, and the
+  configurator confirms "Quick actions saved" (or tells you if a save fails)
+  instead of failing without a word.
 - Playback: with both "Continue after…" switches off, playback now stops at the
   end of the current episode instead of rolling on to another one. And when
   playback does continue, finishing an episode you started from the middle of the

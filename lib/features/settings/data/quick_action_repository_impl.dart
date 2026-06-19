@@ -72,8 +72,16 @@ class QuickActionRepositoryImpl implements QuickActionRepository {
         _db.quickActionConfigs,
       )..where((q) => q.contentType.equals(contentType.name))).go();
 
+      // Deduplicate keys, preserving first-occurrence order. Legacy data can
+      // produce duplicates on read (e.g. both 'addToQueue' and its rename
+      // 'addToEndOfQueue' map to the same action), and the table has a UNIQUE
+      // constraint on {contentType, actionKey}. Collapsing duplicates keeps the
+      // persisted rows matching the user's visible order without aborting the
+      // transaction on a UNIQUE violation.
+      final seen = <String>{};
       var order = 0;
       for (final key in actionKeys) {
+        if (!seen.add(key)) continue;
         await _db
             .into(_db.quickActionConfigs)
             .insert(
