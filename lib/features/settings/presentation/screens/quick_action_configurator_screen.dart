@@ -3,7 +3,6 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
 
-import '../../../../core/accessibility/announce.dart';
 import '../../../../data/db/enums.dart';
 import '../../domain/quick_action_definition.dart';
 import '../providers/settings_providers.dart';
@@ -190,8 +189,8 @@ class _QuickActionConfiguratorScreenState
   Future<void> _save() async {
     final keys = _activeKeys ?? _allKeys;
     final repo = ref.read(quickActionRepositoryProvider);
-    // Capture the view before the async gap so the announcement can fire after
-    // the screen pops and VoiceOver focus moves back to the trigger.
+    // Capture the view before the async gap so the announcement targets the
+    // correct FlutterView even if the widget rebuilds.
     final view = View.of(context);
     try {
       if (_isEpisode) {
@@ -223,18 +222,23 @@ class _QuickActionConfiguratorScreenState
       }
       return;
     }
-    // Pop first, then announce past the dismiss + focus settle so iOS VoiceOver
-    // doesn't discard the announcement mid focus-transition. The menu order and
-    // default tap update instantly; only the rotor waits for a relaunch (the
-    // action-id cache can't be reset in a release build), so say so on episode
-    // saves.
-    if (mounted) Navigator.of(context).pop();
-    announceAfterDismiss(
-      view,
-      _isEpisode
-          ? 'Quick actions saved. Reopen Earshot to update the rotor order.'
-          : 'Quick actions saved',
-    );
+    // Success. We deliberately do NOT auto-pop the screen. A full-screen pop
+    // fires an iOS screen-change that reassigns VoiceOver focus to the
+    // destination and drops any pending announcement, so the saved confirmation
+    // was being cut off. (assertiveness has no effect on iOS in this Flutter
+    // version, so it can't rescue a post-pop announcement.) Announcing on the
+    // still-focused screen is the same stable path the failure case uses, so
+    // it's reliably heard; the user navigates back manually. The menu order and
+    // default tap have already updated; only the rotor waits for a relaunch.
+    final successMessage = _isEpisode
+        ? 'Quick actions saved. Reopen Earshot to update the rotor order.'
+        : 'Quick actions saved';
+    SemanticsService.sendAnnouncement(view, successMessage, TextDirection.ltr);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(successMessage)),
+      );
+    }
   }
 }
 
