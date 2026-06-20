@@ -40,6 +40,13 @@ struct SubscriptionsView: View {
                     Label("Search", systemImage: "magnifyingglass")
                 }
             }
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink {
+                    FoldersScreen()
+                } label: {
+                    Label("Folders", systemImage: "folder")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingAdd = true
@@ -111,10 +118,12 @@ struct SubscriptionsView: View {
     }
 
     private func unsubscribe(_ podcast: Podcast) {
+        let title = podcast.title
+        FolderRepository(context: context).removeFromAllFolders(podcast)
         context.delete(podcast)
         do {
             try context.save()
-            Announcer.announce("Unsubscribed from \(podcast.title)")
+            Announcer.announce("Unsubscribed from \(title)")
         } catch {
             AppLog.subscriptions.error("Failed to unsubscribe: \(error.localizedDescription, privacy: .public)")
         }
@@ -136,7 +145,12 @@ struct SubscriptionsView: View {
     }
 
     private func delete(_ offsets: IndexSet) {
-        for index in offsets { context.delete(podcasts[index]) }
+        let repo = FolderRepository(context: context)
+        for index in offsets {
+            let podcast = podcasts[index]
+            repo.removeFromAllFolders(podcast)
+            context.delete(podcast)
+        }
         do {
             try context.save()
         } catch {
