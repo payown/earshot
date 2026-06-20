@@ -16,24 +16,69 @@ struct EpisodeListView: View {
     }
 
     var body: some View {
-        List(sortedEpisodes) { episode in
-            EpisodeRow(
-                episode: episode,
-                actions: buildEpisodeActions(
-                    episode: episode,
-                    order: quickActions.actions,
-                    player: player,
-                    context: context,
-                    onShowNotes: { showNotesEpisode = episode },
-                    onShare: { sharingEpisode = episode }
-                )
-            )
+        List {
+            Section {
+                header
+            }
+            Section {
+                ForEach(sortedEpisodes) { episode in
+                    EpisodeRow(
+                        episode: episode,
+                        actions: buildEpisodeActions(
+                            episode: episode,
+                            order: quickActions.actions,
+                            player: player,
+                            context: context,
+                            onShowNotes: { showNotesEpisode = episode },
+                            onShare: { sharingEpisode = episode }
+                        )
+                    )
+                }
+            } header: {
+                Text("^[\(sortedEpisodes.count) episode](inflect: true)")
+            }
         }
         .navigationTitle(podcast.title)
         .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await refresh() }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .center, spacing: Spacing.sm) {
+            PodcastArtwork(urlString: podcast.artworkURL, size: 120, cornerRadius: 12)
+            Text(podcast.title)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+            if let author = podcast.author, !author.isEmpty {
+                Text(author)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            if let description = podcast.podcastDescription, !description.isEmpty {
+                Text(description)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .padding(.top, Spacing.xs)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Spacing.sm)
+    }
+
+    private func refresh() async {
+        do {
+            try await SubscriptionRepository(context: context).refresh(podcast)
+            Announcer.announce("\(podcast.title) refreshed")
+        } catch {
+            AppLog.subscriptions.error("Refresh failed: \(error.localizedDescription, privacy: .public)")
+            Announcer.announce("Couldn't refresh \(podcast.title)")
         }
     }
 

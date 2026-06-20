@@ -27,14 +27,19 @@ struct AddFeedView: View {
 
                 Section("Try a sample") {
                     ForEach(samples, id: \.url) { sample in
-                        Button(sample.name) { urlString = sample.url }
+                        Button(sample.name) {
+                            urlString = sample.url
+                            Announcer.announce("\(sample.name) URL filled in")
+                        }
+                        .accessibilityHint("Fills in the feed URL")
                     }
                 }
 
                 if let errorMessage {
                     Section {
                         Text(errorMessage)
-                            .foregroundStyle(.red)
+                            .font(.callout)
+                            .foregroundStyle(AppColor.error)
                             .accessibilityLabel("Error: \(errorMessage)")
                     }
                 }
@@ -62,40 +67,14 @@ struct AddFeedView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let feed = try await FeedService().fetch(urlString)
-            let podcast = Podcast(
-                feedURL: urlString.trimmingCharacters(in: .whitespacesAndNewlines),
-                title: feed.title.isEmpty ? "Untitled podcast" : feed.title,
-                author: feed.author,
-                podcastDescription: feed.description,
-                artworkURL: feed.artworkURL,
-                websiteURL: feed.websiteURL,
-                language: feed.language,
-                category: feed.category
-            )
-            context.insert(podcast)
-            for item in feed.episodes {
-                let episode = Episode(
-                    guid: item.guid,
-                    title: item.title,
-                    audioURL: item.audioURL,
-                    episodeDescription: item.description,
-                    durationSeconds: item.durationSeconds,
-                    pubDate: item.pubDate,
-                    artworkURL: item.artworkURL,
-                    episodeNumber: item.episodeNumber,
-                    seasonNumber: item.seasonNumber,
-                    chapterURL: item.chapterURL,
-                    transcriptURL: item.transcriptURL
-                )
-                episode.podcast = podcast
-                context.insert(episode)
-            }
-            try context.save()
+            let podcast = try await SubscriptionRepository(context: context).subscribe(feedURL: urlString)
+            Announcer.announce("Subscribed to \(podcast.title)")
             dismiss()
         } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription
+            let message = (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
+            errorMessage = message
+            Announcer.announce("Couldn't add podcast. \(message)")
         }
     }
 }

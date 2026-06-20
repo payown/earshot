@@ -50,6 +50,9 @@ struct EpisodeRow: View {
     private var accessibilityLabel: String {
         var parts = [episode.title]
         if episode.isPlayed { parts.append("Played") }
+        if let date = episode.pubDate {
+            parts.append(date.formatted(date: .abbreviated, time: .omitted))
+        }
         return parts.joined(separator: ", ")
     }
 }
