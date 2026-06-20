@@ -21,6 +21,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.swift
         INFOPLIST_FILE: Sources/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: "72PH974742"
         CODE_SIGN_STYLE: Automatic
         ENABLE_PREVIEWS: YES
