@@ -20,99 +20,109 @@ struct FolderDetailScreen: View {
     }
 
     var body: some View {
-        Group {
-            if members.isEmpty {
-                ContentUnavailableView {
-                    Label("No podcasts yet", systemImage: "folder")
-                } description: {
-                    Text("Add podcasts to this folder to group them.")
-                } actions: {
-                    Button("Add podcasts") { showingPicker = true }
-                }
-            } else {
-                List {
-                    Section {
-                        ForEach(members) { podcast in
-                            row(for: podcast)
-                        }
-                        .onMove(perform: move)
-                    } footer: {
-                        ageLimitFooter
+        content
+            .navigationTitle(folder.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { toolbarContent }
+            .sheet(isPresented: $showingPicker) {
+                FolderPodcastPickerView(folder: folder)
+            }
+            .alert("Rename folder", isPresented: $showingRename) {
+                TextField("Folder name", text: $renameText)
+                Button("Rename") { rename() }
+                Button("Cancel", role: .cancel) {}
+            }
+            .alert("Queue expiration", isPresented: $showingAgeLimit) {
+                TextField("Days", text: $ageLimitText)
+                    .keyboardType(.numberPad)
+                Button("Save") { saveAgeLimit() }
+                Button("Clear", role: .destructive) { clearAgeLimit() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Episodes older than this many days are skipped when you add the folder to the queue. Leave empty to disable.")
+            }
+            .confirmationDialog(
+                "Delete folder \(folder.name)?",
+                isPresented: $showingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Delete folder", role: .destructive) { deleteFolder() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes the folder. Your podcasts and their episodes are kept.")
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if members.isEmpty {
+            ContentUnavailableView {
+                Label("No podcasts yet", systemImage: "folder")
+            } description: {
+                Text("Add podcasts to this folder to group them.")
+            } actions: {
+                Button("Add podcasts") { showingPicker = true }
+            }
+        } else {
+            List {
+                Section {
+                    ForEach(members) { podcast in
+                        row(for: podcast)
                     }
+                    .onMove(perform: move)
+                } footer: {
+                    ageLimitFooter
                 }
             }
         }
-        .navigationTitle(folder.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if !members.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    EditButton()
-                }
-            }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        if !members.isEmpty {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    queueFolder()
-                } label: {
-                    Label("Add folder to queue", systemImage: "text.badge.plus")
-                }
-                .disabled(members.isEmpty)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button {
-                        showingPicker = true
-                    } label: {
-                        Label("Add podcasts", systemImage: "plus")
-                    }
-                    Button {
-                        renameText = folder.name
-                        showingRename = true
-                    } label: {
-                        Label("Rename folder", systemImage: "pencil")
-                    }
-                    Button {
-                        ageLimitText = folder.queueAgeLimitDays.map(String.init) ?? ""
-                        showingAgeLimit = true
-                    } label: {
-                        Label("Set queue expiration", systemImage: "clock.arrow.circlepath")
-                    }
-                    Button(role: .destructive) {
-                        showingDelete = true
-                    } label: {
-                        Label("Delete folder", systemImage: "trash")
-                    }
-                } label: {
-                    Label("Folder options", systemImage: "ellipsis.circle")
-                }
+                EditButton()
             }
         }
-        .sheet(isPresented: $showingPicker) {
-            FolderPodcastPickerView(folder: folder)
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                queueFolder()
+            } label: {
+                Label("Add folder to queue", systemImage: "text.badge.plus")
+            }
+            .disabled(members.isEmpty)
         }
-        .alert("Rename folder", isPresented: $showingRename) {
-            TextField("Folder name", text: $renameText)
-            Button("Rename") { rename() }
-            Button("Cancel", role: .cancel) {}
+        ToolbarItem(placement: .topBarTrailing) {
+            optionsMenu
         }
-        .alert("Queue expiration", isPresented: $showingAgeLimit) {
-            TextField("Days", text: $ageLimitText)
-                .keyboardType(.numberPad)
-            Button("Save") { saveAgeLimit() }
-            Button("Clear", role: .destructive) { clearAgeLimit() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Episodes older than this many days are skipped when you add the folder to the queue. Leave empty to disable.")
-        }
-        .confirmationDialog(
-            "Delete folder \(folder.name)?",
-            isPresented: $showingDelete,
-            titleVisibility: .visible
-        ) {
-            Button("Delete folder", role: .destructive) { deleteFolder() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes the folder. Your podcasts and their episodes are kept.")
+    }
+
+    private var optionsMenu: some View {
+        Menu {
+            Button {
+                showingPicker = true
+            } label: {
+                Label("Add podcasts", systemImage: "plus")
+            }
+            Button {
+                renameText = folder.name
+                showingRename = true
+            } label: {
+                Label("Rename folder", systemImage: "pencil")
+            }
+            Button {
+                ageLimitText = folder.queueAgeLimitDays.map(String.init) ?? ""
+                showingAgeLimit = true
+            } label: {
+                Label("Set queue expiration", systemImage: "clock.arrow.circlepath")
+            }
+            Button(role: .destructive) {
+                showingDelete = true
+            } label: {
+                Label("Delete folder", systemImage: "trash")
+            }
+        } label: {
+            Label("Folder options", systemImage: "ellipsis.circle")
         }
     }
 
