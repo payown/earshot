@@ -72,6 +72,9 @@ struct QueueScreen: View {
     private func groupHeader(_ group: QueueGroup) -> some View {
         HStack {
             Text(group.podcast.title)
+                // Header trait on the title text itself, so the headings rotor
+                // lands on it and the Play-group button stays a separate element.
+                .accessibilityAddTraits(.isHeader)
             Spacer()
             Button {
                 repo.playGroup(group.podcast)
@@ -82,8 +85,6 @@ struct QueueScreen: View {
             .accessibilityLabel("Play \(group.podcast.title) group")
             .accessibilityHint("Moves these episodes to the front of the queue")
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isHeader)
     }
 
     // MARK: Row

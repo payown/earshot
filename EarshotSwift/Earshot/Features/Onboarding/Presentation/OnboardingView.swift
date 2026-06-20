@@ -117,7 +117,7 @@ struct OnboardingView: View {
         HStack(spacing: Spacing.md) {
             if pageIndex > 0 {
                 Button {
-                    withAnimation { pageIndex -= 1 }
+                    withAnimation(Motion.preferred(.default)) { pageIndex -= 1 }
                     focusedPage = pageIndex
                 } label: {
                     Label("Back", systemImage: "chevron.left")
@@ -134,7 +134,7 @@ struct OnboardingView: View {
                 .accessibilityHint(hasPodcast ? "" : "Add a podcast first to continue.")
             } else {
                 Button {
-                    withAnimation { pageIndex += 1 }
+                    withAnimation(Motion.preferred(.default)) { pageIndex += 1 }
                     focusedPage = pageIndex
                 } label: {
                     Label("Next", systemImage: "chevron.right")

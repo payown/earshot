@@ -77,12 +77,15 @@ struct DownloadsScreen: View {
             Button("Restore") { restore(episode) }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
+                // The action is exposed via the rotor below; hide the visible
+                // button so the combined row doesn't add a duplicate VO stop.
+                .accessibilityHidden(true)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             [episode.title, episode.podcast?.title].compactMap { $0 }.joined(separator: ", ")
         )
-        .accessibilityValue(days <= 0 ? "Recently expired, expiring soon" : "Recently expired, \(days) days left to restore")
+        .accessibilityValue(days <= 0 ? "Recently expired, expiring soon" : "Recently expired, \(days) \(days == 1 ? "day" : "days") left to restore")
         .accessibilityHint("Restorable for a limited time")
         .accessibilityActions {
             Button("Restore to queue") { restore(episode) }

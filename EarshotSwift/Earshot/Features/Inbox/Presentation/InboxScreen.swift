@@ -30,6 +30,7 @@ struct InboxScreen: View {
                     systemImage: "tray",
                     description: Text("New episodes you haven't triaged appear here.")
                 )
+                .accessibilityElement(children: .combine)
                 .accessibilityFocused($focusEmpty)
             } else {
                 List {
@@ -71,7 +72,9 @@ struct InboxScreen: View {
         Announcer.announce("Inbox cleared")
         // The list collapses to the empty state; move focus there so VoiceOver
         // isn't orphaned on the vanished Clear button.
-        DispatchQueue.main.async { focusEmpty = true }
+        // Delay so the list has collapsed to the empty state (the focus target)
+        // before we request focus on it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { focusEmpty = true }
     }
 
     private func actions(for episode: Episode) -> [QuickActionItem] {

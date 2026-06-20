@@ -19,7 +19,7 @@ private struct ContextualTipModifier: ViewModifier {
         .onAppear {
             guard tips.shouldShow(category) else { return }
             tips.markShown(category)
-            withAnimation { visible = true }
+            withAnimation(Motion.preferred(.default)) { visible = true }
             // Polite live-region announcement of the tip text, delayed so it
             // isn't swallowed by the screen-change utterance as the tab appears.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
@@ -37,7 +37,7 @@ private struct ContextualTipModifier: ViewModifier {
                 .font(.footnote)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button {
-                withAnimation { visible = false }
+                withAnimation(Motion.preferred(.default)) { visible = false }
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.secondary)

@@ -37,11 +37,11 @@ final class FolderRepository {
     /// Podcasts that belong to no folder, by title — the "Unfiled" group.
     func unfiledPodcasts() -> [Podcast] {
         let all = (try? context.fetch(FetchDescriptor<Podcast>())) ?? []
+        // Fetch memberships once (not once per podcast) and build the filed set.
+        let memberships = (try? context.fetch(FetchDescriptor<FolderMembership>())) ?? []
+        let filedIDs = Set(memberships.compactMap { $0.podcast?.persistentModelID })
         return all
-            .filter { podcast in
-                let memberships = (try? context.fetch(FetchDescriptor<FolderMembership>())) ?? []
-                return !memberships.contains { $0.podcast?.persistentModelID == podcast.persistentModelID }
-            }
+            .filter { !filedIDs.contains($0.persistentModelID) }
             .sorted { $0.title < $1.title }
     }
 

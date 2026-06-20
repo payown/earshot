@@ -53,8 +53,9 @@ struct SettingsScreen: View {
             }
 
             Section {
+                // The section footer already explains this; a matching hint would
+                // make VoiceOver read the same sentence twice.
                 Toggle("Opt-in podcasts only", isOn: $settings.inboxOptInOnly)
-                    .accessibilityHint("When on, new episodes only reach the inbox for podcasts you've explicitly included.")
             } header: {
                 Text("Inbox")
             } footer: {
@@ -79,10 +80,10 @@ struct SettingsScreen: View {
             }
 
             Section {
+                // The Privacy footer below covers both toggles; per-control hints
+                // would make VoiceOver repeat it.
                 Toggle("Crash reporting", isOn: $settings.crashReportingEnabled)
-                    .accessibilityHint("Opt-out and anonymized.")
                 Toggle("Anonymous analytics", isOn: $settings.analyticsEnabled)
-                    .accessibilityHint("Opt-out and anonymized. No third-party trackers.")
             } header: {
                 Text("Privacy")
             } footer: {
