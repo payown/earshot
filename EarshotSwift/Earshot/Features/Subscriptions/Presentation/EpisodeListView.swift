@@ -26,7 +26,7 @@ struct EpisodeListView: View {
                         episode: episode,
                         actions: buildEpisodeActions(
                             episode: episode,
-                            order: quickActions.actions,
+                            order: quickActions.episodeActions,
                             player: player,
                             context: context,
                             onShowNotes: { showNotesEpisode = episode },

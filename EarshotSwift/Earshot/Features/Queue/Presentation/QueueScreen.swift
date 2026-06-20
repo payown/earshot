@@ -15,7 +15,6 @@ struct QueueScreen: View {
 
     @State private var groupByPodcast = false
     @State private var showNotesEpisode: Episode?
-    @State private var sharingEpisode: Episode?
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
 
     private var repo: QueueRepository { QueueRepository(context: context) }
@@ -26,9 +25,6 @@ struct QueueScreen: View {
             .navigationTitle("Queue")
             .toolbar { toolbar }
             .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
-            .sheet(item: $sharingEpisode) { episode in
-                ShareSheet(items: shareItems(for: episode))
-            }
     }
 
     @ViewBuilder
@@ -97,21 +93,16 @@ struct QueueScreen: View {
             episode: episode,
             position: position,
             total: total,
-            showsMoveActions: showsMoveActions,
             focusedEpisode: $focusedEpisode,
-            episodeActions: buildEpisodeActions(
+            actions: buildQueueActions(
                 episode: episode,
-                order: quickActions.actions,
+                order: quickActions.queueActions,
+                moveActionsEnabled: showsMoveActions,
                 player: player,
                 context: context,
                 onShowNotes: { showNotesEpisode = episode },
-                onShare: { sharingEpisode = episode }
-            ),
-            onMoveToTop: { move(episode, repo.moveToTop, "Moved \(episode.title) to top") },
-            onMoveUp: { move(episode, repo.moveUp, "Moved \(episode.title) up") },
-            onMoveDown: { move(episode, repo.moveDown, "Moved \(episode.title) down") },
-            onMoveToBottom: { move(episode, repo.moveToBottom, "Moved \(episode.title) to bottom") },
-            onRemove: { remove(episode) }
+                onFocus: { focusedEpisode = $0 }
+            )
         )
     }
 
@@ -141,24 +132,7 @@ struct QueueScreen: View {
         }
     }
 
-    // MARK: Mutations (with VoiceOver focus + announcements)
-
-    /// Applies a move, announces it, and keeps VoiceOver focus on the moved
-    /// episode so the user stays oriented after the list re-renders.
-    private func move(_ episode: Episode, _ apply: (Episode) -> Void, _ announcement: String) {
-        apply(episode)
-        Announcer.announce(announcement)
-        focusedEpisode = episode.persistentModelID
-    }
-
-    /// Removes an episode, announces which one, and moves focus to the row that
-    /// takes its place (or the previous one, or nothing when the queue empties).
-    private func remove(_ episode: Episode) {
-        let nextFocus = neighborID(of: episode, in: episodes)
-        repo.cancelFromQueue(episode)
-        Announcer.announce("Removed \(episode.title) from the queue")
-        focusedEpisode = nextFocus
-    }
+    // MARK: Drag reorder
 
     private func handleMove(_ from: IndexSet, _ to: Int) {
         guard let source = from.first else { return }
@@ -167,42 +141,21 @@ struct QueueScreen: View {
         focusedEpisode = episode.persistentModelID
     }
 
-    /// The id of the row that should receive focus once `episode` leaves the
-    /// list: the next item, else the previous, else nil (queue emptied).
-    private func neighborID(of episode: Episode, in list: [Episode]) -> PersistentIdentifier? {
-        guard let idx = list.firstIndex(where: { $0.persistentModelID == episode.persistentModelID })
-        else { return nil }
-        if idx + 1 < list.count { return list[idx + 1].persistentModelID }
-        if idx > 0 { return list[idx - 1].persistentModelID }
-        return nil
-    }
-
-    private func shareItems(for episode: Episode) -> [Any] {
-        if let url = URL(string: episode.audioURL) {
-            return [episode.title, url]
-        }
-        return [episode.title]
-    }
 }
 
-/// One queue row. The whole row is a single VoiceOver element carrying the
-/// episode's quick actions plus queue-management actions, so a screen-reader
-/// user can reorder without ever needing the drag gesture.
+/// One queue row: a single VoiceOver element whose Actions rotor is the user's
+/// configured queue Quick Actions (in order), so a screen-reader user can play,
+/// reorder, or remove without a drag gesture. Swipe exposes the destructive
+/// actions; the context menu exposes the non-default ones.
 private struct QueueRow: View {
     let episode: Episode
     let position: Int?
     let total: Int?
-    let showsMoveActions: Bool
     @AccessibilityFocusState.Binding var focusedEpisode: PersistentIdentifier?
-    let episodeActions: [EpisodeActionItem]
-    let onMoveToTop: () -> Void
-    let onMoveUp: () -> Void
-    let onMoveDown: () -> Void
-    let onMoveToBottom: () -> Void
-    let onRemove: () -> Void
+    let actions: [QuickActionItem]
 
     var body: some View {
-        let primary = episodeActions.first
+        let primary = actions.first
 
         Button {
             primary?.run()
@@ -227,29 +180,20 @@ private struct QueueRow: View {
         .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
         .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
         .accessibilityActions {
-            ForEach(episodeActions) { action in
+            ForEach(actions) { action in
                 Button(action.label) { action.run() }
             }
-            if showsMoveActions {
-                Button("Move to top") { onMoveToTop() }
-                Button("Move up") { onMoveUp() }
-                Button("Move down") { onMoveDown() }
-                Button("Move to bottom") { onMoveToBottom() }
-            }
-            Button("Remove from queue") { onRemove() }
         }
         .swipeActions(edge: .trailing) {
-            Button(role: .destructive, action: onRemove) {
-                Label("Remove", systemImage: "minus.circle")
+            ForEach(actions.filter(\.isDestructive)) { action in
+                Button(role: .destructive) { action.run() } label: { Text(action.label) }
             }
         }
         .contextMenu {
-            if showsMoveActions {
-                Button(action: onMoveToTop) { Label("Move to Top", systemImage: "arrow.up.to.line") }
-                Button(action: onMoveToBottom) { Label("Move to Bottom", systemImage: "arrow.down.to.line") }
-            }
-            Button(role: .destructive, action: onRemove) {
-                Label("Remove from Queue", systemImage: "minus.circle")
+            ForEach(actions.dropFirst()) { action in
+                Button(role: action.isDestructive ? .destructive : nil) { action.run() } label: {
+                    Text(action.label)
+                }
             }
         }
     }

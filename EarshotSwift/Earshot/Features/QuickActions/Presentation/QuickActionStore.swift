@@ -1,27 +1,46 @@
 import Foundation
 import Observation
+import SwiftData
 
-/// Holds the user's configured episode-action order, persisted in UserDefaults.
-/// Mutating `actions` (e.g. from the settings reorder) updates every episode
-/// row's VoiceOver rotor live — no relaunch needed.
+/// Holds the user's configured Quick Action order for all three content sets
+/// (episode, podcast, queue), persisted in ``QuickActionConfig`` via
+/// ``QuickActionRepository``. Mutating an order updates every row's VoiceOver
+/// rotor live — no relaunch. Serves defaults until ``configure(context:)`` runs.
+@MainActor
 @Observable
 final class QuickActionStore {
-    private let key = "episodeActionOrder"
+    private(set) var episodeActions: [EpisodeAction] = defaultEpisodeActions
+    private(set) var podcastActions: [PodcastAction] = defaultPodcastActions
+    private(set) var queueActions: [QueueItemAction] = defaultQueueItemActions
 
-    var actions: [EpisodeAction] {
-        didSet { persist() }
+    @ObservationIgnored private var context: ModelContext?
+
+    /// Wires persistence and loads the saved order. Call once at startup with the
+    /// shared container's `mainContext` (not from a view body).
+    func configure(context: ModelContext) {
+        self.context = context
+        let repo = QuickActionRepository(context: context)
+        episodeActions = repo.episodeOrder()
+        podcastActions = repo.podcastOrder()
+        queueActions = repo.queueOrder()
     }
 
-    init() {
-        let raw = UserDefaults.standard.string(forKey: key) ?? ""
-        let parsed = raw
-            .split(separator: ",")
-            .compactMap { EpisodeAction(rawValue: String($0)) }
-        actions = parsed.isEmpty ? defaultEpisodeActions : parsed
+    func moveEpisodeActions(from: IndexSet, to: Int) {
+        episodeActions.move(fromOffsets: from, toOffset: to)
+        repo?.setEpisodeOrder(episodeActions)
     }
 
-    private func persist() {
-        let raw = actions.map(\.rawValue).joined(separator: ",")
-        UserDefaults.standard.set(raw, forKey: key)
+    func movePodcastActions(from: IndexSet, to: Int) {
+        podcastActions.move(fromOffsets: from, toOffset: to)
+        repo?.setPodcastOrder(podcastActions)
+    }
+
+    func moveQueueActions(from: IndexSet, to: Int) {
+        queueActions.move(fromOffsets: from, toOffset: to)
+        repo?.setQueueOrder(queueActions)
+    }
+
+    private var repo: QuickActionRepository? {
+        context.map(QuickActionRepository.init)
     }
 }

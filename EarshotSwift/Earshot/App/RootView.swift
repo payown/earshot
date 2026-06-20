@@ -4,6 +4,7 @@ import SwiftData
 struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(PlayerService.self) private var player
+    @Environment(QuickActionStore.self) private var quickActions
 
     var body: some View {
         TabView {
@@ -34,6 +35,7 @@ struct RootView: View {
             // Done here, not in a view body's computed work, so the context is
             // injected exactly once.
             player.configure(context: modelContext)
+            quickActions.configure(context: modelContext)
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
         }
     }

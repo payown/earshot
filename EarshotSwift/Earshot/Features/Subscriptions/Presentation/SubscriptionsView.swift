@@ -3,8 +3,11 @@ import SwiftData
 
 struct SubscriptionsView: View {
     @Environment(\.modelContext) private var context
+    @Environment(QuickActionStore.self) private var quickActions
     @Query(sort: \Podcast.createdAt, order: .reverse) private var podcasts: [Podcast]
     @State private var showingAdd = false
+    @State private var sharingPodcast: Podcast?
+    @State private var pendingUnsubscribe: Podcast?
 
     var body: some View {
         Group {
@@ -39,6 +42,23 @@ struct SubscriptionsView: View {
             }
         }
         .sheet(isPresented: $showingAdd) { AddFeedView() }
+        .sheet(item: $sharingPodcast) { podcast in
+            ShareSheet(items: shareItems(for: podcast))
+        }
+        .confirmationDialog(
+            "Unsubscribe from \(pendingUnsubscribe?.title ?? "this podcast")?",
+            isPresented: Binding(
+                get: { pendingUnsubscribe != nil },
+                set: { if !$0 { pendingUnsubscribe = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingUnsubscribe
+        ) { podcast in
+            Button("Unsubscribe", role: .destructive) { unsubscribe(podcast) }
+            Button("Cancel", role: .cancel) { pendingUnsubscribe = nil }
+        } message: { podcast in
+            Text("This removes \(podcast.title) and its episodes. This can't be undone.")
+        }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
     }
 
@@ -60,6 +80,44 @@ struct SubscriptionsView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(rowLabel(for: podcast))
+        .accessibilityActions {
+            ForEach(rotorActions(for: podcast)) { action in
+                Button(action.label) { action.run() }
+            }
+        }
+    }
+
+    /// The podcast Quick Actions for the row's VoiceOver rotor, in the user's
+    /// configured order. "Open podcast detail" is the NavigationLink tap (a
+    /// navigation row), so it's excluded from the rotor — never add it here or it
+    /// double-navigates. See SWIFTUI_PLAN.md. Unsubscribe is destructive and
+    /// routes through a confirmation dialog rather than firing immediately.
+    private func rotorActions(for podcast: Podcast) -> [QuickActionItem] {
+        buildPodcastActions(
+            podcast: podcast,
+            order: quickActions.podcastActions.filter { $0 != .openDetail },
+            context: context,
+            onOpenDetail: {},
+            onShare: { sharingPodcast = podcast },
+            onUnsubscribe: { pendingUnsubscribe = podcast }
+        )
+    }
+
+    private func unsubscribe(_ podcast: Podcast) {
+        context.delete(podcast)
+        do {
+            try context.save()
+            Announcer.announce("Unsubscribed from \(podcast.title)")
+        } catch {
+            AppLog.subscriptions.error("Failed to unsubscribe: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func shareItems(for podcast: Podcast) -> [Any] {
+        if let url = URL(string: podcast.feedURL) {
+            return [podcast.title, url]
+        }
+        return [podcast.title]
     }
 
     private func rowLabel(for podcast: Podcast) -> String {
