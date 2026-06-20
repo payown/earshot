@@ -7,127 +7,267 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0B804951DB88CBCDD8D80B58 /* SubscriptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98B5529B69F7F0A1DBDE4EEC /* SubscriptionsView.swift */; };
-		25B5EA61E6A912CB5405BF3A /* EpisodeAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF2FCF62B5EE5EB4EE3716E /* EpisodeAction.swift */; };
-		3CFAD45CFBE31F241EB05627 /* Episode.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3BB9E47ED93F4F36161A3A /* Episode.swift */; };
-		449C4522BB6D4BA2B0844538 /* EpisodeListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56A64A893907778ECA233492 /* EpisodeListView.swift */; };
-		4B509D2EDB4B16C0A49C7504 /* FeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4D92D8742AB6B953BC59F5A /* FeedService.swift */; };
-		52986C9D566756EBBD6362B0 /* QuickActionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 293212305CFB05740B3B6B35 /* QuickActionStore.swift */; };
-		5D858F0BB3A020C8F28B90D1 /* EpisodeActionsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7653C12F20092CDE5F44D21 /* EpisodeActionsBuilder.swift */; };
-		5E790298F21DB7CDCC210E11 /* RSSParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C36C7FE0EC2330A1BB750E /* RSSParser.swift */; };
-		63BE0AE6AA2E7B65C0DC6E5A /* QuickActionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 611E43C7FB2DAEE644D221B2 /* QuickActionsSettingsView.swift */; };
-		871CCE6C55E18B9D8918D229 /* ShowNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90194B41D2DD35F8BABEBC9 /* ShowNotesView.swift */; };
-		8CD5D5B99FF2B7412487E59B /* EpisodeRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D25C33BEB17007AA558412 /* EpisodeRow.swift */; };
-		8CF19514228325F48C78C06C /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A06AF8FF118F4A4CCAD580 /* ShareSheet.swift */; };
-		A8B355BD966A91360056D39D /* PlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE6519257DA99AEA2E6183BA /* PlayerService.swift */; };
-		BDE0F7BEF70F0A53AB2BBDFF /* Podcast.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1DE5F93DA18FE967EC8A2AA /* Podcast.swift */; };
-		CA7F0B2EBB76823A6144E6BD /* AddFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F32589A7BF8BE05E96EAF9F7 /* AddFeedView.swift */; };
-		CF4395661504F8E492453BDA /* NowPlayingBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9B9C2EB756D944F2094B946 /* NowPlayingBar.swift */; };
-		EA8DF46C89183DE615E17561 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30036BEEE8F66A288ADE9618 /* RootView.swift */; };
-		F3E3AB7123DF3B73CA03C93A /* EarshotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F603BDB23F7808BA9857CBB /* EarshotApp.swift */; };
+		0C34726CCF898D3B224D7296 /* ShowNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C2A7F38E26A61D91D5846A4 /* ShowNotesView.swift */; };
+		0EA843CE44BDF92F60286C83 /* QuickActionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */; };
+		13797CCEF4754E2CB175CA74 /* RSSParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85CC9C4E71AE76C7AD5682BB /* RSSParser.swift */; };
+		1EB72C9EDA751CE62531D56B /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BE919DDCD5DBE1272334FF6 /* RootView.swift */; };
+		2651183B9A6197ACA0DCEC9D /* SubscriptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B9DA2518345900178343187 /* SubscriptionsView.swift */; };
+		42C670F214460BADA919C9DB /* EpisodeActionsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F9762C13BCD2647A7BBDAD /* EpisodeActionsBuilder.swift */; };
+		4A96AC7CA53D6D1AD19EDA3E /* Podcast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CF61D55C48D468680AB681C /* Podcast.swift */; };
+		51EE602096FEE0FF490A7CBB /* PlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E565903CF72B66FF3E108C5B /* PlayerService.swift */; };
+		5300063D3DF0F8B0C230D30E /* EpisodeAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F71AE13AFCDD1550650672 /* EpisodeAction.swift */; };
+		5DC7D8D09A34917698C18126 /* NowPlayingBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25DCF677FA43A7F79872AE07 /* NowPlayingBar.swift */; };
+		60BEBF0B98670BDA9980C3B6 /* Episode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 478105CB6C9A1309975A07A1 /* Episode.swift */; };
+		78792212EF7E1CCAE13117F8 /* RSSParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BE4582317C4948ECEF3288 /* RSSParserTests.swift */; };
+		87D55A542BD1471B1F6DCA83 /* EpisodeRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A621AE99537538C3A0AD021C /* EpisodeRow.swift */; };
+		A6ABA0F37BA96A1A6D768F49 /* EpisodeListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94347B9412E35CBD85FC2705 /* EpisodeListView.swift */; };
+		B30814ED8290A53F37FF3952 /* AddFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B06F7F65FB0DBA6132EE39E /* AddFeedView.swift */; };
+		B485218BA32829A9DC997E32 /* FeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1908FA7002380BE2E52E7F8A /* FeedService.swift */; };
+		D466FE5826600E4D347FBFED /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7436039DC8D115F1F457E3C3 /* ShareSheet.swift */; };
+		DAE5B17F783B9608A4E356A3 /* QuickActionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD6029A247CD01E7E6D06F1 /* QuickActionStore.swift */; };
+		E1326BBBB921376DFEF73272 /* EarshotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DA06952463063521A170CEC /* EarshotApp.swift */; };
+		F736F4872226E3D2DDDDD76F /* Logger+Earshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D504E12C18259B246B251C7B /* Logger+Earshot.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		1BE932869FD54030A7461C83 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9FB774AEE0DC1581E53209CF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E31CD32546C44FDD4709019C;
+			remoteInfo = Earshot;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
-		1CF2FCF62B5EE5EB4EE3716E /* EpisodeAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeAction.swift; sourceTree = "<group>"; };
-		1F603BDB23F7808BA9857CBB /* EarshotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotApp.swift; sourceTree = "<group>"; };
-		293212305CFB05740B3B6B35 /* QuickActionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionStore.swift; sourceTree = "<group>"; };
-		2C3D6E629EEED7098B7B5967 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		30036BEEE8F66A288ADE9618 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
-		33D25C33BEB17007AA558412 /* EpisodeRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeRow.swift; sourceTree = "<group>"; };
-		56A64A893907778ECA233492 /* EpisodeListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeListView.swift; sourceTree = "<group>"; };
-		611E43C7FB2DAEE644D221B2 /* QuickActionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsSettingsView.swift; sourceTree = "<group>"; };
-		98B5529B69F7F0A1DBDE4EEC /* SubscriptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionsView.swift; sourceTree = "<group>"; };
-		A1C36C7FE0EC2330A1BB750E /* RSSParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSParser.swift; sourceTree = "<group>"; };
-		A7653C12F20092CDE5F44D21 /* EpisodeActionsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeActionsBuilder.swift; sourceTree = "<group>"; };
-		BC3BB9E47ED93F4F36161A3A /* Episode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Episode.swift; sourceTree = "<group>"; };
-		C4D92D8742AB6B953BC59F5A /* FeedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedService.swift; sourceTree = "<group>"; };
-		CE6519257DA99AEA2E6183BA /* PlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerService.swift; sourceTree = "<group>"; };
-		D1DE5F93DA18FE967EC8A2AA /* Podcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Podcast.swift; sourceTree = "<group>"; };
+		1908FA7002380BE2E52E7F8A /* FeedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedService.swift; sourceTree = "<group>"; };
+		1CC39C15B55034A61C9FB060 /* EarshotTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EarshotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		25DCF677FA43A7F79872AE07 /* NowPlayingBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingBar.swift; sourceTree = "<group>"; };
+		2BE919DDCD5DBE1272334FF6 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		3B9DA2518345900178343187 /* SubscriptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionsView.swift; sourceTree = "<group>"; };
+		478105CB6C9A1309975A07A1 /* Episode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Episode.swift; sourceTree = "<group>"; };
+		4B06F7F65FB0DBA6132EE39E /* AddFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddFeedView.swift; sourceTree = "<group>"; };
+		59BE4582317C4948ECEF3288 /* RSSParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSParserTests.swift; sourceTree = "<group>"; };
+		5DA06952463063521A170CEC /* EarshotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotApp.swift; sourceTree = "<group>"; };
+		7436039DC8D115F1F457E3C3 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
+		75F9762C13BCD2647A7BBDAD /* EpisodeActionsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeActionsBuilder.swift; sourceTree = "<group>"; };
+		7CF61D55C48D468680AB681C /* Podcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Podcast.swift; sourceTree = "<group>"; };
+		85CC9C4E71AE76C7AD5682BB /* RSSParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSParser.swift; sourceTree = "<group>"; };
+		94347B9412E35CBD85FC2705 /* EpisodeListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeListView.swift; sourceTree = "<group>"; };
+		9C2A7F38E26A61D91D5846A4 /* ShowNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShowNotesView.swift; sourceTree = "<group>"; };
+		A621AE99537538C3A0AD021C /* EpisodeRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeRow.swift; sourceTree = "<group>"; };
+		B5F71AE13AFCDD1550650672 /* EpisodeAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeAction.swift; sourceTree = "<group>"; };
+		CFD6029A247CD01E7E6D06F1 /* QuickActionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionStore.swift; sourceTree = "<group>"; };
 		D417CBEB2EF403CE505CD8E9 /* Earshot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Earshot.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		E90194B41D2DD35F8BABEBC9 /* ShowNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShowNotesView.swift; sourceTree = "<group>"; };
-		F32589A7BF8BE05E96EAF9F7 /* AddFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddFeedView.swift; sourceTree = "<group>"; };
-		F3A06AF8FF118F4A4CCAD580 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
-		F9B9C2EB756D944F2094B946 /* NowPlayingBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingBar.swift; sourceTree = "<group>"; };
+		D504E12C18259B246B251C7B /* Logger+Earshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Logger+Earshot.swift"; sourceTree = "<group>"; };
+		E565903CF72B66FF3E108C5B /* PlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerService.swift; sourceTree = "<group>"; };
+		EF4559A7D750A9F7AFFC5652 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
-		373449AA16D97653E16A2BF2 /* Products */ = {
+		226A036D0987EEE09C09D751 /* Logging */ = {
 			isa = PBXGroup;
 			children = (
-				D417CBEB2EF403CE505CD8E9 /* Earshot.app */,
+				D504E12C18259B246B251C7B /* Logger+Earshot.swift */,
 			);
-			name = Products;
+			path = Logging;
 			sourceTree = "<group>";
 		};
-		58CBAC9BC04F80EC8802E0B0 /* Models */ = {
+		2A2D8FC551EDAA9E074169D5 /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				BC3BB9E47ED93F4F36161A3A /* Episode.swift */,
-				1CF2FCF62B5EE5EB4EE3716E /* EpisodeAction.swift */,
-				D1DE5F93DA18FE967EC8A2AA /* Podcast.swift */,
-				293212305CFB05740B3B6B35 /* QuickActionStore.swift */,
+				478105CB6C9A1309975A07A1 /* Episode.swift */,
+				7CF61D55C48D468680AB681C /* Podcast.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
 		};
-		700C2813CF9B73DF7171EE3A /* Views */ = {
+		33546D3836BE31CC0785426A /* Subscriptions */ = {
 			isa = PBXGroup;
 			children = (
-				F32589A7BF8BE05E96EAF9F7 /* AddFeedView.swift */,
-				56A64A893907778ECA233492 /* EpisodeListView.swift */,
-				33D25C33BEB17007AA558412 /* EpisodeRow.swift */,
-				F9B9C2EB756D944F2094B946 /* NowPlayingBar.swift */,
-				611E43C7FB2DAEE644D221B2 /* QuickActionsSettingsView.swift */,
-				30036BEEE8F66A288ADE9618 /* RootView.swift */,
-				F3A06AF8FF118F4A4CCAD580 /* ShareSheet.swift */,
-				E90194B41D2DD35F8BABEBC9 /* ShowNotesView.swift */,
-				98B5529B69F7F0A1DBDE4EEC /* SubscriptionsView.swift */,
+				F47F45AC4CA9B705B006AF6B /* Data */,
+				993667BC9CDF65D974D50E88 /* Presentation */,
 			);
-			path = Views;
+			path = Subscriptions;
+			sourceTree = "<group>";
+		};
+		373449AA16D97653E16A2BF2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D417CBEB2EF403CE505CD8E9 /* Earshot.app */,
+				1CC39C15B55034A61C9FB060 /* EarshotTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		3869032457A3166B74305C1F /* Domain */ = {
+			isa = PBXGroup;
+			children = (
+				B5F71AE13AFCDD1550650672 /* EpisodeAction.swift */,
+				75F9762C13BCD2647A7BBDAD /* EpisodeActionsBuilder.swift */,
+			);
+			path = Domain;
+			sourceTree = "<group>";
+		};
+		4274C0A85F145B1D7BDC10FD /* Earshot */ = {
+			isa = PBXGroup;
+			children = (
+				62EB7B31F1A76BAA6CD3E051 /* App */,
+				E52CF55137A1278DB44D8888 /* Core */,
+				567B64298A5E9A355E86D228 /* Data */,
+				F6A8460F5200A96DDA6701AA /* Features */,
+			);
+			path = Earshot;
+			sourceTree = "<group>";
+		};
+		4337CABBC3BFF200BD721BC4 /* EarshotTests */ = {
+			isa = PBXGroup;
+			children = (
+				59BE4582317C4948ECEF3288 /* RSSParserTests.swift */,
+			);
+			path = EarshotTests;
+			sourceTree = "<group>";
+		};
+		567B64298A5E9A355E86D228 /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				2A2D8FC551EDAA9E074169D5 /* Models */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
+		62EB7B31F1A76BAA6CD3E051 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				5DA06952463063521A170CEC /* EarshotApp.swift */,
+				EF4559A7D750A9F7AFFC5652 /* Info.plist */,
+				2BE919DDCD5DBE1272334FF6 /* RootView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		92ACC113472B96ECCA0644B6 /* Presentation */ = {
+			isa = PBXGroup;
+			children = (
+				F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */,
+				CFD6029A247CD01E7E6D06F1 /* QuickActionStore.swift */,
+			);
+			path = Presentation;
+			sourceTree = "<group>";
+		};
+		993667BC9CDF65D974D50E88 /* Presentation */ = {
+			isa = PBXGroup;
+			children = (
+				4B06F7F65FB0DBA6132EE39E /* AddFeedView.swift */,
+				94347B9412E35CBD85FC2705 /* EpisodeListView.swift */,
+				A621AE99537538C3A0AD021C /* EpisodeRow.swift */,
+				9C2A7F38E26A61D91D5846A4 /* ShowNotesView.swift */,
+				3B9DA2518345900178343187 /* SubscriptionsView.swift */,
+			);
+			path = Presentation;
 			sourceTree = "<group>";
 		};
 		993B8D204E4E7B3167DF2E35 = {
 			isa = PBXGroup;
 			children = (
-				F8EC87DAC5FB6FD30359BA3D /* Sources */,
+				4274C0A85F145B1D7BDC10FD /* Earshot */,
+				4337CABBC3BFF200BD721BC4 /* EarshotTests */,
 				373449AA16D97653E16A2BF2 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		C4FB68EB2A1320101E3DF436 /* Services */ = {
+		AE0610F297D9A358175982BD /* QuickActions */ = {
 			isa = PBXGroup;
 			children = (
-				C4D92D8742AB6B953BC59F5A /* FeedService.swift */,
-				CE6519257DA99AEA2E6183BA /* PlayerService.swift */,
-				A1C36C7FE0EC2330A1BB750E /* RSSParser.swift */,
+				3869032457A3166B74305C1F /* Domain */,
+				92ACC113472B96ECCA0644B6 /* Presentation */,
 			);
-			path = Services;
+			path = QuickActions;
 			sourceTree = "<group>";
 		};
-		D9AB7145DED75344167E95E3 /* Support */ = {
+		DE20018C1E596BDF50F7F328 /* Data */ = {
 			isa = PBXGroup;
 			children = (
-				A7653C12F20092CDE5F44D21 /* EpisodeActionsBuilder.swift */,
+				E565903CF72B66FF3E108C5B /* PlayerService.swift */,
 			);
-			path = Support;
+			path = Data;
 			sourceTree = "<group>";
 		};
-		F8EC87DAC5FB6FD30359BA3D /* Sources */ = {
+		DFE123C4B6B7A778558B051F /* Presentation */ = {
 			isa = PBXGroup;
 			children = (
-				1F603BDB23F7808BA9857CBB /* EarshotApp.swift */,
-				2C3D6E629EEED7098B7B5967 /* Info.plist */,
-				58CBAC9BC04F80EC8802E0B0 /* Models */,
-				C4FB68EB2A1320101E3DF436 /* Services */,
-				D9AB7145DED75344167E95E3 /* Support */,
-				700C2813CF9B73DF7171EE3A /* Views */,
+				25DCF677FA43A7F79872AE07 /* NowPlayingBar.swift */,
 			);
-			path = Sources;
+			path = Presentation;
+			sourceTree = "<group>";
+		};
+		E52CF55137A1278DB44D8888 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				226A036D0987EEE09C09D751 /* Logging */,
+				FB561C5DBD35A07AE5446BA0 /* UI */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		E6B946989E9817D3F874990D /* Player */ = {
+			isa = PBXGroup;
+			children = (
+				DE20018C1E596BDF50F7F328 /* Data */,
+				DFE123C4B6B7A778558B051F /* Presentation */,
+			);
+			path = Player;
+			sourceTree = "<group>";
+		};
+		F47F45AC4CA9B705B006AF6B /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				1908FA7002380BE2E52E7F8A /* FeedService.swift */,
+				85CC9C4E71AE76C7AD5682BB /* RSSParser.swift */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
+		F6A8460F5200A96DDA6701AA /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				E6B946989E9817D3F874990D /* Player */,
+				AE0610F297D9A358175982BD /* QuickActions */,
+				33546D3836BE31CC0785426A /* Subscriptions */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		FB561C5DBD35A07AE5446BA0 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				7436039DC8D115F1F457E3C3 /* ShareSheet.swift */,
+			);
+			path = UI;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		916802478DDA8A030C689CC9 /* EarshotTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5A6AD01F0F524600229031A7 /* Build configuration list for PBXNativeTarget "EarshotTests" */;
+			buildPhases = (
+				AADDFF44010EF59732076845 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				3DB1905100168A0D01A62FE4 /* PBXTargetDependency */,
+			);
+			name = EarshotTests;
+			packageProductDependencies = (
+			);
+			productName = EarshotTests;
+			productReference = 1CC39C15B55034A61C9FB060 /* EarshotTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		E31CD32546C44FDD4709019C /* Earshot */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 7F90677C9B9E9DC75FEA96C9 /* Build configuration list for PBXNativeTarget "Earshot" */;
@@ -154,6 +294,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					916802478DDA8A030C689CC9 = {
+						DevelopmentTeam = 72PH974742;
+						ProvisioningStyle = Automatic;
+					};
 					E31CD32546C44FDD4709019C = {
 						DevelopmentTeam = 72PH974742;
 						ProvisioningStyle = Automatic;
@@ -175,6 +319,7 @@
 			projectRoot = "";
 			targets = (
 				E31CD32546C44FDD4709019C /* Earshot */,
+				916802478DDA8A030C689CC9 /* EarshotTests */,
 			);
 		};
 /* End PBXProject section */
@@ -184,28 +329,45 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CA7F0B2EBB76823A6144E6BD /* AddFeedView.swift in Sources */,
-				F3E3AB7123DF3B73CA03C93A /* EarshotApp.swift in Sources */,
-				3CFAD45CFBE31F241EB05627 /* Episode.swift in Sources */,
-				25B5EA61E6A912CB5405BF3A /* EpisodeAction.swift in Sources */,
-				5D858F0BB3A020C8F28B90D1 /* EpisodeActionsBuilder.swift in Sources */,
-				449C4522BB6D4BA2B0844538 /* EpisodeListView.swift in Sources */,
-				8CD5D5B99FF2B7412487E59B /* EpisodeRow.swift in Sources */,
-				4B509D2EDB4B16C0A49C7504 /* FeedService.swift in Sources */,
-				CF4395661504F8E492453BDA /* NowPlayingBar.swift in Sources */,
-				A8B355BD966A91360056D39D /* PlayerService.swift in Sources */,
-				BDE0F7BEF70F0A53AB2BBDFF /* Podcast.swift in Sources */,
-				52986C9D566756EBBD6362B0 /* QuickActionStore.swift in Sources */,
-				63BE0AE6AA2E7B65C0DC6E5A /* QuickActionsSettingsView.swift in Sources */,
-				5E790298F21DB7CDCC210E11 /* RSSParser.swift in Sources */,
-				EA8DF46C89183DE615E17561 /* RootView.swift in Sources */,
-				8CF19514228325F48C78C06C /* ShareSheet.swift in Sources */,
-				871CCE6C55E18B9D8918D229 /* ShowNotesView.swift in Sources */,
-				0B804951DB88CBCDD8D80B58 /* SubscriptionsView.swift in Sources */,
+				B30814ED8290A53F37FF3952 /* AddFeedView.swift in Sources */,
+				E1326BBBB921376DFEF73272 /* EarshotApp.swift in Sources */,
+				60BEBF0B98670BDA9980C3B6 /* Episode.swift in Sources */,
+				5300063D3DF0F8B0C230D30E /* EpisodeAction.swift in Sources */,
+				42C670F214460BADA919C9DB /* EpisodeActionsBuilder.swift in Sources */,
+				A6ABA0F37BA96A1A6D768F49 /* EpisodeListView.swift in Sources */,
+				87D55A542BD1471B1F6DCA83 /* EpisodeRow.swift in Sources */,
+				B485218BA32829A9DC997E32 /* FeedService.swift in Sources */,
+				F736F4872226E3D2DDDDD76F /* Logger+Earshot.swift in Sources */,
+				5DC7D8D09A34917698C18126 /* NowPlayingBar.swift in Sources */,
+				51EE602096FEE0FF490A7CBB /* PlayerService.swift in Sources */,
+				4A96AC7CA53D6D1AD19EDA3E /* Podcast.swift in Sources */,
+				DAE5B17F783B9608A4E356A3 /* QuickActionStore.swift in Sources */,
+				0EA843CE44BDF92F60286C83 /* QuickActionsSettingsView.swift in Sources */,
+				13797CCEF4754E2CB175CA74 /* RSSParser.swift in Sources */,
+				1EB72C9EDA751CE62531D56B /* RootView.swift in Sources */,
+				D466FE5826600E4D347FBFED /* ShareSheet.swift in Sources */,
+				0C34726CCF898D3B224D7296 /* ShowNotesView.swift in Sources */,
+				2651183B9A6197ACA0DCEC9D /* SubscriptionsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AADDFF44010EF59732076845 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				78792212EF7E1CCAE13117F8 /* RSSParserTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		3DB1905100168A0D01A62FE4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E31CD32546C44FDD4709019C /* Earshot */;
+			targetProxy = 1BE932869FD54030A7461C83 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		0E956BB3C807FD8C37138DE3 /* Debug */ = {
@@ -282,7 +444,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 72PH974742;
 				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = Sources/Info.plist;
+				INFOPLIST_FILE = Earshot/App/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -352,6 +514,25 @@
 			};
 			name = Release;
 		};
+		7DBFAA456FB5ABBE14E23A80 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 72PH974742;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot.swift.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Earshot.app/Earshot";
+			};
+			name = Debug;
+		};
 		987A614C5B11A6A47360C74E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -360,7 +541,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 72PH974742;
 				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = Sources/Info.plist;
+				INFOPLIST_FILE = Earshot/App/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -371,9 +552,37 @@
 			};
 			name = Debug;
 		};
+		D6FC61A6881555A02A25BAFD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 72PH974742;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot.swift.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Earshot.app/Earshot";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5A6AD01F0F524600229031A7 /* Build configuration list for PBXNativeTarget "EarshotTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7DBFAA456FB5ABBE14E23A80 /* Debug */,
+				D6FC61A6881555A02A25BAFD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		5E10F8C7203D68DB8A12B50A /* Build configuration list for PBXProject "Earshot" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

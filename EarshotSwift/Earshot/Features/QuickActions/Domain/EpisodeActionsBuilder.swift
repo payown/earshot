@@ -35,7 +35,11 @@ func buildEpisodeActions(
                 isDestructive: false
             ) {
                 episode.isPlayed.toggle()
-                try? context.save()
+                do {
+                    try context.save()
+                } catch {
+                    AppLog.quickActions.error("Failed to save played state: \(error.localizedDescription, privacy: .public)")
+                }
             }
         case .openShowNotes:
             return EpisodeActionItem(label: "Open show notes", isDestructive: false) {

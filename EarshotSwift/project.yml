@@ -15,12 +15,37 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: Sources
+      - path: Earshot
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.swift
-        INFOPLIST_FILE: Sources/Info.plist
+        INFOPLIST_FILE: Earshot/App/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
         DEVELOPMENT_TEAM: "72PH974742"
         CODE_SIGN_STYLE: Automatic
         ENABLE_PREVIEWS: YES
+  EarshotTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: EarshotTests
+    dependencies:
+      - target: Earshot
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.swift.tests
+        DEVELOPMENT_TEAM: "72PH974742"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Earshot:
+    build:
+      targets:
+        Earshot: all
+        EarshotTests: [test]
+    test:
+      targets:
+        - EarshotTests
+      gatherCoverageData: true
+    run:
+      config: Debug

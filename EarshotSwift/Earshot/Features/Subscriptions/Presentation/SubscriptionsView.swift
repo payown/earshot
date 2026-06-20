@@ -48,6 +48,10 @@ struct SubscriptionsView: View {
 
     private func delete(_ offsets: IndexSet) {
         for index in offsets { context.delete(podcasts[index]) }
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            AppLog.subscriptions.error("Failed to delete podcast: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }

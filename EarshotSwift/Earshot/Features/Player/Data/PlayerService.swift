@@ -12,7 +12,10 @@ final class PlayerService {
     var isPlaying = false
 
     func play(_ episode: Episode) {
-        guard let url = URL(string: episode.audioURL) else { return }
+        guard let url = URL(string: episode.audioURL) else {
+            AppLog.player.error("Cannot play episode, invalid audio URL: \(episode.audioURL, privacy: .public)")
+            return
+        }
         configureSession()
         player.replaceCurrentItem(with: AVPlayerItem(url: url))
         player.play()
@@ -31,7 +34,11 @@ final class PlayerService {
 
     private func configureSession() {
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback)
-        try? session.setActive(true)
+        do {
+            try session.setCategory(.playback)
+            try session.setActive(true)
+        } catch {
+            AppLog.player.error("Failed to configure audio session: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }
