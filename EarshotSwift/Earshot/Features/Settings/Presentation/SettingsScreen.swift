@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 /// All app configuration. Each control binds to ``SettingsStore`` (persisted to
 /// SwiftData). Native `Form` controls (Toggle, Picker, Stepper) are
@@ -12,6 +13,7 @@ struct SettingsScreen: View {
 
     @State private var exportURL: ExportFile?
     @State private var confirmingReset = false
+    @State private var importingOPML = false
 
     private static let speeds: [Double] = [0.8, 1.0, 1.2, 1.5, 1.75, 2.0]
     private static let skipIntervals = [10, 15, 30, 45, 60]
@@ -99,6 +101,12 @@ struct SettingsScreen: View {
                 .disabled(podcasts.isEmpty)
                 .accessibilityHint(podcasts.isEmpty ? "Subscribe to a podcast to enable export." : "")
 
+                Button {
+                    importingOPML = true
+                } label: {
+                    Label("Import subscriptions (OPML)", systemImage: "square.and.arrow.down")
+                }
+
                 Button(role: .destructive) {
                     confirmingReset = true
                 } label: {
@@ -108,6 +116,12 @@ struct SettingsScreen: View {
         }
         .navigationTitle("Settings")
         .sheet(item: $exportURL) { file in ShareSheet(items: [file.url]) }
+        .fileImporter(
+            isPresented: $importingOPML,
+            allowedContentTypes: [UTType(filenameExtension: "opml") ?? .xml, .xml]
+        ) { result in
+            handleImport(result)
+        }
         .confirmationDialog(
             "Delete all local data?",
             isPresented: $confirmingReset,
@@ -131,6 +145,23 @@ struct SettingsScreen: View {
         } catch {
             AppLog.data.error("OPML export failed: \(error.localizedDescription, privacy: .public)")
             return nil
+        }
+    }
+
+    // MARK: Import
+
+    private func handleImport(_ result: Result<URL, Error>) {
+        guard case let .success(url) = result else { return }
+        // Security-scoped access for a user-picked file.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let opml = try? String(contentsOf: url, encoding: .utf8) else {
+            Announcer.announce("Couldn't read that OPML file")
+            return
+        }
+        Task {
+            let count = await OPMLImportService(context: context).importOPML(opml)
+            Announcer.announce("Imported ^[\(count) podcast](inflect: true)")
         }
     }
 

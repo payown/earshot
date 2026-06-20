@@ -33,6 +33,13 @@ struct SubscriptionsView: View {
         }
         .navigationTitle("Podcasts")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink {
+                    SearchView()
+                } label: {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingAdd = true
