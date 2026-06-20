@@ -120,4 +120,24 @@ final class PlaybackLogicTests: XCTestCase {
         let rate = PlaybackLogic.effectivePlaybackRate(podcastSpeedOverride: 0, globalSpeed: 1.25)
         XCTAssertEqual(rate, 1.25)
     }
+
+    // MARK: Up-next resolution (gapless advance)
+
+    func testNextUpIsFirstQueueItemAfterCurrent() {
+        XCTAssertEqual(PlaybackLogic.nextUpID(queue: [1, 2, 3], after: 1), 2)
+    }
+
+    func testNextUpSkipsTheCurrentEpisodeWhereverItSits() {
+        // The finished episode may still be in the list when we look ahead.
+        XCTAssertEqual(PlaybackLogic.nextUpID(queue: [2, 1, 3], after: 1), 2)
+    }
+
+    func testNextUpIsHeadWhenNothingPlaying() {
+        XCTAssertEqual(PlaybackLogic.nextUpID(queue: [5, 6], after: nil), 5)
+    }
+
+    func testNextUpIsNilWhenQueueEmptyOrOnlyCurrent() {
+        XCTAssertNil(PlaybackLogic.nextUpID(queue: [], after: 1))
+        XCTAssertNil(PlaybackLogic.nextUpID(queue: [1], after: 1))
+    }
 }

@@ -1,6 +1,13 @@
 import Foundation
 import SwiftData
 
+extension Notification.Name {
+    /// Posted after any queue mutation persists, so the player can invalidate /
+    /// refresh its gapless preload without the queue and player features being
+    /// directly coupled.
+    static let earshotQueueDidChange = Notification.Name("earshotQueueDidChange")
+}
+
 /// A podcast and its episodes within the "Group by podcast" queue view.
 struct QueueGroup: Identifiable {
     let podcast: Podcast
@@ -180,6 +187,7 @@ final class QueueRepository {
     private func save() {
         do {
             try context.save()
+            NotificationCenter.default.post(name: .earshotQueueDidChange, object: nil)
         } catch {
             AppLog.player.error("Queue save failed: \(error.localizedDescription, privacy: .public)")
         }

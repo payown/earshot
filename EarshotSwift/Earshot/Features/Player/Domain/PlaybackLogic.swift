@@ -61,6 +61,13 @@ enum PlaybackLogic {
         let resumePosition: Int
     }
 
+    /// The id of the episode to play next after `current` finishes: the first
+    /// queue entry that isn't the one that just played. `nil` when the queue is
+    /// empty or holds only the current episode. Drives gapless advance.
+    static func nextUpID<ID: Equatable>(queue: [ID], after current: ID?) -> ID? {
+        queue.first { $0 != current }
+    }
+
     /// Decides whether an episode at `position` of `duration` seconds should be
     /// marked played, and where to resume from on the next play.
     ///

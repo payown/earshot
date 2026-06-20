@@ -43,6 +43,13 @@ final class PlayerService {
     /// True when playback was paused by a system interruption that may resume.
     @ObservationIgnored private var pausedByInterruption = false
 
+    // Gapless preload: the next queue item is built (and starts buffering) ahead
+    // of time so auto-advance is near-seamless. Invalidated whenever the queue
+    // changes (via `.earshotQueueDidChange`).
+    @ObservationIgnored private var preloadedItem: AVPlayerItem?
+    @ObservationIgnored private var preloadedEpisode: Episode?
+    @ObservationIgnored private var queueChangeObserver: NSObjectProtocol?
+
     // MARK: Lifecycle
 
     /// Wires the service to a persistence context. Call once at app startup with
@@ -54,6 +61,7 @@ final class PlayerService {
         observeNotifications()
         observePeriodicTime()
         observeItemDidPlayToEnd()
+        observeQueueChanges()
     }
 
     // MARK: Public playback API
@@ -61,12 +69,24 @@ final class PlayerService {
     /// Loads and starts playing an episode. Resumes from the saved position when
     /// the episode is below the played threshold, otherwise starts from the top.
     func play(_ episode: Episode) {
-        guard let url = PlaybackLogic.resolvePlaybackURL(
-            downloadPath: episode.downloadPath,
-            audioURL: episode.audioURL
-        ) else {
-            AppLog.player.error("Cannot play episode, no usable source: \(episode.audioURL, privacy: .public)")
-            return
+        play(episode, preparedItem: nil)
+    }
+
+    /// Shared play path. `preparedItem`, when supplied, is a pre-buffered
+    /// `AVPlayerItem` from the gapless preload, used for near-seamless advance.
+    private func play(_ episode: Episode, preparedItem: AVPlayerItem?) {
+        let item: AVPlayerItem
+        if let preparedItem {
+            item = preparedItem
+        } else {
+            guard let url = PlaybackLogic.resolvePlaybackURL(
+                downloadPath: episode.downloadPath,
+                audioURL: episode.audioURL
+            ) else {
+                AppLog.player.error("Cannot play episode, no usable source: \(episode.audioURL, privacy: .public)")
+                return
+            }
+            item = AVPlayerItem(url: url)
         }
 
         // Persist the position of whatever was playing before we swap items.
@@ -79,7 +99,6 @@ final class PlayerService {
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
 
-        let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
 
         // Resume position: honor saved progress unless past the threshold.
@@ -101,6 +120,7 @@ final class PlayerService {
 
         persistLastPlayingEpisode(episode)
         updateNowPlayingInfo()
+        refreshPreload()
     }
 
     /// Loads an episode paused, restoring its saved position. Used on launch to
@@ -304,9 +324,87 @@ final class PlayerService {
     }
 
     private func handlePlaybackEnded() {
-        isPlaying = false
-        markCurrentEpisodePlayed()
-        updateNowPlayingInfo()
+        guard let finished = currentEpisode, let context else {
+            isPlaying = false
+            markCurrentEpisodePlayed()
+            updateNowPlayingInfo()
+            return
+        }
+
+        let repo = QueueRepository(context: context)
+        let queued = repo.queue()
+        let nextID = PlaybackLogic.nextUpID(
+            queue: queued.map(\.persistentModelID),
+            after: finished.persistentModelID
+        )
+        let nextEpisode = queued.first { $0.persistentModelID == nextID }
+
+        // The finished episode: mark played and remove it from the queue. Reset
+        // its position since it played to the end.
+        repo.markPlayedAndRemove(finished)
+        finished.positionSeconds = 0
+        saveContext()
+
+        guard let nextEpisode else {
+            isPlaying = false
+            currentEpisode = nil
+            updateNowPlayingInfo()
+            return
+        }
+
+        // Use the pre-buffered item when it's still the right one.
+        let prepared = preloadedEpisode?.persistentModelID == nextEpisode.persistentModelID
+            ? preloadedItem : nil
+        preloadedItem = nil
+        preloadedEpisode = nil
+        play(nextEpisode, preparedItem: prepared)
+        Announcer.announce("Now playing \(nextEpisode.title)")
+    }
+
+    // MARK: Private — gapless preload
+
+    private func observeQueueChanges() {
+        queueChangeObserver = NotificationCenter.default.addObserver(
+            forName: .earshotQueueDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshPreload() }
+        }
+    }
+
+    /// Builds (and starts buffering) the next queue item ahead of time, or clears
+    /// a stale preload when the up-next episode changed or the queue emptied.
+    private func refreshPreload() {
+        guard let context, let current = currentEpisode else {
+            clearPreload()
+            return
+        }
+        let queued = QueueRepository(context: context).queue()
+        let nextID = PlaybackLogic.nextUpID(
+            queue: queued.map(\.persistentModelID),
+            after: current.persistentModelID
+        )
+        guard let next = queued.first(where: { $0.persistentModelID == nextID }) else {
+            clearPreload()
+            return
+        }
+        // Already buffering the right episode — nothing to do.
+        if preloadedEpisode?.persistentModelID == next.persistentModelID { return }
+        guard let url = PlaybackLogic.resolvePlaybackURL(
+            downloadPath: next.downloadPath,
+            audioURL: next.audioURL
+        ) else {
+            clearPreload()
+            return
+        }
+        preloadedItem = AVPlayerItem(url: url)
+        preloadedEpisode = next
+    }
+
+    private func clearPreload() {
+        preloadedItem = nil
+        preloadedEpisode = nil
     }
 
     // MARK: Private — interruptions & route changes (PRD 5.5)
