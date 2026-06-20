@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imported one after another. (iOS only for now.)
 
 ### Changed
+- Quick Actions: your configured episode-action order now drives the VoiceOver
+  Actions rotor too, not just the menu and default double-tap. Reorder your
+  actions in Settings and the rotor follows the same order (the menu and default
+  update instantly; the rotor applies the next time you open Earshot, which the
+  app announces when you save).
 - Episode actions are now identical across Inbox, Queue, Library, and Downloads.
   Every tab uses one shared "Play now" path, one shared actions bottom sheet, and
   the same VoiceOver rotor actions in the order set in Quick Actions settings.
