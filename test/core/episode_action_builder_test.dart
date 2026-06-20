@@ -1,4 +1,5 @@
 import 'package:earshot/core/episode_action_builder.dart';
+import 'package:earshot/core/presentation/widgets/episode_actions_sheet.dart';
 import 'package:earshot/data/db/enums.dart';
 import 'package:earshot/features/settings/domain/quick_action_definition.dart';
 import 'package:earshot/features/subscriptions/domain/episode.dart';
@@ -98,16 +99,29 @@ void main() {
     expect(labels, isNot(contains('Export audio file')));
   });
 
-  testWidgets('queue context offers only playback and file actions', (
+  testWidgets('queue context offers everything except queue-positioning', (
     tester,
   ) async {
+    // The queue gets the full configured set so the user's edits show up here
+    // too — only Play next / Add to end of queue are dropped, because the queue
+    // has its own dedicated Move/Remove controls for those.
     final labels = await _labelsFor(
       tester,
       defaultEpisodeActions,
       actionContext: EpisodeActionContext.queue,
       positionSeconds: 120,
     );
-    expect(labels, ['Play now', 'Download', 'Export audio file']);
+    expect(labels, [
+      'Play now',
+      'Mark as played',
+      'Open show notes',
+      'Bookmark current spot',
+      'Download',
+      'Share',
+      'Export audio file',
+    ]);
+    expect(labels, isNot(contains('Play next')));
+    expect(labels, isNot(contains('Add to end of queue')));
   });
 
   testWidgets('list context offers Bookmark only when there is a position', (
@@ -141,6 +155,90 @@ void main() {
       queueOrder,
       reason: 'shared actions keep the same order across contexts',
     );
+  });
+
+  test(
+    'rotor labels follow the configured order, variants adjacent, moves last',
+    () {
+      final labels = episodeActionRotorLabels(const [
+        EpisodeAction.openShowNotes,
+        EpisodeAction.download,
+        EpisodeAction.playNow,
+      ]);
+      expect(labels, [
+        'Open show notes',
+        'Download',
+        'Remove download',
+        'Cancel download',
+        'Retry download',
+        'Play now',
+        'Move to top',
+        'Move up',
+        'Move down',
+        'Move to bottom',
+      ]);
+    },
+  );
+
+  test(
+    'every EpisodeAction has rotor variant labels including its base label',
+    () {
+      for (final a in EpisodeAction.values) {
+        final variants = episodeActionVariantLabels[a];
+        expect(variants, isNotNull, reason: '$a missing from variant map');
+        expect(variants, contains(a.label), reason: '$a base label missing');
+      }
+    },
+  );
+
+  test('rotor seed covers every label an action can emit', () {
+    // Every label buildEpisodeActions / _buildItem and the Queue move actions
+    // can produce, including dynamic variants. If any is missing from the seed
+    // order, that action lands in an arbitrary rotor slot — silently breaking
+    // the consistency seedEpisodeActionRotorOrder exists to guarantee.
+    final all = episodeActionRotorLabels(EpisodeAction.values.toList());
+    final emittable = <String>{
+      for (final a in EpisodeAction.values) a.label,
+      'Move to play next', // playNext when already queued
+      'Remove from queue', // addToEndOfQueue when queued + queue move action
+      'Mark as unplayed', // markPlayed when already played
+      'Remove download', 'Cancel download', 'Retry download', // download states
+      'Move to top', 'Move up', 'Move down', 'Move to bottom', // queue moves
+    };
+    for (final label in emittable) {
+      expect(
+        all,
+        contains(label),
+        reason:
+            '"$label" can be emitted but is missing from the rotor seed '
+            'order, which silently breaks VoiceOver rotor consistency',
+      );
+    }
+  });
+
+  test('orderEpisodeActionItems honors the configured order', () {
+    EpisodeQuickActionItem item(String label) =>
+        EpisodeQuickActionItem(label: label, onInvoke: () {});
+    final available = {
+      EpisodeAction.playNow: item('Play now'),
+      EpisodeAction.openShowNotes: item('Open show notes'),
+      EpisodeAction.share: item('Share'),
+    };
+
+    // Order that moves Share first; markPlayed is absent from `available` and
+    // is skipped rather than throwing.
+    final ordered = orderEpisodeActionItems(const [
+      EpisodeAction.share,
+      EpisodeAction.markPlayed,
+      EpisodeAction.playNow,
+      EpisodeAction.openShowNotes,
+    ], available);
+
+    expect(ordered.map((a) => a.label).toList(), [
+      'Share',
+      'Play now',
+      'Open show notes',
+    ]);
   });
 
   testWidgets('Open show notes opens an accessible dialog (#305)', (

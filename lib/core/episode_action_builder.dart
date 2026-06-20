@@ -23,51 +23,129 @@ import 'presentation/widgets/show_notes_dialog.dart';
 
 /// Where an episode's action list is being shown.
 ///
-/// This is the single source of truth for *which* actions an episode offers, so
-/// every screen stays consistent instead of each one hand-maintaining its own
-/// allowed-action set (which is how they drifted apart). The user's configured
-/// [order] still controls ordering and the default (first) action; the context
-/// only decides which actions are eligible.
+/// This is the single source of truth for *which* actions an episode offers.
+/// The goal is that a user's configured action list is honored everywhere: when
+/// they edit it in Settings, those edits show up on every screen. So eligibility
+/// is **capability-based**, not screen-based — an action is hidden only when the
+/// episode itself can't support it (its state) or a dedicated visible control
+/// already covers it. The user's configured [order] controls ordering and the
+/// default (first) action.
 enum EpisodeActionContext {
   /// General browse lists — inbox, library, podcast detail, downloads. Offers
   /// every core action, filtered only by the episode's own state.
   list,
 
-  /// The queue screen. The episode is already queued, so it offers playback and
-  /// file actions only; the caller appends the queue-management items
-  /// (move/remove) after these.
+  /// The queue screen. Same as [list], minus the two queue-positioning actions
+  /// (play next, add to end of queue): the queue has its own dedicated, visible
+  /// Move-to-top/up/down/bottom + Remove controls, which the caller appends, so
+  /// emitting the generic versions here would just duplicate them.
   queue,
 }
 
-/// The actions eligible for [episode] in [actionContext]. State-based, not
-/// screen-based, so the same episode offers the same actions wherever it's
-/// shown.
+/// The actions eligible for [episode] in [actionContext]. Capability-based, not
+/// screen-based, so the same episode offers the same actions wherever it's shown
+/// — with the only differences tied to the episode's state or to a screen's
+/// dedicated controls, never to screen preference.
 Set<EpisodeAction> allowedEpisodeActions(
   EpisodeActionContext actionContext,
   Episode episode,
 ) {
+  // The full state-filtered set. Bookmark only when there's a real position to
+  // bookmark, so it's never a dead "bookmark at 0:00".
+  final standard = <EpisodeAction>{
+    EpisodeAction.playNow,
+    EpisodeAction.playNext,
+    EpisodeAction.addToEndOfQueue,
+    EpisodeAction.markPlayed,
+    EpisodeAction.openShowNotes,
+    EpisodeAction.download,
+    EpisodeAction.share,
+    EpisodeAction.exportAudio,
+    if (episode.positionSeconds > 0) EpisodeAction.bookmark,
+  };
+
   switch (actionContext) {
-    case EpisodeActionContext.queue:
-      return const {
-        EpisodeAction.playNow,
-        EpisodeAction.download,
-        EpisodeAction.exportAudio,
-      };
     case EpisodeActionContext.list:
-      return {
-        EpisodeAction.playNow,
-        EpisodeAction.playNext,
-        EpisodeAction.addToEndOfQueue,
-        EpisodeAction.markPlayed,
-        EpisodeAction.openShowNotes,
-        EpisodeAction.download,
-        EpisodeAction.share,
-        EpisodeAction.exportAudio,
-        // Bookmark only when there's a real position to bookmark, so it's never
-        // a dead "bookmark at 0:00" — applied uniformly across every list
-        // screen rather than excluded per-screen.
-        if (episode.positionSeconds > 0) EpisodeAction.bookmark,
-      };
+      return standard;
+    case EpisodeActionContext.queue:
+      // Drop the two queue-positioning actions — the queue's own Move/Remove
+      // block (appended by the caller) is the single source for those.
+      return standard
+        ..remove(EpisodeAction.playNext)
+        ..remove(EpisodeAction.addToEndOfQueue);
+  }
+}
+
+/// Returns the [available] action items in the user's configured [order],
+/// skipping any action that isn't present. Keeps ordering logic in one place so
+/// every screen — including ones that can't use [buildEpisodeActions] (e.g.
+/// search previews, which aren't persisted episodes) — honors the same order.
+List<EpisodeQuickActionItem> orderEpisodeActionItems(
+  List<EpisodeAction> order,
+  Map<EpisodeAction, EpisodeQuickActionItem> available,
+) {
+  return [
+    for (final action in order)
+      if (available[action] != null) available[action]!,
+  ];
+}
+
+/// The state-variant labels each configurable [EpisodeAction] can present in a
+/// row's VoiceOver Actions rotor, in a stable sub-order. Only one variant shows
+/// per row at a time (see [_buildItem]); seeding all of them adjacently keeps a
+/// logical action's rotor slot stable as the episode's state changes. MUST stay
+/// in sync with every label [_buildItem] can emit (a test asserts this).
+const episodeActionVariantLabels = <EpisodeAction, List<String>>{
+  EpisodeAction.playNow: ['Play now'],
+  EpisodeAction.playNext: ['Play next', 'Move to play next'],
+  EpisodeAction.addToEndOfQueue: ['Add to end of queue', 'Remove from queue'],
+  EpisodeAction.markPlayed: ['Mark as played', 'Mark as unplayed'],
+  EpisodeAction.openShowNotes: ['Open show notes'],
+  EpisodeAction.bookmark: ['Bookmark current spot'],
+  EpisodeAction.download: [
+    'Download',
+    'Remove download',
+    'Cancel download',
+    'Retry download',
+  ],
+  EpisodeAction.share: ['Share'],
+  EpisodeAction.exportAudio: ['Export audio file'],
+};
+
+/// The queue-screen-only move actions, appended after the configured episode
+/// actions so they always sort last on queue rows. Not user-configurable.
+const queueMoveRotorLabels = <String>[
+  'Move to top',
+  'Move up',
+  'Move down',
+  'Move to bottom',
+];
+
+/// The ordered rotor labels for [order]: each action's variant labels (adjacent)
+/// in the user's configured order, then the queue move block.
+///
+/// iOS VoiceOver orders the Actions rotor by an internal id Flutter assigns the
+/// first time each distinct label is seen, then sorts on it (see
+/// [CustomSemanticsAction.getIdentifier] and the `customSemanticsActionIds
+/// ..sort()` in the framework's semantics.dart). Insertion order in
+/// `customSemanticsActions` cannot change the rotor; only id (first-seen) order
+/// can. So seeding the ids once at startup in this order makes the rotor follow
+/// the user's configuration. See [seedEpisodeActionRotorOrder].
+List<String> episodeActionRotorLabels(List<EpisodeAction> order) {
+  return [
+    for (final action in order) ...?episodeActionVariantLabels[action],
+    ...queueMoveRotorLabels,
+  ];
+}
+
+/// Seeds the VoiceOver Actions rotor order from the user's configured [order].
+/// MUST be called once in `main()` before `runApp` and before any episode row
+/// builds, or the rotor falls back to arbitrary first-seen order. The id cache
+/// cannot be reset in a release build, so a configuration change takes effect on
+/// the next app launch. See [episodeActionRotorLabels].
+void seedEpisodeActionRotorOrder(List<EpisodeAction> order) {
+  for (final label in episodeActionRotorLabels(order)) {
+    CustomSemanticsAction.getIdentifier(CustomSemanticsAction(label: label));
   }
 }
 
@@ -79,6 +157,13 @@ Set<EpisodeAction> allowedEpisodeActions(
 ///
 /// [actionContext] selects the eligible action set (see [allowedEpisodeActions]);
 /// the actions appear in the user's configured [order].
+///
+/// Keep the order stable across every row on purpose: iOS VoiceOver remembers
+/// the Actions rotor by *position*, not by label, and exposes no API to reset
+/// the rotor cursor per row. Because the same index maps to the same action on
+/// every episode, a user who arms a rotor slot never double-flicks "the same
+/// slot" and hits a different action on the next episode. Do NOT reorder actions
+/// per-row based on episode state — that reintroduces exactly that hazard.
 List<EpisodeQuickActionItem> buildEpisodeActions({
   required Episode episode,
   required List<EpisodeAction> order,
