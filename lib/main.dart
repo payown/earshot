@@ -15,6 +15,7 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'core/background/background_tasks.dart';
 import 'core/constants/playback.dart';
+import 'core/episode_action_builder.dart';
 import 'core/providers/auto_refresh_provider.dart';
 import 'core/providers/core_providers.dart';
 import 'core/logging/log_providers.dart';
@@ -31,6 +32,8 @@ import 'features/player/data/audio_session_config.dart';
 import 'features/player/data/magic_tap_handler.dart';
 import 'features/player/presentation/providers/player_providers.dart';
 import 'features/settings/data/app_settings_repository.dart';
+import 'features/settings/data/quick_action_repository_impl.dart';
+import 'features/settings/domain/quick_action_definition.dart';
 import 'features/settings/presentation/providers/settings_providers.dart';
 import 'features/subscriptions/presentation/providers/subscriptions_providers.dart';
 
@@ -160,6 +163,25 @@ Future<void> main() async {
       ),
     );
     return;
+  }
+
+  // Seed the VoiceOver Actions rotor from the user's saved order, now that the
+  // DB is known-good. iOS orders the rotor by first-seen action id, so this must
+  // run before runApp / any episode row builds. A failure here is non-fatal —
+  // fall back to the default order so startup still proceeds.
+  try {
+    final savedOrder = await QuickActionRepositoryImpl(
+      database: db,
+    ).watchEpisodeActions().first;
+    seedEpisodeActionRotorOrder(savedOrder);
+  } catch (error, stackTrace) {
+    _log.warning(
+      'Failed to seed rotor order from saved config',
+      error,
+      stackTrace,
+    );
+    await Sentry.captureException(error, stackTrace: stackTrace);
+    seedEpisodeActionRotorOrder(defaultEpisodeActions);
   }
 
   if (crashReportingEnabled && _sentryDsn.isNotEmpty) {
