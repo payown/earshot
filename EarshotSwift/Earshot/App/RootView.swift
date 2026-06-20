@@ -10,6 +10,9 @@ struct RootView: View {
     @Environment(TipsStore.self) private var tips
 
     @State private var showOnboarding = false
+    #if IS_BETA_BUILD
+    @State private var showMigration = false
+    #endif
 
     var body: some View {
         TabView {
@@ -51,6 +54,11 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
         }
+        #if IS_BETA_BUILD
+        .fullScreenCover(isPresented: $showMigration) {
+            MigrationPromptView()
+        }
+        #endif
         .task {
             // Wire persistence and restore the last episode (paused) on launch.
             // Done here, not in a view body's computed work, so the context is
@@ -65,6 +73,16 @@ struct RootView: View {
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
             // Show onboarding on first launch (after settings load so we don't flash).
             showOnboarding = !settings.onboardingComplete
+            #if IS_BETA_BUILD
+            // Beta only: offer the Flutter→SwiftUI import once onboarding is done
+            // and migration hasn't been resolved. Mutually exclusive with
+            // onboarding (which requires onboardingComplete == false).
+            let migration = FlutterMigrationService(context: modelContext)
+            showMigration = MigrationGate.shouldPrompt(
+                onboardingComplete: settings.onboardingComplete,
+                migrationComplete: migration.isComplete
+            )
+            #endif
         }
     }
 }

@@ -16,6 +16,7 @@
 		0EA843CE44BDF92F60286C83 /* QuickActionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */; };
 		0F598FF01FFD7FF9B1B5BB69 /* AppSetting.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABEEC723E5C0BC90DFC057B2 /* AppSetting.swift */; };
 		120F7E7696DFA8780C99278B /* TestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE47A8895121139EC1D75B8A /* TestSupport.swift */; };
+		1213231195FB3A095F9FB437 /* FlutterMigrationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F29EFE156F619DD326A85C61 /* FlutterMigrationServiceTests.swift */; };
 		12FF5569EF0035E8169F9C7B /* SubscriptionRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CCBE4AE43F4BE56415F15CA /* SubscriptionRepositoryTests.swift */; };
 		130092801731CA67DB45FEEB /* BookmarkRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238A11F44CA01F8C84622259 /* BookmarkRepository.swift */; };
 		13797CCEF4754E2CB175CA74 /* RSSParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85CC9C4E71AE76C7AD5682BB /* RSSParser.swift */; };
@@ -33,12 +34,14 @@
 		2E1D2D6E6830D24F356C575D /* AppSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58EF6C73A139CF1EDE219A40 /* AppSettingsStore.swift */; };
 		32BF15D8A033A13EA5B4F6C3 /* ListeningSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C882FAEA23E70A49123D92E /* ListeningSession.swift */; };
 		33C506B6499A0ED5BFBA8756 /* ModelEnums.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0E82F35CB949845DE1189C9 /* ModelEnums.swift */; };
+		34135B5AE507132BD69B71F6 /* MigrationGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF95FFDEDEAE5976897AFC8E /* MigrationGateTests.swift */; };
 		3569E4DF882AA0744DF03F6B /* FolderLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4003700266EC96D55971CD8F /* FolderLogic.swift */; };
 		36F063B141F605CB5193359F /* PlaybackLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EC414F03B2203A2D9FC8456 /* PlaybackLogic.swift */; };
 		387A6B9D205F92CFF6C98F8B /* BookmarkRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5716DC7465AF0422B02CD0CF /* BookmarkRepositoryTests.swift */; };
 		388BE077DBF1E14B55493529 /* QuickActionRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC944C7D4C1D3D3D7C4E1A9 /* QuickActionRepositoryTests.swift */; };
 		3C6476CFA60A09AE37DB5A26 /* AppColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A70527F1DAF265141AC6979 /* AppColor.swift */; };
 		3DA541CA557082ADCED13D06 /* QueueLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4728275D0F503536DAC8C87F /* QueueLogicTests.swift */; };
+		3EEF6B6A6FDDBADE20EE821C /* FlutterMigrationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733BAE969BAD299432E1627C /* FlutterMigrationService.swift */; };
 		41AFCC8DA6210A4533048FBD /* QueueRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28A65FBFCB276A5A5134554C /* QueueRepositoryTests.swift */; };
 		42C670F214460BADA919C9DB /* EpisodeActionsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F9762C13BCD2647A7BBDAD /* EpisodeActionsBuilder.swift */; };
 		4A96AC7CA53D6D1AD19EDA3E /* Podcast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CF61D55C48D468680AB681C /* Podcast.swift */; };
@@ -58,6 +61,7 @@
 		6431563238F258D03A768B3C /* PlaybackStartup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176D270ABFB38F7C3BBA92BA /* PlaybackStartup.swift */; };
 		6CD33440829B9B83DBA4F576 /* QuickActionConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B3D418DEEE23B973A761F26 /* QuickActionConfig.swift */; };
 		78792212EF7E1CCAE13117F8 /* RSSParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BE4582317C4948ECEF3288 /* RSSParserTests.swift */; };
+		7A11ED3F5A587E7B4348FA63 /* MigrationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F51D7E55E6E0C5CD1413FA1 /* MigrationGate.swift */; };
 		7CD93A96CA718A1A12785A98 /* StatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC5F7F7D6333626FE8650F1 /* StatsTests.swift */; };
 		7FBDB46131548E8BECAE13ED /* DownloadsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7050EBE34C45786E647A8592 /* DownloadsScreen.swift */; };
 		804B7B62EC6392153998B061 /* StatsLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1499A9003D5B822FFE1076C /* StatsLogic.swift */; };
@@ -96,6 +100,7 @@
 		D0EAF35C0542B99058B990D8 /* InboxExpirationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21426D34A6272D33878D6A13 /* InboxExpirationServiceTests.swift */; };
 		D1738164A815F57F4845D2F9 /* ChapterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02DD508062C57130CC40137 /* ChapterParser.swift */; };
 		D1D8FED1FF178F0258395B35 /* TipsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1843307451115BD5BBF433E4 /* TipsStore.swift */; };
+		D1E2340A03C47BE105B38364 /* MigrationPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8A682900771BBF5F04D41C /* MigrationPromptView.swift */; };
 		D2ACE04F1A94DF80EF1D670E /* QueueItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B6092B4EFAE230806253B94 /* QueueItem.swift */; };
 		D466FE5826600E4D347FBFED /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7436039DC8D115F1F457E3C3 /* ShareSheet.swift */; };
 		D8E6CF1EAFB66882C4F6DCB7 /* FolderRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A11D600A98A1DDDDC3A3379 /* FolderRepositoryTests.swift */; };
@@ -174,11 +179,13 @@
 		5D1D28B26DA693A5CEB8AE85 /* DownloadGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadGate.swift; sourceTree = "<group>"; };
 		5DA06952463063521A170CEC /* EarshotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotApp.swift; sourceTree = "<group>"; };
 		5EC5F7F7D6333626FE8650F1 /* StatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsTests.swift; sourceTree = "<group>"; };
+		5F51D7E55E6E0C5CD1413FA1 /* MigrationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationGate.swift; sourceTree = "<group>"; };
 		604A1CE8A8148C3DBAB95ECB /* ChapterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterService.swift; sourceTree = "<group>"; };
 		6A9F5501C7FE1D92BC8A539E /* OnboardingContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingContent.swift; sourceTree = "<group>"; };
 		7050EBE34C45786E647A8592 /* DownloadsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsScreen.swift; sourceTree = "<group>"; };
 		71BD562BB534B0133D9733ED /* QueueLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueLogic.swift; sourceTree = "<group>"; };
 		7212EBC83A48695F41673C88 /* OPMLDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMLDocument.swift; sourceTree = "<group>"; };
+		733BAE969BAD299432E1627C /* FlutterMigrationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterMigrationService.swift; sourceTree = "<group>"; };
 		7436039DC8D115F1F457E3C3 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
 		75F9762C13BCD2647A7BBDAD /* EpisodeActionsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeActionsBuilder.swift; sourceTree = "<group>"; };
 		7B3D418DEEE23B973A761F26 /* QuickActionConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionConfig.swift; sourceTree = "<group>"; };
@@ -210,6 +217,7 @@
 		B5F71AE13AFCDD1550650672 /* EpisodeAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeAction.swift; sourceTree = "<group>"; };
 		B6671B2FA2792BA768FAAE05 /* StatsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsRepository.swift; sourceTree = "<group>"; };
 		BDC724CA4ACA6B86ADE5CCF6 /* FolderDetailScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderDetailScreen.swift; sourceTree = "<group>"; };
+		BF95FFDEDEAE5976897AFC8E /* MigrationGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationGateTests.swift; sourceTree = "<group>"; };
 		C17AC464CF36C31FB5798C0E /* SearchOPMLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOPMLTests.swift; sourceTree = "<group>"; };
 		C2AFBB00F8C76C7C8D5A7BF3 /* PodcastArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastArtwork.swift; sourceTree = "<group>"; };
 		C4C2CEA51FF27CE1EF442176 /* Chapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chapter.swift; sourceTree = "<group>"; };
@@ -226,6 +234,7 @@
 		D9750B9E78F260DABE15CC00 /* Tip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tip.swift; sourceTree = "<group>"; };
 		DB277E3AB7A3AD6A261D149A /* InboxLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxLogic.swift; sourceTree = "<group>"; };
 		DD200CDC4AE4418A37F121CF /* StatsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsScreen.swift; sourceTree = "<group>"; };
+		DE8A682900771BBF5F04D41C /* MigrationPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationPromptView.swift; sourceTree = "<group>"; };
 		DF69017C7C2090E496CBC830 /* EarshotSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotSchema.swift; sourceTree = "<group>"; };
 		E26741EC8F02BA386553352C /* AppSettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsStoreTests.swift; sourceTree = "<group>"; };
 		E565903CF72B66FF3E108C5B /* PlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerService.swift; sourceTree = "<group>"; };
@@ -234,6 +243,7 @@
 		EF4559A7D750A9F7AFFC5652 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		F02DD508062C57130CC40137 /* ChapterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterParser.swift; sourceTree = "<group>"; };
 		F0E82F35CB949845DE1189C9 /* ModelEnums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelEnums.swift; sourceTree = "<group>"; };
+		F29EFE156F619DD326A85C61 /* FlutterMigrationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterMigrationServiceTests.swift; sourceTree = "<group>"; };
 		F4EB4F7F597FCC1DD27CEEE4 /* FolderRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRepository.swift; sourceTree = "<group>"; };
 		F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsSettingsView.swift; sourceTree = "<group>"; };
 		F67B8AAA16F69CB84C899E27 /* FolderPodcastPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPodcastPickerView.swift; sourceTree = "<group>"; };
@@ -340,6 +350,14 @@
 			path = Domain;
 			sourceTree = "<group>";
 		};
+		36D5E903229015D8176355AA /* Presentation */ = {
+			isa = PBXGroup;
+			children = (
+				DE8A682900771BBF5F04D41C /* MigrationPromptView.swift */,
+			);
+			path = Presentation;
+			sourceTree = "<group>";
+		};
 		373449AA16D97653E16A2BF2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -409,8 +427,10 @@
 				3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */,
 				278A76C6E3AB1F92AFACB741 /* CoreServicesTests.swift */,
 				9F413BCD620A311C966B89FD /* DownloadsInboxLogicTests.swift */,
+				F29EFE156F619DD326A85C61 /* FlutterMigrationServiceTests.swift */,
 				1A11D600A98A1DDDDC3A3379 /* FolderRepositoryTests.swift */,
 				21426D34A6272D33878D6A13 /* InboxExpirationServiceTests.swift */,
+				BF95FFDEDEAE5976897AFC8E /* MigrationGateTests.swift */,
 				935DE9BF07F90D248001ADE9 /* ModelGraphTests.swift */,
 				4815697742D078E6B5CF9962 /* OnboardingTipsTests.swift */,
 				2767329BD74341CFE704F947 /* PlaybackLogicTests.swift */,
@@ -672,6 +692,14 @@
 			path = QuickActions;
 			sourceTree = "<group>";
 		};
+		AE64E136D51C81E15749FCD1 /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				733BAE969BAD299432E1627C /* FlutterMigrationService.swift */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
 		B8E66938AC2D9B0FA489A06F /* Domain */ = {
 			isa = PBXGroup;
 			children = (
@@ -708,6 +736,14 @@
 				7050EBE34C45786E647A8592 /* DownloadsScreen.swift */,
 			);
 			path = Presentation;
+			sourceTree = "<group>";
+		};
+		C9F34951B62AD212B9430D29 /* Domain */ = {
+			isa = PBXGroup;
+			children = (
+				5F51D7E55E6E0C5CD1413FA1 /* MigrationGate.swift */,
+			);
+			path = Domain;
 			sourceTree = "<group>";
 		};
 		D2361DBC8CEA76D753525E7D /* Presentation */ = {
@@ -817,6 +853,7 @@
 				37BF0C4FD5A99749E22BE665 /* Downloads */,
 				FED36EEB92F042A43A0762D6 /* Folders */,
 				90452DABB7C998D954F6D980 /* Inbox */,
+				FE1F9B27FC88FE56AE422D2D /* Migration */,
 				79AAEF3C770A7F25FB0A5081 /* Onboarding */,
 				E6B946989E9817D3F874990D /* Player */,
 				253926C599E72777B8930C9C /* Queue */,
@@ -835,6 +872,16 @@
 				7436039DC8D115F1F457E3C3 /* ShareSheet.swift */,
 			);
 			path = UI;
+			sourceTree = "<group>";
+		};
+		FE1F9B27FC88FE56AE422D2D /* Migration */ = {
+			isa = PBXGroup;
+			children = (
+				AE64E136D51C81E15749FCD1 /* Data */,
+				C9F34951B62AD212B9430D29 /* Domain */,
+				36D5E903229015D8176355AA /* Presentation */,
+			);
+			path = Migration;
 			sourceTree = "<group>";
 		};
 		FED36EEB92F042A43A0762D6 /* Folders */ = {
@@ -967,6 +1014,7 @@
 				E40C8D42A6D9245D3CEE9681 /* ExpirationLogic.swift in Sources */,
 				F1B461F346E5F616B6040FAF /* ExpirationService.swift in Sources */,
 				B485218BA32829A9DC997E32 /* FeedService.swift in Sources */,
+				3EEF6B6A6FDDBADE20EE821C /* FlutterMigrationService.swift in Sources */,
 				A7CE5C257707DC30388A3BC8 /* FolderDetailScreen.swift in Sources */,
 				3569E4DF882AA0744DF03F6B /* FolderLogic.swift in Sources */,
 				01262DE59B46D2A204377F1D /* FolderMembership.swift in Sources */,
@@ -980,6 +1028,8 @@
 				DDE214B4D555DF97D11B0253 /* InboxScreen.swift in Sources */,
 				32BF15D8A033A13EA5B4F6C3 /* ListeningSession.swift in Sources */,
 				F736F4872226E3D2DDDDD76F /* Logger+Earshot.swift in Sources */,
+				7A11ED3F5A587E7B4348FA63 /* MigrationGate.swift in Sources */,
+				D1E2340A03C47BE105B38364 /* MigrationPromptView.swift in Sources */,
 				EE9986D2EC3F6DE5E32BDBE8 /* ModelContainerFactory.swift in Sources */,
 				33C506B6499A0ED5BFBA8756 /* ModelEnums.swift in Sources */,
 				5DC7D8D09A34917698C18126 /* NowPlayingBar.swift in Sources */,
@@ -1040,8 +1090,10 @@
 				C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */,
 				51AB6A682FF34A1A768BCF68 /* CoreServicesTests.swift in Sources */,
 				DF0AB7339887FFF84B765FDE /* DownloadsInboxLogicTests.swift in Sources */,
+				1213231195FB3A095F9FB437 /* FlutterMigrationServiceTests.swift in Sources */,
 				D8E6CF1EAFB66882C4F6DCB7 /* FolderRepositoryTests.swift in Sources */,
 				D0EAF35C0542B99058B990D8 /* InboxExpirationServiceTests.swift in Sources */,
+				34135B5AE507132BD69B71F6 /* MigrationGateTests.swift in Sources */,
 				F0CF93FBA3262643F8E54460 /* ModelGraphTests.swift in Sources */,
 				154356CD59BB0B1D7668F20E /* OnboardingTipsTests.swift in Sources */,
 				14767E36BB627235213229DF /* PlaybackLogicTests.swift in Sources */,
@@ -1069,6 +1121,25 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		058318926F4A5F0A37D7058E /* Beta */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 72PH974742;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot.swift.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Earshot.app/Earshot";
+			};
+			name = Beta;
+		};
 		0E956BB3C807FD8C37138DE3 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1150,6 +1221,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot.swift;
 				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -1213,6 +1285,85 @@
 			};
 			name = Release;
 		};
+		51D4BA5D7798897E8537C4AC /* Beta */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Beta;
+		};
+		6A56373EF55A425D8DFF7482 /* Beta */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 72PH974742;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Earshot/App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot.swift;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = IS_BETA_BUILD;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Beta;
+		};
 		7DBFAA456FB5ABBE14E23A80 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1247,6 +1398,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot.swift;
 				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG IS_BETA_BUILD";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -1276,29 +1428,32 @@
 		5A6AD01F0F524600229031A7 /* Build configuration list for PBXNativeTarget "EarshotTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
+				058318926F4A5F0A37D7058E /* Beta */,
 				7DBFAA456FB5ABBE14E23A80 /* Debug */,
 				D6FC61A6881555A02A25BAFD /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
+			defaultConfigurationName = Beta;
 		};
 		5E10F8C7203D68DB8A12B50A /* Build configuration list for PBXProject "Earshot" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
+				51D4BA5D7798897E8537C4AC /* Beta */,
 				0E956BB3C807FD8C37138DE3 /* Debug */,
 				442DB5E1579CF9F8F2E674FF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
+			defaultConfigurationName = Beta;
 		};
 		7F90677C9B9E9DC75FEA96C9 /* Build configuration list for PBXNativeTarget "Earshot" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
+				6A56373EF55A425D8DFF7482 /* Beta */,
 				987A614C5B11A6A47360C74E /* Debug */,
 				1010EACC05677C5E33B6E28E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
+			defaultConfigurationName = Beta;
 		};
 /* End XCConfigurationList section */
 	};

@@ -22,6 +22,9 @@ enum SettingsKey {
     static let defaultLaunchScreen = "default_launch_screen"
     static let lastPlayingEpisodeID = "last_playing_episode_id"
     static let statsStreaksEnabled = "stats_streaks_enabled"
+    // Flutter→SwiftUI migration (beta only).
+    static let flutterMigrationComplete = "flutter_migration_complete"
+    static let migrationReminderCount = "migration_reminder_count"
 }
 
 /// Documented defaults for settings not yet written by the user.
