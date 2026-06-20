@@ -72,6 +72,17 @@ final class PlayerService {
         play(episode, preparedItem: nil)
     }
 
+    /// The currently loaded episode, if any. Exposed read-only for features that
+    /// act on the current item — e.g. bookmarking the current position.
+    var nowPlayingEpisode: Episode? { currentEpisode }
+
+    /// Plays `episode` and jumps to an explicit start position. Backs
+    /// jump-to-bookmark, where the saved position must be overridden.
+    func play(_ episode: Episode, at startSeconds: Double) {
+        play(episode, preparedItem: nil)
+        seek(to: startSeconds)
+    }
+
     /// Shared play path. `preparedItem`, when supplied, is a pre-buffered
     /// `AVPlayerItem` from the gapless preload, used for near-seamless advance.
     private func play(_ episode: Episode, preparedItem: AVPlayerItem?) {

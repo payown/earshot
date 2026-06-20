@@ -26,7 +26,8 @@ func buildEpisodeActions(
     downloads: DownloadManager,
     context: ModelContext,
     onShowNotes: @escaping () -> Void,
-    onShare: @escaping () -> Void
+    onShare: @escaping () -> Void,
+    onBookmarks: @escaping () -> Void
 ) -> [QuickActionItem] {
     order.map { action in
         switch action {
@@ -64,6 +65,10 @@ func buildEpisodeActions(
             ) {
                 episode.isPlayed.toggle()
                 saveQuickAction(context, "played state")
+            }
+        case .viewBookmarks:
+            return QuickActionItem(label: "Bookmarks", isDestructive: false) {
+                onBookmarks()
             }
         case .openShowNotes:
             return QuickActionItem(label: "Open show notes", isDestructive: false) {

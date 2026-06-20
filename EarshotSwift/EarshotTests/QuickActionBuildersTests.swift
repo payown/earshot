@@ -25,7 +25,8 @@ final class QuickActionBuildersTests: XCTestCase {
             downloads: DownloadManager(),
             context: ctx,
             onShowNotes: {},
-            onShare: {}
+            onShare: {},
+            onBookmarks: {}
         )
         XCTAssertEqual(items.map(\.label), ["Share", "Play now", "Add to queue (top)"])
     }
@@ -36,9 +37,23 @@ final class QuickActionBuildersTests: XCTestCase {
         let items = buildEpisodeActions(
             episode: played, order: [.markPlayed], player: PlayerService(),
             downloads: DownloadManager(),
-            context: ctx, onShowNotes: {}, onShare: {}
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}
         )
         XCTAssertEqual(items.map(\.label), ["Mark as unplayed"])
+    }
+
+    func testEpisodeBookmarksActionInvokesCallback() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        var opened = false
+        let items = buildEpisodeActions(
+            episode: episode, order: [.viewBookmarks], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: { opened = true }
+        )
+        XCTAssertEqual(items.map(\.label), ["Bookmarks"])
+        items.first?.run()
+        XCTAssertTrue(opened)
     }
 
     func testQueueActionsDropMovesWhenDisabled() {

@@ -11,6 +11,7 @@ struct EpisodeListView: View {
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
+    @State private var bookmarksEpisode: Episode?
 
     private var sortedEpisodes: [Episode] {
         podcast.episodes.sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
@@ -32,7 +33,8 @@ struct EpisodeListView: View {
                             downloads: downloads,
                             context: context,
                             onShowNotes: { showNotesEpisode = episode },
-                            onShare: { sharingEpisode = episode }
+                            onShare: { sharingEpisode = episode },
+                            onBookmarks: { bookmarksEpisode = episode }
                         )
                     )
                 }
@@ -44,6 +46,7 @@ struct EpisodeListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await refresh() }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
         }

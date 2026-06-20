@@ -16,6 +16,7 @@ struct InboxScreen: View {
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
+    @State private var bookmarksEpisode: Episode?
     @State private var confirmingClear = false
     @AccessibilityFocusState private var focusEmpty: Bool
 
@@ -61,6 +62,7 @@ struct InboxScreen: View {
             Text("Hides all \(inbox.count) episodes from the inbox. They stay in your podcasts.")
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
     }
 
@@ -80,7 +82,8 @@ struct InboxScreen: View {
             downloads: downloads,
             context: context,
             onShowNotes: { showNotesEpisode = episode },
-            onShare: { sharingEpisode = episode }
+            onShare: { sharingEpisode = episode },
+            onBookmarks: { bookmarksEpisode = episode }
         )
     }
 

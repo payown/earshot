@@ -14,6 +14,7 @@ struct DownloadsScreen: View {
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
+    @State private var bookmarksEpisode: Episode?
 
     private var downloaded: [Episode] {
         allEpisodes
@@ -56,6 +57,7 @@ struct DownloadsScreen: View {
         }
         .navigationTitle("Downloads")
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
     }
 
@@ -106,7 +108,8 @@ struct DownloadsScreen: View {
             downloads: downloads,
             context: context,
             onShowNotes: { showNotesEpisode = episode },
-            onShare: { sharingEpisode = episode }
+            onShare: { sharingEpisode = episode },
+            onBookmarks: { bookmarksEpisode = episode }
         )
     }
 

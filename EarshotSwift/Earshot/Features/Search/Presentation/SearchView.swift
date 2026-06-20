@@ -20,6 +20,7 @@ struct SearchView: View {
     @State private var searchingDirectory = false
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
+    @State private var bookmarksEpisode: Episode?
 
     private let itunes = ITunesSearchService()
 
@@ -70,6 +71,7 @@ struct SearchView: View {
         .onChange(of: query) { _, _ in if searchEverywhere { runDirectorySearch() } }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
         .overlay {
             if query.isEmpty {
@@ -147,7 +149,8 @@ struct SearchView: View {
                 Announcer.announce("This bookmark's episode is unavailable")
                 return
             }
-            player.play(episode)
+            player.play(episode, at: Double(bookmark.positionSeconds))
+            Announcer.announce("Playing from \(BookmarkLogic.spoken(bookmark.positionSeconds))")
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(bookmark.note.isEmpty ? "Bookmark" : bookmark.note).font(.body)
@@ -167,7 +170,8 @@ struct SearchView: View {
         buildEpisodeActions(
             episode: episode, order: quickActions.episodeActions, player: player,
             downloads: downloads, context: context,
-            onShowNotes: { showNotesEpisode = episode }, onShare: { sharingEpisode = episode }
+            onShowNotes: { showNotesEpisode = episode }, onShare: { sharingEpisode = episode },
+            onBookmarks: { bookmarksEpisode = episode }
         )
     }
 

@@ -4,15 +4,15 @@ import Foundation
 /// double-tap (first) and the VoiceOver Actions rotor order — natively, no
 /// startup seeding and no relaunch required (unlike the Flutter build).
 ///
-/// Only actions whose backing feature exists today are listed. Bookmark (F12)
-/// and delete (F8 storage) join this set as those features land — see
-/// SWIFTUI_PLAN.md.
+/// Only actions whose backing feature exists today are listed. Delete (F8
+/// storage) joins this set as that feature lands — see SWIFTUI_PLAN.md.
 enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
     case playNow
     case addToQueueTop
     case addToQueueBottom
     case download
     case markPlayed
+    case viewBookmarks
     case openShowNotes
     case share
 
@@ -27,6 +27,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
         case .addToQueueBottom: return "Add to queue (bottom)"
         case .download: return "Download"
         case .markPlayed: return "Mark as played"
+        case .viewBookmarks: return "Bookmarks"
         case .openShowNotes: return "Open show notes"
         case .share: return "Share"
         }
@@ -39,6 +40,7 @@ let defaultEpisodeActions: [EpisodeAction] = [
     .addToQueueTop,
     .download,
     .markPlayed,
+    .viewBookmarks,
     .openShowNotes,
     .share,
 ]
