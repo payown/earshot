@@ -224,9 +224,17 @@ class _QuickActionConfiguratorScreenState
       return;
     }
     // Pop first, then announce past the dismiss + focus settle so iOS VoiceOver
-    // doesn't discard the announcement mid focus-transition.
+    // doesn't discard the announcement mid focus-transition. The menu order and
+    // default tap update instantly; only the rotor waits for a relaunch (the
+    // action-id cache can't be reset in a release build), so say so on episode
+    // saves.
     if (mounted) Navigator.of(context).pop();
-    announceAfterDismiss(view, 'Quick actions saved');
+    announceAfterDismiss(
+      view,
+      _isEpisode
+          ? 'Quick actions saved. Reopen Earshot to update the rotor order.'
+          : 'Quick actions saved',
+    );
   }
 }
 
