@@ -281,6 +281,14 @@ final class PlayerService {
         )
     }
 
+    /// Current effective playback rate (per-podcast override or global). Readable
+    /// by the UI to display e.g. "1.5×".
+    var effectiveRate: Double { currentEffectiveRate }
+
+    /// Re-applies the effective rate to the player. Call when the global speed —
+    /// or the current podcast's override — changes mid-playback.
+    func reapplyRate() { applyRate() }
+
     private func applyRate() {
         let rate = currentEffectiveRate
         // Setting `rate` also starts playback; only apply when we intend to play.
@@ -295,13 +303,38 @@ final class PlayerService {
 
     // MARK: Private — audio session
 
+    private var voiceEnhanceEnabled: Bool {
+        settings?.bool(SettingsKey.voiceEnhanceEnabled, default: false) ?? false
+    }
+
     private func configureSession() {
         let session = AVAudioSession.sharedInstance()
+        let enhance = voiceEnhanceEnabled
         do {
-            try session.setCategory(.playback, mode: .spokenAudio)
+            try session.setCategory(.playback, mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance))
             try session.setActive(true)
+            try session.setPreferredOutputNumberOfChannels(
+                AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: enhance)
+            )
         } catch {
             AppLog.player.error("Failed to configure audio session: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Applies the voice-enhance setting (spoken-audio mode + mono) or restores
+    /// the stereo default. Call on episode load and whenever the toggle changes
+    /// mid-playback (a route change can also reset the channel count). Channel
+    /// count is a hint some Bluetooth routes ignore — expected, not a bug.
+    func applyAudioEnhancement() {
+        let session = AVAudioSession.sharedInstance()
+        let enhance = voiceEnhanceEnabled
+        do {
+            try session.setCategory(.playback, mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance))
+            try session.setPreferredOutputNumberOfChannels(
+                AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: enhance)
+            )
+        } catch {
+            AppLog.player.error("Failed to apply audio enhancement: \(error.localizedDescription, privacy: .public)")
         }
     }
 

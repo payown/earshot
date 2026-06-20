@@ -59,6 +59,13 @@ struct RootView: View {
             MigrationPromptView()
         }
         #endif
+        // Re-apply audio settings mid-playback when they change (#352).
+        .onChange(of: settings.globalSpeed) { _, _ in
+            player.reapplyRate()
+        }
+        .onChange(of: settings.voiceEnhanceEnabled) { _, _ in
+            player.applyAudioEnhancement()
+        }
         .task {
             // Wire persistence and restore the last episode (paused) on launch.
             // Done here, not in a view body's computed work, so the context is
