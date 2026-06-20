@@ -5,13 +5,32 @@ import SwiftData
 struct EarshotApp: App {
     @State private var player = PlayerService()
     @State private var quickActions = QuickActionStore()
+    private let container: ModelContainer
+
+    /// True when the process is hosting an XCTest run. Unit tests use the app as
+    /// their test host; rendering the real SwiftUI tree (with `@Query` observing
+    /// the model graph) inside the test process races with the tests' own
+    /// SwiftData work. During tests we keep the host inert.
+    private let isRunningTests = NSClassFromString("XCTestCase") != nil
+
+    init() {
+        if NSClassFromString("XCTestCase") != nil {
+            container = ModelContainerFactory.makeTestHostPlaceholder()
+        } else {
+            container = ModelContainerFactory.makeShared()
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(player)
-                .environment(quickActions)
+            if isRunningTests {
+                Color.clear
+            } else {
+                RootView()
+                    .environment(player)
+                    .environment(quickActions)
+            }
         }
-        .modelContainer(for: [Podcast.self, Episode.self])
+        .modelContainer(container)
     }
 }

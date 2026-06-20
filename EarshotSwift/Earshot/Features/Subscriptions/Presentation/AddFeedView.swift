@@ -66,8 +66,8 @@ struct AddFeedView: View {
             let podcast = Podcast(
                 feedURL: urlString.trimmingCharacters(in: .whitespacesAndNewlines),
                 title: feed.title.isEmpty ? "Untitled podcast" : feed.title,
-                artworkURL: feed.artworkURL,
-                podcastDescription: feed.description
+                podcastDescription: feed.description,
+                artworkURL: feed.artworkURL
             )
             context.insert(podcast)
             for item in feed.episodes {
