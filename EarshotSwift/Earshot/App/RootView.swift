@@ -20,15 +20,15 @@ struct RootView: View {
             .tabItem { Label("Inbox", systemImage: "tray") }
 
             NavigationStack {
-                SubscriptionsView()
-            }
-            .tabItem { Label("Podcasts", systemImage: "music.note.list") }
-
-            NavigationStack {
                 QueueScreen()
                     .contextualTip(.queue)
             }
             .tabItem { Label("Queue", systemImage: "list.bullet") }
+
+            NavigationStack {
+                SubscriptionsView()
+            }
+            .tabItem { Label("Library", systemImage: "books.vertical") }
 
             NavigationStack {
                 DownloadsScreen()

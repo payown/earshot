@@ -44,7 +44,7 @@ extension LaunchScreen {
         switch self {
         case .inbox: return "Inbox"
         case .queue: return "Queue"
-        case .library: return "Podcasts"
+        case .library: return "Library"
         case .downloads: return "Downloads"
         }
     }

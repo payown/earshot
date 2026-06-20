@@ -31,7 +31,7 @@ struct SubscriptionsView: View {
                 .refreshable { await refreshAll() }
             }
         }
-        .navigationTitle("Podcasts")
+        .navigationTitle("Library")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 NavigationLink {
@@ -160,6 +160,6 @@ struct SubscriptionsView: View {
 
     private func refreshAll() async {
         await SubscriptionRepository(context: context).refreshAll()
-        Announcer.announce("Podcasts refreshed")
+        Announcer.announce("Library refreshed")
     }
 }
