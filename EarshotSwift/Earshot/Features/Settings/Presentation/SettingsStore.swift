@@ -35,6 +35,9 @@ final class SettingsStore {
     // Stats
     var statsStreaksEnabled: Bool = SettingsDefault.statsStreaksEnabled { didSet { persist { $0.setBool(statsStreaksEnabled, for: SettingsKey.statsStreaksEnabled) } } }
 
+    // Onboarding
+    var onboardingComplete: Bool = SettingsDefault.onboardingComplete { didSet { persist { $0.setBool(onboardingComplete, for: SettingsKey.onboardingComplete) } } }
+
     // Accessibility
     var directTouchEnabled: Bool = SettingsDefault.directTouchEnabled { didSet { persist { $0.setBool(directTouchEnabled, for: SettingsKey.directTouchEnabled) } } }
 
@@ -60,6 +63,7 @@ final class SettingsStore {
         analyticsEnabled = store.bool(SettingsKey.analyticsEnabled, default: SettingsDefault.analyticsEnabled)
         directTouchEnabled = store.bool(SettingsKey.directTouchEnabled, default: SettingsDefault.directTouchEnabled)
         statsStreaksEnabled = store.bool(SettingsKey.statsStreaksEnabled, default: SettingsDefault.statsStreaksEnabled)
+        onboardingComplete = store.bool(SettingsKey.onboardingComplete, default: SettingsDefault.onboardingComplete)
         loaded = true
     }
 

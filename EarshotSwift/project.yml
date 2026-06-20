@@ -24,6 +24,7 @@ targets:
         DEVELOPMENT_TEAM: "72PH974742"
         CODE_SIGN_STYLE: Automatic
         ENABLE_PREVIEWS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   EarshotTests:
     type: bundle.unit-test
     platform: iOS
