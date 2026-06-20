@@ -127,9 +127,18 @@ final class QueueRepository {
 
     // MARK: Internals
 
+    /// Queue items in position order, with orphans (no episode — only possible
+    /// via corrupt/aged data, since the relationship cascades) deleted so the
+    /// set the UI shows and the set we reorder over are always identical.
     private func orderedItems() -> [QueueItem] {
         let descriptor = FetchDescriptor<QueueItem>(sortBy: [SortDescriptor(\.position)])
-        return (try? context.fetch(descriptor)) ?? []
+        let all = (try? context.fetch(descriptor)) ?? []
+        let orphans = all.filter { $0.episode == nil }
+        if !orphans.isEmpty {
+            orphans.forEach(context.delete)
+            AppLog.player.error("Removed \(orphans.count) orphan queue item(s)")
+        }
+        return all.filter { $0.episode != nil }
     }
 
     private func enqueue(_ episode: Episode) -> QueueItem {

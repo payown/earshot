@@ -30,6 +30,7 @@
 		51AB6A682FF34A1A768BCF68 /* CoreServicesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 278A76C6E3AB1F92AFACB741 /* CoreServicesTests.swift */; };
 		51EE602096FEE0FF490A7CBB /* PlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E565903CF72B66FF3E108C5B /* PlayerService.swift */; };
 		5300063D3DF0F8B0C230D30E /* EpisodeAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F71AE13AFCDD1550650672 /* EpisodeAction.swift */; };
+		554A84BC9151972C692FA2F4 /* QueueScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7B9236014226D8C519CAD91 /* QueueScreen.swift */; };
 		5DC7D8D09A34917698C18126 /* NowPlayingBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25DCF677FA43A7F79872AE07 /* NowPlayingBar.swift */; };
 		60BEBF0B98670BDA9980C3B6 /* Episode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 478105CB6C9A1309975A07A1 /* Episode.swift */; };
 		6431563238F258D03A768B3C /* PlaybackStartup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176D270ABFB38F7C3BBA92BA /* PlaybackStartup.swift */; };
@@ -117,6 +118,7 @@
 		CFD6029A247CD01E7E6D06F1 /* QuickActionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionStore.swift; sourceTree = "<group>"; };
 		D417CBEB2EF403CE505CD8E9 /* Earshot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Earshot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D504E12C18259B246B251C7B /* Logger+Earshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Logger+Earshot.swift"; sourceTree = "<group>"; };
+		D7B9236014226D8C519CAD91 /* QueueScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueScreen.swift; sourceTree = "<group>"; };
 		DF69017C7C2090E496CBC830 /* EarshotSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotSchema.swift; sourceTree = "<group>"; };
 		E26741EC8F02BA386553352C /* AppSettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsStoreTests.swift; sourceTree = "<group>"; };
 		E565903CF72B66FF3E108C5B /* PlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerService.swift; sourceTree = "<group>"; };
@@ -151,6 +153,7 @@
 			children = (
 				A95E9A936DBBC680A6C746CC /* Data */,
 				6DAB824EFE7BC297071AE534 /* Domain */,
+				5CA8EC12B581F86B2E567876 /* Presentation */,
 			);
 			path = Queue;
 			sourceTree = "<group>";
@@ -243,6 +246,14 @@
 				B460461D7FFCC6EB70CB51B4 /* ReduceMotion.swift */,
 			);
 			path = Accessibility;
+			sourceTree = "<group>";
+		};
+		5CA8EC12B581F86B2E567876 /* Presentation */ = {
+			isa = PBXGroup;
+			children = (
+				D7B9236014226D8C519CAD91 /* QueueScreen.swift */,
+			);
+			path = Presentation;
 			sourceTree = "<group>";
 		};
 		62EB7B31F1A76BAA6CD3E051 /* App */ = {
@@ -516,6 +527,7 @@
 				D2ACE04F1A94DF80EF1D670E /* QueueItem.swift in Sources */,
 				EF4531D32B453FFD8667C030 /* QueueLogic.swift in Sources */,
 				F9A44A65F4853F96DA84642C /* QueueRepository.swift in Sources */,
+				554A84BC9151972C692FA2F4 /* QueueScreen.swift in Sources */,
 				6CD33440829B9B83DBA4F576 /* QuickActionConfig.swift in Sources */,
 				DAE5B17F783B9608A4E356A3 /* QuickActionStore.swift in Sources */,
 				0EA843CE44BDF92F60286C83 /* QuickActionsSettingsView.swift in Sources */,

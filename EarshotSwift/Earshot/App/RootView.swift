@@ -13,6 +13,11 @@ struct RootView: View {
             .tabItem { Label("Podcasts", systemImage: "music.note.list") }
 
             NavigationStack {
+                QueueScreen()
+            }
+            .tabItem { Label("Queue", systemImage: "list.bullet") }
+
+            NavigationStack {
                 QuickActionsSettingsView()
             }
             .tabItem { Label("Actions", systemImage: "slider.horizontal.3") }
