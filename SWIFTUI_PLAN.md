@@ -35,6 +35,18 @@ Deferred (folded into the nearest feature or appended as issues once prerequisit
 land): Transcripts (5.6), Local audio import (5.8), Notifications (5.10), Sharing /
 Universal Links (5.11).
 
+## Phase 2
+
+Phase 2 = immediate fixes, the Flutter→SwiftUI migration, and audio DSP (#352).
+
+| Item | GH Issue | Status | Notes |
+|------|----------|--------|-------|
+| Fix A — app icon on device | — | [x] | No-op. Icon config verified correct (1024² source, Contents.json, `ASSETCATALOG_COMPILER_APPICON_NAME`). Confirmed working on device by Michael; no code change. |
+| Fix B — tab order + Library rename | #353 | [x] | Reordered to Inbox/Queue/Library/Downloads/Settings; `books.vertical` icon; renamed Podcasts→Library in tab label, `SubscriptionsView` title, refresh announcement, and reset category label. Search results "Podcasts" header left as-is (result category, not tab). 189 tests green. Commit c363675. Awaiting device verification. |
+| Fix C — artwork not loading on device | — | [x] | Skipped. Artwork confirmed working on device by Michael. (Investigation noted a latent gap: RSSParser reads `itunes:image` only, not the standard `<image><url>` channel-art fallback — file an issue if any feed surfaces it later.) |
+| Migration — Flutter→SwiftUI subscription import | TBD | [ ] | Pending issue-body format. App Group `group.media.payown.earshot`; SwiftData reads `earshot_export.db` via SQLite3; beta-gated full-screen prompt (`#if IS_BETA_BUILD`). Flutter side (entitlement + export copy) is document-only. |
+| Audio DSP | #352 | [ ] | Main-thread-safe `AVAudioSession` only (no MTAudioProcessingTap per Decision F14): rate re-apply, mono via `setPreferredOutputNumberOfChannels`, `.spokenAudio` mode. |
+
 ## Decisions Log
 
 - **Decision:** Feature-first layout `Earshot/Features/<feature>/{Data,Domain,Presentation}`, migrating the flat `EarshotSwift/Sources/` slice. **Reason:** documented CLAUDE.md standard; cheap while small. **Issue:** #336.
