@@ -21,6 +21,7 @@ enum SettingsKey {
     static let groupQueueEpisodes = "group_queue_episodes"
     static let defaultLaunchScreen = "default_launch_screen"
     static let lastPlayingEpisodeID = "last_playing_episode_id"
+    static let statsStreaksEnabled = "stats_streaks_enabled"
 }
 
 /// Documented defaults for settings not yet written by the user.
@@ -39,6 +40,7 @@ enum SettingsDefault {
     static let groupQueueEpisodes = false
     static let onboardingComplete = false
     static let launchScreen: LaunchScreen = .inbox
+    static let statsStreaksEnabled = false
 }
 
 /// Typed access to the generic ``AppSetting`` key/value store. The full

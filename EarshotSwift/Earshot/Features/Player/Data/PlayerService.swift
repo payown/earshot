@@ -43,6 +43,14 @@ final class PlayerService {
     /// True when playback was paused by a system interruption that may resume.
     @ObservationIgnored private var pausedByInterruption = false
 
+    // Listening-session recording (feeds Stats). We accumulate plausible per-tick
+    // position advances and flush a `ListeningSession` every `sessionFlushSeconds`
+    // (and on pause / stop / episode switch). Forward skips and seeks are filtered
+    // out by `StatsLogic.isListeningStep`.
+    @ObservationIgnored private var lastTickPosition: Double?
+    @ObservationIgnored private var accumulatedListenSeconds: Double = 0
+    @ObservationIgnored private let sessionFlushSeconds: Double = 30
+
     // Gapless preload: the next queue item is built (and starts buffering) ahead
     // of time so auto-advance is near-seamless. Invalidated whenever the queue
     // changes (via `.earshotQueueDidChange`).
@@ -100,8 +108,9 @@ final class PlayerService {
             item = AVPlayerItem(url: url)
         }
 
-        // Persist the position of whatever was playing before we swap items.
+        // Persist + record the session of whatever was playing before we swap.
         persistCurrentPosition()
+        flushListeningSession()
 
         configureSession()
 
@@ -123,6 +132,7 @@ final class PlayerService {
         } else {
             currentPositionSeconds = 0
         }
+        resetListeningTracking()
 
         applyRate()
         player.play()
@@ -187,6 +197,7 @@ final class PlayerService {
         player.pause()
         isPlaying = false
         persistCurrentPosition()
+        flushListeningSession()
         updateNowPlayingInfo()
     }
 
@@ -230,13 +241,19 @@ final class PlayerService {
 
     // MARK: Private — rate
 
-    private func applyRate() {
+    /// The playback rate that applies to the loaded episode (per-podcast override
+    /// or the global speed). Also the speed recorded on listening sessions.
+    private var currentEffectiveRate: Double {
         let global = settings?.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
             ?? SettingsDefault.globalSpeed
-        let rate = PlaybackLogic.effectivePlaybackRate(
+        return PlaybackLogic.effectivePlaybackRate(
             podcastSpeedOverride: currentEpisode?.podcast?.speedOverride,
             globalSpeed: global
         )
+    }
+
+    private func applyRate() {
+        let rate = currentEffectiveRate
         // Setting `rate` also starts playback; only apply when we intend to play.
         if isPlaying || player.timeControlStatus == .playing {
             player.rate = Float(rate)
@@ -284,6 +301,7 @@ final class PlayerService {
         }
 
         persistCurrentPosition()
+        recordListeningTick()
         updateNowPlayingElapsed()
 
         // Mark played once we cross the threshold.
@@ -298,6 +316,51 @@ final class PlayerService {
         guard let episode = currentEpisode, currentPositionSeconds.isFinite else { return }
         episode.positionSeconds = Int(max(0, currentPositionSeconds))
         saveContext()
+    }
+
+    // MARK: Private — listening-session recording
+
+    /// Accumulates the position advance since the last tick (dropping seeks/skips)
+    /// and flushes a session once enough real listening has built up.
+    private func recordListeningTick() {
+        guard isPlaying, currentPositionSeconds.isFinite else { return }
+        defer { lastTickPosition = currentPositionSeconds }
+        guard let last = lastTickPosition else { return }
+        let step = currentPositionSeconds - last
+        if StatsLogic.isListeningStep(step) {
+            accumulatedListenSeconds += step
+        }
+        if accumulatedListenSeconds >= sessionFlushSeconds {
+            flushListeningSession()
+        }
+    }
+
+    /// Writes the accumulated listening time as a ``ListeningSession`` and resets
+    /// the accumulator. Called on the flush threshold and on pause / stop /
+    /// episode switch. `minSeconds` drops trivial spans.
+    private func flushListeningSession(minSeconds: Int = 2) {
+        guard let episode = currentEpisode, let context else {
+            accumulatedListenSeconds = 0
+            return
+        }
+        let seconds = Int(accumulatedListenSeconds)
+        accumulatedListenSeconds = 0
+        guard seconds >= minSeconds else { return }
+        let session = ListeningSession(
+            episode: episode,
+            podcast: episode.podcast,
+            durationSeconds: seconds,
+            speed: currentEffectiveRate,
+            date: .now
+        )
+        context.insert(session)
+        saveContext()
+    }
+
+    /// Resets per-episode tick tracking when a new episode loads.
+    private func resetListeningTracking() {
+        lastTickPosition = currentPositionSeconds
+        accumulatedListenSeconds = 0
     }
 
     private func markCurrentEpisodePlayed() {
@@ -341,6 +404,9 @@ final class PlayerService {
             updateNowPlayingInfo()
             return
         }
+
+        // Record the just-finished listening before advancing.
+        flushListeningSession()
 
         let repo = QueueRepository(context: context)
         let queued = repo.queue()

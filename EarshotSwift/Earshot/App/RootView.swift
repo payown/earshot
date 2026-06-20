@@ -51,6 +51,7 @@ struct RootView: View {
             downloads.configure(context: modelContext)
             settings.configure(context: modelContext)
             ExpirationService(context: modelContext).runExpiration()
+            StatsRepository(context: modelContext).applyRetention(days: settings.historyRetentionDays)
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
         }
     }

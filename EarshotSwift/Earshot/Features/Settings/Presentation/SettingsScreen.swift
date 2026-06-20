@@ -72,6 +72,7 @@ struct SettingsScreen: View {
             }
 
             Section("History") {
+                NavigationLink("Listening stats") { StatsScreen() }
                 Picker("Keep listening history", selection: $settings.historyRetentionDays) {
                     ForEach(Self.retentionOptions, id: \.self) { Text("\($0) days").tag($0) }
                 }
