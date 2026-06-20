@@ -6,6 +6,7 @@ struct EarshotApp: App {
     @State private var player = PlayerService()
     @State private var quickActions = QuickActionStore()
     @State private var downloads = DownloadManager()
+    @State private var settings = SettingsStore()
     private let container: ModelContainer
 
     /// True when the process is hosting an XCTest run. Unit tests use the app as
@@ -31,6 +32,7 @@ struct EarshotApp: App {
                     .environment(player)
                     .environment(quickActions)
                     .environment(downloads)
+                    .environment(settings)
             }
         }
         .modelContainer(container)

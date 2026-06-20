@@ -6,6 +6,7 @@ struct RootView: View {
     @Environment(PlayerService.self) private var player
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(DownloadManager.self) private var downloads
+    @Environment(SettingsStore.self) private var settings
 
     var body: some View {
         TabView {
@@ -30,9 +31,9 @@ struct RootView: View {
             .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
 
             NavigationStack {
-                QuickActionsSettingsView()
+                SettingsScreen()
             }
-            .tabItem { Label("Actions", systemImage: "slider.horizontal.3") }
+            .tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .safeAreaInset(edge: .bottom) {
             NowPlayingBar()
@@ -48,6 +49,7 @@ struct RootView: View {
             player.configure(context: modelContext)
             quickActions.configure(context: modelContext)
             downloads.configure(context: modelContext)
+            settings.configure(context: modelContext)
             ExpirationService(context: modelContext).runExpiration()
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
         }
