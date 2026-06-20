@@ -7,6 +7,7 @@ import SwiftData
 struct NowPlayingBar: View {
     @Environment(PlayerService.self) private var player
     @Environment(\.modelContext) private var context
+    @State private var showingControls = false
 
     var body: some View {
         if let title = player.currentTitle {
@@ -38,31 +39,47 @@ struct NowPlayingBar: View {
             .onChange(of: player.isPlaying) { _, isPlaying in
                 Announcer.announce(isPlaying ? "Playing" : "Paused")
             }
+            .sheet(isPresented: $showingControls) { PlayerControlsSheet() }
         }
     }
 
+    /// The title/show area, which doubles as the button that opens the expanded
+    /// player controls (sleep timer + chapters).
     private func nowPlayingInfo(title: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "waveform")
-                .font(.title3)
-                .accessibilityHidden(true)
+        Button {
+            showingControls = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: sleepTimerActive ? "moon.zzz.fill" : "waveform")
+                    .font(.title3)
+                    .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline)
-                    .lineLimit(2)
-                if let artist = player.currentArtist {
-                    Text(artist)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline)
                         .lineLimit(2)
+                        .foregroundStyle(.primary)
+                    if let artist = player.currentArtist {
+                        Text(artist)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
                 }
             }
+            .contentShape(Rectangle())
         }
-        // Combine the waveform + title + show name into one VoiceOver label so the
-        // controls that follow read as distinct, actionable elements.
+        .buttonStyle(.plain)
+        // Combine the glyph + title + show name into one VoiceOver button. Keep
+        // the button trait explicitly (combine can drop it) and only attach a
+        // value when the sleep timer is on (an empty value reads as a pause).
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Opens player controls, sleep timer and chapters")
+        .modifier(OptionalAccessibilityValue(value: sleepTimerActive ? "Sleep timer on" : nil))
     }
+
+    private var sleepTimerActive: Bool { player.sleepTimer.isActive }
 
     private var controls: some View {
         HStack(spacing: 12) {
@@ -111,6 +128,20 @@ struct NowPlayingBar: View {
         let position = Int(player.currentPositionSeconds)
         BookmarkRepository(context: context).add(to: episode, positionSeconds: position)
         Announcer.announce("Bookmark added at \(BookmarkLogic.spoken(position))")
+    }
+}
+
+/// Applies `.accessibilityValue` only when a value is present. An empty-string
+/// value registers a node VoiceOver can announce as a pause, so we skip it.
+private struct OptionalAccessibilityValue: ViewModifier {
+    let value: String?
+
+    func body(content: Content) -> some View {
+        if let value {
+            content.accessibilityValue(value)
+        } else {
+            content
+        }
     }
 }
 

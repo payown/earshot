@@ -10,6 +10,7 @@
 		00B5AE69A700B0B85F25638B /* InboxRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29FEA690D050216F4B4F0454 /* InboxRepository.swift */; };
 		01262DE59B46D2A204377F1D /* FolderMembership.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17A60E43D00F2AEB85499BCA /* FolderMembership.swift */; };
 		0740972B7545E5C01C3177AD /* ITunesSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 153E920C6B22C967CFB67F3E /* ITunesSearchService.swift */; };
+		08CE6FDC6BF27D427FFBFBC1 /* SleepTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297BEC6C00A3076AF4CC7259 /* SleepTimer.swift */; };
 		0C34726CCF898D3B224D7296 /* ShowNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C2A7F38E26A61D91D5846A4 /* ShowNotesView.swift */; };
 		0EA843CE44BDF92F60286C83 /* QuickActionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */; };
 		0F598FF01FFD7FF9B1B5BB69 /* AppSetting.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABEEC723E5C0BC90DFC057B2 /* AppSetting.swift */; };
@@ -17,6 +18,7 @@
 		12FF5569EF0035E8169F9C7B /* SubscriptionRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CCBE4AE43F4BE56415F15CA /* SubscriptionRepositoryTests.swift */; };
 		130092801731CA67DB45FEEB /* BookmarkRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238A11F44CA01F8C84622259 /* BookmarkRepository.swift */; };
 		13797CCEF4754E2CB175CA74 /* RSSParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85CC9C4E71AE76C7AD5682BB /* RSSParser.swift */; };
+		144409D942BD6D9647CFD91D /* Chapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C2CEA51FF27CE1EF442176 /* Chapter.swift */; };
 		14767E36BB627235213229DF /* PlaybackLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2767329BD74341CFE704F947 /* PlaybackLogicTests.swift */; };
 		154FDE6C00CDB28F5FF0A4E1 /* SettingsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D79742B8D8E4A2F7B8EC721 /* SettingsStoreTests.swift */; };
 		1D47C0F7F6B8FC8FFBFDF28A /* SearchLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D404C59CC052B4721EF162F /* SearchLogic.swift */; };
@@ -80,9 +82,13 @@
 		C135742F72316B0AA623460E /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DBB0DBE3C822485265C03BA /* SearchView.swift */; };
 		C2575FA0F95FEF33CA069017 /* PodcastFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20EED9B85C78529A51C7C70 /* PodcastFolder.swift */; };
 		C290A8B98AF505B8C16FB539 /* QuickActionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF2D210574E494DFF9E08AB0 /* QuickActionRepository.swift */; };
+		C50E7E8B943F8A46B218EB53 /* ChapterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 604A1CE8A8148C3DBAB95ECB /* ChapterService.swift */; };
 		C591E706C3B3930635BA9CEE /* InboxLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB277E3AB7A3AD6A261D149A /* InboxLogic.swift */; };
+		C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */; };
+		C84A8A8808D8727FC8DC1C5C /* PlayerControlsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CDDEEB4DCCF1EAA40AA1518 /* PlayerControlsSheet.swift */; };
 		C8CF2F0E0FDDC190BC14C478 /* QuickActionBuildersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4250FA40569C87B3F4F943A8 /* QuickActionBuildersTests.swift */; };
 		D0EAF35C0542B99058B990D8 /* InboxExpirationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21426D34A6272D33878D6A13 /* InboxExpirationServiceTests.swift */; };
+		D1738164A815F57F4845D2F9 /* ChapterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02DD508062C57130CC40137 /* ChapterParser.swift */; };
 		D2ACE04F1A94DF80EF1D670E /* QueueItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B6092B4EFAE230806253B94 /* QueueItem.swift */; };
 		D466FE5826600E4D347FBFED /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7436039DC8D115F1F457E3C3 /* ShareSheet.swift */; };
 		D8E6CF1EAFB66882C4F6DCB7 /* FolderRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A11D600A98A1DDDDC3A3379 /* FolderRepositoryTests.swift */; };
@@ -100,6 +106,7 @@
 		F1B461F346E5F616B6040FAF /* ExpirationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BCA26B22E21066A09DA54E7 /* ExpirationService.swift */; };
 		F736F4872226E3D2DDDDD76F /* Logger+Earshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D504E12C18259B246B251C7B /* Logger+Earshot.swift */; };
 		F9A44A65F4853F96DA84642C /* QueueRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2780CB0E5357F4C10C7F4754 /* QueueRepository.swift */; };
+		FE10F8BBC14151987F725410 /* SleepTimerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B0DA96A716D9C8977EA90EF /* SleepTimerController.swift */; };
 		FE19FBFCB33519DACA4A792C /* PodcastActionsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE11723CD083B143985A7C7C /* PodcastActionsBuilder.swift */; };
 /* End PBXBuildFile section */
 
@@ -130,6 +137,7 @@
 		2780CB0E5357F4C10C7F4754 /* QueueRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueRepository.swift; sourceTree = "<group>"; };
 		278A76C6E3AB1F92AFACB741 /* CoreServicesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreServicesTests.swift; sourceTree = "<group>"; };
 		28A65FBFCB276A5A5134554C /* QueueRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueRepositoryTests.swift; sourceTree = "<group>"; };
+		297BEC6C00A3076AF4CC7259 /* SleepTimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepTimer.swift; sourceTree = "<group>"; };
 		29FEA690D050216F4B4F0454 /* InboxRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxRepository.swift; sourceTree = "<group>"; };
 		2A70527F1DAF265141AC6979 /* AppColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColor.swift; sourceTree = "<group>"; };
 		2B744CD0D217BC04C25FAB2B /* SettingsReset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsReset.swift; sourceTree = "<group>"; };
@@ -137,6 +145,7 @@
 		33D8853AB932B8147D824DA5 /* QueueActionsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueActionsBuilder.swift; sourceTree = "<group>"; };
 		36E58C1C8D0069EACC139345 /* ModelContainerFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelContainerFactory.swift; sourceTree = "<group>"; };
 		3B9DA2518345900178343187 /* SubscriptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionsView.swift; sourceTree = "<group>"; };
+		3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterSleepTests.swift; sourceTree = "<group>"; };
 		4003700266EC96D55971CD8F /* FolderLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderLogic.swift; sourceTree = "<group>"; };
 		4250FA40569C87B3F4F943A8 /* QuickActionBuildersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionBuildersTests.swift; sourceTree = "<group>"; };
 		4728275D0F503536DAC8C87F /* QueueLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueLogicTests.swift; sourceTree = "<group>"; };
@@ -150,9 +159,11 @@
 		5716DC7465AF0422B02CD0CF /* BookmarkRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkRepositoryTests.swift; sourceTree = "<group>"; };
 		58EF6C73A139CF1EDE219A40 /* AppSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsStore.swift; sourceTree = "<group>"; };
 		59BE4582317C4948ECEF3288 /* RSSParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSParserTests.swift; sourceTree = "<group>"; };
+		5B0DA96A716D9C8977EA90EF /* SleepTimerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepTimerController.swift; sourceTree = "<group>"; };
 		5D1D28B26DA693A5CEB8AE85 /* DownloadGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadGate.swift; sourceTree = "<group>"; };
 		5DA06952463063521A170CEC /* EarshotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotApp.swift; sourceTree = "<group>"; };
 		5EC5F7F7D6333626FE8650F1 /* StatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsTests.swift; sourceTree = "<group>"; };
+		604A1CE8A8148C3DBAB95ECB /* ChapterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterService.swift; sourceTree = "<group>"; };
 		7050EBE34C45786E647A8592 /* DownloadsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsScreen.swift; sourceTree = "<group>"; };
 		71BD562BB534B0133D9733ED /* QueueLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueLogic.swift; sourceTree = "<group>"; };
 		7212EBC83A48695F41673C88 /* OPMLDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMLDocument.swift; sourceTree = "<group>"; };
@@ -172,6 +183,7 @@
 		9AD0D647CD02ADF165EDBDE2 /* DownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadManager.swift; sourceTree = "<group>"; };
 		9C2A7F38E26A61D91D5846A4 /* ShowNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShowNotesView.swift; sourceTree = "<group>"; };
 		9CCBE4AE43F4BE56415F15CA /* SubscriptionRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionRepositoryTests.swift; sourceTree = "<group>"; };
+		9CDDEEB4DCCF1EAA40AA1518 /* PlayerControlsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerControlsSheet.swift; sourceTree = "<group>"; };
 		9DC944C7D4C1D3D3D7C4E1A9 /* QuickActionRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionRepositoryTests.swift; sourceTree = "<group>"; };
 		9F413BCD620A311C966B89FD /* DownloadsInboxLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsInboxLogicTests.swift; sourceTree = "<group>"; };
 		A0CB078CBF0DF39C849DEE81 /* ExpirationLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpirationLogic.swift; sourceTree = "<group>"; };
@@ -187,6 +199,7 @@
 		BDC724CA4ACA6B86ADE5CCF6 /* FolderDetailScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderDetailScreen.swift; sourceTree = "<group>"; };
 		C17AC464CF36C31FB5798C0E /* SearchOPMLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOPMLTests.swift; sourceTree = "<group>"; };
 		C2AFBB00F8C76C7C8D5A7BF3 /* PodcastArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastArtwork.swift; sourceTree = "<group>"; };
+		C4C2CEA51FF27CE1EF442176 /* Chapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chapter.swift; sourceTree = "<group>"; };
 		C75A4D2E9D30DDEF48E91230 /* FoldersScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoldersScreen.swift; sourceTree = "<group>"; };
 		CE11723CD083B143985A7C7C /* PodcastActionsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastActionsBuilder.swift; sourceTree = "<group>"; };
 		CE3D0B29C92483947ADFC8FD /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
@@ -205,6 +218,7 @@
 		E956D51604F1BA07981F0001 /* SubscriptionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionRepository.swift; sourceTree = "<group>"; };
 		EE47A8895121139EC1D75B8A /* TestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSupport.swift; sourceTree = "<group>"; };
 		EF4559A7D750A9F7AFFC5652 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		F02DD508062C57130CC40137 /* ChapterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterParser.swift; sourceTree = "<group>"; };
 		F0E82F35CB949845DE1189C9 /* ModelEnums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelEnums.swift; sourceTree = "<group>"; };
 		F4EB4F7F597FCC1DD27CEEE4 /* FolderRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRepository.swift; sourceTree = "<group>"; };
 		F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsSettingsView.swift; sourceTree = "<group>"; };
@@ -377,6 +391,7 @@
 			children = (
 				E26741EC8F02BA386553352C /* AppSettingsStoreTests.swift */,
 				5716DC7465AF0422B02CD0CF /* BookmarkRepositoryTests.swift */,
+				3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */,
 				278A76C6E3AB1F92AFACB741 /* CoreServicesTests.swift */,
 				9F413BCD620A311C966B89FD /* DownloadsInboxLogicTests.swift */,
 				1A11D600A98A1DDDDC3A3379 /* FolderRepositoryTests.swift */,
@@ -617,8 +632,12 @@
 		B8E66938AC2D9B0FA489A06F /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				C4C2CEA51FF27CE1EF442176 /* Chapter.swift */,
+				F02DD508062C57130CC40137 /* ChapterParser.swift */,
 				8EC414F03B2203A2D9FC8456 /* PlaybackLogic.swift */,
 				176D270ABFB38F7C3BBA92BA /* PlaybackStartup.swift */,
+				297BEC6C00A3076AF4CC7259 /* SleepTimer.swift */,
+				5B0DA96A716D9C8977EA90EF /* SleepTimerController.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -667,6 +686,7 @@
 		DE20018C1E596BDF50F7F328 /* Data */ = {
 			isa = PBXGroup;
 			children = (
+				604A1CE8A8148C3DBAB95ECB /* ChapterService.swift */,
 				E565903CF72B66FF3E108C5B /* PlayerService.swift */,
 			);
 			path = Data;
@@ -676,6 +696,7 @@
 			isa = PBXGroup;
 			children = (
 				25DCF677FA43A7F79872AE07 /* NowPlayingBar.swift */,
+				9CDDEEB4DCCF1EAA40AA1518 /* PlayerControlsSheet.swift */,
 			);
 			path = Presentation;
 			sourceTree = "<group>";
@@ -864,6 +885,9 @@
 				62C3AB292C4FD85532CB2E89 /* BookmarkLogic.swift in Sources */,
 				130092801731CA67DB45FEEB /* BookmarkRepository.swift in Sources */,
 				B2B931F27D1BEAB5FFD77BC6 /* BookmarksListView.swift in Sources */,
+				144409D942BD6D9647CFD91D /* Chapter.swift in Sources */,
+				D1738164A815F57F4845D2F9 /* ChapterParser.swift in Sources */,
+				C50E7E8B943F8A46B218EB53 /* ChapterService.swift in Sources */,
 				90B302BC78F413A2F575AC1A /* DownloadGate.swift in Sources */,
 				286B8CE0CD292D58CBE8DC60 /* DownloadManager.swift in Sources */,
 				7FBDB46131548E8BECAE13ED /* DownloadsScreen.swift in Sources */,
@@ -897,6 +921,7 @@
 				4E9CD397633F77B15C362FA5 /* OPMLImportService.swift in Sources */,
 				36F063B141F605CB5193359F /* PlaybackLogic.swift in Sources */,
 				6431563238F258D03A768B3C /* PlaybackStartup.swift in Sources */,
+				C84A8A8808D8727FC8DC1C5C /* PlayerControlsSheet.swift in Sources */,
 				51EE602096FEE0FF490A7CBB /* PlayerService.swift in Sources */,
 				4A96AC7CA53D6D1AD19EDA3E /* Podcast.swift in Sources */,
 				80E7C9113664F9DD51702897 /* PodcastAction.swift in Sources */,
@@ -924,6 +949,8 @@
 				2770F2A93C5278E71C214601 /* SettingsStore.swift in Sources */,
 				D466FE5826600E4D347FBFED /* ShareSheet.swift in Sources */,
 				0C34726CCF898D3B224D7296 /* ShowNotesView.swift in Sources */,
+				08CE6FDC6BF27D427FFBFBC1 /* SleepTimer.swift in Sources */,
+				FE10F8BBC14151987F725410 /* SleepTimerController.swift in Sources */,
 				9B96460020EE778842F1D5C4 /* Spacing.swift in Sources */,
 				804B7B62EC6392153998B061 /* StatsLogic.swift in Sources */,
 				B976F875CA2E076695C9B30B /* StatsPeriod.swift in Sources */,
@@ -940,6 +967,7 @@
 			files = (
 				EDD3D7C3BDC9A5D163CD92DA /* AppSettingsStoreTests.swift in Sources */,
 				387A6B9D205F92CFF6C98F8B /* BookmarkRepositoryTests.swift in Sources */,
+				C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */,
 				51AB6A682FF34A1A768BCF68 /* CoreServicesTests.swift in Sources */,
 				DF0AB7339887FFF84B765FDE /* DownloadsInboxLogicTests.swift in Sources */,
 				D8E6CF1EAFB66882C4F6DCB7 /* FolderRepositoryTests.swift in Sources */,

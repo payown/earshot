@@ -29,6 +29,10 @@ final class PlayerService {
     /// Loaded episode duration in seconds, if known.
     var durationSeconds: Double = 0
 
+    /// The sleep timer. Observed so the UI shows the live countdown; the player
+    /// pauses when it fires.
+    let sleepTimer = SleepTimerController()
+
     // MARK: Private engine state
 
     @ObservationIgnored private let player = AVPlayer()
@@ -70,6 +74,31 @@ final class PlayerService {
         observePeriodicTime()
         observeItemDidPlayToEnd()
         observeQueueChanges()
+        sleepTimer.onExpired = { [weak self] in self?.handleSleepTimerExpired() }
+    }
+
+    /// Pauses when a countdown sleep timer fires, with a short fade so it isn't
+    /// an abrupt cut.
+    private func handleSleepTimerExpired() {
+        fadeOutThenPause()
+        Announcer.announce("Sleep timer ended. Paused.")
+    }
+
+    private func fadeOutThenPause() {
+        // A brief linear volume fade, then pause and restore volume for next time.
+        let steps = 8
+        let startVolume = player.volume
+        for step in 0..<steps {
+            let delay = Double(step) * 0.08
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.player.volume = startVolume * Float(steps - step - 1) / Float(steps)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double(steps) * 0.08) { [weak self] in
+            guard let self else { return }
+            self.pause()
+            self.player.volume = startVolume
+        }
     }
 
     // MARK: Public playback API
@@ -409,6 +438,21 @@ final class PlayerService {
         flushListeningSession()
 
         let repo = QueueRepository(context: context)
+
+        // End-of-episode sleep timer: mark this one done but stop instead of
+        // auto-advancing to the next queue item.
+        if sleepTimer.endOfEpisode {
+            sleepTimer.episodeEnded()
+            repo.markPlayedAndRemove(finished)
+            finished.positionSeconds = 0
+            saveContext()
+            isPlaying = false
+            currentEpisode = nil
+            updateNowPlayingInfo()
+            Announcer.announce("Sleep timer ended. Playback stopped.")
+            return
+        }
+
         let queued = repo.queue()
         let nextID = PlaybackLogic.nextUpID(
             queue: queued.map(\.persistentModelID),
