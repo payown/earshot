@@ -22,7 +22,7 @@ final class QuickActionRepositoryTests: XCTestCase {
 
     func testEpisodeOrderRoundTrips() {
         let ctx = TestStore.freshContext()
-        let custom: [EpisodeAction] = [.share, .openShowNotes, .markPlayed, .addToQueueTop, .addToQueueBottom, .playNow]
+        let custom: [EpisodeAction] = [.share, .openShowNotes, .markPlayed, .download, .addToQueueTop, .addToQueueBottom, .playNow]
         QuickActionRepository(context: ctx).setEpisodeOrder(custom)
 
         // A fresh repository over the same store reads the persisted order.

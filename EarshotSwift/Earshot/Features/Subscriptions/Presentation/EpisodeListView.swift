@@ -6,6 +6,7 @@ struct EpisodeListView: View {
 
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
+    @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
 
     @State private var showNotesEpisode: Episode?
@@ -28,6 +29,7 @@ struct EpisodeListView: View {
                             episode: episode,
                             order: quickActions.episodeActions,
                             player: player,
+                            downloads: downloads,
                             context: context,
                             onShowNotes: { showNotesEpisode = episode },
                             onShare: { sharingEpisode = episode }

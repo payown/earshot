@@ -22,6 +22,7 @@ final class QuickActionBuildersTests: XCTestCase {
             episode: episode,
             order: [.share, .playNow, .addToQueueTop],
             player: PlayerService(),
+            downloads: DownloadManager(),
             context: ctx,
             onShowNotes: {},
             onShare: {}
@@ -34,6 +35,7 @@ final class QuickActionBuildersTests: XCTestCase {
         let played = makeEpisode(ctx, played: true)
         let items = buildEpisodeActions(
             episode: played, order: [.markPlayed], player: PlayerService(),
+            downloads: DownloadManager(),
             context: ctx, onShowNotes: {}, onShare: {}
         )
         XCTAssertEqual(items.map(\.label), ["Mark as unplayed"])

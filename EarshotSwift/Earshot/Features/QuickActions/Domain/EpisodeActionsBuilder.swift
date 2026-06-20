@@ -23,6 +23,7 @@ func buildEpisodeActions(
     episode: Episode,
     order: [EpisodeAction],
     player: PlayerService,
+    downloads: DownloadManager,
     context: ModelContext,
     onShowNotes: @escaping () -> Void,
     onShare: @escaping () -> Void
@@ -32,6 +33,18 @@ func buildEpisodeActions(
         case .playNow:
             return QuickActionItem(label: "Play now", isDestructive: false) {
                 player.play(episode)
+            }
+        case .download:
+            let downloaded = episode.downloadStatus == .downloaded
+            return QuickActionItem(
+                label: downloaded ? "Remove download" : "Download",
+                isDestructive: downloaded
+            ) {
+                if downloaded {
+                    downloads.removeDownload(episode)
+                } else {
+                    Task { await downloads.download(episode) }
+                }
             }
         case .addToQueueTop:
             return QuickActionItem(label: "Add to queue (top)", isDestructive: false) {

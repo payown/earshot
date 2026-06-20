@@ -5,9 +5,15 @@ struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(PlayerService.self) private var player
     @Environment(QuickActionStore.self) private var quickActions
+    @Environment(DownloadManager.self) private var downloads
 
     var body: some View {
         TabView {
+            NavigationStack {
+                InboxScreen()
+            }
+            .tabItem { Label("Inbox", systemImage: "tray") }
+
             NavigationStack {
                 SubscriptionsView()
             }
@@ -17,6 +23,11 @@ struct RootView: View {
                 QueueScreen()
             }
             .tabItem { Label("Queue", systemImage: "list.bullet") }
+
+            NavigationStack {
+                DownloadsScreen()
+            }
+            .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
 
             NavigationStack {
                 QuickActionsSettingsView()
@@ -36,6 +47,8 @@ struct RootView: View {
             // injected exactly once.
             player.configure(context: modelContext)
             quickActions.configure(context: modelContext)
+            downloads.configure(context: modelContext)
+            ExpirationService(context: modelContext).runExpiration()
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
         }
     }
