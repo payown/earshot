@@ -10,14 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Coming from the previous version of Earshot: the first time you open this
   build over your existing install, Earshot brings your subscribed shows across
-  automatically and drops you straight into your Library, skipping setup. It
-  reads your old subscription list from the app's own storage on your device, so
-  nothing leaves your phone and no extra steps are needed. VoiceOver says
-  "Welcome back" while it works and tells you how many shows it imported. Only
-  your subscriptions move over (not play positions or queue); if anything can't
-  be brought across, you can still export an OPML file and import it. If you're
-  offline when you first open it, reopen Earshot once you're back online to
-  finish.
+  automatically and drops you straight into your Library, skipping setup. Your
+  shows appear almost instantly; their episodes then load in the background, so
+  the app stays responsive the whole time (a progress indicator at the top shows
+  how many shows have loaded, and each show reads "Loading episodes…" until its
+  episodes arrive). VoiceOver confirms how many shows were restored and announces
+  when episodes have finished loading. It reads your old subscription list from
+  the app's own storage on your device, so nothing leaves your phone and no extra
+  steps are needed. Your inbox starts empty; new episodes published from now on
+  arrive in it as usual. Only your subscriptions move over (not play positions or
+  queue); if anything can't be brought across, you can still export an OPML file
+  and import it.
 - Export audio file: every episode now has an "Export audio file" action that
   opens the share sheet, so you can save the audio to Files, AirDrop it, or open
   it in another app. It's in the Now Playing player's "Episode actions" menu

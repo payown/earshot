@@ -81,4 +81,47 @@ final class SubscriptionRepositoryTests: XCTestCase {
         try await repo.refresh(podcast)
         XCTAssertEqual(podcast.episodes.count, 1)
     }
+
+    func testFirstRefreshBackfillsMigratedShellPreDismissed() async throws {
+        let ctx = TestStore.freshContext()
+        // A migrated shell: subscribed, but no episodes and no high-water mark.
+        let shell = Podcast(feedURL: "https://x/feed.xml", title: "Shell")
+        ctx.insert(shell)
+        try ctx.save()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+
+        try await repo.refresh(shell)
+
+        XCTAssertEqual(shell.episodes.count, 2)
+        XCTAssertTrue(shell.episodes.allSatisfy { $0.inboxDismissed }) // backlog pre-dismissed
+        XCTAssertEqual(shell.lastSeenPubDate, d2)
+        XCTAssertEqual(InboxRepository(context: ctx).inboxEpisodes().count, 0) // inbox starts empty
+    }
+
+    func testFutureDatedEpisodeDoesNotAdvanceMarkOnSubscribe() async throws {
+        let ctx = TestStore.freshContext()
+        let future = Date(timeIntervalSinceNow: 60 * 60 * 24 * 30) // 30 days ahead
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("future", future)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        // Mark is the newest NON-future date, not the future one (#296).
+        XCTAssertEqual(podcast.lastSeenPubDate, d1)
+    }
+
+    func testFutureDatedEpisodeDoesNotAdvanceMarkOnRefresh() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml") // mark = d1
+
+        let future = Date(timeIntervalSinceNow: 60 * 60 * 24 * 30)
+        fetcher.feed = feed([episode("a", d1), episode("future", future)])
+        try await repo.refresh(podcast)
+
+        // The future episode must not poison the mark past real dates (#296).
+        XCTAssertEqual(podcast.lastSeenPubDate, d1)
+    }
 }

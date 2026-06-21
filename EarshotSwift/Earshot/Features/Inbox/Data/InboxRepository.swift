@@ -16,12 +16,22 @@ final class InboxRepository {
     }
 
     /// Inbox episodes, newest first.
+    ///
+    /// Fetches only non-dismissed episodes via a `#Predicate` so the dismissed
+    /// backlog never materializes — the query stays cheap even with thousands of
+    /// episodes in the store, instead of fetching every row and filtering in
+    /// memory on the main actor (which made episode-heavy operations jank and
+    /// starve VoiceOver). Status and per-podcast exclusion are applied in-memory
+    /// on the already-small candidate set. (#396)
     func inboxEpisodes() -> [Episode] {
         let optInOnly = settings.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
-        let all = (try? context.fetch(FetchDescriptor<Episode>())) ?? []
-        return all
-            .filter { $0.status == .newEpisode && !$0.inboxDismissed && !isExcluded($0.podcast, optInOnly: optInOnly) }
-            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+        var descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.inboxDismissed == false },
+            sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
+        )
+        descriptor.relationshipKeyPathsForPrefetching = [\Episode.podcast]
+        let candidates = (try? context.fetch(descriptor)) ?? []
+        return candidates.filter { $0.status == .newEpisode && !isExcluded($0.podcast, optInOnly: optInOnly) }
     }
 
     /// Applies per-podcast age + count caps across all included podcasts. Safe to
