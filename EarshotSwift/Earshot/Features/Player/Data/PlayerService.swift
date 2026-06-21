@@ -3,6 +3,7 @@ import AVFoundation
 import MediaPlayer
 import Observation
 import SwiftData
+import UIKit
 
 /// AVPlayer-based playback engine for Earshot.
 ///
@@ -70,6 +71,10 @@ final class PlayerService {
     @ObservationIgnored private var preloadedItem: AVPlayerItem?
     @ObservationIgnored private var preloadedEpisode: Episode?
     @ObservationIgnored private var queueChangeObserver: NSObjectProtocol?
+
+    // Artwork: track the last URL we fetched so we don't re-download when the
+    // same episode (or a different episode with the same artwork) is loaded.
+    @ObservationIgnored private var lastArtworkURL: URL?
 
     // MARK: Lifecycle
 
@@ -707,6 +712,74 @@ final class PlayerService {
         }
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentPositionSeconds
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? player.rate : 0
+        // Preserve artwork that was already set by a prior fetch so it isn't
+        // cleared by this synchronous update. The async artwork path will
+        // overwrite it (or set it for the first time) when the image arrives.
+        if let existing = MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] {
+            info[MPMediaItemPropertyArtwork] = existing
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+
+        // Kick off an async artwork fetch for the newly loaded episode. No-ops
+        // immediately when the URL matches the last successfully-fetched artwork.
+        let artworkURL = currentEpisode.flatMap {
+            ($0.artworkURL ?? $0.podcast?.artworkURL).flatMap(URL.init)
+        }
+        Task { await updateNowPlayingArtwork(from: artworkURL) }
+    }
+
+    /// Fetches artwork for the lock screen and Control Center. Tries the system
+    /// URLCache first (free if SwiftUI's AsyncImage already loaded it), then
+    /// falls back to a network request. Writes the result into nowPlayingInfo
+    /// without disturbing other fields.
+    ///
+    /// Thread-safe: the final write is dispatched back to the main actor. The
+    /// `lastArtworkURL` guard prevents redundant fetches when the same episode
+    /// is toggled play/pause repeatedly.
+    private func updateNowPlayingArtwork(from url: URL?) async {
+        guard let url else {
+            // No artwork URL — clear any stale artwork from a previous episode.
+            lastArtworkURL = nil
+            var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+            info.removeValue(forKey: MPMediaItemPropertyArtwork)
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            return
+        }
+
+        // Skip the fetch when we already have artwork for this URL loaded.
+        guard url != lastArtworkURL else { return }
+
+        // Check the system URLCache. SwiftUI's AsyncImage caches responses here,
+        // so artwork already visible in the UI is typically a synchronous hit.
+        let request = URLRequest(url: url)
+        if let cached = URLCache.shared.cachedResponse(for: request),
+           let image = UIImage(data: cached.data) {
+            lastArtworkURL = url
+            setArtwork(image)
+            return
+        }
+
+        // Cache miss: fetch from the network.
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            guard let image = UIImage(data: data) else {
+                AppLog.player.error("Artwork data from \(url, privacy: .public) could not be decoded as UIImage")
+                return
+            }
+            lastArtworkURL = url
+            setArtwork(image)
+        } catch {
+            AppLog.player.error("Artwork fetch failed for \(url, privacy: .public): \(error)")
+        }
+    }
+
+    /// Writes `image` into `MPNowPlayingInfoCenter` without touching any other
+    /// field. Safe to call after `updateNowPlayingInfo` has already run — only
+    /// the artwork key is mutated.
+    func setArtwork(_ image: UIImage) {
+        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        info[MPMediaItemPropertyArtwork] = artwork
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
