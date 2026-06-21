@@ -84,12 +84,21 @@ Step 1 = surface and clear all `complete` strict-concurrency warnings in Debug,
 | Subsystem | GH Issue | Status | Notes |
 |-----------|----------|--------|-------|
 | Persistence — non-Sendable KeyPaths + schema versionIdentifier | #357 | [x] | Done (commit 6ecbd80). `versionIdentifier` made computed (values unchanged); `sendableKeyPath` helper (layout-preserving marker-protocol cast, stored-property-only per doc precondition) at SortDescriptor/@Query sites. All 5 gates passed. 204 tests. **4 warnings remain by design:** Apple `#Predicate`-macro-internal `KeyPath<Model,String>` Sendable (AppSettingsStore ×2, PlaybackStartup, SubscriptionRepository) — unfixable at source until a newer SDK; revisit at the Step 2 flip. |
-| Player — `sending 'note'` data races in PlayerService NC observers (+ trivial ChapterParser unused var) | #358 | [ ] | Not started. |
-| Subscriptions — `sending 'self.feed'` data races in SubscriptionRepository | #359 | [ ] | Not started. |
-| Migration — main-actor static props from nonisolated context in FlutterMigrationService | #360 | [ ] | Not started. |
+| Player — `sending 'note'` data races in PlayerService NC observers (+ trivial ChapterParser unused var) | #358 | [x] | Done. NC observers extract Sendable `UInt?` values on `.main` before the `@MainActor` Task; handlers re-typed to take raw values. Behavior preserved. Gates passed. |
+| Subscriptions — `sending 'self.feed'` data races in SubscriptionRepository | #359 | [x] | Done. `FeedFetching: Sendable`; `FeedService: @unchecked Sendable` (value type, all stored state Sendable down to URLSession). Test fallout fixed (FakeFeedFetcher `@unchecked Sendable`). Gates passed. |
+| Migration — main-actor static props from nonisolated context in FlutterMigrationService | #360 | [x] | Done. `appGroupID`/`exportDBName` → `nonisolated static let`. No entitlement/behavior change. Gates passed. |
+| Test target — strict-concurrency warnings in StoreMigrationTests + FolderRepositoryTests | #361 | [x] | Done. `nonisolated(unsafe)` on serially-accessed test scaffolding; `sendableKeyPath(\Episode.guid)` in test FetchDescriptor; dropped unused binding. Surfaced once `xcodebuild test` compiled the test target under `complete`. Gates passed. |
 
-After #358/#359/#360 land, only the 4 macro `#Predicate` warnings should remain;
-then stop and report before considering the Step 2 `SWIFT_VERSION: 6` flip.
+**Step 1 status: COMPLETE.** Debug strict-concurrency clean (204 tests pass, 0
+errors) except the 4 Apple `#Predicate`-macro-internal `KeyPath<Model,String>`
+warnings, which are unfixable at source. Per plan, STOP and report before
+considering the Step 2 `SWIFT_VERSION: 6` flip (that flip turns the 4 macro
+warnings into errors and needs a separate decision / newer-SDK check).
+
+Non-blocking follow-up (from testing gate): extract pure
+`PlaybackLogic.interruptionAction(...)`/`routeChangeAction(...)` so the
+PlayerService interruption/route mapping becomes unit-testable (currently the
+private AVFoundation handlers can't be covered without restructuring).
 
 ## Decisions Log
 
@@ -129,6 +138,17 @@ then stop and report before considering the Step 2 `SWIFT_VERSION: 6` flip.
 - **Decision (F14):** Chapters (PC2.0 JSON + embedded AVAsset/ID3 + description-timestamp fallback) and the sleep timer (all presets, extend +5, end-of-episode) are implemented, wired, and unit-tested. **Audio-enhancement DSP (skip silence / voice boost / mono) is deferred.** Native AVPlayer has no API for these; they require an `MTAudioProcessingTap` (audio-render-thread C interop) that cannot be device-verified in the build/test environment, and a faulty tap crashes the render thread — exactly the kind of un-recoverable failure the DB-migration rule warns against shipping unverified. The Flutter app's own iOS build doesn't apply these either (they're Android-only there — see its `player_screen.dart` comments), so this is not a parity regression. The existing Settings toggles (`skip_silence_enabled`, `voice_enhance_enabled`) persist and are ready to wire when the tap lands on-device. **Follow-up:** implement `MTAudioProcessingTap`-based mono + gain (and evaluate skip-silence) in a focused, device-verified PR. **Issue:** #349.
 
 - **Decision (Naming):** "Library" is the **established, intentional** name for the subscriptions / podcast list (the tab, `SubscriptionsView` title, related announcements). Users are already used to it — do not rename it. The PRD's use of "Library" for local audio import (PRD 5.8) is a naming conflict, resolved here in favor of the existing user vocabulary: the subscriptions list keeps "Library," and local audio import — **if** it ships — will be called **"Local Audio,"** not "Library." Documentation-only; no code change.
+
+## Swift 6 Review — Issues #358, #359, #360, #361
+
+- **Mode:** `SWIFT_STRICT_CONCURRENCY: complete` (Debug), `SWIFT_VERSION: 5.0`. Full `xcodebuild test` independently confirmed TEST SUCCEEDED, 204 tests, 0 errors, only the 4 known `#Predicate`/`@Query` `KeyPath<Model,String>` Sendable warnings remain (issue #357, unfixable at source).
+- **Result: PASS.** All eight concurrency-checklist items pass; no `@unchecked`/`nonisolated(unsafe)` hides a real race.
+- **#358 PlayerService:** NC observer closures run on `.main`, extract `UInt?` raw values from `Notification.userInfo` before the `@MainActor` Task; no `Notification` (non-Sendable) crosses the boundary. Handlers re-typed to `(typeValue:optionsValue:)` / `(reasonValue:)`. Only callers are the two closures. Guards and behavior preserved. ChapterParser: dead `i` from `enumerated()` removed, no impact.
+- **#359 SubscriptionRepository:** `FeedFetching: Sendable` is correct — `fetch` is `nonisolated async`, so the `@MainActor` repo sends the conformer off-actor. `extension FeedService: @unchecked Sendable` is sound: `FeedService` is a struct whose only stored prop is `HTTPClient` (struct wrapping a Sendable `URLSession`). Plain `Sendable` would also have worked, but `@unchecked` in the declaring extension is required since the conformance can't live in FeedService.swift; harmless and documented. Single conformance, no duplicate-conformance risk under Swift 6.
+- **#360 FlutterMigrationService:** `appGroupID`/`exportDBName` → `nonisolated static let` correct and required so the existing `nonisolated static var sharedDatabaseURL` can read them off the `@MainActor` class. Plain `String` constants, Sendable.
+- **#361 Tests:** `FakeFeedFetcher: @unchecked Sendable` — justified; mutable `feed` only reassigned and read serially inside `@MainActor` tests, `fetch` returns synchronously, no concurrent access. `StoreMigrationTests` `dir`/`storeURL` → `nonisolated(unsafe) var` — justified; XCTest setUp→test→tearDown is serial with happens-before, and the override points are `nonisolated` so MainActor isolation can't apply. `sendableKeyPath(\Episode.guid)` — `unsafeBitCast` to `KeyPath & Sendable` is a layout-preserving no-op; precondition (stored-property key path) holds for both `Episode.guid` and `PodcastFolder.sortOrder`. FolderRepositoryTests: dropped unused `loose` binding (side-effecting `makePodcast` call retained), added behavior-neutral sort assertion.
+- **Swift 6 forward-compat:** All constructs are already Swift-6-valid (they're the Swift-6-style fixes). Nothing here becomes an error when `SWIFT_VERSION` flips to 6. The 4 remaining #357 warnings are the only items that would become errors — tracked separately, not in scope of these issues.
+- **New agents created:** none.
 
 ## Blockers
 

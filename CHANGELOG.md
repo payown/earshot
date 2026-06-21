@@ -61,9 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 - Internal: started the Swift 6 migration (step 1). Turned on strict concurrency
   checking for Debug builds only (Beta and Release stay on the minimal setting,
-  and the language version is still Swift 5) and cleared the SwiftData
-  concurrency warnings it surfaced. No change to how the app behaves; this is
-  groundwork for a clean Swift 6 build. (closes #357)
+  and the language version is still Swift 5) and cleared the data-race warnings it
+  surfaced across the player, subscriptions, migration, and the test suite. The
+  Debug build is now strict-concurrency clean except for four warnings inside
+  Apple's own #Predicate macro that we can't change. No change to how the app
+  behaves; this is groundwork for a clean Swift 6 build.
+  (closes #357, #358, #359, #360, #361)
 
 ### Fixed
 - Quick Actions: reordering your episode or podcast actions now saves reliably.
