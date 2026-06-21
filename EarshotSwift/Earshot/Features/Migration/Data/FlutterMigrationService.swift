@@ -2,53 +2,58 @@ import Foundation
 import SQLite3
 import SwiftData
 
-/// One-time import of the user's subscriptions from the Flutter app's drift
-/// database, exposed to the SwiftUI app through a shared App Group container.
+/// A subscription read from the Flutter drift database during migration: the feed
+/// URL plus display metadata so the imported Library row is labeled immediately,
+/// before its episodes are fetched.
+struct FlutterSubscription: Sendable, Equatable {
+    let rssURL: String
+    let title: String?
+    let author: String?
+    let artworkURL: String?
+}
+
+/// One-time import of the user's subscriptions from a previous (Flutter) install
+/// that shared this bundle id's container.
 ///
-/// Scope (first pass): subscriptions only. Queue order, played state, and
-/// playback positions are intentionally not migrated — getting the feed list
-/// right is what matters to users, and every other field is re-derived from the
-/// live RSS feed on subscribe.
+/// The SwiftUI app now ships under the same bundle id (`media.payown.earshot`) as
+/// the old Flutter app, so an over-the-top update keeps the same sandbox and the
+/// Flutter drift database is still sitting at `Documents/earshot.db`. We read its
+/// `podcasts` table directly via SQLite3 on first launch — no App Group,
+/// entitlement, or Flutter-side export writer needed.
 ///
-/// Safety: if the shared database is absent or unreadable (the normal case until
-/// both apps ship the matching App Group entitlement) every method no-ops
-/// quietly. Every SQLite call goes through guarded returns — no `fatalError`, no
-/// force-unwrap, no crash on a tester's real data.
+/// Scope: subscriptions only. Queue order, played state, and playback positions
+/// are intentionally not migrated — getting the feed list right is what matters
+/// to users, and every other field is re-derived from the live RSS feed on
+/// subscribe.
+///
+/// Safety: if the database is absent or unreadable (the normal case for a fresh
+/// install) every method no-ops quietly. Every SQLite call goes through guarded
+/// returns — no `fatalError`, no force-unwrap, no crash on a tester's real data.
 @MainActor
 final class FlutterMigrationService {
-    /// App Group shared between the Flutter (`media.payown.earshot`) and SwiftUI
-    /// (`media.payown.earshot.swift`) builds. Until the entitlement is added to
-    /// both apps, `containerURL(...)` returns nil and migration no-ops.
-    static let appGroupID = "group.media.payown.earshot"
-
-    /// The Flutter app copies `earshot.db` to this name in the shared container.
-    static let exportDBName = "earshot_export.db"
-
-    /// URL of the exported drift DB in the shared App Group container, or nil if
-    /// the entitlement isn't present yet. `nonisolated` so it can serve as a
-    /// default argument (evaluated outside the main actor); it only touches
-    /// `FileManager`, which is thread-safe.
-    nonisolated static var sharedDatabaseURL: URL? {
+    /// The Flutter app's drift database, left in the shared sandbox after an
+    /// over-the-top update. drift writes it to the Documents directory
+    /// (`getApplicationDocumentsDirectory()`), so we read it from the same place.
+    /// `nonisolated` so it can serve as a default argument (evaluated outside the
+    /// main actor); it only touches `FileManager`, which is thread-safe.
+    nonisolated static var localDatabaseURL: URL? {
         FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
-            .appendingPathComponent(exportDBName)
+            .urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("earshot.db")
     }
 
     private let settings: AppSettingsStore
-    private let subscriptions: SubscriptionRepository
     private let databaseURL: URL?
 
     init(
         context: ModelContext,
-        databaseURL: URL? = FlutterMigrationService.sharedDatabaseURL,
-        subscriptions: SubscriptionRepository? = nil
+        databaseURL: URL? = FlutterMigrationService.localDatabaseURL
     ) {
         self.settings = AppSettingsStore(context: context)
-        self.subscriptions = subscriptions ?? SubscriptionRepository(context: context)
         self.databaseURL = databaseURL
     }
 
-    // MARK: Completion flag + reminder count
+    // MARK: Completion flag
 
     var isComplete: Bool {
         settings.bool(SettingsKey.flutterMigrationComplete, default: false)
@@ -58,42 +63,14 @@ final class FlutterMigrationService {
         settings.setBool(true, for: SettingsKey.flutterMigrationComplete)
     }
 
-    var reminderCount: Int {
-        settings.int(SettingsKey.migrationReminderCount, default: 0)
-    }
+    // MARK: Read
 
-    func recordReminderDismissal() {
-        settings.setInt(reminderCount + 1, for: SettingsKey.migrationReminderCount)
-    }
-
-    // MARK: Import
-
-    /// Subscribes to every feed found in the exported drift DB. Returns the count
-    /// of podcasts successfully subscribed. No-ops (returns 0) when the shared DB
-    /// is missing. Per-feed failures are logged and skipped so one bad feed never
-    /// aborts the rest.
-    @discardableResult
-    func importSubscriptions() async -> Int {
-        guard let feeds = readFeedURLs(), !feeds.isEmpty else { return 0 }
-        var imported = 0
-        for url in feeds {
-            do {
-                _ = try await subscriptions.subscribe(feedURL: url)
-                imported += 1
-            } catch {
-                AppLog.data.error(
-                    "Migration: subscribe failed for \(url, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                )
-            }
-        }
-        AppLog.data.info("Migration: imported \(imported, privacy: .public) of \(feeds.count, privacy: .public) feed(s)")
-        return imported
-    }
-
-    /// Reads non-empty `rss_url` values from the drift `podcasts` table. Returns
-    /// nil if the file is missing or the database can't be opened/queried, so
-    /// callers can distinguish "no shared data" from "zero podcasts".
-    func readFeedURLs() -> [String]? {
+    /// Reads subscriptions (feed URL + display metadata) from the drift `podcasts`
+    /// table. Returns nil if the file is missing or the database can't be
+    /// opened/queried, so callers can distinguish "no shared data" from "zero
+    /// podcasts". Rows with a blank `rss_url` are skipped; NULL/blank metadata
+    /// columns (older drift rows) become nil rather than failing.
+    func readSubscriptions() -> [FlutterSubscription]? {
         guard let databaseURL,
               FileManager.default.fileExists(atPath: databaseURL.path)
         else { return nil }
@@ -107,19 +84,35 @@ final class FlutterMigrationService {
         defer { sqlite3_close(db) }
 
         var statement: OpaquePointer?
-        let sql = "SELECT rss_url FROM podcasts"
+        let sql = "SELECT rss_url, title, author, artwork_url FROM podcasts"
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             AppLog.data.error("Migration: could not prepare podcasts query")
             return nil
         }
         defer { sqlite3_finalize(statement) }
 
-        var urls: [String] = []
+        var subs: [FlutterSubscription] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard let cString = sqlite3_column_text(statement, 0) else { continue }
-            let value = String(cString: cString).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty { urls.append(value) }
+            guard let rss = Self.column(statement, 0) else { continue }
+            subs.append(FlutterSubscription(
+                rssURL: rss,
+                title: Self.column(statement, 1),
+                author: Self.column(statement, 2),
+                artworkURL: Self.column(statement, 3)
+            ))
         }
-        return urls
+        return subs
+    }
+
+    /// Non-empty feed URLs only. Kept for callers/tests that just need the list.
+    func readFeedURLs() -> [String]? {
+        readSubscriptions()?.map(\.rssURL)
+    }
+
+    /// Trimmed text for a column, or nil when NULL/blank.
+    private static func column(_ statement: OpaquePointer?, _ index: Int32) -> String? {
+        guard let cString = sqlite3_column_text(statement, index) else { return nil }
+        let value = String(cString: cString).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 }

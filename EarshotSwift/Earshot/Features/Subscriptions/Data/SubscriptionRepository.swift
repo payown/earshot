@@ -43,16 +43,17 @@ final class SubscriptionRepository {
         )
         context.insert(podcast)
 
-        var newest: Date?
         for item in parsed.episodes {
             let episode = makeEpisode(from: item)
             episode.podcast = podcast
             episode.inboxDismissed = true // pre-dismiss backlog on subscribe
             context.insert(episode)
-            newest = laterOf(newest, item.pubDate)
         }
-        podcast.lastSeenPubDate = newest
-        podcast.refreshedAt = .now
+        // Seed the high-water mark to the newest NON-FUTURE pub date so a misdated
+        // future episode can't push the mark ahead of real new episodes (#296).
+        let now = Date.now
+        podcast.lastSeenPubDate = latestNonFuturePubDate(parsed.episodes, now: now) ?? now
+        podcast.refreshedAt = now
         try context.save()
         AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsed.episodes.count) episodes")
         return podcast
@@ -63,23 +64,47 @@ final class SubscriptionRepository {
     /// are pre-dismissed. The high-water mark then advances to the newest seen.
     func refresh(_ podcast: Podcast) async throws {
         let parsed = try await feed.fetch(podcast.feedURL)
+        let now = Date.now
+
+        // First refresh of a freshly-migrated shell (no episodes AND no high-water
+        // mark): backfill the whole catalog pre-dismissed and seed the mark, so the
+        // inbox starts empty and only future episodes surface later — mirroring
+        // subscribe. Guarded on episodes.isEmpty so a normally-subscribed podcast
+        // (which always has a mark) never takes this path.
+        if podcast.episodes.isEmpty && podcast.lastSeenPubDate == nil {
+            for item in parsed.episodes {
+                let episode = makeEpisode(from: item)
+                episode.podcast = podcast
+                episode.inboxDismissed = true
+                context.insert(episode)
+            }
+            podcast.lastSeenPubDate = latestNonFuturePubDate(parsed.episodes, now: now) ?? now
+            podcast.refreshedAt = now
+            try context.save()
+            AppLog.subscriptions.info("Backfilled \(podcast.title, privacy: .public): \(parsed.episodes.count) episode(s)")
+            return
+        }
+
         let existingGUIDs = Set(podcast.episodes.map(\.guid))
-        let mark = podcast.lastSeenPubDate
-        var newest = mark
+        // Clamp an already-future mark back to now so a previously-poisoned mark
+        // can't keep real new episodes out of the inbox (#296).
+        let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
         var added = 0
 
         for item in parsed.episodes where !existingGUIDs.contains(item.guid) {
             let episode = makeEpisode(from: item)
             episode.podcast = podcast
-            let isNew = (item.pubDate ?? .distantPast) > (mark ?? .distantPast)
-            episode.inboxDismissed = !isNew
+            let pub = item.pubDate ?? .distantPast
+            // New = newer than the mark AND not future-dated (#296).
+            episode.inboxDismissed = !(pub > mark && pub <= now)
             context.insert(episode)
-            newest = laterOf(newest, item.pubDate)
             added += 1
         }
 
-        podcast.lastSeenPubDate = newest
-        podcast.refreshedAt = .now
+        // Advance the mark to the newest non-future pub date; never retreat, never
+        // to a future date (#296).
+        podcast.lastSeenPubDate = max(mark, latestNonFuturePubDate(parsed.episodes, now: now) ?? mark)
+        podcast.refreshedAt = now
         try context.save()
         if added > 0 {
             AppLog.subscriptions.info("Refreshed \(podcast.title, privacy: .public): \(added) new episode(s)")
@@ -87,15 +112,18 @@ final class SubscriptionRepository {
     }
 
     /// Refreshes every subscription, logging and continuing past individual
-    /// failures so one bad feed doesn't abort the rest.
-    func refreshAll() async {
+    /// failures so one bad feed doesn't abort the rest. `onProgress` is called
+    /// (on the main actor) after each podcast with the running `(completed, total)`.
+    func refreshAll(onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil) async {
         let all = (try? context.fetch(FetchDescriptor<Podcast>())) ?? []
-        for podcast in all {
+        let total = all.count
+        for (index, podcast) in all.enumerated() {
             do {
                 try await refresh(podcast)
             } catch {
                 AppLog.subscriptions.error("Refresh failed for \(podcast.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
+            onProgress?(index + 1, total)
         }
     }
 
@@ -123,12 +151,10 @@ final class SubscriptionRepository {
         )
     }
 
-    private func laterOf(_ a: Date?, _ b: Date?) -> Date? {
-        switch (a, b) {
-        case let (x?, y?): return max(x, y)
-        case let (x?, nil): return x
-        case let (nil, y?): return y
-        case (nil, nil): return nil
-        }
+    /// The newest episode pub date that is not in the future, or nil if none.
+    /// Future-dated items are excluded so a misdated episode can't advance the
+    /// inbox high-water mark and silently strand later real episodes (#296).
+    private func latestNonFuturePubDate(_ episodes: [ParsedEpisode], now: Date) -> Date? {
+        episodes.compactMap(\.pubDate).filter { $0 <= now }.max()
     }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-struct ParsedEpisode {
+struct ParsedEpisode: Sendable {
     var guid: String
     var title: String
     var audioURL: String
@@ -14,7 +14,7 @@ struct ParsedEpisode {
     var transcriptURL: String?
 }
 
-struct ParsedFeed {
+struct ParsedFeed: Sendable {
     var title: String
     var artworkURL: String?
     var description: String?

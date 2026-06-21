@@ -22,24 +22,37 @@ struct EpisodeListView: View {
             Section {
                 header
             }
-            Section {
-                ForEach(sortedEpisodes) { episode in
-                    EpisodeRow(
-                        episode: episode,
-                        actions: buildEpisodeActions(
-                            episode: episode,
-                            order: quickActions.episodeActions,
-                            player: player,
-                            downloads: downloads,
-                            context: context,
-                            onShowNotes: { showNotesEpisode = episode },
-                            onShare: { sharingEpisode = episode },
-                            onBookmarks: { bookmarksEpisode = episode }
-                        )
-                    )
+            if sortedEpisodes.isEmpty && podcast.refreshedAt == nil {
+                // Freshly-migrated show whose episodes haven't been fetched yet.
+                // Distinguish "still loading" from a genuinely empty feed so a
+                // VoiceOver user isn't told "no episodes" prematurely.
+                Section {
+                    Label("Loading episodes…", systemImage: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(.secondary)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Loading episodes")
+                        .accessibilityAddTraits(.updatesFrequently)
                 }
-            } header: {
-                Text("^[\(sortedEpisodes.count) episode](inflect: true)")
+            } else {
+                Section {
+                    ForEach(sortedEpisodes) { episode in
+                        EpisodeRow(
+                            episode: episode,
+                            actions: buildEpisodeActions(
+                                episode: episode,
+                                order: quickActions.episodeActions,
+                                player: player,
+                                downloads: downloads,
+                                context: context,
+                                onShowNotes: { showNotesEpisode = episode },
+                                onShare: { sharingEpisode = episode },
+                                onBookmarks: { bookmarksEpisode = episode }
+                            )
+                        )
+                    }
+                } header: {
+                    Text("^[\(sortedEpisodes.count) episode](inflect: true)")
+                }
             }
         }
         .navigationTitle(podcast.title)

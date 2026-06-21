@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct RootView: View {
     @Environment(\.modelContext) private var modelContext
@@ -10,9 +11,7 @@ struct RootView: View {
     @Environment(TipsStore.self) private var tips
 
     @State private var showOnboarding = false
-    #if IS_BETA_BUILD
-    @State private var showMigration = false
-    #endif
+    @State private var importState = MigrationImportState()
 
     var body: some View {
         TabView {
@@ -20,35 +19,36 @@ struct RootView: View {
                 InboxScreen()
                     .contextualTip(.inbox)
             }
-            .modifier(MiniPlayerInset())
+            .modifier(TabChrome())
             .tabItem { Label("Inbox", systemImage: "tray") }
 
             NavigationStack {
                 QueueScreen()
                     .contextualTip(.queue)
             }
-            .modifier(MiniPlayerInset())
+            .modifier(TabChrome())
             .tabItem { Label("Queue", systemImage: "list.bullet") }
 
             NavigationStack {
                 SubscriptionsView()
             }
-            .modifier(MiniPlayerInset())
+            .modifier(TabChrome())
             .tabItem { Label("Library", systemImage: "books.vertical") }
 
             NavigationStack {
                 DownloadsScreen()
                     .contextualTip(.downloads)
             }
-            .modifier(MiniPlayerInset())
+            .modifier(TabChrome())
             .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
 
             NavigationStack {
                 SettingsScreen()
             }
-            .modifier(MiniPlayerInset())
+            .modifier(TabChrome())
             .tabItem { Label("Settings", systemImage: "gearshape") }
         }
+        .environment(importState)
         // VoiceOver magic tap (two-finger double tap) toggles playback anywhere.
         .accessibilityAction(.magicTap) {
             player.togglePlayPause()
@@ -63,11 +63,6 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
         }
-        #if IS_BETA_BUILD
-        .fullScreenCover(isPresented: $showMigration) {
-            MigrationPromptView()
-        }
-        #endif
         // Re-apply audio settings mid-playback when they change (#352).
         .onChange(of: settings.globalSpeed) { _, _ in
             player.reapplyRate()
@@ -87,35 +82,77 @@ struct RootView: View {
             ExpirationService(context: modelContext).runExpiration()
             StatsRepository(context: modelContext).applyRetention(days: settings.historyRetentionDays)
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
-            // Show onboarding on first launch (after settings load so we don't flash).
-            showOnboarding = !settings.onboardingComplete
-            #if IS_BETA_BUILD
-            // Beta only: offer the Flutter→SwiftUI import once onboarding is done
-            // and migration hasn't been resolved. Mutually exclusive with
-            // onboarding (which requires onboardingComplete == false).
+            // One-time import of subscriptions from a previous (Flutter) install
+            // that shared this bundle id's container. The fast local SQLite read
+            // (readFeedURLs) decides migrator vs. new user; the slow network
+            // subscribe runs in a detached task so launch is never blocked.
             let migration = FlutterMigrationService(context: modelContext)
-            showMigration = MigrationGate.shouldPrompt(
-                onboardingComplete: settings.onboardingComplete,
-                migrationComplete: migration.isComplete
-            )
-            #endif
+            if MigrationGate.shouldImport(migrationComplete: migration.isComplete),
+               let subs = migration.readSubscriptions(), !subs.isEmpty {
+                // Returning user from the old build: skip onboarding and restore
+                // their shows. Two phases:
+                //   1. Near-instant: create labeled show "shells" (no episodes) on a
+                //      background context (@ModelActor). This is what keeps VoiceOver
+                //      responsive — no thousands-of-episodes write storm.
+                //   2. Background: a normal refresh fetches each show's episodes and
+                //      seeds the inbox high-water mark (pre-dismissing the backlog so
+                //      the inbox starts empty; only future episodes surface later).
+                // The user is free to use the populated Library throughout.
+                settings.onboardingComplete = true
+                showOnboarding = false
+                let importer = SubscriptionImporter(modelContainer: modelContext.container)
+                Task {
+                    let count = await importer.importShells(subs) { _, _ in }
+                    migration.markComplete()
+                    guard count > 0 else { return }
+                    // Haptic first so it doesn't race the start of the spoken announcement.
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    Announcer.announce(
+                        "\(count) \(count == 1 ? "show" : "shows") restored. Your Library is ready. "
+                        + "Episodes are loading in the background.",
+                        assertive: true
+                    )
+
+                    // Fill episodes in the background. The RestoreBanner tracks progress
+                    // (swipe-to-check); no spoken milestones — it's a background task the
+                    // user didn't start, so interrupting their navigation would be noise.
+                    importState.start(total: count)
+                    await SubscriptionRepository(context: modelContext).refreshAll { completed, _ in
+                        importState.update(completed: completed)
+                    }
+                    importState.finish()
+                    Announcer.announce("Episodes loaded. Your Library is up to date.")
+                }
+            } else {
+                // Fresh install (or already migrated): nothing to import.
+                if !migration.isComplete { migration.markComplete() }
+                // Show onboarding on first launch (after settings load so we don't flash).
+                showOnboarding = !settings.onboardingComplete
+            }
         }
     }
 }
 
-/// Insets the mini player above a tab's content via the tab content's own bottom
-/// safe area. Applied to each tab's `NavigationStack` rather than to the
-/// `TabView` — attaching the inset to the TabView itself pushed the bar into the
-/// TabView's bottom safe area, which overlaps and hides the system tab bar
-/// (#366). Attached to the tab content, the bar floats above the system tab bar,
-/// the tab bar stays visible and tappable during playback, and the system
-/// continues to handle positioning above the tab bar and home indicator across
-/// devices and Dynamic Type sizes. `NowPlayingBar` renders nothing when no
-/// episode is loaded, so this adds no inset until playback begins.
-private struct MiniPlayerInset: ViewModifier {
+/// Per-tab chrome: the restore-progress banner inset above the content (top) and
+/// the mini player inset above the system tab bar (bottom). Applied to each tab's
+/// `NavigationStack` rather than to the `TabView` — attaching an inset to the
+/// TabView itself pushes it into the TabView's safe area, which overlaps and hides
+/// the system tab bar (#366). Attached to the tab content, both float correctly
+/// and the system handles positioning across devices and Dynamic Type sizes.
+/// Both subviews render nothing when inactive, so they add no inset until needed:
+/// `NowPlayingBar` while nothing is loaded, `RestoreBanner` while not importing.
+private struct TabChrome: ViewModifier {
+    @Environment(MigrationImportState.self) private var migration
+
     func body(content: Content) -> some View {
-        content.safeAreaInset(edge: .bottom) {
-            NowPlayingBar()
-        }
+        content
+            .safeAreaInset(edge: .top) {
+                if migration.isActive {
+                    RestoreBanner(completed: migration.completed, total: migration.total)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                NowPlayingBar()
+            }
     }
 }
