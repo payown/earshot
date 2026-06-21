@@ -2,36 +2,34 @@ import Foundation
 import SQLite3
 import SwiftData
 
-/// One-time import of the user's subscriptions from the Flutter app's drift
-/// database, exposed to the SwiftUI app through a shared App Group container.
+/// One-time import of the user's subscriptions from a previous (Flutter) install
+/// that shared this bundle id's container.
 ///
-/// Scope (first pass): subscriptions only. Queue order, played state, and
-/// playback positions are intentionally not migrated — getting the feed list
-/// right is what matters to users, and every other field is re-derived from the
-/// live RSS feed on subscribe.
+/// The SwiftUI app now ships under the same bundle id (`media.payown.earshot`) as
+/// the old Flutter app, so an over-the-top update keeps the same sandbox and the
+/// Flutter drift database is still sitting at `Documents/earshot.db`. We read its
+/// `podcasts` table directly via SQLite3 on first launch — no App Group,
+/// entitlement, or Flutter-side export writer needed.
 ///
-/// Safety: if the shared database is absent or unreadable (the normal case until
-/// both apps ship the matching App Group entitlement) every method no-ops
-/// quietly. Every SQLite call goes through guarded returns — no `fatalError`, no
-/// force-unwrap, no crash on a tester's real data.
+/// Scope: subscriptions only. Queue order, played state, and playback positions
+/// are intentionally not migrated — getting the feed list right is what matters
+/// to users, and every other field is re-derived from the live RSS feed on
+/// subscribe.
+///
+/// Safety: if the database is absent or unreadable (the normal case for a fresh
+/// install) every method no-ops quietly. Every SQLite call goes through guarded
+/// returns — no `fatalError`, no force-unwrap, no crash on a tester's real data.
 @MainActor
 final class FlutterMigrationService {
-    /// App Group shared between the Flutter (`media.payown.earshot`) and SwiftUI
-    /// (`media.payown.earshot.swift`) builds. Until the entitlement is added to
-    /// both apps, `containerURL(...)` returns nil and migration no-ops.
-    static let appGroupID = "group.media.payown.earshot"
-
-    /// The Flutter app copies `earshot.db` to this name in the shared container.
-    static let exportDBName = "earshot_export.db"
-
-    /// URL of the exported drift DB in the shared App Group container, or nil if
-    /// the entitlement isn't present yet. `nonisolated` so it can serve as a
-    /// default argument (evaluated outside the main actor); it only touches
-    /// `FileManager`, which is thread-safe.
-    nonisolated static var sharedDatabaseURL: URL? {
+    /// The Flutter app's drift database, left in the shared sandbox after an
+    /// over-the-top update. drift writes it to the Documents directory
+    /// (`getApplicationDocumentsDirectory()`), so we read it from the same place.
+    /// `nonisolated` so it can serve as a default argument (evaluated outside the
+    /// main actor); it only touches `FileManager`, which is thread-safe.
+    nonisolated static var localDatabaseURL: URL? {
         FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
-            .appendingPathComponent(exportDBName)
+            .urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("earshot.db")
     }
 
     private let settings: AppSettingsStore
@@ -40,7 +38,7 @@ final class FlutterMigrationService {
 
     init(
         context: ModelContext,
-        databaseURL: URL? = FlutterMigrationService.sharedDatabaseURL,
+        databaseURL: URL? = FlutterMigrationService.localDatabaseURL,
         subscriptions: SubscriptionRepository? = nil
     ) {
         self.settings = AppSettingsStore(context: context)
@@ -48,7 +46,7 @@ final class FlutterMigrationService {
         self.databaseURL = databaseURL
     }
 
-    // MARK: Completion flag + reminder count
+    // MARK: Completion flag
 
     var isComplete: Bool {
         settings.bool(SettingsKey.flutterMigrationComplete, default: false)
@@ -56,14 +54,6 @@ final class FlutterMigrationService {
 
     func markComplete() {
         settings.setBool(true, for: SettingsKey.flutterMigrationComplete)
-    }
-
-    var reminderCount: Int {
-        settings.int(SettingsKey.migrationReminderCount, default: 0)
-    }
-
-    func recordReminderDismissal() {
-        settings.setInt(reminderCount + 1, for: SettingsKey.migrationReminderCount)
     }
 
     // MARK: Import

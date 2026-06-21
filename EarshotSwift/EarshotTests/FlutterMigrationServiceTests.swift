@@ -114,7 +114,7 @@ final class FlutterMigrationServiceTests: XCTestCase {
         XCTAssertEqual(count, 0)
     }
 
-    // MARK: flag + reminder count
+    // MARK: completion flag
 
     func testCompletionFlagRoundTrips() {
         let ctx = TestStore.freshContext()
@@ -122,14 +122,5 @@ final class FlutterMigrationServiceTests: XCTestCase {
         XCTAssertFalse(service.isComplete)
         service.markComplete()
         XCTAssertTrue(FlutterMigrationService(context: ctx, databaseURL: nil).isComplete)
-    }
-
-    func testReminderCountIncrements() {
-        let ctx = TestStore.freshContext()
-        let service = FlutterMigrationService(context: ctx, databaseURL: nil)
-        XCTAssertEqual(service.reminderCount, 0)
-        service.recordReminderDismissal()
-        service.recordReminderDismissal()
-        XCTAssertEqual(FlutterMigrationService(context: ctx, databaseURL: nil).reminderCount, 2)
     }
 }

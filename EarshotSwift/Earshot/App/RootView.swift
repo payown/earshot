@@ -10,9 +10,6 @@ struct RootView: View {
     @Environment(TipsStore.self) private var tips
 
     @State private var showOnboarding = false
-    #if IS_BETA_BUILD
-    @State private var showMigration = false
-    #endif
 
     var body: some View {
         TabView {
@@ -63,11 +60,6 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
         }
-        #if IS_BETA_BUILD
-        .fullScreenCover(isPresented: $showMigration) {
-            MigrationPromptView()
-        }
-        #endif
         // Re-apply audio settings mid-playback when they change (#352).
         .onChange(of: settings.globalSpeed) { _, _ in
             player.reapplyRate()
@@ -87,18 +79,41 @@ struct RootView: View {
             ExpirationService(context: modelContext).runExpiration()
             StatsRepository(context: modelContext).applyRetention(days: settings.historyRetentionDays)
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
-            // Show onboarding on first launch (after settings load so we don't flash).
-            showOnboarding = !settings.onboardingComplete
-            #if IS_BETA_BUILD
-            // Beta only: offer the Flutter→SwiftUI import once onboarding is done
-            // and migration hasn't been resolved. Mutually exclusive with
-            // onboarding (which requires onboardingComplete == false).
+            // One-time import of subscriptions from a previous (Flutter) install
+            // that shared this bundle id's container. The fast local SQLite read
+            // (readFeedURLs) decides migrator vs. new user; the slow network
+            // subscribe runs in a detached task so launch is never blocked.
             let migration = FlutterMigrationService(context: modelContext)
-            showMigration = MigrationGate.shouldPrompt(
-                onboardingComplete: settings.onboardingComplete,
-                migrationComplete: migration.isComplete
-            )
-            #endif
+            if MigrationGate.shouldImport(migrationComplete: migration.isComplete),
+               let feeds = migration.readFeedURLs(), !feeds.isEmpty {
+                // Returning user from the old build: skip onboarding and restore
+                // their shows quietly. The immediate cue avoids a silent gap while
+                // the (slow) network subscribe runs; a second announcement confirms
+                // completion. We mark complete only on success so a failed run
+                // (e.g. offline) retries on the next launch instead of stranding a
+                // returning user with no shows and no retry path.
+                settings.onboardingComplete = true
+                showOnboarding = false
+                Announcer.announce("Welcome back. Restoring your shows.")
+                Task {
+                    let count = await migration.importSubscriptions()
+                    if count > 0 {
+                        migration.markComplete()
+                        Announcer.announce(
+                            "Imported \(count) \(count == 1 ? "show" : "shows") into your Library."
+                        )
+                    } else {
+                        Announcer.announce(
+                            "Couldn't import your shows right now. Reopen Earshot when you're online to finish."
+                        )
+                    }
+                }
+            } else {
+                // Fresh install (or already migrated): nothing to import.
+                if !migration.isComplete { migration.markComplete() }
+                // Show onboarding on first launch (after settings load so we don't flash).
+                showOnboarding = !settings.onboardingComplete
+            }
         }
     }
 }
