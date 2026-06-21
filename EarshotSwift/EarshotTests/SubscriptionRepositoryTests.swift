@@ -8,6 +8,13 @@ private final class FakeFeedFetcher: FeedFetching {
     func fetch(_ urlString: String) async throws -> ParsedFeed { feed }
 }
 
+/// Records which episodes were passed to ``download(_:)`` without touching
+/// the network or filesystem.
+private final class FakeDownloader: EpisodeDownloading {
+    private(set) var downloaded: [Episode] = []
+    func download(_ episode: Episode) async { downloaded.append(episode) }
+}
+
 @MainActor
 final class SubscriptionRepositoryTests: XCTestCase {
 
@@ -123,5 +130,152 @@ final class SubscriptionRepositoryTests: XCTestCase {
 
         // The future episode must not poison the mark past real dates (#296).
         XCTAssertEqual(podcast.lastSeenPubDate, d1)
+    }
+
+    // MARK: Auto-download on subscribe
+
+    func testSubscribeAutoDownloadsNMostRecentEpisodes() async throws {
+        let ctx = TestStore.freshContext()
+        // Set autoDownloadCount = 3 in settings.
+        AppSettingsStore(context: ctx).setInt(3, for: SettingsKey.autoDownloadCount)
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2), episode("c", d3)]))
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader)
+
+        _ = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        // All 3 episodes should be downloaded; the most-recent-first sort means
+        // "c" (d3), "b" (d2), "a" (d1) are the top 3 of 3.
+        XCTAssertEqual(fakeDownloader.downloaded.count, 3)
+        let downloadedGUIDs = Set(fakeDownloader.downloaded.map(\.guid))
+        XCTAssertEqual(downloadedGUIDs, ["a", "b", "c"])
+    }
+
+    func testSubscribeAutoDownloadsOnlyNMostRecentWhenFeedHasMore() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(2, for: SettingsKey.autoDownloadCount)
+        let d0 = Date(timeIntervalSince1970: 1_699_900_000) // older than d1
+        let fetcher = FakeFeedFetcher(
+            feed([episode("old", d0), episode("a", d1), episode("b", d2), episode("c", d3)])
+        )
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader)
+
+        _ = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        // Only the 2 most recent (c, b) should be downloaded.
+        XCTAssertEqual(fakeDownloader.downloaded.count, 2)
+        let downloadedGUIDs = Set(fakeDownloader.downloaded.map(\.guid))
+        XCTAssertTrue(downloadedGUIDs.contains("c"))
+        XCTAssertTrue(downloadedGUIDs.contains("b"))
+        XCTAssertFalse(downloadedGUIDs.contains("old"))
+    }
+
+    func testSubscribeWithAutoDownloadCountZeroDoesNotDownload() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(0, for: SettingsKey.autoDownloadCount)
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader)
+
+        _ = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        XCTAssertEqual(fakeDownloader.downloaded.count, 0)
+    }
+
+    func testSubscribeWithNoDownloaderDoesNotDownload() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(3, for: SettingsKey.autoDownloadCount)
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
+        // downloader omitted -- nil by default
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+
+        // Should complete without error; no downloads fired.
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        XCTAssertEqual(podcast.episodes.count, 2)
+    }
+
+    // MARK: Auto-queue on refresh
+
+    func testRefreshWithAutoQueueEnabledNewEpisodesGoToQueue() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let queueRepo = QueueRepository(context: ctx)
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, queue: queueRepo)
+        // Subscribe with autoQueue off so the initial episodes go to the normal path.
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        podcast.autoQueue = true
+        try ctx.save()
+
+        // Feed gains a new episode "b" at d2, which is after the mark (d1).
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        try await repo.refresh(podcast)
+
+        let b = try XCTUnwrap(podcast.episodes.first { $0.guid == "b" })
+        // Should be in queue, not inbox.
+        XCTAssertEqual(b.status, .inQueue)
+        XCTAssertTrue(b.inboxDismissed) // kept out of inbox
+        XCTAssertNotNil(b.queueItem)
+        // Verify it appears in the queue.
+        XCTAssertTrue(queueRepo.queue().map(\.guid).contains("b"))
+    }
+
+    func testRefreshWithAutoQueueDisabledNewEpisodesGoToInbox() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let queueRepo = QueueRepository(context: ctx)
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, queue: queueRepo)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        // autoQueue defaults to false; leave it off.
+
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        try await repo.refresh(podcast)
+
+        let b = try XCTUnwrap(podcast.episodes.first { $0.guid == "b" })
+        // Should be in inbox, not queue.
+        XCTAssertEqual(b.status, .newEpisode)
+        XCTAssertFalse(b.inboxDismissed)
+        XCTAssertNil(b.queueItem)
+        XCTAssertFalse(queueRepo.queue().map(\.guid).contains("b"))
+    }
+
+    func testRefreshWithAutoQueueButNoQueueRepositoryNewEpisodesGoToInbox() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        // No queue injected -- should fall back to normal inbox path.
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        podcast.autoQueue = true
+        try ctx.save()
+
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        try await repo.refresh(podcast)
+
+        let b = try XCTUnwrap(podcast.episodes.first { $0.guid == "b" })
+        // Falls back to inbox because queue was not provided.
+        XCTAssertEqual(b.status, .newEpisode)
+        XCTAssertFalse(b.inboxDismissed)
+    }
+
+    func testRefreshAutoQueueDoesNotEnqueueOldEpisodes() async throws {
+        let ctx = TestStore.freshContext()
+        let d0 = Date(timeIntervalSince1970: 1_699_900_000) // older than d1
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let queueRepo = QueueRepository(context: ctx)
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, queue: queueRepo)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml") // mark = d1
+        podcast.autoQueue = true
+        try ctx.save()
+
+        // "old" has a pub date before the mark -- it is NOT a new episode.
+        fetcher.feed = feed([episode("a", d1), episode("old", d0)])
+        try await repo.refresh(podcast)
+
+        let old = try XCTUnwrap(podcast.episodes.first { $0.guid == "old" })
+        // Old episodes are pre-dismissed into inbox, not auto-queued.
+        XCTAssertEqual(old.status, .newEpisode)
+        XCTAssertTrue(old.inboxDismissed) // dismissed, not queued
+        XCTAssertNil(old.queueItem)
+        XCTAssertTrue(queueRepo.queue().isEmpty)
     }
 }
