@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Now Playing: you can change playback speed directly from the player screen. Tap the speed badge below the controls to open a picker with quick shortcuts (0.5×, 1×, 1.25×, 1.5×, 2×) and a stepper for 0.1× precision anywhere from 0.5× to 5.0×. Set the speed for just the current podcast or for all podcasts from the same sheet. When a per-podcast speed is active, the badge shows a * so you can tell it differs from your global setting. VoiceOver announces the speed you chose and which scope you applied it to, and focus returns to the badge when the sheet closes. The global speed picker in Settings also covers the full 0.5× to 5.0× range now. (closes #368)
 - Coming from the previous version of Earshot: the first time you open this
   build over your existing install, Earshot brings your subscribed shows across
   automatically and drops you straight into your Library, skipping setup. Your
@@ -60,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imported one after another. (iOS only for now.)
 
 ### Changed
+- Settings: removed the Skip Silence toggle. AVPlayer doesn't support silence trimming natively, so the toggle had no effect on playback. Removing a control that silently does nothing is better than leaving it there. (closes #369)
 - Quick Actions: your configured episode-action order now drives the VoiceOver
   Actions rotor too, not just the menu and default double-tap. Reorder your
   actions in Settings and the rotor follows the same order (the menu and default
