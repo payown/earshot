@@ -161,6 +161,20 @@ The SwiftUI side is built and waiting.
   `PlayerService.swift`, `NowPlayingScreen.swift`, `SpeedPickerSheet.swift`
   (new), `SettingsScreen.swift`, `SpeedTests.swift` (new). 235 tests green.
 
+- **Decision (#370 -- AirPlay session options + in-player route picker):**
+  The `.playback` category was configured without options, so AirPlay was not
+  enabled by default. Added `options: [.allowAirPlay, .allowBluetooth]` to
+  both `configureSession()` (called on every episode load and resume) and
+  `applyAudioEnhancement()` (called on voice-enhance toggle mid-playback).
+  Keeping the same options in both call sites prevents a voice-enhance toggle
+  from inadvertently stripping AirPlay capability. Added `RoutePickerView`
+  (`AVRoutePickerView` wrapped as `UIViewRepresentable`, tint from
+  `Color.accentColor`) in `Core/UI/` and `airPlayRow` in `NowPlayingScreen`
+  below the speed badge. Accessibility label "AirPlay" / hint "Choose audio
+  output device" set on both the UIKit view and the SwiftUI wrapper layer.
+  **Files:** `RoutePickerView.swift` (new), `PlayerService.swift`,
+  `NowPlayingScreen.swift`, `project.pbxproj`. 248 tests green.
+
 ## UI Decisions
 
 - **Mini player inset attaches to tab content, not the TabView (#366).** The
