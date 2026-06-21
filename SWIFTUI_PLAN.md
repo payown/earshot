@@ -69,6 +69,28 @@ The SwiftUI side is built and waiting.
 4. Until 1–3 ship, OPML import (Settings) is the manual fallback, surfaced in the
    prompt's "Export my subscriptions as OPML" instructions.
 
+## Swift 6 Migration
+
+Step 1 = surface and clear all `complete` strict-concurrency warnings in Debug,
+**without** raising `SWIFT_VERSION` to 6 yet. Step 2 (later) flips
+`SWIFT_VERSION: 6` and fixes the remaining errors. One GH issue per subsystem;
+`earshot-swift6` gate on each.
+
+- **Flip (commit feb429a):** `SWIFT_STRICT_CONCURRENCY: complete` set in the
+  Debug config only (project-level `settings.configs.Debug`). Base, Beta, and
+  Release stay `minimal`. `SWIFT_VERSION` stays 5.0. Baseline: 86 unique
+  warnings, 0 errors, build succeeds.
+
+| Subsystem | GH Issue | Status | Notes |
+|-----------|----------|--------|-------|
+| Persistence — non-Sendable KeyPaths + schema versionIdentifier | #357 | [x] | Done (commit 6ecbd80). `versionIdentifier` made computed (values unchanged); `sendableKeyPath` helper (layout-preserving marker-protocol cast, stored-property-only per doc precondition) at SortDescriptor/@Query sites. All 5 gates passed. 204 tests. **4 warnings remain by design:** Apple `#Predicate`-macro-internal `KeyPath<Model,String>` Sendable (AppSettingsStore ×2, PlaybackStartup, SubscriptionRepository) — unfixable at source until a newer SDK; revisit at the Step 2 flip. |
+| Player — `sending 'note'` data races in PlayerService NC observers (+ trivial ChapterParser unused var) | #358 | [ ] | Not started. |
+| Subscriptions — `sending 'self.feed'` data races in SubscriptionRepository | #359 | [ ] | Not started. |
+| Migration — main-actor static props from nonisolated context in FlutterMigrationService | #360 | [ ] | Not started. |
+
+After #358/#359/#360 land, only the 4 macro `#Predicate` warnings should remain;
+then stop and report before considering the Step 2 `SWIFT_VERSION: 6` flip.
+
 ## Decisions Log
 
 - **Decision:** Feature-first layout `Earshot/Features/<feature>/{Data,Domain,Presentation}`, migrating the flat `EarshotSwift/Sources/` slice. **Reason:** documented CLAUDE.md standard; cheap while small. **Issue:** #336.
