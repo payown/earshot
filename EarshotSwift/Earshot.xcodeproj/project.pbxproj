@@ -64,6 +64,7 @@
 		6CD33440829B9B83DBA4F576 /* QuickActionConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B3D418DEEE23B973A761F26 /* QuickActionConfig.swift */; };
 		712E933178474B9565AD8801 /* EarshotSchemaV1.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52A120256FB53824821318A4 /* EarshotSchemaV1.swift */; };
 		76CA1D5C34804F82048795F3 /* StoreMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBCA06917D3490C5734BED12 /* StoreMigrationTests.swift */; };
+		7716D65EEDCDBDB4CC11E772 /* NowPlayingScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A434721909D5CCA1BBA8CD0C /* NowPlayingScreen.swift */; };
 		78792212EF7E1CCAE13117F8 /* RSSParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BE4582317C4948ECEF3288 /* RSSParserTests.swift */; };
 		7A11ED3F5A587E7B4348FA63 /* MigrationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F51D7E55E6E0C5CD1413FA1 /* MigrationGate.swift */; };
 		7CD93A96CA718A1A12785A98 /* StatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC5F7F7D6333626FE8650F1 /* StatsTests.swift */; };
@@ -215,6 +216,7 @@
 		9F413BCD620A311C966B89FD /* DownloadsInboxLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsInboxLogicTests.swift; sourceTree = "<group>"; };
 		A0CB078CBF0DF39C849DEE81 /* ExpirationLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpirationLogic.swift; sourceTree = "<group>"; };
 		A201BE0E62AF4F48FB841958 /* StoreMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreMigration.swift; sourceTree = "<group>"; };
+		A434721909D5CCA1BBA8CD0C /* NowPlayingScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingScreen.swift; sourceTree = "<group>"; };
 		A621AE99537538C3A0AD021C /* EpisodeRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeRow.swift; sourceTree = "<group>"; };
 		ABEEC723E5C0BC90DFC057B2 /* AppSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSetting.swift; sourceTree = "<group>"; };
 		AF2D210574E494DFF9E08AB0 /* QuickActionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionRepository.swift; sourceTree = "<group>"; };
@@ -790,6 +792,7 @@
 			isa = PBXGroup;
 			children = (
 				25DCF677FA43A7F79872AE07 /* NowPlayingBar.swift */,
+				A434721909D5CCA1BBA8CD0C /* NowPlayingScreen.swift */,
 				9CDDEEB4DCCF1EAA40AA1518 /* PlayerControlsSheet.swift */,
 			);
 			path = Presentation;
@@ -1050,6 +1053,7 @@
 				EE9986D2EC3F6DE5E32BDBE8 /* ModelContainerFactory.swift in Sources */,
 				33C506B6499A0ED5BFBA8756 /* ModelEnums.swift in Sources */,
 				5DC7D8D09A34917698C18126 /* NowPlayingBar.swift in Sources */,
+				7716D65EEDCDBDB4CC11E772 /* NowPlayingScreen.swift in Sources */,
 				A3B6D7635B7E6F694708D515 /* OPMLDocument.swift in Sources */,
 				4E9CD397633F77B15C362FA5 /* OPMLImportService.swift in Sources */,
 				048CB4E68DC3B4C54EF6CFE9 /* OnboardingContent.swift in Sources */,

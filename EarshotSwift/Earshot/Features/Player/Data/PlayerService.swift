@@ -122,6 +122,11 @@ final class PlayerService {
     /// act on the current item — e.g. bookmarking the current position.
     var nowPlayingEpisode: Episode? { currentEpisode }
 
+    /// True once a finite, positive duration is known for the loaded item. The
+    /// scrubber binds its range and enabled state to this so it never receives a
+    /// degenerate `0...0` range before the item reports its duration (#367).
+    var hasKnownDuration: Bool { durationSeconds > 0 }
+
     /// Plays `episode` and jumps to an explicit start position. Backs
     /// jump-to-bookmark, where the saved position must be overridden.
     func play(_ episode: Episode, at startSeconds: Double) {

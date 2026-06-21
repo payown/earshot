@@ -20,36 +20,45 @@ struct RootView: View {
                 InboxScreen()
                     .contextualTip(.inbox)
             }
+            .modifier(MiniPlayerInset())
             .tabItem { Label("Inbox", systemImage: "tray") }
 
             NavigationStack {
                 QueueScreen()
                     .contextualTip(.queue)
             }
+            .modifier(MiniPlayerInset())
             .tabItem { Label("Queue", systemImage: "list.bullet") }
 
             NavigationStack {
                 SubscriptionsView()
             }
+            .modifier(MiniPlayerInset())
             .tabItem { Label("Library", systemImage: "books.vertical") }
 
             NavigationStack {
                 DownloadsScreen()
                     .contextualTip(.downloads)
             }
+            .modifier(MiniPlayerInset())
             .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
 
             NavigationStack {
                 SettingsScreen()
             }
+            .modifier(MiniPlayerInset())
             .tabItem { Label("Settings", systemImage: "gearshape") }
-        }
-        .safeAreaInset(edge: .bottom) {
-            NowPlayingBar()
         }
         // VoiceOver magic tap (two-finger double tap) toggles playback anywhere.
         .accessibilityAction(.magicTap) {
             player.togglePlayPause()
+        }
+        // Announce play-state transitions once, at the single TabView root. The
+        // mini player is now inset into each of the five tabs (#366), so the
+        // announcement cannot live on NowPlayingBar without firing up to five
+        // times per toggle. Announcer no-ops when VoiceOver is off.
+        .onChange(of: player.isPlaying) { _, isPlaying in
+            Announcer.announce(isPlaying ? "Playing" : "Paused")
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
@@ -90,6 +99,23 @@ struct RootView: View {
                 migrationComplete: migration.isComplete
             )
             #endif
+        }
+    }
+}
+
+/// Insets the mini player above a tab's content via the tab content's own bottom
+/// safe area. Applied to each tab's `NavigationStack` rather than to the
+/// `TabView` — attaching the inset to the TabView itself pushed the bar into the
+/// TabView's bottom safe area, which overlaps and hides the system tab bar
+/// (#366). Attached to the tab content, the bar floats above the system tab bar,
+/// the tab bar stays visible and tappable during playback, and the system
+/// continues to handle positioning above the tab bar and home indicator across
+/// devices and Dynamic Type sizes. `NowPlayingBar` renders nothing when no
+/// episode is loaded, so this adds no inset until playback begins.
+private struct MiniPlayerInset: ViewModifier {
+    func body(content: Content) -> some View {
+        content.safeAreaInset(edge: .bottom) {
+            NowPlayingBar()
         }
     }
 }

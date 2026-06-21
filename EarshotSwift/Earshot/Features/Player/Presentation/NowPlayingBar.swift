@@ -7,7 +7,7 @@ import SwiftData
 struct NowPlayingBar: View {
     @Environment(PlayerService.self) private var player
     @Environment(\.modelContext) private var context
-    @State private var showingControls = false
+    @State private var showingNowPlaying = false
 
     var body: some View {
         if let title = player.currentTitle {
@@ -33,13 +33,10 @@ struct NowPlayingBar: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(.regularMaterial)
-            // The value change alone isn't reliably re-spoken on a custom button,
-            // so announce play-state transitions explicitly (Announcer no-ops when
-            // VoiceOver is off). This is the single source for the announcement.
-            .onChange(of: player.isPlaying) { _, isPlaying in
-                Announcer.announce(isPlaying ? "Playing" : "Paused")
-            }
-            .sheet(isPresented: $showingControls) { PlayerControlsSheet() }
+            // Play-state ("Playing" / "Paused") is announced once at the RootView
+            // TabView level, not here: this bar is inset into all five tabs (#366),
+            // so a per-bar .onChange would announce up to five times per toggle.
+            .sheet(isPresented: $showingNowPlaying) { NowPlayingScreen() }
         }
     }
 
@@ -47,7 +44,7 @@ struct NowPlayingBar: View {
     /// player controls (sleep timer + chapters).
     private func nowPlayingInfo(title: String) -> some View {
         Button {
-            showingControls = true
+            showingNowPlaying = true
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: sleepTimerActive ? "moon.zzz.fill" : "waveform")
@@ -75,7 +72,7 @@ struct NowPlayingBar: View {
         // value when the sleep timer is on (an empty value reads as a pause).
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Opens player controls, sleep timer and chapters")
+        .accessibilityHint("Opens the full player")
         .modifier(OptionalAccessibilityValue(value: sleepTimerActive ? "Sleep timer on" : nil))
     }
 
