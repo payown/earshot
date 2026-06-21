@@ -55,6 +55,15 @@ final class PlayerService {
     @ObservationIgnored private var accumulatedListenSeconds: Double = 0
     @ObservationIgnored private let sessionFlushSeconds: Double = 30
 
+    // Position-persistence throttle (#362). The periodic time observer fires
+    // every second, but a synchronous main-actor `context.save()` every second
+    // starves the run loop enough to block TabView selection while playing.
+    // We instead persist position on a coarse cadence (see
+    // `PlaybackLogic.shouldPersistTick`); the existing pause / seek / episode-
+    // switch / session-flush paths still save eagerly so durability is intact.
+    // `nil` forces the next tick to write.
+    @ObservationIgnored private var lastPersistedSecond: Int?
+
     // Gapless preload: the next queue item is built (and starts buffering) ahead
     // of time so auto-advance is near-seamless. Invalidated whenever the queue
     // changes (via `.earshotQueueDidChange`).
@@ -205,6 +214,8 @@ final class PlayerService {
         }
         currentPositionSeconds = Double(resume)
         isPlaying = false
+        // Force the first tick after play to persist this episode's position.
+        lastPersistedSecond = nil
         updateNowPlayingInfo()
     }
 
@@ -362,7 +373,7 @@ final class PlayerService {
             currentEpisode?.durationSeconds = Int(itemDuration)
         }
 
-        persistCurrentPosition()
+        persistPositionThrottled(currentSecond: Int(currentSeconds))
         recordListeningTick()
         updateNowPlayingElapsed()
 
@@ -374,9 +385,30 @@ final class PlayerService {
         }
     }
 
+    /// Eagerly writes the current position to disk (used by pause, seek, episode
+    /// switch — the durability anchors). Resets the per-tick throttle so the next
+    /// tick doesn't redundantly re-save the same second.
     private func persistCurrentPosition() {
         guard let episode = currentEpisode, currentPositionSeconds.isFinite else { return }
-        episode.positionSeconds = Int(max(0, currentPositionSeconds))
+        let second = Int(max(0, currentPositionSeconds))
+        episode.positionSeconds = second
+        lastPersistedSecond = second
+        saveContext()
+    }
+
+    /// Per-tick position write, throttled to ``PlaybackLogic/positionPersistInterval``
+    /// so the synchronous `context.save()` doesn't run every second and stall the
+    /// main run loop (issue #362). The observed `currentPositionSeconds` and the
+    /// lock-screen elapsed time still update every tick — only the SwiftData
+    /// write is coarsened.
+    private func persistPositionThrottled(currentSecond: Int) {
+        guard let episode = currentEpisode else { return }
+        guard PlaybackLogic.shouldPersistTick(
+            currentSecond: currentSecond,
+            lastPersistedSecond: lastPersistedSecond
+        ) else { return }
+        episode.positionSeconds = max(0, currentSecond)
+        lastPersistedSecond = currentSecond
         saveContext()
     }
 
@@ -423,6 +455,8 @@ final class PlayerService {
     private func resetListeningTracking() {
         lastTickPosition = currentPositionSeconds
         accumulatedListenSeconds = 0
+        // Force the next tick to persist this episode's first position.
+        lastPersistedSecond = nil
     }
 
     private func markCurrentEpisodePlayed() {
