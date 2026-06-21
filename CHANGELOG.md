@@ -69,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (closes #357, #358, #359, #360, #361)
 
 ### Fixed
+- Player: tabs now switch instantly while audio is playing. Before, tapping a tab
+  did nothing until you paused, which left VoiceOver users unable to move around
+  the app during playback. The fix throttles how often the playback position is
+  saved to disk (it was saving every second on the main thread and starving the
+  UI). Position is still saved on pause, seek, and episode change, so nothing is
+  lost. (closes #362)
 - Quick Actions: reordering your episode or podcast actions now saves reliably.
   Some setups (carried over from an older app version) could hit a hidden
   conflict that silently rolled back the save, so the order reverted every time

@@ -68,6 +68,38 @@ enum PlaybackLogic {
         queue.first { $0 != current }
     }
 
+    /// How often the per-tick playback position is flushed to SwiftData while
+    /// audio plays. The periodic time observer fires every second, but a
+    /// synchronous main-actor `context.save()` every second starves the main
+    /// run loop (TabView selection/hit-testing stalls — issue #362). Position is
+    /// also persisted on pause, seek, episode switch, and listening-session
+    /// flush, so a coarser tick cadence loses at most this many seconds of
+    /// progress on an abrupt kill, while keeping the run loop responsive.
+    static let positionPersistInterval = 5
+
+    /// Whether this tick should write the playback position to disk.
+    ///
+    /// True on the first tracked tick (`lastPersistedSecond == nil`), whenever at
+    /// least ``positionPersistInterval`` seconds have elapsed since the last
+    /// write, or whenever the position jumped backwards (a seek/skip-back — we
+    /// want that reflected promptly). Pure so the cadence is unit-testable.
+    ///
+    /// - Parameters:
+    ///   - currentSecond: The integer playback second for this tick.
+    ///   - lastPersistedSecond: The second at which we last wrote, or `nil` if we
+    ///     have not written for the current episode yet.
+    ///   - interval: The minimum gap between writes (defaults to
+    ///     ``positionPersistInterval``).
+    static func shouldPersistTick(
+        currentSecond: Int,
+        lastPersistedSecond: Int?,
+        interval: Int = positionPersistInterval
+    ) -> Bool {
+        guard let last = lastPersistedSecond else { return true }
+        if currentSecond < last { return true }
+        return currentSecond - last >= interval
+    }
+
     /// Decides whether an episode at `position` of `duration` seconds should be
     /// marked played, and where to resume from on the next play.
     ///
