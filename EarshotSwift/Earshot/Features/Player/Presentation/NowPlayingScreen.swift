@@ -15,11 +15,13 @@ struct NowPlayingScreen: View {
 
     @State private var showingControls = false
     @State private var showingNotes = false
+    @State private var showingSpeedPicker = false
 
     // On present, VoiceOver should land on the episode title (a heading), not the
     // Close button or the decorative artwork. We request focus after a short
     // settle so the sheet transition doesn't drop the request mid-animation.
     @AccessibilityFocusState private var titleFocused: Bool
+    @AccessibilityFocusState private var speedBadgeFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -31,6 +33,7 @@ struct NowPlayingScreen: View {
                     titleBlock
                     ScrubberView(player: player)
                     transportRow
+                    speedRow
 
                     if hasShowNotes {
                         showNotesButton
@@ -57,6 +60,13 @@ struct NowPlayingScreen: View {
                 }
             }
             .sheet(isPresented: $showingControls) { PlayerControlsSheet() }
+            .sheet(isPresented: $showingSpeedPicker, onDismiss: {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    speedBadgeFocused = true
+                }
+            }) {
+                SpeedPickerSheet()
+            }
             .sheet(isPresented: $showingNotes) {
                 if let episode = player.nowPlayingEpisode {
                     ShowNotesView(episode: episode)
@@ -142,6 +152,46 @@ struct NowPlayingScreen: View {
                 .accessibilityHidden(true)
         }
         .accessibilityLabel(label)
+    }
+
+    // MARK: Speed control row
+
+    /// A compact single-row speed badge. Tapping opens the full speed picker
+    /// sheet where the user can choose a quick value or use the stepper.
+    private var speedRow: some View {
+        HStack {
+            Spacer()
+            Button {
+                showingSpeedPicker = true
+            } label: {
+                Text(speedLabel)
+                    .font(.subheadline.monospacedDigit())
+                    .fontWeight(.medium)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.xs)
+                    .background(.thinMaterial, in: Capsule())
+            }
+            .accessibilityLabel("Playback speed")
+            .accessibilityValue(speedAccessibilityValue)
+            .accessibilityHint("Opens speed picker")
+            .accessibilityFocused($speedBadgeFocused)
+            Spacer()
+        }
+    }
+
+    private var speedLabel: String {
+        let rate = player.effectiveRate
+        let formatted = rate.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", rate)
+            : String(format: "%g", rate)
+        let overrideIndicator = player.hasPodcastSpeedOverride ? "*" : ""
+        return "\(formatted)x\(overrideIndicator)"
+    }
+
+    private var speedAccessibilityValue: String {
+        let label = PlaybackLogic.spokenRate(player.effectiveRate)
+        return player.hasPodcastSpeedOverride ? "\(label), podcast override active" : label
     }
 
     // MARK: Show notes

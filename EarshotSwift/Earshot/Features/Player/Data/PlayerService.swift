@@ -305,6 +305,47 @@ final class PlayerService {
     /// or the current podcast's override — changes mid-playback.
     func reapplyRate() { applyRate() }
 
+    /// Sets the per-podcast speed override on the current episode's podcast and
+    /// immediately re-applies the rate. No-op when nothing is loaded.
+    /// Announces the change to VoiceOver.
+    func setPodcastSpeedOverride(_ speed: Double) {
+        guard let podcast = currentEpisode?.podcast else { return }
+        let clamped = PlaybackLogic.clampedSpeed(speed)
+        podcast.speedOverride = clamped
+        saveContext()
+        applyRate()
+        Announcer.announce("Speed set to \(PlaybackLogic.spokenRate(clamped)) for this podcast")
+    }
+
+    /// Clears the per-podcast speed override on the current episode's podcast so
+    /// global speed takes effect. No-op when nothing is loaded.
+    func clearPodcastSpeedOverride() {
+        guard let podcast = currentEpisode?.podcast else { return }
+        podcast.speedOverride = nil
+        saveContext()
+        applyRate()
+        let global = settings?.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
+            ?? SettingsDefault.globalSpeed
+        Announcer.announce("Speed reset to global \(PlaybackLogic.spokenRate(global))")
+    }
+
+    /// Sets the global playback speed in persistent settings, clears any
+    /// per-podcast override on the current podcast, and immediately re-applies.
+    /// Announces the change to VoiceOver.
+    func setGlobalSpeed(_ speed: Double) {
+        let clamped = PlaybackLogic.clampedSpeed(speed)
+        settings?.setDouble(clamped, for: SettingsKey.globalSpeed)
+        currentEpisode?.podcast?.speedOverride = nil
+        saveContext()
+        applyRate()
+        Announcer.announce("Speed set to \(PlaybackLogic.spokenRate(clamped)) globally")
+    }
+
+    /// True when the currently loaded episode's podcast has a speed override set.
+    var hasPodcastSpeedOverride: Bool {
+        currentEpisode?.podcast?.speedOverride != nil
+    }
+
     private func applyRate() {
         let rate = currentEffectiveRate
         // Setting `rate` also starts playback; only apply when we intend to play.

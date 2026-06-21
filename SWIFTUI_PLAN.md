@@ -140,6 +140,27 @@ The SwiftUI side is built and waiting.
   tracker; eager paths reset it), `PlaybackLogicTests.swift` (+6 cadence tests).
   210 tests green, Debug strict-concurrency clean.
 
+- **Decision (#368 -- in-player speed control):** Speed control added to
+  `NowPlayingScreen` as a compact speed badge (shows current rate with a `*`
+  suffix when a podcast override is active). Tapping opens `SpeedPickerSheet`,
+  a new sheet with: (a) a scope toggle "This podcast" vs "All podcasts", (b) a
+  quick-tap grid of 8 shortcuts (0.8, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0),
+  (c) a Stepper for precise 0.1x adjustment across the full 0.5x-5.0x range,
+  and (d) a destructive "Reset to global speed" row when a podcast override is
+  active. Per-podcast writes go to `Podcast.speedOverride`; global writes go to
+  `AppSettingsStore` (same key `global_speed` used by SettingsScreen). Both
+  paths call `PlayerService.applyRate()` immediately so the rate takes effect
+  without pause/resume. VoiceOver: badge has `accessibilityLabel("Playback
+  speed")` and a spoken `accessibilityValue` (e.g. "1.5 times"); speed changes
+  are announced via `Announcer.announce`; the stepper has an explicit
+  `accessibilityValue` and hint; shortcuts carry `.isSelected` when active.
+  Speed range updated in SettingsScreen to full 0.5x-5.0x via `stride`. Pure
+  helpers (`clampedSpeed`, `spokenRate`, `speedShortcuts`, `minSpeed`,
+  `maxSpeed`, `speedStep`) added to `PlaybackLogic` and covered by 23 new unit
+  tests in `SpeedTests.swift`. **Files:** `PlaybackLogic.swift`,
+  `PlayerService.swift`, `NowPlayingScreen.swift`, `SpeedPickerSheet.swift`
+  (new), `SettingsScreen.swift`, `SpeedTests.swift` (new). 235 tests green.
+
 ## UI Decisions
 
 - **Mini player inset attaches to tab content, not the TabView (#366).** The
@@ -170,6 +191,46 @@ The SwiftUI side is built and waiting.
   on the `swift` branch is **209** (verified via `git stash` on this branch). New
   baseline of record: **209**.
 
+## Phase 3 Work Queue (post-parity audit, 2026-06-21)
+
+Test baseline: **235 tests** (verified 2026-06-21, after #368).
+
+### P0 — Must fix first
+| Issue | Title | Agent | Status |
+|-------|-------|-------|--------|
+| #368 | In-player speed control + per-podcast override | earshot-audio + earshot-ui | [x] | DONE. Speed badge in NowPlayingScreen, SpeedPickerSheet (shortcuts + stepper + scope + reset), per-podcast override and global write paths, full 0.5x-5.0x range in SettingsScreen. 23 new tests, 235 total. |
+| #369 | Skip Silence: wire or remove dead toggle | earshot-audio | [x] | DONE. Chose Option B: removed dead Toggle from SettingsScreen (was bound to a property that no engine code ever read). Removed skipSilenceEnabled property and configure-load from SettingsStore. Retained SettingsKey/SettingsDefault constants in AppSettingsStore with deprecation comments (data compat). No MTAudioProcessingTap (Decision F14). 235 tests green. |
+
+### P1 — High user impact
+| Issue | Title | Agent | Status |
+|-------|-------|-------|--------|
+| #399 | Per-podcast settings page | earshot-ui | [ ] |
+| #370 | AirPlay route picker in player | earshot-audio | [ ] |
+| #380 | Auto-download N on subscribe + auto-queue on refresh | earshot-data | [ ] |
+| #378 | Lock screen artwork (MPMediaItemArtwork) | earshot-audio | [ ] |
+| #401 | Verify export audio shares local file (follow-up #363) | earshot-audio | [ ] |
+
+### P2 — Polish and parity
+| Issue | Title | Agent | Status |
+|-------|-------|-------|--------|
+| #379 | Sleep timer: Extend +5 on bar; countdown clears on episode switch | earshot-audio + earshot-ui | [ ] |
+| #373 | Chapter skip next/prev from player controls + hold-to-scan | earshot-audio | [ ] |
+| #371 | Player episode actions: Mark as played, Export audio, Stop after this episode | earshot-ui | [ ] |
+| #372 | Bookmarks list in player: jump, delete, share | earshot-ui | [ ] |
+| #392 | About screen + Send Feedback (PRD 12/17) | earshot-ui | [ ] |
+| #400 | Expand speed range 0.5×–5.0× | earshot-ui | [x] | Absorbed into #368. SettingsScreen Picker now uses stride(0.5...5.0 by 0.1). |
+
+### P3 — Larger standalone features
+| Issue | Title | Agent | Status |
+|-------|-------|-------|--------|
+| #381 | Background feed refresh (BGTaskScheduler) | earshot-networking | [ ] |
+| #72 | Push notifications per podcast | earshot-data | [ ] |
+| #385 | Artwork disk cache | earshot-networking | [ ] |
+| #386 | Networking robustness: retry/backoff/timeouts | earshot-networking | [ ] |
+
+### Excluded
+- #395 — DO NOT TOUCH. Protected per session instructions.
+
 ## Blockers
 
 None. (F14 audio-enhancement DSP intentionally deferred — see Decision F14.)
@@ -184,3 +245,18 @@ No force-unwraps (the lone `!` is the boolean `!settings.onboardingComplete`), n
 type struct, no Task/observer/timer/sink), no new async or off-main SwiftData
 access, no entitlement or secret changes. `#if IS_BETA_BUILD` migration guards
 untouched and still fenced. Structural UI change with no new logic.
+
+## Security Review — Issue #369
+
+earshot-security gate: PASS. Removal-only change: dead `Toggle("Skip silence")`
+removed from SettingsScreen, `skipSilenceEnabled` property and its configure-load
+line removed from SettingsStore. `SettingsKey.skipSilenceEnabled` and
+`SettingsDefault.skipSilenceEnabled` retained in AppSettingsStore with explicit
+deprecation comments explaining data compatibility. No new code paths, no new
+closures, no new async work. Pre-existing `try?` calls in AppSettingsStore
+(context.fetch) and SettingsScreen (String(contentsOf:)) are unchanged and
+pre-date this issue. No force-unwraps, fatalErrors, retain cycles, secrets,
+entitlement changes, or IS_BETA_BUILD guard regressions introduced.
+Data compatibility is sound: the key is retained so a future reader gets the
+stored Bool string; it is simply never written again. No new error types needed
+(no new code paths).

@@ -52,6 +52,39 @@ enum PlaybackLogic {
         return 1.0
     }
 
+    // MARK: Speed range and helpers (PRD 5.5)
+
+    /// The minimum allowed playback speed (PRD 5.5).
+    static let minSpeed: Double = 0.5
+    /// The maximum allowed playback speed (PRD 5.5).
+    static let maxSpeed: Double = 5.0
+    /// Step size for the full-range speed picker (0.1x increments, PRD 5.5).
+    static let speedStep: Double = 0.1
+
+    /// Clamps `speed` to the allowed [0.5, 5.0] range and rounds to the nearest
+    /// 0.1 increment so floating-point arithmetic does not produce values like
+    /// 1.1000000001.
+    static func clampedSpeed(_ speed: Double) -> Double {
+        let clamped = min(max(speed, minSpeed), maxSpeed)
+        return (clamped * 10).rounded() / 10
+    }
+
+    /// The human-readable form of a speed value used in VoiceOver announcements.
+    /// Whole-number speeds omit the decimal (e.g. 2.0 becomes "2 times"); others
+    /// keep the significant digit (e.g. 1.5 becomes "1.5 times").
+    static func spokenRate(_ speed: Double) -> String {
+        let formatted = speed.truncatingRemainder(dividingBy: 1) == 0
+            ? String(Int(speed))
+            : String(format: "%g", speed)
+        return "\(formatted) times"
+    }
+
+    /// Quick-tap speed shortcuts shown in the in-player speed picker. Covers
+    /// the most common values without requiring the full stepper.
+    static let speedShortcuts: [Double] = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
+
+    // MARK: Completion / resume logic
+
     /// The result of evaluating a playback position against its duration.
     struct CompletionDecision: Equatable {
         /// True once the episode crosses the played threshold (or completes).
@@ -62,7 +95,7 @@ enum PlaybackLogic {
     }
 
     /// The id of the episode to play next after `current` finishes: the first
-    /// queue entry that isn't the one that just played. `nil` when the queue is
+    /// queue entry that is not the one that just played. `nil` when the queue is
     /// empty or holds only the current episode. Drives gapless advance.
     static func nextUpID<ID: Equatable>(queue: [ID], after current: ID?) -> ID? {
         queue.first { $0 != current }
@@ -71,7 +104,7 @@ enum PlaybackLogic {
     /// How often the per-tick playback position is flushed to SwiftData while
     /// audio plays. The periodic time observer fires every second, but a
     /// synchronous main-actor `context.save()` every second starves the main
-    /// run loop (TabView selection/hit-testing stalls — issue #362). Position is
+    /// run loop (TabView selection/hit-testing stalls -- issue #362). Position is
     /// also persisted on pause, seek, episode switch, and listening-session
     /// flush, so a coarser tick cadence loses at most this many seconds of
     /// progress on an abrupt kill, while keeping the run loop responsive.
@@ -81,7 +114,7 @@ enum PlaybackLogic {
     ///
     /// True on the first tracked tick (`lastPersistedSecond == nil`), whenever at
     /// least ``positionPersistInterval`` seconds have elapsed since the last
-    /// write, or whenever the position jumped backwards (a seek/skip-back — we
+    /// write, or whenever the position jumped backwards (a seek/skip-back --
     /// want that reflected promptly). Pure so the cadence is unit-testable.
     ///
     /// - Parameters:

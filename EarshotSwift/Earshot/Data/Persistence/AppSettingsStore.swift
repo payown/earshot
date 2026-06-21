@@ -10,6 +10,9 @@ enum SettingsKey {
     static let onboardingComplete = "onboarding_complete"
     static let crashReportingEnabled = "crash_reporting_enabled"
     static let analyticsEnabled = "analytics_enabled"
+    // skip_silence_enabled: retained for data compatibility only. The feature
+    // requires MTAudioProcessingTap (Decision F14) and is not implemented. The
+    // SettingsStore property and Settings UI toggle have been removed (#369).
     static let skipSilenceEnabled = "skip_silence_enabled"
     static let voiceEnhanceEnabled = "voice_enhance_enabled"
     static let globalSpeed = "global_speed"
@@ -32,7 +35,7 @@ enum SettingsDefault {
     static let historyRetentionDays = 90
     static let crashReportingEnabled = true
     static let analyticsEnabled = true
-    static let skipSilenceEnabled = false
+    static let skipSilenceEnabled = false  // retained; not read by SettingsStore (#369)
     static let globalSpeed = 1.0
     static let skipForwardSeconds = 30
     static let skipBackSeconds = 15

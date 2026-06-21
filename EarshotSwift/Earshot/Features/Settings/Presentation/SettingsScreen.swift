@@ -15,7 +15,10 @@ struct SettingsScreen: View {
     @State private var confirmingReset = false
     @State private var importingOPML = false
 
-    private static let speeds: [Double] = [0.8, 1.0, 1.2, 1.5, 1.75, 2.0]
+    // Full 0.5x-5.0x range in 0.1x increments (PRD 5.5). Generated at compile
+    // time so the Picker covers the complete allowed range.
+    private static let speeds: [Double] = stride(from: 0.5, through: 5.0, by: 0.1)
+        .map { (($0 * 10).rounded() / 10) }
     private static let skipIntervals = [10, 15, 30, 45, 60]
     private static let downloadCounts = [0, 1, 3, 5, 10]
     private static let retentionOptions = [30, 60, 90, 180, 365]
@@ -40,7 +43,6 @@ struct SettingsScreen: View {
                         Text("\(secs)s").tag(secs).accessibilityLabel("\(secs) seconds")
                     }
                 }
-                Toggle("Skip silence", isOn: $settings.skipSilenceEnabled)
                 Toggle("Voice enhance", isOn: $settings.voiceEnhanceEnabled)
             }
 
@@ -101,7 +103,9 @@ struct SettingsScreen: View {
                     Label("Export subscriptions (OPML)", systemImage: "square.and.arrow.up")
                 }
                 .disabled(podcasts.isEmpty)
-                .accessibilityHint(podcasts.isEmpty ? "Subscribe to a podcast to enable export." : "")
+                .accessibilityHint(podcasts.isEmpty
+                    ? "Subscribe to a podcast to enable export."
+                    : "Saves your podcast list as a file you can use as a backup")
 
                 Button {
                     importingOPML = true
