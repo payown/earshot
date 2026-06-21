@@ -121,6 +121,45 @@ final class PlaybackLogicTests: XCTestCase {
         XCTAssertEqual(rate, 1.25)
     }
 
+    // MARK: Position-persist cadence (#362)
+
+    func testFirstTickAlwaysPersists() {
+        // No prior write for this episode -> persist immediately.
+        XCTAssertTrue(PlaybackLogic.shouldPersistTick(currentSecond: 0, lastPersistedSecond: nil))
+        XCTAssertTrue(PlaybackLogic.shouldPersistTick(currentSecond: 42, lastPersistedSecond: nil))
+    }
+
+    func testDoesNotPersistBeforeIntervalElapses() {
+        // Default interval is 5s; ticks 1..4 after a write at 0 should not save.
+        for second in 1...4 {
+            XCTAssertFalse(
+                PlaybackLogic.shouldPersistTick(currentSecond: second, lastPersistedSecond: 0),
+                "second \(second) should be throttled"
+            )
+        }
+    }
+
+    func testPersistsOnceIntervalElapses() {
+        XCTAssertTrue(PlaybackLogic.shouldPersistTick(currentSecond: 5, lastPersistedSecond: 0))
+        XCTAssertTrue(PlaybackLogic.shouldPersistTick(currentSecond: 6, lastPersistedSecond: 0))
+        XCTAssertTrue(PlaybackLogic.shouldPersistTick(currentSecond: 30, lastPersistedSecond: 25))
+    }
+
+    func testBackwardJumpPersistsImmediately() {
+        // A seek/skip-back lands behind the last write — reflect it promptly.
+        XCTAssertTrue(PlaybackLogic.shouldPersistTick(currentSecond: 10, lastPersistedSecond: 40))
+    }
+
+    func testRespectsCustomInterval() {
+        XCTAssertFalse(PlaybackLogic.shouldPersistTick(currentSecond: 9, lastPersistedSecond: 0, interval: 10))
+        XCTAssertTrue(PlaybackLogic.shouldPersistTick(currentSecond: 10, lastPersistedSecond: 0, interval: 10))
+    }
+
+    func testDefaultIntervalIsCoarserThanOneSecond() {
+        // Guards against regressing back to a per-second save.
+        XCTAssertGreaterThan(PlaybackLogic.positionPersistInterval, 1)
+    }
+
     // MARK: Up-next resolution (gapless advance)
 
     func testNextUpIsFirstQueueItemAfterCurrent() {

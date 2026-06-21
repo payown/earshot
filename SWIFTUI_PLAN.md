@@ -46,6 +46,13 @@ Phase 2 = immediate fixes, the Flutter→SwiftUI migration, and audio DSP (#352)
 | Fix C — artwork not loading on device | — | [x] | Skipped. Artwork confirmed working on device by Michael. (Investigation noted a latent gap: RSSParser reads `itunes:image` only, not the standard `<image><url>` channel-art fallback — file an issue if any feed surfaces it later.) |
 | Migration — Flutter→SwiftUI subscription import | #354 | [~] | SwiftUI signing-independent layer DONE: `MigrationGate` (gate + 3-reminder cap), `FlutterMigrationService` (reads `SELECT rss_url FROM podcasts` from `earshot_export.db` via `import SQLite3`, no-ops if absent), beta-gated `MigrationPromptView` wired into RootView, dedicated **Beta** build config (`IS_BETA_BUILD` in Debug+Beta, not Release). 10 new tests (real temp SQLite DB + mocked feed). Release build confirmed to exclude the sheet. mobile-accessibility reviewed (iOS-001 announcement lifecycle + 5 more fixed). **Deferred:** App Group entitlement (`Earshot.entitlements`) — needs the group registered to team 72PH974742 and matched on the Flutter app; can't be verified in CI. Until it lands, the container URL is nil and migration no-ops. See Flutter-side tasks below. |
 | Audio DSP | #352 | [~] | DONE pending device verify. `AudioEnhancementLogic` (pure mode/channel mapping, tested both ways). `configureSession` now conditional on `voiceEnhanceEnabled` (was hardcoded `.spokenAudio`); `applyAudioEnhancement()` sets mode + `setPreferredOutputNumberOfChannels` (1 mono / 2 stereo); all `AVAudioSession` calls in do/catch + `AppLog.player` (no silent `try?`). Public `effectiveRate` + `reapplyRate()`. RootView `.onChange` re-applies global speed + voice-enhance mid-playback (observation-based, not NotificationCenter). Per-podcast `speedOverride` has no setter UI yet (deferred F7) — `reapplyRate()` ready for it. Mono is audible only on device. |
+| BUG — tab switching blocked during playback | #362 | [x] | Per-second synchronous main-actor SwiftData `context.save()` from the 1s time observer starved the run loop, freezing TabView selection while audio played (severe VoiceOver nav regression). Fixed by throttling the per-tick position write to a 5s cadence via pure `PlaybackLogic.shouldPersistTick`; eager saves on pause/seek/episode-switch/30s-flush keep durability. All gates passed (security, testing, swift6, changelog; a11y N/A — no view changed). 210 tests green (was 204). Branch `fix/issue-362-tab-switching-playback`. Awaiting device verification. |
+
+**Non-blocking follow-up (from #362 security gate, NOT done — file if it surfaces):**
+`PlayerService.persistPositionThrottled` (and the prior per-second save) lacks an
+`isPlayed` guard, so a tick after the 95% played threshold could rewrite a stale
+non-zero `positionSeconds` over the just-zeroed value. Pre-existing, cosmetic
+(episode is already played; end-of-item resets to 0 anyway), out of scope for #362.
 
 ### Migration — Flutter-side tasks (document-only; NOT done, no Flutter files touched)
 
@@ -107,6 +114,31 @@ The SwiftUI side is built and waiting.
 - **Decision (F14):** Chapters (PC2.0 JSON + embedded AVAsset/ID3 + description-timestamp fallback) and the sleep timer (all presets, extend +5, end-of-episode) are implemented, wired, and unit-tested. **Audio-enhancement DSP (skip silence / voice boost / mono) is deferred.** Native AVPlayer has no API for these; they require an `MTAudioProcessingTap` (audio-render-thread C interop) that cannot be device-verified in the build/test environment, and a faulty tap crashes the render thread — exactly the kind of un-recoverable failure the DB-migration rule warns against shipping unverified. The Flutter app's own iOS build doesn't apply these either (they're Android-only there — see its `player_screen.dart` comments), so this is not a parity regression. The existing Settings toggles (`skip_silence_enabled`, `voice_enhance_enabled`) persist and are ready to wire when the tap lands on-device. **Follow-up:** implement `MTAudioProcessingTap`-based mono + gain (and evaluate skip-silence) in a focused, device-verified PR. **Issue:** #349.
 
 - **Decision (Naming):** "Library" is the **established, intentional** name for the subscriptions / podcast list (the tab, `SubscriptionsView` title, related announcements). Users are already used to it — do not rename it. The PRD's use of "Library" for local audio import (PRD 5.8) is a naming conflict, resolved here in favor of the existing user vocabulary: the subscriptions list keeps "Library," and local audio import — **if** it ships — will be called **"Local Audio,"** not "Library." Documentation-only; no code change.
+
+## Audio Decisions
+
+- **Decision (#362 — tab switching blocked during playback):** The periodic time
+  observer fires every second and previously called `persistCurrentPosition()` →
+  synchronous main-actor SwiftData `context.save()` on **every** tick, plus a
+  `currentPositionSeconds` observation write that invalidates the whole TabView
+  subtree (NowPlayingBar + all tabbed NavigationStacks read PlayerService). The
+  per-second synchronous save starved the main run loop enough that TabView
+  selection/hit-testing was delayed or dropped while playing, recovering the
+  moment the tick loop stopped (pause) — a severe VoiceOver navigation
+  regression. **Fix:** throttle the per-tick position write to a coarse cadence
+  (`PlaybackLogic.positionPersistInterval = 5s`) via a new pure, unit-tested
+  `PlaybackLogic.shouldPersistTick(currentSecond:lastPersistedSecond:interval:)`.
+  The observed `currentPositionSeconds` and the lock-screen elapsed time still
+  update every tick (cheap; required for AC #6); only the SwiftData write is
+  coarsened. Durability is preserved because pause, seek, episode switch, and the
+  30s listening-session flush all still persist eagerly (and reset the throttle).
+  Worst-case loss on an abrupt process kill is ~5s of position. Backward jumps
+  (seek/skip-back) persist immediately. **No selection binding** was being
+  clobbered — RootView's TabView has none (confirmed). **Issue:** #362.
+  **Files:** `PlaybackLogic.swift` (+`shouldPersistTick`/`positionPersistInterval`),
+  `PlayerService.swift` (`persistPositionThrottled` + `lastPersistedSecond`
+  tracker; eager paths reset it), `PlaybackLogicTests.swift` (+6 cadence tests).
+  210 tests green, Debug strict-concurrency clean.
 
 ## Blockers
 
