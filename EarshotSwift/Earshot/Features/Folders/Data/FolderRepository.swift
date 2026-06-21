@@ -19,7 +19,10 @@ final class FolderRepository {
     /// All folders, ordered by `sortOrder` then name.
     func folders() -> [PodcastFolder] {
         let descriptor = FetchDescriptor<PodcastFolder>(
-            sortBy: [SortDescriptor(\.sortOrder), SortDescriptor(\.name)]
+            sortBy: [
+                SortDescriptor(sendableKeyPath(\PodcastFolder.sortOrder)),
+                SortDescriptor(sendableKeyPath(\PodcastFolder.name)),
+            ]
         )
         return (try? context.fetch(descriptor)) ?? []
     }

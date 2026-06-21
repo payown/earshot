@@ -61,7 +61,9 @@ final class QuickActionRepository {
     /// via an enum `#Predicate`) to avoid SwiftData predicate quirks on the
     /// String-backed enum; the table is tiny.
     private func configs(for type: QuickActionContentType) -> [QuickActionConfig] {
-        let descriptor = FetchDescriptor<QuickActionConfig>(sortBy: [SortDescriptor(\.sortOrder)])
+        let descriptor = FetchDescriptor<QuickActionConfig>(
+            sortBy: [SortDescriptor(sendableKeyPath(\QuickActionConfig.sortOrder))]
+        )
         let all = (try? context.fetch(descriptor)) ?? []
         return all.filter { $0.contentType == type }
     }

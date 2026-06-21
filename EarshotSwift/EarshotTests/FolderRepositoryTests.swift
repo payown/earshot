@@ -41,6 +41,30 @@ final class FolderRepositoryTests: XCTestCase {
         XCTAssertEqual(repo.folders().map(\.name), ["News", "Comedy"])
     }
 
+    // Issue #357: the fetch sort uses `sendableKeyPath(...)`-wrapped key paths to
+    // satisfy strict concurrency. This asserts the wrapping is behavior-neutral:
+    // folders must still come back ordered by `sortOrder` first, then `name`.
+    func testFoldersSortedBySortOrderThenName() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+
+        // Create out of alphabetical order so name ordering can't be coincidental.
+        let zebra = repo.createFolder(name: "Zebra")   // sortOrder 0
+        let apple = repo.createFolder(name: "Apple")   // sortOrder 1
+        let mango = repo.createFolder(name: "Mango")   // sortOrder 2
+
+        // Primary key is sortOrder, so creation order wins over alphabetical.
+        XCTAssertEqual(repo.folders().map(\.name), ["Zebra", "Apple", "Mango"])
+
+        // Tie the sortOrder so the secondary key (name) decides.
+        zebra.sortOrder = 5
+        apple.sortOrder = 5
+        mango.sortOrder = 5
+        try? ctx.save()
+
+        XCTAssertEqual(repo.folders().map(\.name), ["Apple", "Mango", "Zebra"])
+    }
+
     func testCreateTrimsWhitespace() {
         let ctx = TestStore.freshContext()
         let folder = FolderRepository(context: ctx).createFolder(name: "  Tech  ")

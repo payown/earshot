@@ -21,7 +21,7 @@ final class ExpirationService {
     /// Recently-expired episodes, most recently expired first (restorable).
     func recentlyExpired() -> [RecentlyExpired] {
         let descriptor = FetchDescriptor<RecentlyExpired>(
-            sortBy: [SortDescriptor(\.expiredAt, order: .reverse)]
+            sortBy: [SortDescriptor(sendableKeyPath(\RecentlyExpired.expiredAt), order: .reverse)]
         )
         return ((try? context.fetch(descriptor)) ?? []).filter { $0.episode != nil }
     }

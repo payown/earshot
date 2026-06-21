@@ -5,7 +5,10 @@ import SwiftData
 /// folder opens its detail. Reachable from the Podcasts tab.
 struct FoldersScreen: View {
     @Environment(\.modelContext) private var context
-    @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
+    @Query(sort: [
+        SortDescriptor(sendableKeyPath(\PodcastFolder.sortOrder)),
+        SortDescriptor(sendableKeyPath(\PodcastFolder.name)),
+    ])
     private var folders: [PodcastFolder]
 
     @State private var showingCreate = false

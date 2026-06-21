@@ -14,7 +14,10 @@ import SwiftData
 /// `SchemaMigrationPlan`. Future additive changes (V3+) that only add optional
 /// fields or new entities can use a lightweight `SchemaMigrationPlan`.
 enum EarshotSchemaV2: VersionedSchema {
-    static var versionIdentifier = Schema.Version(2, 0, 0)
+    // Computed (not a stored `static var`) so there is no nonisolated global
+    // mutable state under strict concurrency. The value is unchanged — ADR 002
+    // requires the version identifier stay exactly 2.0.0.
+    static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
 
     static var models: [any PersistentModel.Type] {
         [

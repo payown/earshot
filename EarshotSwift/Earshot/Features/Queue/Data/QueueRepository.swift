@@ -138,7 +138,9 @@ final class QueueRepository {
     /// via corrupt/aged data, since the relationship cascades) deleted so the
     /// set the UI shows and the set we reorder over are always identical.
     private func orderedItems() -> [QueueItem] {
-        let descriptor = FetchDescriptor<QueueItem>(sortBy: [SortDescriptor(\.position)])
+        let descriptor = FetchDescriptor<QueueItem>(
+            sortBy: [SortDescriptor(sendableKeyPath(\QueueItem.position))]
+        )
         let all = (try? context.fetch(descriptor)) ?? []
         let orphans = all.filter { $0.episode == nil }
         if !orphans.isEmpty {

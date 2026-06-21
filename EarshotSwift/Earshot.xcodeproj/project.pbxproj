@@ -83,6 +83,7 @@
 		A6ABA0F37BA96A1A6D768F49 /* EpisodeListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94347B9412E35CBD85FC2705 /* EpisodeListView.swift */; };
 		A7CE5C257707DC30388A3BC8 /* FolderDetailScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC724CA4ACA6B86ADE5CCF6 /* FolderDetailScreen.swift */; };
 		A8211C827EC54C8E34EF424C /* SubscriptionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = E956D51604F1BA07981F0001 /* SubscriptionRepository.swift */; };
+		A8E76C5D132B73BC73E2AF50 /* SendableKeyPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = F590E20BD05D7E4D486398E5 /* SendableKeyPath.swift */; };
 		AA2A5021F179C47FCD28D534 /* Bookmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523456F65D5DEC166E44B8F7 /* Bookmark.swift */; };
 		AB89D4F368E38728AA8BE166 /* Announcer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9754C877DA03DC598F4567 /* Announcer.swift */; };
 		B02A3E45F1D53182B2A57ECA /* SettingsReset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B744CD0D217BC04C25FAB2B /* SettingsReset.swift */; };
@@ -255,6 +256,7 @@
 		F29EFE156F619DD326A85C61 /* FlutterMigrationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterMigrationServiceTests.swift; sourceTree = "<group>"; };
 		F4EB4F7F597FCC1DD27CEEE4 /* FolderRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRepository.swift; sourceTree = "<group>"; };
 		F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsSettingsView.swift; sourceTree = "<group>"; };
+		F590E20BD05D7E4D486398E5 /* SendableKeyPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendableKeyPath.swift; sourceTree = "<group>"; };
 		F67B8AAA16F69CB84C899E27 /* FolderPodcastPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPodcastPickerView.swift; sourceTree = "<group>"; };
 		F6EE4757B64A837E04D89E7E /* OPMLImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMLImportService.swift; sourceTree = "<group>"; };
 		FA719A9EE6C298B619478083 /* StatsPeriod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsPeriod.swift; sourceTree = "<group>"; };
@@ -269,6 +271,7 @@
 				DF69017C7C2090E496CBC830 /* EarshotSchema.swift */,
 				52A120256FB53824821318A4 /* EarshotSchemaV1.swift */,
 				36E58C1C8D0069EACC139345 /* ModelContainerFactory.swift */,
+				F590E20BD05D7E4D486398E5 /* SendableKeyPath.swift */,
 				A201BE0E62AF4F48FB841958 /* StoreMigration.swift */,
 			);
 			path = Persistence;
@@ -1079,6 +1082,7 @@
 				1EB72C9EDA751CE62531D56B /* RootView.swift in Sources */,
 				1D47C0F7F6B8FC8FFBFDF28A /* SearchLogic.swift in Sources */,
 				C135742F72316B0AA623460E /* SearchView.swift in Sources */,
+				A8E76C5D132B73BC73E2AF50 /* SendableKeyPath.swift in Sources */,
 				B02A3E45F1D53182B2A57ECA /* SettingsReset.swift in Sources */,
 				B288D6F2C8567E87055FDAA2 /* SettingsScreen.swift in Sources */,
 				2770F2A93C5278E71C214601 /* SettingsStore.swift in Sources */,

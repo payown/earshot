@@ -59,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   button. Downloaded episodes now always play the local file instead of streaming.
   Destructive actions (Remove from queue, Delete download) show a leading icon in
   the sheet so danger is not signaled by color alone.
+- Internal: started the Swift 6 migration (step 1). Turned on strict concurrency
+  checking for Debug builds only (Beta and Release stay on the minimal setting,
+  and the language version is still Swift 5) and cleared the SwiftData
+  concurrency warnings it surfaced. No change to how the app behaves; this is
+  groundwork for a clean Swift 6 build. (closes #357)
 
 ### Fixed
 - Quick Actions: reordering your episode or podcast actions now saves reliably.

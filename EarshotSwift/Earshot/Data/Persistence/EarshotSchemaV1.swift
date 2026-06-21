@@ -14,7 +14,10 @@ import SwiftData
 /// process. Do not edit these definitions; they must keep matching what early
 /// builds actually wrote to disk.
 enum EarshotSchemaV1: VersionedSchema {
-    static var versionIdentifier = Schema.Version(1, 0, 0)
+    // Computed (not a stored `static var`) so there is no nonisolated global
+    // mutable state under strict concurrency. The value is unchanged — this must
+    // keep matching the on-disk schema early builds wrote (1.0.0).
+    static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
 
     static var models: [any PersistentModel.Type] {
         [Podcast.self, Episode.self]
