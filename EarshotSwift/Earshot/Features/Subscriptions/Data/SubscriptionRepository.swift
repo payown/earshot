@@ -3,11 +3,20 @@ import SwiftData
 
 /// Abstraction over feed fetching so the repository can be tested without
 /// hitting the network. ``FeedService`` is the production implementation.
-protocol FeedFetching {
+///
+/// `Sendable` because the `@MainActor` repository calls `fetch(_:)` (a
+/// `nonisolated async` requirement), which sends the conformer off the main
+/// actor. All conformers are value types whose stored state is Sendable.
+protocol FeedFetching: Sendable {
     func fetch(_ urlString: String) async throws -> ParsedFeed
 }
 
-extension FeedService: FeedFetching {}
+// `@unchecked Sendable` because `FeedFetching` now refines `Sendable` and the
+// conformance lives here rather than in FeedService.swift (the compiler requires
+// the Sendable conformance in the declaring file otherwise). It is safe:
+// `FeedService` is a value-type struct whose only stored property (`HTTPClient`,
+// itself a value type wrapping a Sendable `URLSession`) is Sendable.
+extension FeedService: @unchecked Sendable, FeedFetching {}
 
 /// Owns subscribe and refresh logic for podcasts. Views call into this instead
 /// of touching the model graph directly.

@@ -2,7 +2,10 @@ import XCTest
 import SwiftData
 @testable import Earshot
 
-private final class FakeFeedFetcher: FeedFetching {
+// @unchecked Sendable: FeedFetching now requires Sendable (#359), but this fake
+// keeps a mutable `feed` that tests reassign to simulate a feed gaining episodes.
+// Only ever used serially from the @MainActor test below, so the mutation is safe.
+private final class FakeFeedFetcher: FeedFetching, @unchecked Sendable {
     var feed: ParsedFeed
     init(_ feed: ParsedFeed) { self.feed = feed }
     func fetch(_ urlString: String) async throws -> ParsedFeed { feed }
