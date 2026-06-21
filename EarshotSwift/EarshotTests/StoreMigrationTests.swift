@@ -8,8 +8,11 @@ import SwiftData
 /// *previous* schema with realistic data and asserts the upgrade preserves it.
 @MainActor
 final class StoreMigrationTests: XCTestCase {
-    private var dir: URL!
-    private var storeURL: URL!
+    // nonisolated(unsafe): XCTest drives setUp -> test -> tearDown serially on a
+    // single thread, but the override points are nonisolated, so the @MainActor
+    // class isolation can't apply. Safe here; no concurrent access.
+    private nonisolated(unsafe) var dir: URL!
+    private nonisolated(unsafe) var storeURL: URL!
 
     override func setUpWithError() throws {
         dir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -63,7 +66,7 @@ final class StoreMigrationTests: XCTestCase {
         XCTAssertEqual(podcasts.first?.title, "Show")
 
         let episodes = try ctx.fetch(
-            FetchDescriptor<Episode>(sortBy: [SortDescriptor(\.guid)])
+            FetchDescriptor<Episode>(sortBy: [SortDescriptor(sendableKeyPath(\Episode.guid))])
         )
         XCTAssertEqual(episodes.count, 2, "both episodes should survive migration")
 
