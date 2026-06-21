@@ -193,21 +193,21 @@ The SwiftUI side is built and waiting.
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
-Test baseline: **235 tests** (verified 2026-06-21, after #368).
+Test baseline: **248 tests** (verified 2026-06-21, after #380 — 8 new SubscriptionRepositoryTests covering auto-download count=0, no-downloader safety, N-most-recent cap, autoQueue enabled/disabled/no-repo fallback, and old-episode guard).
 
 ### P0 — Must fix first
 | Issue | Title | Agent | Status |
 |-------|-------|-------|--------|
-| #368 | In-player speed control + per-podcast override | earshot-audio + earshot-ui | [x] | DONE. Speed badge in NowPlayingScreen, SpeedPickerSheet (shortcuts + stepper + scope + reset), per-podcast override and global write paths, full 0.5x-5.0x range in SettingsScreen. 23 new tests, 235 total. |
-| #369 | Skip Silence: wire or remove dead toggle | earshot-audio | [x] | DONE. Chose Option B: removed dead Toggle from SettingsScreen (was bound to a property that no engine code ever read). Removed skipSilenceEnabled property and configure-load from SettingsStore. Retained SettingsKey/SettingsDefault constants in AppSettingsStore with deprecation comments (data compat). No MTAudioProcessingTap (Decision F14). 235 tests green. |
+| #368 | In-player speed control + per-podcast override | earshot-audio + earshot-ui | [x] Closed 2026-06-21. SpeedPickerSheet, per-podcast override, 0.5x-5.0x full range. 235 tests. Commit 5322185. |
+| #369 | Skip Silence: wire or remove dead toggle | earshot-audio | [x] Closed 2026-06-21. Toggle removed; AppSettingsStore key retained for data compat. All gates passed. Commit 5322185. |
 
 ### P1 — High user impact
 | Issue | Title | Agent | Status |
 |-------|-------|-------|--------|
 | #399 | Per-podcast settings page | earshot-ui | [ ] |
 | #370 | AirPlay route picker in player | earshot-audio | [ ] |
-| #380 | Auto-download N on subscribe + auto-queue on refresh | earshot-data | [ ] |
-| #378 | Lock screen artwork (MPMediaItemArtwork) | earshot-audio | [ ] |
+| #380 | Auto-download N on subscribe + auto-queue on refresh | earshot-data | [~] Gates running. 8 new tests; 248 total. All gates PASS. |
+| #378 | Lock screen artwork (MPMediaItemArtwork) | earshot-audio | [~] Gates running. Commit 5505b85. |
 | #401 | Verify export audio shares local file (follow-up #363) | earshot-audio | [ ] |
 
 ### P2 — Polish and parity
@@ -246,6 +246,20 @@ type struct, no Task/observer/timer/sink), no new async or off-main SwiftData
 access, no entitlement or secret changes. `#if IS_BETA_BUILD` migration guards
 untouched and still fenced. Structural UI change with no new logic.
 
+## Security Review — Issue #378
+
+earshot-security gate: PASS (with advisory). Lock screen artwork via MPMediaItemArtwork.
+No force-unwraps (the two `!` in PlayerService.swift are boolean negations, not optional
+force-unwraps). No `try?` — network path uses full `do/catch` with `AppLog.player.error`.
+No `fatalError`. No secrets. No entitlement changes. No IS_BETA_BUILD impact.
+Both new methods (`updateNowPlayingArtwork`, `setArtwork`) are @MainActor-isolated
+(inherited from the class annotation); URLSession suspension is correct async pattern.
+Both error paths logged. Advisory only: `Task { await updateNowPlayingArtwork(from:) }`
+(line 728) captures `self` strongly without `[weak self]` — inconsistent with lines
+543/611/658/665 in the same file. Not a practical problem (PlayerService lives for the
+app lifetime), but recommend adding `[weak self]` for consistency. Also: `setArtwork`
+could be `private` rather than `internal`. Neither finding blocks the gate.
+
 ## Security Review — Issue #369
 
 earshot-security gate: PASS. Removal-only change: dead `Toggle("Skip silence")`
@@ -260,3 +274,18 @@ entitlement changes, or IS_BETA_BUILD guard regressions introduced.
 Data compatibility is sound: the key is retained so a future reader gets the
 stored Bool string; it is simply never written again. No new error types needed
 (no new code paths).
+
+## Security Review — Issue #380
+
+earshot-security gate: PASS. Auto-download on subscribe + auto-queue on refresh.
+No force-unwraps (all four `!` characters are boolean operators). No `try?` introduced
+by this PR; two pre-existing `try?` fetch calls in `refreshAll` and `podcast(forFeedURL:)`
+are unchanged and both acceptable (degrade-to-default and sentinel-nil patterns). No
+`fatalError`. No retain cycles (no Task/NotificationCenter/Combine closures; all async
+work is direct await on the @MainActor class). @MainActor annotation at class level
+covers all new methods including `subscribe` and `refresh`. `QueueRepository.add` is
+also @MainActor. `EpisodeDownloading` protocol is non-throwing by design; error contract
+delegated to DownloadManager. All new code paths logged via AppLog.subscriptions.
+No secrets. No entitlement changes. No IS_BETA_BUILD impact. Advisory only:
+`AppSettingsStore(context:)` constructed inline in `subscribe()` — consider injecting
+`autoDownloadCount` for cleaner unit testing. Does not block the gate.
