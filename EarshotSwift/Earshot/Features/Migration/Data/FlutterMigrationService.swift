@@ -19,10 +19,10 @@ final class FlutterMigrationService {
     /// App Group shared between the Flutter (`media.payown.earshot`) and SwiftUI
     /// (`media.payown.earshot.swift`) builds. Until the entitlement is added to
     /// both apps, `containerURL(...)` returns nil and migration no-ops.
-    static let appGroupID = "group.media.payown.earshot"
+    nonisolated static let appGroupID = "group.media.payown.earshot"
 
     /// The Flutter app copies `earshot.db` to this name in the shared container.
-    static let exportDBName = "earshot_export.db"
+    nonisolated static let exportDBName = "earshot_export.db"
 
     /// URL of the exported drift DB in the shared App Group container, or nil if
     /// the entitlement isn't present yet. `nonisolated` so it can serve as a
