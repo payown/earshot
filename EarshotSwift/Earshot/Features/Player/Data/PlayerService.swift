@@ -373,7 +373,11 @@ final class PlayerService {
         let session = AVAudioSession.sharedInstance()
         let enhance = voiceEnhanceEnabled
         do {
-            try session.setCategory(.playback, mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance))
+            try session.setCategory(
+                .playback,
+                mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance),
+                options: [.allowAirPlay, .allowBluetooth]
+            )
             try session.setActive(true)
             try session.setPreferredOutputNumberOfChannels(
                 AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: enhance)
@@ -391,7 +395,11 @@ final class PlayerService {
         let session = AVAudioSession.sharedInstance()
         let enhance = voiceEnhanceEnabled
         do {
-            try session.setCategory(.playback, mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance))
+            try session.setCategory(
+                .playback,
+                mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance),
+                options: [.allowAirPlay, .allowBluetooth]
+            )
             try session.setPreferredOutputNumberOfChannels(
                 AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: enhance)
             )

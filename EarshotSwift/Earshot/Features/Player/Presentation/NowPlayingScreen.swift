@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 
 /// Full-screen Now Playing view, presented from the mini player. Adds the in-app
 /// progress scrubber that the compact bar can't carry, plus artwork, title, the
@@ -34,6 +35,7 @@ struct NowPlayingScreen: View {
                     ScrubberView(player: player)
                     transportRow
                     speedRow
+                    airPlayRow
 
                     if hasShowNotes {
                         showNotesButton
@@ -192,6 +194,22 @@ struct NowPlayingScreen: View {
     private var speedAccessibilityValue: String {
         let label = PlaybackLogic.spokenRate(player.effectiveRate)
         return player.hasPodcastSpeedOverride ? "\(label), podcast override active" : label
+    }
+
+    // MARK: AirPlay route picker
+
+    /// A centered AirPlay route picker. Tapping presents the system output-device
+    /// sheet (AirPlay, Bluetooth, etc.). The accessible label and hint are set on
+    /// the underlying `AVRoutePickerView` inside `RoutePickerView`.
+    private var airPlayRow: some View {
+        HStack {
+            Spacer()
+            RoutePickerView()
+                .frame(width: Spacing.minTouchTarget, height: Spacing.minTouchTarget)
+                .accessibilityLabel("AirPlay")
+                .accessibilityHint("Choose audio output device")
+            Spacer()
+        }
     }
 
     // MARK: Show notes
