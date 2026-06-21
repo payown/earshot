@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   apps (e.g. Castro, Overcast). Tapping or sharing an OPML file opens the
   Import OPML screen pre-loaded with the file; multiple shared files are
   imported one after another. (iOS only for now.)
+- Now Playing: an AirPlay button lets you pick your audio output device directly from the player screen. Tap it to switch to AirPlay speakers, headphones, or any Bluetooth device without leaving the app. VoiceOver labels it "AirPlay" with the hint "Choose audio output device." (closes #370)
 
 ### Changed
 - Settings: removed the Skip Silence toggle. AVPlayer doesn't support silence trimming natively, so the toggle had no effect on playback. Removing a control that silently does nothing is better than leaving it there. (closes #369)
