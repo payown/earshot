@@ -16,7 +16,7 @@ enum ChapterParser {
         else { return [] }
 
         var chapters: [Chapter] = []
-        for (i, item) in raw.enumerated() {
+        for item in raw {
             if let toc = item["toc"] as? Bool, toc == false { continue }
             guard let start = (item["startTime"] as? NSNumber)?.doubleValue else { continue }
             let title = (item["title"] as? String) ?? "Chapter \(chapters.count + 1)"

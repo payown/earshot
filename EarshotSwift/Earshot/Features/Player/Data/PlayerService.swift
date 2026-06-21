@@ -570,20 +570,31 @@ final class PlayerService {
             object: session,
             queue: .main
         ) { [weak self] note in
-            Task { @MainActor in self?.handleInterruption(note) }
+            // Extract the Sendable primitives here (the observer runs on .main)
+            // so a non-Sendable Notification never crosses the actor boundary.
+            let info = note.userInfo
+            let typeValue = info?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let optionsValue = info?[AVAudioSessionInterruptionOptionKey] as? UInt
+            Task { @MainActor in
+                self?.handleInterruption(typeValue: typeValue, optionsValue: optionsValue)
+            }
         }
         routeChangeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
             object: session,
             queue: .main
         ) { [weak self] note in
-            Task { @MainActor in self?.handleRouteChange(note) }
+            // Extract the Sendable primitive here (the observer runs on .main)
+            // so a non-Sendable Notification never crosses the actor boundary.
+            let reasonValue = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            Task { @MainActor in
+                self?.handleRouteChange(reasonValue: reasonValue)
+            }
         }
     }
 
-    private func handleInterruption(_ note: Notification) {
-        guard let info = note.userInfo,
-              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+    private func handleInterruption(typeValue: UInt?, optionsValue: UInt?) {
+        guard let typeValue,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
 
         switch type {
@@ -593,7 +604,7 @@ final class PlayerService {
                 pausedByInterruption = true
             }
         case .ended:
-            guard let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            guard let optionsValue else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
             if options.contains(.shouldResume), pausedByInterruption {
                 resume()
@@ -604,9 +615,8 @@ final class PlayerService {
         }
     }
 
-    private func handleRouteChange(_ note: Notification) {
-        guard let info = note.userInfo,
-              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+    private func handleRouteChange(reasonValue: UInt?) {
+        guard let reasonValue,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
         // Headphones / Bluetooth unplugged: pause so audio doesn't blast aloud.
         if reason == .oldDeviceUnavailable, isPlaying {
