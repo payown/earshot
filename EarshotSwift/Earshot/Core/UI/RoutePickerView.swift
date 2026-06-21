@@ -11,7 +11,7 @@ struct RoutePickerView: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let picker = AVRoutePickerView()
         picker.tintColor = UIColor(Color.accentColor)
-        picker.activeTintColor = UIColor(Color.accentColor)
+        picker.activeTintColor = UIColor.systemBlue
         // The system accessibility label for AVRoutePickerView reads
         // "AirPlay" by default; we reinforce it so VoiceOver always
         // announces the correct name regardless of locale fallback.
@@ -24,6 +24,6 @@ struct RoutePickerView: UIViewRepresentable {
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
         // Tint may change when the color scheme changes — keep it in sync.
         uiView.tintColor = UIColor(Color.accentColor)
-        uiView.activeTintColor = UIColor(Color.accentColor)
+        uiView.activeTintColor = UIColor.systemBlue
     }
 }

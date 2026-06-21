@@ -376,7 +376,7 @@ final class PlayerService {
             try session.setCategory(
                 .playback,
                 mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance),
-                options: [.allowAirPlay, .allowBluetooth]
+                options: [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
             )
             try session.setActive(true)
             try session.setPreferredOutputNumberOfChannels(
@@ -398,7 +398,7 @@ final class PlayerService {
             try session.setCategory(
                 .playback,
                 mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance),
-                options: [.allowAirPlay, .allowBluetooth]
+                options: [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
             )
             try session.setPreferredOutputNumberOfChannels(
                 AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: enhance)

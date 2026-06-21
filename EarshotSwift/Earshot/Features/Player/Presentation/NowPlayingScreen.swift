@@ -205,9 +205,7 @@ struct NowPlayingScreen: View {
         HStack {
             Spacer()
             RoutePickerView()
-                .frame(width: Spacing.minTouchTarget, height: Spacing.minTouchTarget)
-                .accessibilityLabel("AirPlay")
-                .accessibilityHint("Choose audio output device")
+                .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
             Spacer()
         }
     }
