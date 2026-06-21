@@ -16,7 +16,14 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
+    # Beta/Release stay at minimal until the Swift 6 migration completes.
     SWIFT_STRICT_CONCURRENCY: minimal
+  configs:
+    # Swift 6 migration Step 1: surface all concurrency warnings in Debug only.
+    # Flip happens here (not SWIFT_VERSION: 6) so the build still compiles while
+    # warnings are fixed file-by-file. Do NOT raise this to Beta/Release yet.
+    Debug:
+      SWIFT_STRICT_CONCURRENCY: complete
 targets:
   Earshot:
     type: application
