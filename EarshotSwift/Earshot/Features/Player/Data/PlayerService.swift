@@ -725,7 +725,7 @@ final class PlayerService {
         let artworkURL = currentEpisode.flatMap {
             ($0.artworkURL ?? $0.podcast?.artworkURL).flatMap(URL.init)
         }
-        Task { await updateNowPlayingArtwork(from: artworkURL) }
+        Task { [weak self] in await self?.updateNowPlayingArtwork(from: artworkURL) }
     }
 
     /// Fetches artwork for the lock screen and Control Center. Tries the system
