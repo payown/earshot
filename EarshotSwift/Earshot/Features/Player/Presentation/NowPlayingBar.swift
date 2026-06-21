@@ -33,12 +33,9 @@ struct NowPlayingBar: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(.regularMaterial)
-            // The value change alone isn't reliably re-spoken on a custom button,
-            // so announce play-state transitions explicitly (Announcer no-ops when
-            // VoiceOver is off). This is the single source for the announcement.
-            .onChange(of: player.isPlaying) { _, isPlaying in
-                Announcer.announce(isPlaying ? "Playing" : "Paused")
-            }
+            // Play-state ("Playing" / "Paused") is announced once at the RootView
+            // TabView level, not here: this bar is inset into all five tabs (#366),
+            // so a per-bar .onChange would announce up to five times per toggle.
             .sheet(isPresented: $showingControls) { PlayerControlsSheet() }
         }
     }

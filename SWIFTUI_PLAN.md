@@ -140,6 +140,47 @@ The SwiftUI side is built and waiting.
   tracker; eager paths reset it), `PlaybackLogicTests.swift` (+6 cadence tests).
   210 tests green, Debug strict-concurrency clean.
 
+## UI Decisions
+
+- **Mini player inset attaches to tab content, not the TabView (#366).** The
+  `NowPlayingBar` was attached with `.safeAreaInset(edge: .bottom)` on the
+  `TabView` itself, which inserted the bar into the TabView's bottom safe area and
+  drew it *over* the system tab bar — the tab bar was fully covered and not
+  tappable during playback. **Fix:** a small private `MiniPlayerInset`
+  `ViewModifier` (in `RootView.swift`) that applies
+  `.safeAreaInset(edge: .bottom) { NowPlayingBar() }`, applied to each of the five
+  tabs' `NavigationStack`s instead of to the TabView. With the inset on the tab
+  content, the bar floats *above* the system tab bar; the tab bar stays visible
+  and interactive, and the system handles positioning above the tab bar and home
+  indicator across devices and Dynamic Type — no fragile manual height math
+  (ZStack overlay was rejected for that reason). `NowPlayingBar` still renders
+  nothing when `player.currentTitle == nil`, so no inset is added until playback
+  begins. The magic-tap action and the audio re-apply `.onChange`/`.task` hooks
+  on the TabView are untouched. **Issue:** #366. **Files:** `RootView.swift`.
+  209 tests green (branch baseline 209; no regression).
+- **Play-state announcement moved to the TabView root (#366 a11y gate).** Because
+  the mini player is now inset into all five tabs, it renders five times. The
+  per-bar `.onChange(of: player.isPlaying) { Announcer.announce(...) }` would have
+  fired up to five times per toggle (VoiceOver "Playing, Playing, ..."). The
+  announcer was removed from `NowPlayingBar` and a single one added at the
+  `RootView` TabView root, so the transition is announced exactly once. Play/pause
+  state is still carried on the transport button's `accessibilityValue`. **Files:**
+  `RootView.swift`, `NowPlayingBar.swift`. Caught by the earshot-accessibility gate.
+- **Doc correction:** the #362 note records "210 tests green," but the actual count
+  on the `swift` branch is **209** (verified via `git stash` on this branch). New
+  baseline of record: **209**.
+
 ## Blockers
 
 None. (F14 audio-enhancement DSP intentionally deferred — see Decision F14.)
+
+## Security Review — Issue #366
+
+earshot-security gate: PASS. NowPlayingBar overlapping tab bar fix. Only Swift
+change is RootView.swift (added private `MiniPlayerInset` ViewModifier, moved the
+`.safeAreaInset(edge: .bottom)` off the TabView onto each tab's NavigationStack).
+No force-unwraps (the lone `!` is the boolean `!settings.onboardingComplete`), no
+`try?`, no `fatalError`, no new closures capturing self (the modifier is a value-
+type struct, no Task/observer/timer/sink), no new async or off-main SwiftData
+access, no entitlement or secret changes. `#if IS_BETA_BUILD` migration guards
+untouched and still fenced. Structural UI change with no new logic.

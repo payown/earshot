@@ -67,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saved to disk (it was saving every second on the main thread and starving the
   UI). Position is still saved on pause, seek, and episode change, so nothing is
   lost. (closes #362)
+- Player: the mini player no longer covers the tab bar during playback. The Now
+  Playing bar now sits above the tab bar, so all five tabs stay visible and
+  tappable while audio is playing. The bar still respects the home indicator and
+  hides when nothing is loaded. (closes #366)
 - Quick Actions: reordering your episode or podcast actions now saves reliably.
   Some setups (carried over from an older app version) could hit a hidden
   conflict that silently rolled back the save, so the order reverted every time
@@ -171,6 +175,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Replaced custom Semantics/ExcludeSemantics wrappers with plain CheckboxListTile
   whose built-in MergeSemantics correctly maps to "checkbox, checked/unchecked"
   on iOS VoiceOver. Same fix applied to "Create new folder" row.
+
+### Accessibility
+- Player: VoiceOver now announces "Playing" or "Paused" once when playback state
+  changes, instead of repeating the announcement for every tab. (closes #366)
 
 ### Phase 8 complete — Alpha build prep
 
