@@ -76,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Player: podcast artwork now appears on the lock screen and in Control Center while an episode is playing. Earshot checks its local cache first, so no extra network request is needed if you've already seen the artwork in the app. (closes #378)
 - Player: tabs now switch instantly while audio is playing. Before, tapping a tab
   did nothing until you paused, which left VoiceOver users unable to move around
   the app during playback. The fix throttles how often the playback position is
