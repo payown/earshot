@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imported one after another. (iOS only for now.)
 - Now Playing: an AirPlay button lets you pick your audio output device directly from the player screen. Tap it to switch to AirPlay speakers, headphones, or any Bluetooth device without leaving the app. VoiceOver labels it "AirPlay" with the hint "Choose audio output device." (closes #370)
 - Per-podcast settings: tap the gear icon on any podcast's episode list to set its playback speed, auto-queue, inbox limits, and notification preference. Changes take effect immediately. (closes #399)
+- Player: three new actions are available from the full-screen player's overflow menu and the VoiceOver actions rotor. "Mark as played" marks the current episode played and moves you on without playing to the end, and Earshot announces "Marked as played". (#371)
+- Player: "Export audio file" shares the current episode's audio through the system share sheet, so you can save it to Files, AirDrop it, or open it in another app. If the episode isn't downloaded yet, Earshot downloads it first and then shares the local file. (#371)
+- Player: "Stop after this episode" is a one-off that stops playback when the current episode finishes instead of auto-advancing, then clears itself. It also resets if you restart the app. Earshot announces "Will stop after this episode" when you turn it on. (#371)
 
 ### Changed
 - Settings: removed the Skip Silence toggle. AVPlayer doesn't support silence trimming natively, so the toggle had no effect on playback. Removing a control that silently does nothing is better than leaving it there. (closes #369)
