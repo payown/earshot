@@ -133,6 +133,44 @@ enum PlaybackLogic {
         return currentSecond - last >= interval
     }
 
+    /// How often, in seconds, the lock-screen / Control Center "elapsed time" is
+    /// re-synced to `MPNowPlayingInfoCenter` during steady playback.
+    ///
+    /// `nowPlayingInfo` is a cross-process dictionary handed to `mediaserverd`;
+    /// reading and rewriting the whole thing every second is a real, sustained
+    /// energy cost (issue #412). It is also unnecessary: once `elapsedPlaybackTime`,
+    /// `playbackRate`, and `playbackDuration` are set, the system extrapolates the
+    /// running elapsed time itself from the rate. A periodic re-sync only corrects
+    /// the small drift between our clock and the system's; every few seconds is
+    /// imperceptible on the lock screen while cutting the IPC rate by this factor.
+    /// Discontinuities (play, pause, seek, rate change) still update eagerly and
+    /// exactly via ``PlayerService`` so the lock screen never shows a stale jump.
+    static let nowPlayingElapsedSyncInterval = 5
+
+    /// Whether this tick should re-sync the lock-screen elapsed time.
+    ///
+    /// True on the first tick after a discontinuity (`lastSyncedSecond == nil`),
+    /// whenever at least ``nowPlayingElapsedSyncInterval`` seconds have elapsed
+    /// since the last sync, or whenever the position jumped backwards (a
+    /// seek/skip-back the system's extrapolation can't have predicted). Pure so
+    /// the cadence is unit-testable.
+    ///
+    /// - Parameters:
+    ///   - currentSecond: The integer playback second for this tick.
+    ///   - lastSyncedSecond: The second at which we last wrote now-playing, or
+    ///     `nil` to force a sync (set after every discontinuity).
+    ///   - interval: The minimum gap between syncs (defaults to
+    ///     ``nowPlayingElapsedSyncInterval``).
+    static func shouldSyncNowPlayingElapsed(
+        currentSecond: Int,
+        lastSyncedSecond: Int?,
+        interval: Int = nowPlayingElapsedSyncInterval
+    ) -> Bool {
+        guard let last = lastSyncedSecond else { return true }
+        if currentSecond < last { return true }
+        return currentSecond - last >= interval
+    }
+
     /// Decides whether an episode at `position` of `duration` seconds should be
     /// marked played, and where to resume from on the next play.
     ///

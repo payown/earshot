@@ -87,6 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Playback: the device now runs cooler and uses less battery during playback. Earshot was updating the lock screen and Control Center elapsed time every second, which kept the system media server busy in the background; it now refreshes that time every 5 seconds (and right away when you play, pause, seek, or change speed). The lock screen still shows the correct elapsed time because the system fills in the seconds between updates. (#412)
 - Sleep timer: starting a different episode now cancels any running sleep timer. VoiceOver announces "Sleep timer cancelled" when this happens. (#379)
 - Player: podcast artwork now appears on the lock screen and in Control Center while an episode is playing. Earshot checks its local cache first, so no extra network request is needed if you've already seen the artwork in the app. (closes #378)
 - Player: tabs now switch instantly while audio is playing. Before, tapping a tab

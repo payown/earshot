@@ -160,6 +160,55 @@ final class PlaybackLogicTests: XCTestCase {
         XCTAssertGreaterThan(PlaybackLogic.positionPersistInterval, 1)
     }
 
+    // MARK: Now-playing elapsed-sync cadence (#412)
+
+    func testFirstNowPlayingSyncAfterDiscontinuityAlwaysWrites() {
+        // After every play / pause / seek / rate change, lastSyncedSecond is reset
+        // to nil so the next tick re-anchors the lock-screen elapsed time exactly.
+        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 0, lastSyncedSecond: nil))
+        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 137, lastSyncedSecond: nil))
+    }
+
+    func testNowPlayingNotResyncedEverySecond() {
+        // The fix's whole point: between syncs the system extrapolates elapsed time,
+        // so ticks within the interval must NOT rewrite the cross-process dictionary.
+        for second in 1...4 {
+            XCTAssertFalse(
+                PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: second, lastSyncedSecond: 0),
+                "second \(second) should be throttled, not a per-tick now-playing rewrite"
+            )
+        }
+    }
+
+    func testNowPlayingResyncsOnceIntervalElapses() {
+        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 5, lastSyncedSecond: 0))
+        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 60, lastSyncedSecond: 50))
+    }
+
+    func testNowPlayingBackwardJumpResyncsImmediately() {
+        // A seek/skip-back the system can't have extrapolated — correct it at once.
+        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 12, lastSyncedSecond: 55))
+    }
+
+    func testNowPlayingSameSecondDuplicateTickDoesNotResync() {
+        // The periodic observer can emit the same integer second twice in a row.
+        // A repeat at the second we just synced is neither forward-interval nor a
+        // backward jump, so it must NOT rewrite the cross-process dictionary.
+        XCTAssertFalse(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 0, lastSyncedSecond: 0))
+        XCTAssertFalse(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 50, lastSyncedSecond: 50))
+    }
+
+    func testNowPlayingRespectsCustomInterval() {
+        XCTAssertFalse(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 2, lastSyncedSecond: 0, interval: 3))
+        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 3, lastSyncedSecond: 0, interval: 3))
+    }
+
+    func testNowPlayingSyncIntervalIsCoarserThanOneSecond() {
+        // Guards against regressing back to a per-second nowPlayingInfo rewrite,
+        // which is the sustained-CPU / overheating cause in #412.
+        XCTAssertGreaterThan(PlaybackLogic.nowPlayingElapsedSyncInterval, 1)
+    }
+
     // MARK: Up-next resolution (gapless advance)
 
     func testNextUpIsFirstQueueItemAfterCurrent() {
