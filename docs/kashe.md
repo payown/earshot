@@ -125,6 +125,15 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 - The bottom tab bar is what she uses most, dozens of times a day, glanceless;
   she'd normalized its verbose VoiceOver announcement like a rattle in the car
   (Chapter 21)
+- She has a cousin (whose wedding she attended) and a great-aunt; at the wedding
+  she drank at the open bar and danced with a tall, cute stranger despite "not
+  dancing" -- first time we see her fully off-duty and a little reckless
+  (Chapter 22)
+- The Flutter-to-SwiftUI rewrite is now canon in her world: she noticed the app
+  got rebuilt underneath her ("It was both"); Renata's nephew rebuilt it
+  (Chapter 22)
+- She turns on per-show new-episode notifications for the shows she won't miss
+  (Chapter 22)
 
 ## What you can generate
 
@@ -609,6 +618,55 @@ She didn't notice it the way you notice a new feature. She noticed it the way yo
 With VoiceOver on, move across the bottom tabs. Each should read its name and, for tabs with a count, the count spoken once, like "Inbox, 3 new." No "button," no "Tab N of 4."
 
 The tab you're currently on should announce "selected." Moving between tabs should feel quicker and less wordy than before.
+
+---
+
+### Chapter 22 — Build 114
+
+*Kashe goes quiet for three days after a wedding. When she comes back, Earshot feels different underneath her.*
+
+What to test: Scroll your library and watch the cover art load instantly now, no
+flicker. Open the app cold after a day away and your inbox is already sorted and
+waiting, refreshed quietly in the background. In a show's settings, turn on
+new-episode notifications for the shows you don't want to miss. Email
+michael@payown.media if anything's stale or a notification misfires.
+
+Three days. That's how long Kashe went quiet, and she'd tell you it was a wedding,
+and she'd be telling the truth, mostly.
+
+What she'd leave out is the tall, cute stranger who talked her onto the dance floor
+"for one song," and how one song became however many it takes to lose track, and
+how the open bar did the rest. She does not dance. She danced. There's a great-aunt
+who'll bring it up at holidays for years.
+
+The trip home is a smear. A ride she half-remembers, a back seat that smelled like
+pine and somebody else's night, a driver who said "long one, huh." She remembers
+the door, not the stairs. She made it as far as the couch, face-first, still in her
+good clothes, and slept like someone had unplugged her. Her phone died on the
+floor. A personal record.
+
+She surfaced two days later and let the phone tell on her. An Uber receipt at 2:14,
+later than the night she'd decided to remember. A call log she couldn't read: a
+bakery three towns over, a number that just answers "front desk," somebody saved as
+"DO NOT." She left them where they were. Some mysteries you let keep.
+
+Then she opened Earshot, two days behind on everything, and it felt wrong. Not
+broken. Wrong. Faster. Lighter. The kind of different where you check you opened
+the right app.
+
+She had. It just became a different one underneath while she was busy being a
+disaster at a wedding.
+
+The artwork was the first tell. Every cover just there, instant, no hitch. Her
+inbox, untouched for three days, was already full, already sorted, working while
+she wasn't. In a show's settings she found a switch for getting told when it posts
+something new. Turned it on for the one show she won't miss, then a second, then a
+third, because that worked now too.
+
+She texted Renata: "either your nephew rebuilt this whole thing or I'm still
+hungover." A pause. "could be both."
+
+It was both.
 
 ---
 
