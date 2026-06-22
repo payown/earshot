@@ -207,7 +207,7 @@ The SwiftUI side is built and waiting.
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
-Test baseline: **252 tests** (verified 2026-06-21, after #379 — 4 new SleepTimerController tests in ChapterSleepTests covering extend-by-5 default, extend-after-cancel no-op, and cancel-on-switch behavior).
+Test baseline: **274 tests** (verified 2026-06-21, after #399 — 22 new PodcastSettingsViewTests covering speedOverride, autoQueue, queueAgeLimitDays, inboxMaxEpisodes, inboxAgeLimitHours, notificationEnabled defaults/mutations/persistence, and speed option list validation).
 
 ### P0 — Must fix first
 | Issue | Title | Agent | Status |
@@ -218,10 +218,10 @@ Test baseline: **252 tests** (verified 2026-06-21, after #379 — 4 new SleepTim
 ### P1 — High user impact
 | Issue | Title | Agent | Status |
 |-------|-------|-------|--------|
-| #399 | Per-podcast settings page | earshot-ui | [ ] |
-| #370 | AirPlay route picker in player | earshot-audio | [ ] |
-| #380 | Auto-download N on subscribe + auto-queue on refresh | earshot-data | [~] Gates running. 8 new tests; 248 total. All gates PASS. |
-| #378 | Lock screen artwork (MPMediaItemArtwork) | earshot-audio | [~] Gates running. Commit 5505b85. |
+| #399 | Per-podcast settings page | earshot-ui | [x] Closed 2026-06-21. All gates PASS (security, swift6, accessibility, testing — 274 tests, Release clean). Merged via PR #403. Commit ab398cb. |
+| #370 | AirPlay route picker in player | earshot-audio | [x] Closed earlier. Merged via PR #402 (commit 3ea5998). Follow-up: AirPlayTests salvaged into separate PR (see Salvage note below). |
+| #380 | Auto-download N on subscribe + auto-queue on refresh | earshot-data | [x] Closed 2026-06-21. All gates PASS. |
+| #378 | Lock screen artwork (MPMediaItemArtwork) | earshot-audio | [x] Closed 2026-06-21. Commit 5505b85. |
 | #401 | Verify export audio shares local file (follow-up #363) | earshot-audio | [ ] |
 
 ### P2 — Polish and parity
