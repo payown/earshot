@@ -96,6 +96,15 @@ struct SettingsScreen: View {
                 Toggle("Direct-touch playback area", isOn: $settings.directTouchEnabled)
             }
 
+            Section("Help") {
+                NavigationLink {
+                    SendFeedbackView()
+                } label: {
+                    Label("Send Feedback", systemImage: "envelope")
+                }
+                .accessibilityHint("Email the Earshot team with feedback, bug reports, or ideas")
+            }
+
             Section("Data") {
                 Button {
                     exportURL = makeExportFile()
