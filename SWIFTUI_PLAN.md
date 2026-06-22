@@ -299,6 +299,47 @@ The SwiftUI side is built and waiting.
   boundaries to callers. The `PodcastArtwork` loader hops to the main actor by
   virtue of `.task`/`@State` after the `await`. No new data races; no actors
   added.
+- **#386 Networking robustness: one shared session + retry/backoff.** New
+  `Core/Networking/EarshotURLSession.swift` is an `enum` namespace holding the
+  single configured `URLSession` (`.shared`) and a `makeConfiguration()`
+  factory: explicit `timeoutIntervalForRequest = 15s`,
+  `timeoutIntervalForResource = 60s`, and `requestCachePolicy =
+  .reloadIgnoringLocalCacheData` (feeds/search change often). `HTTPClient` and
+  `ITunesSearchService` default inits now take `EarshotURLSession.shared`
+  instead of `URLSession.shared`, so the whole feed/search layer shares one
+  configuration. Both inits stay injectable for tests. **`ArtworkCache` keeps
+  its own session** on purpose (disk `URLCache` + `.returnCacheDataElseLoad`,
+  #385) — left as-is, not folded into the shared session.
+- **Pure `RetryPolicy` (Core/Networking/RetryPolicy.swift), unit-tested.** A
+  `Sendable` value type: `maxAttempts` (3) + `backoff` schedule (`[1, 2]` →
+  1s then 2s). `isTransient(_:)` classifies retryable failures: HTTP **5xx**
+  and connectivity `URLError`s (`.timedOut`, `.networkConnectionLost`,
+  `.cannotConnectToHost`, `.notConnectedToInternet`, `.dnsLookupFailed`).
+  **Non-transient and never retried:** HTTP **4xx**, `HTTPError.badURL`,
+  decoding/parse errors, `URLError.cancelled`. `.standard` is the shipping
+  policy; `.immediate` (same attempts, 0s delays) is for tests.
+- **`HTTPClient` retry loop.** `data(from:)` wraps `performFetch` in an
+  attempt loop. The raw error/status is classified **before** it is wrapped
+  into `HTTPError.transport`, so the policy sees the real 5xx / `URLError`.
+  Backoff is awaited via an **injectable** `sleep` closure
+  (`@Sendable (TimeInterval) async throws -> Void`, default `Task.sleep`,
+  honors cancellation; tests inject a no-op). On exhaustion the original
+  `HTTPError` (`.server(status:)` or `.transport`) surfaces unchanged —
+  existing user-facing messages preserved, no swallowed errors, no
+  force-unwraps.
+- **Tests + `MockURLProtocol`.** New `EarshotTests/MockURLProtocol.swift`
+  (a `URLProtocol` subclass with a FIFO queue of scripted outcomes — status
+  +body or a `URLError`, lock-guarded) and `makeSession()` that layers it onto
+  `EarshotURLSession.makeConfiguration()`. `RetryPolicyTests` (pure
+  classification + backoff schedule) and `HTTPClientRetryTests` cover: 5xx→200
+  and timeout/connection-lost→200 succeed after retry; 4xx fails fast (no
+  retry); persistent 5xx/timeout exhaust and surface the right `HTTPError`;
+  badURL never hits the network. Retry tests use `.immediate` + no-op sleep so
+  the suite doesn't wait. **Test count 385 → 404.**
+- **Flag for earshot-swift6:** new async + `Sendable` surface —
+  `RetryPolicy: Sendable`, the `@Sendable` injected `sleep` closure on
+  `HTTPClient`, and the lock-guarded mutable static queue in `MockURLProtocol`
+  (test-only). No actors added; no SwiftUI view changed (no accessibility gate).
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
@@ -503,5 +544,89 @@ risks causing data races" under strict-complete (the AVAudioSession interruption
 route-change Notification observer pattern). Those lines are unchanged by #385 and
 predate it; out of scope for this gate. Project-wide strict-complete surfaces 118
 concurrency warnings total (e.g. the known DownloadManager one), none in #385's files.
+
+New agents created: none. Overall: PASS.
+
+## Security Review — Issue #386
+
+earshot-security gate: PASS (no defects, no code changes needed). Networking robustness:
+retry/backoff + shared configured URLSession + explicit timeouts. New: EarshotURLSession.swift
+(immutable `static let shared` over a thread-safe URLSession; 15s request / 60s resource;
+`.reloadIgnoringLocalCacheData`), RetryPolicy.swift (pure `Sendable` value type; maxAttempts 3,
+backoff [1,2]s; transient = HTTP 5xx + connectivity URLErrors). Modified: HTTPClient.swift gains
+a bounded retry loop with an injectable `@Sendable` sleep (default Task.sleep, honors
+cancellation); ITunesSearchService default session switched to EarshotURLSession.shared. New
+tests: MockURLProtocol.swift, RetryPolicyTests.swift, HTTPClientRetryTests.swift.
+
+Findings:
+- Force-unwraps: only in test-only code (MockURLProtocol fallback URL/HTTPURLResponse,
+  test fixture URLs) — acceptable XCTest exception. None in production.
+- Retry surfaces the real final error: on exhaustion/non-transient, `throw mapped(error, url:)`
+  passes HTTPError through unchanged and wraps raw transport as .transport. Verified by
+  exhaustion tests (.server(status:500) and .transport surface, not masked).
+- Unbounded loop / DoS / battery: `while true` bounded by `attempt < maxAttempts` (cap 3).
+  Cannot loop forever.
+- Cancellation: `try await sleep(backoff)` sits OUTSIDE the do/catch, so CancellationError
+  exits immediately without consuming a retry; URLError(.cancelled) classified non-transient.
+- Thread-safety: shared session is an immutable static let over a thread-safe URLSession;
+  MockURLProtocol's mutable static queue is NSLock-guarded on every access and is test-only.
+- .reloadIgnoringLocalCacheData: deliberate; applies only to feed/search session. ArtworkCache
+  (#385) uses a separate session with its own disk URLCache + .returnCacheDataElseLoad — intact.
+- Typed errors (HTTPError enum); AppLog.networking on all log paths; no try?/fatalError;
+  no @Published/UI state; no entitlement or project.yml changes; no secrets.
+
+Build: simulator BUILD SUCCEEDED on iPhone 17. Feature suggestions: none. Overall: PASS.
+
+## Swift 6 Review — Issue #386
+
+earshot-swift6 gate: PASS (no code changes needed). Networking robustness:
+RetryPolicy.swift, EarshotURLSession.swift, HTTPClient.swift, ITunesSearchService.swift
+(session swap), MockURLProtocol.swift (test-only). Concurrency mode verified:
+SWIFT_STRICT_CONCURRENCY=complete (project baseline is Swift 5.0 / minimal).
+Default build SUCCEEDED and strict-complete build SUCCEEDED on iPhone 17 sim;
+test target build-for-testing SUCCEEDED (default) and under strict-complete.
+
+Findings:
+- Sendable conformance: `struct RetryPolicy: Sendable` is sound — all stored
+  props are `let` over `Int` / `[TimeInterval]`; statics are `let`. Explicit
+  conformance correct. PASS.
+- HTTPClient struct Sendability: stored props are `session: URLSession`
+  (thread-safe, Sendable), `retryPolicy: RetryPolicy` (Sendable), and
+  `sleep: @Sendable (TimeInterval) async throws -> Void`. The closure is
+  correctly `@escaping @Sendable`; the default body captures nothing external
+  (only its `seconds` param + `Task.sleep`). Struct is implicitly Sendable and
+  crosses awaits race-free. NOTE: signature is `TimeInterval`, not the
+  `Duration/TimeInterval` named in the issue brief — fine either way, no
+  concurrency impact. PASS.
+- static let shared URLSession: immutable `let`, thread-safe URLSession, Swift's
+  thread-safe lazy static init. Concurrency-safe from any actor. PASS.
+- Retry loop / Task.sleep cancellation: `attempt` is local stack state, no shared
+  mutable state across awaits. `Task.sleep` CancellationError is not an HTTPError
+  or URLError, so `isTransient` returns false and it propagates out instead of
+  looping; URLError(.cancelled) likewise non-transient. No data race. PASS.
+  (Behavioral note, out of gate scope: a cancelled sleep is wrapped by `mapped()`
+  into HTTPError.transport rather than rethrown as CancellationError — covered by
+  the security gate, not a concurrency defect.)
+- nonisolated functions: none introduced; all methods are plain struct methods.
+  N/A.
+- Structured concurrency: no Task.detached anywhere in the issue's code. PASS.
+- Global state: `EarshotURLSession.shared`, `requestTimeout`, `resourceTimeout`,
+  `RetryPolicy.standard/.immediate/.transientURLErrorCodes`, `AppLog.networking`
+  are all `let` (Sendable). No mutable app-target global state. PASS.
+- Swift 6 build clean: ZERO strict-complete warnings/errors in any of the four
+  app-target files (RetryPolicy, EarshotURLSession, HTTPClient, ITunesSearchService).
+
+Test-only (does NOT block gate): MockURLProtocol.swift:25 `static var outcomes`
+warns under strict-complete ("nonisolated global shared mutable state"). It is
+fully NSLock-guarded on every access (setOutcomes/reset/nextOutcome), so it is
+NOT a real data race — the compiler just can't see through the manual lock.
+Test target is not on Swift 6. If/when the test target flips to Swift 6, minimal
+fix is `nonisolated(unsafe) static var outcomes` (justified: lock-protected).
+
+Pre-existing (NOT this issue): project-wide strict-complete surfaces the same
+catalogue of warnings as #385 (SwiftData KeyPath-not-Sendable macro noise,
+DownloadManager non-Sendable `Episode` param, SubscriptionRepository `@Model`
+sends, PlayerService.swift:981/988 `sending 'note'`, EarshotSchema
+`versionIdentifier` static state). None are in #386's files; all out of scope.
 
 New agents created: none. Overall: PASS.
