@@ -71,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Player: three new actions are available from the full-screen player's overflow menu and the VoiceOver actions rotor. "Mark as played" marks the current episode played and moves you on without playing to the end, and Earshot announces "Marked as played". (#371)
 - Player: "Export audio file" shares the current episode's audio through the system share sheet, so you can save it to Files, AirDrop it, or open it in another app. If the episode isn't downloaded yet, Earshot downloads it first and then shares the local file. (#371)
 - Player: "Stop after this episode" is a one-off that stops playback when the current episode finishes instead of auto-advancing, then clears itself. It also resets if you restart the app. Earshot announces "Will stop after this episode" when you turn it on. (#371)
+- New episode notifications: turn on "Notify on new episodes" for any show from its settings page, and Earshot sends you a notification when a background refresh finds new episodes for it. The notification shows the show name and how many new episodes there are, and gives you "Add to queue" and "Play now" buttons right on it. Tapping the notification opens that show in your Library. Earshot asks for notification permission the first time you turn the toggle on. These are on-device notifications only, so nothing is sent to a server, and Earshot never pesters you about your inbox, queue, downloads, or how long it's been since you last listened. (closes #72)
 
 ### Changed
 - Networking: feed refresh and podcast search now hold up better on a flaky connection. When a request hits a temporary problem (a server 5xx error, a dropped connection, or a timeout), Earshot waits briefly and tries again, twice, before giving up (1 second then 2 seconds). Permanent errors like a 404 or a bad address still fail right away instead of retrying for no reason. All network requests now use the same timeouts, so you should see fewer "couldn't load" failures when the network hiccups. (#386)
@@ -211,6 +212,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Accessibility
 - Player: VoiceOver now announces "Playing" or "Paused" once when playback state
   changes, instead of repeating the announcement for every tab. (closes #366)
+- New episode notifications: notifications use plain, meaningful text with no emoji, so VoiceOver reads something useful like "Show name, 2 new episodes" instead of an icon. Tapping a notification moves focus to that show's detail screen in the Library. (closes #72)
 
 ### Phase 8 complete — Alpha build prep
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UserNotifications
 
 @main
 struct EarshotApp: App {
@@ -9,7 +10,11 @@ struct EarshotApp: App {
     @State private var downloads = DownloadManager()
     @State private var settings = SettingsStore()
     @State private var tips = TipsStore()
+    @State private var notificationRouter: NotificationRouter
     private let container: ModelContainer
+    /// Retains the notification delegate for the process lifetime;
+    /// `UNUserNotificationCenter.delegate` is a weak reference.
+    private let notificationDelegate: NotificationDelegate
 
     /// True when the process is hosting an XCTest run. Unit tests use the app as
     /// their test host; rendering the real SwiftUI tree (with `@Query` observing
@@ -23,6 +28,9 @@ struct EarshotApp: App {
         } else {
             container = ModelContainerFactory.makeShared()
         }
+        let router = NotificationRouter()
+        _notificationRouter = State(initialValue: router)
+        notificationDelegate = NotificationDelegate(router: router)
     }
 
     var body: some Scene {
@@ -36,6 +44,13 @@ struct EarshotApp: App {
                     .environment(downloads)
                     .environment(settings)
                     .environment(tips)
+                    .environment(notificationRouter)
+                    .task {
+                        // Wire the notification delegate and register the
+                        // "new episodes" category (actions) once, at launch (#72).
+                        UNUserNotificationCenter.current().delegate = notificationDelegate
+                        await NotificationService().registerCategories()
+                    }
             }
         }
         .modelContainer(container)

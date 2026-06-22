@@ -9,18 +9,26 @@ struct RootView: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(SettingsStore.self) private var settings
     @Environment(TipsStore.self) private var tips
+    @Environment(NotificationRouter.self) private var notificationRouter
 
     @State private var showOnboarding = false
     @State private var importState = MigrationImportState()
 
+    /// Which tab is selected. Bound so a notification tap can switch to Library.
+    @State private var selectedTab: RootTab = .inbox
+    /// Navigation path for the Library tab, so a notification can push a podcast
+    /// detail screen onto it (#72).
+    @State private var libraryPath: [Podcast] = []
+
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             NavigationStack {
                 InboxScreen()
                     .contextualTip(.inbox)
             }
             .modifier(TabChrome())
             .tabItem { Label("Inbox", systemImage: "tray") }
+            .tag(RootTab.inbox)
 
             NavigationStack {
                 QueueScreen()
@@ -28,12 +36,14 @@ struct RootView: View {
             }
             .modifier(TabChrome())
             .tabItem { Label("Queue", systemImage: "list.bullet") }
+            .tag(RootTab.queue)
 
-            NavigationStack {
+            NavigationStack(path: $libraryPath) {
                 SubscriptionsView()
             }
             .modifier(TabChrome())
             .tabItem { Label("Library", systemImage: "books.vertical") }
+            .tag(RootTab.library)
 
             NavigationStack {
                 DownloadsScreen()
@@ -41,14 +51,22 @@ struct RootView: View {
             }
             .modifier(TabChrome())
             .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
+            .tag(RootTab.downloads)
 
             NavigationStack {
                 SettingsScreen()
             }
             .modifier(TabChrome())
             .tabItem { Label("Settings", systemImage: "gearshape") }
+            .tag(RootTab.settings)
         }
         .environment(importState)
+        // Route a notification tap / action into the Library tab + podcast detail
+        // (#72). Reacting on the published intent keeps the delegate decoupled
+        // from the view tree.
+        .onChange(of: notificationRouter.pendingIntent) { _, intent in
+            if let intent { route(intent) }
+        }
         // VoiceOver magic tap (two-finger double tap) toggles playback anywhere.
         .accessibilityAction(.magicTap) {
             player.togglePlayPause()
@@ -134,6 +152,56 @@ struct RootView: View {
             }
         }
     }
+
+    // MARK: Notification routing (#72)
+
+    /// Resolves a notification intent against the model graph, performs any
+    /// action (enqueue / play), switches to the Library tab, and pushes the
+    /// podcast's detail screen. Clears the router when done. Missing podcasts /
+    /// episodes are logged and skipped — never crash on a stale notification.
+    private func route(_ intent: NotificationIntent) {
+        defer { notificationRouter.clear() }
+
+        let feedURL = intent.feedURL
+        var descriptor = FetchDescriptor<Podcast>(
+            predicate: #Predicate { $0.feedURL == feedURL }
+        )
+        descriptor.fetchLimit = 1
+        guard let podcast = (try? modelContext.fetch(descriptor))?.first else {
+            AppLog.notifications.error("Notification routing: podcast not found for feed")
+            return
+        }
+
+        switch intent {
+        case .openPodcast:
+            break
+        case let .addEpisodeToQueue(_, episodeGUID):
+            if let episode = episode(guid: episodeGUID, in: podcast) {
+                QueueRepository(context: modelContext).add(episode)
+                Announcer.announce("Added to queue")
+            }
+        case let .playEpisode(_, episodeGUID):
+            if let episode = episode(guid: episodeGUID, in: podcast) {
+                player.play(episode)
+            }
+        }
+
+        // Switch to Library and push the podcast detail. Reset the path first so
+        // we always land on the show's detail, not stacked atop a prior push.
+        selectedTab = .library
+        libraryPath = [podcast]
+    }
+
+    /// Finds an episode by guid within a podcast's loaded episodes.
+    private func episode(guid: String, in podcast: Podcast) -> Episode? {
+        podcast.episodes.first { $0.guid == guid }
+    }
+}
+
+/// The five root tabs. Backs the `TabView` selection so notification routing can
+/// switch to Library programmatically (#72).
+private enum RootTab: Hashable {
+    case inbox, queue, library, downloads, settings
 }
 
 /// Per-tab chrome: the restore-progress banner inset above the content (top) and

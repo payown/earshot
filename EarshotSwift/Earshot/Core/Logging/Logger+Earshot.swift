@@ -12,4 +12,5 @@ enum AppLog {
     static let quickActions = Logger(subsystem: subsystem, category: "quick-actions")
     static let data = Logger(subsystem: subsystem, category: "data")
     static let networking = Logger(subsystem: subsystem, category: "networking")
+    static let notifications = Logger(subsystem: subsystem, category: "notifications")
 }

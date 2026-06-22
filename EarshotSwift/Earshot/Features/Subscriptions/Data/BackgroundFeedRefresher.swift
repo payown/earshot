@@ -55,7 +55,8 @@ enum BackgroundFeedRefresher {
     static func runRefresh(
         container: ModelContainer,
         force: Bool = false,
-        isCancelled: @escaping () -> Bool = { Task.isCancelled }
+        isCancelled: @escaping () -> Bool = { Task.isCancelled },
+        notifier: NotificationService = NotificationService()
     ) async -> Bool {
         let context = container.mainContext
         let settings = AppSettingsStore(context: context)
@@ -87,9 +88,18 @@ enum BackgroundFeedRefresher {
         // refreshAll already logs+continues past individual feed failures and
         // saves per podcast. Forward the expiration check so a cancelled BGTask
         // stops the loop promptly rather than spinning through every feed.
-        await repo.refreshAll(isCancelled: isCancelled) { _, _ in }
+        // It returns one notification per notification-enabled podcast that got
+        // genuinely-new episodes (#72).
+        let notifications = await repo.refreshAll(isCancelled: isCancelled) { _, _ in }
 
         settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
+
+        // Deliver per-podcast "new episodes" notifications. NotificationService
+        // never throws (logs + swallows), so this can't break task completion.
+        if !notifications.isEmpty {
+            await notifier.deliver(notifications)
+        }
+
         AppLog.networking.info("Background feed refresh complete")
         return true
     }

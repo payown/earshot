@@ -630,3 +630,69 @@ sends, PlayerService.swift:981/988 `sending 'note'`, EarshotSchema
 `versionIdentifier` static state). None are in #386's files; all out of scope.
 
 New agents created: none. Overall: PASS.
+
+## Security Review — Issue #72
+
+earshot-security gate: PASS. Per-podcast new-episode LOCAL notifications.
+Reviewed: Core/Notifications/{NewEpisodeNotification, NewEpisodeNotificationDecision,
+NotificationCenterProtocol, NotificationService, NotificationRouter,
+NotificationDelegate}.swift (new), Logger+Earshot.swift, SubscriptionRepository.swift,
+BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, RootView.swift.
+
+- Force-unwraps: none. fatalError: none. Secrets: none (scan hits were userInfo key constants).
+- try?: one new (RootView route() podcast fetch) — acceptable, fetch-fail and not-found
+  both log + return identically. The two SubscriptionRepository try? are pre-existing.
+- Retain cycles: none. Delegate Task captures `router` not self; app retains the delegate
+  because UNUserNotificationCenter.delegate is weak (correct, commented).
+- @MainActor / thread safety: NotificationRouter is @MainActor @Observable; delegate hops to
+  main actor before mutating. BackgroundFeedRefresher.runRefresh and refreshAll are both
+  @MainActor, so the new deliver() call is race-free. NotificationService is a Sendable struct
+  over the thread-safe UNUserNotificationCenter via an injectable protocol.
+- Delivery never throws out of the background task — auth/delivery failures caught+logged via
+  new AppLog.notifications. Stale notifications resolve podcast by feedURL / episode by guid
+  with guards; missing refs log + no-op, never crash.
+- Entitlements: N/A (local notifications need none; no aps-environment added). IS_BETA_BUILD:
+  N/A (no migration code). Release build SUCCEEDED. Tests: 27/27 + 22/22 (incl. 4 new) pass.
+- Feature suggestions: none this review. New agents created: none.
+
+## Notifications Decisions
+
+- **#72 Per-podcast new-episode local notifications (PRD 5.10).** LOCAL
+  notifications only via `UserNotifications` — no APNs/FCM/remote push, no new
+  Info.plist key, no entitlement. New `Earshot/Core/Notifications/` module:
+  `NotificationService` (auth + category + delivery), `NotificationDelegate`
+  (`UNUserNotificationCenterDelegate`), `NotificationRouter` (`@MainActor`
+  `@Observable` routing state), plus pure value/logic types
+  `NewEpisodeNotification`, `NewEpisodeNotificationDecision`, and the
+  `NotificationScheduling` protocol with a `SystemNotificationCenter` adapter.
+- **Testability via protocol seam.** All `UNUserNotificationCenter` access goes
+  through `NotificationScheduling` so authorization/delivery is unit-tested
+  against an actor-backed mock — no real notification center in the test host.
+  Pure helpers (`bodyText`, `shouldNotify`, `NotificationDelegate.intent`) are
+  static and tested directly.
+- **Fire point.** `SubscriptionRepository.refresh(_:)` now returns a
+  `RefreshOutcome` (`added`, `wasBackfill`, `newestNewEpisode`); `refreshAll`
+  collects one `NewEpisodeNotification` per notification-enabled podcast that got
+  genuinely-new episodes (decision excludes both backfill paths: first-subscribe
+  pre-dismiss and migrated-shell catalog seed). `BackgroundFeedRefresher.runRefresh`
+  delivers them after stamping the throttle timestamp. Delivery never throws —
+  failures are logged via `AppLog.notifications` and swallowed so the BGTask
+  always completes.
+- **Natural-key references.** `userInfo` carries `podcastFeedURL` (unique) and
+  `episodeGUID`, not `PersistentIdentifier`, mirroring `lastPlayingEpisodeID`
+  (which stores `episode.guid`) so references resolve reliably across launches.
+- **Deep link + actions.** Two foreground actions ("Add to queue", "Play now")
+  on a stable category id. The delegate maps the response to a `NotificationIntent`
+  and publishes it on `NotificationRouter`; `RootView` observes it, resolves the
+  podcast/episode by natural key, performs the action (enqueue via
+  `QueueRepository` / play via `PlayerService`), switches to the Library tab
+  (new `TabView` selection binding + `RootTab` enum), and pushes the show's
+  detail via a bound Library `NavigationStack` path. Missing podcast/episode is
+  logged and skipped — never crashes on a stale notification.
+- **Permission prompt.** Requested only when the user first toggles
+  "Notify on new episodes" ON in `PodcastSettingsView` (`.onChange`), and only if
+  status is `.notDetermined` (idempotent). Title/body are plain text (no emoji,
+  per the issue's VoiceOver requirement); body is correctly pluralized.
+- **Concurrency.** `NotificationService`/value types are `Sendable`;
+  `NotificationRouter` is `@MainActor`; the delegate hops to the main actor to
+  publish. Debug + Release builds clean under `minimal` strict concurrency.

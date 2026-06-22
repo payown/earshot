@@ -357,4 +357,71 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertEqual(fetcher.fetchCount - before, 0)
         XCTAssertEqual(progressCalls, 0)
     }
+
+    // MARK: New-episode notifications (#72)
+
+    func testRefreshOutcomeReportsAddedAndNewestEpisode() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        fetcher.feed = feed([episode("a", d1), episode("b", d2), episode("c", d3)])
+        let outcome = try await repo.refresh(podcast)
+
+        XCTAssertEqual(outcome.added, 2)
+        XCTAssertFalse(outcome.wasBackfill)
+        XCTAssertEqual(outcome.newestNewEpisode?.guid, "c", "Newest new episode is the deep-link target")
+    }
+
+    func testBackfillRefreshOutcomeIsMarkedBackfill() async throws {
+        let ctx = TestStore.freshContext()
+        let shell = Podcast(feedURL: "https://x/feed.xml", title: "Shell")
+        ctx.insert(shell)
+        try ctx.save()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+
+        let outcome = try await repo.refresh(shell)
+
+        XCTAssertTrue(outcome.wasBackfill, "Migrated-shell backfill must be flagged so it never notifies")
+        XCTAssertNil(outcome.newestNewEpisode)
+    }
+
+    func testRefreshAllSurfacesNotificationOnlyForEnabledPodcastsWithNewEpisodes() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+
+        // Two enabled, one disabled. All subscribed (so backlog pre-dismissed).
+        let enabled = try await repo.subscribe(feedURL: "https://x/enabled.xml")
+        enabled.notificationEnabled = true
+        let disabled = try await repo.subscribe(feedURL: "https://x/disabled.xml")
+        disabled.notificationEnabled = false
+        try ctx.save()
+
+        // Feed now has a new episode "b" — applies to every feed via FakeFeedFetcher.
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        let notifications = await repo.refreshAll()
+
+        XCTAssertEqual(notifications.count, 1, "Only the enabled podcast notifies")
+        let n = try XCTUnwrap(notifications.first)
+        XCTAssertEqual(n.podcastFeedURL, "https://x/enabled.xml")
+        XCTAssertEqual(n.episodeGUID, "b")
+        XCTAssertEqual(n.newEpisodeCount, 1)
+        XCTAssertEqual(n.podcastTitle, "Show")
+    }
+
+    func testRefreshAllSurfacesNoNotificationsWhenNoNewEpisodes() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        podcast.notificationEnabled = true
+        try ctx.save()
+
+        // No new episodes on refresh.
+        let notifications = await repo.refreshAll()
+        XCTAssertTrue(notifications.isEmpty)
+    }
 }
