@@ -1056,14 +1056,16 @@ final class PlayerService {
         Task { [weak self] in await self?.updateNowPlayingArtwork(from: artworkURL) }
     }
 
-    /// Fetches artwork for the lock screen and Control Center. Tries the system
-    /// URLCache first (free if SwiftUI's AsyncImage already loaded it), then
-    /// falls back to a network request. Writes the result into nowPlayingInfo
+    /// Fetches artwork for the lock screen and Control Center through the shared
+    /// disk-backed ``ArtworkCache`` — the same cache that ``PodcastArtwork`` uses
+    /// in the UI (#378/#385), so artwork already loaded for a screen is a cache
+    /// hit here (and survives relaunch). Writes the result into nowPlayingInfo
     /// without disturbing other fields.
     ///
-    /// Thread-safe: the final write is dispatched back to the main actor. The
-    /// `lastArtworkURL` guard prevents redundant fetches when the same episode
-    /// is toggled play/pause repeatedly.
+    /// Thread-safe: ``ArtworkCache`` is `Sendable`; the final write happens on
+    /// the main actor (this method is `@MainActor`-isolated). The `lastArtworkURL`
+    /// guard prevents redundant fetches when the same episode is toggled
+    /// play/pause repeatedly.
     private func updateNowPlayingArtwork(from url: URL?) async {
         guard let url else {
             // No artwork URL — clear any stale artwork from a previous episode.
@@ -1077,28 +1079,11 @@ final class PlayerService {
         // Skip the fetch when we already have artwork for this URL loaded.
         guard url != lastArtworkURL else { return }
 
-        // Check the system URLCache. SwiftUI's AsyncImage caches responses here,
-        // so artwork already visible in the UI is typically a synchronous hit.
-        let request = URLRequest(url: url)
-        if let cached = URLCache.shared.cachedResponse(for: request),
-           let image = UIImage(data: cached.data) {
-            lastArtworkURL = url
-            setArtwork(image)
-            return
-        }
-
-        // Cache miss: fetch from the network.
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard let image = UIImage(data: data) else {
-                AppLog.player.error("Artwork data from \(url, privacy: .public) could not be decoded as UIImage")
-                return
-            }
-            lastArtworkURL = url
-            setArtwork(image)
-        } catch {
-            AppLog.player.error("Artwork fetch failed for \(url, privacy: .public): \(error)")
-        }
+        // ArtworkCache serves from its disk cache when present and fetches
+        // (then caches) otherwise; it returns nil instead of throwing on failure.
+        guard let image = await ArtworkCache.shared.image(for: url) else { return }
+        lastArtworkURL = url
+        setArtwork(image)
     }
 
     /// Writes `image` into `MPNowPlayingInfoCenter` without touching any other

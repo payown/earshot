@@ -21,6 +21,7 @@ enum SettingsReset {
             AppLog.data.error("Factory reset save failed: \(error.localizedDescription, privacy: .public)")
         }
         deleteDownloadsDirectory()
+        deleteArtworkCache()
     }
 
     private static func deleteAll<T: PersistentModel>(_ type: T.Type, _ context: ModelContext) {
@@ -34,6 +35,15 @@ enum SettingsReset {
             .url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
             .appendingPathComponent("Downloads", isDirectory: true)
         else { return }
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    /// Drops the disk-backed artwork cache (#385) so a factory reset doesn't
+    /// leave stale podcast artwork behind. Clears the live ``URLCache`` and
+    /// removes the on-disk cache directory.
+    private static func deleteArtworkCache() {
+        ArtworkCache.shared.clear()
+        guard let dir = ArtworkCache.cacheDirectoryURL() else { return }
         try? FileManager.default.removeItem(at: dir)
     }
 }
