@@ -35,6 +35,7 @@ struct NowPlayingScreen: View {
                     ScrubberView(player: player)
                     transportRow
                     speedRow
+                    sleepTimerRow
                     airPlayRow
 
                     if hasShowNotes {
@@ -194,6 +195,60 @@ struct NowPlayingScreen: View {
     private var speedAccessibilityValue: String {
         let label = PlaybackLogic.spokenRate(player.effectiveRate)
         return player.hasPodcastSpeedOverride ? "\(label), podcast override active" : label
+    }
+
+    // MARK: Sleep timer row
+
+    /// An inline sleep timer status row: visible only when a timer is active.
+    /// Shows the live countdown (or "End of episode") and an "Extend +5 min"
+    /// button for countdown mode. Tapping the controls button in the toolbar
+    /// also reaches the full sleep timer section in PlayerControlsSheet.
+    @ViewBuilder
+    private var sleepTimerRow: some View {
+        let timer = player.sleepTimer
+        if timer.isActive {
+            HStack(spacing: Spacing.md) {
+                Image(systemName: "moon.zzz.fill")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+
+                Text(sleepTimerStatusText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .accessibilityLabel("Sleep timer")
+                    .accessibilityValue(timer.endOfEpisode
+                        ? "End of episode"
+                        : SleepTimerLogic.spokenRemaining(timer.remainingSeconds))
+
+                Spacer()
+
+                if !timer.endOfEpisode {
+                    Button {
+                        timer.extend()
+                        Announcer.announce("Sleep timer extended by 5 minutes")
+                    } label: {
+                        Text("+5 min")
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, Spacing.md)
+                            .padding(.vertical, Spacing.xs)
+                            .background(.thinMaterial, in: Capsule())
+                    }
+                    .accessibilityLabel("Extend sleep timer by 5 minutes")
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Spacing.xs)
+        }
+    }
+
+    private var sleepTimerStatusText: String {
+        let timer = player.sleepTimer
+        if timer.endOfEpisode { return "End of episode" }
+        if let remaining = timer.remainingSeconds {
+            return SleepTimerLogic.clock(remaining)
+        }
+        return ""
     }
 
     // MARK: AirPlay route picker
