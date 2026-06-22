@@ -40,8 +40,38 @@ struct InboxScreen: View {
                 }
             }
         }
+        // The visible title and its VoiceOver label both derive from
+        // `inbox.count`, which comes from the @Query-backed `inbox` — so they
+        // re-render live as episodes are triaged or the inbox is cleared, with
+        // no separate state to go stale. Visible string stays compact
+        // ("Inbox (12)"); VoiceOver gets a naturally-spoken label
+        // ("Inbox, 12 episodes").
+        //
+        // The count-bearing title rides on a `.principal` toolbar item rather
+        // than `.navigationTitle`. A `.navigationTitle(Text(...))` plus a
+        // standalone `.accessibilityLabel` puts the label on the content view,
+        // not the title element, so VoiceOver still spells out "open paren,
+        // 12, close paren". Even moving the label onto the `Text` passed to
+        // `navigationTitle` is unreliable here: on this project's iOS 17
+        // deployment target SwiftUI's navigation-bar bridge does not
+        // consistently carry a custom accessibility label into the LARGE
+        // title. The `.principal` item is a single, real bar element we fully
+        // own, so the label is guaranteed. `.accessibilityAddTraits(.isHeader)`
+        // restores the heading role that a plain `navigationTitle` grants for
+        // free. Tradeoff: a principal item presents inline-style with no
+        // large-title spring — acceptable for an accessibility-first app where
+        // the guaranteed reading matters more than the large-title animation.
+        // The plain `navigationTitle("Inbox")` keeps the bar's title identity
+        // (e.g. for back-button context) without duplicating the principal.
         .navigationTitle("Inbox")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text(InboxLogic.inboxTitle(count: inbox.count))
+                    .font(.headline)
+                    .accessibilityLabel(InboxLogic.inboxTitleAccessibilityLabel(count: inbox.count))
+                    .accessibilityAddTraits(.isHeader)
+            }
             if !inbox.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
