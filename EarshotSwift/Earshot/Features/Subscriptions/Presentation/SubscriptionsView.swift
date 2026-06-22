@@ -159,7 +159,11 @@ struct SubscriptionsView: View {
     }
 
     private func refreshAll() async {
+        // Pull-to-refresh always forces (bypasses the FeedRefreshPolicy window)
+        // and updates the throttle timestamp so the next background wake within
+        // 15 minutes is skipped (#381).
         await SubscriptionRepository(context: context).refreshAll()
+        AppSettingsStore(context: context).setDate(Date(), for: SettingsKey.lastFeedRefresh)
         Announcer.announce("Library refreshed")
     }
 }

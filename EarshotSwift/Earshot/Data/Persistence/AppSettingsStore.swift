@@ -27,6 +27,9 @@ enum SettingsKey {
     static let statsStreaksEnabled = "stats_streaks_enabled"
     // Flutter→SwiftUI one-time subscription import.
     static let flutterMigrationComplete = "flutter_migration_complete"
+    // Timestamp (epoch seconds) of the last completed feed refresh. Used by
+    // FeedRefreshPolicy to throttle background refreshes (#381).
+    static let lastFeedRefresh = "last_feed_refresh"
 }
 
 /// Documented defaults for settings not yet written by the user.
@@ -118,6 +121,16 @@ final class AppSettingsStore {
 
     func setOptionalInt(_ value: Int?, for key: String) {
         setRawValue(value.map(String.init) ?? "null", for: key)
+    }
+
+    /// Reads a Date stored as epoch seconds, or `nil` if unset/unparseable.
+    func date(_ key: String) -> Date? {
+        guard let raw = rawValue(key), let seconds = TimeInterval(raw) else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
+    func setDate(_ value: Date, for key: String) {
+        setRawValue(String(value.timeIntervalSince1970), for: key)
     }
 
     func launchScreen() -> LaunchScreen {
