@@ -247,6 +247,10 @@ Test baseline: **349 tests** (verified 2026-06-21, after #392 — 10 FeedbackCom
 ### Excluded
 - #395 — DO NOT TOUCH. Protected per session instructions.
 
+### Deferred — needs Michael's decision
+- #259 Appearance (manual theme override / accent color picker / layout density) — DEFERRED 2026-06-21. Two reasons: (1) the issue is Flutter-framed (references lib/, Riverpod, MaterialApp) and not yet re-scoped for SwiftUI; (2) a manual theme/accent/density override brushes CLAUDE.md non-negotiable rule #3 ("follow system settings; never override the user's theme/contrast; Earshot reads from the system, never imposes"). A user-chosen Light/Dark/System override is arguably fine and is an accessibility win for some users, but accent-color/density overrides go further. This is a product-principle call for Michael before building. Not a technical blocker.
+- #258 About screen is Flutter-framed too but ports cleanly and is explicitly wanted (PRD 17); re-scoped to a new SwiftUI issue and implemented.
+
 ## Blockers
 
 None. (F14 audio-enhancement DSP intentionally deferred — see Decision F14.)
