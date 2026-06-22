@@ -80,19 +80,19 @@ final class FeedbackComposerTests: XCTestCase {
 
     func testMailtoURLBasic() {
         let url = FeedbackComposer.mailtoURL(
-            to: "beta@payown.media",
+            to: "michael@payown.media",
             subject: "Earshot feedback",
             body: "Hello"
         )
         XCTAssertEqual(
             url?.absoluteString,
-            "mailto:beta@payown.media?subject=Earshot%20feedback&body=Hello"
+            "mailto:michael@payown.media?subject=Earshot%20feedback&body=Hello"
         )
     }
 
     func testMailtoURLEncodesNewlines() {
         let url = FeedbackComposer.mailtoURL(
-            to: "beta@payown.media",
+            to: "michael@payown.media",
             subject: "Sub",
             body: "Line one\nLine two"
         )
@@ -102,7 +102,7 @@ final class FeedbackComposerTests: XCTestCase {
 
     func testMailtoURLEncodesQueryReservedCharacters() {
         let url = FeedbackComposer.mailtoURL(
-            to: "beta@payown.media",
+            to: "michael@payown.media",
             subject: "a&b=c+d?e",
             body: "x"
         )
@@ -115,7 +115,7 @@ final class FeedbackComposerTests: XCTestCase {
 
     func testMailtoURLEncodesSpecialCharacters() {
         let url = FeedbackComposer.mailtoURL(
-            to: "beta@payown.media",
+            to: "michael@payown.media",
             subject: "100% sure: it's broken!",
             body: "café"
         )

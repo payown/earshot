@@ -115,6 +115,8 @@ The SwiftUI side is built and waiting.
 
 - **Decision (Naming):** "Library" is the **established, intentional** name for the subscriptions / podcast list (the tab, `SubscriptionsView` title, related announcements). Users are already used to it — do not rename it. The PRD's use of "Library" for local audio import (PRD 5.8) is a naming conflict, resolved here in favor of the existing user vocabulary: the subscriptions list keeps "Library," and local audio import — **if** it ships — will be called **"Local Audio,"** not "Library." Documentation-only; no code change.
 
+- **Issue #418 (Settings — Send Feedback recipient):** Changed the feedback recipient from `beta@payown.media` to `michael@payown.media`. **Implemented by:** planning agent (one-word/string-constant change, no domain logic). **Reviewed by:** earshot-security (PASS), earshot-accessibility (PASS — VoiceOver hint now reads "Opens an email to michael at payown dot media"), earshot-testing (PASS — 438/438, Release build clean), earshot-changelog (entry under Fixed; also corrected the unshipped #392 Added line). Touches `FeedbackComposer.recipient`, the `SendFeedbackView` doc comment + `accessibilityHint`, and 4 literals in `FeedbackComposerTests`. The mailto fallback, in-line fallback message, and Announcer all interpolate `FeedbackComposer.recipient`, so no literal edits there. Acceptance: `grep -r "beta@payown.media" EarshotSwift/` returns nothing. **Test count: 438** (baseline of record was 404; never decreased). Branch `fix/issue-418-feedback-recipient` into `swift`. Not merged / not closed — Michael verifies on device first.
+
 ## Audio Decisions
 
 - **Decision (#362 — tab switching blocked during playback):** The periodic time
@@ -445,6 +447,20 @@ delegated to DownloadManager. All new code paths logged via AppLog.subscriptions
 No secrets. No entitlement changes. No IS_BETA_BUILD impact. Advisory only:
 `AppSettingsStore(context:)` constructed inline in `subscribe()` — consider injecting
 `autoDownloadCount` for cleaner unit testing. Does not block the gate.
+
+## Security Review — Issue #418
+
+earshot-security gate: PASS. Send Feedback recipient corrected from beta@payown.media to
+michael@payown.media (the project owner contact from CLAUDE.md). Pure string-constant change,
+3 files: FeedbackComposer.swift (`recipient` constant), SendFeedbackView.swift (doc comment +
+accessibilityHint "michael at payown dot media"), FeedbackComposerTests.swift (4 literal
+assertions; the 5th test follows `FeedbackComposer.recipient`). No logic change — the mailto
+builder, percent-encoding, fallback message, and Announcer all interpolate `recipient` and were
+untouched. No force-unwraps, no `fatalError`, no secrets (the address is a public contact, not a
+credential). The 3 `try?` grep hits are pre-existing `XCTUnwrap` wrappers in test code, not in
+this diff. No new closures/retain cycles; SendFeedbackView already @MainActor. AppLog error paths
+intact. No entitlements/project.yml/migration impact (IS_BETA_BUILD Release check N/A). git diff
+vs swift confirms exactly 3 files; no stray beta@payown.media remains. Feature suggestions: none.
 
 ## Security Review — Issue #410
 

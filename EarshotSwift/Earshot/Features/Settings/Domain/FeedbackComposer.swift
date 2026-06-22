@@ -13,7 +13,7 @@ import Foundation
 enum FeedbackComposer {
 
     /// The address feedback is sent to (PRD 12).
-    static let recipient = "beta@payown.media"
+    static let recipient = "michael@payown.media"
 
     /// The default subject line for a feedback mail.
     static let defaultSubject = "Earshot feedback"
