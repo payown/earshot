@@ -4,7 +4,7 @@ import MessageUI
 
 /// Settings → Send Feedback (PRD 12, issue #392).
 ///
-/// Opens a pre-filled mail composer to `beta@payown.media`. The user can choose
+/// Opens a pre-filled mail composer to `michael@payown.media`. The user can choose
 /// to attach an anonymized system-info block (app version, build, iOS version,
 /// device model — nothing personal). When no Mail account is configured the
 /// screen falls back to a `mailto:` URL; if that can't be opened either, it
@@ -42,7 +42,7 @@ struct SendFeedbackView: View {
                 } label: {
                     Label("Compose feedback email", systemImage: "envelope")
                 }
-                .accessibilityHint("Opens an email to beta at payown dot media")
+                .accessibilityHint("Opens an email to michael at payown dot media")
             }
 
             if let fallbackMessage {
