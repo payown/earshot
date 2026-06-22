@@ -207,7 +207,7 @@ The SwiftUI side is built and waiting.
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
-Test baseline: **284 tests** (verified 2026-06-21, after the #370 AirPlay test salvage — 10 new AirPlayTests covering AVAudioSession AirPlay/Bluetooth options, AudioEnhancementLogic regression guards, and RoutePickerView type existence; PR #405, commit d60c5f7). Prior step: 274 after #399 (22 PodcastSettingsViewTests).
+Test baseline: **315 tests** (verified 2026-06-21, after #373 — 16 ChapterSkipLogicTests + 15 AdvancedPlaybackTests covering auto-skip decisions/loop guard and fast-forward begin/end/rotor-gating/episode-reset; PR #406, commit 4744946). Prior steps: 284 after #370 AirPlay salvage; 274 after #399.
 
 ### P0 — Must fix first
 | Issue | Title | Agent | Status |
@@ -228,7 +228,7 @@ Test baseline: **284 tests** (verified 2026-06-21, after the #370 AirPlay test s
 | Issue | Title | Agent | Status |
 |-------|-------|-------|--------|
 | #379 | Sleep timer: Extend +5 on bar; countdown clears on episode switch | earshot-audio + earshot-ui | [x] Closed 2026-06-21. All gates PASS (security, swift6, accessibility, testing — 252 tests, Release clean). Merged via PR #404. Commit 41c7b32. Non-blocking follow-up: +5/speed badge touch-target <44pt (pre-existing, cleanup pass). |
-| #373 | Chapter skip next/prev from player controls + hold-to-scan | earshot-audio | [ ] |
+| #373 | Chapter skip next/prev from player controls + hold-to-scan | earshot-audio | [x] Closed 2026-06-21. Hold-to-FF 4× (gesture + rotor gated on Direct Touch) + chapter auto-skip (in-memory skip set, loop guard). All gates PASS — 315 tests. Merged via PR #406. Commit 4744946. |
 | #371 | Player episode actions: Mark as played, Export audio, Stop after this episode | earshot-ui | [ ] |
 | #372 | Bookmarks list in player: jump, delete, share | earshot-ui | [ ] |
 | #392 | About screen + Send Feedback (PRD 12/17) | earshot-ui | [ ] |
