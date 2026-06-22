@@ -168,4 +168,58 @@ final class SleepTimerControllerTests: XCTestCase {
         XCTAssertFalse(fired)
         XCTAssertTrue(timer.isActive)
     }
+
+    // MARK: Cancel-on-episode-switch behaviour (issue #379)
+
+    // Cancelling a countdown timer clears all state and does not call onExpired.
+    func testCancelCountdownDoesNotFireOnExpired() {
+        let timer = SleepTimerController()
+        var fired = false
+        timer.onExpired = { fired = true }
+        timer.set(.thirtyMinutes, now: now)
+        XCTAssertTrue(timer.isActive)
+
+        timer.cancel()
+
+        XCTAssertFalse(fired, "cancel() must not fire onExpired")
+        XCTAssertFalse(timer.isActive)
+        XCTAssertNil(timer.remainingSeconds)
+        XCTAssertFalse(timer.endOfEpisode)
+    }
+
+    // Cancelling an end-of-episode timer clears state without firing onExpired.
+    func testCancelEndOfEpisodeDoesNotFireOnExpired() {
+        let timer = SleepTimerController()
+        var fired = false
+        timer.onExpired = { fired = true }
+        timer.set(.endOfEpisode, now: now)
+        XCTAssertTrue(timer.isActive)
+
+        timer.cancel()
+
+        XCTAssertFalse(fired, "cancel() must not fire onExpired")
+        XCTAssertFalse(timer.isActive)
+        XCTAssertFalse(timer.endOfEpisode)
+    }
+
+    // After cancel, extend is a no-op (guarded by isActive).
+    func testExtendAfterCancelIsNoop() {
+        let timer = SleepTimerController()
+        timer.set(.fiveMinutes, now: now)
+        timer.cancel()
+        timer.extend(by: 300, now: now) // must not crash or re-activate
+        XCTAssertFalse(timer.isActive)
+        XCTAssertNil(timer.remainingSeconds)
+    }
+
+    // Extend by the default 5-minute amount increases remaining for a countdown timer.
+    func testExtendByFiveMinutesDefaultAmount() throws {
+        let timer = SleepTimerController()
+        timer.set(.tenMinutes, now: now)
+        // Default extend is SleepTimerLogic.extendBy (300 s)
+        timer.extend(now: now)
+        // 10 min + 5 min = 15 min
+        let remaining = try XCTUnwrap(timer.remainingSeconds)
+        XCTAssertEqual(remaining, 900, accuracy: 1.0)
+    }
 }
