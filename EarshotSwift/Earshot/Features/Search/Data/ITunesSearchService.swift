@@ -15,7 +15,7 @@ struct PodcastSearchResult: Identifiable, Equatable {
 final class ITunesSearchService {
     private let session: URLSession
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = EarshotURLSession.shared) {
         self.session = session
     }
 

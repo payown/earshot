@@ -73,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Player: "Stop after this episode" is a one-off that stops playback when the current episode finishes instead of auto-advancing, then clears itself. It also resets if you restart the app. Earshot announces "Will stop after this episode" when you turn it on. (#371)
 
 ### Changed
+- Networking: feed refresh and podcast search now hold up better on a flaky connection. When a request hits a temporary problem (a server 5xx error, a dropped connection, or a timeout), Earshot waits briefly and tries again, twice, before giving up (1 second then 2 seconds). Permanent errors like a 404 or a bad address still fail right away instead of retrying for no reason. All network requests now use the same timeouts, so you should see fewer "couldn't load" failures when the network hiccups. (#386)
 - Settings: removed the Skip Silence toggle. AVPlayer doesn't support silence trimming natively, so the toggle had no effect on playback. Removing a control that silently does nothing is better than leaving it there. (closes #369)
 - Quick Actions: your configured episode-action order now drives the VoiceOver
   Actions rotor too, not just the menu and default double-tap. Reorder your
