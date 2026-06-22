@@ -65,6 +65,16 @@ final class PlayerService {
     // `nil` forces the next tick to write.
     @ObservationIgnored private var lastPersistedSecond: Int?
 
+    // Now-playing elapsed-time throttle (#412). The periodic time observer fires
+    // every second, but reading and rewriting the whole cross-process
+    // `MPNowPlayingInfoCenter.nowPlayingInfo` dictionary every second is a
+    // sustained energy cost. The system extrapolates elapsed time from the rate
+    // we set, so a periodic re-sync (see `PlaybackLogic.shouldSyncNowPlayingElapsed`)
+    // is enough to correct clock drift. Every discontinuity (play / pause / seek /
+    // resume / rate change) still updates now-playing eagerly and exactly, and
+    // resets this to `nil` so the next tick re-anchors. `nil` forces a sync.
+    @ObservationIgnored private var lastNowPlayingSyncSecond: Int?
+
     // Gapless preload: the next queue item is built (and starts buffering) ahead
     // of time so auto-advance is near-seamless. Invalidated whenever the queue
     // changes (via `.earshotQueueDidChange`).
@@ -420,6 +430,12 @@ final class PlayerService {
         // Setting `rate` also starts playback; only apply when we intend to play.
         if isPlaying || player.timeControlStatus == .playing {
             player.rate = Float(rate)
+            // A rate change is a discontinuity for the lock screen's elapsed-time
+            // extrapolation: push the new rate (and exact elapsed) immediately so
+            // the now-playing throttle (#412) doesn't leave it stale for up to a
+            // full sync interval.
+            updateNowPlayingElapsed()
+            lastNowPlayingSyncSecond = nil
         } else {
             player.rate = 0
             // Stash the desired rate so the next play() uses it via defaultRate.
@@ -716,7 +732,7 @@ final class PlayerService {
 
         persistPositionThrottled(currentSecond: Int(currentSeconds))
         recordListeningTick()
-        updateNowPlayingElapsed()
+        updateNowPlayingElapsedThrottled(currentSecond: Int(currentSeconds))
         evaluateChapterAutoSkip()
 
         // Mark played once we cross the threshold.
@@ -1027,6 +1043,11 @@ final class PlayerService {
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 
+        // This is a discontinuity write (play / pause / seek / resume): the elapsed
+        // time and rate are now exact, so re-anchor the per-tick throttle (#412) and
+        // let the next tick re-sync `nowPlayingElapsedSyncInterval` seconds later.
+        lastNowPlayingSyncSecond = nil
+
         // Kick off an async artwork fetch for the newly loaded episode. No-ops
         // immediately when the URL matches the last successfully-fetched artwork.
         let artworkURL = currentEpisode.flatMap {
@@ -1090,7 +1111,23 @@ final class PlayerService {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
-    /// Lightweight update of just the moving fields, called on every tick.
+    /// Per-tick entry point for the lock-screen elapsed time, throttled to
+    /// ``PlaybackLogic/nowPlayingElapsedSyncInterval`` (#412). Reading and
+    /// rewriting the cross-process `nowPlayingInfo` dictionary every second is a
+    /// sustained energy cost; the system extrapolates elapsed time from the rate
+    /// we set, so a coarser re-sync only corrects clock drift. Discontinuities
+    /// reset the throttle via ``updateNowPlayingInfo`` so they update immediately.
+    private func updateNowPlayingElapsedThrottled(currentSecond: Int) {
+        guard PlaybackLogic.shouldSyncNowPlayingElapsed(
+            currentSecond: currentSecond,
+            lastSyncedSecond: lastNowPlayingSyncSecond
+        ) else { return }
+        lastNowPlayingSyncSecond = currentSecond
+        updateNowPlayingElapsed()
+    }
+
+    /// Writes just the moving fields (elapsed time, rate, duration) into
+    /// `nowPlayingInfo` without disturbing the title/artist/artwork.
     private func updateNowPlayingElapsed() {
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentPositionSeconds

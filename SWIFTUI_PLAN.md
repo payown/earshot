@@ -140,6 +140,43 @@ The SwiftUI side is built and waiting.
   tracker; eager paths reset it), `PlaybackLogicTests.swift` (+6 cadence tests).
   210 tests green, Debug strict-concurrency clean.
 
+- **Decision (#412 — device overheats / sustained high CPU during playback):**
+  The 1 Hz periodic time observer's `handleTick` called `updateNowPlayingElapsed()`
+  on **every** tick, which read and rewrote the entire
+  `MPNowPlayingInfoCenter.default().nowPlayingInfo` dictionary. That dictionary is
+  marshaled cross-process to `mediaserverd` (including the `MPMediaItemArtwork`), so
+  a full get+set every second indefinitely is a real, sustained energy cost — the
+  overheating source. It is also unnecessary: once `elapsedPlaybackTime`,
+  `playbackRate`, and `playbackDuration` are set, the system **extrapolates** the
+  running elapsed time from the rate, so a per-second rewrite only re-states what the
+  system already computes. **Ruled out as causes (verified):** the always-mounted
+  `NowPlayingBar`/`RootView` do **not** read `currentPositionSeconds` in their
+  bodies, so `@Observable` does not re-render them at 1 Hz (only the open
+  `NowPlayingScreen` scrubber observes position, which is expected and transient);
+  `evaluateChapterAutoSkip()` early-returns immediately when no chapters are marked
+  skipped (the common case); `recordListeningTick()` is cheap arithmetic;
+  `handleRouteChange` only `pause()`s and never re-invokes `configureSession()`
+  (no `setCategory`/`setActive` churn); exactly one `AVPlayerItem` buffers at a time
+  (preload is built only on queue-change / play, never per tick). **Fix:** throttle
+  the per-tick now-playing elapsed rewrite to a coarse cadence
+  (`PlaybackLogic.nowPlayingElapsedSyncInterval = 5s`) via a new pure, unit-tested
+  `PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond:lastSyncedSecond:interval:)`,
+  cutting the cross-process IPC rate ~5×. Correctness preserved: every discontinuity
+  (play / pause / seek / resume) already calls `updateNowPlayingInfo()` with the
+  exact elapsed time and rate, and now resets the throttle tracker
+  (`lastNowPlayingSyncSecond = nil`) so the next tick re-anchors; rate (speed)
+  changes now also push an immediate `updateNowPlayingElapsed()` so the lock screen
+  reflects the new speed at once instead of waiting up to a sync interval. Backward
+  jumps re-sync immediately. Lock-screen elapsed time, mark-played threshold,
+  listening-session stats, chapter auto-skip, and the sleep timer are untouched.
+  **Issue:** #412. **Files:** `PlaybackLogic.swift`
+  (+`shouldSyncNowPlayingElapsed`/`nowPlayingElapsedSyncInterval`),
+  `PlayerService.swift` (`updateNowPlayingElapsedThrottled` + `lastNowPlayingSyncSecond`
+  tracker; `updateNowPlayingInfo` and `applyRate` reset it), `PlaybackLogicTests.swift`
+  (+7 cadence tests). 362 tests green, Release build clean. **Concurrency:** not
+  touched — no async/actor/Sendable changes, all work stays on the existing
+  `@MainActor` tick path.
+
 - **Decision (#368 -- in-player speed control):** Speed control added to
   `NowPlayingScreen` as a compact speed badge (shows current rate with a `*`
   suffix when a podcast override is active). Tapping opens `SpeedPickerSheet`,
@@ -325,3 +362,17 @@ hint. No secrets (only public repo URL + already-public beta@payown.media). No e
 project.yml changes. Release build SUCCEEDED on iPhone 17 sim after xcodegen regenerate; no
 migration/IS_BETA_BUILD impact. project.pbxproj registration verified for all three files across
 app + test targets.
+
+## Security Review — Issue #412
+
+earshot-security gate: PASS. Playback overheating fix: now-playing elapsed write throttled
+from 1 Hz to once per 5s. Changed: PlayerService.swift (added `@ObservationIgnored
+lastNowPlayingSyncSecond`, `updateNowPlayingElapsedThrottled`; applyRate/updateNowPlayingInfo
+re-anchor), PlaybackLogic.swift (pure `nowPlayingElapsedSyncInterval` + `shouldSyncNowPlayingElapsed`),
+PlaybackLogicTests.swift (8 cadence tests, all pass). No force-unwraps, no `try?`, no `fatalError`,
+no secrets in the diff. Time observer closure uses `[weak self]` + `guard let self` on @MainActor;
+class is @MainActor @Observable so the throttle anchor is main-actor-only. No stall risk: lock-screen
+elapsed keeps moving via system rate extrapolation; every discontinuity (play/pause/seek/resume/rate)
+pushes exact elapsed+rate and resets the anchor to nil; backward jumps force an immediate resync.
+mark-played write is unconditional in handleTick, unaffected by the throttle. No entitlement/migration
+changes; Release build SUCCEEDED on iPhone 17 sim. No feature suggestions this review.
