@@ -78,7 +78,6 @@ secrets/
 *.p12
 *.mobileprovision
 lib/core/config/api_keys.dart
-docs/kashe.md
 
 # Local test fixtures (sample OPML feed lists)
 *.opml
