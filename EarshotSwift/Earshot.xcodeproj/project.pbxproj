@@ -151,6 +151,7 @@
 		DA8A89E9C242146855F938FE /* ChapterSkipLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FD316F5819C53E890B613A2 /* ChapterSkipLogic.swift */; };
 		DAE5B17F783B9608A4E356A3 /* QuickActionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD6029A247CD01E7E6D06F1 /* QuickActionStore.swift */; };
 		DDC4E3E1E20C71FDDDF633E3 /* HTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C269D472A99E48313C640C1 /* HTTPClient.swift */; };
+		DDD9859D39A5A68259B0DA38 /* NotificationPermissionTrigger.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2139AAC938323A76B008595 /* NotificationPermissionTrigger.swift */; };
 		DDE214B4D555DF97D11B0253 /* InboxScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = D160839A12DBFE58F2A68B55 /* InboxScreen.swift */; };
 		DF0AB7339887FFF84B765FDE /* DownloadsInboxLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F413BCD620A311C966B89FD /* DownloadsInboxLogicTests.swift */; };
 		E1326BBBB921376DFEF73272 /* EarshotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DA06952463063521A170CEC /* EarshotApp.swift */; };
@@ -336,6 +337,7 @@
 		EF9CBE5DA98EB620F0AD4CEF /* MigrationImportState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationImportState.swift; sourceTree = "<group>"; };
 		F02DD508062C57130CC40137 /* ChapterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterParser.swift; sourceTree = "<group>"; };
 		F0E82F35CB949845DE1189C9 /* ModelEnums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelEnums.swift; sourceTree = "<group>"; };
+		F2139AAC938323A76B008595 /* NotificationPermissionTrigger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPermissionTrigger.swift; sourceTree = "<group>"; };
 		F29EFE156F619DD326A85C61 /* FlutterMigrationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterMigrationServiceTests.swift; sourceTree = "<group>"; };
 		F4EB4F7F597FCC1DD27CEEE4 /* FolderRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRepository.swift; sourceTree = "<group>"; };
 		F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsSettingsView.swift; sourceTree = "<group>"; };
@@ -884,6 +886,7 @@
 				FE4C9FFA1E2D81C45CDDADF0 /* NewEpisodeNotificationDecision.swift */,
 				2DE6692C5C3E4749C0B62772 /* NotificationCenterProtocol.swift */,
 				E4424CF6A7E7F746BDD54A3F /* NotificationDelegate.swift */,
+				F2139AAC938323A76B008595 /* NotificationPermissionTrigger.swift */,
 				0FAE84EA17DC1E88FAFAA276 /* NotificationRouter.swift */,
 				8D593C7355D8CEF192497648 /* NotificationService.swift */,
 			);
@@ -1201,6 +1204,7 @@
 				BAF6741A633EEB000ED00EE8 /* NewEpisodeNotificationDecision.swift in Sources */,
 				4CA62DBEF67FD97D823908F0 /* NotificationCenterProtocol.swift in Sources */,
 				63E922E79A943B6A85D37640 /* NotificationDelegate.swift in Sources */,
+				DDD9859D39A5A68259B0DA38 /* NotificationPermissionTrigger.swift in Sources */,
 				5CEA31E95F78FF0B4B1CE325 /* NotificationRouter.swift in Sources */,
 				1F0116AC3D1E02927613340E /* NotificationService.swift in Sources */,
 				5DC7D8D09A34917698C18126 /* NowPlayingBar.swift in Sources */,

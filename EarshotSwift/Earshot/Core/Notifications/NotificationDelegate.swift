@@ -64,14 +64,24 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         completionHandler()
     }
 
-    /// Show the banner + sound even when the app is in the foreground, so a
-    /// notification that arrives during a foreground refresh isn't silently
-    /// dropped.
+    /// Presentation options for a notification that arrives while the app is
+    /// foregrounded. `willPresent` fires ONLY in the foreground.
+    ///
+    /// A new-episode notification can now be delivered from the foreground
+    /// refresh path itself (pull-to-refresh / launch restore), where the user is
+    /// already looking at the new episodes. Showing an interrupting banner + sound
+    /// on top of that is noise (#421). We return `.list` so the notification is
+    /// still delivered to Notification Center (the user can find it later, and the
+    /// per-podcast coalescing identifier still applies), but suppress the banner
+    /// and sound so it never interrupts the active session. Background-delivered
+    /// notifications are unaffected — `willPresent` is not called for those.
+    static let foregroundPresentationOptions: UNNotificationPresentationOptions = [.list, .badge]
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        completionHandler(Self.foregroundPresentationOptions)
     }
 }
