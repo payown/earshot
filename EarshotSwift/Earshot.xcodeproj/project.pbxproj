@@ -129,6 +129,7 @@
 		F1B461F346E5F616B6040FAF /* ExpirationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BCA26B22E21066A09DA54E7 /* ExpirationService.swift */; };
 		D824D2022903405F862D3CB1 /* NowPlayingArtworkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 858F8A5E486648A8841607BE /* NowPlayingArtworkTests.swift */; };
 		F6D4582CC60766923E89BEBD /* AudioEnhancementLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D46224649A8922ADD5EEB593 /* AudioEnhancementLogicTests.swift */; };
+		277102FDCE7E4AEFAED4AC57 /* AirPlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F1E2D3C4B5A69788776655A /* AirPlayTests.swift */; };
 		F736F4872226E3D2DDDDD76F /* Logger+Earshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D504E12C18259B246B251C7B /* Logger+Earshot.swift */; };
 		F9A44A65F4853F96DA84642C /* QueueRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2780CB0E5357F4C10C7F4754 /* QueueRepository.swift */; };
 		FE10F8BBC14151987F725410 /* SleepTimerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B0DA96A716D9C8977EA90EF /* SleepTimerController.swift */; };
@@ -256,6 +257,7 @@
 		D417CBEB2EF403CE505CD8E9 /* Earshot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Earshot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		858F8A5E486648A8841607BE /* NowPlayingArtworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingArtworkTests.swift; sourceTree = "<group>"; };
 		D46224649A8922ADD5EEB593 /* AudioEnhancementLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEnhancementLogicTests.swift; sourceTree = "<group>"; };
+		0F1E2D3C4B5A69788776655A /* AirPlayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPlayTests.swift; sourceTree = "<group>"; };
 		D504E12C18259B246B251C7B /* Logger+Earshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Logger+Earshot.swift"; sourceTree = "<group>"; };
 		D7B9236014226D8C519CAD91 /* QueueScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueScreen.swift; sourceTree = "<group>"; };
 		D9750B9E78F260DABE15CC00 /* Tip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tip.swift; sourceTree = "<group>"; };
@@ -457,6 +459,7 @@
 			children = (
 				E26741EC8F02BA386553352C /* AppSettingsStoreTests.swift */,
 				D46224649A8922ADD5EEB593 /* AudioEnhancementLogicTests.swift */,
+				0F1E2D3C4B5A69788776655A /* AirPlayTests.swift */,
 				5716DC7465AF0422B02CD0CF /* BookmarkRepositoryTests.swift */,
 				3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */,
 				278A76C6E3AB1F92AFACB741 /* CoreServicesTests.swift */,
@@ -1141,6 +1144,7 @@
 			files = (
 				EDD3D7C3BDC9A5D163CD92DA /* AppSettingsStoreTests.swift in Sources */,
 				F6D4582CC60766923E89BEBD /* AudioEnhancementLogicTests.swift in Sources */,
+				277102FDCE7E4AEFAED4AC57 /* AirPlayTests.swift in Sources */,
 				387A6B9D205F92CFF6C98F8B /* BookmarkRepositoryTests.swift in Sources */,
 				C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */,
 				51AB6A682FF34A1A768BCF68 /* CoreServicesTests.swift in Sources */,
