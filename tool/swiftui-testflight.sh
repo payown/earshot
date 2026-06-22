@@ -80,6 +80,9 @@ xcodegen generate
 
 # ── Archive ───────────────────────────────────────────────────────────────────
 echo "▶ Archiving..."
+# Clear any stale archive/export from a previous run so a failed build can
+# never let a stale IPA reach upload.
+rm -rf "$ARCHIVE_PATH" "$EXPORT_PATH"
 xcodebuild archive \
   -project Earshot.xcodeproj \
   -scheme "$SCHEME" \
@@ -88,7 +91,10 @@ xcodebuild archive \
   -destination "generic/platform=iOS" \
   CODE_SIGN_STYLE=Automatic \
   DEVELOPMENT_TEAM=72PH974742 \
-  | grep -E "error:|warning:|Archive"
+  | grep -E "error:|warning:|Archive" || true
+# Gate on the real artifact, not grep's exit code: under `set -o pipefail` a
+# grep with no match returns non-zero and would abort an otherwise-good build.
+[ -d "$ARCHIVE_PATH" ] || { echo "❌ Archive failed (no .xcarchive produced)"; exit 1; }
 
 # ── Export IPA ────────────────────────────────────────────────────────────────
 echo "▶ Exporting IPA..."
@@ -113,7 +119,8 @@ xcodebuild -exportArchive \
   -archivePath "$ARCHIVE_PATH" \
   -exportPath "$EXPORT_PATH" \
   -exportOptionsPlist /tmp/ExportOptions.plist \
-  | grep -E "error:|Export"
+  | grep -E "error:|Export" || true
+[ -f "$IPA_PATH" ] || { echo "❌ Export failed (no IPA produced)"; exit 1; }
 
 # ── Upload ────────────────────────────────────────────────────────────────────
 echo "▶ Uploading to TestFlight ($GROUP)..."
