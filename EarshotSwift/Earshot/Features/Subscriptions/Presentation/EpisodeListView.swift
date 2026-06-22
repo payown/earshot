@@ -12,6 +12,7 @@ struct EpisodeListView: View {
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
+    @State private var showingPodcastSettings = false
 
     private var sortedEpisodes: [Episode] {
         podcast.episodes.sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
@@ -58,6 +59,20 @@ struct EpisodeListView: View {
         .navigationTitle(podcast.title)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await refresh() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingPodcastSettings = true
+                } label: {
+                    Label("Podcast settings", systemImage: "gearshape")
+                }
+                .accessibilityLabel("Podcast settings")
+                .accessibilityHint("Opens settings for this podcast")
+            }
+        }
+        .sheet(isPresented: $showingPodcastSettings) {
+            PodcastSettingsView(podcast: podcast)
+        }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { episode in
