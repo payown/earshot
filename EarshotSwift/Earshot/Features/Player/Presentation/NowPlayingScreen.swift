@@ -7,9 +7,9 @@ import AVKit
 /// sheet (sleep timer + chapters). Purely presentational — all behavior delegates
 /// to ``PlayerService``.
 ///
-/// Scope is deliberately the scaffold + scrubber (issue #367). Speed control,
-/// episode actions, and the bookmarks list are tracked as follow-up issues and
-/// slot into this screen later.
+/// Scope began as the scaffold + scrubber (issue #367); speed control, episode
+/// actions (#371), and the bookmarks list (#372) have since slotted in via the
+/// toolbar overflow menu and the artwork rotor.
 struct NowPlayingScreen: View {
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
@@ -18,6 +18,7 @@ struct NowPlayingScreen: View {
     @State private var showingControls = false
     @State private var showingNotes = false
     @State private var showingSpeedPicker = false
+    @State private var showingBookmarks = false
 
     // Export audio file (#371): the prepared local-file URL to share, and a flag
     // covering the download-then-share wait so the action can show progress and
@@ -88,6 +89,11 @@ struct NowPlayingScreen: View {
             .sheet(item: $exportURL) { file in
                 ShareSheet(items: [file.url])
             }
+            .sheet(isPresented: $showingBookmarks) {
+                if let episode = player.nowPlayingEpisode {
+                    BookmarksListView(episode: episode)
+                }
+            }
         }
         .task {
             // Let the present transition settle before requesting VoiceOver focus;
@@ -136,6 +142,9 @@ struct NowPlayingScreen: View {
                 Button("Mark as played") { player.markCurrentPlayedAndAdvance() }
                 Button(exportActionLabel) { startExport() }
                 Button(stopAfterActionLabel) { player.toggleStopAfterEpisode() }
+                if player.nowPlayingEpisode != nil {
+                    Button("Bookmarks") { showingBookmarks = true }
+                }
             }
 
         // Only attach a value node while actually scanning. An empty-string value
@@ -380,12 +389,18 @@ struct NowPlayingScreen: View {
                     systemImage: player.stopAfterCurrentEpisode ? "checkmark" : "stop.circle"
                 )
             }
+
+            Button {
+                showingBookmarks = true
+            } label: {
+                Label("Bookmarks", systemImage: "bookmark")
+            }
         } label: {
             Image(systemName: "ellipsis.circle")
         }
         .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
         .accessibilityLabel("Episode actions")
-        .accessibilityHint("Mark as played, export audio, and stop after this episode")
+        .accessibilityHint("Mark as played, export audio, stop after this episode, and bookmarks")
         .disabled(player.nowPlayingEpisode == nil)
     }
 
