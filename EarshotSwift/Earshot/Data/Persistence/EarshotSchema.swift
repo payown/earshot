@@ -1,18 +1,25 @@
 import Foundation
 import SwiftData
 
-/// Version 2 — the current Earshot SwiftData schema (the full model graph).
+/// Version 2 — the schema exactly as it shipped in #337 (`f0ae8d5`): the full
+/// 10-entity model graph with `Podcast.notificationEnabled` as a **non-optional**
+/// `Bool`.
 ///
-/// The original shipped schema is preserved in ``EarshotSchemaV1`` (only
-/// `Podcast` + `Episode`, with `Episode.isPlayed` and no `Episode.createdAt`).
+/// These model types are intentionally nested and frozen — a verbatim snapshot
+/// of the live models as they shipped at V2. They are NOT references to the
+/// live top-level types. SwiftData keys an entity off its class NAME (`"Podcast"`,
+/// `"Episode"`, …), so nesting does not change entity identity or the computed
+/// version hash; it only lets V2 and V3 coexist in one process. Do not edit
+/// these definitions — they must keep matching what V2 builds actually wrote to
+/// disk. When the live models change, freeze a NEW version (see ``EarshotSchemaV3``
+/// and the drift-detection test) rather than editing this snapshot.
 ///
 /// V1→V2 is **not** a lightweight migration: it turns 2 entities into 10 and
 /// adds many non-optional attributes. SwiftData's lightweight migration cannot
 /// add a non-optional attribute (it does not honour Swift property defaults as
 /// store defaults — verified in `StoreMigrationTests`), so the upgrade is done
 /// as a manual export/reimport in ``StoreMigration`` rather than via a
-/// `SchemaMigrationPlan`. Future additive changes (V3+) that only add optional
-/// fields or new entities can use a lightweight `SchemaMigrationPlan`.
+/// `MigrationStage.lightweight`.
 enum EarshotSchemaV2: VersionedSchema {
     static var versionIdentifier = Schema.Version(2, 0, 0)
 
@@ -30,4 +37,361 @@ enum EarshotSchemaV2: VersionedSchema {
             AppSetting.self,
         ]
     }
+
+    @Model
+    final class Podcast {
+        @Attribute(.unique) var feedURL: String
+        var title: String
+        var author: String?
+        var podcastDescription: String?
+        var artworkURL: String?
+        var websiteURL: String?
+        var language: String?
+        var category: String?
+
+        var autoQueue: Bool
+        /// Non-optional in V2 — this is the field whose later change to optional
+        /// motivates the V2→V3 lightweight stage.
+        var notificationEnabled: Bool
+
+        var speedOverride: Double?
+        var trimSilenceOverride: Bool?
+
+        var queueAgeLimitDays: Int?
+        var inboxMaxEpisodes: Int?
+        var inboxAgeLimitHours: Int?
+        var inboxExcluded: Bool
+        var inboxIncluded: Bool
+
+        var createdAt: Date
+        var refreshedAt: Date?
+        var lastSeenPubDate: Date?
+
+        @Relationship(deleteRule: .cascade, inverse: \Episode.podcast)
+        var episodes: [Episode]
+
+        init(
+            feedURL: String,
+            title: String,
+            author: String? = nil,
+            podcastDescription: String? = nil,
+            artworkURL: String? = nil,
+            websiteURL: String? = nil,
+            language: String? = nil,
+            category: String? = nil,
+            autoQueue: Bool = false,
+            notificationEnabled: Bool = false,
+            speedOverride: Double? = nil,
+            trimSilenceOverride: Bool? = nil,
+            queueAgeLimitDays: Int? = nil,
+            inboxMaxEpisodes: Int? = nil,
+            inboxAgeLimitHours: Int? = nil,
+            inboxExcluded: Bool = false,
+            inboxIncluded: Bool = false,
+            createdAt: Date = .now,
+            refreshedAt: Date? = nil,
+            lastSeenPubDate: Date? = nil
+        ) {
+            self.feedURL = feedURL
+            self.title = title
+            self.author = author
+            self.podcastDescription = podcastDescription
+            self.artworkURL = artworkURL
+            self.websiteURL = websiteURL
+            self.language = language
+            self.category = category
+            self.autoQueue = autoQueue
+            self.notificationEnabled = notificationEnabled
+            self.speedOverride = speedOverride
+            self.trimSilenceOverride = trimSilenceOverride
+            self.queueAgeLimitDays = queueAgeLimitDays
+            self.inboxMaxEpisodes = inboxMaxEpisodes
+            self.inboxAgeLimitHours = inboxAgeLimitHours
+            self.inboxExcluded = inboxExcluded
+            self.inboxIncluded = inboxIncluded
+            self.createdAt = createdAt
+            self.refreshedAt = refreshedAt
+            self.lastSeenPubDate = lastSeenPubDate
+            self.episodes = []
+        }
+    }
+
+    @Model
+    final class Episode {
+        var guid: String
+        var title: String
+        var episodeDescription: String?
+        var audioURL: String
+        var durationSeconds: Int?
+        var pubDate: Date?
+        var artworkURL: String?
+        var episodeNumber: Int?
+        var seasonNumber: Int?
+        var chapterURL: String?
+        var transcriptURL: String?
+
+        var status: EpisodeStatus
+        var downloadStatus: DownloadStatus
+        var downloadPath: String?
+        var positionSeconds: Int
+        var playedAt: Date?
+        var inboxDismissed: Bool
+        var createdAt: Date
+
+        var podcast: Podcast?
+
+        @Relationship(deleteRule: .cascade, inverse: \QueueItem.episode)
+        var queueItem: QueueItem?
+
+        @Relationship(deleteRule: .cascade, inverse: \Bookmark.episode)
+        var bookmarks: [Bookmark]
+
+        @Relationship(deleteRule: .cascade, inverse: \RecentlyExpired.episode)
+        var recentlyExpired: RecentlyExpired?
+
+        var isPlayed: Bool {
+            get { status == .played }
+            set {
+                status = newValue ? .played : .newEpisode
+                playedAt = newValue ? .now : nil
+            }
+        }
+
+        init(
+            guid: String,
+            title: String,
+            audioURL: String,
+            episodeDescription: String? = nil,
+            durationSeconds: Int? = nil,
+            pubDate: Date? = nil,
+            artworkURL: String? = nil,
+            episodeNumber: Int? = nil,
+            seasonNumber: Int? = nil,
+            chapterURL: String? = nil,
+            transcriptURL: String? = nil,
+            status: EpisodeStatus = .newEpisode,
+            downloadStatus: DownloadStatus = .none,
+            downloadPath: String? = nil,
+            positionSeconds: Int = 0,
+            playedAt: Date? = nil,
+            inboxDismissed: Bool = false,
+            createdAt: Date = .now
+        ) {
+            self.guid = guid
+            self.title = title
+            self.audioURL = audioURL
+            self.episodeDescription = episodeDescription
+            self.durationSeconds = durationSeconds
+            self.pubDate = pubDate
+            self.artworkURL = artworkURL
+            self.episodeNumber = episodeNumber
+            self.seasonNumber = seasonNumber
+            self.chapterURL = chapterURL
+            self.transcriptURL = transcriptURL
+            self.status = status
+            self.downloadStatus = downloadStatus
+            self.downloadPath = downloadPath
+            self.positionSeconds = positionSeconds
+            self.playedAt = playedAt
+            self.inboxDismissed = inboxDismissed
+            self.createdAt = createdAt
+            self.bookmarks = []
+        }
+    }
+
+    @Model
+    final class QueueItem {
+        var episode: Episode?
+        var position: Int
+        var addedAt: Date
+
+        init(episode: Episode? = nil, position: Int, addedAt: Date = .now) {
+            self.episode = episode
+            self.position = position
+            self.addedAt = addedAt
+        }
+    }
+
+    @Model
+    final class ListeningSession {
+        var episode: Episode?
+        var podcast: Podcast?
+        var durationSeconds: Int
+        var speed: Double
+        var date: Date
+
+        init(
+            episode: Episode? = nil,
+            podcast: Podcast? = nil,
+            durationSeconds: Int,
+            speed: Double = 1.0,
+            date: Date = .now
+        ) {
+            self.episode = episode
+            self.podcast = podcast
+            self.durationSeconds = durationSeconds
+            self.speed = speed
+            self.date = date
+        }
+    }
+
+    @Model
+    final class Bookmark {
+        var episode: Episode?
+        var positionSeconds: Int
+        var note: String
+        var createdAt: Date
+
+        init(
+            episode: Episode? = nil,
+            positionSeconds: Int,
+            note: String = "",
+            createdAt: Date = .now
+        ) {
+            self.episode = episode
+            self.positionSeconds = positionSeconds
+            self.note = note
+            self.createdAt = createdAt
+        }
+    }
+
+    @Model
+    final class PodcastFolder {
+        var name: String
+        var sortOrder: Int
+        var queueAgeLimitDays: Int?
+        var createdAt: Date
+
+        @Relationship(deleteRule: .cascade, inverse: \FolderMembership.folder)
+        var memberships: [FolderMembership]
+
+        init(
+            name: String,
+            sortOrder: Int = 0,
+            queueAgeLimitDays: Int? = nil,
+            createdAt: Date = .now
+        ) {
+            self.name = name
+            self.sortOrder = sortOrder
+            self.queueAgeLimitDays = queueAgeLimitDays
+            self.createdAt = createdAt
+            self.memberships = []
+        }
+    }
+
+    @Model
+    final class FolderMembership {
+        var folder: PodcastFolder?
+        var podcast: Podcast?
+        var sortOrder: Int
+
+        init(folder: PodcastFolder? = nil, podcast: Podcast? = nil, sortOrder: Int = 0) {
+            self.folder = folder
+            self.podcast = podcast
+            self.sortOrder = sortOrder
+        }
+    }
+
+    @Model
+    final class RecentlyExpired {
+        var episode: Episode?
+        var expiredAt: Date
+
+        init(episode: Episode? = nil, expiredAt: Date = .now) {
+            self.episode = episode
+            self.expiredAt = expiredAt
+        }
+    }
+
+    @Model
+    final class QuickActionConfig {
+        var contentType: QuickActionContentType
+        var actionKey: String
+        var sortOrder: Int
+
+        init(contentType: QuickActionContentType, actionKey: String, sortOrder: Int) {
+            self.contentType = contentType
+            self.actionKey = actionKey
+            self.sortOrder = sortOrder
+        }
+    }
+
+    @Model
+    final class AppSetting {
+        @Attribute(.unique) var key: String
+        var value: String
+
+        init(key: String, value: String) {
+            self.key = key
+            self.value = value
+        }
+    }
+}
+
+/// Version 3 — the **current** schema. Unlike V2, this is the only versioned
+/// schema that references the live top-level `@Model` types. Every change to the
+/// live model graph must be matched by freezing the previous V into a nested
+/// snapshot and bumping this version (see ``SchemaDriftTests`` — CI fails if the
+/// live graph drifts from this snapshot without a version bump).
+///
+/// V2→V3 is a SwiftData-native lightweight stage: the only difference between the
+/// frozen V2 graph and the live V3 graph is `Podcast.notificationEnabled` going
+/// from a non-optional `Bool` to an optional `Bool?` (nil = off). Making an
+/// attribute optional is exactly the kind of additive change lightweight
+/// migration supports, so V2→V3 never aborts on a missing mandatory value.
+enum EarshotSchemaV3: VersionedSchema {
+    static var versionIdentifier = Schema.Version(3, 0, 0)
+
+    static var models: [any PersistentModel.Type] {
+        [
+            Podcast.self,
+            Episode.self,
+            QueueItem.self,
+            ListeningSession.self,
+            Bookmark.self,
+            PodcastFolder.self,
+            FolderMembership.self,
+            RecentlyExpired.self,
+            QuickActionConfig.self,
+            AppSetting.self,
+        ]
+    }
+}
+
+/// The ordered migration plan for the Earshot store.
+///
+/// Two stages:
+///   - **V1→V2** is a `.custom` stage. SwiftData cannot infer it (2 entities
+///     become 10, with new non-optional attributes), so the heavy lifting stays
+///     in ``StoreMigration`` (manual export/reimport). The plan's custom stage
+///     willMigrate is a no-op marker: the real V1 path is handled by
+///     ``StoreMigration/openOrMigrate(at:)`` before the plan ever runs, so this
+///     stage only exists to keep the version chain complete and never throws.
+///   - **V2→V3** is `.lightweight`: `notificationEnabled` becomes optional.
+enum EarshotMigrationPlan: SchemaMigrationPlan {
+    static var schemas: [any VersionedSchema.Type] {
+        [EarshotSchemaV1.self, EarshotSchemaV2.self, EarshotSchemaV3.self]
+    }
+
+    static var stages: [MigrationStage] {
+        [migrateV1toV2, migrateV2toV3]
+    }
+
+    /// Marker stage. The real V1→V2 transform is the manual export/reimport in
+    /// ``StoreMigration`` (a V1 store is never opened directly as V3 with this
+    /// plan), so this stage does no work and cannot fail.
+    static let migrateV1toV2 = MigrationStage.custom(
+        fromVersion: EarshotSchemaV1.self,
+        toVersion: EarshotSchemaV2.self,
+        willMigrate: nil,
+        didMigrate: nil
+    )
+
+    /// `Podcast.notificationEnabled` goes from `Bool` to `Bool?`. Making an
+    /// attribute optional is a standard lightweight change; existing rows keep
+    /// their stored value and the model coalesces nil to false on read.
+    static let migrateV2toV3 = MigrationStage.lightweight(
+        fromVersion: EarshotSchemaV2.self,
+        toVersion: EarshotSchemaV3.self
+    )
 }

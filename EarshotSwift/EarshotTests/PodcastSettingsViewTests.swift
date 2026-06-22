@@ -132,19 +132,21 @@ final class PodcastSettingsViewTests: XCTestCase {
 
     // MARK: Notification toggle
 
-    func testNotificationEnabledDefaultsToFalse() {
+    func testNotificationEnabledDefaultsToNilOff() {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx)
-        XCTAssertFalse(p.notificationEnabled)
+        // nil = off (#425); readers coalesce nil to false.
+        XCTAssertNil(p.notificationEnabled)
+        XCTAssertFalse(p.notificationEnabled ?? false)
     }
 
     func testNotificationEnabledCanBeToggled() {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx)
         p.notificationEnabled = true
-        XCTAssertTrue(p.notificationEnabled)
+        XCTAssertEqual(p.notificationEnabled, true)
         p.notificationEnabled = false
-        XCTAssertFalse(p.notificationEnabled)
+        XCTAssertEqual(p.notificationEnabled, false)
     }
 
     // MARK: Multiple settings on the same podcast
@@ -164,7 +166,7 @@ final class PodcastSettingsViewTests: XCTestCase {
         XCTAssertEqual(p.queueAgeLimitDays, 3)
         XCTAssertEqual(p.inboxMaxEpisodes, 10)
         XCTAssertEqual(p.inboxAgeLimitHours, 48)
-        XCTAssertTrue(p.notificationEnabled)
+        XCTAssertEqual(p.notificationEnabled, true)
     }
 
     func testSettingsArePersisted() throws {

@@ -718,3 +718,50 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 - **Concurrency.** `NotificationService`/value types are `Sendable`;
   `NotificationRouter` is `@MainActor`; the delegate hops to the main actor to
   publish. Debug + Release builds clean under `minimal` strict concurrency.
+
+## Data Decisions
+
+### Issue #425 — Freeze V2, add V3 + drift detection (launch-crash hardening)
+- **Frozen-schema architecture.** `EarshotSchemaV2` is now a verbatim frozen
+  snapshot (nested `@Model` types) of the 10-entity graph as it shipped at #337
+  (`f0ae8d5`), including `Podcast.notificationEnabled` as the original
+  non-optional `Bool`. `EarshotSchemaV3` (`Schema.Version(3,0,0)`) is the only
+  versioned schema that references the LIVE top-level model types. No
+  `VersionedSchema` references live types except V3.
+- **The latent crash.** Previously `EarshotSchemaV2.models` pointed at live
+  types, so the 2.0.0 schema silently changed shape on any field add — SwiftData
+  would later abort a store open into a non-optional destination attribute
+  (NSCocoaErrorDomain 134110), an uncatchable launch crash. Freezing V2 makes
+  that class impossible; the drift test makes the next occurrence a CI failure.
+- **notificationEnabled -> Bool?.** The live `Podcast.notificationEnabled` is now
+  optional (`nil` = off). Default in the initializer is `nil` so a fresh insert
+  and a row migrated from V2 read identically. Every reader coalesces `nil` to
+  `false`: `SubscriptionRepository` (`?? false` into the notify decision),
+  `PodcastActionsBuilder` (read + explicit-assign toggle, no `.toggle()`),
+  `PodcastSettingsView` (an explicit `Binding<Bool>` bridges the optional to the
+  `Toggle`), and `NewEpisodeNotificationDecision` keeps its plain `Bool` param.
+- **Migration plan.** `EarshotMigrationPlan` chains `[V1, V2, V3]` with two
+  stages: V1->V2 stays the manual export/reimport in `StoreMigration` (the plan's
+  V1->V2 custom stage is an inert marker — a V1 store is intercepted before the
+  plan runs), and V2->V3 is `.lightweight` (optionalizing a field is natively
+  supported, so it migrates instead of aborting). The production container
+  (`ModelContainerFactory.makeShared` via `StoreMigration.openOrMigrate`) now
+  opens as V3 with the plan; reset-on-failure and in-memory tiers are preserved.
+- **Drift detection** (`SchemaDriftTests`). Compares the live graph against the
+  frozen V2 snapshot and asserts the only difference is the documented intentional
+  delta (`Podcast.notificationEnabled`: `Bool` -> `Bool?`). Any other added /
+  removed / retyped attribute fails CI, forcing a new frozen Vn + migration stage.
+  Verified to fail when a probe field is added to a live model.
+- **Upgrade fixture** (`StoreMigrationV2toV3Tests`). Seeds a real on-disk store at
+  the frozen V2 schema (2 podcasts, episodes incl. NULL optionals + a played one,
+  queue item, bookmark, folder + membership, `notificationEnabled` true/false) and
+  asserts V2->V3 via the production path completes without aborting and preserves
+  every relationship and the nil-as-false semantics. The original V1->V2
+  `StoreMigrationTests` still passes.
+- **#423 coordination.** PR #423's `PodcastSettingsView` notifications toggle binds
+  `isOn: $podcast.notificationEnabled` directly. Against the now-optional field a
+  `Binding<Bool?>` cannot bind to `Toggle(isOn:)`, so when #423 rebases it must use
+  the same bridge this PR added (a `Binding<Bool>` get `{ podcast.notificationEnabled
+  ?? false }` set `{ podcast.notificationEnabled = $0 }`) and observe that binding's
+  `wrappedValue` in `.onChange`. If #423 also reads `notificationEnabled` anywhere as
+  a plain `Bool`, coalesce with `?? false`.

@@ -15,7 +15,10 @@ final class Podcast {
 
     // Content-flow settings
     var autoQueue: Bool
-    var notificationEnabled: Bool
+    /// nil = off. Optional so V2→V3 is a SwiftData-native lightweight migration
+    /// (a non-optional Bool here would make SwiftData abort the store open on
+    /// upgrade — issue #425). Every reader coalesces nil to false; see callers.
+    var notificationEnabled: Bool?
 
     // Per-podcast playback overrides (nil = fall back to global)
     var speedOverride: Double?
@@ -47,7 +50,9 @@ final class Podcast {
         language: String? = nil,
         category: String? = nil,
         autoQueue: Bool = false,
-        notificationEnabled: Bool = false,
+        // Default nil (off) so a fresh insert and a row migrated from V2 read
+        // identically — both nil, both treated as off (#425).
+        notificationEnabled: Bool? = nil,
         speedOverride: Double? = nil,
         trimSilenceOverride: Bool? = nil,
         queueAgeLimitDays: Int? = nil,

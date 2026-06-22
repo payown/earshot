@@ -123,12 +123,19 @@ struct PodcastSettingsView: View {
     }
 
     private var notificationsSection: some View {
-        Section {
-            Toggle("Notify on new episodes", isOn: $podcast.notificationEnabled)
+        // `notificationEnabled` is `Bool?` (nil = off, see Podcast / #425), which
+        // can't bind to `Toggle(isOn:)` directly. Bridge it: read nil as false,
+        // write a concrete Bool back.
+        let notifyBinding = Binding<Bool>(
+            get: { podcast.notificationEnabled ?? false },
+            set: { podcast.notificationEnabled = $0 }
+        )
+        return Section {
+            Toggle("Notify on new episodes", isOn: notifyBinding)
                 // Request notification permission the first time the user turns
                 // this on. requestAuthorization() is idempotent — it never
                 // re-prompts once the user has decided (#72).
-                .onChange(of: podcast.notificationEnabled) { _, isOn in
+                .onChange(of: notifyBinding.wrappedValue) { _, isOn in
                     guard isOn else { return }
                     Task { await NotificationService().requestAuthorization() }
                 }
