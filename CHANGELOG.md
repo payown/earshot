@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Sleep timer: an "Extend +5 min" button now appears on the Now Playing bar and the player screen while a timer is counting down, so you can add time without reopening the timer picker. (#379)
 - Now Playing: you can change playback speed directly from the player screen. Tap the speed badge below the controls to open a picker with quick shortcuts (0.5×, 1×, 1.25×, 1.5×, 2×) and a stepper for 0.1× precision anywhere from 0.5× to 5.0×. Set the speed for just the current podcast or for all podcasts from the same sheet. When a per-podcast speed is active, the badge shows a * so you can tell it differs from your global setting. VoiceOver announces the speed you chose and which scope you applied it to, and focus returns to the badge when the sheet closes. The global speed picker in Settings also covers the full 0.5× to 5.0× range now. (closes #368)
 - Coming from the previous version of Earshot: the first time you open this
   build over your existing install, Earshot brings your subscribed shows across
@@ -77,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Sleep timer: starting a different episode now cancels any running sleep timer. VoiceOver announces "Sleep timer cancelled" when this happens. (#379)
 - Player: podcast artwork now appears on the lock screen and in Control Center while an episode is playing. Earshot checks its local cache first, so no extra network request is needed if you've already seen the artwork in the app. (closes #378)
 - Player: tabs now switch instantly while audio is playing. Before, tapping a tab
   did nothing until you paused, which left VoiceOver users unable to move around
