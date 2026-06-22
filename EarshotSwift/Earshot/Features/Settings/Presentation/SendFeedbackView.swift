@@ -72,8 +72,8 @@ struct SendFeedbackView: View {
 
     private var composedBody: String {
         let info = includeSystemInfo ? FeedbackComposer.systemInfoBlock(
-            appVersion: Self.appVersion,
-            build: Self.buildNumber,
+            appVersion: AppInfo.version,
+            build: AppInfo.build,
             iosVersion: UIDevice.current.systemVersion,
             deviceModel: Self.deviceModelIdentifier
         ) : nil
@@ -116,14 +116,6 @@ struct SendFeedbackView: View {
     }
 
     // MARK: Anonymized device info
-
-    private static var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
-    }
-
-    private static var buildNumber: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
-    }
 
     /// The hardware model identifier (e.g. "iPhone16,2"). On the simulator the
     /// real device model is exposed via the `SIMULATOR_MODEL_IDENTIFIER`

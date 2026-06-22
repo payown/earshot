@@ -309,3 +309,19 @@ delegated to DownloadManager. All new code paths logged via AppLog.subscriptions
 No secrets. No entitlement changes. No IS_BETA_BUILD impact. Advisory only:
 `AppSettingsStore(context:)` constructed inline in `subscribe()` — consider injecting
 `autoDownloadCount` for cleaner unit testing. Does not block the gate.
+
+## Security Review — Issue #410
+
+earshot-security gate: PASS. Settings → About screen (PRD 17). New files: AppInfo.swift,
+AboutView.swift, AppInfoTests.swift; SendFeedbackView refactored to use AppInfo; SettingsScreen
+gained an About NavigationLink. No force-unwraps (AppInfo uses `as? String ?? "unknown"`;
+AboutView guards the repo URL with `if let`). No `try?` introduced (the lone grep hit at
+SettingsScreen.swift:180 is pre-existing OPML code, not in this branch's diff). No `fatalError`.
+No retain cycles (AppInfo/AboutView have no Task/sink/observer/Timer; SendFeedbackView's openURL
+closure captures only @State value types). @MainActor on AboutView; AppInfo is a pure stateless
+enum. No new catch blocks. PII/privacy: reads only CFBundleShortVersionString + CFBundleVersion;
+external Link is a system-handled SwiftUI Link to the public repo with a VoiceOver "leaves the app"
+hint. No secrets (only public repo URL + already-public beta@payown.media). No entitlement or
+project.yml changes. Release build SUCCEEDED on iPhone 17 sim after xcodegen regenerate; no
+migration/IS_BETA_BUILD impact. project.pbxproj registration verified for all three files across
+app + test targets.
