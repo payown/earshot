@@ -74,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New episode notifications: turn on "Notify on new episodes" for any show from its settings page, and Earshot sends you a notification when a background refresh finds new episodes for it. The notification shows the show name and how many new episodes there are, and gives you "Add to queue" and "Play now" buttons right on it. Tapping the notification opens that show in your Library. Earshot asks for notification permission the first time you turn the toggle on. These are on-device notifications only, so nothing is sent to a server, and Earshot never pesters you about your inbox, queue, downloads, or how long it's been since you last listened. (closes #72)
 
 ### Changed
+- New episode notifications: when a new episode is found while Earshot is open, the notification no longer interrupts you with a banner and sound. It goes quietly to Notification Center so it doesn't talk over what you're doing or pull screen reader focus away. (closes #421)
 - Networking: feed refresh and podcast search now hold up better on a flaky connection. When a request hits a temporary problem (a server 5xx error, a dropped connection, or a timeout), Earshot waits briefly and tries again, twice, before giving up (1 second then 2 seconds). Permanent errors like a 404 or a bad address still fail right away instead of retrying for no reason. All network requests now use the same timeouts, so you should see fewer "couldn't load" failures when the network hiccups. (#386)
 - Settings: removed the Skip Silence toggle. AVPlayer doesn't support silence trimming natively, so the toggle had no effect on playback. Removing a control that silently does nothing is better than leaving it there. (closes #369)
 - Quick Actions: your configured episode-action order now drives the VoiceOver
@@ -90,6 +91,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- New episode notifications: turning on a show's "Notify on new episodes" toggle now reliably asks for notification permission the first time. Before, the permission prompt never appeared, so the notifications could never be delivered. (closes #421)
+- New episode notifications: notifications now fire from a pull-to-refresh and from launch, not just from the background check. Before, only the background refresh sent them, which rarely ran, so new episodes you found yourself never produced a notification. (closes #421)
+- New episode notifications: a notification is no longer dropped when a background check is skipped because your feeds were refreshed in the last 15 minutes. Notification delivery is now separate from that refresh window, so an expected notification still goes out. (closes #421)
 - Settings: Send Feedback now sends to michael@payown.media instead of the old beta@payown.media address. This corrects the mail composer recipient, the mailto fallback, and the address shown when no mail app is set up, so feedback reaches the project owner as the release notes said it would. VoiceOver's hint on the button now reads "Opens an email to michael at payown dot media". (closes #418)
 - Playback: the device now runs cooler and uses less battery during playback. Earshot was updating the lock screen and Control Center elapsed time every second, which kept the system media server busy in the background; it now refreshes that time every 5 seconds (and right away when you play, pause, seek, or change speed). The lock screen still shows the correct elapsed time because the system fills in the seconds between updates. (#412)
 - Sleep timer: starting a different episode now cancels any running sleep timer. VoiceOver announces "Sleep timer cancelled" when this happens. (#379)
@@ -214,6 +218,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Player: VoiceOver now announces "Playing" or "Paused" once when playback state
   changes, instead of repeating the announcement for every tab. (closes #366)
 - New episode notifications: notifications use plain, meaningful text with no emoji, so VoiceOver reads something useful like "Show name, 2 new episodes" instead of an icon. Tapping a notification moves focus to that show's detail screen in the Library. (closes #72)
+- New episode notifications: a new-episode notification that arrives while you're using the app is now delivered silently to Notification Center instead of taking over with a banner and sound, so it doesn't interrupt VoiceOver or pull your focus mid-task. (closes #421)
 
 ### Phase 8 complete — Alpha build prep
 
