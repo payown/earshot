@@ -207,7 +207,7 @@ The SwiftUI side is built and waiting.
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
-Test baseline: **248 tests** (verified 2026-06-21, after #380 — 8 new SubscriptionRepositoryTests covering auto-download count=0, no-downloader safety, N-most-recent cap, autoQueue enabled/disabled/no-repo fallback, and old-episode guard).
+Test baseline: **252 tests** (verified 2026-06-21, after #379 — 4 new SleepTimerController tests in ChapterSleepTests covering extend-by-5 default, extend-after-cancel no-op, and cancel-on-switch behavior).
 
 ### P0 — Must fix first
 | Issue | Title | Agent | Status |
@@ -227,7 +227,7 @@ Test baseline: **248 tests** (verified 2026-06-21, after #380 — 8 new Subscrip
 ### P2 — Polish and parity
 | Issue | Title | Agent | Status |
 |-------|-------|-------|--------|
-| #379 | Sleep timer: Extend +5 on bar; countdown clears on episode switch | earshot-audio + earshot-ui | [ ] |
+| #379 | Sleep timer: Extend +5 on bar; countdown clears on episode switch | earshot-audio + earshot-ui | [x] Closed 2026-06-21. All gates PASS (security, swift6, accessibility, testing — 252 tests, Release clean). Merged via PR #404. Commit 41c7b32. Non-blocking follow-up: +5/speed badge touch-target <44pt (pre-existing, cleanup pass). |
 | #373 | Chapter skip next/prev from player controls + hold-to-scan | earshot-audio | [ ] |
 | #371 | Player episode actions: Mark as played, Export audio, Stop after this episode | earshot-ui | [ ] |
 | #372 | Bookmarks list in player: jump, delete, share | earshot-ui | [ ] |
