@@ -133,6 +133,8 @@
 		F9A44A65F4853F96DA84642C /* QueueRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2780CB0E5357F4C10C7F4754 /* QueueRepository.swift */; };
 		FE10F8BBC14151987F725410 /* SleepTimerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B0DA96A716D9C8977EA90EF /* SleepTimerController.swift */; };
 		FE19FBFCB33519DACA4A792C /* PodcastActionsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE11723CD083B143985A7C7C /* PodcastActionsBuilder.swift */; };
+		39423BEBED90F120FC0AE54A /* PodcastSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC59AF48648CC68D60A5F863 /* PodcastSettingsView.swift */; };
+		D31AA70310E63394922AD919 /* PodcastSettingsViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61B146E001AB98BE599AE46 /* PodcastSettingsViewTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -275,6 +277,8 @@
 		F6EE4757B64A837E04D89E7E /* OPMLImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMLImportService.swift; sourceTree = "<group>"; };
 		FA719A9EE6C298B619478083 /* StatsPeriod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsPeriod.swift; sourceTree = "<group>"; };
 		FBCA06917D3490C5734BED12 /* StoreMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreMigrationTests.swift; sourceTree = "<group>"; };
+		CC59AF48648CC68D60A5F863 /* PodcastSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastSettingsView.swift; sourceTree = "<group>"; };
+		A61B146E001AB98BE599AE46 /* PodcastSettingsViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastSettingsViewTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -477,6 +481,7 @@
 				FBCA06917D3490C5734BED12 /* StoreMigrationTests.swift */,
 				B3A3B1702C4523909DBC2673 /* SubscriptionImporterTests.swift */,
 				9CCBE4AE43F4BE56415F15CA /* SubscriptionRepositoryTests.swift */,
+				A61B146E001AB98BE599AE46 /* PodcastSettingsViewTests.swift */,
 				EE47A8895121139EC1D75B8A /* TestSupport.swift */,
 			);
 			path = EarshotTests;
@@ -683,6 +688,7 @@
 				94347B9412E35CBD85FC2705 /* EpisodeListView.swift */,
 				A621AE99537538C3A0AD021C /* EpisodeRow.swift */,
 				C2AFBB00F8C76C7C8D5A7BF3 /* PodcastArtwork.swift */,
+				CC59AF48648CC68D60A5F863 /* PodcastSettingsView.swift */,
 				9C2A7F38E26A61D91D5846A4 /* ShowNotesView.swift */,
 				3B9DA2518345900178343187 /* SubscriptionsView.swift */,
 			);
@@ -1088,6 +1094,7 @@
 				80E7C9113664F9DD51702897 /* PodcastAction.swift in Sources */,
 				FE19FBFCB33519DACA4A792C /* PodcastActionsBuilder.swift in Sources */,
 				BCC4D9C61F2DA7D7F9975DD2 /* PodcastArtwork.swift in Sources */,
+				39423BEBED90F120FC0AE54A /* PodcastSettingsView.swift in Sources */,
 				C2575FA0F95FEF33CA069017 /* PodcastFolder.swift in Sources */,
 				937D978ADE376CB4C7C1DCD2 /* QueueActionsBuilder.swift in Sources */,
 				D2ACE04F1A94DF80EF1D670E /* QueueItem.swift in Sources */,
@@ -1158,6 +1165,7 @@
 				76CA1D5C34804F82048795F3 /* StoreMigrationTests.swift in Sources */,
 				2A49106E55A23EB564A50F07 /* SubscriptionImporterTests.swift in Sources */,
 				12FF5569EF0035E8169F9C7B /* SubscriptionRepositoryTests.swift in Sources */,
+				D31AA70310E63394922AD919 /* PodcastSettingsViewTests.swift in Sources */,
 				120F7E7696DFA8780C99278B /* TestSupport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
