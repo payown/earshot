@@ -85,6 +85,14 @@ final class PlayerService {
     /// state and the rotor action's start/stop label.
     var isFastForwarding = false
 
+    /// One-off "stop after this episode" flag (#371). When set, the current
+    /// episode plays to its natural end and then playback STOPS instead of
+    /// auto-advancing to the next queue item — after which the flag clears.
+    /// IN-MEMORY ONLY: it resets on app restart and after it fires, mirroring
+    /// Flutter's `stopAfterCurrentEpisode` and the end-of-episode sleep timer's
+    /// lifetime. Also cleared when the user plays something else.
+    var stopAfterCurrentEpisode = false
+
     // Chapter auto-skip (#373). The set of chapter indices the user marked
     // "skip" per episode, keyed by the durable episode guid. IN-MEMORY ONLY —
     // it resets on app restart, matching Flutter's `SkippedChaptersNotifier`
@@ -201,6 +209,13 @@ final class PlayerService {
         lastAutoSkipFromChapterIndex = nil
         isFastForwarding = false
         rateBeforeFastForward = nil
+        // Playing something else clears the one-off stop-after flag (mirrors the
+        // sleep timer behaviour above). Announce only if it was actually set so
+        // we don't fire a spurious announcement on every episode start.
+        if stopAfterCurrentEpisode {
+            stopAfterCurrentEpisode = false
+            Announcer.announce("Stop after this episode cancelled")
+        }
 
         currentEpisode = episode
         currentTitle = episode.title
@@ -445,6 +460,111 @@ final class PlayerService {
         rateBeforeFastForward = nil
         applyRate()
         Announcer.announce("Fast forward stopped")
+    }
+
+    // MARK: Public — episode actions (#371)
+
+    /// Toggles the one-off "stop after this episode" flag and announces the new
+    /// state. Returns the resulting state. The flag is honoured at the natural
+    /// end of the current episode in ``handlePlaybackEnded`` and clears after it
+    /// fires, on app restart, or when the user plays something else.
+    @discardableResult
+    func toggleStopAfterEpisode() -> Bool {
+        stopAfterCurrentEpisode.toggle()
+        Announcer.announce(stopAfterCurrentEpisode
+            ? "Will stop after this episode"
+            : "Stop after this episode cancelled")
+        return stopAfterCurrentEpisode
+    }
+
+    /// Manual "mark as played" for the loaded episode: marks it played, removes
+    /// it from the queue, and advances to the next queue item WITHOUT playing the
+    /// current one to the end. Distinct from the automatic 95% mark in
+    /// ``handleTick``. No-op when nothing is loaded. Announces the result.
+    func markCurrentPlayedAndAdvance() {
+        guard let finished = currentEpisode, let context else { return }
+
+        flushListeningSession()
+        let repo = QueueRepository(context: context)
+
+        let queued = repo.queue()
+        let nextID = PlaybackLogic.nextUpID(
+            queue: queued.map(\.persistentModelID),
+            after: finished.persistentModelID
+        )
+        let nextEpisode = queued.first { $0.persistentModelID == nextID }
+
+        repo.markPlayedAndRemove(finished)
+        finished.positionSeconds = 0
+        saveContext()
+        Announcer.announce("Marked as played")
+
+        guard let nextEpisode else {
+            // Nothing queued after this one: stop cleanly with the bar cleared.
+            pause()
+            isPlaying = false
+            currentEpisode = nil
+            updateNowPlayingInfo()
+            return
+        }
+
+        let prepared = preloadedEpisode?.persistentModelID == nextEpisode.persistentModelID
+            ? preloadedItem : nil
+        preloadedItem = nil
+        preloadedEpisode = nil
+        play(nextEpisode, preparedItem: prepared)
+        Announcer.announce("Now playing \(nextEpisode.title)")
+    }
+
+    /// True when the loaded episode's audio is available as a local file (already
+    /// downloaded). Drives whether "Export audio file" shares immediately or has
+    /// to download first.
+    var currentEpisodeIsDownloaded: Bool {
+        guard let path = currentEpisode?.downloadPath, !path.isEmpty else { return false }
+        return FileManager.default.fileExists(atPath: path)
+    }
+
+    /// Exports the loaded episode's LOCAL audio file for sharing (#371, #401).
+    ///
+    /// Downloads the episode first when it isn't already local, then copies the
+    /// local file to a temporary file named "Podcast name - Episode title" so the
+    /// share sheet presents a human-readable filename. Returns the temporary file
+    /// URL to hand to the OS share sheet, or `nil` on failure (logged via
+    /// `AppLog`). NEVER returns the remote enclosure URL — the share is always
+    /// the on-disk audio.
+    func exportCurrentEpisodeAudio(using downloads: DownloadManager) async -> URL? {
+        guard let episode = currentEpisode else { return nil }
+
+        // Ensure the file is local first. download() is a no-op when already
+        // downloaded; otherwise it writes downloadPath / downloadStatus.
+        if !currentEpisodeIsDownloaded {
+            await downloads.download(episode)
+        }
+
+        guard let path = episode.downloadPath, !path.isEmpty,
+              FileManager.default.fileExists(atPath: path) else {
+            AppLog.player.error("Export failed: no local file for \(episode.title, privacy: .public)")
+            return nil
+        }
+
+        let localURL = URL(fileURLWithPath: path)
+        let fileName = EpisodeExportLogic.exportFileName(
+            podcastTitle: episode.podcast?.title,
+            episodeTitle: episode.title,
+            sourceURL: URL(string: episode.audioURL)
+        )
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent(fileName)
+
+        do {
+            // Copy (not move) so the original download stays intact for playback.
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.copyItem(at: localURL, to: destination)
+            return destination
+        } catch {
+            AppLog.player.error("Export copy failed for \(episode.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     // MARK: Public — chapter auto-skip (#373)
@@ -739,6 +859,22 @@ final class PlayerService {
             currentEpisode = nil
             updateNowPlayingInfo()
             Announcer.announce("Sleep timer ended. Playback stopped.")
+            return
+        }
+
+        // Stop-after-this-episode (#371): the natural end of the current episode
+        // marks it played and removes it from the queue, then STOPS instead of
+        // auto-advancing. The one-off flag clears so the next episode (started
+        // manually) advances normally again.
+        if EpisodeExportLogic.shouldStopAfterCurrent(stopAfterCurrentEpisode: stopAfterCurrentEpisode) {
+            stopAfterCurrentEpisode = false
+            repo.markPlayedAndRemove(finished)
+            finished.positionSeconds = 0
+            saveContext()
+            isPlaying = false
+            currentEpisode = nil
+            updateNowPlayingInfo()
+            Announcer.announce("Stopped after this episode")
             return
         }
 

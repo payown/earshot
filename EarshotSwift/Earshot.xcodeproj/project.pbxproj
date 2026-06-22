@@ -10,6 +10,7 @@
 		00B5AE69A700B0B85F25638B /* InboxRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29FEA690D050216F4B4F0454 /* InboxRepository.swift */; };
 		01262DE59B46D2A204377F1D /* FolderMembership.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17A60E43D00F2AEB85499BCA /* FolderMembership.swift */; };
 		048CB4E68DC3B4C54EF6CFE9 /* OnboardingContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9F5501C7FE1D92BC8A539E /* OnboardingContent.swift */; };
+		0623BB8FF5D6F2C31A2E8FC2 /* EpisodeExportLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 339F4A0A7A0FCC29DAFD1150 /* EpisodeExportLogicTests.swift */; };
 		0740972B7545E5C01C3177AD /* ITunesSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 153E920C6B22C967CFB67F3E /* ITunesSearchService.swift */; };
 		08CE6FDC6BF27D427FFBFBC1 /* SleepTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297BEC6C00A3076AF4CC7259 /* SleepTimer.swift */; };
 		0C34726CCF898D3B224D7296 /* ShowNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C2A7F38E26A61D91D5846A4 /* ShowNotesView.swift */; };
@@ -84,6 +85,7 @@
 		8E9B046EC870926B325058F2 /* FolderPodcastPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F67B8AAA16F69CB84C899E27 /* FolderPodcastPickerView.swift */; };
 		90B302BC78F413A2F575AC1A /* DownloadGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1D28B26DA693A5CEB8AE85 /* DownloadGate.swift */; };
 		937D978ADE376CB4C7C1DCD2 /* QueueActionsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D8853AB932B8147D824DA5 /* QueueActionsBuilder.swift */; };
+		9384CF21515C9BA9F322A177 /* EpisodeExportLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59E6B431FF3AB66D1412802 /* EpisodeExportLogic.swift */; };
 		996DE47BD6F4BB678F86590D /* FolderRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4EB4F7F597FCC1DD27CEEE4 /* FolderRepository.swift */; };
 		9B96460020EE778842F1D5C4 /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B27BB426B5C9992591376435 /* Spacing.swift */; };
 		9C1E3FCE1E702A0C3CA62867 /* RestoreBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F29E86AFF01FA1B90CBBF29 /* RestoreBanner.swift */; };
@@ -179,6 +181,7 @@
 		2A70527F1DAF265141AC6979 /* AppColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColor.swift; sourceTree = "<group>"; };
 		2B744CD0D217BC04C25FAB2B /* SettingsReset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsReset.swift; sourceTree = "<group>"; };
 		2BE919DDCD5DBE1272334FF6 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		339F4A0A7A0FCC29DAFD1150 /* EpisodeExportLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeExportLogicTests.swift; sourceTree = "<group>"; };
 		33D8853AB932B8147D824DA5 /* QueueActionsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueActionsBuilder.swift; sourceTree = "<group>"; };
 		36E58C1C8D0069EACC139345 /* ModelContainerFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelContainerFactory.swift; sourceTree = "<group>"; };
 		3B9DA2518345900178343187 /* SubscriptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionsView.swift; sourceTree = "<group>"; };
@@ -285,6 +288,7 @@
 		F29EFE156F619DD326A85C61 /* FlutterMigrationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterMigrationServiceTests.swift; sourceTree = "<group>"; };
 		F4EB4F7F597FCC1DD27CEEE4 /* FolderRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRepository.swift; sourceTree = "<group>"; };
 		F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsSettingsView.swift; sourceTree = "<group>"; };
+		F59E6B431FF3AB66D1412802 /* EpisodeExportLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeExportLogic.swift; sourceTree = "<group>"; };
 		F67B8AAA16F69CB84C899E27 /* FolderPodcastPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPodcastPickerView.swift; sourceTree = "<group>"; };
 		F6EE4757B64A837E04D89E7E /* OPMLImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMLImportService.swift; sourceTree = "<group>"; };
 		FA719A9EE6C298B619478083 /* StatsPeriod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsPeriod.swift; sourceTree = "<group>"; };
@@ -474,6 +478,7 @@
 				3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */,
 				278A76C6E3AB1F92AFACB741 /* CoreServicesTests.swift */,
 				9F413BCD620A311C966B89FD /* DownloadsInboxLogicTests.swift */,
+				339F4A0A7A0FCC29DAFD1150 /* EpisodeExportLogicTests.swift */,
 				F29EFE156F619DD326A85C61 /* FlutterMigrationServiceTests.swift */,
 				1A11D600A98A1DDDDC3A3379 /* FolderRepositoryTests.swift */,
 				21426D34A6272D33878D6A13 /* InboxExpirationServiceTests.swift */,
@@ -762,6 +767,7 @@
 				C4C2CEA51FF27CE1EF442176 /* Chapter.swift */,
 				F02DD508062C57130CC40137 /* ChapterParser.swift */,
 				9FD316F5819C53E890B613A2 /* ChapterSkipLogic.swift */,
+				F59E6B431FF3AB66D1412802 /* EpisodeExportLogic.swift */,
 				8EC414F03B2203A2D9FC8456 /* PlaybackLogic.swift */,
 				176D270ABFB38F7C3BBA92BA /* PlaybackStartup.swift */,
 				297BEC6C00A3076AF4CC7259 /* SleepTimer.swift */,
@@ -1072,6 +1078,7 @@
 				60BEBF0B98670BDA9980C3B6 /* Episode.swift in Sources */,
 				5300063D3DF0F8B0C230D30E /* EpisodeAction.swift in Sources */,
 				42C670F214460BADA919C9DB /* EpisodeActionsBuilder.swift in Sources */,
+				9384CF21515C9BA9F322A177 /* EpisodeExportLogic.swift in Sources */,
 				A6ABA0F37BA96A1A6D768F49 /* EpisodeListView.swift in Sources */,
 				87D55A542BD1471B1F6DCA83 /* EpisodeRow.swift in Sources */,
 				E40C8D42A6D9245D3CEE9681 /* ExpirationLogic.swift in Sources */,
@@ -1164,6 +1171,7 @@
 				C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */,
 				51AB6A682FF34A1A768BCF68 /* CoreServicesTests.swift in Sources */,
 				DF0AB7339887FFF84B765FDE /* DownloadsInboxLogicTests.swift in Sources */,
+				0623BB8FF5D6F2C31A2E8FC2 /* EpisodeExportLogicTests.swift in Sources */,
 				1213231195FB3A095F9FB437 /* FlutterMigrationServiceTests.swift in Sources */,
 				D8E6CF1EAFB66882C4F6DCB7 /* FolderRepositoryTests.swift in Sources */,
 				D0EAF35C0542B99058B990D8 /* InboxExpirationServiceTests.swift in Sources */,

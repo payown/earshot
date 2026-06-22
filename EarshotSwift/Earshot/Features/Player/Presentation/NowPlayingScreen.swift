@@ -12,11 +12,18 @@ import AVKit
 /// slot into this screen later.
 struct NowPlayingScreen: View {
     @Environment(PlayerService.self) private var player
+    @Environment(DownloadManager.self) private var downloads
     @Environment(\.dismiss) private var dismiss
 
     @State private var showingControls = false
     @State private var showingNotes = false
     @State private var showingSpeedPicker = false
+
+    // Export audio file (#371): the prepared local-file URL to share, and a flag
+    // covering the download-then-share wait so the action can show progress and
+    // disable itself while in flight.
+    @State private var exportURL: ExportFile?
+    @State private var isExporting = false
 
     // On present, VoiceOver should land on the episode title (a heading), not the
     // Close button or the decorative artwork. We request focus after a short
@@ -61,6 +68,9 @@ struct NowPlayingScreen: View {
                     }
                     .accessibilityLabel("Player controls, sleep timer and chapters")
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    episodeActionsMenu
+                }
             }
             .sheet(isPresented: $showingControls) { PlayerControlsSheet() }
             .sheet(isPresented: $showingSpeedPicker, onDismiss: {
@@ -74,6 +84,9 @@ struct NowPlayingScreen: View {
                 if let episode = player.nowPlayingEpisode {
                     ShowNotesView(episode: episode)
                 }
+            }
+            .sheet(item: $exportURL) { file in
+                ShareSheet(items: [file.url])
             }
         }
         .task {
@@ -108,7 +121,10 @@ struct NowPlayingScreen: View {
             // the label, value, and rotor action below reliably attach to it.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Episode artwork")
-            // Offer the scan as a rotor action only where Direct Touch applies.
+            // Offer the scan as a rotor action only where Direct Touch applies,
+            // plus the three episode actions (#371) so VoiceOver users reach
+            // Mark as played, Export audio file, and Stop after this episode from
+            // the artwork rotor — the same set the visible overflow menu shows.
             .accessibilityActions {
                 if player.fastForwardRotorAvailable {
                     if player.isFastForwarding {
@@ -117,6 +133,9 @@ struct NowPlayingScreen: View {
                         Button("Start Fast Forward") { player.beginFastForward() }
                     }
                 }
+                Button("Mark as played") { player.markCurrentPlayedAndAdvance() }
+                Button(exportActionLabel) { startExport() }
+                Button(stopAfterActionLabel) { player.toggleStopAfterEpisode() }
             }
 
         // Only attach a value node while actually scanning. An empty-string value
@@ -331,6 +350,81 @@ struct NowPlayingScreen: View {
         .accessibilityHint("Opens the episode show notes")
     }
 
+    // MARK: Episode actions menu (#371)
+
+    /// The toolbar overflow menu surfacing the three episode actions as a visible
+    /// control alongside the VoiceOver rotor actions on the artwork. Each
+    /// destructive-feeling action carries a leading icon so its nature isn't
+    /// signalled by position alone. "Stop after this episode" shows a checkmark
+    /// while active.
+    private var episodeActionsMenu: some View {
+        Menu {
+            Button {
+                player.markCurrentPlayedAndAdvance()
+            } label: {
+                Label("Mark as played", systemImage: "checkmark.circle")
+            }
+
+            Button {
+                startExport()
+            } label: {
+                Label(exportActionLabel, systemImage: "square.and.arrow.up")
+            }
+            .disabled(isExporting)
+
+            Button {
+                player.toggleStopAfterEpisode()
+            } label: {
+                Label(
+                    "Stop after this episode",
+                    systemImage: player.stopAfterCurrentEpisode ? "checkmark" : "stop.circle"
+                )
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
+        .accessibilityLabel("Episode actions")
+        .accessibilityHint("Mark as played, export audio, and stop after this episode")
+        .disabled(player.nowPlayingEpisode == nil)
+    }
+
+    /// Export label reflects the download-then-share wait so the user knows the
+    /// file has to download first when it isn't already local.
+    private var exportActionLabel: String {
+        if isExporting { return "Preparing audio file…" }
+        return player.currentEpisodeIsDownloaded
+            ? "Export audio file"
+            : "Download and export audio file"
+    }
+
+    /// Stop-after label flips so the rotor action announces what activating it
+    /// will do (set vs cancel), since rotor buttons can't show a checkmark.
+    private var stopAfterActionLabel: String {
+        player.stopAfterCurrentEpisode
+            ? "Cancel stop after this episode"
+            : "Stop after this episode"
+    }
+
+    /// Kicks off the export: downloads if needed, then presents the share sheet
+    /// with the LOCAL file. Guards against double-runs while one is in flight.
+    private func startExport() {
+        guard !isExporting, player.nowPlayingEpisode != nil else { return }
+        isExporting = true
+        if !player.currentEpisodeIsDownloaded {
+            Announcer.announce("Preparing audio file for export")
+        }
+        Task {
+            let url = await player.exportCurrentEpisodeAudio(using: downloads)
+            isExporting = false
+            if let url {
+                exportURL = ExportFile(url: url)
+            } else {
+                Announcer.announce("Could not export audio file")
+            }
+        }
+    }
+
     // MARK: Derived
 
     private var artworkURLString: String? {
@@ -345,6 +439,13 @@ struct NowPlayingScreen: View {
     private func secondsPhrase(_ seconds: Int) -> String {
         "\(seconds) second\(seconds == 1 ? "" : "s")"
     }
+}
+
+/// Identifiable wrapper so the exported local-file URL can drive a
+/// `.sheet(item:)` for the share sheet (#371).
+private struct ExportFile: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
 }
 
 /// The in-app progress scrubber: a visual `Slider` for sighted drag, with its
