@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Now Playing: press and hold the player artwork to scan forward at 4× while you hold, then let go to drop back to whatever speed you were playing at. Earshot announces "Fast forward at 4 times speed" when you start and "Fast forward stopped" when you release. If you use VoiceOver with Direct Touch turned on, a "Start Fast Forward" / "Stop Fast Forward" action shows up in the actions rotor so you can scan without holding. (#373)
+- Chapters: you can now mark chapters to skip from the player controls, and Earshot jumps past them automatically as you listen, announcing "Skipping chapter: …" each time it does. Your skip choices clear when you restart the app. (#373)
 - Sleep timer: an "Extend +5 min" button now appears on the Now Playing bar and the player screen while a timer is counting down, so you can add time without reopening the timer picker. (#379)
 - Now Playing: you can change playback speed directly from the player screen. Tap the speed badge below the controls to open a picker with quick shortcuts (0.5×, 1×, 1.25×, 1.5×, 2×) and a stepper for 0.1× precision anywhere from 0.5× to 5.0×. Set the speed for just the current podcast or for all podcasts from the same sheet. When a per-podcast speed is active, the badge shows a * so you can tell it differs from your global setting. VoiceOver announces the speed you chose and which scope you applied it to, and focus returns to the badge when the sheet closes. The global speed picker in Settings also covers the full 0.5× to 5.0× range now. (closes #368)
 - Coming from the previous version of Earshot: the first time you open this

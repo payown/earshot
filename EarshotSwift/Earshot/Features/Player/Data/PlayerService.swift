@@ -76,6 +76,27 @@ final class PlayerService {
     // same episode (or a different episode with the same artwork) is loaded.
     @ObservationIgnored private var lastArtworkURL: URL?
 
+    // Hold-to-fast-forward (4× scan, #373). While held, playback runs at 4× and
+    // the prior effective rate is stashed so release restores it exactly —
+    // including a per-podcast override. `nil` means not currently scanning.
+    @ObservationIgnored private var rateBeforeFastForward: Double?
+
+    /// True while a hold-to-fast-forward scan is active. Drives the UI's pressed
+    /// state and the rotor action's start/stop label.
+    var isFastForwarding = false
+
+    // Chapter auto-skip (#373). The set of chapter indices the user marked
+    // "skip" per episode, keyed by the durable episode guid. IN-MEMORY ONLY —
+    // it resets on app restart, matching Flutter's `SkippedChaptersNotifier`
+    // (no SwiftData model). `currentChapters` is the chapter list the player
+    // screen loaded for the current episode, supplied via `setChapters`.
+    @ObservationIgnored private var skippedChapterIndices: [String: Set<Int>] = [:]
+    @ObservationIgnored private var currentChapters: [Chapter] = []
+    /// Loop guard: the chapter index we last auto-skipped *from*. We don't fire
+    /// again until the active chapter moves away from it, so the seek's own
+    /// position update can't restart an endless skip loop.
+    @ObservationIgnored private var lastAutoSkipFromChapterIndex: Int?
+
     // MARK: Lifecycle
 
     /// Wires the service to a persistence context. Call once at app startup with
@@ -172,6 +193,15 @@ final class PlayerService {
 
         configureSession()
 
+        // A new episode invalidates the loaded chapter list, the auto-skip loop
+        // guard, and any in-progress fast-forward scan. The skipped-chapter map
+        // is keyed by guid so it survives the switch (and still resets on app
+        // restart, which is the intended lifetime).
+        currentChapters = []
+        lastAutoSkipFromChapterIndex = nil
+        isFastForwarding = false
+        rateBeforeFastForward = nil
+
         currentEpisode = episode
         currentTitle = episode.title
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
@@ -216,6 +246,13 @@ final class PlayerService {
             AppLog.player.error("Cannot load episode, no usable source: \(episode.audioURL, privacy: .public)")
             return
         }
+        // Like the play() path, switching the loaded episode invalidates the
+        // chapter list, the auto-skip loop guard, and any fast-forward scan.
+        currentChapters = []
+        lastAutoSkipFromChapterIndex = nil
+        isFastForwarding = false
+        rateBeforeFastForward = nil
+
         currentEpisode = episode
         currentTitle = episode.title
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
@@ -362,7 +399,9 @@ final class PlayerService {
     }
 
     private func applyRate() {
-        let rate = currentEffectiveRate
+        // While a fast-forward scan is active, the scan rate wins; the prior rate
+        // is restored by `endFastForward`.
+        let rate = isFastForwarding ? ChapterSkipLogic.fastForwardRate : currentEffectiveRate
         // Setting `rate` also starts playback; only apply when we intend to play.
         if isPlaying || player.timeControlStatus == .playing {
             player.rate = Float(rate)
@@ -370,6 +409,119 @@ final class PlayerService {
             player.rate = 0
             // Stash the desired rate so the next play() uses it via defaultRate.
             player.defaultRate = Float(rate)
+        }
+    }
+
+    // MARK: Public — hold-to-fast-forward (4× scan, #373)
+
+    /// True when the VoiceOver rotor "Start/Stop Fast Forward" action should be
+    /// offered. The sighted press-and-hold gesture on the artwork is always
+    /// available; the rotor action is gated on the Direct Touch setting because
+    /// that's where Flutter exposes it (a direct-touch playback affordance).
+    var fastForwardRotorAvailable: Bool {
+        settings?.bool(SettingsKey.directTouchEnabled, default: false) ?? false
+    }
+
+    /// Raises playback to the 4× scan rate, stashing the exact prior effective
+    /// rate (including any per-podcast override) so release restores it. No-op
+    /// when nothing is loaded or a scan is already running. Announces the start.
+    func beginFastForward() {
+        guard currentEpisode != nil, !isFastForwarding else { return }
+        rateBeforeFastForward = currentEffectiveRate
+        isFastForwarding = true
+        // Ensure audio is actually moving so the scan is audible / progresses.
+        if !isPlaying {
+            resume()
+        }
+        applyRate()
+        Announcer.announce("Fast forward at 4 times speed")
+    }
+
+    /// Restores the exact rate from before the scan and stops fast-forwarding.
+    /// No-op when no scan is active. Announces the stop.
+    func endFastForward() {
+        guard isFastForwarding else { return }
+        isFastForwarding = false
+        rateBeforeFastForward = nil
+        applyRate()
+        Announcer.announce("Fast forward stopped")
+    }
+
+    // MARK: Public — chapter auto-skip (#373)
+
+    /// Supplies the current episode's chapter list to the engine so auto-skip can
+    /// evaluate the active chapter on each tick. Called by the player screen once
+    /// chapters are loaded. Clears the loop guard so a fresh list starts clean.
+    func setChapters(_ chapters: [Chapter]) {
+        currentChapters = chapters
+        lastAutoSkipFromChapterIndex = nil
+    }
+
+    /// Whether `chapter` is currently marked skipped for the loaded episode.
+    func isChapterSkipped(_ chapter: Chapter) -> Bool {
+        guard let key = currentEpisode?.guid else { return false }
+        return skippedChapterIndices[key]?.contains(chapter.index) ?? false
+    }
+
+    /// Toggles the skipped state of `chapter` for the loaded episode (in-memory,
+    /// resets on restart). Returns the new state. Announces the change so the
+    /// VoiceOver user hears the result of activating the control.
+    @discardableResult
+    func toggleChapterSkipped(_ chapter: Chapter) -> Bool {
+        guard let key = currentEpisode?.guid else { return false }
+        var set = skippedChapterIndices[key] ?? []
+        let nowSkipped: Bool
+        if set.contains(chapter.index) {
+            set.remove(chapter.index)
+            nowSkipped = false
+        } else {
+            set.insert(chapter.index)
+            nowSkipped = true
+        }
+        skippedChapterIndices[key] = set
+        Announcer.announce(nowSkipped
+            ? "Will skip chapter: \(chapter.title)"
+            : "Will play chapter: \(chapter.title)")
+        return nowSkipped
+    }
+
+    /// Evaluates the active chapter against the skipped set and, when the active
+    /// chapter is skipped, seeks to the start of the next non-skipped chapter (or
+    /// ends the episode if none remain). The loop guard ensures the seek's own
+    /// position update doesn't re-trigger the same boundary.
+    private func evaluateChapterAutoSkip() {
+        guard let key = currentEpisode?.guid,
+              let skipped = skippedChapterIndices[key], !skipped.isEmpty,
+              !currentChapters.isEmpty else { return }
+
+        let activeIndex = currentChapters.activeChapterIndex(at: currentPositionSeconds)
+
+        // Reset the guard once we've moved into a chapter we won't skip, so a
+        // later return to a skipped chapter can fire again.
+        if let activeIndex, !skipped.contains(activeIndex) {
+            lastAutoSkipFromChapterIndex = nil
+        }
+
+        guard ChapterSkipLogic.shouldAutoSkip(
+            activeIndex: activeIndex,
+            skipped: skipped,
+            lastAutoSkipFromIndex: lastAutoSkipFromChapterIndex
+        ) else { return }
+
+        lastAutoSkipFromChapterIndex = activeIndex
+
+        switch ChapterSkipLogic.decision(
+            chapters: currentChapters,
+            skipped: skipped,
+            activeIndex: activeIndex
+        ) {
+        case .none:
+            break
+        case let .seek(_, startTime, targetTitle):
+            seek(to: startTime)
+            Announcer.announce("Skipping chapter: \(targetTitle)")
+        case .endOfEpisode:
+            handlePlaybackEnded()
         }
     }
 
@@ -445,6 +597,7 @@ final class PlayerService {
         persistPositionThrottled(currentSecond: Int(currentSeconds))
         recordListeningTick()
         updateNowPlayingElapsed()
+        evaluateChapterAutoSkip()
 
         // Mark played once we cross the threshold.
         let duration = currentEpisode?.durationSeconds ?? (durationSeconds > 0 ? Int(durationSeconds) : nil)
