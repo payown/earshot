@@ -88,6 +88,15 @@ struct RootView: View {
         .onChange(of: settings.voiceEnhanceEnabled) { _, _ in
             player.applyAudioEnhancement()
         }
+        // Keep the lock-screen / Control Center skip buttons in sync with the
+        // skip-interval settings (#... review P1-5). Set once at launch, then
+        // updated here so a change in Settings takes effect immediately.
+        .onChange(of: settings.skipForwardSeconds) { _, _ in
+            player.updateRemoteSkipIntervals()
+        }
+        .onChange(of: settings.skipBackSeconds) { _, _ in
+            player.updateRemoteSkipIntervals()
+        }
         .task {
             // Wire persistence and restore the last episode (paused) on launch.
             // Done here, not in a view body's computed work, so the context is
