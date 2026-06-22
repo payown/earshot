@@ -18,6 +18,20 @@ protocol EpisodeDownloading: AnyObject {
 
 extension DownloadManager: EpisodeDownloading {}
 
+/// The result of refreshing a single podcast. `added` is the count of genuinely
+/// new (non-future, newer-than-the-mark) episodes inserted; `wasBackfill` is
+/// true when the refresh took a backfill path (first-subscribe / migrated-shell
+/// catalog seed) where the inserted episodes are pre-existing catalog and must
+/// NOT trigger a new-episode notification (#72). `newestNewEpisode` is the
+/// newest of the genuinely-new episodes, used as the deep-link / action target.
+struct RefreshOutcome {
+    var added: Int
+    var wasBackfill: Bool
+    var newestNewEpisode: Episode?
+
+    static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisode: nil)
+}
+
 /// Owns subscribe and refresh logic for podcasts. Views call into this instead
 /// of touching the model graph directly.
 @MainActor
@@ -113,7 +127,8 @@ final class SubscriptionRepository {
     /// If the podcast has `autoQueue = true` and a `queue` was provided at init,
     /// genuinely new episodes (newer than the high-water mark and not future-dated)
     /// are enrolled directly into the play queue instead of the inbox.
-    func refresh(_ podcast: Podcast) async throws {
+    @discardableResult
+    func refresh(_ podcast: Podcast) async throws -> RefreshOutcome {
         let parsed = try await feed.fetch(podcast.feedURL)
         let now = Date.now
 
@@ -133,7 +148,8 @@ final class SubscriptionRepository {
             podcast.refreshedAt = now
             try context.save()
             AppLog.subscriptions.info("Backfilled \(podcast.title, privacy: .public): \(parsed.episodes.count) episode(s)")
-            return
+            // Backfill: pre-existing catalog, never a notification target (#72).
+            return .backfill
         }
 
         let existingGUIDs = Set(podcast.episodes.map(\.guid))
@@ -142,6 +158,10 @@ final class SubscriptionRepository {
         let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
         var added = 0
         var autoQueued: [Episode] = []
+        // Track the newest genuinely-new episode so a notification can deep-link
+        // and the actions ("Add to queue" / "Play now") have a concrete target (#72).
+        var newestNew: Episode?
+        var newestNewPub = Date.distantPast
 
         for item in parsed.episodes where !existingGUIDs.contains(item.guid) {
             let episode = makeEpisode(from: item)
@@ -149,6 +169,10 @@ final class SubscriptionRepository {
             let pub = item.pubDate ?? .distantPast
             // New = newer than the mark AND not future-dated (#296).
             let isNewEpisode = pub > mark && pub <= now
+            if isNewEpisode && pub >= newestNewPub {
+                newestNew = episode
+                newestNewPub = pub
+            }
             if isNewEpisode && podcast.autoQueue && queue != nil {
                 // Auto-queue: keep out of inbox; the queue.add() call below sets
                 // status = .inQueue. inboxDismissed = true ensures the episode
@@ -183,6 +207,8 @@ final class SubscriptionRepository {
         if added > 0 {
             AppLog.subscriptions.info("Refreshed \(podcast.title, privacy: .public): \(added) new episode(s)")
         }
+
+        return RefreshOutcome(added: added, wasBackfill: false, newestNewEpisode: newestNew)
     }
 
     /// Refreshes every subscription, logging and continuing past individual
@@ -192,24 +218,43 @@ final class SubscriptionRepository {
     /// `isCancelled` is checked before each feed so a background-task expiration
     /// (#381) stops the loop promptly instead of spinning through every remaining
     /// feed issuing fetches that immediately cancel. Defaults to `Task.isCancelled`.
+    @discardableResult
     func refreshAll(
         isCancelled: @escaping () -> Bool = { Task.isCancelled },
         onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
-    ) async {
+    ) async -> [NewEpisodeNotification] {
         let all = (try? context.fetch(FetchDescriptor<Podcast>())) ?? []
         let total = all.count
+        var notifications: [NewEpisodeNotification] = []
         for (index, podcast) in all.enumerated() {
             guard !isCancelled() else {
                 AppLog.subscriptions.info("refreshAll stopped early (cancelled) after \(index) of \(total)")
-                return
+                return notifications
             }
             do {
-                try await refresh(podcast)
+                let outcome = try await refresh(podcast)
+                // Only notification-enabled podcasts with genuinely-new episodes
+                // (never a backfill pass) earn a notification (#72).
+                if NewEpisodeNotificationDecision.shouldNotify(
+                    notificationEnabled: podcast.notificationEnabled,
+                    addedCount: outcome.added,
+                    wasBackfill: outcome.wasBackfill
+                ), let target = outcome.newestNewEpisode {
+                    notifications.append(
+                        NewEpisodeNotification(
+                            podcastFeedURL: podcast.feedURL,
+                            episodeGUID: target.guid,
+                            podcastTitle: podcast.title,
+                            newEpisodeCount: outcome.added
+                        )
+                    )
+                }
             } catch {
                 AppLog.subscriptions.error("Refresh failed for \(podcast.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
             onProgress?(index + 1, total)
         }
+        return notifications
     }
 
     // MARK: Helpers
