@@ -87,6 +87,7 @@
 		937D978ADE376CB4C7C1DCD2 /* QueueActionsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D8853AB932B8147D824DA5 /* QueueActionsBuilder.swift */; };
 		9384CF21515C9BA9F322A177 /* EpisodeExportLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59E6B431FF3AB66D1412802 /* EpisodeExportLogic.swift */; };
 		996DE47BD6F4BB678F86590D /* FolderRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4EB4F7F597FCC1DD27CEEE4 /* FolderRepository.swift */; };
+		9B11AEBD4BA00264B0DA899D /* BookmarkShareLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8352682C90C578F28EE2EA6F /* BookmarkShareLogic.swift */; };
 		9B96460020EE778842F1D5C4 /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B27BB426B5C9992591376435 /* Spacing.swift */; };
 		9C1E3FCE1E702A0C3CA62867 /* RestoreBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F29E86AFF01FA1B90CBBF29 /* RestoreBanner.swift */; };
 		A3B6D7635B7E6F694708D515 /* OPMLDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7212EBC83A48695F41673C88 /* OPMLDocument.swift */; };
@@ -106,6 +107,7 @@
 		B976F875CA2E076695C9B30B /* StatsPeriod.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA719A9EE6C298B619478083 /* StatsPeriod.swift */; };
 		BCC4D9C61F2DA7D7F9975DD2 /* PodcastArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2AFBB00F8C76C7C8D5A7BF3 /* PodcastArtwork.swift */; };
 		BD328CD81999A2F96B8C52D3 /* NowPlayingArtworkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF92E05A0193AF0123DA2A5B /* NowPlayingArtworkTests.swift */; };
+		C083251185DA72F96AD0612C /* BookmarkShareLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 450C66B85D5547A1E0E62D21 /* BookmarkShareLogicTests.swift */; };
 		C135742F72316B0AA623460E /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DBB0DBE3C822485265C03BA /* SearchView.swift */; };
 		C2575FA0F95FEF33CA069017 /* PodcastFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20EED9B85C78529A51C7C70 /* PodcastFolder.swift */; };
 		C290A8B98AF505B8C16FB539 /* QuickActionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF2D210574E494DFF9E08AB0 /* QuickActionRepository.swift */; };
@@ -190,6 +192,7 @@
 		4250FA40569C87B3F4F943A8 /* QuickActionBuildersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionBuildersTests.swift; sourceTree = "<group>"; };
 		43B68C7D3951BA02B70E0F3F /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		43C24AB621B349FF76FF2168 /* SpeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeedTests.swift; sourceTree = "<group>"; };
+		450C66B85D5547A1E0E62D21 /* BookmarkShareLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkShareLogicTests.swift; sourceTree = "<group>"; };
 		4728275D0F503536DAC8C87F /* QueueLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueLogicTests.swift; sourceTree = "<group>"; };
 		478105CB6C9A1309975A07A1 /* Episode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Episode.swift; sourceTree = "<group>"; };
 		4815697742D078E6B5CF9962 /* OnboardingTipsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTipsTests.swift; sourceTree = "<group>"; };
@@ -222,6 +225,7 @@
 		7CF61D55C48D468680AB681C /* Podcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Podcast.swift; sourceTree = "<group>"; };
 		7D40AFBC69A987AAC98236BF /* BookmarksListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarksListView.swift; sourceTree = "<group>"; };
 		7D79742B8D8E4A2F7B8EC721 /* SettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreTests.swift; sourceTree = "<group>"; };
+		8352682C90C578F28EE2EA6F /* BookmarkShareLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkShareLogic.swift; sourceTree = "<group>"; };
 		85CC9C4E71AE76C7AD5682BB /* RSSParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSParser.swift; sourceTree = "<group>"; };
 		87A568096519564A56357FBD /* RecentlyExpired.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentlyExpired.swift; sourceTree = "<group>"; };
 		8C9754C877DA03DC598F4567 /* Announcer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Announcer.swift; sourceTree = "<group>"; };
@@ -474,6 +478,7 @@
 				E26741EC8F02BA386553352C /* AppSettingsStoreTests.swift */,
 				D46224649A8922ADD5EEB593 /* AudioEnhancementLogicTests.swift */,
 				5716DC7465AF0422B02CD0CF /* BookmarkRepositoryTests.swift */,
+				450C66B85D5547A1E0E62D21 /* BookmarkShareLogicTests.swift */,
 				E561A2C8B10CB27A76F73D67 /* ChapterSkipLogicTests.swift */,
 				3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */,
 				278A76C6E3AB1F92AFACB741 /* CoreServicesTests.swift */,
@@ -510,6 +515,7 @@
 			isa = PBXGroup;
 			children = (
 				B5864D99DBA32F8B8EF4A684 /* BookmarkLogic.swift */,
+				8352682C90C578F28EE2EA6F /* BookmarkShareLogic.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -1063,6 +1069,7 @@
 				AA2A5021F179C47FCD28D534 /* Bookmark.swift in Sources */,
 				62C3AB292C4FD85532CB2E89 /* BookmarkLogic.swift in Sources */,
 				130092801731CA67DB45FEEB /* BookmarkRepository.swift in Sources */,
+				9B11AEBD4BA00264B0DA899D /* BookmarkShareLogic.swift in Sources */,
 				B2B931F27D1BEAB5FFD77BC6 /* BookmarksListView.swift in Sources */,
 				144409D942BD6D9647CFD91D /* Chapter.swift in Sources */,
 				D1738164A815F57F4845D2F9 /* ChapterParser.swift in Sources */,
@@ -1167,6 +1174,7 @@
 				EDD3D7C3BDC9A5D163CD92DA /* AppSettingsStoreTests.swift in Sources */,
 				F6D4582CC60766923E89BEBD /* AudioEnhancementLogicTests.swift in Sources */,
 				387A6B9D205F92CFF6C98F8B /* BookmarkRepositoryTests.swift in Sources */,
+				C083251185DA72F96AD0612C /* BookmarkShareLogicTests.swift in Sources */,
 				3B2C35CAA573FA40C23EF216 /* ChapterSkipLogicTests.swift in Sources */,
 				C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */,
 				51AB6A682FF34A1A768BCF68 /* CoreServicesTests.swift in Sources */,
