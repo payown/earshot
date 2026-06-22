@@ -28,7 +28,7 @@ struct NowPlayingScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: Spacing.xl) {
-                    PodcastArtwork(urlString: artworkURLString, size: 280, cornerRadius: 16)
+                    artworkBlock
                         .padding(.top, Spacing.lg)
 
                     titleBlock
@@ -81,6 +81,51 @@ struct NowPlayingScreen: View {
             // a request mid-animation is dropped.
             try? await Task.sleep(for: .milliseconds(500))
             titleFocused = true
+        }
+    }
+
+    // MARK: Artwork (with hold-to-fast-forward, #373)
+
+    /// The episode artwork doubles as a press-and-hold fast-forward "scan" pad:
+    /// holding raises playback to 4× while held and restores the prior rate on
+    /// release (Flutter parity). For VoiceOver users the same behavior is a custom
+    /// rotor action, but only when Direct Touch is enabled — without it the
+    /// sustained press conflicts with VoiceOver's own gestures. The sighted
+    /// press-and-hold is always available.
+    @ViewBuilder
+    private var artworkBlock: some View {
+        let base = PodcastArtwork(urlString: artworkURLString, size: 280, cornerRadius: 16)
+            // A zero-distance long press fires `pressing:` on touch-down and again
+            // on release, giving us begin/end without a separate drag gesture.
+            .onLongPressGesture(minimumDuration: 0.3, pressing: { isPressing in
+                if isPressing {
+                    player.beginFastForward()
+                } else {
+                    player.endFastForward()
+                }
+            }, perform: {})
+            // Collapse PodcastArtwork's internal elements into one definite node so
+            // the label, value, and rotor action below reliably attach to it.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Episode artwork")
+            // Offer the scan as a rotor action only where Direct Touch applies.
+            .accessibilityActions {
+                if player.fastForwardRotorAvailable {
+                    if player.isFastForwarding {
+                        Button("Stop Fast Forward") { player.endFastForward() }
+                    } else {
+                        Button("Start Fast Forward") { player.beginFastForward() }
+                    }
+                }
+            }
+
+        // Only attach a value node while actually scanning. An empty-string value
+        // registers a node VoiceOver reads as a pause (the same rule applied in
+        // PlayerControlsSheet), so the idle artwork carries no value.
+        if player.isFastForwarding {
+            base.accessibilityValue("Fast forwarding at 4 times speed")
+        } else {
+            base
         }
     }
 

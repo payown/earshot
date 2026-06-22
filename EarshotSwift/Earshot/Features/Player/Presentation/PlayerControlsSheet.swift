@@ -8,6 +8,10 @@ struct PlayerControlsSheet: View {
 
     @State private var chapters: [Chapter] = []
     @State private var loadingChapters = true
+    // Local mirror of the engine's in-memory skipped-chapter set, keyed by chapter
+    // index, so toggling re-renders rows immediately (the engine map isn't an
+    // observed property). Seeded from the engine when chapters load.
+    @State private var skipState: [Int: Bool] = [:]
 
     private var sleepTimer: SleepTimerController { player.sleepTimer }
 
@@ -104,6 +108,7 @@ struct PlayerControlsSheet: View {
 
     private func chapterRow(_ chapter: Chapter) -> some View {
         let isCurrent = activeChapterIndex == chapter.index
+        let isSkipped = skipState[chapter.index] ?? player.isChapterSkipped(chapter)
         return Button {
             player.seek(to: chapter.startTime)
             Announcer.announce("Playing \(chapter.title)")
@@ -121,17 +126,53 @@ struct PlayerControlsSheet: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
+                Spacer(minLength: Spacing.sm)
+                // Visible "skip" indicator so the state isn't color-only: a filled
+                // forward-slash icon when this chapter will be auto-skipped.
+                if isSkipped {
+                    Image(systemName: "forward.end.alt.fill")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
             }
+            .frame(minHeight: Spacing.minTouchTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button {
+                toggleSkip(chapter)
+            } label: {
+                Label(isSkipped ? "Don't skip" : "Skip", systemImage: isSkipped ? "play.circle" : "forward.end.alt")
+            }
+            .tint(isSkipped ? .gray : .orange)
+        }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(chapter.title), \(BookmarkLogic.spoken(Int(chapter.startTime)))")
+        .accessibilityLabel(chapterAccessibilityLabel(chapter, isSkipped: isSkipped))
         .accessibilityHint("Jumps to this chapter")
+        // The skip toggle is offered to VoiceOver as a custom action (rotor),
+        // mirroring the swipe action for sighted users.
+        .accessibilityAction(named: isSkipped ? "Don't skip this chapter" : "Skip this chapter") {
+            toggleSkip(chapter)
+        }
         // `.isSelected` is the standard list "current item" trait — VoiceOver says
         // "Selected". No empty-string value (that registers a node VO reads as a
         // pause); the trait alone carries the current-chapter state.
         .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
+    }
+
+    /// VoiceOver name for a chapter row, folding in the skipped state as words so
+    /// it isn't conveyed by the trailing icon alone.
+    private func chapterAccessibilityLabel(_ chapter: Chapter, isSkipped: Bool) -> String {
+        let base = "\(chapter.title), \(BookmarkLogic.spoken(Int(chapter.startTime)))"
+        return isSkipped ? "\(base), set to skip" : base
+    }
+
+    /// Flips the skipped state in the engine and mirrors it locally so the row
+    /// re-renders immediately (the engine map isn't observed).
+    private func toggleSkip(_ chapter: Chapter) {
+        let nowSkipped = player.toggleChapterSkipped(chapter)
+        skipState[chapter.index] = nowSkipped
     }
 
     private var activeChapterIndex: Int? {
@@ -151,6 +192,13 @@ struct PlayerControlsSheet: View {
             descriptionHTML: episode.episodeDescription
         )
         chapters = found
+        // Hand the list to the engine so auto-skip can evaluate the active
+        // chapter on each tick, and seed the local skip mirror from any state
+        // already set this session.
+        player.setChapters(found)
+        skipState = Dictionary(
+            uniqueKeysWithValues: found.map { ($0.index, player.isChapterSkipped($0)) }
+        )
         loadingChapters = false
     }
 }
