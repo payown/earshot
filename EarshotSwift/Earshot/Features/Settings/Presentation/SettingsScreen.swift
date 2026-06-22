@@ -103,6 +103,13 @@ struct SettingsScreen: View {
                     Label("Send Feedback", systemImage: "envelope")
                 }
                 .accessibilityHint("Email the Earshot team with feedback, bug reports, or ideas")
+
+                NavigationLink {
+                    AboutView()
+                } label: {
+                    Label("About", systemImage: "info.circle")
+                }
+                .accessibilityHint("App version, credits, and license")
             }
 
             Section("Data") {
