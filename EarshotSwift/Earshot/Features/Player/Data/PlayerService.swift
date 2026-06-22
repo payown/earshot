@@ -160,6 +160,16 @@ final class PlayerService {
         persistCurrentPosition()
         flushListeningSession()
 
+        // Cancel any running sleep timer when the user manually starts a new
+        // episode. PRD 5.5: "timer clears when the user plays something else."
+        // Both countdown and end-of-episode modes are cancelled. The cancellation
+        // is announced via VoiceOver only if the timer was actually running so we
+        // don't fire a spurious announcement on every episode start.
+        if sleepTimer.isActive {
+            sleepTimer.cancel()
+            Announcer.announce("Sleep timer cancelled")
+        }
+
         configureSession()
 
         currentEpisode = episode

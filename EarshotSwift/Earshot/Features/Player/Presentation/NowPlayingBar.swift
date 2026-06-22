@@ -80,6 +80,17 @@ struct NowPlayingBar: View {
 
     private var controls: some View {
         HStack(spacing: 12) {
+            // Show "Extend +5" when a countdown sleep timer is running. Hidden in
+            // end-of-episode mode (extending makes no sense there) and when no
+            // timer is active, so it doesn't occupy permanent space in the bar.
+            if sleepTimerActive && !player.sleepTimer.endOfEpisode {
+                TransportButton(
+                    systemImage: "plus.circle",
+                    label: "Extend sleep timer by 5 minutes",
+                    action: extendSleepTimer
+                )
+            }
+
             TransportButton(
                 systemImage: "gobackward",
                 label: "Skip back \(secondsPhrase(player.skipBackSeconds))",
@@ -109,6 +120,11 @@ struct NowPlayingBar: View {
                 action: addBookmark
             )
         }
+    }
+
+    private func extendSleepTimer() {
+        player.sleepTimer.extend()
+        Announcer.announce("Sleep timer extended by 5 minutes")
     }
 
     /// Pluralizes a seconds count so VoiceOver never reads "1 seconds".
