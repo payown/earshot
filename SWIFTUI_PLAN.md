@@ -207,7 +207,7 @@ The SwiftUI side is built and waiting.
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
-Test baseline: **274 tests** (verified 2026-06-21, after #399 — 22 new PodcastSettingsViewTests covering speedOverride, autoQueue, queueAgeLimitDays, inboxMaxEpisodes, inboxAgeLimitHours, notificationEnabled defaults/mutations/persistence, and speed option list validation).
+Test baseline: **284 tests** (verified 2026-06-21, after the #370 AirPlay test salvage — 10 new AirPlayTests covering AVAudioSession AirPlay/Bluetooth options, AudioEnhancementLogic regression guards, and RoutePickerView type existence; PR #405, commit d60c5f7). Prior step: 274 after #399 (22 PodcastSettingsViewTests).
 
 ### P0 — Must fix first
 | Issue | Title | Agent | Status |
