@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Settings: a "Send Feedback" option now opens a pre-filled email to the Earshot team (beta@payown.media). You can choose to include anonymized system info (app version, iOS version, device model) to help with debugging, and nothing personal is sent. If you don't have email set up, Earshot shows the address so you can still reach out. (#392)
 - Now Playing: press and hold the player artwork to scan forward at 4× while you hold, then let go to drop back to whatever speed you were playing at. Earshot announces "Fast forward at 4 times speed" when you start and "Fast forward stopped" when you release. If you use VoiceOver with Direct Touch turned on, a "Start Fast Forward" / "Stop Fast Forward" action shows up in the actions rotor so you can scan without holding. (#373)
 - Chapters: you can now mark chapters to skip from the player controls, and Earshot jumps past them automatically as you listen, announcing "Skipping chapter: …" each time it does. Your skip choices clear when you restart the app. (#373)
 - Sleep timer: an "Extend +5 min" button now appears on the Now Playing bar and the player screen while a timer is counting down, so you can add time without reopening the timer picker. (#379)
