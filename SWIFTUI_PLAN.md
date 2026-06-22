@@ -274,6 +274,31 @@ The SwiftUI side is built and waiting.
   exactly what `InboxRepository`'s `status == .newEpisode && !inboxDismissed`
   query surfaces. Auto-queue + auto-download-N (#380) fire inside the same
   `refresh` path, so they trigger through the background path unchanged.
+- **#385 Disk-backed artwork cache.** New `Core/Networking/ArtworkCache.swift`:
+  a `Sendable final class` wrapping a dedicated `URLSession` whose
+  `URLCache(memoryCapacity:16MB, diskCapacity:200MB, directory:)` is rooted at
+  `Caches/artwork/` (system may evict under storage pressure — acceptable for
+  re-fetchable artwork). Exposes async `data(for:)`/`image(for:)` primitives
+  using `.returnCacheDataElseLoad`, so a previously fetched image is served from
+  disk after a cold launch instead of re-downloading (the bug; `AsyncImage` and
+  `URLCache.shared` were effectively per-session). Returns `nil` on any failure
+  (no throws) since artwork is decorative — callers fall back to a placeholder.
+  Falls back to a memory-only cache if the Caches dir can't be resolved (no
+  force-unwraps, no crash).
+- **Single shared cache for UI + lock screen (#378 reuse).** `ArtworkCache.shared`
+  is used by both `PodcastArtwork` (replaced `AsyncImage` with a `@State` loader
+  keyed by `urlString` via `.task(id:)`, cancellation-checked; stays decorative
+  + `accessibilityHidden(true)` with the same placeholder/frame/border/API) and
+  `PlayerService.updateNowPlayingArtwork`, which dropped its `URLCache.shared` +
+  `URLSession.shared` path. So artwork loaded for a screen is a disk hit on the
+  lock screen and vice versa.
+- **Reset path.** `SettingsReset` now calls `ArtworkCache.shared.clear()` plus
+  removes the `Caches/artwork/` directory, so "Reset local data" drops artwork.
+- **Flag for earshot-swift6:** `ArtworkCache` is `Sendable` (immutable `let`
+  refs to the thread-safe `URLCache`/`URLSession`); `UIImage`/`Data` cross actor
+  boundaries to callers. The `PodcastArtwork` loader hops to the main actor by
+  virtue of `.task`/`@State` after the `await`. No new data races; no actors
+  added.
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
@@ -427,3 +452,56 @@ expiration with many feeds kept spinning fetches instead of stopping. FIX: added
 forwarded from runRefresh; existing trailing-closure callers unaffected. Re-verified BUILD
 SUCCEEDED + 33 related tests pass (policy 8, settings 6, repo 15, importer 4). No feature
 suggestions this review.
+
+## Security Review — Issue #385
+
+earshot-security gate: PASS (no defects, no code changes needed). Disk-backed artwork cache.
+New: ArtworkCache.swift — `final class ArtworkCache: Sendable`, `static let shared`, dedicated
+URLSession over a disk-backed URLCache (16MB mem / 200MB disk) rooted at Caches/artwork; async
+`data(for:)`/`image(for:)` return nil (never throw) on miss/failure; `clear()` and
+`cacheDirectoryURL()`. Wired into PodcastArtwork (replaces AsyncImage with a cancellation-guarded
+@State loader) and PlayerService.updateNowPlayingArtwork (lock-screen path now reuses the same
+cache, #378). SettingsReset factory reset now clears the URLCache + removes Caches/artwork.
+Checklist clean: no force-unwraps (only XCTUnwrap in tests), no fatalError, no secrets, no
+entitlement/migration changes. The three `try?` calls are all benign filesystem ops (createDirectory
+best-effort with logged memory-only fallback; removeItem on possibly-absent dirs). Retain cycles:
+PlayerService callsite uses `[weak self]`; PodcastArtwork is a struct view (no self capture) and
+re-checks `!Task.isCancelled` + URL identity after await before committing @State. @MainActor:
+PlayerService is class-level @MainActor so the post-await write is safe; ArtworkCache is Sendable
+with only immutable URLCache/URLSession refs. AppLog.networking.error covers every failure branch
+(HTTP non-2xx, fetch, decode, memory-only fallback) — no empty catches. Defensive filesystem
+confirmed: memory-only URLCache fallback when Caches dir unresolvable, no crash. SettingsReset scope
+confirmed: removes exactly Caches/artwork, nothing broader; new SettingsStoreTests proves it. Build
+SUCCEEDED on iPhone 17 sim. No feature suggestions this review.
+
+## Swift 6 Review — Issue #385
+
+earshot-swift6 gate: PASS. Disk-backed artwork cache (ArtworkCache.swift,
+PodcastArtwork.swift, PlayerService.updateNowPlayingArtwork, SettingsReset).
+Concurrency mode verified: SWIFT_STRICT_CONCURRENCY=complete (project baseline is
+Swift 5.0 / minimal). Default build SUCCEEDED and strict-complete build SUCCEEDED
+on iPhone 17 sim; test target build-for-testing SUCCEEDED under strict-complete.
+
+Findings:
+- Sendable: `final class ArtworkCache: Sendable` is sound — only immutable `let`
+  refs to a thread-safe URLCache + URLSession, no mutable shared state; `static let
+  shared` is safe. PASS.
+- UIImage across the isolation boundary: `image(for:)` is nonisolated async and
+  constructs the UIImage internally, returning a freshly-built value with no other
+  references. Under region-based isolation the return value is in a disconnected
+  region, so handing it to the MainActor caller (PodcastArtwork @State set;
+  PlayerService.setArtwork MainActor write) is race-free. Strict-complete produced
+  ZERO warnings on either call site. No need to fall back to returning Data?. PASS.
+- PodcastArtwork load: `.task(id:)` cancels on URL change; load() re-checks
+  `!Task.isCancelled` && `self.urlString == urlString` after await before mutating
+  @State on the main actor (struct view, no self capture). Race-free. PASS.
+- SettingsReset.deleteArtworkCache: called from @MainActor static func; clear() and
+  cacheDirectoryURL() are nonisolated on a Sendable type — valid from any actor. PASS.
+
+Pre-existing (NOT this issue): PlayerService.swift:981 and :988 emit "sending 'note'
+risks causing data races" under strict-complete (the AVAudioSession interruption /
+route-change Notification observer pattern). Those lines are unchanged by #385 and
+predate it; out of scope for this gate. Project-wide strict-complete surfaces 118
+concurrency warnings total (e.g. the known DownloadManager one), none in #385's files.
+
+New agents created: none. Overall: PASS.

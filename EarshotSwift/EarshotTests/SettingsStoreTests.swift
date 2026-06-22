@@ -43,6 +43,21 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Episode>()), 0)
     }
 
+    /// A factory reset must also drop the disk-backed artwork cache directory
+    /// (#385) so stale podcast artwork doesn't survive "Reset local data".
+    func testFactoryResetRemovesArtworkCacheDirectory() throws {
+        let dir = try XCTUnwrap(ArtworkCache.cacheDirectoryURL())
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let marker = dir.appendingPathComponent("seed.bin")
+        try Data("seed".utf8).write(to: marker)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path))
+
+        SettingsReset.deleteAllLocalData(context: TestStore.freshContext())
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path),
+                       "Factory reset should remove the artwork cache directory")
+    }
+
     func testOPMLExportRoundTripsFeedURLs() {
         let opml = OPMLDocument.export([
             (title: "A & B", feedURL: "https://a.com/feed"),
