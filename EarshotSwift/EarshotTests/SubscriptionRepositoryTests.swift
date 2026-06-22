@@ -15,6 +15,19 @@ private final class FakeDownloader: EpisodeDownloading {
     func download(_ episode: Episode) async { downloaded.append(episode) }
 }
 
+/// Returns the same feed for every URL but counts how many times ``fetch(_:)``
+/// is called, so `refreshAll`'s per-iteration cancellation guard (#381) can be
+/// asserted: a cancelled run must stop issuing fetches early.
+private final class CountingFeedFetcher: FeedFetching {
+    var feed: ParsedFeed
+    private(set) var fetchCount = 0
+    init(_ feed: ParsedFeed) { self.feed = feed }
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        fetchCount += 1
+        return feed
+    }
+}
+
 @MainActor
 final class SubscriptionRepositoryTests: XCTestCase {
 
@@ -277,5 +290,71 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertTrue(old.inboxDismissed) // dismissed, not queued
         XCTAssertNil(old.queueItem)
         XCTAssertTrue(queueRepo.queue().isEmpty)
+    }
+
+    // MARK: refreshAll cancellation (#381)
+
+    /// Subscribes `count` podcasts (each on a distinct URL) so the store holds
+    /// real subscriptions with a high-water mark, then returns the fetcher's call
+    /// count after setup so a later `refreshAll` delta can be measured.
+    private func seedSubscriptions(
+        _ count: Int, fetcher: CountingFeedFetcher, repo: SubscriptionRepository
+    ) async throws {
+        for i in 0..<count {
+            _ = try await repo.subscribe(feedURL: "https://x/feed\(i).xml")
+        }
+    }
+
+    func testRefreshAllProcessesAllWhenNotCancelled() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = CountingFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        try await seedSubscriptions(3, fetcher: fetcher, repo: repo)
+
+        let before = fetcher.fetchCount
+        var lastCompleted = 0
+        await repo.refreshAll(isCancelled: { false }) { completed, _ in
+            lastCompleted = completed
+        }
+
+        // One fetch per podcast during refreshAll.
+        XCTAssertEqual(fetcher.fetchCount - before, 3)
+        XCTAssertEqual(lastCompleted, 3) // progress reported through to the end
+    }
+
+    func testRefreshAllStopsEarlyWhenCancelled() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = CountingFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        try await seedSubscriptions(3, fetcher: fetcher, repo: repo)
+
+        let before = fetcher.fetchCount
+        // Cancel as soon as the first feed has been fetched. The guard runs before
+        // each iteration, so iteration 0 fetches once, then iteration 1's guard
+        // fires and the loop returns -- the remaining two feeds are never fetched.
+        var progressCalls = 0
+        await repo.refreshAll(isCancelled: { fetcher.fetchCount - before >= 1 }) { _, _ in
+            progressCalls += 1
+        }
+
+        // Only the first podcast was fetched; the loop stopped before the rest.
+        XCTAssertEqual(fetcher.fetchCount - before, 1)
+        // Progress fired only for the one feed processed before cancellation.
+        XCTAssertEqual(progressCalls, 1)
+    }
+
+    func testRefreshAllCancelledBeforeFirstFeedDoesNothing() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = CountingFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        try await seedSubscriptions(3, fetcher: fetcher, repo: repo)
+
+        let before = fetcher.fetchCount
+        var progressCalls = 0
+        // Already cancelled at entry: no feed should be fetched at all.
+        await repo.refreshAll(isCancelled: { true }) { _, _ in progressCalls += 1 }
+
+        XCTAssertEqual(fetcher.fetchCount - before, 0)
+        XCTAssertEqual(progressCalls, 0)
     }
 }

@@ -188,10 +188,21 @@ final class SubscriptionRepository {
     /// Refreshes every subscription, logging and continuing past individual
     /// failures so one bad feed doesn't abort the rest. `onProgress` is called
     /// (on the main actor) after each podcast with the running `(completed, total)`.
-    func refreshAll(onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil) async {
+    ///
+    /// `isCancelled` is checked before each feed so a background-task expiration
+    /// (#381) stops the loop promptly instead of spinning through every remaining
+    /// feed issuing fetches that immediately cancel. Defaults to `Task.isCancelled`.
+    func refreshAll(
+        isCancelled: @escaping () -> Bool = { Task.isCancelled },
+        onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
+    ) async {
         let all = (try? context.fetch(FetchDescriptor<Podcast>())) ?? []
         let total = all.count
         for (index, podcast) in all.enumerated() {
+            guard !isCancelled() else {
+                AppLog.subscriptions.info("refreshAll stopped early (cancelled) after \(index) of \(total)")
+                return
+            }
             do {
                 try await refresh(podcast)
             } catch {

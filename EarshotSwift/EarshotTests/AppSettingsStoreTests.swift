@@ -49,4 +49,19 @@ final class AppSettingsStoreTests: XCTestCase {
         store.setOptionalInt(90, for: SettingsKey.historyRetentionDays)
         XCTAssertEqual(store.optionalInt(SettingsKey.historyRetentionDays), 90)
     }
+
+    func testDateIsNilWhenUnset() throws {
+        let store = try makeStore()
+        XCTAssertNil(store.date(SettingsKey.lastFeedRefresh))
+    }
+
+    func testDateRoundTrips() throws {
+        let store = try makeStore()
+        let when = Date(timeIntervalSince1970: 1_700_000_000)
+        store.setDate(when, for: SettingsKey.lastFeedRefresh)
+        let read = store.date(SettingsKey.lastFeedRefresh)
+        XCTAssertNotNil(read)
+        // Stored as epoch seconds; sub-second precision is intentionally dropped.
+        XCTAssertEqual(read!.timeIntervalSince1970, when.timeIntervalSince1970, accuracy: 0.001)
+    }
 }

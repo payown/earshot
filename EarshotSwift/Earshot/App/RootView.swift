@@ -120,6 +120,9 @@ struct RootView: View {
                     await SubscriptionRepository(context: modelContext).refreshAll { completed, _ in
                         importState.update(completed: completed)
                     }
+                    // Stamp the throttle window so a background wake right after the
+                    // restore doesn't redundantly re-refresh every show (#381).
+                    AppSettingsStore(context: modelContext).setDate(Date(), for: SettingsKey.lastFeedRefresh)
                     importState.finish()
                     Announcer.announce("Episodes loaded. Your Library is up to date.")
                 }

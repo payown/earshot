@@ -242,6 +242,39 @@ The SwiftUI side is built and waiting.
   on the `swift` branch is **209** (verified via `git stash` on this branch). New
   baseline of record: **209**.
 
+## Networking Decisions
+
+- **#381 Background feed refresh + 15-min skip window.** Registered a
+  `BGAppRefreshTask` with stable identifier `media.payown.earshot.feedrefresh`
+  (declared in `Info.plist > BGTaskSchedulerPermittedIdentifiers`; `fetch` added
+  to `UIBackgroundModes`). The launch handler is attached declaratively via the
+  SwiftUI `.backgroundTask(.appRefresh(_:))` scene modifier on `EarshotApp`
+  (skipped under `isRunningTests`). The handler **re-schedules the next request
+  first**, then runs a throttled refresh.
+- **Throttle policy is pure + unit-tested.** `FeedRefreshPolicy.shouldRefresh(
+  lastRefresh:now:force:window:)` (window default 15 min, mirrors Flutter) lives
+  in the Subscriptions domain layer alongside `PlaybackLogic`/`StatsLogic`.
+  Persisted via new `AppSetting` key `last_feed_refresh` (epoch seconds) with
+  typed `AppSettingsStore.date/setDate` accessors. Background + cold-launch paths
+  consult the window; manual pull-to-refresh passes `force: true` and stamps the
+  timestamp so the next background wake inside 15 min is skipped. The migration
+  restore in `RootView` also stamps it after its full refresh.
+- **Threading.** `BackgroundFeedRefresher.runRefresh` is `@MainActor`. Both
+  `SubscriptionRepository` and `AppSettingsStore` are `@MainActor`-bound (they
+  touch `mainContext`), and `refreshAll` already saves per-podcast and
+  logs+continues past per-feed failures. The 15-min window keeps each wake to one
+  batched pass, so this does not re-introduce the cold-launch write storm the
+  `@ModelActor` migration importer was built to avoid. All background DB work is
+  guarded (no unrecoverable dead end, per `database-migrations.md`); the handler
+  respects `Task.isCancelled` for task expiration. **Flag for earshot-swift6:**
+  new async/MainActor-isolated code (`BackgroundFeedRefresher`, the
+  `.backgroundTask` closure hopping to `MainActor.run`).
+- **Inbox reach confirmed.** Background `refreshAll` → `refresh` writes new
+  episodes as default `status == .newEpisode` with `inboxDismissed == false`,
+  exactly what `InboxRepository`'s `status == .newEpisode && !inboxDismissed`
+  query surfaces. Auto-queue + auto-download-N (#380) fire inside the same
+  `refresh` path, so they trigger through the background path unchanged.
+
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
 Test baseline: **349 tests** (verified 2026-06-21, after #392 — 10 FeedbackComposerTests covering system-info block/anonymization and mailto encoding; PR #409, commit b319307). Prior steps: 339 after #372; 327 after #371; 315 after #373; 284 after #370 AirPlay salvage; 274 after #399.
@@ -376,3 +409,21 @@ elapsed keeps moving via system rate extrapolation; every discontinuity (play/pa
 pushes exact elapsed+rate and resets the anchor to nil; backward jumps force an immediate resync.
 mark-played write is unconditional in handleTick, unaffected by the throttle. No entitlement/migration
 changes; Release build SUCCEEDED on iPhone 17 sim. No feature suggestions this review.
+
+## Security Review — Issue #381
+
+earshot-security gate: PASS (with one defect found + fixed). Background feed refresh via
+BGAppRefreshTask. New files: FeedRefreshPolicy.swift (pure throttle, 15-min window, force bypass)
+and BackgroundFeedRefresher.swift (caseless enum: owns task id, schedules next request, runs
+@MainActor throttled refresh wrapped do/catch). Checklist clean: no force-unwraps, no `try?`,
+no fatalError, no secrets, no retain cycles (caseless enums + value-type App/scene closures),
+@MainActor on all DB work. Task identifier `media.payown.earshot.feedrefresh` matches byte-for-byte
+across the const, `.appRefresh` registration, BGAppRefreshTaskRequest, and Info.plist
+BGTaskSchedulerPermittedIdentifiers; UIBackgroundModes `fetch` present. DB-migration safety rule
+satisfied — refreshAll logs+continues per feed, AppSettingsStore.save is do/catch+AppLog; no
+unguarded DB call can dead-end the task. DEFECT: refreshAll ignored cancellation, so BGTask
+expiration with many feeds kept spinning fetches instead of stopping. FIX: added
+`isCancelled` param (default `{ Task.isCancelled }`) to refreshAll with a per-iteration guard,
+forwarded from runRefresh; existing trailing-closure callers unaffected. Re-verified BUILD
+SUCCEEDED + 33 related tests pass (policy 8, settings 6, repo 15, importer 4). No feature
+suggestions this review.

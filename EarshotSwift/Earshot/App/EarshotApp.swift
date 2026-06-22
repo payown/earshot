@@ -3,6 +3,7 @@ import SwiftData
 
 @main
 struct EarshotApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var player = PlayerService()
     @State private var quickActions = QuickActionStore()
     @State private var downloads = DownloadManager()
@@ -38,5 +39,30 @@ struct EarshotApp: App {
             }
         }
         .modelContainer(container)
+        // Schedule the next background refresh whenever we leave the foreground,
+        // so the OS can wake us to fetch new episodes. Skipped under tests.
+        .onChange(of: scenePhase) { _, phase in
+            guard !isRunningTests, phase == .background else { return }
+            BackgroundFeedRefresher.scheduleNext()
+        }
+        // OS-launched background refresh. Re-schedule the chain FIRST, then run a
+        // throttled refresh that respects task expiration. Skipped under tests —
+        // BGTaskScheduler isn't available in the test host. (#381)
+        .backgroundRefreshTask(isEnabled: !isRunningTests, container: container)
+    }
+}
+
+private extension Scene {
+    /// Conditionally attaches the `.appRefresh` background handler. Wrapped so the
+    /// modifier is a no-op in the XCTest host (registering a BGTask handler there
+    /// would trap), keeping the call site in `body` declarative.
+    func backgroundRefreshTask(isEnabled: Bool, container: ModelContainer) -> some Scene {
+        backgroundTask(.appRefresh(BackgroundFeedRefresher.taskIdentifier)) {
+            guard isEnabled else { return }
+            // Keep the chain going before doing any work, so a slow/cancelled run
+            // still leaves a future request queued.
+            await MainActor.run { BackgroundFeedRefresher.scheduleNext() }
+            await BackgroundFeedRefresher.runRefresh(container: container)
+        }
     }
 }
