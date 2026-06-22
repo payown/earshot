@@ -207,7 +207,7 @@ The SwiftUI side is built and waiting.
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
-Test baseline: **327 tests** (verified 2026-06-21, after #371 — 12 EpisodeExportLogicTests covering export filename/extension/sanitization and the stop-after decision; PR #407, commit fd47c3b). Prior steps: 315 after #373; 284 after #370 AirPlay salvage; 274 after #399.
+Test baseline: **339 tests** (verified 2026-06-21, after #372 — 12 BookmarkShareLogicTests covering share-text building/sanitization/edge cases; PR #408, commit 193635a). Prior steps: 327 after #371; 315 after #373; 284 after #370 AirPlay salvage; 274 after #399.
 
 > Follow-up for #391 (changelog reconcile): older untagged Flutter-era [Unreleased] entries duplicate the new #371-tagged "Export audio file" / "Stop after this episode" / "Mark as played" entries and reference TalkBack/auto-advance details that don't match the SwiftUI build. Dedupe before cutting the release block.
 
@@ -232,7 +232,7 @@ Test baseline: **327 tests** (verified 2026-06-21, after #371 — 12 EpisodeExpo
 | #379 | Sleep timer: Extend +5 on bar; countdown clears on episode switch | earshot-audio + earshot-ui | [x] Closed 2026-06-21. All gates PASS (security, swift6, accessibility, testing — 252 tests, Release clean). Merged via PR #404. Commit 41c7b32. Non-blocking follow-up: +5/speed badge touch-target <44pt (pre-existing, cleanup pass). |
 | #373 | Chapter skip next/prev from player controls + hold-to-scan | earshot-audio | [x] Closed 2026-06-21. Hold-to-FF 4× (gesture + rotor gated on Direct Touch) + chapter auto-skip (in-memory skip set, loop guard). All gates PASS — 315 tests. Merged via PR #406. Commit 4744946. |
 | #371 | Player episode actions: Mark as played, Export audio, Stop after this episode | earshot-ui | [x] Closed 2026-06-21. Overflow Menu + rotor actions; export shares LOCAL file (addresses #401 concern for player path); stop-after intercepts handlePlaybackEnded. All gates PASS — 327 tests. Merged via PR #407. Commit fd47c3b. Row-level export parity = separate follow-up. |
-| #372 | Bookmarks list in player: jump, delete, share | earshot-ui | [ ] |
+| #372 | Bookmarks list in player: jump, delete, share | earshot-ui | [x] Closed 2026-06-21. Surfaced existing BookmarksListView from player (menu + rotor); added per-bookmark share (pure BookmarkShareLogic). All gates PASS — 339 tests. Merged via PR #408. Commit 193635a. |
 | #392 | About screen + Send Feedback (PRD 12/17) | earshot-ui | [ ] |
 | #400 | Expand speed range 0.5×–5.0× | earshot-ui | [x] | Absorbed into #368. SettingsScreen Picker now uses stride(0.5...5.0 by 0.1). |
 
