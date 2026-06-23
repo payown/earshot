@@ -224,6 +224,31 @@ The SwiftUI side is built and waiting.
 
 ## UI Decisions
 
+- **Import older data lives in an always-visible Settings → Data row (#429).** The
+  manual re-import is surfaced as an "Import older data" row in the existing Data
+  section of `SettingsScreen` — never gated on `IS_BETA_BUILD` or any migration
+  window, so a returning tester can re-run it any time. The row shows the current
+  outcome on its trailing side via a pure helper `ImportStatusText.rowValue` ("Not
+  imported" / "Imported on {medium date}" / "Import failed"); the status is exposed
+  as `.accessibilityValue(...)` with a fixed `.accessibilityLabel("Import older
+  data")` so VoiceOver reads label + value as one stop and the status never bakes
+  into the label. Status is read from `FlutterMigrationService(context:)` on
+  `.onAppear` and refreshed on the sheet's `onDismiss` (the persisted
+  `migration_status`/`migration_last_attempt_date` AppSettings don't drive `@Query`,
+  so an explicit refresh keeps the row current). Tapping opens a dedicated
+  `DataImportSheet` (separate from onboarding's migration sheet — no "Remind me
+  later", reachable any time). The sheet wraps a `NavigationStack` with a Done
+  confirmation button plus `.accessibilityAction(.escape)` so it's dismissible
+  without a drag; its title `Text` carries `.isHeader`. A `@MainActor @Observable`
+  `DataImportViewModel` (held via `@State`, created lazily on appear because it
+  needs the environment `modelContext`) owns the `isRunning` flag, mirrors the
+  persisted status, and posts `Announcer.announce("Import complete" / "Import
+  failed", assertive: true)` when a run finishes. The result line pairs a
+  decorative (`accessibilityHidden`) success/failure icon with text that states the
+  outcome — color is never the only signal. Status→string logic is kept in the pure
+  `ImportStatusText` enum so it's unit-testable without a view. **Issue:** #429.
+  **Files:** `SettingsScreen.swift`, `Migration/Presentation/ImportStatusText.swift`,
+  `DataImportViewModel.swift`, `DataImportSheet.swift`. 518 tests green (was 505).
 - **Mini player inset attaches to tab content, not the TabView (#366).** The
   `NowPlayingBar` was attached with `.safeAreaInset(edge: .bottom)` on the
   `TabView` itself, which inserted the bar into the TabView's bottom safe area and
