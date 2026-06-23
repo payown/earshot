@@ -621,52 +621,27 @@ The tab you're currently on should announce "selected." Moving between tabs shou
 
 ---
 
-### Chapter 22 — Build 115
+### Chapter 22 — Build 116
 
-*Kashe goes quiet for three days after a wedding. When she comes back, Earshot feels different underneath her.*
+*Kashe goes quiet for three days after a wedding. When she comes back, Earshot has rebuilt itself underneath her — and then quietly put everything back where she left it.*
 
-What to test: Scroll your library and watch the cover art load instantly now, no
-flicker. Open the app cold after a day away and your inbox is already sorted and
-waiting, refreshed quietly in the background. In a show's settings, turn on
-new-episode notifications for the shows you don't want to miss. Email
-michael@payown.media if anything's stale or a notification misfires.
+What she'd leave out is the tall, cute stranger who talked her onto the dance floor "for one song," and how one song became however many it takes to lose track, and how the open bar did the rest. She does not dance. She danced. There's a great-aunt who'll bring it up at holidays for years.
 
-Three days. That's how long Kashe went quiet, and she'd tell you it was a wedding,
-and she'd be telling the truth, mostly.
+She surfaced two days later, charged her phone, and opened Earshot. The app was there. Her shows were not.
 
-What she'd leave out is the tall, cute stranger who talked her onto the dance floor
-"for one song," and how one song became however many it takes to lose track, and
-how the open bar did the rest. She does not dance. She danced. There's a great-aunt
-who'll bring it up at holidays for years.
+She didn't panic. She did the thing she always does first, which is assume she broke something and go looking for what. Closed it. Opened it again. Same empty shelves. Same quiet inbox. She thought about texting Renata and then didn't, because she wasn't ready to say out loud that she'd somehow lost everything.
 
-The trip home is a smear. A ride she half-remembers, a back seat that smelled like
-pine and somebody else's night, a driver who said "long one, huh." She remembers
-the door, not the stairs. She made it as far as the couch, face-first, still in her
-good clothes, and slept like someone had unplugged her. Her phone died on the
-floor. A personal record.
+By the next morning it was back. All of it. Her shows in the right order, her inbox with the episodes she hadn't played yet, her position on the long one she'd been working through for a week. The app had just needed another launch to figure out where it had put things.
 
-She surfaced two days later and let the phone tell on her. An Uber receipt at 2:14,
-later than the night she'd decided to remember. A call log she couldn't read: a
-bakery three towns over, a number that just answers "front desk," somebody saved as
-"DO NOT." She left them where they were. Some mysteries you let keep.
+She still doesn't entirely know what happened. She knows the app rebuilt itself from scratch while she was at a wedding, and that on the second open it found her data and put it back. She texted Renata: "tell your nephew the app lost my stuff and then found it again." A pause. "I'm choosing to be impressed."
 
-Then she opened Earshot, two days behind on everything, and it felt wrong. Not
-broken. Wrong. Faster. Lighter. The kind of different where you check you opened
-the right app.
+The artwork loads instantly now. She noticed that too, the way you notice a sound stopping. And the notification she tried to set for one show finally prompted her — she tapped Allow without thinking about it, the way you do when something just works.
 
-She had. It just became a different one underneath while she was busy being a
-disaster at a wedding.
+**What to test:**
 
-The artwork was the first tell. Every cover just there, instant, no hitch. Her
-inbox, untouched for three days, was already full, already sorted, working while
-she wasn't. In a show's settings she found a switch for getting told when it posts
-something new. Turned it on for the one show she won't miss, then a second, then a
-third, because that worked now too.
+This build is about getting data back. If you upgraded from an older build and your library or inbox looked empty, open the app and give it a moment — it should find your shows and inbox on this launch. Let michael@payown.media know if anything's still missing.
 
-She texted Renata: "either your nephew rebuilt this whole thing or I'm still
-hungover." A pause. "could be both."
-
-It was both.
+For everyone: open a show's settings and turn on new-episode notifications. You should get the iOS permission prompt the first time. Artwork should load instantly with no placeholder flicker. Your inbox count shows in the tab title now — "Inbox (3)" — and VoiceOver reads it cleanly.
 
 ---
 
