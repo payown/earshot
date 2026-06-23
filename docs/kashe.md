@@ -139,6 +139,11 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   play/pause label to Renata, months before it got fixed (Chapter 22)
 - She now sees the inbox count on the Inbox tab itself, not just the heading, so
   she can tell what's waiting from the tab bar before opening it (Chapter 22)
+- On the build-119 upgrade her data held (shows, queue, and her saved place all
+  intact, no empty-shelf morning like the wedding); she found the new
+  Settings > Data "Import older data" row (status plus on-demand re-import) and
+  valued having a recovery door she controls rather than waiting in the dark
+  (Chapter 23)
 
 ## What you can generate
 
@@ -657,6 +662,30 @@ If you upgraded from an older build and your inbox or library looked empty, open
 Play an episode and listen to what VoiceOver says when you tap the play/pause button. It should say "Play" when paused and "Pause" when playing. Report anything that still reads "Play or Pause Playing."
 
 Check the Inbox tab in the tab bar. It should show a count when you have unplayed inbox items, and no number when the inbox is empty. VoiceOver should announce it cleanly (you'll hear the number as part of the tab).
+
+---
+
+### Chapter 23 — Build 119
+
+*At the wedding she had to wait in the dark and hope.*
+
+The night everything vanished and came back (the wedding, the bare shelves, the next-morning relief) taught her one thing she didn't love: when it went sideways, all she could do was close the app and hope the next launch sorted it. It did. But hope isn't a setting.
+
+This build puts one in. Down in Settings there's a Data section now, with a row that reads Import older data. It tells her where she stands: imported, and the date it last ran. If something from the old version didn't make it across, that's the button that goes back and gets it, on her say-so.
+
+She found it the way she finds everything, looking for something else. Her shows were all there, her queue the way she left it, the long one she'd been a week into still sitting right where she'd stopped. After the wedding she'd half-braced for another empty-shelf morning. It didn't come.
+
+What stayed with her was that the row was there at all. At the wedding she'd had nothing to do but wait. Now there's a door, and it's hers to open.
+
+She'd put it the way she puts most things, if she put it to Renata at all: she doesn't need the app to be perfect. She needs to not be stuck in the dark when it isn't.
+
+**What to test:**
+
+Open Settings and find the new Data section. There should be a row called Import older data showing your status: not imported, imported on a date, or import failed.
+
+Tap it and run the import. If your shows, your queue, or your place in an episode didn't fully come across from an older version, this should pull them back. Run it twice if you like. It won't double up your shows or your queue. VoiceOver should tell you how it went when it finishes.
+
+We changed how your saved place is handled this build, so upgrading won't move it backward. If you ever do see your place jump back on its own, that's a bug now, email michael@payown.media.
 
 ---
 
