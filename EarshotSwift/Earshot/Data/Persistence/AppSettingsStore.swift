@@ -40,6 +40,29 @@ enum SettingsKey {
     // Timestamp (epoch seconds) of the last completed feed refresh. Used by
     // FeedRefreshPolicy to throttle background refreshes (#381).
     static let lastFeedRefresh = "last_feed_refresh"
+    // Outcome of the most recent Flutter→SwiftUI import attempt (notAttempted /
+    // succeeded / failed). Surfaced in Settings → Data so the user can see
+    // whether their older data came across, and re-run the import on demand
+    // (#429). Stored as the ``MigrationStatus`` raw value.
+    static let migrationStatus = "migration_status"
+    // Timestamp (epoch seconds) of the most recent import attempt, set on every
+    // run (automatic launch import or manual re-import). nil until the first
+    // attempt (#429).
+    static let migrationLastAttemptDate = "migration_last_attempt_date"
+}
+
+/// Outcome of the most recent Flutter→SwiftUI data import (#429). Persisted as a
+/// String raw value under ``SettingsKey/migrationStatus`` so Settings → Data can
+/// show the user whether their older data came across. Defaults to
+/// ``notAttempted`` when unset or unparseable.
+enum MigrationStatus: String {
+    /// No import has run yet on this install.
+    case notAttempted = "not_attempted"
+    /// The last import completed: shells imported and the state/queue overlay
+    /// finished without throwing.
+    case succeeded
+    /// The last import errored — either an import failure or the overlay threw.
+    case failed
 }
 
 /// Documented defaults for settings not yet written by the user.
@@ -141,6 +164,29 @@ final class AppSettingsStore {
 
     func setDate(_ value: Date, for key: String) {
         setRawValue(String(value.timeIntervalSince1970), for: key)
+    }
+
+    /// The outcome of the most recent import attempt, defaulting to
+    /// ``MigrationStatus/notAttempted`` when unset or unparseable (#429).
+    func migrationStatus() -> MigrationStatus {
+        guard let raw = rawValue(SettingsKey.migrationStatus),
+              let status = MigrationStatus(rawValue: raw)
+        else { return .notAttempted }
+        return status
+    }
+
+    func setMigrationStatus(_ status: MigrationStatus) {
+        setRawValue(status.rawValue, for: SettingsKey.migrationStatus)
+    }
+
+    /// The timestamp of the most recent import attempt, or nil before any run
+    /// (#429).
+    func migrationLastAttemptDate() -> Date? {
+        date(SettingsKey.migrationLastAttemptDate)
+    }
+
+    func setMigrationLastAttemptDate(_ value: Date) {
+        setDate(value, for: SettingsKey.migrationLastAttemptDate)
     }
 
     func launchScreen() -> LaunchScreen {

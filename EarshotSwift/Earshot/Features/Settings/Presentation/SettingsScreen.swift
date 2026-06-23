@@ -14,6 +14,11 @@ struct SettingsScreen: View {
     @State private var exportURL: ExportFile?
     @State private var confirmingReset = false
     @State private var importingOPML = false
+    @State private var showingDataImport = false
+    // Mirrors the persisted Flutter→SwiftUI import outcome (#429). Read on appear
+    // and refreshed when the Import sheet closes so the row's status stays current.
+    @State private var importStatus: MigrationStatus = .notAttempted
+    @State private var importLastAttempt: Date?
 
     // Full 0.5x-5.0x range in 0.1x increments (PRD 5.5). Generated at compile
     // time so the Picker covers the complete allowed range.
@@ -129,6 +134,23 @@ struct SettingsScreen: View {
                     Label("Import subscriptions (OPML)", systemImage: "square.and.arrow.down")
                 }
 
+                Button {
+                    showingDataImport = true
+                } label: {
+                    HStack {
+                        Label("Import older data", systemImage: "clock.arrow.circlepath")
+                        Spacer()
+                        Text(importStatusValue)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                // Label + value read as one VoiceOver stop ("Import older data,
+                // Imported on June 12, 2026"); status lives in the value, never
+                // the label.
+                .accessibilityLabel("Import older data")
+                .accessibilityValue(importStatusValue)
+                .accessibilityHint("Brings your shows, played state, and queue over from the previous version of Earshot")
+
                 Button(role: .destructive) {
                     confirmingReset = true
                 } label: {
@@ -137,6 +159,10 @@ struct SettingsScreen: View {
             }
         }
         .navigationTitle("Settings")
+        .onAppear(perform: refreshImportStatus)
+        .sheet(isPresented: $showingDataImport, onDismiss: refreshImportStatus) {
+            DataImportSheet()
+        }
         .sheet(item: $exportURL) { file in ShareSheet(items: [file.url]) }
         .fileImporter(
             isPresented: $importingOPML,
@@ -154,6 +180,21 @@ struct SettingsScreen: View {
         } message: {
             Text("Removes every podcast, episode, download, and setting on this device. This can't be undone.")
         }
+    }
+
+    // MARK: Import older data (#429)
+
+    /// The status string shown on the "Import older data" row and used as its
+    /// VoiceOver value. Derived purely from the persisted status/date.
+    private var importStatusValue: String {
+        ImportStatusText.rowValue(status: importStatus, lastAttemptDate: importLastAttempt)
+    }
+
+    /// Re-reads the persisted import outcome so the row reflects the latest run.
+    private func refreshImportStatus() {
+        let service = FlutterMigrationService(context: context)
+        importStatus = service.status
+        importLastAttempt = service.lastAttemptDate
     }
 
     // MARK: Export

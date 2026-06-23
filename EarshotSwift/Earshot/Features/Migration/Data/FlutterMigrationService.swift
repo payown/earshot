@@ -72,6 +72,7 @@ final class FlutterMigrationService {
             .appendingPathComponent("earshot.db")
     }
 
+    private let context: ModelContext
     private let settings: AppSettingsStore
     private let databaseURL: URL?
 
@@ -79,6 +80,7 @@ final class FlutterMigrationService {
         context: ModelContext,
         databaseURL: URL? = FlutterMigrationService.localDatabaseURL
     ) {
+        self.context = context
         self.settings = AppSettingsStore(context: context)
         self.databaseURL = databaseURL
     }
@@ -106,6 +108,38 @@ final class FlutterMigrationService {
     /// the self-heal gate stops re-running them.
     func markEpisodeStateRestored() {
         settings.setBool(true, for: SettingsKey.flutterEpisodeStateRestored)
+    }
+
+    // MARK: Import status (#429)
+
+    /// The outcome of the most recent import attempt, surfaced in Settings → Data.
+    /// Defaults to ``MigrationStatus/notAttempted`` before any run.
+    var status: MigrationStatus {
+        settings.migrationStatus()
+    }
+
+    /// The timestamp of the most recent import attempt, or nil before any run.
+    var lastAttemptDate: Date? {
+        settings.migrationLastAttemptDate()
+    }
+
+    /// Stamps the start of an import attempt: records "now" as the last-attempt
+    /// date so Settings → Data can show when the import last ran, even while it's
+    /// in flight. The status is written separately on completion / failure.
+    func recordImportAttempt(now: Date = .now) {
+        settings.setMigrationLastAttemptDate(now)
+    }
+
+    /// Marks the most recent import run as having succeeded — shells imported and
+    /// the state/queue overlay finished without throwing.
+    func recordImportSucceeded() {
+        settings.setMigrationStatus(.succeeded)
+    }
+
+    /// Marks the most recent import run as having failed — an import error or the
+    /// state/queue overlay threw.
+    func recordImportFailed() {
+        settings.setMigrationStatus(.failed)
     }
 
     /// Records a launch where the import ran but the Flutter database yielded no
@@ -296,6 +330,72 @@ final class FlutterMigrationService {
             ))
         }
         return entries
+    }
+
+    // MARK: On-demand import (#429)
+
+    /// Runs the full Flutter→SwiftUI import on demand, for the Settings → Data
+    /// "Import older data" action. Reopens the migration gate and replays the same
+    /// sequence the launch path runs: read subscriptions → import deduped show
+    /// shells → mark complete → refresh every feed → overlay played/inbox/position
+    /// state and queue order → mark the overlay restored. Stamps the attempt date
+    /// up front and the status (succeeded / failed) on the way out, so the sheet
+    /// can reflect the result.
+    ///
+    /// Idempotent and safe to call when already migrated: ``SubscriptionImporter``
+    /// dedupes by feedURL and ``QueueImporter`` skips already-queued episodes, so a
+    /// re-run adds no duplicate podcasts or queue entries. Returns true on success.
+    ///
+    /// If the Flutter database is missing or empty this is treated as a no-op
+    /// success — there is simply nothing to import — so the user isn't shown a
+    /// failure for a clean install. Any thrown error (refresh / overlay) records
+    /// `.failed` and returns false rather than crashing.
+    @MainActor
+    @discardableResult
+    func runManualImport(
+        onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int) -> Void)? = nil
+    ) async -> Bool {
+        recordImportAttempt()
+
+        // Reopen the gate so a previously-completed migration can re-run cleanly.
+        resetForSelfHeal()
+
+        guard let subs = readSubscriptions(), !subs.isEmpty else {
+            // Nothing on disk to import. Not a failure — a clean install legitimately
+            // has no older data. Record success so the UI shows "up to date".
+            AppLog.data.info("Manual import: no Flutter data found; nothing to import")
+            markComplete()
+            recordImportSucceeded()
+            return true
+        }
+
+        // Phase 1: deduped show shells (no episodes) on a background context.
+        let importer = SubscriptionImporter(modelContainer: context.container)
+        _ = await importer.importShells(subs) { completed, total in
+            onProgress?(completed, total)
+        }
+        markComplete()
+
+        // Phase 2: fill episodes, then overlay the user's per-episode state and
+        // queue order. A thrown error here leaves the gate open for a later retry
+        // and records the failure for the UI.
+        do {
+            _ = await SubscriptionRepository(context: context).refreshAll()
+            if let flutterEpisodes = readEpisodes() {
+                try EpisodeStateImporter(context: context).apply(flutterEpisodes)
+            }
+            if let flutterQueue = readQueue() {
+                try QueueImporter(context: context).apply(flutterQueue)
+            }
+            markEpisodeStateRestored()
+            recordImportSucceeded()
+            AppLog.data.info("Manual import: completed successfully")
+            return true
+        } catch {
+            recordImportFailed()
+            AppLog.data.error("Manual import: failed during overlay: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     /// Trimmed text for a column, or nil when NULL/blank.
