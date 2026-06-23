@@ -97,14 +97,13 @@ struct NowPlayingBar: View {
                 action: player.skipBack
             )
 
-            // Stable VoiceOver name ("Play or pause") with the live state carried
-            // by the value, rather than flipping the label. A stable name keeps the
-            // control predictable for screen-reader and Voice Control users; the
-            // value (and the announcement above) convey state.
+            // Dynamic VoiceOver name reflecting the action the button performs
+            // ("Play" when paused, "Pause" when playing). No accessibilityValue —
+            // the label carries the meaning, and the play-state transition is
+            // announced once at the RootView level.
             TransportButton(
                 systemImage: player.isPlaying ? "pause.fill" : "play.fill",
-                label: "Play or pause",
-                value: player.isPlaying ? "Playing" : "Paused",
+                label: player.isPlaying ? "Pause" : "Play",
                 action: player.togglePlayPause
             )
 
