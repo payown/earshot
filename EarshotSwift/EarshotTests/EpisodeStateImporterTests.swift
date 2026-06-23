@@ -39,7 +39,7 @@ final class EpisodeStateImporterTests: XCTestCase {
             (guid: "untouched", audio: "https://x/untouched.mp3"),
         ])
 
-        let count = EpisodeStateImporter(context: ctx).apply([
+        let count = try EpisodeStateImporter(context: ctx).apply([
             FlutterEpisode(guid: "played", audioURL: "https://x/played.mp3", isPlayed: true, inboxDismissed: true, pubDate: nil, positionSeconds: 300),
             FlutterEpisode(guid: "inbox", audioURL: "https://x/inbox.mp3", isPlayed: false, inboxDismissed: false, pubDate: nil, positionSeconds: nil),
             // No record for "untouched" -> it keeps the backfill default.
@@ -66,7 +66,7 @@ final class EpisodeStateImporterTests: XCTestCase {
     func testMatchesByAudioURLWhenGUIDDiffers() throws {
         let ctx = seedStore([(guid: "new-guid", audio: "https://x/ep.mp3")])
 
-        let count = EpisodeStateImporter(context: ctx).apply([
+        let count = try EpisodeStateImporter(context: ctx).apply([
             FlutterEpisode(guid: "old-guid", audioURL: "https://x/ep.mp3", isPlayed: true, inboxDismissed: true, pubDate: nil, positionSeconds: nil),
         ])
 
@@ -77,7 +77,7 @@ final class EpisodeStateImporterTests: XCTestCase {
     func testPlayedStateForcesInboxDismissedEvenIfRecordSaysOtherwise() throws {
         let ctx = seedStore([(guid: "g", audio: "https://x/g.mp3")])
 
-        EpisodeStateImporter(context: ctx).apply([
+        try EpisodeStateImporter(context: ctx).apply([
             FlutterEpisode(guid: "g", audioURL: "https://x/g.mp3", isPlayed: true, inboxDismissed: false, pubDate: nil, positionSeconds: nil),
         ])
 
@@ -92,7 +92,7 @@ final class EpisodeStateImporterTests: XCTestCase {
         seeded.positionSeconds = 42
         try? ctx.save()
 
-        EpisodeStateImporter(context: ctx).apply([
+        try EpisodeStateImporter(context: ctx).apply([
             FlutterEpisode(guid: "g", audioURL: "https://x/g.mp3", isPlayed: false, inboxDismissed: false, pubDate: nil, positionSeconds: 0),
         ])
 
@@ -101,7 +101,7 @@ final class EpisodeStateImporterTests: XCTestCase {
 
     func testEmptyInputIsANoOp() throws {
         let ctx = seedStore([(guid: "g", audio: "https://x/g.mp3")])
-        XCTAssertEqual(EpisodeStateImporter(context: ctx).apply([]), 0)
+        XCTAssertEqual(try EpisodeStateImporter(context: ctx).apply([]), 0)
         XCTAssertTrue(try episode(ctx, guid: "g").inboxDismissed) // unchanged
     }
 }

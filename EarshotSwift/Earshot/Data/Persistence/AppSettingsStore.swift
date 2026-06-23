@@ -31,6 +31,12 @@ enum SettingsKey {
     // yielded no subscriptions. Bounds retries so a transient first-launch miss
     // recovers while a genuinely empty install stops looping (#426).
     static let flutterMigrationAttempts = "flutter_migration_attempts"
+    // Whether the post-import per-episode state overlay (played / inbox /
+    // position) and queue-order restore completed without error. Set only on
+    // success, so a migration that imported show shells but failed (or never
+    // reached) the overlay can self-heal a state-only re-restore on a later
+    // launch instead of stranding the user with shows but no history (#426).
+    static let flutterEpisodeStateRestored = "flutter_episode_state_restored"
     // Timestamp (epoch seconds) of the last completed feed refresh. Used by
     // FeedRefreshPolicy to throttle background refreshes (#381).
     static let lastFeedRefresh = "last_feed_refresh"

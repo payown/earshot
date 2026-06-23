@@ -25,44 +25,30 @@ final class EpisodeStateImporter {
     }
 
     /// Applies Flutter episode state to the current store. Returns the number of
-    /// episodes whose state was updated. Saves once at the end; a save failure is
-    /// logged but never crashes — losing the overlay is recoverable, a crash is
-    /// not.
+    /// records whose matching episode was updated. Matching goes through the
+    /// shared ``MigrationEpisodeMatcher`` (guid first, audioURL fallback), so it
+    /// can't drift from the queue restore's matching.
+    ///
+    /// Throws on a hard failure (the episode fetch or the final save), so the
+    /// caller can leave the "state restored" marker unset and retry on a later
+    /// launch instead of recording a half-applied overlay as done (#426). A crash
+    /// is never the failure mode — the caller catches and defers.
     @discardableResult
-    func apply(_ flutterEpisodes: [FlutterEpisode]) -> Int {
+    func apply(_ flutterEpisodes: [FlutterEpisode]) throws -> Int {
         guard !flutterEpisodes.isEmpty else { return 0 }
 
-        // Index the Flutter records for O(1) lookup. guid wins when both are
-        // present; audioURL is the fallback bucket.
-        var byGUID: [String: FlutterEpisode] = [:]
-        var byAudioURL: [String: FlutterEpisode] = [:]
-        for record in flutterEpisodes {
-            if let guid = record.guid, !guid.isEmpty { byGUID[guid] = record }
-            if let audio = record.audioURL, !audio.isEmpty { byAudioURL[audio] = record }
-        }
+        let episodes = try context.fetch(FetchDescriptor<Episode>())
+        let matcher = MigrationEpisodeMatcher(episodes: episodes)
 
-        let episodes: [Episode]
-        do {
-            episodes = try context.fetch(FetchDescriptor<Episode>())
-        } catch {
-            // Don't crash a returning user's launch over a failed fetch; log so a
-            // missed state restore is diagnosable rather than silent (#426).
-            AppLog.data.error("Migration: failed to fetch episodes for state restore: \(error.localizedDescription, privacy: .public)")
-            return 0
-        }
         var updated = 0
-        for episode in episodes {
-            guard let record = byGUID[episode.guid] ?? byAudioURL[episode.audioURL] else { continue }
+        for record in flutterEpisodes {
+            guard let episode = matcher.match(guid: record.guid, audioURL: record.audioURL) else { continue }
             apply(record, to: episode)
             updated += 1
         }
 
         if context.hasChanges {
-            do {
-                try context.save()
-            } catch {
-                AppLog.data.error("Migration: failed to save restored episode state: \(error.localizedDescription, privacy: .public)")
-            }
+            try context.save()
         }
         AppLog.data.info("Migration: restored state for \(updated, privacy: .public) episode(s)")
         return updated
