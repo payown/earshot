@@ -147,6 +147,10 @@ struct RootView: View {
                 if migratedPodcastCount == 0 {
                     migration.resetForSelfHeal()
                 } else {
+                    // State-only self-heal: the library survived but its per-episode
+                    // state never restored. Stamp the attempt date; restoreEpisodeState
+                    // records succeeded/failed (#429).
+                    migration.recordImportAttempt()
                     Task { await restoreEpisodeState(using: migration) }
                 }
             }
@@ -166,6 +170,11 @@ struct RootView: View {
                 // The user is free to use the populated Library throughout.
                 settings.onboardingComplete = true
                 showOnboarding = false
+                // Stamp the attempt date now that an import run is actually
+                // starting, so Settings → Data shows when the import last ran even
+                // while episodes are still loading (#429). Status is written at the
+                // success/failure points in restoreEpisodeState.
+                migration.recordImportAttempt()
                 let importer = SubscriptionImporter(modelContainer: modelContext.container)
                 Task {
                     let count = await importer.importShells(subs) { _, _ in }
@@ -242,7 +251,14 @@ struct RootView: View {
                 try QueueImporter(context: modelContext).apply(flutterQueue)
             }
             migration.markEpisodeStateRestored()
+            // The import run completed: shells imported AND the overlay finished
+            // without throwing. Stamp the status so Settings → Data shows success
+            // (#429).
+            migration.recordImportSucceeded()
         } catch {
+            // The overlay threw: leave the "restored" marker unset so a later
+            // launch retries, and record the failure for Settings → Data (#429).
+            migration.recordImportFailed()
             AppLog.data.error("Migration: episode state restore failed; will retry next launch: \(error.localizedDescription, privacy: .public)")
         }
     }
