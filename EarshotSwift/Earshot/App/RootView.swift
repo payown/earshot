@@ -88,6 +88,15 @@ struct RootView: View {
         .onChange(of: settings.voiceEnhanceEnabled) { _, _ in
             player.applyAudioEnhancement()
         }
+        // Keep the lock-screen / Control Center skip buttons in sync with the
+        // skip-interval settings (#... review P1-5). Set once at launch, then
+        // updated here so a change in Settings takes effect immediately.
+        .onChange(of: settings.skipForwardSeconds) { _, _ in
+            player.updateRemoteSkipIntervals()
+        }
+        .onChange(of: settings.skipBackSeconds) { _, _ in
+            player.updateRemoteSkipIntervals()
+        }
         .task {
             // Wire persistence and restore the last episode (paused) on launch.
             // Done here, not in a view body's computed work, so the context is
@@ -105,6 +114,18 @@ struct RootView: View {
             // (readFeedURLs) decides migrator vs. new user; the slow network
             // subscribe runs in a detached task so launch is never blocked.
             let migration = FlutterMigrationService(context: modelContext)
+            // Self-heal: a prior launch marked the migration complete but left the
+            // Library empty while earshot.db still holds data — the first-launch
+            // import fired and found nothing (or failed) and locked the user out of
+            // a recoverable library. Reopen the gate so the import path below
+            // re-runs (#426).
+            if MigrationGate.shouldSelfHeal(
+                migrationComplete: migration.isComplete,
+                podcastCount: (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0,
+                flutterHasData: migration.hasFlutterData()
+            ) {
+                migration.resetForSelfHeal()
+            }
             if MigrationGate.shouldImport(migrationComplete: migration.isComplete),
                let subs = migration.readSubscriptions(), !subs.isEmpty {
                 // Returning user from the old build: skip onboarding and restore
@@ -115,6 +136,9 @@ struct RootView: View {
                 //   2. Background: a normal refresh fetches each show's episodes and
                 //      seeds the inbox high-water mark (pre-dismissing the backlog so
                 //      the inbox starts empty; only future episodes surface later).
+                //   3. Overlay the user's old per-episode state (played / inbox /
+                //      position) from earshot.db onto those freshly-fetched episodes,
+                //      so a returning user's inbox and history come back (#426).
                 // The user is free to use the populated Library throughout.
                 settings.onboardingComplete = true
                 showOnboarding = false
@@ -135,8 +159,25 @@ struct RootView: View {
                     // (swipe-to-check); no spoken milestones — it's a background task the
                     // user didn't start, so interrupting their navigation would be noise.
                     importState.start(total: count)
-                    await SubscriptionRepository(context: modelContext).refreshAll { completed, _ in
-                        importState.update(completed: completed)
+                    let notifications = await SubscriptionRepository(context: modelContext)
+                        .refreshAll(onProgress: { completed, _ in
+                            importState.update(completed: completed)
+                        })
+                    // Deliver any new-episode notifications this launch refresh
+                    // found. This stamp marks lastFeedRefresh, so a background wake
+                    // inside the throttle window is skipped — the path that finds
+                    // new episodes must be the path that notifies or they're lost
+                    // (#421). deliver() coalesces per podcast, so no double-fire.
+                    // (Migrated shells backfill pre-dismissed and never notify, so
+                    // this is typically empty on the very first restore.)
+                    if !notifications.isEmpty {
+                        await NotificationService().deliver(notifications)
+                    }
+                    // Restore played / inbox / position state now that the episodes
+                    // exist. The backfill above pre-dismissed and unplayed everything;
+                    // this puts the user's actual inbox and history back (#426).
+                    if let flutterEpisodes = migration.readEpisodes() {
+                        EpisodeStateImporter(context: modelContext).apply(flutterEpisodes)
                     }
                     // Stamp the throttle window so a background wake right after the
                     // restore doesn't redundantly re-refresh every show (#381).
@@ -144,10 +185,15 @@ struct RootView: View {
                     importState.finish()
                     Announcer.announce("Episodes loaded. Your Library is up to date.")
                 }
+            } else if MigrationGate.shouldImport(migrationComplete: migration.isComplete) {
+                // Gate is open but the Flutter database gave us nothing this launch.
+                // Don't mark complete yet — a first cold launch can miss earshot.db.
+                // Retry on the next launch, giving up only after maxAttempts (#426).
+                migration.recordEmptyImportAttempt()
+                showOnboarding = !settings.onboardingComplete
             } else {
-                // Fresh install (or already migrated): nothing to import.
-                if !migration.isComplete { migration.markComplete() }
-                // Show onboarding on first launch (after settings load so we don't flash).
+                // Already migrated: nothing to import. Show onboarding on first
+                // launch (after settings load so we don't flash).
                 showOnboarding = !settings.onboardingComplete
             }
         }

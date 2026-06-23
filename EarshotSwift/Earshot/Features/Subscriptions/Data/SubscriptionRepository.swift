@@ -236,7 +236,7 @@ final class SubscriptionRepository {
                 // Only notification-enabled podcasts with genuinely-new episodes
                 // (never a backfill pass) earn a notification (#72).
                 if NewEpisodeNotificationDecision.shouldNotify(
-                    notificationEnabled: podcast.notificationEnabled,
+                    notificationEnabled: podcast.notificationEnabled ?? false,
                     addedCount: outcome.added,
                     wasBackfill: outcome.wasBackfill
                 ), let target = outcome.newestNewEpisode {

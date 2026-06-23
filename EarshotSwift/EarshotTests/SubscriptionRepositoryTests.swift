@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import UserNotifications
 @testable import Earshot
 
 private final class FakeFeedFetcher: FeedFetching {
@@ -424,4 +425,85 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let notifications = await repo.refreshAll()
         XCTAssertTrue(notifications.isEmpty)
     }
+
+    // MARK: Foreground delivery + throttle decoupling (#421)
+
+    /// The fix for #421: a FOREGROUND refresh (pull-to-refresh / launch restore)
+    /// must DELIVER the notifications it finds, not discard them. This mirrors
+    /// SubscriptionsView.refreshAll(): refreshAll() → NotificationService.deliver().
+    func testForegroundRefreshDeliversNotifications() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        podcast.notificationEnabled = true
+        try ctx.save()
+
+        // A genuinely-new episode arrives.
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+
+        // Foreground path: find new episodes, then deliver via the service.
+        let notifications = await repo.refreshAll()
+        XCTAssertEqual(notifications.count, 1, "Foreground refresh found one new-episode notification")
+
+        let mock = TestNotificationCenter(status: .authorized)
+        await NotificationService(center: mock).deliver(notifications)
+
+        let added = await mock.addedRequests
+        XCTAssertEqual(added.count, 1, "Foreground refresh delivered the notification (not discarded)")
+        XCTAssertEqual(added.first?.content.title, "Show")
+    }
+
+    /// A foreground pull stamps `lastFeedRefresh`, so the next background wake
+    /// inside the 15-minute window is throttle-skipped (FeedRefreshPolicy). The
+    /// notification must NOT be lost: the foreground path that found the new
+    /// episode is the path that delivers it. This asserts the coherent design —
+    /// throttle-skipped background, but the notification was already delivered.
+    func testNotificationNotLostWhenBackgroundRunIsThrottleSkipped() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        podcast.notificationEnabled = true
+        try ctx.save()
+
+        // New episode appears; foreground pull finds and delivers it, then stamps
+        // the throttle window (as SubscriptionsView.refreshAll does).
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        let foregroundNotifications = await repo.refreshAll()
+        let mock = TestNotificationCenter(status: .authorized)
+        await NotificationService(center: mock).deliver(foregroundNotifications)
+        let stampedAt = Date()
+
+        // A background wake one minute later is within the 15-minute window, so
+        // FeedRefreshPolicy skips it — it never even runs refreshAll.
+        let backgroundShouldRun = FeedRefreshPolicy.shouldRefresh(
+            lastRefresh: stampedAt,
+            now: stampedAt.addingTimeInterval(60),
+            force: false
+        )
+        XCTAssertFalse(backgroundShouldRun, "Background wake is throttle-skipped within the window")
+
+        // The notification was already delivered by the foreground path, so it is
+        // NOT lost despite the background skip. deliver() coalesces per podcast by
+        // a stable identifier, so even if the background path had run it could not
+        // double-deliver the same show.
+        let added = await mock.addedRequests
+        XCTAssertEqual(added.count, 1, "Notification delivered once by the foreground path; never lost")
+    }
+}
+
+/// Local actor-isolated mock of ``NotificationScheduling`` for the foreground
+/// delivery tests (#421). Mirrors the one in NotificationServiceTests, scoped
+/// here so the two test files stay independent.
+private actor TestNotificationCenter: NotificationScheduling {
+    private let status: UNAuthorizationStatus
+    private(set) var addedRequests: [UNNotificationRequest] = []
+
+    init(status: UNAuthorizationStatus) { self.status = status }
+
+    func authorizationStatus() async -> UNAuthorizationStatus { status }
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool { true }
+    func setNotificationCategories(_ categories: Set<UNNotificationCategory>) async {}
+    func add(_ request: UNNotificationRequest) async throws { addedRequests.append(request) }
 }

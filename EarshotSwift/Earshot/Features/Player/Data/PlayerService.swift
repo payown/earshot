@@ -48,6 +48,12 @@ final class PlayerService {
     /// True when playback was paused by a system interruption that may resume.
     @ObservationIgnored private var pausedByInterruption = false
 
+    /// Generation token for the sleep-timer volume fade (review P1-4). Each fade
+    /// captures the current value; every queued fade step bails if it no longer
+    /// matches, so a new play/resume during the ~0.6s fade can cancel the
+    /// trailing `pause()` and the intermediate volume writes.
+    @ObservationIgnored private var fadeGeneration = 0
+
     // Listening-session recording (feeds Stats). We accumulate plausible per-tick
     // position advances and flush a `ListeningSession` every `sessionFlushSeconds`
     // (and on pause / stop / episode switch). Forward skips and seeks are filtered
@@ -110,6 +116,13 @@ final class PlayerService {
     // screen loaded for the current episode, supplied via `setChapters`.
     @ObservationIgnored private var skippedChapterIndices: [String: Set<Int>] = [:]
     @ObservationIgnored private var currentChapters: [Chapter] = []
+    /// Resolves chapters for the loaded episode. Held so the engine can populate
+    /// `currentChapters` itself on every episode load (review P1-1) rather than
+    /// relying on the player-controls sheet being opened.
+    @ObservationIgnored private let chapterService = ChapterService()
+    /// Guards against a stale async chapter load applying to the wrong episode:
+    /// the guid the most recent chapter load was started for.
+    @ObservationIgnored private var chapterLoadEpisodeGUID: String?
     /// Loop guard: the chapter index we last auto-skipped *from*. We don't fire
     /// again until the active chapter moves away from it, so the seek's own
     /// position update can't restart an endless skip loop.
@@ -139,19 +152,33 @@ final class PlayerService {
 
     private func fadeOutThenPause() {
         // A brief linear volume fade, then pause and restore volume for next time.
+        // A generation token lets a play/resume started during the fade cancel
+        // the trailing pause (and the intermediate volume writes) — see P1-4.
+        fadeGeneration &+= 1
+        let generation = fadeGeneration
         let steps = 8
         let startVolume = player.volume
         for step in 0..<steps {
             let delay = Double(step) * 0.08
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.player.volume = startVolume * Float(steps - step - 1) / Float(steps)
+                guard let self, self.fadeGeneration == generation else { return }
+                self.player.volume = startVolume * Float(steps - step - 1) / Float(steps)
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(steps) * 0.08) { [weak self] in
-            guard let self else { return }
+            guard let self, self.fadeGeneration == generation else { return }
             self.pause()
             self.player.volume = startVolume
         }
+    }
+
+    /// Cancels any in-flight sleep-timer fade and restores full volume, so a new
+    /// play/resume during the fade is neither paused by the trailing closure nor
+    /// left quiet by a mid-fade volume write (review P1-4). Volume is otherwise
+    /// only ever touched by the fade, so 1.0 is the correct baseline.
+    private func cancelFadeIfNeeded() {
+        fadeGeneration &+= 1
+        if player.volume != 1.0 { player.volume = 1.0 }
     }
 
     // MARK: Public playback API
@@ -194,6 +221,9 @@ final class PlayerService {
             }
             item = AVPlayerItem(url: url)
         }
+
+        // A new episode supersedes any in-flight sleep-timer fade (P1-4).
+        cancelFadeIfNeeded()
 
         // Persist + record the session of whatever was playing before we swap.
         persistCurrentPosition()
@@ -255,6 +285,7 @@ final class PlayerService {
         persistLastPlayingEpisode(episode)
         updateNowPlayingInfo()
         refreshPreload()
+        loadChaptersForCurrentEpisode()
     }
 
     /// Loads an episode paused, restoring its saved position. Used on launch to
@@ -299,6 +330,7 @@ final class PlayerService {
         // Force the first tick after play to persist this episode's position.
         lastPersistedSecond = nil
         updateNowPlayingInfo()
+        loadChaptersForCurrentEpisode()
     }
 
     func togglePlayPause() {
@@ -307,6 +339,8 @@ final class PlayerService {
 
     func resume() {
         guard currentEpisode != nil else { return }
+        // Resuming during a sleep-timer fade supersedes it (P1-4).
+        cancelFadeIfNeeded()
         configureSession()
         applyRate()
         player.play()
@@ -591,6 +625,35 @@ final class PlayerService {
     func setChapters(_ chapters: [Chapter]) {
         currentChapters = chapters
         lastAutoSkipFromChapterIndex = nil
+    }
+
+    /// Resolves and installs the loaded episode's chapters in the engine so
+    /// auto-skip works on every episode, not only after the player-controls
+    /// sheet has been opened (review P1-1). Only Sendable strings cross the
+    /// async boundary — the `@Model` stays on the main actor — and the result is
+    /// discarded if the user switched episodes while it loaded. The
+    /// controls-sheet `setChapters` path still applies (idempotent; same list).
+    private func loadChaptersForCurrentEpisode() {
+        guard let episode = currentEpisode else { return }
+        let guid = episode.guid
+        let chapterURL = episode.chapterURL
+        let audioURL = episode.audioURL
+        let descriptionHTML = episode.episodeDescription
+        chapterLoadEpisodeGUID = guid
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let found = await self.chapterService.chapters(
+                chapterURL: chapterURL,
+                audioURL: audioURL,
+                descriptionHTML: descriptionHTML
+            )
+            // Drop a stale load: only apply if this is still the loaded episode
+            // and no newer load has superseded us.
+            guard self.chapterLoadEpisodeGUID == guid,
+                  self.currentEpisode?.guid == guid else { return }
+            self.currentChapters = found
+            self.lastAutoSkipFromChapterIndex = nil
+        }
     }
 
     /// Whether `chapter` is currently marked skipped for the loaded episode.
@@ -1146,13 +1209,12 @@ final class PlayerService {
             return .success
         }
 
-        center.skipForwardCommand.preferredIntervals = [NSNumber(value: skipForwardSeconds)]
+        updateRemoteSkipIntervals()
         center.skipForwardCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
             self.skipForward()
             return .success
         }
-        center.skipBackwardCommand.preferredIntervals = [NSNumber(value: skipBackSeconds)]
         center.skipBackwardCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
             self.skipBack()
@@ -1166,5 +1228,15 @@ final class PlayerService {
             self.seek(to: positionEvent.positionTime)
             return .success
         }
+    }
+
+    /// Pushes the current skip-interval settings to the lock-screen / Control
+    /// Center skip buttons. Called once at launch and again whenever the skip
+    /// interval changes in Settings, so the remote buttons seek by the same
+    /// amount as in-app skips (review P1-5).
+    func updateRemoteSkipIntervals() {
+        let center = MPRemoteCommandCenter.shared()
+        center.skipForwardCommand.preferredIntervals = [NSNumber(value: skipForwardSeconds)]
+        center.skipBackwardCommand.preferredIntervals = [NSNumber(value: skipBackSeconds)]
     }
 }

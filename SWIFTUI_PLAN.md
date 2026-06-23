@@ -117,6 +117,12 @@ The SwiftUI side is built and waiting.
 
 - **Issue #418 (Settings — Send Feedback recipient):** Changed the feedback recipient from `beta@payown.media` to `michael@payown.media`. **Implemented by:** planning agent (one-word/string-constant change, no domain logic). **Reviewed by:** earshot-security (PASS), earshot-accessibility (PASS — VoiceOver hint now reads "Opens an email to michael at payown dot media"), earshot-testing (PASS — 438/438, Release build clean), earshot-changelog (entry under Fixed; also corrected the unshipped #392 Added line). Touches `FeedbackComposer.recipient`, the `SendFeedbackView` doc comment + `accessibilityHint`, and 4 literals in `FeedbackComposerTests`. The mailto fallback, in-line fallback message, and Announcer all interpolate `FeedbackComposer.recipient`, so no literal edits there. Acceptance: `grep -r "beta@payown.media" EarshotSwift/` returns nothing. **Test count: 438** (baseline of record was 404; never decreased). Branch `fix/issue-418-feedback-recipient` into `swift`. Not merged / not closed — Michael verifies on device first.
 
+- **Issue #421 (Notifications — per-podcast new-episode notifications never fired; BLOCKED build 114):** Four compounding bugs fixed. **PRIMARY — no permission prompt (root cause confirmed with Michael's device report):** `PodcastSettingsView`'s "Notify on new episodes" toggle bound `$podcast.notificationEnabled` (a SwiftData `@Model` property) and requested authorization from `.onChange(of:)` + a bare `Task {}`. `.onChange` does not reliably fire on a persistent-model write (old == new by the time SwiftUI diffs) and the unowned `Task {}` had no lifetime owner, so `requestAuthorization()` was never invoked, the iOS prompt never appeared, status stayed `.notDetermined`, and every `deliver()` silently failed (that toggle is the ONLY `requestAuthorization` call site). Local notifications need no Info.plist usage string or entitlement — none added/required. **Fix:** explicit `Binding` (writes the model + bumps a `@State` token) + `.task(id:)` that owns and awaits `requestAuthorization()`; pure `NotificationPermissionTrigger` makes the ON/OFF decision unit-testable. Plus (2) foreground delivery from pull-to-refresh (`SubscriptionsView`) and launch/restore (`RootView`) capturing `refreshAll()`'s `[NewEpisodeNotification]`; (3) `NotificationDelegate` foreground options `[.list, .badge]` (quiet — no banner/sound interruption, screen-reader-correct); (4) delivery decoupled from the 15-min network throttle, `deliver()` coalesces per podcast so a throttle-skipped wake loses nothing and no show double-fires. **Implemented by:** earshot-audio. **Gates:** earshot-security PASS, earshot-accessibility PASS (toggle keeps native switch role/state), earshot-testing PASS (442 tests, baseline 438, Release clean), earshot-changelog (Fixed/Changed/Accessibility). +4 tests. **PR #423** into `swift`. **Not merged / not closed — Michael verifies on device first.**
+
+- **Issue #422 (Inbox — item count in title, VoiceOver-readable; BLOCKED build 114):** Inbox nav title now shows "Inbox (N)" when non-empty, just "Inbox" when empty (never "(0)"), live from the `@Query`. **Accessibility approach (load-bearing decision):** `.accessibilityLabel` chained after `.navigationTitle` binds to the content view, not the nav-bar title element, so VoiceOver spoke "Inbox, open paren, 12" (first earshot-accessibility pass FAILED). On iOS 17 the large-title a11y bridge is unreliable about carrying a custom label even on the title `Text`, so the count is rendered in a `.principal` ToolbarItem `Text` carrying `.accessibilityLabel` ("Inbox, 12 episodes" / "Inbox, 1 episode" / "Inbox") + `.accessibilityAddTraits(.isHeader)`, with plain `.navigationTitle("Inbox")` + `.inline` for bar/back-button identity. Tradeoff accepted: inline title (no large-title spring) in exchange for a guaranteed spoken count. Pure title/label logic in testable `InboxLogic` helpers. **Implemented by:** earshot-ui. **Gates:** earshot-security PASS, earshot-accessibility FAIL→rework→PASS, earshot-testing PASS (442 tests, Release clean), earshot-changelog (Added/Accessibility). +4 tests. **PR #424** into `swift`. **Not merged / not closed — Michael verifies on device first.**
+
+- **Decision (parallel-agent branch hygiene, 2026-06-22):** #421 and #422 were implemented by two domain agents dispatched in parallel sharing one working tree. The earshot-ui (#422) commit captured the earshot-audio (#421) uncommitted files, bundling both issues into one commit on one branch. Resolved by rebuilding each branch off `swift` from the combined tip and `git checkout <tip> -- <files>` selecting only each issue's own files (verified no cross-leakage; each branch builds + tests green independently at 442). **Lesson:** do not run two implementing domain agents in parallel in the same worktree — give each its own worktree, or run sequentially, so commits stay one-issue-per-branch.
+
 ## Audio Decisions
 
 - **Decision (#362 — tab switching blocked during playback):** The periodic time
@@ -712,3 +718,151 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 - **Concurrency.** `NotificationService`/value types are `Sendable`;
   `NotificationRouter` is `@MainActor`; the delegate hops to the main actor to
   publish. Debug + Release builds clean under `minimal` strict concurrency.
+
+## Data Decisions
+
+### Issue #425 — Freeze V2, add V3 + drift detection (launch-crash hardening)
+- **Frozen-schema architecture.** `EarshotSchemaV2` is now a verbatim frozen
+  snapshot (nested `@Model` types) of the 10-entity graph as it shipped at #337
+  (`f0ae8d5`), including `Podcast.notificationEnabled` as the original
+  non-optional `Bool`. `EarshotSchemaV3` (`Schema.Version(3,0,0)`) is the only
+  versioned schema that references the LIVE top-level model types. No
+  `VersionedSchema` references live types except V3.
+- **The latent crash.** Previously `EarshotSchemaV2.models` pointed at live
+  types, so the 2.0.0 schema silently changed shape on any field add — SwiftData
+  would later abort a store open into a non-optional destination attribute
+  (NSCocoaErrorDomain 134110), an uncatchable launch crash. Freezing V2 makes
+  that class impossible; the drift test makes the next occurrence a CI failure.
+- **notificationEnabled -> Bool?.** The live `Podcast.notificationEnabled` is now
+  optional (`nil` = off). Default in the initializer is `nil` so a fresh insert
+  and a row migrated from V2 read identically. Every reader coalesces `nil` to
+  `false`: `SubscriptionRepository` (`?? false` into the notify decision),
+  `PodcastActionsBuilder` (read + explicit-assign toggle, no `.toggle()`),
+  `PodcastSettingsView` (an explicit `Binding<Bool>` bridges the optional to the
+  `Toggle`), and `NewEpisodeNotificationDecision` keeps its plain `Bool` param.
+- **Migration plan.** `EarshotMigrationPlan` chains `[V1, V2, V3]` with two
+  stages: V1->V2 stays the manual export/reimport in `StoreMigration` (the plan's
+  V1->V2 custom stage is an inert marker — a V1 store is intercepted before the
+  plan runs), and V2->V3 is `.lightweight` (optionalizing a field is natively
+  supported, so it migrates instead of aborting). The production container
+  (`ModelContainerFactory.makeShared` via `StoreMigration.openOrMigrate`) now
+  opens as V3 with the plan; reset-on-failure and in-memory tiers are preserved.
+- **Drift detection** (`SchemaDriftTests`). Compares the live graph against the
+  frozen V2 snapshot and asserts the only difference is the documented intentional
+  delta (`Podcast.notificationEnabled`: `Bool` -> `Bool?`). Any other added /
+  removed / retyped attribute fails CI, forcing a new frozen Vn + migration stage.
+  Verified to fail when a probe field is added to a live model.
+- **Upgrade fixture** (`StoreMigrationV2toV3Tests`). Seeds a real on-disk store at
+  the frozen V2 schema (2 podcasts, episodes incl. NULL optionals + a played one,
+  queue item, bookmark, folder + membership, `notificationEnabled` true/false) and
+  asserts V2->V3 via the production path completes without aborting and preserves
+  every relationship and the nil-as-false semantics. The original V1->V2
+  `StoreMigrationTests` still passes.
+- **#423 coordination.** PR #423's `PodcastSettingsView` notifications toggle binds
+  `isOn: $podcast.notificationEnabled` directly. Against the now-optional field a
+  `Binding<Bool?>` cannot bind to `Toggle(isOn:)`, so when #423 rebases it must use
+  the same bridge this PR added (a `Binding<Bool>` get `{ podcast.notificationEnabled
+  ?? false }` set `{ podcast.notificationEnabled = $0 }`) and observe that binding's
+  `wrappedValue` in `.onChange`. If #423 also reads `notificationEnabled` anywhere as
+  a plain `Bool`, coalesce with `?? false`.
+
+## Security Review — Issue #425
+
+earshot-security gate: **PASS**. Reviewed the schema-freeze + V2->V3 migration
+hardening across EarshotSchema.swift, StoreMigration.swift, ModelContainerFactory.swift,
+Podcast.swift, and the three reader sites (SubscriptionRepository, PodcastSettingsView,
+PodcastActionsBuilder) plus the new tests.
+
+- Force-unwraps / try! / fatalError: none introduced. The pre-existing `try!`
+  (test-host placeholder) and in-memory last-resort `fatalError` in
+  ModelContainerFactory are unchanged and expected.
+- try?: the deliberate `try?` in `openOrMigrate` is correct — a failed V3/V2 open
+  is an expected recoverable signal routing to the manual V1 reimport, not a
+  swallowed error; a genuine failure still throws into makeShared's
+  reset-on-failure catch.
+- Data safety: V2->V3 is a native `.lightweight` Bool->Bool? stage that migrates
+  (never aborts) and preserves all data; reset-on-failure can only fire on a
+  genuinely unreadable store, never on a normal upgrade or fresh install. Verified
+  by StoreMigrationV2toV3Tests and the SchemaDriftTests CI guard.
+- All notificationEnabled readers coalesce nil->false; no entitlements/secrets
+  touched. Release build SUCCEEDED. 26/26 targeted tests pass.
+
+## Issue #425 (Data — Freeze V2 schema, add V3 + drift detection; build-114 launch-crash class)
+
+**Status:** Implemented, all gates PASS, NOT merged / NOT closed. Branch
+`fix/issue-425-freeze-schema-v3-migration` off `swift`. Awaiting Michael's on-device
+UPGRADE verification (a clean install proves nothing per database-migrations.md).
+
+**Validation verdict (planning agent):** Accepted the proposed architecture, with a
+correction to the diagnosis recorded for the record. Git history proof: no
+`Data/Models/*.swift` file has changed since the V2 graph was created (#337, f0ae8d5),
+and `notificationEnabled` was present in V2 from that first commit — so the literal
+"a field added to V2 without a bump, store-on-disk lacks it, same-version shape
+mismatch aborts" story is NOT yet true on shipped builds. BUT the underlying defect is
+real and the fix is the correct, owner-aligned ("most stable, future-proof") move:
+`EarshotSchemaV2.models` referenced LIVE types, so the 2.0.0 schema would silently
+change shape the moment any model gains a field with no bump — a latent guaranteed
+launch-crash. Reproduced the abort MECHANISM by running StoreMigrationTests: opening a
+V1 store against the live V2 schema throws NSCocoaErrorDomain 134110
+(`entity=Episode, attribute=createdAt ... missing attribute values on mandatory
+destination attribute`), surviving today only because `openOrMigrate` wraps the first
+open in `try?` and falls back to manual reimport. The fix makes the whole class
+impossible and adds a CI drift test so it can never silently return.
+
+**Implemented by:** earshot-data.
+
+**Changes:** EarshotSchema.swift (froze V2 into nested @Model snapshots of all 10
+entities; added EarshotSchemaV3 holding the live types — now the ONLY versioned schema
+referencing live models; added `EarshotMigrationPlan` with V1->V2 [manual reimport
+intercept] and V2->V3 [.lightweight] stages); Podcast.swift (`notificationEnabled`
+Bool -> Bool?, default nil); StoreMigration.swift + ModelContainerFactory.swift (open
+as V3 via the plan; reset-on-failure + in-memory tiers preserved); nil-as-false readers
+at SubscriptionRepository:239, PodcastSettingsView (Binding<Bool> bridge + .onChange),
+PodcastActionsBuilder:23/28/30; NEW SchemaDriftTests.swift (fails CI if live graph
+diverges from frozen V2 by anything but the documented notificationEnabled delta); NEW
+StoreMigrationV2toV3Tests.swift (real frozen-V2 on-disk store w/ podcasts incl. NULL
+optionals, episodes, queue, played, bookmark, folder, membership -> migrates to V3 via
+production path preserving all data, never aborting; + clean reopen-as-V3).
+
+**Gates:** earshot-security PASS; earshot-swift6 PASS (no new concurrency surface);
+earshot-accessibility PASS (Binding<Bool> bridge keeps native switch role/state; nil
+reads as "off", not dimmed); earshot-testing PASS (**442** executed, 0 failures =
+438 branch baseline + 4 new; Release build clean); earshot-changelog (Fixed +
+Changed entries in repo-root CHANGELOG.md).
+
+**Test count: 442** on this branch (438 branch baseline + 4). NOTE: SWIFTUI_PLAN's
+442 figure for #421/#422 is post their unmerged PRs #423/#424; this branch reaches the
+same 442 independently off the 438 `swift` tip. Set branch baseline to 442 once merged.
+
+**Non-blocking follow-ups (do NOT block close):**
+- earshot-testing flagged the drift test covers attribute names/optionality/valueType
+  but not @Relationship topology (delete rules/inverse) or `.unique` markers. A change
+  to those that keeps attribute shape would slip past. Worth a future enhancement issue
+  to make it a full schema-hash guard.
+- earshot-swift6 flagged the project is at `SWIFT_STRICT_CONCURRENCY: minimal`, not
+  strict — true Swift 6 gating needs that raised in a separate migration issue.
+- SWIFTUI_PLAN.md is at ~810 lines (target <400). Archive completed sections to
+  docs/phases/swiftui/ in a separate housekeeping pass (not in this fix branch).
+
+**Coordination — #423/#424 (open into `swift`, unmerged):** This migration fix lands
+FIRST; #423/#424 rebase onto the optional field afterward. #423 will break at
+`PodcastSettingsView` `Toggle("Notify on new episodes", isOn: $podcast.notificationEnabled)`
+because `$podcast.notificationEnabled` is now `Binding<Bool?>` (won't compile against
+`Toggle(isOn:)`), and `.onChange(of: podcast.notificationEnabled)` now observes an
+optional. #423 must adopt the `Binding<Bool>` bridge this PR already lands
+(get `{ podcast.notificationEnabled ?? false }`, set `{ podcast.notificationEnabled = $0 }`)
+and observe `binding.wrappedValue`, plus coalesce any other `notificationEnabled` reads
+it adds with `?? false`. #424 (Inbox count) does not touch `notificationEnabled` and
+needs no field change, only a normal rebase onto the new `swift` tip after this merges.
+
+**Device verification for Michael (UPGRADE path — required before merge/close):**
+1. Install the PRIOR shipped build over a fresh device (or keep your current build).
+2. In that build, create real data: subscribe to 2-3 feeds, queue a couple episodes,
+   mark one played, add a bookmark, toggle "Notify on new episodes" ON for one show.
+3. Build/install THIS branch's build OVER the existing app (do NOT delete first — a
+   clean install proves nothing).
+4. Confirm on launch: app reaches the normal screen (no crash, no reset), and your
+   subscriptions, inbox/queue, played state, bookmark, and the notification toggle ON
+   state all survived. The "Notify on new episodes" toggle should read ON for the show
+   you enabled and OFF elsewhere.
+5. If anything is missing or it crashes, stay on this branch and report back.

@@ -59,12 +59,52 @@ final class RSSParser: NSObject, XMLParserDelegate {
 
     private var episodes: [ParsedEpisode] = []
 
-    private static let rfc822: DateFormatter = {
+    /// RFC822 / RSS pubDate formats, tried in order. Real-world feeds vary: some
+    /// use named zones (`GMT`, `EST`) instead of numeric offsets, some omit the
+    /// weekday, some drop seconds, some drop the leading zero on the day. A
+    /// single rigid format silently dropped all of these, stranding episodes in
+    /// the inbox high-water-mark logic (review P1-3).
+    private static let rfc822Formats: [String] = [
+        "EEE, dd MMM yyyy HH:mm:ss Z",
+        "EEE, dd MMM yyyy HH:mm:ss zzz",
+        "EEE, dd MMM yyyy HH:mm Z",
+        "EEE, dd MMM yyyy HH:mm zzz",
+        "dd MMM yyyy HH:mm:ss Z",
+        "dd MMM yyyy HH:mm:ss zzz",
+    ]
+
+    private static let rfc822Formatters: [DateFormatter] = rfc822Formats.map { format in
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+        f.dateFormat = format
+        return f
+    }
+
+    /// ISO8601 (Atom `published`/`updated`), with and without fractional seconds.
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
         return f
     }()
+
+    private static let iso8601Fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    /// Parses a feed date string, trying the RFC822 variants then ISO8601.
+    /// Returns nil only when no known format matches.
+    static func parseDate(_ raw: String) -> Date? {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        for formatter in rfc822Formatters {
+            if let date = formatter.date(from: s) { return date }
+        }
+        if let date = iso8601Fractional.date(from: s) { return date }
+        if let date = iso8601.date(from: s) { return date }
+        return nil
+    }
 
     func parse(_ data: Data) -> ParsedFeed? {
         let parser = XMLParser(data: data)
@@ -104,7 +144,7 @@ final class RSSParser: NSObject, XMLParserDelegate {
     ) {
         text = ""
         switch elementName {
-        case "item":
+        case "item", "entry":
             inItem = true
             itemTitle = ""; itemAudio = ""; itemGUID = ""
             itemDescription = ""; itemSummary = ""; itemPubDate = ""
@@ -112,6 +152,19 @@ final class RSSParser: NSObject, XMLParserDelegate {
             itemSeason = ""; itemChapterURL = nil; itemTranscriptURL = nil
         case "enclosure":
             if let url = attributeDict["url"], inItem { itemAudio = url }
+        case "link":
+            // Atom links carry their target in attributes (RSS <link> has text
+            // content, handled at didEndElement). Inside an entry, the audio is
+            // the rel="enclosure" link; at feed level, rel="alternate" (or no
+            // rel) is the website.
+            if let href = attributeDict["href"] {
+                let rel = attributeDict["rel"]
+                if inItem {
+                    if rel == "enclosure", itemAudio.isEmpty { itemAudio = href }
+                } else if feedLink == nil, rel == nil || rel == "alternate" {
+                    feedLink = href
+                }
+            }
         case "itunes:image":
             if let href = attributeDict["href"] {
                 if inItem { itemImage = href } else { feedImage = href }
@@ -150,34 +203,23 @@ final class RSSParser: NSObject, XMLParserDelegate {
             switch elementName {
             case "title": itemTitle = value
             case "guid": itemGUID = value
-            case "description", "content:encoded":
+            // Atom entries identify themselves with <id>; let an RSS <guid> win
+            // if both are somehow present.
+            case "id": if itemGUID.isEmpty { itemGUID = value }
+            case "description", "content:encoded", "content":
                 if itemDescription.isEmpty { itemDescription = value }
             case "itunes:summary": itemSummary = value
+            // Atom <summary> is the short form; treat it like itunes:summary.
+            case "summary": if itemSummary.isEmpty { itemSummary = value }
             case "pubDate": itemPubDate = value
+            // Atom dates: prefer <published>, fall back to <updated>.
+            case "published": itemPubDate = value
+            case "updated": if itemPubDate.isEmpty { itemPubDate = value }
             case "itunes:duration": itemDuration = value
             case "itunes:episode": itemEpisode = value
             case "itunes:season": itemSeason = value
-            case "item":
-                inItem = false
-                guard !itemAudio.isEmpty else { return }
-                let guid = itemGUID.isEmpty ? itemAudio : itemGUID
-                let desc = !itemDescription.isEmpty ? itemDescription
-                    : (itemSummary.isEmpty ? nil : itemSummary)
-                episodes.append(
-                    ParsedEpisode(
-                        guid: guid,
-                        title: itemTitle.isEmpty ? "Untitled episode" : itemTitle,
-                        audioURL: itemAudio,
-                        description: desc,
-                        pubDate: Self.rfc822.date(from: itemPubDate),
-                        durationSeconds: Self.parseDuration(itemDuration),
-                        artworkURL: itemImage,
-                        episodeNumber: Int(itemEpisode),
-                        seasonNumber: Int(itemSeason),
-                        chapterURL: itemChapterURL,
-                        transcriptURL: itemTranscriptURL
-                    )
-                )
+            case "item", "entry":
+                finishItem()
             default:
                 break
             }
@@ -185,8 +227,12 @@ final class RSSParser: NSObject, XMLParserDelegate {
             switch elementName {
             case "title": if feedTitle.isEmpty { feedTitle = value }
             case "description": if feedDescription == nil { feedDescription = value }
+            // Atom feed-level description / image / author.
+            case "subtitle": if feedDescription == nil { feedDescription = value }
             case "itunes:summary": if feedSummary == nil { feedSummary = value }
             case "itunes:author": if feedAuthor == nil { feedAuthor = value }
+            case "name": if feedAuthor == nil { feedAuthor = value }
+            case "logo", "icon": if feedImage == nil, !value.isEmpty { feedImage = value }
             case "link": if feedLink == nil, !value.isEmpty { feedLink = value }
             case "language": if feedLanguage == nil { feedLanguage = value }
             default:
@@ -194,6 +240,32 @@ final class RSSParser: NSObject, XMLParserDelegate {
             }
         }
         text = ""
+    }
+
+    /// Finalizes the in-progress item/entry and appends a `ParsedEpisode`.
+    /// Shared by RSS `<item>` and Atom `<entry>`; entries with no audio
+    /// enclosure (e.g. plain blog posts in a mixed Atom feed) are skipped.
+    private func finishItem() {
+        inItem = false
+        guard !itemAudio.isEmpty else { return }
+        let guid = itemGUID.isEmpty ? itemAudio : itemGUID
+        let desc = !itemDescription.isEmpty ? itemDescription
+            : (itemSummary.isEmpty ? nil : itemSummary)
+        episodes.append(
+            ParsedEpisode(
+                guid: guid,
+                title: itemTitle.isEmpty ? "Untitled episode" : itemTitle,
+                audioURL: itemAudio,
+                description: desc,
+                pubDate: Self.parseDate(itemPubDate),
+                durationSeconds: Self.parseDuration(itemDuration),
+                artworkURL: itemImage,
+                episodeNumber: Int(itemEpisode),
+                seasonNumber: Int(itemSeason),
+                chapterURL: itemChapterURL,
+                transcriptURL: itemTranscriptURL
+            )
+        )
     }
 }
 

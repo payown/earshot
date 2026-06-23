@@ -20,14 +20,17 @@ func buildPodcastActions(
                 onOpenDetail()
             }
         case .toggleNotifications:
-            let on = podcast.notificationEnabled
+            // notificationEnabled is Bool? (nil = off, #425); coalesce on read
+            // and write a concrete Bool back.
+            let on = podcast.notificationEnabled ?? false
             return QuickActionItem(
                 label: on ? "Turn off notifications" : "Turn on notifications",
                 isDestructive: false
             ) {
-                podcast.notificationEnabled.toggle()
+                let newValue = !(podcast.notificationEnabled ?? false)
+                podcast.notificationEnabled = newValue
                 saveQuickAction(context, "notifications")
-                Announcer.announce(podcast.notificationEnabled ? "Notifications on" : "Notifications off")
+                Announcer.announce(newValue ? "Notifications on" : "Notifications off")
             }
         case .toggleAutoQueue:
             let on = podcast.autoQueue
