@@ -163,7 +163,9 @@ struct PodcastSettingsView: View {
     /// iOS permission prompt the first time it is switched on.
     private var notificationEnabledBinding: Binding<Bool> {
         Binding(
-            get: { podcast.notificationEnabled },
+            // `notificationEnabled` is `Bool?` (nil = off, see Podcast / #425);
+            // read nil as false so it can drive a `Toggle(isOn:)`.
+            get: { podcast.notificationEnabled ?? false },
             set: { isOn in
                 let decision = NotificationPermissionTrigger.apply(newValue: isOn)
                 podcast.notificationEnabled = decision.persistedValue
