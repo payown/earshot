@@ -190,9 +190,10 @@ struct NowPlayingScreen: View {
                 action: player.skipBack
             )
 
-            // Stable VoiceOver name ("Play or pause") with the live state carried by
-            // the value, matching the mini bar. Play-state is announced once at the
-            // RootView level, so this screen adds no own onChange announcement.
+            // Dynamic VoiceOver name reflecting the action the button performs
+            // ("Play" when paused, "Pause" when playing), matching the mini bar.
+            // Play-state is announced once at the RootView level, so this screen
+            // adds no own onChange announcement.
             Button(action: player.togglePlayPause) {
                 Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(.system(.largeTitle, design: .default))
@@ -200,8 +201,7 @@ struct NowPlayingScreen: View {
                     .accessibilityHidden(true)
             }
             .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
-            .accessibilityLabel("Play or pause")
-            .accessibilityValue(player.isPlaying ? "Playing" : "Paused")
+            .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
 
             transportButton(
                 systemImage: "goforward",

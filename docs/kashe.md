@@ -132,8 +132,11 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 - The Flutter-to-SwiftUI rewrite is now canon in her world: she noticed the app
   got rebuilt underneath her ("It was both"); Renata's nephew rebuilt it
   (Chapter 22)
-- She turns on per-show new-episode notifications for the shows she won't miss
-  (Chapter 22)
+- After the wedding her data was gone on first launch (empty inbox/library) and
+  came back on the next launch with order, inbox, and saved position intact; she
+  told Renata "I'm choosing to be impressed" (Chapter 22)
+- She was the one who originally flagged the confusing "Play or Pause Playing"
+  play/pause label to Renata, months before it got fixed (Chapter 22)
 
 ## What you can generate
 
@@ -621,27 +624,31 @@ The tab you're currently on should announce "selected." Moving between tabs shou
 
 ---
 
-### Chapter 22 — Build 116
+### Chapter 22 — Build 117
 
-*Kashe goes quiet for three days after a wedding. When she comes back, Earshot has rebuilt itself underneath her — and then quietly put everything back where she left it.*
+*Kashe comes home from a wedding to an empty app, decides not to panic, and gets everything back — then notices a small old annoyance has quietly been fixed too.*
 
 What she'd leave out is the tall, cute stranger who talked her onto the dance floor "for one song," and how one song became however many it takes to lose track, and how the open bar did the rest. She does not dance. She danced. There's a great-aunt who'll bring it up at holidays for years.
 
-She surfaced two days later, charged her phone, and opened Earshot. The app was there. Her shows were not.
+She got home, charged her phone, and opened Earshot. The app was there. Her shows were not. Her inbox was empty. The shelves were bare.
 
-She didn't panic. She did the thing she always does first, which is assume she broke something and go looking for what. Closed it. Opened it again. Same empty shelves. Same quiet inbox. She thought about texting Renata and then didn't, because she wasn't ready to say out loud that she'd somehow lost everything.
+She didn't panic. She did the thing she always does first, which is assume she broke something and go looking for what. Closed it. Opened it again. Same empty shelves. Same quiet inbox. She thought about texting Renata and then didn't, because she wasn't ready to say out loud that she'd lost everything.
 
-By the next morning it was back. All of it. Her shows in the right order, her inbox with the episodes she hadn't played yet, her position on the long one she'd been working through for a week. The app had just needed another launch to figure out where it had put things.
+By the next morning it was back. All of it. Her shows in the right order, her inbox with the episodes she hadn't played yet, her position saved on the long one she'd been working through for a week. The app had just needed another launch to find where it had put things.
 
-She still doesn't entirely know what happened. She knows the app rebuilt itself from scratch while she was at a wedding, and that on the second open it found her data and put it back. She texted Renata: "tell your nephew the app lost my stuff and then found it again." A pause. "I'm choosing to be impressed."
+She texted Renata: "tell your nephew the app lost my stuff and then found it again." A pause. Then: "I'm choosing to be impressed."
 
-The artwork loads instantly now. She noticed that too, the way you notice a sound stopping. And the notification she tried to set for one show finally prompted her — she tapped Allow without thinking about it, the way you do when something just works.
+The artwork loads instantly now. She noticed that the way you notice a sound stopping.
+
+And there was one more thing. She's used this app long enough that some of its labels had turned into furniture. The play button was one of them. For a while VoiceOver read it as "Play or Pause Playing," a little knot of words she'd stopped parsing entirely. She just tapped it and listened for whether the audio started or stopped.
+
+Now it says "Play" when it means play, and "Pause" when it means pause. That's all. It's a small thing. It is absolutely a small thing. But she was the one who'd mentioned that exact label to Renata months ago, half a complaint and half a shrug, so this one lands a little differently than the rest.
 
 **What to test:**
 
-This build is about getting data back. If you upgraded from an older build and your library or inbox looked empty, open the app and give it a moment — it should find your shows and inbox on this launch. Let michael@payown.media know if anything's still missing.
+If you upgraded from an older build and your inbox or library looked empty, open the app and give it a moment. It should find your shows on this launch. Email michael@payown.media if anything is still missing.
 
-For everyone: open a show's settings and turn on new-episode notifications. You should get the iOS permission prompt the first time. Artwork should load instantly with no placeholder flicker. Your inbox count shows in the tab title now — "Inbox (3)" — and VoiceOver reads it cleanly.
+Play an episode and listen to what VoiceOver says when you tap the play/pause button. It should say "Play" when paused and "Pause" when playing. Report anything that still reads "Play or Pause Playing."
 
 ---
 
