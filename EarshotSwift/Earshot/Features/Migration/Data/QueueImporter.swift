@@ -29,9 +29,19 @@ final class QueueImporter {
     func apply(_ entries: [FlutterQueueEntry]) throws -> Int {
         guard !entries.isEmpty else { return 0 }
 
+        let queue = QueueRepository(context: context)
+        // Never clobber a queue the user has already built in the new app. The
+        // migration only seeds an empty queue; if the user has queued anything
+        // (an active install hitting a self-heal, or a manual re-import), leave
+        // their queue exactly as-is rather than appending stale Flutter entries
+        // in the old order (#426).
+        guard queue.queue().isEmpty else {
+            AppLog.data.info("Migration: queue restore skipped — queue already has items")
+            return 0
+        }
+
         let episodes = try context.fetch(FetchDescriptor<Episode>())
         let matcher = MigrationEpisodeMatcher(episodes: episodes)
-        let queue = QueueRepository(context: context)
 
         var added = 0
         // Ascending position so sequential appends reproduce the old order.

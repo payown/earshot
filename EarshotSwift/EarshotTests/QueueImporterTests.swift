@@ -92,6 +92,27 @@ final class QueueImporterTests: XCTestCase {
         XCTAssertEqual(queuedGUIDs(ctx), ["a", "b"])
     }
 
+    func testSkipsRestoreWhenQueueAlreadyHasItems() throws {
+        let ctx = seedStore([
+            (guid: "existing", audio: "https://x/existing.mp3"),
+            (guid: "flutter", audio: "https://x/flutter.mp3"),
+        ])
+        // The user already built a queue in the new app.
+        let existing = try XCTUnwrap(
+            try ctx.fetch(FetchDescriptor<Episode>()).first { $0.guid == "existing" }
+        )
+        QueueRepository(context: ctx).add(existing)
+
+        // A self-heal / manual re-import tries to restore the old Flutter queue.
+        let added = try QueueImporter(context: ctx).apply([
+            FlutterQueueEntry(guid: "flutter", audioURL: "https://x/flutter.mp3", position: 0),
+        ])
+
+        // Nothing added; the existing queue is left exactly as the user had it.
+        XCTAssertEqual(added, 0)
+        XCTAssertEqual(queuedGUIDs(ctx), ["existing"])
+    }
+
     func testEmptyInputIsANoOp() throws {
         let ctx = seedStore([(guid: "a", audio: "https://x/a.mp3")])
         XCTAssertEqual(try QueueImporter(context: ctx).apply([]), 0)
