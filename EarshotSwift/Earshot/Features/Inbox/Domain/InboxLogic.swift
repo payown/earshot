@@ -33,4 +33,21 @@ enum InboxLogic {
         guard cap >= 0, itemsNewestFirst.count > cap else { return [] }
         return Array(itemsNewestFirst.dropFirst(cap))
     }
+
+    /// The visible navigation title for the inbox. Shows a compact parenthesized
+    /// count when there's at least one item ("Inbox (12)") and never "(0)" — an
+    /// empty inbox reads just "Inbox" so the empty state carries the message.
+    static func inboxTitle(count: Int) -> String {
+        count > 0 ? "Inbox (\(count))" : "Inbox"
+    }
+
+    /// The VoiceOver label for the inbox title. The visible "(12)" form is spoken
+    /// awkwardly ("open paren, 12, close paren"), so we hand VoiceOver a natural
+    /// sentence with correct singular/plural ("Inbox, 12 episodes" / "1 episode").
+    /// Empty inbox reads just "Inbox".
+    static func inboxTitleAccessibilityLabel(count: Int) -> String {
+        guard count > 0 else { return "Inbox" }
+        let noun = count == 1 ? "episode" : "episodes"
+        return "Inbox, \(count) \(noun)"
+    }
 }

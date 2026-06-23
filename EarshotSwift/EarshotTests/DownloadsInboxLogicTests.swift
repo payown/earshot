@@ -56,6 +56,27 @@ final class DownloadsInboxLogicTests: XCTestCase {
         XCTAssertEqual(InboxLogic.idsToDismissForCount([3, 2, 1], cap: 0), [3, 2, 1])
     }
 
+    // MARK: InboxLogic — title + count (#422)
+
+    func testInboxTitleShowsCountWhenNonEmpty() {
+        XCTAssertEqual(InboxLogic.inboxTitle(count: 12), "Inbox (12)")
+        XCTAssertEqual(InboxLogic.inboxTitle(count: 1), "Inbox (1)")
+    }
+
+    func testInboxTitleNeverShowsZero() {
+        XCTAssertEqual(InboxLogic.inboxTitle(count: 0), "Inbox")
+        XCTAssertFalse(InboxLogic.inboxTitle(count: 0).contains("("))
+    }
+
+    func testInboxTitleAccessibilityLabelReadsNaturally() {
+        XCTAssertEqual(InboxLogic.inboxTitleAccessibilityLabel(count: 12), "Inbox, 12 episodes")
+        XCTAssertEqual(InboxLogic.inboxTitleAccessibilityLabel(count: 1), "Inbox, 1 episode")
+    }
+
+    func testInboxTitleAccessibilityLabelEmptyOmitsCount() {
+        XCTAssertEqual(InboxLogic.inboxTitleAccessibilityLabel(count: 0), "Inbox")
+    }
+
     // MARK: ExpirationLogic
 
     func testQueueItemExpiresOlderThanAgeLimit() {

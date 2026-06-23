@@ -72,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Player: "Export audio file" shares the current episode's audio through the system share sheet, so you can save it to Files, AirDrop it, or open it in another app. If the episode isn't downloaded yet, Earshot downloads it first and then shares the local file. (#371)
 - Player: "Stop after this episode" is a one-off that stops playback when the current episode finishes instead of auto-advancing, then clears itself. It also resets if you restart the app. Earshot announces "Will stop after this episode" when you turn it on. (#371)
 - New episode notifications: turn on "Notify on new episodes" for any show from its settings page, and Earshot sends you a notification when a background refresh finds new episodes for it. The notification shows the show name and how many new episodes there are, and gives you "Add to queue" and "Play now" buttons right on it. Tapping the notification opens that show in your Library. Earshot asks for notification permission the first time you turn the toggle on. These are on-device notifications only, so nothing is sent to a server, and Earshot never pesters you about your inbox, queue, downloads, or how long it's been since you last listened. (closes #72)
+- Inbox: the Inbox tab title now shows how many episodes are waiting, like "Inbox (12)", and updates live as you triage or clear the inbox. When the inbox is empty the title is just "Inbox", never "Inbox (0)". (#422)
 
 ### Changed
 - New episode notifications: when a new episode is found while Earshot is open, the notification no longer interrupts you with a banner and sound. It goes quietly to Notification Center so it doesn't talk over what you're doing or pull screen reader focus away. (closes #421)
@@ -225,6 +226,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New episode notifications: notifications use plain, meaningful text with no emoji, so VoiceOver reads something useful like "Show name, 2 new episodes" instead of an icon. Tapping a notification moves focus to that show's detail screen in the Library. (closes #72)
 - New episode notifications: a new-episode notification that arrives while you're using the app is now delivered silently to Notification Center instead of taking over with a banner and sound, so it doesn't interrupt VoiceOver or pull your focus mid-task. (closes #421)
 - Coming from the previous version of Earshot, VoiceOver users now land in a Library that matches what they left. Their inbox, played episodes, and saved positions all carry over, so the first thing VoiceOver reads after the move is their real state and not an empty, all-unplayed list. (#426)
+- Inbox: VoiceOver now reads the inbox count as part of the tab title, spoken naturally as "Inbox, 12 episodes" (and "Inbox, 1 episode" for a single item), with the heading role preserved. (#422)
 
 ### Phase 8 complete — Alpha build prep
 
