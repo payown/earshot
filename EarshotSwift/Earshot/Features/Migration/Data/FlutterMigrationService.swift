@@ -357,6 +357,11 @@ final class FlutterMigrationService {
     ) async -> Bool {
         recordImportAttempt()
 
+        // Temporary instrumentation for the returning-user data-loss report
+        // (#430): snapshot earshot.db's on-disk state on every manual import.
+        // Remove once diagnosed.
+        logDiagnostics(trigger: "manual")
+
         // Reopen the gate so a previously-completed migration can re-run cleanly.
         resetForSelfHeal()
 
@@ -396,6 +401,70 @@ final class FlutterMigrationService {
             AppLog.data.error("Manual import: failed during overlay: \(error.localizedDescription, privacy: .public)")
             return false
         }
+    }
+
+    // MARK: Diagnostics (#430 — build 120 returning-user data-loss investigation)
+
+    /// Emits a one-shot, read-only snapshot of the Flutter database's on-disk
+    /// state to the `migration` log channel so a returning-user "no data after
+    /// upgrade" report can be diagnosed from Console.app on device, without a
+    /// special build. Logs, in order:
+    ///   1. whether `earshot.db` exists and its file size,
+    ///   2. the drift schema version (`PRAGMA user_version`),
+    ///   3. how many `podcasts` rows have `is_subscribed = 1` (and the total, to
+    ///      tell an empty table apart from a missing/renamed column),
+    ///   4. the SQLite result code + message on any failure.
+    ///
+    /// Temporary instrumentation: remove once #430 is diagnosed. Best-effort and
+    /// side-effect free — every step is guarded, it never throws, mutates, or
+    /// touches migration logic. Called on every run, automatic or manual, with a
+    /// `trigger` tag (`"launch"` / `"manual"`) so the two paths are
+    /// distinguishable in the log.
+    func logDiagnostics(trigger: String) {
+        guard let databaseURL else {
+            AppLog.migration.error("Diagnostics [\(trigger, privacy: .public)]: no Documents directory; databaseURL is nil")
+            return
+        }
+
+        let path = databaseURL.path
+        let exists = FileManager.default.fileExists(atPath: path)
+        let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int ?? 0
+        AppLog.migration.info("Diagnostics [\(trigger, privacy: .public)]: earshot.db exists=\(exists, privacy: .public) size=\(size, privacy: .public) bytes path=\(path, privacy: .public)")
+
+        guard exists else { return }
+
+        var db: OpaquePointer?
+        let openResult = sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil)
+        guard openResult == SQLITE_OK else {
+            let msg = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            AppLog.migration.error("Diagnostics [\(trigger, privacy: .public)]: open failed code=\(openResult, privacy: .public) msg=\(msg, privacy: .public)")
+            sqlite3_close(db)
+            return
+        }
+        defer { sqlite3_close(db) }
+
+        logScalar(db, label: "user_version", sql: "PRAGMA user_version", trigger: trigger)
+        logScalar(db, label: "podcasts is_subscribed=1 count", sql: "SELECT COUNT(*) FROM podcasts WHERE is_subscribed = 1", trigger: trigger)
+        logScalar(db, label: "podcasts total count", sql: "SELECT COUNT(*) FROM podcasts", trigger: trigger)
+    }
+
+    /// Runs one single-value integer query for ``logDiagnostics(trigger:)`` and
+    /// logs the result, or the SQLite error code + message when the statement
+    /// can't be prepared or stepped (e.g. a missing table or column — the prime
+    /// suspect for a returning user whose schema predates a queried column).
+    private func logScalar(_ db: OpaquePointer?, label: String, sql: String, trigger: String) {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_ROW
+        else {
+            let code = sqlite3_errcode(db)
+            let msg = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            AppLog.migration.error("Diagnostics [\(trigger, privacy: .public)]: \(label, privacy: .public) failed code=\(code, privacy: .public) msg=\(msg, privacy: .public)")
+            return
+        }
+        let value = Int(sqlite3_column_int64(statement, 0))
+        AppLog.migration.info("Diagnostics [\(trigger, privacy: .public)]: \(label, privacy: .public)=\(value, privacy: .public)")
     }
 
     /// Trimmed text for a column, or nil when NULL/blank.

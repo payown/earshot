@@ -128,6 +128,10 @@ struct RootView: View {
             // (readFeedURLs) decides migrator vs. new user; the slow network
             // subscribe runs in a detached task so launch is never blocked.
             let migration = FlutterMigrationService(context: modelContext)
+            // Temporary instrumentation for the returning-user data-loss report
+            // (#430): snapshot earshot.db's on-disk state to the migration log
+            // channel on every launch. Remove once diagnosed.
+            migration.logDiagnostics(trigger: "launch")
             // Self-heal a completed migration that's missing data. Two cases,
             // distinguished by whether any shows survived (#426):
             //  - Library empty: the first-launch import fired and found nothing
