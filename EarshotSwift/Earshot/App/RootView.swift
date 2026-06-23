@@ -14,6 +14,13 @@ struct RootView: View {
     @State private var showOnboarding = false
     @State private var importState = MigrationImportState()
 
+    /// Unfiltered episode query. Its sole purpose is to trigger a re-render of
+    /// RootView whenever any `Episode` row changes, so the Inbox tab badge stays
+    /// live as items are added or removed. The real membership rules live in
+    /// `InboxRepository.inboxEpisodes()`; the count below comes from there, not
+    /// from this raw (unfiltered) query. Mirrors InboxScreen's pattern.
+    @Query private var inboxEpisodes: [Episode]
+
     /// Which tab is selected. Bound so a notification tap can switch to Library.
     @State private var selectedTab: RootTab = .inbox
     /// Navigation path for the Library tab, so a notification can push a podcast
@@ -21,6 +28,12 @@ struct RootView: View {
     @State private var libraryPath: [Podcast] = []
 
     var body: some View {
+        // Live unplayed-inbox count from the same source of truth as the Inbox
+        // heading. Shown as a native tab badge (the red bubble); SwiftUI auto-hides
+        // the badge when the count is 0. The unused `inboxEpisodes` @Query above
+        // drives the re-render that keeps this current.
+        let inboxBadgeCount = InboxRepository(context: modelContext).inboxEpisodes().count
+
         TabView(selection: $selectedTab) {
             NavigationStack {
                 InboxScreen()
@@ -28,6 +41,7 @@ struct RootView: View {
             }
             .modifier(TabChrome())
             .tabItem { Label("Inbox", systemImage: "tray") }
+            .badge(inboxBadgeCount)
             .tag(RootTab.inbox)
 
             NavigationStack {
