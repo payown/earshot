@@ -27,6 +27,10 @@ enum SettingsKey {
     static let statsStreaksEnabled = "stats_streaks_enabled"
     // Flutter→SwiftUI one-time subscription import.
     static let flutterMigrationComplete = "flutter_migration_complete"
+    // Count of launches where the import attempted but the Flutter database
+    // yielded no subscriptions. Bounds retries so a transient first-launch miss
+    // recovers while a genuinely empty install stops looping (#426).
+    static let flutterMigrationAttempts = "flutter_migration_attempts"
     // Timestamp (epoch seconds) of the last completed feed refresh. Used by
     // FeedRefreshPolicy to throttle background refreshes (#381).
     static let lastFeedRefresh = "last_feed_refresh"
