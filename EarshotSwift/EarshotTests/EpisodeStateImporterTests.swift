@@ -99,6 +99,33 @@ final class EpisodeStateImporterTests: XCTestCase {
         XCTAssertEqual(try episode(ctx, guid: "g").positionSeconds, 42)
     }
 
+    func testDoesNotOverwriteExistingProgressWithOlderPosition() throws {
+        // The user has built up progress in this app (100s); the old Flutter
+        // snapshot has an earlier place (30s). Forward-only: their progress wins,
+        // so a self-heal / re-import can't knock their place backward (#426).
+        let ctx = seedStore([(guid: "g", audio: "https://x/g.mp3")])
+        let seeded = try episode(ctx, guid: "g")
+        seeded.positionSeconds = 100
+        try? ctx.save()
+
+        try EpisodeStateImporter(context: ctx).apply([
+            FlutterEpisode(guid: "g", audioURL: "https://x/g.mp3", isPlayed: false, inboxDismissed: false, pubDate: nil, positionSeconds: 30),
+        ])
+
+        XCTAssertEqual(try episode(ctx, guid: "g").positionSeconds, 100)
+    }
+
+    func testRestoresPositionOntoFreshEpisode() throws {
+        // No progress here yet (0): the old place is seeded normally.
+        let ctx = seedStore([(guid: "g", audio: "https://x/g.mp3")])
+
+        try EpisodeStateImporter(context: ctx).apply([
+            FlutterEpisode(guid: "g", audioURL: "https://x/g.mp3", isPlayed: false, inboxDismissed: false, pubDate: nil, positionSeconds: 250),
+        ])
+
+        XCTAssertEqual(try episode(ctx, guid: "g").positionSeconds, 250)
+    }
+
     func testEmptyInputIsANoOp() throws {
         let ctx = seedStore([(guid: "g", audio: "https://x/g.mp3")])
         XCTAssertEqual(try EpisodeStateImporter(context: ctx).apply([]), 0)

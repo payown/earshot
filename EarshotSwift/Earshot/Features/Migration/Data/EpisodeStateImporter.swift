@@ -57,12 +57,17 @@ final class EpisodeStateImporter {
     /// Restores one episode's played/inbox/position state from its Flutter
     /// record. `isPlayed` is set via the model's convenience setter so `status`
     /// and `playedAt` stay consistent; a played episode is also dismissed from
-    /// the inbox so it can't surface there. A non-nil, positive position is
-    /// carried over; nil/zero leaves the existing value alone.
+    /// the inbox so it can't surface there.
+    ///
+    /// Position is **forward-only**: the saved place from the old database is
+    /// seeded only when the episode has no position here yet (`positionSeconds
+    /// == 0`). A position the user has already built up in this app is never
+    /// overwritten, so a self-heal or manual re-import can't knock their place
+    /// backward to the old snapshot (#426).
     private func apply(_ record: FlutterEpisode, to episode: Episode) {
         episode.isPlayed = record.isPlayed
         episode.inboxDismissed = record.isPlayed ? true : record.inboxDismissed
-        if let position = record.positionSeconds, position > 0 {
+        if let position = record.positionSeconds, position > 0, episode.positionSeconds == 0 {
             episode.positionSeconds = position
         }
     }
