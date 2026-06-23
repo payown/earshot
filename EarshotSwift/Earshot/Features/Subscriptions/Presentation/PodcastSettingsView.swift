@@ -11,6 +11,16 @@ struct PodcastSettingsView: View {
     @Bindable var podcast: Podcast
     @Environment(\.dismiss) private var dismiss
 
+    /// Bumped each time the notification toggle is switched ON. A `.task(id:)`
+    /// keyed on this token owns the async `requestAuthorization()` call so it
+    /// runs with the view's lifetime rather than in an unowned `Task {}` that
+    /// SwiftUI may tear down before it reaches the system prompt (#421).
+    @State private var authRequestToken = 0
+
+    /// Factory for the notification service, injectable so a test can supply a
+    /// mock `NotificationScheduling` and assert the permission request fires.
+    var makeNotificationService: () -> NotificationService = { NotificationService() }
+
     // MARK: Speed options
 
     /// Speed override options shown in the Picker.
@@ -123,21 +133,19 @@ struct PodcastSettingsView: View {
     }
 
     private var notificationsSection: some View {
-        // `notificationEnabled` is `Bool?` (nil = off, see Podcast / #425), which
-        // can't bind to `Toggle(isOn:)` directly. Bridge it: read nil as false,
-        // write a concrete Bool back.
-        let notifyBinding = Binding<Bool>(
-            get: { podcast.notificationEnabled ?? false },
-            set: { podcast.notificationEnabled = $0 }
-        )
-        return Section {
-            Toggle("Notify on new episodes", isOn: notifyBinding)
+        Section {
+            Toggle("Notify on new episodes", isOn: notificationEnabledBinding)
                 // Request notification permission the first time the user turns
-                // this on. requestAuthorization() is idempotent — it never
-                // re-prompts once the user has decided (#72).
-                .onChange(of: notifyBinding.wrappedValue) { _, isOn in
-                    guard isOn else { return }
-                    Task { await NotificationService().requestAuthorization() }
+                // this on. The async request is owned by a `.task(id:)` keyed on
+                // `authRequestToken` (below) — NOT a bare `Task {}` — so it is
+                // guaranteed to run and be awaited with the view's lifetime even
+                // though writing a SwiftData @Model property doesn't reliably
+                // fire `.onChange` (the model diffs old == new by the time
+                // SwiftUI compares) (#421). requestAuthorization() is idempotent:
+                // it never re-prompts once the user has decided (#72).
+                .task(id: authRequestToken) {
+                    guard authRequestToken > 0 else { return }
+                    await makeNotificationService().requestAuthorization()
                 }
         } header: {
             Text("Notifications")
@@ -145,6 +153,25 @@ struct PodcastSettingsView: View {
         } footer: {
             Text("Sends a notification when new episodes are detected during a background refresh.")
         }
+    }
+
+    /// Binding for the "Notify on new episodes" toggle. The `set` performs the
+    /// model write AND, when the toggle goes ON, bumps `authRequestToken` so the
+    /// `.task(id:)` above runs `requestAuthorization()` with the view's lifetime.
+    /// Doing the permission trigger here (rather than via `.onChange` on the
+    /// @Model property) is the fix for #421: the toggle now reliably surfaces the
+    /// iOS permission prompt the first time it is switched on.
+    private var notificationEnabledBinding: Binding<Bool> {
+        Binding(
+            // `notificationEnabled` is `Bool?` (nil = off, see Podcast / #425);
+            // read nil as false so it can drive a `Toggle(isOn:)`.
+            get: { podcast.notificationEnabled ?? false },
+            set: { isOn in
+                let decision = NotificationPermissionTrigger.apply(newValue: isOn)
+                podcast.notificationEnabled = decision.persistedValue
+                if decision.shouldRequestAuthorization { authRequestToken += 1 }
+            }
+        )
     }
 
     // MARK: Pickers

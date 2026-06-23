@@ -242,6 +242,40 @@ final class NotificationServiceTests: XCTestCase {
         let added = await mock.addedRequests
         XCTAssertEqual(added.count, 2)
     }
+
+    // MARK: Toggle-ON permission trigger (#421)
+
+    func testToggleOnTriggersAuthorizationRequest() async {
+        // The fix for #421: switching the per-podcast "Notify on new episodes"
+        // toggle ON must reach requestAuthorization() (which surfaces the iOS
+        // prompt on first use). PodcastSettingsView's toggle binding routes
+        // through NotificationPermissionTrigger.apply and then runs the service;
+        // exercise that exact path against a mock center.
+        let decision = NotificationPermissionTrigger.apply(newValue: true)
+        XCTAssertTrue(decision.persistedValue, "Model value persists as ON")
+        XCTAssertTrue(decision.shouldRequestAuthorization, "ON must trigger the request")
+
+        let mock = MockNotificationCenter(status: .notDetermined, grantResult: true)
+        if decision.shouldRequestAuthorization {
+            await NotificationService(center: mock).requestAuthorization()
+        }
+        let calls = await mock.requestCallCount
+        XCTAssertEqual(calls, 1, "Turning the toggle ON invokes requestAuthorization exactly once")
+    }
+
+    func testToggleOffPersistsWithoutRequestingAuthorization() async {
+        // Turning the toggle OFF persists the value but must never prompt.
+        let decision = NotificationPermissionTrigger.apply(newValue: false)
+        XCTAssertFalse(decision.persistedValue)
+        XCTAssertFalse(decision.shouldRequestAuthorization)
+
+        let mock = MockNotificationCenter(status: .notDetermined, grantResult: true)
+        if decision.shouldRequestAuthorization {
+            await NotificationService(center: mock).requestAuthorization()
+        }
+        let calls = await mock.requestCallCount
+        XCTAssertEqual(calls, 0, "Turning the toggle OFF must not request authorization")
+    }
 }
 
 /// Actor-isolated mock of ``NotificationScheduling`` so async assertions are

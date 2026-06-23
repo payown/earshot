@@ -159,8 +159,19 @@ struct RootView: View {
                     // (swipe-to-check); no spoken milestones — it's a background task the
                     // user didn't start, so interrupting their navigation would be noise.
                     importState.start(total: count)
-                    await SubscriptionRepository(context: modelContext).refreshAll { completed, _ in
-                        importState.update(completed: completed)
+                    let notifications = await SubscriptionRepository(context: modelContext)
+                        .refreshAll(onProgress: { completed, _ in
+                            importState.update(completed: completed)
+                        })
+                    // Deliver any new-episode notifications this launch refresh
+                    // found. This stamp marks lastFeedRefresh, so a background wake
+                    // inside the throttle window is skipped — the path that finds
+                    // new episodes must be the path that notifies or they're lost
+                    // (#421). deliver() coalesces per podcast, so no double-fire.
+                    // (Migrated shells backfill pre-dismissed and never notify, so
+                    // this is typically empty on the very first restore.)
+                    if !notifications.isEmpty {
+                        await NotificationService().deliver(notifications)
                     }
                     // Restore played / inbox / position state now that the episodes
                     // exist. The backfill above pre-dismissed and unplayed everything;

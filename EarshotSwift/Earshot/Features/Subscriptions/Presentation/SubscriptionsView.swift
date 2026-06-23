@@ -162,8 +162,18 @@ struct SubscriptionsView: View {
         // Pull-to-refresh always forces (bypasses the FeedRefreshPolicy window)
         // and updates the throttle timestamp so the next background wake within
         // 15 minutes is skipped (#381).
-        await SubscriptionRepository(context: context).refreshAll()
+        //
+        // Capture and DELIVER the new-episode notifications this foreground pass
+        // found. Because the pull stamps lastFeedRefresh, the next background
+        // wake inside the 15-minute window is throttle-skipped — so whichever
+        // path actually finds new episodes must be the path that notifies, or the
+        // notification is lost (#421). deliver() coalesces per podcast by a stable
+        // identifier, so the same show notifying from both paths can never stack.
+        let notifications = await SubscriptionRepository(context: context).refreshAll()
         AppSettingsStore(context: context).setDate(Date(), for: SettingsKey.lastFeedRefresh)
+        if !notifications.isEmpty {
+            await NotificationService().deliver(notifications)
+        }
         Announcer.announce("Library refreshed")
     }
 }
