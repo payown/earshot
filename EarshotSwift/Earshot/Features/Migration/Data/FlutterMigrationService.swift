@@ -29,6 +29,17 @@ struct FlutterEpisode: Sendable, Equatable {
     let positionSeconds: Int?
 }
 
+/// One entry of the user's play queue read from the Flutter drift `queue_items`
+/// table during migration, joined to `episodes` for the identity columns the new
+/// store matches on. `position` is the Flutter ordering key; the restore re-adds
+/// entries in ascending `position` so the queue keeps its order. Identified by
+/// `guid` (preferred) or `audioURL` (fallback), the same as ``FlutterEpisode``.
+struct FlutterQueueEntry: Sendable, Equatable {
+    let guid: String?
+    let audioURL: String?
+    let position: Int
+}
+
 /// One-time import of the user's subscriptions from a previous (Flutter) install
 /// that shared this bundle id's container.
 ///
@@ -82,6 +93,21 @@ final class FlutterMigrationService {
         settings.setBool(true, for: SettingsKey.flutterMigrationComplete)
     }
 
+    /// Whether the per-episode state overlay (played / inbox / position) and
+    /// queue-order restore have completed successfully for this install. False
+    /// until ``markEpisodeStateRestored()`` runs, so a migration that imported
+    /// shells but failed (or predates) the overlay reads as "state still missing"
+    /// and self-heals a local re-restore (#426).
+    var episodeStateRestored: Bool {
+        settings.bool(SettingsKey.flutterEpisodeStateRestored, default: false)
+    }
+
+    /// Records that the state overlay + queue restore finished without error, so
+    /// the self-heal gate stops re-running them.
+    func markEpisodeStateRestored() {
+        settings.setBool(true, for: SettingsKey.flutterEpisodeStateRestored)
+    }
+
     /// Records a launch where the import ran but the Flutter database yielded no
     /// subscriptions. Increments the attempt counter and, once the retry budget
     /// is exhausted, marks the migration complete so a genuinely empty install
@@ -106,6 +132,7 @@ final class FlutterMigrationService {
     func resetForSelfHeal() {
         settings.setBool(false, for: SettingsKey.flutterMigrationComplete)
         settings.setInt(0, for: SettingsKey.flutterMigrationAttempts)
+        settings.setBool(false, for: SettingsKey.flutterEpisodeStateRestored)
         AppLog.data.info("Migration: self-heal — store empty but Flutter data present; re-running import")
     }
 
@@ -222,6 +249,53 @@ final class FlutterMigrationService {
             ))
         }
         return episodes
+    }
+
+    /// Reads the user's play-queue order from the drift `queue_items` table,
+    /// joined to `episodes` for the identity columns (`guid`, `audio_url`) the new
+    /// store matches on, ordered by the Flutter `position`. Returns nil when the
+    /// file/tables are missing or the query fails, so the caller no-ops rather
+    /// than wiping the queue. Rows missing both identifiers are skipped (nothing
+    /// to match them against) (#426).
+    func readQueue() -> [FlutterQueueEntry]? {
+        guard let databaseURL,
+              FileManager.default.fileExists(atPath: databaseURL.path)
+        else { return nil }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            AppLog.data.error("Migration: could not open export DB for queue")
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+
+        var statement: OpaquePointer?
+        let sql = """
+        SELECT e.guid, e.audio_url, q.position
+        FROM queue_items q
+        JOIN episodes e ON e.id = q.episode_id
+        ORDER BY q.position
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            AppLog.data.error("Migration: could not prepare queue query")
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var entries: [FlutterQueueEntry] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let guid = Self.column(statement, 0)
+            let audioURL = Self.column(statement, 1)
+            // No identifier means nothing to match against — skip it.
+            if guid == nil && audioURL == nil { continue }
+            entries.append(FlutterQueueEntry(
+                guid: guid,
+                audioURL: audioURL,
+                position: Self.intColumn(statement, 2) ?? 0
+            ))
+        }
+        return entries
     }
 
     /// Trimmed text for a column, or nil when NULL/blank.

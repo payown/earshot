@@ -128,17 +128,27 @@ struct RootView: View {
             // (readFeedURLs) decides migrator vs. new user; the slow network
             // subscribe runs in a detached task so launch is never blocked.
             let migration = FlutterMigrationService(context: modelContext)
-            // Self-heal: a prior launch marked the migration complete but left the
-            // Library empty while earshot.db still holds data — the first-launch
-            // import fired and found nothing (or failed) and locked the user out of
-            // a recoverable library. Reopen the gate so the import path below
-            // re-runs (#426).
+            // Self-heal a completed migration that's missing data. Two cases,
+            // distinguished by whether any shows survived (#426):
+            //  - Library empty: the first-launch import fired and found nothing
+            //    (or failed), locking the user out of a library still recoverable
+            //    from earshot.db. Reopen the gate so the full import below re-runs.
+            //  - Shows present but per-episode state never restored (a prior build,
+            //    or an overlay that failed after the shells imported): re-run just
+            //    the local state overlay against the episodes already in the store
+            //    — no network, no re-subscribe, no "shows restored" announcement.
+            let migratedPodcastCount = (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0
             if MigrationGate.shouldSelfHeal(
                 migrationComplete: migration.isComplete,
-                podcastCount: (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0,
+                podcastCount: migratedPodcastCount,
+                episodeStateRestored: migration.episodeStateRestored,
                 flutterHasData: migration.hasFlutterData()
             ) {
-                migration.resetForSelfHeal()
+                if migratedPodcastCount == 0 {
+                    migration.resetForSelfHeal()
+                } else {
+                    Task { await restoreEpisodeState(using: migration) }
+                }
             }
             if MigrationGate.shouldImport(migrationComplete: migration.isComplete),
                let subs = migration.readSubscriptions(), !subs.isEmpty {
@@ -187,12 +197,12 @@ struct RootView: View {
                     if !notifications.isEmpty {
                         await NotificationService().deliver(notifications)
                     }
-                    // Restore played / inbox / position state now that the episodes
-                    // exist. The backfill above pre-dismissed and unplayed everything;
-                    // this puts the user's actual inbox and history back (#426).
-                    if let flutterEpisodes = migration.readEpisodes() {
-                        EpisodeStateImporter(context: modelContext).apply(flutterEpisodes)
-                    }
+                    // Restore played / inbox / position state and queue order now
+                    // that the episodes exist. The backfill above pre-dismissed and
+                    // unplayed everything; this puts the user's actual inbox,
+                    // history, and queue back, and records success so the self-heal
+                    // gate won't redo it (#426).
+                    await restoreEpisodeState(using: migration)
                     // Stamp the throttle window so a background wake right after the
                     // restore doesn't redundantly re-refresh every show (#381).
                     AppSettingsStore(context: modelContext).setDate(Date(), for: SettingsKey.lastFeedRefresh)
@@ -210,6 +220,30 @@ struct RootView: View {
                 // launch (after settings load so we don't flash).
                 showOnboarding = !settings.onboardingComplete
             }
+        }
+    }
+
+    // MARK: Migration state restore (#426)
+
+    /// Overlays the user's Flutter per-episode state (played / inbox / position)
+    /// and queue order onto the episodes now in the store, then records success
+    /// so the self-heal gate won't re-run it. Shared by the full first-launch
+    /// import and the state-only self-heal path. A hard failure leaves the marker
+    /// unset so a later launch retries, rather than recording a half-applied
+    /// overlay as done. The queue restore runs after the state overlay because a
+    /// formerly-queued episode is left `newEpisode` until it's re-queued.
+    @MainActor
+    private func restoreEpisodeState(using migration: FlutterMigrationService) async {
+        do {
+            if let flutterEpisodes = migration.readEpisodes() {
+                try EpisodeStateImporter(context: modelContext).apply(flutterEpisodes)
+            }
+            if let flutterQueue = migration.readQueue() {
+                try QueueImporter(context: modelContext).apply(flutterQueue)
+            }
+            migration.markEpisodeStateRestored()
+        } catch {
+            AppLog.data.error("Migration: episode state restore failed; will retry next launch: \(error.localizedDescription, privacy: .public)")
         }
     }
 

@@ -63,6 +63,46 @@ final class FlutterMigrationServiceTests: XCTestCase {
         return url
     }
 
+    /// Builds a throwaway DB with drift-shaped `episodes` + `queue_items` tables.
+    /// Each tuple is (episodeId, guid, audioURL, queuePosition); the episodes row
+    /// carries the identity columns and the queue_items row references it by id.
+    /// A nil queuePosition inserts the episode but no queue entry.
+    private func makeQueueDB(
+        _ rows: [(id: Int, guid: String?, audio: String?, position: Int?)]
+    ) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("earshot.db")
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        XCTAssertEqual(
+            sqlite3_exec(db, "CREATE TABLE episodes (id INTEGER PRIMARY KEY, guid TEXT, audio_url TEXT)", nil, nil, nil),
+            SQLITE_OK
+        )
+        XCTAssertEqual(
+            sqlite3_exec(db, "CREATE TABLE queue_items (id INTEGER PRIMARY KEY, episode_id INTEGER, position INTEGER, added_at INTEGER)", nil, nil, nil),
+            SQLITE_OK
+        )
+        for row in rows {
+            let guid = row.guid.map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" } ?? "NULL"
+            let audio = row.audio.map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" } ?? "NULL"
+            XCTAssertEqual(
+                sqlite3_exec(db, "INSERT INTO episodes (id, guid, audio_url) VALUES (\(row.id), \(guid), \(audio))", nil, nil, nil),
+                SQLITE_OK
+            )
+            if let position = row.position {
+                XCTAssertEqual(
+                    sqlite3_exec(db, "INSERT INTO queue_items (episode_id, position) VALUES (\(row.id), \(position))", nil, nil, nil),
+                    SQLITE_OK
+                )
+            }
+        }
+        return url
+    }
+
     // MARK: readFeedURLs
 
     func testReadsRssUrlColumnAndSkipsBlankRows() throws {
@@ -199,7 +239,7 @@ final class FlutterMigrationServiceTests: XCTestCase {
         let service = FlutterMigrationService(context: ctx, databaseURL: dbURL)
 
         let flutterEpisodes = try XCTUnwrap(service.readEpisodes())
-        let restored = EpisodeStateImporter(context: ctx).apply(flutterEpisodes)
+        let restored = try EpisodeStateImporter(context: ctx).apply(flutterEpisodes)
         XCTAssertEqual(restored, 3)
 
         let all = try ctx.fetch(FetchDescriptor<Episode>())
@@ -270,5 +310,67 @@ final class FlutterMigrationServiceTests: XCTestCase {
         // Attempt counter is cleared, so the re-import gets a full retry budget.
         XCTAssertFalse(service.recordEmptyImportAttempt()) // attempt 1 of fresh budget
         XCTAssertFalse(service.isComplete)
+    }
+
+    // MARK: episode-state-restored flag (#426)
+
+    func testEpisodeStateRestoredFlagRoundTrips() {
+        let ctx = TestStore.freshContext()
+        let service = FlutterMigrationService(context: ctx, databaseURL: nil)
+        XCTAssertFalse(service.episodeStateRestored)
+        service.markEpisodeStateRestored()
+        XCTAssertTrue(FlutterMigrationService(context: ctx, databaseURL: nil).episodeStateRestored)
+    }
+
+    func testResetForSelfHealClearsEpisodeStateRestoredFlag() {
+        let ctx = TestStore.freshContext()
+        let service = FlutterMigrationService(context: ctx, databaseURL: nil)
+        service.markComplete()
+        service.markEpisodeStateRestored()
+        XCTAssertTrue(service.episodeStateRestored)
+
+        service.resetForSelfHeal()
+        // The overlay must re-run on the re-import, so its marker is cleared too.
+        XCTAssertFalse(service.episodeStateRestored)
+    }
+
+    // MARK: readQueue (#426)
+
+    func testReadQueueReturnsEntriesInPositionOrder() throws {
+        let ctx = TestStore.freshContext()
+        let dbURL = try makeQueueDB([
+            (id: 1, guid: "a", audio: "https://x/a.mp3", position: 2),
+            (id: 2, guid: "b", audio: "https://x/b.mp3", position: 0),
+            (id: 3, guid: "c", audio: "https://x/c.mp3", position: 1),
+        ])
+        let entries = try XCTUnwrap(FlutterMigrationService(context: ctx, databaseURL: dbURL).readQueue())
+        XCTAssertEqual(entries.map(\.guid), ["b", "c", "a"])
+        XCTAssertEqual(entries.map(\.position), [0, 1, 2])
+        XCTAssertEqual(entries.first?.audioURL, "https://x/b.mp3")
+    }
+
+    func testReadQueueOnlyIncludesQueuedEpisodes() throws {
+        let ctx = TestStore.freshContext()
+        // Episode id 2 exists but has no queue_items row -> excluded by the JOIN.
+        let dbURL = try makeQueueDB([
+            (id: 1, guid: "queued", audio: "https://x/q.mp3", position: 0),
+            (id: 2, guid: "not-queued", audio: "https://x/n.mp3", position: nil),
+        ])
+        let entries = try XCTUnwrap(FlutterMigrationService(context: ctx, databaseURL: dbURL).readQueue())
+        XCTAssertEqual(entries.map(\.guid), ["queued"])
+    }
+
+    func testReadQueueReturnsNilWhenFileMissing() {
+        let ctx = TestStore.freshContext()
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)/nope.db")
+        XCTAssertNil(FlutterMigrationService(context: ctx, databaseURL: missing).readQueue())
+    }
+
+    func testReadQueueReturnsNilWhenTableMissing() throws {
+        // A DB with podcasts but no queue_items/episodes tables: prepare fails -> nil.
+        let ctx = TestStore.freshContext()
+        let dbURL = try makeTempDB(rssURLs: ["https://a/feed.xml"])
+        XCTAssertNil(FlutterMigrationService(context: ctx, databaseURL: dbURL).readQueue())
     }
 }

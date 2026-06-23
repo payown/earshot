@@ -26,16 +26,26 @@ enum MigrationGate {
         attempts >= maxAttempts
     }
 
-    /// Whether to self-heal an already-migrated install: the migration is marked
-    /// complete, yet the SwiftData store has zero podcasts while the Flutter
-    /// database still holds data. That means the first-launch import fired but
-    /// found nothing (or failed) and locked the user out of a library that is
-    /// still recoverable from `earshot.db`. Reset the flag and re-import (#426).
+    /// Whether to self-heal an already-migrated install. Fires when the migration
+    /// is marked complete and the Flutter database still holds recoverable data,
+    /// and EITHER:
+    ///   - the SwiftData store has zero podcasts — the first-launch import fired
+    ///     but found nothing (or failed) and locked the user out of a library
+    ///     still recoverable from `earshot.db`; or
+    ///   - the per-episode state overlay never completed (`episodeStateRestored`
+    ///     is false) — the shows imported but played / inbox / queue state is
+    ///     missing (a prior build, or an overlay that failed after the shells
+    ///     imported).
+    /// The caller picks the remedy by `podcastCount`: a full re-import when zero,
+    /// a cheap local state-only re-overlay when the shows are already present, so
+    /// recovering missing state never forces a full feed re-refresh (#426).
     static func shouldSelfHeal(
         migrationComplete: Bool,
         podcastCount: Int,
+        episodeStateRestored: Bool,
         flutterHasData: Bool
     ) -> Bool {
-        migrationComplete && podcastCount == 0 && flutterHasData
+        guard migrationComplete, flutterHasData else { return false }
+        return podcastCount == 0 || !episodeStateRestored
     }
 }
