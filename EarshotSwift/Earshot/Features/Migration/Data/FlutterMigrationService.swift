@@ -353,7 +353,7 @@ final class FlutterMigrationService {
     @MainActor
     @discardableResult
     func runManualImport(
-        onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
+        onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int) -> Void)? = nil
     ) async -> Bool {
         recordImportAttempt()
 

@@ -123,6 +123,8 @@ The SwiftUI side is built and waiting.
 
 - **Issue #426 extension (Migration — queue order restore + partial-success self-heal):** Builds on #427's played/inbox/position restore. (1) **Queue order:** `FlutterMigrationService.readQueue()` joins the drift `queue_items → episodes` ordered by Flutter `position`; new `QueueImporter` re-adds via the existing `QueueRepository.add` path (idempotent, sets `.inQueue`, dense positions). The queue data was always in `earshot.db` but was never read. (2) **Partial-success retry:** new `flutter_episode_state_restored` flag set only after the overlay+queue succeed; `EpisodeStateImporter`/`QueueImporter` now `throw` on hard failure so the marker defers and a later launch retries. `MigrationGate.shouldSelfHeal` broadened to fire when state is missing (not just when the library is empty); RootView branches the remedy by podcast count — full re-import when 0 podcasts, a cheap **local** state-only re-overlay (no network, no announcement, no VoiceOver interruption) when shows already exist, which also auto-recovers prior-build users without a forced feed refresh. (3) New shared `MigrationEpisodeMatcher` (guid→audioURL) is the single matching path for both importers, replacing the inline logic in `EpisodeStateImporter`. **Implemented by:** planning agent (well-scoped data-layer extension; no domain logic beyond the audit's design). **Gates:** earshot-security PASS (leak-free SQLite, no force-unwraps, no retain cycle), earshot-swift6 PASS (all new types `@MainActor`/`Sendable`, no isolation violations), earshot-accessibility PASS (silent re-heal confirmed correct), earshot-testing PASS (**495 tests**, was 442 baseline; Release clean). earshot-changelog: Added/Fixed/Accessibility. **PR #428** into `swift`. **Not merged / not closed — Michael verifies on device first** (install a migrated build, then this over the top; confirm queue order + inbox/played history return). **Test baseline of record: 495.**
 
+- **Issue #429 (Settings → Data — "Import older data"):** On-demand re-import of the Flutter `earshot.db` from a Settings → Data action, with a status row + import sheet. `FlutterMigrationService.runManualImport()` reopens the migration gate (`resetForSelfHeal`), imports deduped show shells, refreshes feeds, then overlays played/inbox/position state and queue order — idempotent (re-run adds no duplicate podcasts or queue entries) and a missing/empty DB is a no-op success (clean install, not a failure). New `MigrationStatus` persistence on `AppSettingsStore` (status + last-attempt date, both fall back safely on unset/garbage). New `DataImportViewModel` owns the `isRunning` flag and mirrors the persisted outcome; pure `ImportStatusText` maps status (+date) to the row value, sheet result, and VoiceOver announcement strings. **Implemented by:** earshot-data + earshot-ui (sequential on one branch, per the parallel-agent branch-hygiene lesson). **Gates:** earshot-security PASS (idempotent re-import, no half-written dead end, no retain cycle), earshot-accessibility PASS (row label/value split, header trait, escape action, outcome announced + conveyed by text not color), earshot-swift6 FAIL→fix→PASS (`runManualImport(onProgress:)` needed `@MainActor @Sendable` on the closure param to avoid a non-Sendable capture under strict concurrency — one-line signature fix; no caller passes a non-nil closure), earshot-testing PASS (**518 tests**, was 495 baseline; 0 failures; Release build clean). +21 net new tests across `ManualImportTests` (happy path / idempotent re-run / missing-DB no-op / status helpers), `ImportStatusTextTests` (status→string mapping), `DataImportViewModelTests` (view-model state), `AppSettingsStoreTests` (+5 migration-status round-trip/default). **`.failed` overlay path** covered by decomposition: the catch block only calls `recordImportFailed()` + returns false, and both the helper and the view-model's `.failed`→result-text mapping are independently tested (forcing a real overlay throw would require corrupting the ModelContext — rejected as brittle). Branch `feat/issue-429-import-older-data` into `swift`. **Not merged / not closed — Michael verifies on device first.** **Test baseline of record: 518.**
+
 - **Decision (parallel-agent branch hygiene, 2026-06-22):** #421 and #422 were implemented by two domain agents dispatched in parallel sharing one working tree. The earshot-ui (#422) commit captured the earshot-audio (#421) uncommitted files, bundling both issues into one commit on one branch. Resolved by rebuilding each branch off `swift` from the combined tip and `git checkout <tip> -- <files>` selecting only each issue's own files (verified no cross-leakage; each branch builds + tests green independently at 442). **Lesson:** do not run two implementing domain agents in parallel in the same worktree — give each its own worktree, or run sequentially, so commits stay one-issue-per-branch.
 
 ## Audio Decisions
@@ -425,6 +427,29 @@ Test baseline: **349 tests** (verified 2026-06-21, after #392 — 10 FeedbackCom
 ## Blockers
 
 None. (F14 audio-enhancement DSP intentionally deferred — see Decision F14.)
+
+## Security Review — Issue #429
+
+earshot-security gate: PASS. Settings → Data "Import older data" manual re-import
+with status tracking. Force-unwraps: none in production (all `!` are boolean
+negations; force-unwraps only in test fixtures where nil fails the test). try?:
+no new ones (the `try?` in changed files are pre-existing OPML/AppSettings reads
+out of #429 scope). fatalError: none. Retain cycles: none — `DataImportViewModel`
+is `@MainActor @Observable` held via `@State` in a struct view; the `Task` captures
+the view model, not self, and SwiftUI owns its lifetime. @MainActor: all status
+read/write paths (`FlutterMigrationService`, `AppSettingsStore`, view model,
+`runManualImport`) are main-actor isolated, so status writes can't race the launch
+import Task; `importShells` correctly stays on its own `@ModelActor`. Release build
+SUCCEEDED; the row is intentionally ungated (always-visible recovery affordance),
+`IS_BETA_BUILD` absent from project.yml. AppLog: the one new catch logs + records
+`.failed`. Data-safety deep review: `runManualImport` is idempotent (dedup by
+feedURL in `importShells`, `queueItem == nil` skip in `QueueImporter`, state
+overwrite in `EpisodeStateImporter`) and a phase-2 failure leaves
+`migrationComplete=true`/`episodeStateRestored=false`, which `MigrationGate.shouldSelfHeal`
+recovers on the next launch — no half-written dead end. Missing/empty DB → no-op
+success so a clean install isn't shown a false failure. Faithfully replays the
+shipping launch sequence, so no new cross-context race. Feature suggestions: none
+this review.
 
 ## Security Review — Issue #366
 
