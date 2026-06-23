@@ -137,6 +137,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   told Renata "I'm choosing to be impressed" (Chapter 22)
 - She was the one who originally flagged the confusing "Play or Pause Playing"
   play/pause label to Renata, months before it got fixed (Chapter 22)
+- She now sees the inbox count on the Inbox tab itself, not just the heading, so
+  she can tell what's waiting from the tab bar before opening it (Chapter 22)
 
 ## What you can generate
 
@@ -624,7 +626,7 @@ The tab you're currently on should announce "selected." Moving between tabs shou
 
 ---
 
-### Chapter 22 — Build 117
+### Chapter 22 — Build 118
 
 *Kashe comes home from a wedding to an empty app, decides not to panic, and gets everything back — then notices a small old annoyance has quietly been fixed too.*
 
@@ -644,11 +646,17 @@ And there was one more thing. She's used this app long enough that some of its l
 
 Now it says "Play" when it means play, and "Pause" when it means pause. That's all. It's a small thing. It is absolutely a small thing. But she was the one who'd mentioned that exact label to Renata months ago, half a complaint and half a shrug, so this one lands a little differently than the rest.
 
+The inbox count moved too. It used to live only on the heading, so she'd have to open the inbox to find out how much was waiting. Now the tab itself carries the number. She can tell from the tab bar whether there's one thing or eleven without going in to look.
+
+It's a little thing, again. But the app feels like it knows what it's doing when it tells her that before she asks.
+
 **What to test:**
 
 If you upgraded from an older build and your inbox or library looked empty, open the app and give it a moment. It should find your shows on this launch. Email michael@payown.media if anything is still missing.
 
 Play an episode and listen to what VoiceOver says when you tap the play/pause button. It should say "Play" when paused and "Pause" when playing. Report anything that still reads "Play or Pause Playing."
+
+Check the Inbox tab in the tab bar. It should show a count when you have unplayed inbox items, and no number when the inbox is empty. VoiceOver should announce it cleanly (you'll hear the number as part of the tab).
 
 ---
 
