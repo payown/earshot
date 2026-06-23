@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arrive in it as usual. Only your subscriptions move over (not play positions or
   queue); if anything can't be brought across, you can still export an OPML file
   and import it.
+- Coming from the previous version of Earshot: your play queue now comes across
+  too, in the same order you left it, so you can pick up where you were without
+  rebuilding the queue by hand.
 - Export audio file: every episode now has an "Export audio file" action that
   opens the share sheet, so you can save the audio to Files, AirDrop it, or open
   it in another app. It's in the Now Playing player's "Episode actions" menu
@@ -99,6 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Coming from the previous version of Earshot, the move now brings your full reading state across, not just your subscriptions. Each episode's played status, inbox membership, and where you left off all carry over, matched by episode GUID (or audio URL if there's no GUID). Before this fix a returning user's inbox came back empty and nothing showed as played, because the restore wiped those out as it ran. Played episodes are correctly kept out of the inbox. (#426)
 - The first-launch import no longer locks you out of a library that's still on your device. If that first read found no data it used to mark the move "done" for good, so your shows never appeared. The import now only finishes when it actually brings something across; an empty read is retried on the next launch, up to three times, so a one-off miss recovers on its own. (#426)
 - Earshot now self-heals a stuck move. If an earlier version already marked the move complete but your Library is empty while the old database is still on your device, Earshot spots this on launch and runs the import again automatically. No reinstall needed. (#426)
+- Coming from the previous version of Earshot, a library that arrived with your shows but lost its played, inbox, and queue state now repairs itself on a later launch. This covers a first launch with no earshot.db to read and a move that started but didn't finish. Earshot notices the missing history and quietly runs the restore again, so you get your reading state and queue back without redoing setup or re-downloading anything. (#426)
 - Updating from an older build no longer risks a crash on launch for existing users. Earshot's on-device database now upgrades to the new format through a tested, step-by-step path that keeps your subscriptions, episodes, queue, played status, bookmarks, and folders intact. A test that mimics a real older install proves the upgrade finishes without crashing, and a separate check now blocks any future change that could reintroduce this kind of launch failure. (closes #425)
 - Settings: Send Feedback now sends to michael@payown.media instead of the old beta@payown.media address. This corrects the mail composer recipient, the mailto fallback, and the address shown when no mail app is set up, so feedback reaches the project owner as the release notes said it would. VoiceOver's hint on the button now reads "Opens an email to michael at payown dot media". (closes #418)
 - Playback: the device now runs cooler and uses less battery during playback. Earshot was updating the lock screen and Control Center elapsed time every second, which kept the system media server busy in the background; it now refreshes that time every 5 seconds (and right away when you play, pause, seek, or change speed). The lock screen still shows the correct elapsed time because the system fills in the seconds between updates. (#412)
@@ -226,6 +230,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New episode notifications: notifications use plain, meaningful text with no emoji, so VoiceOver reads something useful like "Show name, 2 new episodes" instead of an icon. Tapping a notification moves focus to that show's detail screen in the Library. (closes #72)
 - New episode notifications: a new-episode notification that arrives while you're using the app is now delivered silently to Notification Center instead of taking over with a banner and sound, so it doesn't interrupt VoiceOver or pull your focus mid-task. (closes #421)
 - Coming from the previous version of Earshot, VoiceOver users now land in a Library that matches what they left. Their inbox, played episodes, and saved positions all carry over, so the first thing VoiceOver reads after the move is their real state and not an empty, all-unplayed list. (#426)
+- The self-heal that restores a missing inbox, queue, and played state on a later launch does its work silently. VoiceOver users are not interrupted by a spurious announcement; the restored state is simply there the next time they look. (#426)
 - Inbox: VoiceOver now reads the inbox count as part of the tab title, spoken naturally as "Inbox, 12 episodes" (and "Inbox, 1 episode" for a single item), with the heading role preserved. (#422)
 
 ### Phase 8 complete — Alpha build prep
