@@ -17,7 +17,7 @@ struct FolderPodcastPickerView: View {
                     ContentUnavailableView {
                         Label("No podcasts", systemImage: "music.note")
                     } description: {
-                        Text("Subscribe to podcasts first, then add them here.")
+                        Text("Follow podcasts first, then add them here.")
                     }
                 } else {
                     List(podcasts) { podcast in

@@ -15,7 +15,7 @@ enum OPMLDocument {
         <?xml version="1.0" encoding="UTF-8"?>
         <opml version="2.0">
           <head>
-            <title>Earshot Subscriptions</title>
+            <title>Earshot Podcasts</title>
           </head>
           <body>
         \(outlines)

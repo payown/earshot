@@ -149,7 +149,7 @@ struct SearchView: View {
             switch scope {
             case .library:
                 ContentUnavailableView("Search your library", systemImage: "magnifyingglass",
-                                       description: Text("Find your subscribed podcasts, episodes, and bookmarks."))
+                                       description: Text("Find podcasts you follow, episodes, and bookmarks."))
             case .everywhere:
                 ContentUnavailableView("Search Earshot", systemImage: "magnifyingglass",
                                        description: Text("Find podcasts, episodes, and bookmarks. The directory is searched automatically as you type."))
@@ -213,7 +213,7 @@ struct SearchView: View {
                 }
             }
             Spacer()
-            Button(subscribed ? "Subscribed" : "Subscribe") { subscribe(result) }
+            Button(subscribed ? "Following" : "Follow") { subscribe(result) }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
                 .disabled(subscribed)
@@ -224,7 +224,7 @@ struct SearchView: View {
         // accessibilityValue("") is spoken as a pause (dead air) in VoiceOver.
         .modifier(SubscribedValue(subscribed: subscribed))
         .accessibilityActions {
-            if !subscribed { Button("Subscribe") { subscribe(result) } }
+            if !subscribed { Button("Follow") { subscribe(result) } }
         }
     }
 
@@ -320,10 +320,10 @@ struct SearchView: View {
         Task {
             do {
                 _ = try await SubscriptionRepository(context: context).subscribe(feedURL: result.feedURL)
-                Announcer.announce("Subscribed to \(result.title)")
+                Announcer.announce("Now following \(result.title)")
             } catch {
                 AppLog.networking.error("Subscribe from search failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                Announcer.announce("Couldn't subscribe to \(result.title)")
+                Announcer.announce("Couldn't follow \(result.title)")
             }
         }
     }
@@ -342,7 +342,7 @@ private struct SubscribedValue: ViewModifier {
 
     func body(content: Content) -> some View {
         if subscribed {
-            content.accessibilityValue("Subscribed")
+            content.accessibilityValue("Following")
         } else {
             content
         }

@@ -68,7 +68,7 @@ struct AddFeedView: View {
         defer { isLoading = false }
         do {
             let podcast = try await SubscriptionRepository(context: context).subscribe(feedURL: urlString)
-            Announcer.announce("Subscribed to \(podcast.title)")
+            Announcer.announce("Now following \(podcast.title)")
             dismiss()
         } catch {
             let message = (error as? LocalizedError)?.errorDescription

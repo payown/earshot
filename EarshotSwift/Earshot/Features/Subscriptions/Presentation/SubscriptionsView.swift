@@ -63,7 +63,7 @@ struct SubscriptionsView: View {
             ShareSheet(items: shareItems(for: podcast))
         }
         .confirmationDialog(
-            "Unsubscribe from \(pendingUnsubscribe?.title ?? "this podcast")?",
+            "Unfollow \(pendingUnsubscribe?.title ?? "this podcast")?",
             isPresented: Binding(
                 get: { pendingUnsubscribe != nil },
                 set: { if !$0 { pendingUnsubscribe = nil } }
@@ -71,7 +71,7 @@ struct SubscriptionsView: View {
             titleVisibility: .visible,
             presenting: pendingUnsubscribe
         ) { podcast in
-            Button("Unsubscribe", role: .destructive) { unsubscribe(podcast) }
+            Button("Unfollow", role: .destructive) { unsubscribe(podcast) }
             Button("Cancel", role: .cancel) { pendingUnsubscribe = nil }
         } message: { podcast in
             Text("This removes \(podcast.title) and its episodes. This can't be undone.")
@@ -126,7 +126,7 @@ struct SubscriptionsView: View {
         context.delete(podcast)
         do {
             try context.save()
-            Announcer.announce("Unsubscribed from \(title)")
+            Announcer.announce("Unfollowed \(title)")
         } catch {
             AppLog.subscriptions.error("Failed to unsubscribe: \(error.localizedDescription, privacy: .public)")
         }
