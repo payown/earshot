@@ -1158,3 +1158,60 @@ Pre-existing baseline (NOT this track), reported separately as requested:
   `route(_:)` notification predicate — NOT this track's `handleIncomingFile`).
 
 New agents created: none. Overall: PASS.
+
+## Security Review — UX Round 1 (branch feat/ux-round-1)
+
+earshot-security review complete. Three commits: fdf0982 (onboarding Next gate),
+2669a0c (library search/add split), 9a1d125 (Subscribe→Follow rename). No GitHub
+issue number assigned to this round; tracked here.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found. `UTType(filenameExtension:) ?? .xml`
+  fallback used in both file importers, not a force-unwrap.
+- [x] Silent try?: PASS — one `try? await Task.sleep` (SearchView:286). Acceptable:
+  Task.sleep only throws CancellationError and cancellation is handled by the very
+  next line (`if Task.isCancelled { return }`); nil == cancelled == expected.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — all `Task {}` blocks are inside SwiftUI View structs
+  (value types; no self reference cycle). `directoryTask` is stored and explicitly
+  cancelled in `.onDisappear` and at the head of each `scheduleDirectorySearch`.
+  AddPodcastView/OnboardingView `fileImporter` + sheet closures capture only URL
+  (Sendable) and MainActor context. No `.sink`/Timer/addObserver introduced.
+- [x] @MainActor: PASS — directoryState/lastAnnouncedSummary mutations run inside
+  View-isolated (MainActor) Task bodies; `announceDirectory` explicitly @MainActor.
+  Only suspension points are `itunes.search` and `SubscriptionRepository.subscribe`,
+  then resume on main. No background SwiftData @Model access added.
+- [x] IS_BETA_BUILD Release build: PASS — migration files untouched this round;
+  no IS_BETA_BUILD in changed code or in project.yml Release config. Release build
+  succeeded (xcodebuild Release, iPhone 17 sim: ** BUILD SUCCEEDED **).
+- [x] Entitlements: N/A — no Earshot.entitlements / Info.plist / project.yml entitlement
+  changes in the round. OPMLFileImporter (the security-scoped helper) is unchanged and
+  still brackets startAccessingSecurityScopedResource() with a balanced defer-stop;
+  AddPodcastView reuses it with no new unscoped read.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new error types; existing typed errors/AppLog paths reused.
+- [x] AppLog coverage: PASS — both new `handleImport` failure branches log
+  `AppLog.data.error`; SearchView.subscribe catch logs `AppLog.networking.error`. No
+  empty catch blocks.
+
+Scope-specific verifications (the point of the round):
+- `.library` SearchScope fires NO network/directory work: `onChange(of: query)` calls
+  `scheduleDirectorySearch` only when `scope == .everywhere`; the "From the directory"
+  section is gated `if scope == .everywhere`. No iTunes call, no debounce Task, no
+  dangling task in `.library`. Pinned by SearchScopeTests. PASS.
+- OPML import reuses the existing security-scoped helper with no new unscoped read in
+  either AddPodcastView or OnboardingView. PASS.
+- Rename touched user-facing strings + VoiceOver labels only. All remaining
+  Subscribe/Subscription occurrences are non-user-facing and correctly left intact:
+  AppLog.subscriptions category, log message strings, `earshot-subscriptions.opml`
+  temp filename, `is_subscribed` DB-column query in FlutterMigrationService, and code
+  identifiers (`subscribe`/`unsubscribe`/`.unsubscribe`/`isSubscribed`/`SubscribedValue`).
+  No identifier/log/DB change. PASS.
+- pbxproj diff adds only the 3 new source files; no build-setting or config changes.
+
+Tests: SearchScopeTests (4) + AddPodcastOptionsTests (1) + OnboardingTipsTests green;
+Release build clean.
+
+Feature suggestions identified: none this round.
+
+New agents created: none. Overall: PASS.

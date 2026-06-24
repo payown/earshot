@@ -163,7 +163,12 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!hasPodcast)
-                .accessibilityHint(hasPodcast ? "" : "Add a podcast first to continue.")
+                // Only attach a hint when the button is disabled. Passing "" can be
+                // spoken as a pause (dead air) by VoiceOver, the same reason
+                // SubscribedValue avoids an empty accessibilityValue. When enabled,
+                // the "Start Listening" label is self-explanatory and needs no hint.
+                .modifier(DisabledHint(isDisabled: !hasPodcast,
+                                       hint: "Add a podcast first to continue."))
             } else {
                 let nextEnabled = currentPage?.isNextEnabled(hasPodcast: hasPodcast) ?? true
                 Button {
@@ -175,7 +180,9 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!nextEnabled)
-                .accessibilityHint(nextEnabled ? "" : "Add a podcast above first, or use Skip to continue.")
+                // Disabled-only hint; avoid passing "" (potential VoiceOver dead air).
+                .modifier(DisabledHint(isDisabled: !nextEnabled,
+                                       hint: "Add a podcast above first, or use Skip to continue."))
             }
         }
         .padding(Spacing.lg)
@@ -185,5 +192,23 @@ struct OnboardingView: View {
         settings.onboardingComplete = true
         Announcer.announce("Onboarding complete. Welcome to Earshot.")
         dismiss()
+    }
+}
+
+/// Attaches an `accessibilityHint` only while the control is disabled. Mirrors
+/// `SubscribedValue` in SearchView: applying the modifier conditionally (rather
+/// than passing "" when there's nothing to say) avoids VoiceOver speaking an
+/// empty hint as a pause. A disabled button is announced as "dimmed" by
+/// VoiceOver, and this hint then explains how to enable it.
+private struct DisabledHint: ViewModifier {
+    let isDisabled: Bool
+    let hint: String
+
+    func body(content: Content) -> some View {
+        if isDisabled {
+            content.accessibilityHint(hint)
+        } else {
+            content
+        }
     }
 }
