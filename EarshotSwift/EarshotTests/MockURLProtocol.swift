@@ -23,6 +23,17 @@ final class MockURLProtocol: URLProtocol {
 
     private static let lock = NSLock()
     private static var outcomes: [Outcome] = []
+    private static var capturedRequests: [URLRequest] = []
+
+    /// The URLs of every request intercepted since the last ``reset()``, in order.
+    /// Lets a test assert how the service built its request (e.g. that a search
+    /// term was confined to the `term` query item and could not inject extra
+    /// parameters).
+    static var requestedURLs: [URL] {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedRequests.compactMap(\.url)
+    }
 
     /// Replaces the queued outcomes. Call before issuing requests.
     static func setOutcomes(_ outcomes: [Outcome]) {
@@ -36,6 +47,13 @@ final class MockURLProtocol: URLProtocol {
         lock.lock()
         defer { lock.unlock() }
         outcomes = []
+        capturedRequests = []
+    }
+
+    private static func record(_ request: URLRequest) {
+        lock.lock()
+        defer { lock.unlock() }
+        capturedRequests.append(request)
     }
 
     private static func nextOutcome() -> Outcome? {
@@ -59,6 +77,7 @@ final class MockURLProtocol: URLProtocol {
 
     override func startLoading() {
         guard let client else { return }
+        Self.record(request)
 
         guard let outcome = Self.nextOutcome() else {
             client.urlProtocol(self, didFailWithError: URLError(.unknown))
