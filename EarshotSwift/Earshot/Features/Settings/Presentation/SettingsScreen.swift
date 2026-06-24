@@ -79,15 +79,17 @@ struct SettingsScreen: View {
                             .accessibilityLabel(inboxSeedAccessibilityLabel(for: option))
                     }
                 }
+                // The picker hint covers this control; keep it out of the footer so
+                // VoiceOver doesn't read the seed-count explanation twice.
                 .accessibilityHint("How many recent episodes appear in the inbox when you add a new podcast")
 
-                // The section footer already explains this; a matching hint would
-                // make VoiceOver read the same sentence twice.
+                // The section footer below explains this toggle; a matching hint
+                // would make VoiceOver read the same sentence twice.
                 Toggle("Opt-in podcasts only", isOn: $settings.inboxOptInOnly)
             } header: {
                 Text("Inbox")
             } footer: {
-                Text("New podcasts add their most recent episodes to your inbox. Opt-in podcasts only: when on, new episodes only reach the inbox for podcasts you've explicitly included.")
+                Text("Opt-in podcasts only: when on, new episodes only reach the inbox for podcasts you've explicitly included.")
             }
 
             Section("Downloads") {
