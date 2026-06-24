@@ -35,3 +35,9 @@ struct FeedService {
         return feed
     }
 }
+
+// Conformance declared here (the type's own file) so the Swift 6 checker can
+// verify `FeedService` is `Sendable` — every stored property (URLSession,
+// RetryPolicy, a @Sendable closure) already is. `FeedFetching` refines
+// `Sendable`, which is why the conformance can't live in SubscriptionRepository.swift.
+extension FeedService: FeedFetching {}
