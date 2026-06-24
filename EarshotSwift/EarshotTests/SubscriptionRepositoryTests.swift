@@ -1,9 +1,14 @@
 import XCTest
 import SwiftData
 import UserNotifications
+import os
 @testable import Earshot
 
-private final class FakeFeedFetcher: FeedFetching {
+/// `@unchecked Sendable`: the fetcher is handed to `FeedRefreshActor` (a
+/// background `@ModelActor`). Tests only mutate `feed` while no refresh is in
+/// flight and read results after `await` completes, so there's no concurrent
+/// access in practice.
+private final class FakeFeedFetcher: FeedFetching, @unchecked Sendable {
     var feed: ParsedFeed
     init(_ feed: ParsedFeed) { self.feed = feed }
     func fetch(_ urlString: String) async throws -> ParsedFeed { feed }
@@ -19,12 +24,16 @@ private final class FakeDownloader: EpisodeDownloading {
 /// Returns the same feed for every URL but counts how many times ``fetch(_:)``
 /// is called, so `refreshAll`'s per-iteration cancellation guard (#381) can be
 /// asserted: a cancelled run must stop issuing fetches early.
-private final class CountingFeedFetcher: FeedFetching {
+private final class CountingFeedFetcher: FeedFetching, @unchecked Sendable {
     var feed: ParsedFeed
-    private(set) var fetchCount = 0
+    // Serialized so the actor's off-main increments and the test's main-actor
+    // reads (taken only after `await` completes) don't race. OSAllocatedUnfairLock
+    // is async-safe (NSLock is not, under the Swift 6 checker).
+    private let count = OSAllocatedUnfairLock(initialState: 0)
+    var fetchCount: Int { count.withLock { $0 } }
     init(_ feed: ParsedFeed) { self.feed = feed }
     func fetch(_ urlString: String) async throws -> ParsedFeed {
-        fetchCount += 1
+        count.withLock { $0 += 1 }
         return feed
     }
 }
@@ -62,6 +71,31 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertTrue(podcast.episodes.allSatisfy { $0.inboxDismissed })
         XCTAssertEqual(podcast.lastSeenPubDate, d2)
         XCTAssertEqual(podcast.author, "Host")
+    }
+
+    /// The returned `Podcast` must be a valid MAIN-context object — re-fetched by
+    /// persistentModelID after the background actor saved — so callers like
+    /// `OPMLImportService` can attach relationships (folder membership) to it. A
+    /// background-context object would either fault wrong or fail a relationship
+    /// insert on the main context.
+    func testSubscribeReturnsMainContextPodcastUsableForRelationships() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        // The returned object resolves to the SAME row a fresh main-context fetch finds.
+        let fetched = try XCTUnwrap(try ctx.fetch(FetchDescriptor<Podcast>()).first)
+        XCTAssertEqual(podcast.persistentModelID, fetched.persistentModelID)
+
+        // It is a live main-context object: attach a folder membership to it (the
+        // OPML import path) and save without error.
+        let folder = PodcastFolder(name: "News")
+        ctx.insert(folder)
+        ctx.insert(FolderMembership(folder: folder, podcast: podcast))
+        XCTAssertNoThrow(try ctx.save())
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 1)
     }
 
     func testSubscribeTwiceReturnsExistingWithoutDuplicates() async throws {
@@ -372,7 +406,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
 
         XCTAssertEqual(outcome.added, 2)
         XCTAssertFalse(outcome.wasBackfill)
-        XCTAssertEqual(outcome.newestNewEpisode?.guid, "c", "Newest new episode is the deep-link target")
+        XCTAssertEqual(outcome.newestNewEpisodeGUID, "c", "Newest new episode is the deep-link target")
     }
 
     func testBackfillRefreshOutcomeIsMarkedBackfill() async throws {
@@ -386,7 +420,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let outcome = try await repo.refresh(shell)
 
         XCTAssertTrue(outcome.wasBackfill, "Migrated-shell backfill must be flagged so it never notifies")
-        XCTAssertNil(outcome.newestNewEpisode)
+        XCTAssertNil(outcome.newestNewEpisodeGUID)
     }
 
     func testRefreshAllSurfacesNotificationOnlyForEnabledPodcastsWithNewEpisodes() async throws {

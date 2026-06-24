@@ -55,7 +55,7 @@ enum BackgroundFeedRefresher {
     static func runRefresh(
         container: ModelContainer,
         force: Bool = false,
-        isCancelled: @escaping () -> Bool = { Task.isCancelled },
+        isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         notifier: NotificationService = NotificationService()
     ) async -> Bool {
         let context = container.mainContext

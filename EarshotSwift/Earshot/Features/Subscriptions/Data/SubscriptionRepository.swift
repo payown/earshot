@@ -3,11 +3,19 @@ import SwiftData
 
 /// Abstraction over feed fetching so the repository can be tested without
 /// hitting the network. ``FeedService`` is the production implementation.
-protocol FeedFetching {
+///
+/// `Sendable` so a fetcher can be handed to ``FeedRefreshActor`` (a
+/// `@ModelActor` on a background executor) and used there off the main thread.
+/// The production `FeedService` is a value type and trivially `Sendable`; test
+/// doubles adopt `@unchecked Sendable`.
+protocol FeedFetching: Sendable {
     func fetch(_ urlString: String) async throws -> ParsedFeed
 }
 
-extension FeedService: FeedFetching {}
+// `FeedService: FeedFetching` is declared in FeedService.swift (same file as the
+// type) because `FeedFetching` refines `Sendable`: Swift 6 requires a `Sendable`
+// conformance to live in the type's own source file so the compiler can verify
+// every stored property is itself `Sendable`.
 
 /// Abstraction over episode downloading so tests can assert download calls
 /// without hitting the network or filesystem. ``DownloadManager`` satisfies
@@ -22,14 +30,21 @@ extension DownloadManager: EpisodeDownloading {}
 /// new (non-future, newer-than-the-mark) episodes inserted; `wasBackfill` is
 /// true when the refresh took a backfill path (first-subscribe / migrated-shell
 /// catalog seed) where the inserted episodes are pre-existing catalog and must
-/// NOT trigger a new-episode notification (#72). `newestNewEpisode` is the
-/// newest of the genuinely-new episodes, used as the deep-link / action target.
-struct RefreshOutcome {
+/// NOT trigger a new-episode notification (#72). `newestNewEpisodeGUID` is the
+/// guid of the newest genuinely-new episode, used as the deep-link / action
+/// target.
+///
+/// `Sendable` — it carries only value types (a guid string, never a `@Model`
+/// `Episode`), so it can be returned from ``FeedRefreshActor`` across the actor
+/// boundary without dragging a SwiftData object onto another executor. (This
+/// also clears the swift6 baseline flag on the old `static let backfill` of a
+/// non-Sendable type.)
+struct RefreshOutcome: Sendable {
     var added: Int
     var wasBackfill: Bool
-    var newestNewEpisode: Episode?
+    var newestNewEpisodeGUID: String?
 
-    static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisode: nil)
+    static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisodeGUID: nil)
 }
 
 /// Owns subscribe and refresh logic for podcasts. Views call into this instead
@@ -39,7 +54,14 @@ final class SubscriptionRepository {
     private let context: ModelContext
     private let feed: FeedFetching
     private let downloader: EpisodeDownloading?
-    private let queue: QueueRepository?
+
+    /// Whether auto-queue enrollment is active. Preserves the old `queue != nil`
+    /// gate: with no queue repository injected, an `autoQueue` podcast's new
+    /// episodes fall back to the inbox instead of being enqueued. The actual
+    /// enqueue now runs inside ``FeedRefreshActor`` on its background context (the
+    /// main-actor `QueueRepository` can't run there), so only the capability flag
+    /// is carried — not the repository itself.
+    private let autoQueueEnabled: Bool
 
     init(
         context: ModelContext,
@@ -50,7 +72,7 @@ final class SubscriptionRepository {
         self.context = context
         self.feed = feed
         self.downloader = downloader
-        self.queue = queue
+        self.autoQueueEnabled = queue != nil
     }
 
     /// Subscribes to a feed URL. If already subscribed, returns the existing
@@ -61,51 +83,52 @@ final class SubscriptionRepository {
     /// If a `downloader` was provided at init, auto-downloads the N most recent
     /// episodes where N = the global `autoDownloadCount` setting (default 3).
     /// Download failures are logged and do not roll back the subscription.
+    ///
+    /// The feed fetch, RSS parse, per-episode inserts, and save all run on
+    /// ``FeedRefreshActor`` (a background `@ModelActor`), never the main thread,
+    /// so an OPML import or a single add doesn't starve VoiceOver (the same fix
+    /// applied to refresh, #382). Only `Sendable` identifiers cross back; the
+    /// returned `Podcast` is then re-fetched on the main context so callers
+    /// (`OPMLImportService` folder membership, `AddFeedView`, search) hold a valid
+    /// main-context object.
     @discardableResult
     func subscribe(feedURL: String) async throws -> Podcast {
         let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if let existing = podcast(forFeedURL: trimmed) { return existing }
 
-        let parsed = try await feed.fetch(trimmed)
-        let podcast = Podcast(
-            feedURL: trimmed,
-            title: parsed.title.isEmpty ? "Untitled podcast" : parsed.title,
-            author: parsed.author,
-            podcastDescription: parsed.description,
-            artworkURL: parsed.artworkURL,
-            websiteURL: parsed.websiteURL,
-            language: parsed.language,
-            category: parsed.category
-        )
-        context.insert(podcast)
+        // Hand the fetch/parse/insert/save to the background actor (off the main
+        // thread). It returns only Sendable PersistentIdentifiers.
+        let actor = FeedRefreshActor(modelContainer: context.container)
+        let result = try await actor.subscribe(feedURL: trimmed, feed: feed)
 
-        var insertedEpisodes: [Episode] = []
-        for item in parsed.episodes {
-            let episode = makeEpisode(from: item)
-            episode.podcast = podcast
-            episode.inboxDismissed = true // pre-dismiss backlog on subscribe
-            context.insert(episode)
-            insertedEpisodes.append(episode)
+        // Pull the background context's writes into the main context so the
+        // re-fetch below resolves the freshly-inserted podcast and episodes.
+        mergeBackgroundWrites()
+
+        // Re-fetch the podcast on the main context by its persistentModelID so the
+        // returned object is a valid main-context `Podcast` for callers. If the
+        // feed already existed (actor early return) it was caught above, but guard
+        // anyway: fall back to a feed-URL lookup so we never return a stale object.
+        guard let podcast = self.podcast(forPersistentID: result.podcastID)
+            ?? self.podcast(forFeedURL: trimmed)
+        else {
+            throw SubscriptionError.podcastNotFoundAfterSubscribe
         }
-        // Seed the high-water mark to the newest NON-FUTURE pub date so a misdated
-        // future episode can't push the mark ahead of real new episodes (#296).
-        let now = Date.now
-        podcast.lastSeenPubDate = latestNonFuturePubDate(parsed.episodes, now: now) ?? now
-        podcast.refreshedAt = now
-        try context.save()
-        AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsed.episodes.count) episodes")
 
-        // Auto-download the N most recent episodes (global setting; 0 = off).
-        // Runs after save so episodes are persisted before the download task begins.
-        // Errors from individual downloads are swallowed here -- the download
-        // manager already logs and marks the episode .failed.
-        if let downloader {
+        // Auto-download the N most recent episodes (global setting; 0 = off). The
+        // downloader is @MainActor and needs main-context `Episode`s, so re-fetch
+        // the inserted episodes by ID HERE (never inside the actor), sort newest
+        // first, and enqueue the top N. Errors from individual downloads are
+        // swallowed -- the download manager already logs and marks the episode
+        // .failed -- and never roll back the subscription.
+        if let downloader, !result.episodeIDs.isEmpty {
             let count = AppSettingsStore(context: context).int(
                 SettingsKey.autoDownloadCount,
                 default: SettingsDefault.autoDownloadCount
             )
             if count > 0 {
-                let toDownload = insertedEpisodes
+                let toDownload = result.episodeIDs
+                    .compactMap { episode(forPersistentID: $0) }
                     .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
                     .prefix(count)
                 for episode in toDownload {
@@ -124,91 +147,30 @@ final class SubscriptionRepository {
     /// Episodes newer than the high-water mark surface in the inbox; older ones
     /// are pre-dismissed. The high-water mark then advances to the newest seen.
     ///
-    /// If the podcast has `autoQueue = true` and a `queue` was provided at init,
-    /// genuinely new episodes (newer than the high-water mark and not future-dated)
-    /// are enrolled directly into the play queue instead of the inbox.
+    /// If the podcast has `autoQueue = true`, genuinely new episodes (newer than
+    /// the high-water mark and not future-dated) are enrolled directly into the
+    /// play queue instead of the inbox.
+    ///
+    /// The fetch, RSS parse, diff, and DB writes all run on ``FeedRefreshActor``
+    /// (a background `@ModelActor`), never the main thread, so VoiceOver isn't
+    /// starved during a refresh (#382). Only the lightweight ``RefreshOutcome``
+    /// (value type) crosses back. After the background save, the main context is
+    /// re-read so callers holding `podcast` see the new episodes.
     @discardableResult
     func refresh(_ podcast: Podcast) async throws -> RefreshOutcome {
-        let parsed = try await feed.fetch(podcast.feedURL)
-        let now = Date.now
-
-        // First refresh of a freshly-migrated shell (no episodes AND no high-water
-        // mark): backfill the whole catalog pre-dismissed and seed the mark, so the
-        // inbox starts empty and only future episodes surface later -- mirroring
-        // subscribe. Guarded on episodes.isEmpty so a normally-subscribed podcast
-        // (which always has a mark) never takes this path.
-        if podcast.episodes.isEmpty && podcast.lastSeenPubDate == nil {
-            for item in parsed.episodes {
-                let episode = makeEpisode(from: item)
-                episode.podcast = podcast
-                episode.inboxDismissed = true
-                context.insert(episode)
-            }
-            podcast.lastSeenPubDate = latestNonFuturePubDate(parsed.episodes, now: now) ?? now
-            podcast.refreshedAt = now
-            try context.save()
-            AppLog.subscriptions.info("Backfilled \(podcast.title, privacy: .public): \(parsed.episodes.count) episode(s)")
-            // Backfill: pre-existing catalog, never a notification target (#72).
-            return .backfill
+        let feedURL = podcast.feedURL
+        let actor = FeedRefreshActor(modelContainer: context.container)
+        guard let outcome = try await actor.refreshOne(
+            feedURL: feedURL, feed: feed, autoQueueEnabled: autoQueueEnabled
+        ) else {
+            // The podcast vanished between fetch and refresh; nothing to report.
+            return RefreshOutcome(added: 0, wasBackfill: false, newestNewEpisodeGUID: nil)
         }
-
-        let existingGUIDs = Set(podcast.episodes.map(\.guid))
-        // Clamp an already-future mark back to now so a previously-poisoned mark
-        // can't keep real new episodes out of the inbox (#296).
-        let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
-        var added = 0
-        var autoQueued: [Episode] = []
-        // Track the newest genuinely-new episode so a notification can deep-link
-        // and the actions ("Add to queue" / "Play now") have a concrete target (#72).
-        var newestNew: Episode?
-        var newestNewPub = Date.distantPast
-
-        for item in parsed.episodes where !existingGUIDs.contains(item.guid) {
-            let episode = makeEpisode(from: item)
-            episode.podcast = podcast
-            let pub = item.pubDate ?? .distantPast
-            // New = newer than the mark AND not future-dated (#296).
-            let isNewEpisode = pub > mark && pub <= now
-            if isNewEpisode && pub >= newestNewPub {
-                newestNew = episode
-                newestNewPub = pub
-            }
-            if isNewEpisode && podcast.autoQueue && queue != nil {
-                // Auto-queue: keep out of inbox; the queue.add() call below sets
-                // status = .inQueue. inboxDismissed = true ensures the episode
-                // never surfaces in the inbox even if it is later removed from
-                // the queue (which would reset status to .newEpisode).
-                episode.inboxDismissed = true
-                context.insert(episode)
-                autoQueued.append(episode)
-            } else {
-                episode.inboxDismissed = !isNewEpisode
-                context.insert(episode)
-            }
-            added += 1
-        }
-
-        // Advance the mark to the newest non-future pub date; never retreat, never
-        // to a future date (#296).
-        podcast.lastSeenPubDate = max(mark, latestNonFuturePubDate(parsed.episodes, now: now) ?? mark)
-        podcast.refreshedAt = now
-        try context.save()
-
-        // Enqueue auto-queue episodes after save so they have persistent IDs.
-        if let queue, !autoQueued.isEmpty {
-            for episode in autoQueued {
-                queue.add(episode)
-            }
-            AppLog.subscriptions.info(
-                "Auto-queue: enrolled \(autoQueued.count) episode(s) for \(podcast.title, privacy: .public)"
-            )
-        }
-
-        if added > 0 {
-            AppLog.subscriptions.info("Refreshed \(podcast.title, privacy: .public): \(added) new episode(s)")
-        }
-
-        return RefreshOutcome(added: added, wasBackfill: false, newestNewEpisode: newestNew)
+        // Pull the background context's writes into the main context so a caller
+        // holding `podcast` (e.g. EpisodeListView, the tests) observes the new
+        // episodes and advanced high-water mark immediately.
+        mergeBackgroundWrites()
+        return outcome
     }
 
     /// Refreshes every subscription, logging and continuing past individual
@@ -220,44 +182,65 @@ final class SubscriptionRepository {
     /// feed issuing fetches that immediately cancel. Defaults to `Task.isCancelled`.
     @discardableResult
     func refreshAll(
-        isCancelled: @escaping () -> Bool = { Task.isCancelled },
+        isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
     ) async -> [NewEpisodeNotification] {
-        let all = (try? context.fetch(FetchDescriptor<Podcast>())) ?? []
-        let total = all.count
+        // Hand the whole per-feed loop — fetch, parse, diff, insert, save — to a
+        // background `@ModelActor` so none of it runs on the main thread and
+        // starves VoiceOver (#382). The actor returns lightweight value-type
+        // results; only the cheap progress callback hops back to the main actor.
+        let actor = FeedRefreshActor(modelContainer: context.container)
+        let progress = onProgress
+        let results = await actor.refreshAll(
+            feed: feed,
+            autoQueueEnabled: autoQueueEnabled,
+            isCancelled: isCancelled,
+            onProgress: { completed, total in
+                progress?(completed, total)
+            }
+        )
+
+        // Pull the background context's writes into the main context so the UI
+        // (and any held `Podcast`/`Episode` objects) reflect the refresh.
+        mergeBackgroundWrites()
+
+        // Build notifications from value-type results only — no `@Model` crossed
+        // the actor boundary. Only notification-enabled podcasts with genuinely-new
+        // episodes (never a backfill pass) earn a notification (#72).
         var notifications: [NewEpisodeNotification] = []
-        for (index, podcast) in all.enumerated() {
-            guard !isCancelled() else {
-                AppLog.subscriptions.info("refreshAll stopped early (cancelled) after \(index) of \(total)")
-                return notifications
-            }
-            do {
-                let outcome = try await refresh(podcast)
-                // Only notification-enabled podcasts with genuinely-new episodes
-                // (never a backfill pass) earn a notification (#72).
-                if NewEpisodeNotificationDecision.shouldNotify(
-                    notificationEnabled: podcast.notificationEnabled ?? false,
-                    addedCount: outcome.added,
-                    wasBackfill: outcome.wasBackfill
-                ), let target = outcome.newestNewEpisode {
-                    notifications.append(
-                        NewEpisodeNotification(
-                            podcastFeedURL: podcast.feedURL,
-                            episodeGUID: target.guid,
-                            podcastTitle: podcast.title,
-                            newEpisodeCount: outcome.added
-                        )
-                    )
-                }
-            } catch {
-                AppLog.subscriptions.error("Refresh failed for \(podcast.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            }
-            onProgress?(index + 1, total)
+        for result in results {
+            guard NewEpisodeNotificationDecision.shouldNotify(
+                notificationEnabled: result.notificationEnabled,
+                addedCount: result.outcome.added,
+                wasBackfill: result.outcome.wasBackfill
+            ), let guid = result.outcome.newestNewEpisodeGUID else { continue }
+            notifications.append(
+                NewEpisodeNotification(
+                    podcastFeedURL: result.feedURL,
+                    episodeGUID: guid,
+                    podcastTitle: result.podcastTitle,
+                    newEpisodeCount: result.outcome.added
+                )
+            )
         }
         return notifications
     }
 
     // MARK: Helpers
+
+    /// Re-reads the store on the main context after ``FeedRefreshActor`` saved on
+    /// its background context, so the main context (and any `Podcast`/`Episode`
+    /// the caller holds) reflect the freshly-inserted episodes and advanced marks.
+    ///
+    /// SwiftData propagates another context's save to the main context, but a
+    /// `Podcast.episodes` array already materialized before the background save
+    /// can stay stale until something re-faults it. An explicit fetch over both
+    /// types forces that re-fault deterministically — cheap relative to the
+    /// network refresh it follows.
+    private func mergeBackgroundWrites() {
+        _ = try? context.fetch(FetchDescriptor<Podcast>())
+        _ = try? context.fetch(FetchDescriptor<Episode>())
+    }
 
     private func podcast(forFeedURL url: String) -> Podcast? {
         var descriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.feedURL == url })
@@ -265,26 +248,30 @@ final class SubscriptionRepository {
         return (try? context.fetch(descriptor))?.first
     }
 
-    private func makeEpisode(from item: ParsedEpisode) -> Episode {
-        Episode(
-            guid: item.guid,
-            title: item.title,
-            audioURL: item.audioURL,
-            episodeDescription: item.description,
-            durationSeconds: item.durationSeconds,
-            pubDate: item.pubDate,
-            artworkURL: item.artworkURL,
-            episodeNumber: item.episodeNumber,
-            seasonNumber: item.seasonNumber,
-            chapterURL: item.chapterURL,
-            transcriptURL: item.transcriptURL
-        )
+    /// Resolves a podcast on the MAIN context from an identifier the background
+    /// actor returned, so callers receive a valid main-context object instead of
+    /// one bound to a background `ModelContext`. Uses a predicate fetch (not
+    /// `ModelContext.model(for:)`, which traps on a missing ID) so a vanished row
+    /// returns nil rather than crashing.
+    private func podcast(forPersistentID id: PersistentIdentifier) -> Podcast? {
+        var descriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.persistentModelID == id })
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
     }
 
-    /// The newest episode pub date that is not in the future, or nil if none.
-    /// Future-dated items are excluded so a misdated episode can't advance the
-    /// inbox high-water mark and silently strand later real episodes (#296).
-    private func latestNonFuturePubDate(_ episodes: [ParsedEpisode], now: Date) -> Date? {
-        episodes.compactMap(\.pubDate).filter { $0 <= now }.max()
+    /// Resolves an episode on the MAIN context from a background-actor identifier,
+    /// so the @MainActor downloader enqueues against a main-context `Episode`.
+    private func episode(forPersistentID id: PersistentIdentifier) -> Episode? {
+        var descriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.persistentModelID == id })
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
     }
+}
+
+/// Errors surfaced by ``SubscriptionRepository``.
+enum SubscriptionError: Error {
+    /// The background actor reported a successful subscribe, but the podcast could
+    /// not be resolved on the main context afterward (should not happen in
+    /// practice — guards a stale/missing re-fetch instead of force-unwrapping).
+    case podcastNotFoundAfterSubscribe
 }
