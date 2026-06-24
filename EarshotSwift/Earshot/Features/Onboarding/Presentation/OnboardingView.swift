@@ -21,6 +21,10 @@ struct OnboardingView: View {
     private let pages = OnboardingContent.pages
     private var isLastPage: Bool { pageIndex == pages.count - 1 }
     private var hasPodcast: Bool { !podcasts.isEmpty }
+    /// The page currently shown. `pageIndex` is the page's `id`, which equals its
+    /// array index here, but look it up by `id` so the gate stays correct even if
+    /// pages are ever reordered.
+    private var currentPage: OnboardingPage? { pages.first { $0.id == pageIndex } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -145,6 +149,14 @@ struct OnboardingView: View {
                 Text("^[\(podcasts.count) podcast](inflect: true) added")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            } else {
+                // Explains why Next is disabled and points to the way out (Skip),
+                // so the gate never reads as a dead end. Plain text, read in
+                // logical order right after the add actions.
+                Text("Add a podcast above, or tap Skip to continue.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
         }
         .padding(.top, Spacing.md)
@@ -170,6 +182,7 @@ struct OnboardingView: View {
                 .disabled(!hasPodcast)
                 .accessibilityHint(hasPodcast ? "" : "Add a podcast first to continue.")
             } else {
+                let nextEnabled = currentPage?.isNextEnabled(hasPodcast: hasPodcast) ?? true
                 Button {
                     withAnimation(Motion.preferred(.default)) { pageIndex += 1 }
                     focusedPage = pageIndex
@@ -178,6 +191,8 @@ struct OnboardingView: View {
                         .frame(minWidth: 100)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!nextEnabled)
+                .accessibilityHint(nextEnabled ? "" : "Add a podcast above first, or use Skip to continue.")
             }
         }
         .padding(Spacing.lg)

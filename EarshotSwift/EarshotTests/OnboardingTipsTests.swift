@@ -17,6 +17,27 @@ final class OnboardingContentTests: XCTestCase {
         XCTAssertEqual(addPages.count, 1)
         XCTAssertEqual(addPages.first?.title, "Add your first podcast")
     }
+
+    /// The add-podcast page's Next is disabled until a podcast exists, and enabled
+    /// once one does. This is the gate ``OnboardingView`` applies to its Next button.
+    func testAddPodcastPageGatesNextOnHavingAPodcast() throws {
+        let page = try XCTUnwrap(OnboardingContent.pages.first(where: \.isAddPodcast))
+        // Empty library: Next is gated.
+        XCTAssertFalse(page.isNextEnabled(hasPodcast: false))
+        // After adding at least one podcast: Next unlocks.
+        XCTAssertTrue(page.isNextEnabled(hasPodcast: true))
+    }
+
+    /// Every non-add page keeps Next enabled regardless of whether a podcast exists,
+    /// so the gate is specific to the add-podcast page only.
+    func testNonAddPagesAlwaysEnableNext() {
+        for page in OnboardingContent.pages where !page.isAddPodcast {
+            XCTAssertTrue(page.isNextEnabled(hasPodcast: false),
+                          "Page \(page.id) should enable Next with no podcasts")
+            XCTAssertTrue(page.isNextEnabled(hasPodcast: true),
+                          "Page \(page.id) should enable Next with a podcast")
+        }
+    }
 }
 
 final class TipsEncodingTests: XCTestCase {

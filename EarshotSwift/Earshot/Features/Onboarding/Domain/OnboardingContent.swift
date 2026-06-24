@@ -10,6 +10,20 @@ struct OnboardingPage: Identifiable, Equatable {
     var isAddPodcast: Bool = false
 }
 
+extension OnboardingPage {
+    /// Whether the "Next" button should be enabled on this page.
+    ///
+    /// Every page enables Next except the add-podcast page, which is gated until
+    /// the user has added at least one podcast (search-subscribe, RSS add, or OPML
+    /// import). "Skip" stays available on every page regardless, so a user who
+    /// doesn't want to add a podcast yet is never trapped. Pure and side-effect
+    /// free so it can be unit-tested without instantiating the view.
+    func isNextEnabled(hasPodcast: Bool) -> Bool {
+        guard isAddPodcast else { return true }
+        return hasPodcast
+    }
+}
+
 /// The seven onboarding pages, the same for everyone (PRD 6). Mirrors the
 /// Flutter onboarding copy.
 enum OnboardingContent {
