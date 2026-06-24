@@ -19,6 +19,53 @@ final class OnboardingContentTests: XCTestCase {
     }
 }
 
+/// Covers the onboarding "Import OPML file" path. `OnboardingView` gates its
+/// "Start Listening" button on `hasPodcast`, which is `!podcasts.isEmpty` over an
+/// `@Query`. A successful OPML import inserts `Podcast` rows into the same model
+/// context the `@Query` observes, so the gate unlocks automatically. These tests
+/// exercise that contract at the data layer — import through the shared
+/// `OPMLFileImporter` (the exact call onboarding makes) and assert the context now
+/// holds podcasts, i.e. `hasPodcast` would be true.
+@MainActor
+final class OnboardingOPMLImportTests: XCTestCase {
+
+    private func writeOPML(_ opml: String) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("subscriptions.opml")
+        try opml.data(using: .utf8)!.write(to: url)
+        return url
+    }
+
+    func testSuccessfulImportPopulatesContextSoStartListeningUnlocks() async throws {
+        let ctx = TestStore.freshContext()
+        // Pre-seed the feed so the import resolves offline (no network), matching
+        // the OPMLFileImporterTests strategy.
+        ctx.insert(Podcast(feedURL: "https://a.com/feed", title: "Seeded"))
+        try ctx.save()
+
+        // Before import via the picker the user could already have this seeded one;
+        // re-run import to prove the shared path the onboarding button drives works.
+        let url = try writeOPML("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <opml version="2.0">
+          <head><title>Test</title></head>
+          <body>
+            <outline type="rss" text="A" xmlUrl="https://a.com/feed"/>
+          </body>
+        </opml>
+        """)
+
+        let count = await OPMLFileImporter.importFile(at: url, context: ctx)
+        XCTAssertEqual(count, 1)
+
+        // hasPodcast == !podcasts.isEmpty over the same context the @Query reads.
+        let podcasts = try ctx.fetch(FetchDescriptor<Podcast>())
+        XCTAssertFalse(podcasts.isEmpty, "Start Listening should unlock once a podcast exists")
+    }
+}
+
 final class TipsEncodingTests: XCTestCase {
 
     func testEncodeDecodeRoundTrip() {

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 /// The seven-screen onboarding flow, shown once on first launch. Same for
 /// everyone (PRD 6). The "Add your first podcast" page hosts Search/Add, and the
@@ -7,11 +8,13 @@ import SwiftData
 struct OnboardingView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
     @Query private var podcasts: [Podcast]
 
     @State private var pageIndex = 0
     @State private var showingAdd = false
     @State private var showingSearch = false
+    @State private var importingOPML = false
     @AccessibilityFocusState private var focusedPage: Int?
 
     private let pages = OnboardingContent.pages
@@ -37,6 +40,17 @@ struct OnboardingView: View {
         .sheet(isPresented: $showingAdd) { AddFeedView() }
         .sheet(isPresented: $showingSearch) {
             NavigationStack { SearchView() }
+        }
+        // Reuses the same shared import pipeline as Settings and the share sheet:
+        // read + security-scope + import + announce all live in OPMLFileImporter,
+        // so every entry point behaves identically. A successful import inserts
+        // podcasts, which @Query observes — hasPodcast flips and "Start Listening"
+        // unlocks with no extra wiring.
+        .fileImporter(
+            isPresented: $importingOPML,
+            allowedContentTypes: [UTType(filenameExtension: "opml") ?? .xml, .xml]
+        ) { result in
+            handleImport(result)
         }
     }
 
@@ -104,6 +118,14 @@ struct OnboardingView: View {
             }
             .buttonStyle(.bordered)
 
+            Button {
+                importingOPML = true
+            } label: {
+                Label("Import OPML file", systemImage: "square.and.arrow.down")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+
             if hasPodcast {
                 Text("^[\(podcasts.count) podcast](inflect: true) added")
                     .font(.footnote)
@@ -150,5 +172,20 @@ struct OnboardingView: View {
         settings.onboardingComplete = true
         Announcer.announce("Onboarding complete. Welcome to Earshot.")
         dismiss()
+    }
+
+    /// Routes a picked OPML file through the shared importer. On `.success`, the
+    /// importer reads + security-scopes + imports + announces the outcome (so
+    /// there's no duplicate announcement here). On `.failure`, log and stay put —
+    /// a picker error must never crash onboarding.
+    private func handleImport(_ result: Result<URL, Error>) {
+        switch result {
+        case let .success(url):
+            Task {
+                await OPMLFileImporter.importFile(at: url, context: context)
+            }
+        case let .failure(error):
+            AppLog.data.error("Onboarding OPML import picker failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }
