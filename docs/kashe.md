@@ -144,11 +144,11 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   Settings > Data "Import older data" row (status plus on-demand re-import) and
   valued having a recovery door she controls rather than waiting in the dark
   (Chapter 23)
-- The woman on her Tuesday route has a sister; Kashe helped the sister bring a
-  large years-old library into Earshot via OPML from the share sheet, and for
-  once the import was the easy part (clean progress screen, no VoiceOver flood);
-  the highest review in Kashe's world is a tech-helped person who doesn't text
-  her with a problem afterward (Chapter 24)
+- Kashe finally moved her own years-old backlog into Earshot via OPML from the
+  share sheet; for once the import was the easy part (clean progress screen with
+  a running count, no VoiceOver flood), and the inbox already had the most recent
+  few episodes of each imported show waiting, so she had something to play right
+  away instead of an empty hallway after a big import (Chapter 24)
 - Kashe prefers the word "Follow" over "Subscribe" for what she does with shows:
   keeping an ear out, not signing a contract (Chapter 24)
 
@@ -698,25 +698,29 @@ We changed how your saved place is handled this build, so upgrading won't move i
 
 ### Chapter 24 — Build 122
 
-*The woman on Kashe's Tuesday route gets a sister into Earshot, and for once the part Kashe dreaded is the easy part.*
+*Kashe finally moves her own backlog into Earshot, braces for the worst part, and finds something already waiting for her on the other side.*
 
-The sister had a list. A long one. Years of shows in some other app, the kind of library you build when you never delete anything, which Kashe respected because it's her whole personality too.
+Kashe had a list she'd never moved. Years of shows in the app she used before this one, the kind of library you build when you never delete anything. She knows that's a problem. It's also her whole personality, so she's made her peace with it.
 
-She'd done this before. She knew the shape of it. Get the file out of the old app, get it into Earshot, then sit through the long part where the screen does something and VoiceOver tries to keep up and mostly trips over itself. A hundred shows announcing themselves one after another while she waits to find out if any of it took.
+She'd put off bringing it over because she knew the shape of the bad part. Get the file out of the old app, get it into Earshot, then sit through the stretch where the screen does something and VoiceOver tries to keep up and mostly trips over itself. A hundred shows announcing themselves one after another while she waits to find out if any of it took.
 
-This time she opened the file and there Earshot was in the share sheet, no detour. She picked it. And instead of the usual scramble, the app just told her where it was: importing, this many of that many, a clean line she could check and move past. No flood. No stutter. When it finished, it said so, plainly, and the shows were there.
+This time she opened the file and there Earshot was in the share sheet, no detour. She picked it. And instead of the usual scramble, the app just told her where it was. Importing, this many of that many, one clean line she could check and move past. No flood. No stutter. When it finished, it said so plainly, and the shows were all there.
 
-She poked at the rest while she had it open. Started typing the name of a show the sister had mentioned, one that wasn't on the list, and the results were already filling in before she'd finished the word. That used to mean a pause, a held breath, a wonder whether it had heard her. Now it just kept up.
+Then came the part she didn't expect. She opened her inbox bracing for nothing, that empty hallway you get right after a big import, all those shows and not one thing to actually play. Go dig, the old apps used to say. Instead the inbox already had something in it. The last few episodes of each show she'd just brought over, sitting there, ready. She'd moved her whole library and landed on something she could press play on right then, in the car, before her first client.
+
+She poked at the rest while she had it open. Started typing the name of a show that wasn't on her old list, one she'd been meaning to find, and the results were filling in before she'd finished the word. That used to mean a pause, a held breath, a wonder whether it had heard her. Now it just kept up.
 
 One small thing made her smile. The button doesn't say Subscribe anymore. It says Follow. She'd never minded Subscribe, exactly. But Follow is the truer word for what she actually does, which is keep an ear out, not sign a contract. Small thing. Right word.
 
-The sister got her whole library across in one sitting and didn't text Kashe once with a problem. Which, in Kashe's world, is the highest review there is.
+She didn't text Renata about any of it. She just had something playing, which is the whole point.
 
 **What to test:**
 
 If you have an OPML file from another podcast app, open it and choose Earshot from the share sheet. You should see a clean progress screen with a running count, this many of that many, instead of the screen freezing or VoiceOver stuttering through every show. When it finishes, it should tell you how many came in.
 
-If you are new and setting up, look for the option to bring your shows in by OPML right during onboarding, before you've added anything by hand.
+After the import finishes, open your inbox. It should already have the most recent few episodes of the shows you brought in, something you can play right away, not an empty inbox you have to go digging through.
+
+If you are new and setting up, look for the option to bring your shows in by OPML right during onboarding, before you've added anything by hand. The same inbox seeding applies, you should land on episodes ready to play, not a blank inbox.
 
 Search for a show by name and watch the results fill in as you type. They should come up fast, without a long pause after each keystroke.
 
