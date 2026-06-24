@@ -95,6 +95,15 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
         }
+        // Share-sheet / "Open in Earshot" for .opml files exported by feed
+        // readers. RootView is always in the tree (onboarding is a cover on top),
+        // so the import runs and announces its count whether the user is
+        // mid-onboarding or on the main tabs — the file is never silently dropped.
+        // Routed through the shared importer so it uses the app's main container
+        // context, exactly as Settings' in-app picker does.
+        .onOpenURL { url in
+            handleIncomingFile(url)
+        }
         // Re-apply audio settings mid-playback when they change (#352).
         .onChange(of: settings.globalSpeed) { _, _ in
             player.reapplyRate()
@@ -264,6 +273,22 @@ struct RootView: View {
             // launch retries, and record the failure for Settings → Data (#429).
             migration.recordImportFailed()
             AppLog.data.error("Migration: episode state restore failed; will retry next launch: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    // MARK: Incoming OPML file (share sheet / Open in)
+
+    /// Handles a file handed to Earshot via the share sheet or "Open in". Only
+    /// acts on `.opml`/`.xml` file URLs (the document types we registered);
+    /// anything else is ignored gracefully. Routes through the shared importer so
+    /// the read + security-scope + import + announce logic is identical to the
+    /// in-app Settings picker, using this view's main container context.
+    private func handleIncomingFile(_ url: URL) {
+        guard url.isFileURL else { return }
+        let ext = url.pathExtension.lowercased()
+        guard ext == "opml" || ext == "xml" else { return }
+        Task {
+            await OPMLFileImporter.importFile(at: url, context: modelContext)
         }
     }
 

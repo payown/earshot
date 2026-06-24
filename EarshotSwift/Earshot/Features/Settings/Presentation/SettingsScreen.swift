@@ -215,16 +215,11 @@ struct SettingsScreen: View {
 
     private func handleImport(_ result: Result<URL, Error>) {
         guard case let .success(url) = result else { return }
-        // Security-scoped access for a user-picked file.
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let opml = try? String(contentsOf: url, encoding: .utf8) else {
-            Announcer.announce("Couldn't read that OPML file")
-            return
-        }
+        // Read + security-scope + import + announce live in one place so the
+        // in-app picker, the share-sheet (onOpenURL), and onboarding all behave
+        // identically (#OPML share sheet).
         Task {
-            let count = await OPMLImportService(context: context).importOPML(opml)
-            Announcer.announce("Imported ^[\(count) podcast](inflect: true)")
+            await OPMLFileImporter.importFile(at: url, context: context)
         }
     }
 
