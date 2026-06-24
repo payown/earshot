@@ -63,16 +63,24 @@ final class SubscriptionRepository {
     /// is carried — not the repository itself.
     private let autoQueueEnabled: Bool
 
+    /// Test-only hook fired each time the main context is reconciled after a
+    /// background save (``mergeBackgroundWrites``). Lets tests assert the bulk
+    /// import path reconciles ONCE per import rather than once per feed — the core
+    /// VoiceOver fix (#440). Nil in production.
+    private let onMerge: (() -> Void)?
+
     init(
         context: ModelContext,
         feed: FeedFetching = FeedService(),
         downloader: EpisodeDownloading? = nil,
-        queue: QueueRepository? = nil
+        queue: QueueRepository? = nil,
+        onMerge: (() -> Void)? = nil
     ) {
         self.context = context
         self.feed = feed
         self.downloader = downloader
         self.autoQueueEnabled = queue != nil
+        self.onMerge = onMerge
     }
 
     /// Subscribes to a feed URL. If already subscribed, returns the existing
@@ -226,6 +234,90 @@ final class SubscriptionRepository {
         return notifications
     }
 
+    /// One feed's outcome from a bulk ``subscribeAll(feedURLs:onProgress:)``, resolved
+    /// back onto the MAIN context: a live `Podcast` the caller can attach folder
+    /// memberships to, plus the `Sendable` episode IDs the @MainActor downloader can
+    /// re-fetch and enqueue. `feedURL` is the (trimmed) URL this came from so the
+    /// caller can map results back to the OPML group it belongs to.
+    struct BulkSubscribeOutcome {
+        let feedURL: String
+        let podcast: Podcast
+        let episodeIDs: [PersistentIdentifier]
+    }
+
+    /// Subscribes to every URL in `feedURLs` in ONE background pass, reconciling the
+    /// main context exactly ONCE afterward — not per feed. This is the bulk OPML
+    /// import path. The old per-feed `subscribe()` merged the entire Podcast +
+    /// Episode tables on the main context once for every feed, and the Library
+    /// `@Query` rebuilt its list and VoiceOver tree on each of those merges, which
+    /// starved VoiceOver during a large import (#440). Doing the whole batch on the
+    /// background actor and merging once removes that per-feed main-thread churn.
+    ///
+    /// Per-feed semantics match the single-feed `subscribe()`: idempotent by feed
+    /// URL, backlog pre-dismissed, #296 future-date clamp, `refreshedAt` stamped,
+    /// and a failing feed logged + skipped (never fatal). `onProgress` fires on the
+    /// main actor after each feed with `(completed, total, currentTitle)` and is kept
+    /// cheap (two ints + an optional String) so it can't reintroduce a stall.
+    ///
+    /// Auto-download is NOT done here — the caller (`OPMLImportService`) runs it once
+    /// at the end against the returned `episodeIDs`, so it too stays off the per-feed
+    /// path. Returns one ``BulkSubscribeOutcome`` per feed that resolved, in input
+    /// order; feeds that threw are absent.
+    func subscribeAll(
+        feedURLs: [String],
+        onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
+    ) async -> [BulkSubscribeOutcome] {
+        guard !feedURLs.isEmpty else { return [] }
+
+        // Hand the whole fetch/parse/insert/save loop to the background actor. It
+        // returns only Sendable PersistentIdentifiers, batching its saves.
+        let actor = FeedRefreshActor(modelContainer: context.container)
+        let results = await actor.subscribeAll(feedURLs: feedURLs, feed: feed, onProgress: onProgress)
+
+        // Reconcile the main context ONCE for the entire batch (the essential fix:
+        // this used to run once per feed).
+        mergeBackgroundWrites()
+
+        // Resolve each result back to a live main-context podcast. A missing
+        // persistentID re-fetch is simply skipped (never force-unwrapped).
+        var outcomes: [BulkSubscribeOutcome] = []
+        for result in results {
+            guard let podcast = self.podcast(forPersistentID: result.podcastID) else { continue }
+            outcomes.append(
+                BulkSubscribeOutcome(
+                    feedURL: podcast.feedURL,
+                    podcast: podcast,
+                    episodeIDs: result.episodeIDs
+                )
+            )
+        }
+        return outcomes
+    }
+
+    /// Auto-downloads the N most recent episodes (global `autoDownloadCount`; 0 =
+    /// off) for each episode-ID set, re-fetching them on the MAIN context (the
+    /// downloader is @MainActor and needs main-context `Episode`s). Used by the bulk
+    /// OPML path to run auto-download ONCE at the end rather than per feed. No-op
+    /// when no downloader was injected — preserving the OPML path's existing
+    /// behavior, which has never had a downloader.
+    func autoDownloadRecent(episodeIDsPerPodcast: [[PersistentIdentifier]]) async {
+        guard let downloader, !episodeIDsPerPodcast.isEmpty else { return }
+        let count = AppSettingsStore(context: context).int(
+            SettingsKey.autoDownloadCount,
+            default: SettingsDefault.autoDownloadCount
+        )
+        guard count > 0 else { return }
+        for episodeIDs in episodeIDsPerPodcast where !episodeIDs.isEmpty {
+            let toDownload = episodeIDs
+                .compactMap { episode(forPersistentID: $0) }
+                .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+                .prefix(count)
+            for episode in toDownload {
+                await downloader.download(episode)
+            }
+        }
+    }
+
     // MARK: Helpers
 
     /// Re-reads the store on the main context after ``FeedRefreshActor`` saved on
@@ -240,6 +332,7 @@ final class SubscriptionRepository {
     private func mergeBackgroundWrites() {
         _ = try? context.fetch(FetchDescriptor<Podcast>())
         _ = try? context.fetch(FetchDescriptor<Episode>())
+        onMerge?()
     }
 
     private func podcast(forFeedURL url: String) -> Podcast? {

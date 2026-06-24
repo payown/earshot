@@ -207,6 +207,80 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).filter { $0.guid == "b" }.count, 3)
     }
 
+    // MARK: subscribeAll (bulk OPML path)
+
+    /// Bulk subscribe inserts every feed's podcast + backlog on the actor's own
+    /// background context, returns one result per feed in input order, and reports
+    /// progress with increasing completed counts up to total.
+    func testActorSubscribeAllInsertsEveryFeedAndReportsProgress() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1), parsedEpisode("b", d2)]))
+        let urls = (0..<12).map { "https://x/feed\($0).xml" } // > saveBatchSize (10) to exercise batching
+        let recorder = ProgressBox()
+
+        let results = await actor.subscribeAll(
+            feedURLs: urls,
+            feed: fetcher,
+            onProgress: { completed, total, _ in
+                recorder.calls += 1
+                recorder.lastCompleted = completed
+                recorder.lastTotal = total
+            }
+        )
+
+        XCTAssertEqual(results.count, 12)
+        XCTAssertTrue(results.allSatisfy { !$0.alreadySubscribed })
+        XCTAssertEqual(recorder.calls, 12)
+        XCTAssertEqual(recorder.lastCompleted, 12)
+        XCTAssertEqual(recorder.lastTotal, 12)
+        // Read back through a fresh context: all 12 podcasts persisted (batched saves).
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<Podcast>()).count, 12)
+        XCTAssertEqual(try episodes(container).count, 24)
+    }
+
+    /// A feed that throws is logged and skipped — the rest of the batch still
+    /// subscribes and the result array omits the failed feed.
+    func testActorSubscribeAllSkipsFailingFeedAndContinues() async throws {
+        final class FlakyFeed: FeedFetching, @unchecked Sendable {
+            let good: ParsedFeed
+            init(_ good: ParsedFeed) { self.good = good }
+            func fetch(_ urlString: String) async throws -> ParsedFeed {
+                if urlString.contains("bad") { throw URLError(.badServerResponse) }
+                return good
+            }
+        }
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FlakyFeed(parsedFeed([parsedEpisode("a", d1)]))
+
+        let results = await actor.subscribeAll(
+            feedURLs: ["https://x/good1.xml", "https://x/bad.xml", "https://x/good2.xml"],
+            feed: fetcher
+        )
+
+        XCTAssertEqual(results.count, 2, "Only the two good feeds resolved")
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<Podcast>()).count, 2)
+    }
+
+    /// Idempotency: a URL already subscribed returns `alreadySubscribed` and never
+    /// double-inserts.
+    func testActorSubscribeAllIsIdempotentByFeedURL() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1)]))
+
+        _ = await actor.subscribeAll(feedURLs: ["https://x/feed.xml"], feed: fetcher)
+        let second = await actor.subscribeAll(
+            feedURLs: ["https://x/feed.xml", "https://x/feed2.xml"], feed: fetcher
+        )
+
+        let already = second.filter { $0.alreadySubscribed }
+        XCTAssertEqual(already.count, 1, "The re-imported URL is already subscribed")
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<Podcast>()).count, 2)
+        XCTAssertEqual(try episodes(container).count, 2, "No duplicate episode rows")
+    }
+
     /// Cancellation before the first feed processes nothing.
     func testActorRefreshAllCancelledImmediatelyDoesNothing() async throws {
         let container = cleanContainer()

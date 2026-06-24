@@ -249,6 +249,29 @@ The SwiftUI side is built and waiting.
   decorative (`accessibilityHidden`) success/failure icon with text that states the
   outcome — color is never the only signal. Status→string logic is kept in the pure
   `ImportStatusText` enum so it's unit-testable without a view. **Issue:** #429.
+
+- **Bulk OPML import shows a determinate progress screen over the active tab.**
+  A `@MainActor @Observable OPMLImportProgress` (`start` / `advance` / `finish`,
+  `isImporting` / `completed` / `total` / `currentTitle`) is provided once from
+  `EarshotApp` via `.environment(...)` — the same single-shared-instance pattern as
+  `MigrationImportState` / `SettingsStore`. Every OPML entry point reads it from the
+  environment and passes it to `OPMLFileImporter.importFile(at:context:progress:)`
+  (new optional `progress:` param, default `nil`, so tests/non-UI callers are
+  unaffected). The importer flips `start(total:)` only after a parseable OPML is
+  read (an unreadable/empty file never flashes the screen), drives `advance(...)`
+  from `importOPML`'s main-actor `onProgress` callback, and clears via `finish()` in
+  a `defer`. `RootView` presents `ImportProgressView` as a `.sheet` bound to a
+  read-only `Binding(get: isImporting, set: { })`, `.interactiveDismissDisabled` and
+  `.presentationDetents([.medium])` — it covers whichever tab is active and
+  auto-dismisses when `finish()` flips the flag (no cancel/manual dismiss for v1).
+  **VoiceOver:** one assertive "Importing N podcasts" announcement on appearance;
+  per-feed progress is *exposed not spoken* — the count + current title live in a
+  single `.accessibilityElement(children: .ignore)` with `.accessibilityValue` and
+  `.updatesFrequently`, so a user can swipe to re-check "3 of 10" on demand without
+  per-tick chatter (the existing "Imported N podcasts" announcement in
+  `OPMLFileImporter` closes the loop). Heading is one `.isHeader` element; no
+  container autofocus; bar animation honors `accessibilityReduceMotion`. Bulk path
+  only — single-podcast add (AddFeedView) is untouched.
   **Files:** `SettingsScreen.swift`, `Migration/Presentation/ImportStatusText.swift`,
   `DataImportViewModel.swift`, `DataImportSheet.swift`. 518 tests green (was 505).
 - **Mini player inset attaches to tab content, not the TabView (#366).** The
@@ -457,6 +480,108 @@ stays `@MainActor`; heavy work isolated to the `@ModelActor`. Secrets/entitlemen
 none touched. Release build (iPhone 17): BUILD SUCCEEDED. Tests: 33 pass (8
 FeedRefreshActorTests + 25 SubscriptionRepositoryTests). Feature suggestions: none
 this review.
+
+## Security Review — Issue #440
+
+earshot-security gate: PASS. Bulk OPML import (off-main one-pass subscribe + ONE
+main-context merge) plus the `OPMLImportProgress`/`ImportProgressView` progress
+sheet. Force-unwraps: none in production. fatalError/`model(for:)`: none — the
+post-save re-resolution of `persistentModelID`s in `SubscriptionRepository`
+(`podcast(forPersistentID:)` / `episode(forPersistentID:)`) uses a predicate
+`FetchDescriptor` returning nil on a missing ID, explicitly NOT `model(for:)`,
+so a vanished row can't trap. try?: all are `context.fetch` reads with `?? []`
+or `?.first`/guard-let fallbacks (valid nil-as-empty reads) plus a `Task.sleep`;
+no silent error swallowing. Per-feed import failures are caught and logged via
+`AppLog.subscriptions` and skipped — one bad feed never aborts the batch
+(`subscribeAll` catch at FeedRefreshActor:209). Retain cycles: none — the
+`onProgress` closure captures the value-type `OPMLImportProgress?`, not self
+(`OPMLFileImporter` is an enum, no self), and is consumed synchronously during
+the await, not stored; the `.sheet` get/set binding closes over the shared
+`@Observable` env object (reference, no view capture). @MainActor: `onProgress`
+is `@MainActor @Sendable`, `OPMLImportProgress` is `@MainActor`, the actor
+marshals each tick via `await onProgress?(...)`; only `Sendable`
+`PersistentIdentifier`s cross the actor boundary — `@Model` `Podcast`/`Episode`
+stay on their owning context. Stuck-sheet check: `OPMLFileImporter` arms
+`defer { progress?.finish() }` BEFORE the import and `start()` runs only after a
+parseable, non-empty OPML, so any throw/early return clears `isImporting` — the
+sheet can't hang. Behavior preserved and test-verified: idempotent re-import (no
+duplicate podcasts/folders/memberships), #296 newest-non-future high-water mark,
+backlog pre-dismiss, auto-download run once at the end, and the core fix asserted
+via `onMerge == 1` per import. Secrets/entitlements/project.yml/IS_BETA_BUILD:
+untouched, N/A. Release build (iPhone 17): BUILD SUCCEEDED, 0 errors. AppLog: all
+four catch blocks log; no empty catches. Feature suggestions: none this review.
+
+## Swift 6 Review — Issue #440
+
+earshot-swift6 gate: PASS. Branch `feat/opml-import-progress`.
+
+Concurrency mode used for review: SWIFT_VERSION=6 SWIFT_STRICT_CONCURRENCY=complete
+(overrides; project baseline remains SWIFT_VERSION=5.0 / minimal). Project baseline
+build (Swift 5): BUILD SUCCEEDED with only the one pre-existing DownloadManager
+warning. Under Swift 6 + complete, every changed file in this branch type-checked
+cleanly; the only errors were in five pre-existing baseline files untouched by this
+branch (see baseline note below).
+
+Checklist:
+[x] Sendable conformance: PASS — `SubscribeResult` (PersistentIdentifier +
+    [PersistentIdentifier] + Bool) is correctly `Sendable`; `PersistentIdentifier`
+    is Sendable in SwiftData and the compiler raised no Sendable diagnostic on it.
+    `BulkSubscribeOutcome` holds a main-context `Podcast` and is built only on the
+    @MainActor repo after the merge — it never crosses the actor boundary. The
+    `@MainActor @Sendable onProgress` closure is the only closure passed into the
+    actor and is correctly Sendable.
+[x] Actor isolation: PASS — `FeedRefreshActor` is `@ModelActor`; `subscribeAll`
+    returns only `[SubscribeResult]`. NO `@Model` crosses the boundary in
+    `subscribeAll`: the live `SubscribeOutcome` (Podcast/Episode) stays inside the
+    actor and only its IDs are projected. The pre-save `persistentModelID` fix is
+    SOUND: a non-alreadySubscribed slot is reserved with a temporary ID, recorded in
+    `pendingIndexByResult`, and ALWAYS overwritten by `flushPending()` after
+    `saveIfNeeded()` — every reserved slot is resolved post-save before the function
+    returns, and a temporary ID is never observable by a caller. A throwing
+    `subscribeOne` reserves no slot. `SubscriptionRepository`/`OPMLImportService`/
+    `OPMLFileImporter` are all `@MainActor`; the actor hop is `await actor.subscribeAll`
+    then `mergeBackgroundWrites()` on main.
+[x] @Model/SwiftData actor boundary: PASS — episode `persistentModelID`s are
+    projected only AFTER the actor's save; main-context re-fetch via
+    `podcast(forPersistentID:)` / `episode(forPersistentID:)` (predicate fetch, nil
+    on miss). No `@Model` on a hop.
+[x] AVAudioSession main actor: N/A — branch touches no audio session code.
+[x] Combine publishers: N/A — `OPMLImportProgress` is `@Observable` (Observation),
+    not ObservableObject; mutated only via main-actor `start/advance/finish`.
+[x] nonisolated functions: PASS — none added; none needed.
+[x] Structured concurrency: PASS — no `Task.detached`. The `.sheet` Bindings and the
+    onOpenURL/Settings `Task { ... }` inherit the main actor. The actor loop awaits
+    per-feed `onProgress` sequentially (bounded, in-order).
+[x] Global state: PASS — no new global/static mutable state in changed files.
+[x] OPMLImportProgress isolation: PASS — `@MainActor @Observable final class`,
+    mutated only on the main actor; the RootView `.sheet` get/set binding reads
+    `isImporting` on main and the `set` is a no-op; `.environment` wiring is clean.
+[x] autoDownloadRecent: PASS — runs on @MainActor, re-fetches main-context
+    `Episode`s by ID, awaits the @MainActor downloader; no `@Model` crosses a hop.
+[x] Swift 6 build clean (changed files): PASS — zero strict-concurrency
+    diagnostics in any file modified or added by this branch.
+
+Pre-existing Swift 6 baseline issues — NOT this branch (each in declaration code
+untouched by the diff; surfaced one at a time as the Swift 6 build advanced PAST
+all of this branch's Subscriptions files into other features):
+  - DownloadManager.swift:41 — `download(_:Episode)` non-Sendable param into a
+    @MainActor impl of a non-isolated protocol requirement (`EpisodeDownloading`).
+    Already a warning at baseline. Correct fix is `@MainActor protocol
+    EpisodeDownloading` (DownloadManager and its sole consumer are already @MainActor)
+    — verified it clears the error. Deferred to the Swift 6 migration, not this PR.
+  - NotificationDelegate.swift:59 — `Task { @MainActor in router.handle(...) }`
+    captures non-Sendable `self` from a non-isolated delegate.
+  - EarshotSchema.swift:24/343, EarshotSchemaV1.swift:17 — `static var
+    versionIdentifier = Schema.Version(...)` nonisolated mutable global (VersionedSchema).
+  - RSSParser.swift:84/90 (+ rfc822Formatters) — static non-Sendable
+    DateFormatter/ISO8601DateFormatter.
+  - PlayerService.swift:1044/1051 — non-Sendable `Notification` sent into
+    `Task { @MainActor in }`.
+These five are the known baseline set; recommend tackling them in the dedicated
+Swift 6 migration (Layer 2/3) issue, not here.
+
+New agents created: none.
+Overall: PASS — no concurrency issue introduced by this branch; nothing committed.
 
 ## Security Review — Issue #429
 
