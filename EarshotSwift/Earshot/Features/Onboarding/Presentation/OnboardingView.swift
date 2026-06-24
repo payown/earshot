@@ -44,7 +44,7 @@ struct OnboardingView: View {
         }
         .sheet(isPresented: $showingAdd) { AddFeedView() }
         .sheet(isPresented: $showingSearch) {
-            NavigationStack { SearchView(scope: .everywhere) }
+            NavigationStack { SearchView(scope: .addPodcast) }
         }
         .fileImporter(
             isPresented: $importingOPML,

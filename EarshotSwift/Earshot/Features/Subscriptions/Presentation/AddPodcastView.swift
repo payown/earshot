@@ -57,7 +57,7 @@ struct AddPodcastView: View {
             }
             .accessibilityAction(.escape) { dismiss() }
             .navigationDestination(isPresented: $navigateToSearch) {
-                SearchView(scope: .everywhere)
+                SearchView(scope: .addPodcast)
             }
         }
         .sheet(isPresented: $showingAddByURL) { AddFeedView() }

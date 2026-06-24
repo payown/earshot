@@ -1,35 +1,74 @@
 import SwiftUI
 import SwiftData
 
-/// Which corpus a ``SearchView`` searches.
+/// Which corpus a ``SearchView`` searches, and which result sections it renders.
 ///
 /// - `.library`: the user's OWN content only — their subscribed podcasts plus the
 ///   episodes and bookmarks already in the local store. The iTunes directory is
 ///   NOT searched at all: no network request fires, no "From the directory"
-///   section appears. This is the Library tab's toolbar search.
-/// - `.everywhere`: local content PLUS the iTunes podcast directory (searched
-///   automatically as the user types). This is the "find new podcasts" search
-///   used by the Add Podcast flow and onboarding.
+///   section appears. This is the Library tab's toolbar search. Shows local
+///   podcasts, episodes, and bookmarks.
+/// - `.addPodcast`: the "find a podcast to follow" search used by the Add Podcast
+///   flow and onboarding. It is podcast-focused: it shows local matching podcasts
+///   (so the user can see a show they already follow) PLUS the iTunes podcast
+///   directory (searched automatically as the user types). It deliberately does
+///   NOT show episodes or bookmarks — when adding a podcast the user wants SHOWS,
+///   not episodes.
 enum SearchScope: Equatable {
     case library
-    case everywhere
+    case addPodcast
+
+    /// Whether the local "Podcasts" section renders in this scope. Both scopes show
+    /// local matching podcasts.
+    var showsPodcasts: Bool { true }
+
+    /// Whether the local "Episodes" section renders. Only `.library` searches
+    /// episodes; the Add-Podcast search is show-focused and omits them.
+    var showsEpisodes: Bool {
+        switch self {
+        case .library: return true
+        case .addPodcast: return false
+        }
+    }
+
+    /// Whether the local "Bookmarks" section renders. Only `.library` searches
+    /// bookmarks; the Add-Podcast search omits them.
+    var showsBookmarks: Bool {
+        switch self {
+        case .library: return true
+        case .addPodcast: return false
+        }
+    }
+
+    /// Whether the iTunes podcast directory is searched and its "From the
+    /// directory" section renders. Only `.addPodcast` reaches the network.
+    var showsDirectory: Bool {
+        switch self {
+        case .library: return false
+        case .addPodcast: return true
+        }
+    }
 }
 
-/// Search across local content (podcasts, episodes, bookmarks) and — in the
-/// `.everywhere` scope only — the iTunes podcast directory. When the directory is
-/// in scope it is searched automatically as the user types (debounced), so
-/// directory results appear alongside the live local results without any extra
-/// tap. In `.library` scope the directory path is fully disabled: no iTunes call,
-/// no debounce task, no directory section. Results are grouped into clearly-headed
-/// sections for a logical VoiceOver structure.
+/// Search across local content and — in the `.addPodcast` scope only — the iTunes
+/// podcast directory. The set of result sections is driven entirely by the scope
+/// (see ``SearchScope``): `.library` shows local podcasts, episodes, and bookmarks
+/// with no directory; `.addPodcast` is podcast-focused, showing local podcasts plus
+/// the directory but no episodes or bookmarks. When the directory is in scope it is
+/// searched automatically as the user types (debounced), so directory results appear
+/// alongside the live local results without any extra tap. In `.library` scope the
+/// directory path is fully disabled: no iTunes call, no debounce task, no directory
+/// section. Results are grouped into clearly-headed sections for a logical VoiceOver
+/// structure.
 struct SearchView: View {
 
-    /// The corpus this instance searches. Defaults to `.everywhere` so existing
-    /// callers keep their behaviour; call sites pass `.library` explicitly to scope
-    /// the search to the user's own content.
+    /// The corpus this instance searches and the sections it renders. Defaults to
+    /// `.addPodcast` so existing callers keep their directory-backed behaviour;
+    /// call sites pass `.library` explicitly to scope the search to the user's own
+    /// content.
     let scope: SearchScope
 
-    init(scope: SearchScope = .everywhere) {
+    init(scope: SearchScope = .addPodcast) {
         self.scope = scope
     }
 
@@ -78,13 +117,19 @@ struct SearchView: View {
         SearchLogic.filter(bookmarks, query: query) { "\($0.note) \($0.episode?.title ?? "")" }
     }
 
+    /// Whether this scope surfaced any LOCAL results to the user. Only counts the
+    /// sections this scope actually renders, so the Add-Podcast scope (which hides
+    /// episodes and bookmarks) doesn't treat a matching episode as a local hit.
     private var hasLocalResults: Bool {
-        !matchedPodcasts.isEmpty || !matchedEpisodes.isEmpty || !matchedBookmarks.isEmpty
+        if !matchedPodcasts.isEmpty { return true }
+        if scope.showsEpisodes && !matchedEpisodes.isEmpty { return true }
+        if scope.showsBookmarks && !matchedBookmarks.isEmpty { return true }
+        return false
     }
 
     var body: some View {
         List {
-            if !matchedPodcasts.isEmpty {
+            if scope.showsPodcasts && !matchedPodcasts.isEmpty {
                 Section(header: Text("Podcasts").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedPodcasts) { podcast in
                         NavigationLink(value: podcast) {
@@ -93,14 +138,14 @@ struct SearchView: View {
                     }
                 }
             }
-            if !matchedEpisodes.isEmpty {
+            if scope.showsEpisodes && !matchedEpisodes.isEmpty {
                 Section(header: Text("Episodes").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedEpisodes) { episode in
                         EpisodeRow(episode: episode, actions: episodeActions(episode))
                     }
                 }
             }
-            if !matchedBookmarks.isEmpty {
+            if scope.showsBookmarks && !matchedBookmarks.isEmpty {
                 Section(header: Text("Bookmarks").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedBookmarks) { bookmark in
                         bookmarkRow(bookmark)
@@ -108,17 +153,18 @@ struct SearchView: View {
                 }
             }
 
-            if scope == .everywhere {
-                searchEverywhereSection
+            if scope.showsDirectory {
+                directorySection
             }
         }
         .navigationTitle("Search")
         .searchable(text: $query, prompt: searchPrompt)
-        // The directory search only ever fires in `.everywhere` scope; in
-        // `.library` scope `scheduleDirectorySearch` is never wired up, so no
-        // network request, debounce task, or directory state change can occur.
+        // The directory search only ever fires in a directory-backed scope (Add
+        // Podcast); in `.library` scope `scheduleDirectorySearch` is never wired
+        // up, so no network request, debounce task, or directory state change can
+        // occur.
         .onChange(of: query) { _, newValue in
-            if scope == .everywhere { scheduleDirectorySearch(for: newValue) }
+            if scope.showsDirectory { scheduleDirectorySearch(for: newValue) }
         }
         .onDisappear { directoryTask?.cancel() }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
@@ -134,8 +180,8 @@ struct SearchView: View {
         switch scope {
         case .library:
             return "Search your library"
-        case .everywhere:
-            return "Search podcasts, episodes, bookmarks"
+        case .addPodcast:
+            return "Search podcasts to follow"
         }
     }
 
@@ -150,9 +196,9 @@ struct SearchView: View {
             case .library:
                 ContentUnavailableView("Search your library", systemImage: "magnifyingglass",
                                        description: Text("Find podcasts you follow, episodes, and bookmarks."))
-            case .everywhere:
-                ContentUnavailableView("Search Earshot", systemImage: "magnifyingglass",
-                                       description: Text("Find podcasts, episodes, and bookmarks. The directory is searched automatically as you type."))
+            case .addPodcast:
+                ContentUnavailableView("Find a podcast to follow", systemImage: "magnifyingglass",
+                                       description: Text("Search by show or author. The directory is searched automatically as you type."))
             }
         } else if scope == .library && !hasLocalResults {
             ContentUnavailableView("No results in your library", systemImage: "magnifyingglass",
@@ -161,7 +207,7 @@ struct SearchView: View {
     }
 
     @ViewBuilder
-    private var searchEverywhereSection: some View {
+    private var directorySection: some View {
         if !query.trimmingCharacters(in: .whitespaces).isEmpty {
             Section(header: Text("From the directory").accessibilityAddTraits(.isHeader)) {
                 switch directoryState {

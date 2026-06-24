@@ -4,17 +4,18 @@ import SwiftUI
 
 /// Tests for the search-scope split: the Library toolbar search is scoped to the
 /// user's own content (`.library`) and never touches the directory, while the Add
-/// Podcast flow's search is `.everywhere`. The directory request, debounce task,
-/// and "From the directory" section are all gated on `scope == .everywhere` in
-/// ``SearchView``, so the stored `scope` is the single source of truth and is what
-/// these tests pin down.
+/// Podcast flow's search is `.addPodcast` — podcast-focused (local podcasts plus
+/// the iTunes directory, no episodes or bookmarks). Each scope's section set, the
+/// directory request, the debounce task, and the "From the directory" section are
+/// all driven by `scope` in ``SearchView``, so the stored `scope` and the section
+/// flags it exposes are the single source of truth these tests pin down.
 final class SearchScopeTests: XCTestCase {
 
-    func testDefaultScopeIsEverywhere() {
+    func testDefaultScopeIsAddPodcast() {
         // Existing call sites that don't pass a scope must keep searching the
-        // directory, so the default must remain `.everywhere`.
+        // directory, so the default must remain the directory-backed Add scope.
         let view = SearchView()
-        XCTAssertEqual(view.scope, .everywhere)
+        XCTAssertEqual(view.scope, .addPodcast)
     }
 
     func testLibraryScopeIsStored() {
@@ -22,13 +23,43 @@ final class SearchScopeTests: XCTestCase {
         XCTAssertEqual(view.scope, .library)
     }
 
-    func testEverywhereScopeIsStored() {
-        let view = SearchView(scope: .everywhere)
-        XCTAssertEqual(view.scope, .everywhere)
+    func testAddPodcastScopeIsStored() {
+        let view = SearchView(scope: .addPodcast)
+        XCTAssertEqual(view.scope, .addPodcast)
     }
 
     func testScopeCasesAreDistinct() {
-        XCTAssertNotEqual(SearchScope.library, SearchScope.everywhere)
+        XCTAssertNotEqual(SearchScope.library, SearchScope.addPodcast)
+    }
+
+    // MARK: - Section sets
+
+    /// The Library scope searches everything the user already has: podcasts,
+    /// episodes, and bookmarks — and never reaches the directory.
+    func testLibraryScopeShowsLocalSectionsAndNoDirectory() {
+        let scope = SearchScope.library
+        XCTAssertTrue(scope.showsPodcasts)
+        XCTAssertTrue(scope.showsEpisodes)
+        XCTAssertTrue(scope.showsBookmarks)
+        XCTAssertFalse(scope.showsDirectory)
+    }
+
+    /// The Add-Podcast scope is podcast-focused: local matching podcasts plus the
+    /// directory, but it deliberately excludes episodes and bookmarks so adding a
+    /// show isn't cluttered with episode/bookmark noise.
+    func testAddPodcastScopeShowsPodcastsAndDirectoryOnly() {
+        let scope = SearchScope.addPodcast
+        XCTAssertTrue(scope.showsPodcasts)
+        XCTAssertTrue(scope.showsDirectory)
+        XCTAssertFalse(scope.showsEpisodes, "Add-Podcast search must not show the episodes section")
+        XCTAssertFalse(scope.showsBookmarks, "Add-Podcast search must not show the bookmarks section")
+    }
+
+    /// Only the Add scope reaches the network; the Library scope never does. Pinning
+    /// this exclusivity keeps the directory request gated on the right scope.
+    func testOnlyAddPodcastScopeReachesDirectory() {
+        XCTAssertTrue(SearchScope.addPodcast.showsDirectory)
+        XCTAssertFalse(SearchScope.library.showsDirectory)
     }
 }
 
