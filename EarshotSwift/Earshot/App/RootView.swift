@@ -9,6 +9,7 @@ struct RootView: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(SettingsStore.self) private var settings
     @Environment(TipsStore.self) private var tips
+    @Environment(OPMLImportProgress.self) private var importProgress
     @Environment(NotificationRouter.self) private var notificationRouter
 
     @State private var showOnboarding = false
@@ -94,6 +95,22 @@ struct RootView: View {
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
+        }
+        // Bulk OPML import progress, presented over whichever tab is active. The
+        // binding is read-only off the shared state: it appears when an import calls
+        // `start()` and auto-dismisses when `finish()` flips `isImporting` false.
+        // There's no manual dismiss for v1 (no cancel) — the import is short and the
+        // "Imported N podcasts" announcement closes the loop. `.interactiveDismiss`
+        // is disabled so a drag can't orphan an in-flight import; auto-dismiss is the
+        // only path, which also keeps it off a drag gesture screen-reader users
+        // can't reliably perform.
+        .sheet(isPresented: Binding(
+            get: { importProgress.isImporting },
+            set: { _ in }
+        )) {
+            ImportProgressView(progress: importProgress)
+                .interactiveDismissDisabled(true)
+                .presentationDetents([.medium])
         }
         // Share-sheet / "Open in Earshot" for .opml files exported by feed
         // readers. RootView is always in the tree (onboarding is a cover on top),
@@ -288,7 +305,7 @@ struct RootView: View {
         let ext = url.pathExtension.lowercased()
         guard ext == "opml" || ext == "xml" else { return }
         Task {
-            await OPMLFileImporter.importFile(at: url, context: modelContext)
+            await OPMLFileImporter.importFile(at: url, context: modelContext, progress: importProgress)
         }
     }
 

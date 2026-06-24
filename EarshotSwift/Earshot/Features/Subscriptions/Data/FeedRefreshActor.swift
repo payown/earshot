@@ -135,14 +135,121 @@ actor FeedRefreshActor {
     /// so the caller re-fetches the inserted episodes by `episodeIDs` on the main
     /// context and enqueues there.
     func subscribe(feedURL: String, feed: FeedFetching) async throws -> SubscribeResult {
+        // Single-feed path: do the core subscribe, persist this one feed's writes,
+        // THEN read the now-permanent identifiers. persistentModelID is temporary
+        // until the context saves; capturing it before the save would yield IDs that
+        // never resolve on the main context (the batched `subscribeAll` saves in
+        // batches but likewise captures IDs only after its saves).
+        let outcome = try await subscribeOne(feedURL: feedURL, feed: feed)
+        saveIfNeeded()
+        return outcome.result()
+    }
+
+    /// Subscribes to every feed URL in `feedURLs` in ONE background pass, saving in
+    /// batches rather than once per feed. This is the bulk OPML-import path: it
+    /// keeps the entire fetch/parse/insert/save loop off the main actor and — just
+    /// as important — lets the caller reconcile the main context exactly ONCE after
+    /// the whole batch instead of per feed, which is what was starving VoiceOver
+    /// while the Library tab was visible during an import.
+    ///
+    /// Per-feed semantics are identical to ``subscribe(feedURL:feed:)``: idempotent
+    /// by feed URL, backlog pre-dismissed (`inboxDismissed = true`), high-water mark
+    /// seeded to the newest NON-FUTURE pub date (#296), and `refreshedAt` stamped. A
+    /// feed that throws (bad URL, parse failure) is logged via `AppLog.subscriptions`
+    /// and skipped — it never aborts the rest of the batch.
+    ///
+    /// `onProgress` is marshaled to the main actor after each feed and is
+    /// intentionally cheap (two ints + an optional title) so it can't reintroduce a
+    /// per-feed main-actor stall. The title, when present, is the just-subscribed
+    /// (or already-subscribed) podcast's title read on this background context.
+    ///
+    /// Returns one ``SubscribeResult`` per feed that resolved (new or already
+    /// subscribed), in input order, carrying `Sendable` identifiers only — never an
+    /// `@Model`. Feeds that threw are absent from the result array.
+    func subscribeAll(
+        feedURLs: [String],
+        feed: FeedFetching,
+        onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
+    ) async -> [SubscribeResult] {
+        let total = feedURLs.count
+        var results: [SubscribeResult] = []
+        var sinceLastSave = 0
+        var completed = 0
+
+        // Inserted-but-not-yet-finally-saved subscribes whose IDs must be read AFTER
+        // a save. persistentModelID is temporary until the context saves; we collect
+        // the live @Model objects here (they never leave the actor) and resolve their
+        // permanent IDs into `results` after each batch save below.
+        var pendingIndexByResult: [Int: SubscribeOutcome] = [:]
+
+        func flushPending() {
+            saveIfNeeded()
+            for (index, outcome) in pendingIndexByResult { results[index] = outcome.result() }
+            pendingIndexByResult.removeAll()
+            sinceLastSave = 0
+        }
+
+        for url in feedURLs {
+            var title: String?
+            do {
+                let outcome = try await subscribeOne(feedURL: url, feed: feed)
+                title = outcome.title
+                if outcome.alreadySubscribed {
+                    // No insert/save needed: IDs are already permanent.
+                    results.append(outcome.result())
+                } else {
+                    // Reserve the slot now (preserves input order) and fill its
+                    // permanent IDs at the next save.
+                    let index = results.count
+                    results.append(SubscribeResult(podcastID: outcome.podcast.persistentModelID, episodeIDs: [], alreadySubscribed: false))
+                    pendingIndexByResult[index] = outcome
+                    sinceLastSave += 1
+                    if sinceLastSave >= Self.saveBatchSize { flushPending() }
+                }
+            } catch {
+                AppLog.subscriptions.error("OPML import: failed \(url, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+            completed += 1
+            await onProgress?(completed, total, title)
+        }
+
+        // Flush the final partial batch and resolve its IDs.
+        flushPending()
+        return results
+    }
+
+    /// The result of one core subscribe, holding the live @Model objects (which stay
+    /// inside the actor) so the caller can read their permanent identifiers AFTER a
+    /// save. `result()` projects to the `Sendable` ``SubscribeResult`` and must be
+    /// called only after the context has saved (so the IDs are permanent).
+    private struct SubscribeOutcome {
+        let podcast: Podcast
+        let episodes: [Episode]
+        let alreadySubscribed: Bool
+        var title: String { podcast.title }
+
+        func result() -> SubscribeResult {
+            SubscribeResult(
+                podcastID: podcast.persistentModelID,
+                episodeIDs: episodes.map(\.persistentModelID),
+                alreadySubscribed: alreadySubscribed
+            )
+        }
+    }
+
+    /// Core subscribe used by both ``subscribe(feedURL:feed:)`` and
+    /// ``subscribeAll(feedURLs:feed:onProgress:)``. Does NOT save — the caller decides
+    /// when to save and then reads permanent IDs via ``SubscribeOutcome/result()``.
+    private func subscribeOne(feedURL: String, feed: FeedFetching) async throws -> SubscribeOutcome {
         let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Idempotency: an existing subscription returns its ID with no fetch,
-        // insert, or save — exactly the old early return.
+        // Idempotency: an existing subscription returns it with no fetch or insert —
+        // exactly the old early return. Its ID is already permanent (it was saved
+        // before), so `result()` is valid immediately.
         var existingDescriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.feedURL == trimmed })
         existingDescriptor.fetchLimit = 1
         if let existing = (try? modelContext.fetch(existingDescriptor))?.first {
-            return SubscribeResult(podcastID: existing.persistentModelID, episodeIDs: [], alreadySubscribed: true)
+            return SubscribeOutcome(podcast: existing, episodes: [], alreadySubscribed: true)
         }
 
         // The fetch (network I/O) and the synchronous parse inside it both run on
@@ -173,14 +280,9 @@ actor FeedRefreshActor {
         let now = Date.now
         podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsed.episodes, now: now) ?? now
         podcast.refreshedAt = now
-        saveIfNeeded()
         AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsed.episodes.count) episodes")
 
-        return SubscribeResult(
-            podcastID: podcast.persistentModelID,
-            episodeIDs: insertedEpisodes.map(\.persistentModelID),
-            alreadySubscribed: false
-        )
+        return SubscribeOutcome(podcast: podcast, episodes: insertedEpisodes, alreadySubscribed: false)
     }
 
     // MARK: Per-podcast write (mirrors SubscriptionRepository.refresh)

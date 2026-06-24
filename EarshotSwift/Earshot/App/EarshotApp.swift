@@ -10,6 +10,10 @@ struct EarshotApp: App {
     @State private var downloads = DownloadManager()
     @State private var settings = SettingsStore()
     @State private var tips = TipsStore()
+    /// Shared bulk-OPML-import progress. One instance for the whole app so every
+    /// import entry point (share-sheet / "Open in", Settings picker) and the
+    /// progress screen in RootView observe the same state.
+    @State private var importProgress = OPMLImportProgress()
     @State private var notificationRouter: NotificationRouter
     private let container: ModelContainer
     /// Retains the notification delegate for the process lifetime;
@@ -44,6 +48,7 @@ struct EarshotApp: App {
                     .environment(downloads)
                     .environment(settings)
                     .environment(tips)
+                    .environment(importProgress)
                     .environment(notificationRouter)
                     .task {
                         // Wire the notification delegate and register the

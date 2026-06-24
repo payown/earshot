@@ -19,8 +19,20 @@ enum OPMLFileImporter {
     /// and released in a `defer` only when we actually acquired it. Reads that fail
     /// (not an OPML/text file, missing file) announce a friendly message and return
     /// `nil` rather than throwing, so callers can fire-and-forget.
+    ///
+    /// Pass `progress` (the shared ``OPMLImportProgress`` from the environment) to
+    /// drive the determinate import-progress screen. It's optional and defaults to
+    /// `nil` so non-UI callers (and tests) need no change. The screen presents off
+    /// `isImporting`: we flip it on only once we've read a parseable OPML with at
+    /// least one feed (so an unreadable/empty file never flashes an empty progress
+    /// screen), and always clear it in a `defer` so a thrown/early return can't leave
+    /// the screen stuck up.
     @discardableResult
-    static func importFile(at url: URL, context: ModelContext) async -> Int? {
+    static func importFile(
+        at url: URL,
+        context: ModelContext,
+        progress: OPMLImportProgress? = nil
+    ) async -> Int? {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
@@ -30,7 +42,25 @@ enum OPMLFileImporter {
             return nil
         }
 
-        let count = await OPMLImportService(context: context).importOPML(opml)
+        // Drive the shared progress screen for the duration of the bulk import.
+        // We present via `onResolveTotal` (not before the call) so the screen comes
+        // up already knowing the real, de-duped feed count — its on-appear "Importing
+        // N podcasts" announcement then speaks the right number instead of "0". The
+        // OPML parse that produces the count is synchronous and fast (no network), so
+        // presenting from it adds no perceptible delay. `finish()` runs no matter how
+        // we leave this scope (parse-empty early return, throw, success) so the sheet
+        // can't hang up.
+        defer { progress?.finish() }
+
+        let count = await OPMLImportService(context: context).importOPML(
+            opml,
+            onResolveTotal: { total in
+                progress?.start(total: total)
+            },
+            onProgress: { completed, total, title in
+                progress?.advance(completed: completed, total: total, title: title)
+            }
+        )
         // Resolve the inflection markup THROUGH String(localized:) before it
         // reaches the Announcer. Everywhere else in the app this markup sits inside
         // a SwiftUI `Text(...)`, whose argument is a LocalizedStringKey that runs

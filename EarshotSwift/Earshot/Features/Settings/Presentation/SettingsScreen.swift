@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 struct SettingsScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(SettingsStore.self) private var settings
+    @Environment(OPMLImportProgress.self) private var importProgress
 
     @Query private var podcasts: [Podcast]
 
@@ -219,7 +220,7 @@ struct SettingsScreen: View {
         // in-app picker, the share-sheet (onOpenURL), and onboarding all behave
         // identically (#OPML share sheet).
         Task {
-            await OPMLFileImporter.importFile(at: url, context: context)
+            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress)
         }
     }
 
