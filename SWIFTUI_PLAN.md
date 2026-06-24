@@ -244,6 +244,32 @@ The SwiftUI side is built and waiting.
   `AddPodcastOptions` is reused by `OnboardingView` so the onboarding and Library add
   flows can't drift. Onboarding's in-flow search now passes `.everywhere` explicitly.
 
+- **Library "+" now lands directly in podcast search (UX round 1, follow-up).**
+  Device feedback: following a show is the primary action, and the intermediate
+  three-option menu was an extra step. The Library toolbar `plus` ("Add podcast")
+  still presents `AddPodcastView`, but `AddPodcastView` was repurposed from a
+  three-button hub into a search-first screen — it wraps `SearchView(scope:
+  .addPodcast, title: "Add podcast", autoFocusSearch: true)` in its own
+  `NavigationStack`, so the directory search field is the first thing the user
+  reaches. `SearchView` gained `title` (nav-title override) and `autoFocusSearch`
+  parameters; the latter focuses the `.searchable` field itself (never a container)
+  via a `SearchFieldFocus` modifier gated on `if #available(iOS 18.0, *)` because
+  `.searchFocused` is iOS 18+. On iOS 17 the field is simply tapped — no container
+  focus is ever forced. The two secondary add paths (Add by RSS URL, Import OPML
+  file) moved into a single labelled "More add options" `Menu`
+  (`ellipsis.circle`, `accessibilityLabel "More add options"`) in the search
+  screen's leading toolbar; each item is a `Label` action with a leading icon. RSS
+  presents `AddFeedView`; OPML runs `OPMLFileImporter.importFile` with the shared
+  `OPMLImportProgress` (no duplicated announcement). Done + `.accessibilityAction(
+  .escape)` keep a non-drag dismiss. The injected toolbar composes onto the
+  `SearchView` instance via `.toolbar` (no generic `SearchView` over
+  `ToolbarContent` — that hit "static stored properties not supported in generic
+  types" for the debounce constant, so the simpler composition was used). The
+  `.addPodcast` scope is unchanged, so it still hides episodes/bookmarks, keeps the
+  "Follow" rotor action and Following value, and searches the directory. **Onboarding
+  is unchanged**: the "Add your first podcast" page still uses the visible
+  three-option `AddPodcastOptions` group for first-run guidance.
+
 - **Import older data lives in an always-visible Settings → Data row (#429).** The
   manual re-import is surfaced as an "Import older data" row in the existing Data
   section of `SettingsScreen` — never gated on `IS_BETA_BUILD` or any migration

@@ -2,14 +2,15 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
-/// The "add a NEW podcast" hub, presented as a sheet from the Library tab's +
-/// button. It offers the three ways to add a podcast — search the iTunes directory
-/// for new shows, add by RSS URL, and import an OPML file — kept identical to
-/// onboarding via the shared ``AddPodcastOptions``.
+/// The "add a NEW podcast" screen, presented as a sheet from the Library tab's +
+/// button. Following a show is the primary action, so this lands the user directly
+/// in the directory search (``SearchView`` in the `.addPodcast` scope) with the
+/// search field focused — type a show and tap Follow, no intermediate menu.
 ///
-/// This is deliberately separate from the Library toolbar's search, which is scoped
-/// to the user's own content (``SearchScope/library``). Finding new podcasts lives
-/// here; searching what you already have lives there.
+/// The two less-common ways to add a podcast — paste an RSS URL, import an OPML
+/// file — stay reachable but secondary, behind a single "More add options" menu in
+/// the navigation bar. This is deliberately separate from the Library toolbar's
+/// search, which is scoped to the user's own content (``SearchScope/library``).
 ///
 /// Dismissal is explicit (a Done button plus `.accessibilityAction(.escape)`), never
 /// drag-only, so it's reachable without a downward swipe gesture. A successful
@@ -22,43 +23,40 @@ struct AddPodcastView: View {
 
     @State private var showingAddByURL = false
     @State private var importingOPML = false
-    // Drives the "Search podcasts" navigation. The shared options group exposes
-    // `onSearch` as a closure (it can't host a NavigationLink directly), so we
-    // toggle this flag and push the directory search via a programmatic
-    // `navigationDestination(isPresented:)`. This keeps the visible control a
-    // single, correctly-labelled "Search podcasts" button rather than splitting it
-    // into a button plus a separate link node.
-    @State private var navigateToSearch = false
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.lg) {
-                    Text("Find a new podcast to add. Search the directory, paste a feed address, or import an OPML file you exported from another app.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-
-                    AddPodcastOptions(
-                        onSearch: { navigateToSearch = true },
-                        onAddByURL: { showingAddByURL = true },
-                        onImportOPML: { importingOPML = true }
-                    )
+            // The search-first screen IS the directory search. Its own toolbar
+            // (search field, etc.) composes with the items we add here: a single
+            // "More add options" menu for the secondary RSS/OPML paths, and Done.
+            SearchView(scope: .addPodcast, title: "Add podcast", autoFocusSearch: true)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        // A single, clearly-labelled menu node holds the secondary
+                        // add paths so they don't crowd the primary search. Each
+                        // item is a labelled action with a leading icon.
+                        Menu {
+                            Button {
+                                showingAddByURL = true
+                            } label: {
+                                Label("Add by RSS URL", systemImage: "link")
+                            }
+                            Button {
+                                importingOPML = true
+                            } label: {
+                                Label("Import OPML file", systemImage: "square.and.arrow.down")
+                            }
+                        } label: {
+                            Label("More add options", systemImage: "ellipsis.circle")
+                        }
+                        .accessibilityLabel("More add options")
+                        .accessibilityHint("Add by RSS URL or import an OPML file")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
                 }
-                .padding(.horizontal, Spacing.xl)
-                .padding(.vertical, Spacing.lg)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .navigationTitle("Add podcast")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .accessibilityAction(.escape) { dismiss() }
-            .navigationDestination(isPresented: $navigateToSearch) {
-                SearchView(scope: .addPodcast)
-            }
+                .accessibilityAction(.escape) { dismiss() }
         }
         .sheet(isPresented: $showingAddByURL) { AddFeedView() }
         .fileImporter(

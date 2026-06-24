@@ -23,6 +23,15 @@ final class SearchScopeTests: XCTestCase {
         XCTAssertEqual(view.scope, .library)
     }
 
+    /// The search-first Add Podcast screen builds a `.addPodcast` SearchView with a
+    /// title override and autofocus on. The stored scope must still be `.addPodcast`
+    /// so episodes/bookmarks stay hidden and the directory stays searched. This pins
+    /// the new configurable init the Library "+" entry depends on.
+    func testSearchViewAddPodcastConfigKeepsScope() {
+        let view = SearchView(scope: .addPodcast, title: "Add podcast", autoFocusSearch: true)
+        XCTAssertEqual(view.scope, .addPodcast)
+    }
+
     func testAddPodcastScopeIsStored() {
         let view = SearchView(scope: .addPodcast)
         XCTAssertEqual(view.scope, .addPodcast)

@@ -68,8 +68,31 @@ struct SearchView: View {
     /// content.
     let scope: SearchScope
 
-    init(scope: SearchScope = .addPodcast) {
+    /// Overrides the navigation title. The Library toolbar search keeps the default
+    /// "Search"; the search-first Add Podcast screen passes "Add podcast" so the bar
+    /// reads as the add flow it now is.
+    private let titleOverride: String?
+
+    /// Whether to move keyboard focus onto the search field as the screen appears,
+    /// so a VoiceOver user can start typing a show to follow immediately. Off for
+    /// the Library toolbar search (a push within an existing stack), on for the
+    /// Add Podcast sheet where searching is the whole point. Honoured on iOS 18+,
+    /// where `.searchFocused` exists; on iOS 17 the field still appears, the user
+    /// just taps it to begin (no container focus is ever forced).
+    private let autoFocusSearch: Bool
+
+    /// Drives the optional search-field autofocus. Bound to the `.searchable` field
+    /// via `.searchFocused` so we focus the field itself, never a container.
+    @FocusState private var searchFieldFocused: Bool
+
+    init(
+        scope: SearchScope = .addPodcast,
+        title: String? = nil,
+        autoFocusSearch: Bool = false
+    ) {
         self.scope = scope
+        self.titleOverride = title
+        self.autoFocusSearch = autoFocusSearch
     }
 
     /// The current state of the automatic directory search.
@@ -157,8 +180,9 @@ struct SearchView: View {
                 directorySection
             }
         }
-        .navigationTitle("Search")
+        .navigationTitle(titleOverride ?? "Search")
         .searchable(text: $query, prompt: searchPrompt)
+        .modifier(SearchFieldFocus(focused: $searchFieldFocused, autoFocus: autoFocusSearch))
         // The directory search only ever fires in a directory-backed scope (Add
         // Podcast); in `.library` scope `scheduleDirectorySearch` is never wired
         // up, so no network request, debounce task, or directory state change can
@@ -377,6 +401,26 @@ struct SearchView: View {
     private func shareItems(for episode: Episode) -> [Any] {
         if let url = URL(string: episode.audioURL) { return [episode.title, url] }
         return [episode.title]
+    }
+}
+
+/// Optionally moves keyboard focus onto the `.searchable` field as the screen
+/// appears. `.searchFocused` is iOS 18+, so on iOS 17 this is a no-op and the user
+/// simply taps the visible search field. We never force focus onto a container —
+/// only the search field itself — so VoiceOver lands somewhere it can type, never
+/// on a merged group summary.
+private struct SearchFieldFocus: ViewModifier {
+    @FocusState.Binding var focused: Bool
+    let autoFocus: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .searchFocused($focused)
+                .onAppear { if autoFocus { focused = true } }
+        } else {
+            content
+        }
     }
 }
 
