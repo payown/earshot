@@ -869,6 +869,29 @@ PodcastActionsBuilder) plus the new tests.
 - All notificationEnabled readers coalesce nil->false; no entitlements/secrets
   touched. Release build SUCCEEDED. 26/26 targeted tests pass.
 
+## Security Review — Issue #383
+
+earshot-security gate: **PASS**. Track 2 — share-sheet / "Open in Earshot" OPML
+import, branch `feat/opml-share-sheet`. Reviewed Info.plist, RootView.swift,
+SettingsScreen.swift, the new OPMLFileImporter.swift, and OPMLFileImporterTests.swift.
+
+- Security-scoped resource: balanced and correct — `startAccessingSecurityScopedResource()`
+  paired with `defer { if scoped { stop... } }`, releasing only when start returned
+  true. No leak, no unbalanced release.
+- UTI / Info.plist scope: minimal-claim. `LSItemContentTypes` lists only
+  `org.opml.opml` (NOT `public.xml`), so the app does not claim all XML.
+  `public.xml`/`public.text` are conformance-only (`UTTypeConformsTo`).
+  `CFBundleTypeRole = Viewer`, `LSHandlerRank = Alternate`. No entitlement change.
+- Untrusted input: `String(contentsOf:encoding:.utf8)` throws (does not crash) on
+  non-UTF8/huge/missing files; `try?`->nil is logged via `AppLog.data.error` AND
+  announced via `Announcer`. Verified at runtime in the test log.
+- No force-unwraps / try! / fatalError introduced. No retain cycle (RootView is a
+  value-type View; inner Task calls a static func). Release build SUCCEEDED.
+  4/4 OPMLFileImporterTests pass.
+- Non-blocking notes: `handleIncomingFile` also accepts `.xml` though only `.opml`
+  is registered (harmless); Settings picker `.failure` still silently returns
+  (pre-existing, unchanged). No fixes applied, no commit made.
+
 ## Issue #425 (Data — Freeze V2 schema, add V3 + drift detection; build-114 launch-crash class)
 
 **Status:** Implemented, all gates PASS, NOT merged / NOT closed. Branch
@@ -948,3 +971,47 @@ needs no field change, only a normal rebase onto the new `swift` tip after this 
    state all survived. The "Notify on new episodes" toggle should read ON for the show
    you enabled and OFF elsewhere.
 5. If anything is missing or it crashes, stay on this branch and report back.
+
+## Swift 6 Review — Track 2 (share-sheet OPML import)
+
+earshot-swift6 gate: PASS. Branch `feat/opml-share-sheet` (uncommitted working
+tree), reviewed via `git diff swift`. Files: NEW
+`Earshot/Features/Subscriptions/Data/OPMLFileImporter.swift`,
+`Earshot/App/RootView.swift`, `Earshot/Features/Settings/Presentation/SettingsScreen.swift`,
+`Earshot/App/Info.plist` (+ NEW `EarshotTests/OPMLFileImporterTests.swift`).
+
+Concurrency mode: SWIFT_STRICT_CONCURRENCY=complete build SUCCEEDED on iPhone 17 sim.
+Full SWIFT_VERSION=6 + strict-complete build FAILS on the PRE-EXISTING baseline only
+(NotificationDelegate.swift:59 "sending 'self' risks causing data races" — untouched by
+this track; compiler halts there). Zero errors and zero non-macro warnings in any of
+this track's changed files in either mode.
+
+Findings:
+- Actor isolation: `@MainActor enum OPMLFileImporter` is correct. `importFile(at:context:)`
+  awaits `@MainActor OPMLImportService.importOPML` and `@MainActor Announcer.announce`
+  with no actor hop — all on MainActor. PASS.
+- ModelContext (NOT Sendable) boundary: helper, both call sites (RootView,
+  SettingsScreen — SwiftUI Views, implicitly @MainActor), and the `Task { }` blocks are
+  all MainActor. `context` from `@Environment(\.modelContext)` never crosses a nonisolated
+  boundary; no illegal capture across an await. PASS.
+- Sendable closures: `onOpenURL { url in handleIncomingFile(url) }` and the inner
+  `Task { await OPMLFileImporter.importFile(...) }` capture only a `URL` (Sendable) and
+  `self`/`context` (MainActor). No non-Sendable capture across an actor boundary. PASS.
+- defer + await: `startAccessingSecurityScopedResource()` / `defer stop...` correctly
+  brackets the awaited `importOPML`; scope released after import completes, all on
+  MainActor. Race-free. PASS.
+- Structured concurrency: uses `Task { }` (inherits MainActor), no `Task.detached`. PASS.
+- Global state: none introduced. PASS.
+
+Pre-existing baseline (NOT this track), reported separately as requested:
+- NotificationDelegate.swift:59 — `sending 'self'` data-race (first hard Swift 6 error).
+- DownloadManager.swift:41 — non-Sendable `Episode` param into MainActor impl.
+- EarshotSchema.swift:24/343, EarshotSchemaV1.swift:17 — `versionIdentifier` global
+  mutable state.
+- RSSParser.swift:84/90 — static `ISO8601DateFormatter` not concurrency-safe.
+- SubscriptionRepository.swift:32 — static `backfill` non-Sendable RefreshOutcome.
+- SwiftData `#Predicate`/`@Query` `KeyPath` not-Sendable macro warnings across
+  FoldersScreen, FolderRepository, InboxRepository, and RootView:306 (the pre-existing
+  `route(_:)` notification predicate — NOT this track's `handleIncomingFile`).
+
+New agents created: none. Overall: PASS.
