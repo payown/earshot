@@ -1,12 +1,111 @@
 import SwiftUI
 import SwiftData
 
-/// Search across local content (podcasts, episodes, bookmarks) plus the iTunes
-/// podcast directory. The directory search runs automatically as the user types
-/// (debounced), so directory results appear alongside the live local results
-/// without any extra tap. Results are grouped into clearly-headed sections for a
-/// logical VoiceOver structure.
-struct SearchView: View {
+/// Which corpus a ``SearchView`` searches, and which result sections it renders.
+///
+/// - `.library`: the user's OWN content only — their subscribed podcasts plus the
+///   episodes and bookmarks already in the local store. The iTunes directory is
+///   NOT searched at all: no network request fires, no "From the directory"
+///   section appears. This is the Library tab's toolbar search. Shows local
+///   podcasts, episodes, and bookmarks.
+/// - `.addPodcast`: the "find a podcast to follow" search used by the Add Podcast
+///   flow and onboarding. It is podcast-focused: it shows local matching podcasts
+///   (so the user can see a show they already follow) PLUS the iTunes podcast
+///   directory (searched automatically as the user types). It deliberately does
+///   NOT show episodes or bookmarks — when adding a podcast the user wants SHOWS,
+///   not episodes.
+enum SearchScope: Equatable {
+    case library
+    case addPodcast
+
+    /// Whether the local "Podcasts" section renders in this scope. Both scopes show
+    /// local matching podcasts.
+    var showsPodcasts: Bool { true }
+
+    /// Whether the local "Episodes" section renders. Only `.library` searches
+    /// episodes; the Add-Podcast search is show-focused and omits them.
+    var showsEpisodes: Bool {
+        switch self {
+        case .library: return true
+        case .addPodcast: return false
+        }
+    }
+
+    /// Whether the local "Bookmarks" section renders. Only `.library` searches
+    /// bookmarks; the Add-Podcast search omits them.
+    var showsBookmarks: Bool {
+        switch self {
+        case .library: return true
+        case .addPodcast: return false
+        }
+    }
+
+    /// Whether the iTunes podcast directory is searched and its "From the
+    /// directory" section renders. Only `.addPodcast` reaches the network.
+    var showsDirectory: Bool {
+        switch self {
+        case .library: return false
+        case .addPodcast: return true
+        }
+    }
+}
+
+/// Search across local content and — in the `.addPodcast` scope only — the iTunes
+/// podcast directory. The set of result sections is driven entirely by the scope
+/// (see ``SearchScope``): `.library` shows local podcasts, episodes, and bookmarks
+/// with no directory; `.addPodcast` is podcast-focused, showing local podcasts plus
+/// the directory but no episodes or bookmarks. When the directory is in scope it is
+/// searched automatically as the user types (debounced), so directory results appear
+/// alongside the live local results without any extra tap. In `.library` scope the
+/// directory path is fully disabled: no iTunes call, no debounce task, no directory
+/// section. Results are grouped into clearly-headed sections for a logical VoiceOver
+/// structure.
+struct SearchView<HeaderContent: View>: View {
+
+    /// The corpus this instance searches and the sections it renders. Defaults to
+    /// `.addPodcast` so existing callers keep their directory-backed behaviour;
+    /// call sites pass `.library` explicitly to scope the search to the user's own
+    /// content.
+    let scope: SearchScope
+
+    /// Overrides the navigation title. The Library toolbar search keeps the default
+    /// "Search"; the search-first Add Podcast screen passes "Add podcast" so the bar
+    /// reads as the add flow it now is.
+    private let titleOverride: String?
+
+    /// Whether to move keyboard focus onto the search field as the screen appears,
+    /// so a VoiceOver user can start typing a show to follow immediately. Off for
+    /// the Library toolbar search (a push within an existing stack), on for the
+    /// Add Podcast sheet where searching is the whole point. Honoured on iOS 18+,
+    /// where `.searchFocused` exists; on iOS 17 the field still appears, the user
+    /// just taps it to begin (no container focus is ever forced).
+    private let autoFocusSearch: Bool
+
+    /// Drives the optional search-field autofocus. Bound to the `.searchable` field
+    /// via `.searchFocused` so we focus the field itself, never a container.
+    @FocusState private var searchFieldFocused: Bool
+
+    /// Caller-supplied content rendered as the FIRST section of the results `List`,
+    /// above any local or directory results. This is the reliable home for screen
+    /// affordances that must stay reachable while the search field is focused and the
+    /// keyboard is up: because it's ordinary `List` content (not nav-bar or keyboard
+    /// chrome), VoiceOver always has it in the swipe path and scrolls it into view —
+    /// unlike toolbar/keyboard-accessory items, which iOS hides or skips once
+    /// `.searchable` is active. The Add Podcast screen uses this to host its
+    /// "Add by RSS URL" / "Import OPML file" rows; other callers pass nothing.
+    @ViewBuilder private let headerContent: HeaderContent
+
+    init(
+        scope: SearchScope = .addPodcast,
+        title: String? = nil,
+        autoFocusSearch: Bool = false,
+        @ViewBuilder headerContent: () -> HeaderContent = { EmptyView() }
+    ) {
+        self.scope = scope
+        self.titleOverride = title
+        self.autoFocusSearch = autoFocusSearch
+        self.headerContent = headerContent()
+    }
 
     /// The current state of the automatic directory search.
     private enum DirectoryState: Equatable {
@@ -40,8 +139,10 @@ struct SearchView: View {
 
     private let itunes = ITunesSearchService()
 
-    /// How long the query must be quiet before a directory request fires.
-    private static let debounce: Duration = .milliseconds(350)
+    /// How long the query must be quiet before a directory request fires. Computed
+    /// rather than stored because `SearchView` is generic (over its header content)
+    /// and generic types can't hold static stored properties.
+    private static var debounce: Duration { .milliseconds(350) }
 
     private var matchedPodcasts: [Podcast] {
         SearchLogic.filter(podcasts, query: query) { "\($0.title) \($0.author ?? "")" }
@@ -53,13 +154,24 @@ struct SearchView: View {
         SearchLogic.filter(bookmarks, query: query) { "\($0.note) \($0.episode?.title ?? "")" }
     }
 
+    /// Whether this scope surfaced any LOCAL results to the user. Only counts the
+    /// sections this scope actually renders, so the Add-Podcast scope (which hides
+    /// episodes and bookmarks) doesn't treat a matching episode as a local hit.
     private var hasLocalResults: Bool {
-        !matchedPodcasts.isEmpty || !matchedEpisodes.isEmpty || !matchedBookmarks.isEmpty
+        if !matchedPodcasts.isEmpty { return true }
+        if scope.showsEpisodes && !matchedEpisodes.isEmpty { return true }
+        if scope.showsBookmarks && !matchedBookmarks.isEmpty { return true }
+        return false
     }
 
     var body: some View {
         List {
-            if !matchedPodcasts.isEmpty {
+            // Caller-supplied rows (e.g. the Add Podcast screen's secondary add
+            // paths) live at the top of the List as real content, so they stay in
+            // VoiceOver's swipe path with the keyboard up.
+            headerContent
+
+            if scope.showsPodcasts && !matchedPodcasts.isEmpty {
                 Section(header: Text("Podcasts").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedPodcasts) { podcast in
                         NavigationLink(value: podcast) {
@@ -68,14 +180,14 @@ struct SearchView: View {
                     }
                 }
             }
-            if !matchedEpisodes.isEmpty {
+            if scope.showsEpisodes && !matchedEpisodes.isEmpty {
                 Section(header: Text("Episodes").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedEpisodes) { episode in
                         EpisodeRow(episode: episode, actions: episodeActions(episode))
                     }
                 }
             }
-            if !matchedBookmarks.isEmpty {
+            if scope.showsBookmarks && !matchedBookmarks.isEmpty {
                 Section(header: Text("Bookmarks").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedBookmarks) { bookmark in
                         bookmarkRow(bookmark)
@@ -83,26 +195,62 @@ struct SearchView: View {
                 }
             }
 
-            searchEverywhereSection
+            if scope.showsDirectory {
+                directorySection
+            }
         }
-        .navigationTitle("Search")
-        .searchable(text: $query, prompt: "Search podcasts, episodes, bookmarks")
-        .onChange(of: query) { _, newValue in scheduleDirectorySearch(for: newValue) }
+        .navigationTitle(titleOverride ?? "Search")
+        .searchable(text: $query, prompt: searchPrompt)
+        .modifier(SearchFieldFocus(focused: $searchFieldFocused, autoFocus: autoFocusSearch))
+        // The directory search only ever fires in a directory-backed scope (Add
+        // Podcast); in `.library` scope `scheduleDirectorySearch` is never wired
+        // up, so no network request, debounce task, or directory state change can
+        // occur.
+        .onChange(of: query) { _, newValue in
+            if scope.showsDirectory { scheduleDirectorySearch(for: newValue) }
+        }
         .onDisappear { directoryTask?.cancel() }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
-        .overlay {
-            if query.isEmpty {
-                ContentUnavailableView("Search Earshot", systemImage: "magnifyingglass",
-                                       description: Text("Find podcasts, episodes, and bookmarks. The directory is searched automatically as you type."))
+        .overlay { emptyOverlay }
+    }
+
+    /// The prompt shown in the search field, tailored to the scope so VoiceOver and
+    /// sighted users both understand what's being searched.
+    private var searchPrompt: String {
+        switch scope {
+        case .library:
+            return "Search your library"
+        case .addPodcast:
+            return "Search podcasts to follow"
+        }
+    }
+
+    /// The placeholder shown before any query is typed, and — in `.library` scope —
+    /// the "no results" message when a query matches nothing in the user's content.
+    /// In `.library` scope there is no directory fallback, so an empty result set is
+    /// terminal and must be announced clearly rather than implying more is coming.
+    @ViewBuilder
+    private var emptyOverlay: some View {
+        if query.isEmpty {
+            switch scope {
+            case .library:
+                ContentUnavailableView("Search your library", systemImage: "magnifyingglass",
+                                       description: Text("Find podcasts you follow, episodes, and bookmarks."))
+            case .addPodcast:
+                ContentUnavailableView("Find a podcast to follow", systemImage: "magnifyingglass",
+                                       description: Text("Search by show or author. The directory is searched automatically as you type."))
             }
+        } else if scope == .library && !hasLocalResults {
+            ContentUnavailableView("No results in your library", systemImage: "magnifyingglass",
+                                   description: Text("Nothing in your podcasts, episodes, or bookmarks matches “\(query)”. To find new podcasts, use Add podcast."))
         }
     }
 
     @ViewBuilder
-    private var searchEverywhereSection: some View {
+    private var directorySection: some View {
         if !query.trimmingCharacters(in: .whitespaces).isEmpty {
             Section(header: Text("From the directory").accessibilityAddTraits(.isHeader)) {
                 switch directoryState {
@@ -154,7 +302,7 @@ struct SearchView: View {
                 }
             }
             Spacer()
-            Button(subscribed ? "Subscribed" : "Subscribe") { subscribe(result) }
+            Button(subscribed ? "Following" : "Follow") { subscribe(result) }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
                 .disabled(subscribed)
@@ -165,7 +313,7 @@ struct SearchView: View {
         // accessibilityValue("") is spoken as a pause (dead air) in VoiceOver.
         .modifier(SubscribedValue(subscribed: subscribed))
         .accessibilityActions {
-            if !subscribed { Button("Subscribe") { subscribe(result) } }
+            if !subscribed { Button("Follow") { subscribe(result) } }
         }
     }
 
@@ -261,10 +409,10 @@ struct SearchView: View {
         Task {
             do {
                 _ = try await SubscriptionRepository(context: context).subscribe(feedURL: result.feedURL)
-                Announcer.announce("Subscribed to \(result.title)")
+                Announcer.announce("Now following \(result.title)")
             } catch {
                 AppLog.networking.error("Subscribe from search failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                Announcer.announce("Couldn't subscribe to \(result.title)")
+                Announcer.announce("Couldn't follow \(result.title)")
             }
         }
     }
@@ -272,6 +420,41 @@ struct SearchView: View {
     private func shareItems(for episode: Episode) -> [Any] {
         if let url = URL(string: episode.audioURL) { return [episode.title, url] }
         return [episode.title]
+    }
+}
+
+/// Optionally moves keyboard focus onto the `.searchable` field as the screen
+/// appears. `.searchFocused` is iOS 18+, so on iOS 17 this is a no-op and the user
+/// simply taps the visible search field. We never force focus onto a container —
+/// only the search field itself — so VoiceOver lands somewhere it can type, never
+/// on a merged group summary.
+///
+/// Autofocus is suppressed while VoiceOver is running. Auto-popping the keyboard
+/// puts `.searchable` into its active state immediately; with VoiceOver that is
+/// exactly the state in which iOS-managed chrome (nav-bar items, keyboard-accessory
+/// items) gets hidden or dropped from the swipe path, which previously stranded the
+/// secondary add controls. Leaving the field unfocused for VoiceOver users keeps the
+/// screen calm and fully swipe-navigable — they land on content, read the screen,
+/// and swipe to the search field when ready. Sighted users still land in the field
+/// and type straight away. The check is read once on appear; if a user toggles
+/// VoiceOver while this screen is open the secondary add rows live in the List
+/// content (always reachable) so nothing is stranded either way.
+private struct SearchFieldFocus: ViewModifier {
+    @FocusState.Binding var focused: Bool
+    let autoFocus: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .searchFocused($focused)
+                .onAppear {
+                    if autoFocus && !UIAccessibility.isVoiceOverRunning {
+                        focused = true
+                    }
+                }
+        } else {
+            content
+        }
     }
 }
 
@@ -283,7 +466,7 @@ private struct SubscribedValue: ViewModifier {
 
     func body(content: Content) -> some View {
         if subscribed {
-            content.accessibilityValue("Subscribed")
+            content.accessibilityValue("Following")
         } else {
             content
         }

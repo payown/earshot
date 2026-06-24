@@ -122,17 +122,17 @@ struct SettingsScreen: View {
                 Button {
                     exportURL = makeExportFile()
                 } label: {
-                    Label("Export subscriptions (OPML)", systemImage: "square.and.arrow.up")
+                    Label("Export podcasts (OPML)", systemImage: "square.and.arrow.up")
                 }
                 .disabled(podcasts.isEmpty)
                 .accessibilityHint(podcasts.isEmpty
-                    ? "Subscribe to a podcast to enable export."
+                    ? "Follow a podcast to enable export."
                     : "Saves your podcast list as a file you can use as a backup")
 
                 Button {
                     importingOPML = true
                 } label: {
-                    Label("Import subscriptions (OPML)", systemImage: "square.and.arrow.down")
+                    Label("Import podcasts (OPML)", systemImage: "square.and.arrow.down")
                 }
 
                 Button {
@@ -231,7 +231,7 @@ struct SettingsScreen: View {
         // Delay so the announcement lands after the confirmation dialog finishes
         // dismissing (otherwise the focus change can swallow it).
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            Announcer.announce("All local data deleted. Subscriptions and downloads removed.")
+            Announcer.announce("All local data deleted. Podcasts you follow and downloads removed.")
         }
     }
 }

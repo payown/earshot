@@ -43,7 +43,7 @@ func buildPodcastActions(
                 Announcer.announce(podcast.autoQueue ? "Auto-queue on" : "Auto-queue off")
             }
         case .unsubscribe:
-            return QuickActionItem(label: "Unsubscribe", isDestructive: true) {
+            return QuickActionItem(label: "Unfollow", isDestructive: true) {
                 onUnsubscribe()
             }
         case .share:

@@ -21,7 +21,7 @@ enum PodcastAction: String, CaseIterable, Identifiable, Codable {
         case .openDetail: return "Open podcast detail"
         case .toggleNotifications: return "Toggle notifications"
         case .toggleAutoQueue: return "Toggle auto-queue"
-        case .unsubscribe: return "Unsubscribe"
+        case .unsubscribe: return "Unfollow"
         case .share: return "Share podcast"
         }
     }

@@ -121,6 +121,7 @@
 		9B96460020EE778842F1D5C4 /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B27BB426B5C9992591376435 /* Spacing.swift */; };
 		9C1E3FCE1E702A0C3CA62867 /* RestoreBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F29E86AFF01FA1B90CBBF29 /* RestoreBanner.swift */; };
 		9E710C86EB230B361A7D8B75 /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62ED2FC514BDF3D857EBC8EF /* MockURLProtocol.swift */; };
+		A18F64CF1E9874FBACECD300 /* AddPodcastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7151D01B33B040C471F672D5 /* AddPodcastView.swift */; };
 		A30738B63FB4B7FFF5BF3B04 /* AppInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E7921BD843199173A93C88 /* AppInfoTests.swift */; };
 		A35B5B07638AEA5B1433A686 /* HTTPClientRetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0140FFFD2CE006140D813DBB /* HTTPClientRetryTests.swift */; };
 		A3B6D7635B7E6F694708D515 /* OPMLDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7212EBC83A48695F41673C88 /* OPMLDocument.swift */; };
@@ -149,7 +150,9 @@
 		BC4EA48D9BD20E2811437803 /* FeedRefreshActorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF7EB271B05EE735D3F8EEAA /* FeedRefreshActorTests.swift */; };
 		BCC4D9C61F2DA7D7F9975DD2 /* PodcastArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2AFBB00F8C76C7C8D5A7BF3 /* PodcastArtwork.swift */; };
 		BD328CD81999A2F96B8C52D3 /* NowPlayingArtworkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF92E05A0193AF0123DA2A5B /* NowPlayingArtworkTests.swift */; };
+		C0041B9112CCC0F470879BE8 /* SearchScopeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1762C5AEBDF029E48BF6D2 /* SearchScopeTests.swift */; };
 		C083251185DA72F96AD0612C /* BookmarkShareLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 450C66B85D5547A1E0E62D21 /* BookmarkShareLogicTests.swift */; };
+		C0BB5C94CF541246F76D2FD0 /* AddPodcastOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C091B032EDF249C457F096E /* AddPodcastOptions.swift */; };
 		C135742F72316B0AA623460E /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DBB0DBE3C822485265C03BA /* SearchView.swift */; };
 		C2575FA0F95FEF33CA069017 /* PodcastFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20EED9B85C78529A51C7C70 /* PodcastFolder.swift */; };
 		C290A8B98AF505B8C16FB539 /* QuickActionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF2D210574E494DFF9E08AB0 /* QuickActionRepository.swift */; };
@@ -287,6 +290,7 @@
 		6B8A4B380A497E7C23B98896 /* ManualImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualImportTests.swift; sourceTree = "<group>"; };
 		6DF46E9C212635AE9F19C511 /* DataImportViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataImportViewModel.swift; sourceTree = "<group>"; };
 		7050EBE34C45786E647A8592 /* DownloadsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsScreen.swift; sourceTree = "<group>"; };
+		7151D01B33B040C471F672D5 /* AddPodcastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPodcastView.swift; sourceTree = "<group>"; };
 		71BD562BB534B0133D9733ED /* QueueLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueLogic.swift; sourceTree = "<group>"; };
 		7212EBC83A48695F41673C88 /* OPMLDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMLDocument.swift; sourceTree = "<group>"; };
 		72268AFC8538ECA1FE0479CB /* AirPlayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPlayTests.swift; sourceTree = "<group>"; };
@@ -298,6 +302,7 @@
 		7A4B44C2C554B50C2C1A846A /* AudioEnhancementLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEnhancementLogic.swift; sourceTree = "<group>"; };
 		7B15FA7A813A473B18BCE6F4 /* ImportStatusTextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportStatusTextTests.swift; sourceTree = "<group>"; };
 		7B3D418DEEE23B973A761F26 /* QuickActionConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionConfig.swift; sourceTree = "<group>"; };
+		7C091B032EDF249C457F096E /* AddPodcastOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPodcastOptions.swift; sourceTree = "<group>"; };
 		7CF61D55C48D468680AB681C /* Podcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Podcast.swift; sourceTree = "<group>"; };
 		7D1FF1B05CD9DD1E0A619E9F /* ITunesSearchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITunesSearchServiceTests.swift; sourceTree = "<group>"; };
 		7D40AFBC69A987AAC98236BF /* BookmarksListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarksListView.swift; sourceTree = "<group>"; };
@@ -336,6 +341,7 @@
 		A6C88F8A12481CD8B9986F26 /* FeedbackComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackComposerTests.swift; sourceTree = "<group>"; };
 		ABEEC723E5C0BC90DFC057B2 /* AppSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSetting.swift; sourceTree = "<group>"; };
 		ABF8AC53F43ED57AC7B70150 /* SubscriptionImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionImporter.swift; sourceTree = "<group>"; };
+		AE1762C5AEBDF029E48BF6D2 /* SearchScopeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchScopeTests.swift; sourceTree = "<group>"; };
 		AE41691F0E4E9DEF6111C5CA /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		AF2D210574E494DFF9E08AB0 /* QuickActionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionRepository.swift; sourceTree = "<group>"; };
 		B20EED9B85C78529A51C7C70 /* PodcastFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastFolder.swift; sourceTree = "<group>"; };
@@ -624,6 +630,7 @@
 				59BE4582317C4948ECEF3288 /* RSSParserTests.swift */,
 				E95227EAA9F9FC318FE854FD /* SchemaDriftTests.swift */,
 				C17AC464CF36C31FB5798C0E /* SearchOPMLTests.swift */,
+				AE1762C5AEBDF029E48BF6D2 /* SearchScopeTests.swift */,
 				7D79742B8D8E4A2F7B8EC721 /* SettingsStoreTests.swift */,
 				C13AC03D8E2F4DB285678051 /* SkipSilenceRemovalTests.swift */,
 				43C24AB621B349FF76FF2168 /* SpeedTests.swift */,
@@ -842,6 +849,8 @@
 			isa = PBXGroup;
 			children = (
 				4B06F7F65FB0DBA6132EE39E /* AddFeedView.swift */,
+				7C091B032EDF249C457F096E /* AddPodcastOptions.swift */,
+				7151D01B33B040C471F672D5 /* AddPodcastView.swift */,
 				94347B9412E35CBD85FC2705 /* EpisodeListView.swift */,
 				A621AE99537538C3A0AD021C /* EpisodeRow.swift */,
 				156FD523B84AC0CFFE5973CD /* ImportProgressView.swift */,
@@ -1220,6 +1229,8 @@
 			files = (
 				B420A9580D5A5606098C51CD /* AboutView.swift in Sources */,
 				B30814ED8290A53F37FF3952 /* AddFeedView.swift in Sources */,
+				C0BB5C94CF541246F76D2FD0 /* AddPodcastOptions.swift in Sources */,
+				A18F64CF1E9874FBACECD300 /* AddPodcastView.swift in Sources */,
 				AB89D4F368E38728AA8BE166 /* Announcer.swift in Sources */,
 				3C6476CFA60A09AE37DB5A26 /* AppColor.swift in Sources */,
 				8544FC4DF6DE4B15FBA82025 /* AppInfo.swift in Sources */,
@@ -1402,6 +1413,7 @@
 				ED3EB7E296F674C8C0B0720D /* RetryPolicyTests.swift in Sources */,
 				086291174A380BA18FB9593D /* SchemaDriftTests.swift in Sources */,
 				5C0D799CBEAAC5D9E5AD3627 /* SearchOPMLTests.swift in Sources */,
+				C0041B9112CCC0F470879BE8 /* SearchScopeTests.swift in Sources */,
 				154FDE6C00CDB28F5FF0A4E1 /* SettingsStoreTests.swift in Sources */,
 				3CD00397784D509C20CC76A3 /* SkipSilenceRemovalTests.swift in Sources */,
 				2C401EF8683A6C0E6BF2C8D7 /* SpeedTests.swift in Sources */,

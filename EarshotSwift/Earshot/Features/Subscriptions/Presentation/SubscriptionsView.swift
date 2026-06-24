@@ -34,10 +34,13 @@ struct SubscriptionsView: View {
         .navigationTitle("Library")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
+                // Scoped to the user's OWN content — subscribed podcasts, episodes,
+                // and bookmarks. Does NOT search the directory; finding new podcasts
+                // lives behind the "Add podcast" button instead.
                 NavigationLink {
-                    SearchView()
+                    SearchView(scope: .library)
                 } label: {
-                    Label("Search", systemImage: "magnifyingglass")
+                    Label("Search your library", systemImage: "magnifyingglass")
                 }
             }
             ToolbarItem(placement: .topBarLeading) {
@@ -55,12 +58,12 @@ struct SubscriptionsView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingAdd) { AddFeedView() }
+        .sheet(isPresented: $showingAdd) { AddPodcastView() }
         .sheet(item: $sharingPodcast) { podcast in
             ShareSheet(items: shareItems(for: podcast))
         }
         .confirmationDialog(
-            "Unsubscribe from \(pendingUnsubscribe?.title ?? "this podcast")?",
+            "Unfollow \(pendingUnsubscribe?.title ?? "this podcast")?",
             isPresented: Binding(
                 get: { pendingUnsubscribe != nil },
                 set: { if !$0 { pendingUnsubscribe = nil } }
@@ -68,7 +71,7 @@ struct SubscriptionsView: View {
             titleVisibility: .visible,
             presenting: pendingUnsubscribe
         ) { podcast in
-            Button("Unsubscribe", role: .destructive) { unsubscribe(podcast) }
+            Button("Unfollow", role: .destructive) { unsubscribe(podcast) }
             Button("Cancel", role: .cancel) { pendingUnsubscribe = nil }
         } message: { podcast in
             Text("This removes \(podcast.title) and its episodes. This can't be undone.")
@@ -123,7 +126,7 @@ struct SubscriptionsView: View {
         context.delete(podcast)
         do {
             try context.save()
-            Announcer.announce("Unsubscribed from \(title)")
+            Announcer.announce("Unfollowed \(title)")
         } catch {
             AppLog.subscriptions.error("Failed to unsubscribe: \(error.localizedDescription, privacy: .public)")
         }
