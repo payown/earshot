@@ -60,7 +60,7 @@ enum SearchScope: Equatable {
 /// directory path is fully disabled: no iTunes call, no debounce task, no directory
 /// section. Results are grouped into clearly-headed sections for a logical VoiceOver
 /// structure.
-struct SearchView: View {
+struct SearchView<HeaderContent: View>: View {
 
     /// The corpus this instance searches and the sections it renders. Defaults to
     /// `.addPodcast` so existing callers keep their directory-backed behaviour;
@@ -85,14 +85,26 @@ struct SearchView: View {
     /// via `.searchFocused` so we focus the field itself, never a container.
     @FocusState private var searchFieldFocused: Bool
 
+    /// Caller-supplied content rendered as the FIRST section of the results `List`,
+    /// above any local or directory results. This is the reliable home for screen
+    /// affordances that must stay reachable while the search field is focused and the
+    /// keyboard is up: because it's ordinary `List` content (not nav-bar or keyboard
+    /// chrome), VoiceOver always has it in the swipe path and scrolls it into view —
+    /// unlike toolbar/keyboard-accessory items, which iOS hides or skips once
+    /// `.searchable` is active. The Add Podcast screen uses this to host its
+    /// "Add by RSS URL" / "Import OPML file" rows; other callers pass nothing.
+    @ViewBuilder private let headerContent: HeaderContent
+
     init(
         scope: SearchScope = .addPodcast,
         title: String? = nil,
-        autoFocusSearch: Bool = false
+        autoFocusSearch: Bool = false,
+        @ViewBuilder headerContent: () -> HeaderContent = { EmptyView() }
     ) {
         self.scope = scope
         self.titleOverride = title
         self.autoFocusSearch = autoFocusSearch
+        self.headerContent = headerContent()
     }
 
     /// The current state of the automatic directory search.
@@ -127,8 +139,10 @@ struct SearchView: View {
 
     private let itunes = ITunesSearchService()
 
-    /// How long the query must be quiet before a directory request fires.
-    private static let debounce: Duration = .milliseconds(350)
+    /// How long the query must be quiet before a directory request fires. Computed
+    /// rather than stored because `SearchView` is generic (over its header content)
+    /// and generic types can't hold static stored properties.
+    private static var debounce: Duration { .milliseconds(350) }
 
     private var matchedPodcasts: [Podcast] {
         SearchLogic.filter(podcasts, query: query) { "\($0.title) \($0.author ?? "")" }
@@ -152,6 +166,11 @@ struct SearchView: View {
 
     var body: some View {
         List {
+            // Caller-supplied rows (e.g. the Add Podcast screen's secondary add
+            // paths) live at the top of the List as real content, so they stay in
+            // VoiceOver's swipe path with the keyboard up.
+            headerContent
+
             if scope.showsPodcasts && !matchedPodcasts.isEmpty {
                 Section(header: Text("Podcasts").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedPodcasts) { podcast in
@@ -409,6 +428,17 @@ struct SearchView: View {
 /// simply taps the visible search field. We never force focus onto a container —
 /// only the search field itself — so VoiceOver lands somewhere it can type, never
 /// on a merged group summary.
+///
+/// Autofocus is suppressed while VoiceOver is running. Auto-popping the keyboard
+/// puts `.searchable` into its active state immediately; with VoiceOver that is
+/// exactly the state in which iOS-managed chrome (nav-bar items, keyboard-accessory
+/// items) gets hidden or dropped from the swipe path, which previously stranded the
+/// secondary add controls. Leaving the field unfocused for VoiceOver users keeps the
+/// screen calm and fully swipe-navigable — they land on content, read the screen,
+/// and swipe to the search field when ready. Sighted users still land in the field
+/// and type straight away. The check is read once on appear; if a user toggles
+/// VoiceOver while this screen is open the secondary add rows live in the List
+/// content (always reachable) so nothing is stranded either way.
 private struct SearchFieldFocus: ViewModifier {
     @FocusState.Binding var focused: Bool
     let autoFocus: Bool
@@ -417,7 +447,11 @@ private struct SearchFieldFocus: ViewModifier {
         if #available(iOS 18.0, *) {
             content
                 .searchFocused($focused)
-                .onAppear { if autoFocus { focused = true } }
+                .onAppear {
+                    if autoFocus && !UIAccessibility.isVoiceOverRunning {
+                        focused = true
+                    }
+                }
         } else {
             content
         }

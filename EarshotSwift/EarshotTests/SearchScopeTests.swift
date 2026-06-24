@@ -41,6 +41,28 @@ final class SearchScopeTests: XCTestCase {
         XCTAssertNotEqual(SearchScope.library, SearchScope.addPodcast)
     }
 
+    /// The Add Podcast screen supplies its secondary add paths ("Add by RSS URL",
+    /// "Import OPML file") via `SearchView`'s `headerContent` slot so they render as
+    /// real `List` rows — the only placement VoiceOver reliably reaches while the
+    /// `.searchable` field is focused and the keyboard is up. Passing header content
+    /// must not change the stored scope (episodes/bookmarks stay hidden, directory
+    /// stays searched). This pins the generic header-content init the fix depends on.
+    func testSearchViewKeepsScopeWithHeaderContent() {
+        let view = SearchView(scope: .addPodcast, title: "Add podcast", autoFocusSearch: true) {
+            Text("Other ways to add")
+        }
+        XCTAssertEqual(view.scope, .addPodcast)
+    }
+
+    /// Callers that pass no header content (Library toolbar search, onboarding) infer
+    /// an empty header so they're unaffected by the new slot. This guards the default
+    /// `EmptyView` header so adding the slot didn't break the existing call sites.
+    func testSearchViewDefaultsToEmptyHeaderContent() {
+        let view = SearchView(scope: .library)
+        XCTAssertEqual(view.scope, .library)
+        XCTAssertTrue(type(of: view) == SearchView<EmptyView>.self)
+    }
+
     // MARK: - Section sets
 
     /// The Library scope searches everything the user already has: podcasts,
