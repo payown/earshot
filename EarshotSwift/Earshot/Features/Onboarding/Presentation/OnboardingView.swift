@@ -1,17 +1,21 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 /// The seven-screen onboarding flow, shown once on first launch. Same for
-/// everyone (PRD 6). The "Add your first podcast" page hosts Search/Add, and the
-/// final "Start Listening" is gated on having at least one subscription.
+/// everyone (PRD 6). The "Add your first podcast" page hosts Search/Add/Import,
+/// and the final "Start Listening" is gated on having at least one subscription.
 struct OnboardingView: View {
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.modelContext) private var context
+    @Environment(OPMLImportProgress.self) private var importProgress
     @Environment(\.dismiss) private var dismiss
     @Query private var podcasts: [Podcast]
 
     @State private var pageIndex = 0
     @State private var showingAdd = false
     @State private var showingSearch = false
+    @State private var importingOPML = false
     @AccessibilityFocusState private var focusedPage: Int?
 
     private let pages = OnboardingContent.pages
@@ -37,6 +41,31 @@ struct OnboardingView: View {
         .sheet(isPresented: $showingAdd) { AddFeedView() }
         .sheet(isPresented: $showingSearch) {
             NavigationStack { SearchView() }
+        }
+        .fileImporter(
+            isPresented: $importingOPML,
+            allowedContentTypes: [UTType(filenameExtension: "opml") ?? .xml, .xml]
+        ) { result in
+            handleImport(result)
+        }
+    }
+
+    /// Imports a user-picked OPML file via the shared importer. Read +
+    /// security-scope + import + the "Imported N podcasts" announcement all live in
+    /// ``OPMLFileImporter`` so onboarding behaves identically to Settings and the
+    /// share-sheet path. Passing the shared `importProgress` drives the app-wide
+    /// import-progress screen (presented from `RootView`), so it appears over
+    /// onboarding automatically — we don't present it here. A successful import
+    /// populates `podcasts`, which unlocks "Start Listening" on the final page.
+    private func handleImport(_ result: Result<URL, Error>) {
+        guard case let .success(url) = result else {
+            if case let .failure(error) = result {
+                AppLog.data.error("Onboarding OPML import: picker failed: \(error.localizedDescription, privacy: .public)")
+            }
+            return
+        }
+        Task {
+            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress)
         }
     }
 
@@ -100,6 +129,14 @@ struct OnboardingView: View {
                 showingAdd = true
             } label: {
                 Label("Add by RSS URL", systemImage: "link")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+
+            Button {
+                importingOPML = true
+            } label: {
+                Label("Import OPML file", systemImage: "square.and.arrow.down")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
