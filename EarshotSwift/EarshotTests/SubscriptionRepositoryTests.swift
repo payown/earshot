@@ -73,6 +73,31 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertEqual(podcast.author, "Host")
     }
 
+    /// The returned `Podcast` must be a valid MAIN-context object — re-fetched by
+    /// persistentModelID after the background actor saved — so callers like
+    /// `OPMLImportService` can attach relationships (folder membership) to it. A
+    /// background-context object would either fault wrong or fail a relationship
+    /// insert on the main context.
+    func testSubscribeReturnsMainContextPodcastUsableForRelationships() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        // The returned object resolves to the SAME row a fresh main-context fetch finds.
+        let fetched = try XCTUnwrap(try ctx.fetch(FetchDescriptor<Podcast>()).first)
+        XCTAssertEqual(podcast.persistentModelID, fetched.persistentModelID)
+
+        // It is a live main-context object: attach a folder membership to it (the
+        // OPML import path) and save without error.
+        let folder = PodcastFolder(name: "News")
+        ctx.insert(folder)
+        ctx.insert(FolderMembership(folder: folder, podcast: podcast))
+        XCTAssertNoThrow(try ctx.save())
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 1)
+    }
+
     func testSubscribeTwiceReturnsExistingWithoutDuplicates() async throws {
         let ctx = TestStore.freshContext()
         let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))

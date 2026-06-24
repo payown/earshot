@@ -428,6 +428,36 @@ Test baseline: **349 tests** (verified 2026-06-21, after #392 — 10 FeedbackCom
 
 None. (F14 audio-enhancement DSP intentionally deferred — see Decision F14.)
 
+## Security Review — subscribe() off-main-actor (branch fix/refresh-off-main-actor)
+
+earshot-security gate: PASS. Extension moves `SubscriptionRepository.subscribe()`
+onto the background `FeedRefreshActor` (`@ModelActor`), mirroring the refresh fix.
+Force-unwraps: none (no `!` in either production file beyond none-found). force-try:
+none. fatalError/trap: none — the deliberate avoidance of `ModelContext.model(for:)`
+(which traps on a missing ID) is confirmed; both ID re-fetches use predicate
+`FetchDescriptor` and the missing-podcast path THROWS `SubscriptionError.podcastNotFoundAfterSubscribe`
+instead of crashing. try?: 9 uses, all on `ModelContext.fetch` for idempotency
+lookups / re-faults where nil is a valid "not present" result, not a swallowed
+error — acceptable per checklist item 2. Silent error swallowing: subscribe
+failures propagate (`async throws`); all 3 callers handle them — OPMLImportService
+logs per-feed + continues, AddFeedView surfaces to UI + Announcer, SearchView
+announces failure. saveIfNeeded() logs on catch. Cross-context safety: only
+`PersistentIdentifier` value types cross the actor boundary (SubscribeResult);
+no `@Model` is returned from or force-unwrapped after the actor. Auto-download
+loop re-fetches Episodes by ID on the MAIN context via `compactMap` (stale/missing
+IDs are dropped, never crashed), so the downloader never sees a background-context
+or stale Episode. Idempotency preserved: re-subscribe returns the existing podcast
+ID with no fetch/insert/save (alreadySubscribed=true); test confirms 1 podcast /
+1 episode after double-subscribe. Behavior preservation verified: backlog
+pre-dismiss (`inboxDismissed = true`), #296 future-date clamp on `lastSeenPubDate`
+(seeded to newest NON-future pub date), `refreshedAt` stamp, and auto-download of
+N most recent — all still hold and are covered by tests. Retain cycles: none (no
+Task/sink/Timer/addObserver closures in changed files). @MainActor: repository
+stays `@MainActor`; heavy work isolated to the `@ModelActor`. Secrets/entitlements:
+none touched. Release build (iPhone 17): BUILD SUCCEEDED. Tests: 33 pass (8
+FeedRefreshActorTests + 25 SubscriptionRepositoryTests). Feature suggestions: none
+this review.
+
 ## Security Review — Issue #429
 
 earshot-security gate: PASS. Settings → Data "Import older data" manual re-import

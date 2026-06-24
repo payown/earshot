@@ -31,6 +31,22 @@ actor FeedRefreshActor {
         let outcome: RefreshOutcome
     }
 
+    /// The result of subscribing on the background context. Carries only
+    /// `PersistentIdentifier`s (a `Sendable` value type), never an `@Model`
+    /// `Podcast`/`Episode`, so it can cross back to the main actor. The caller
+    /// re-fetches both on the main context by these IDs: the podcast so callers
+    /// hold a valid main-context object, the episodes so the @MainActor downloader
+    /// can enqueue auto-downloads against main-context `Episode`s.
+    ///
+    /// `alreadySubscribed` is true when the feed URL already resolved to an
+    /// existing podcast — the actor did no fetch/insert/save and `episodeIDs` is
+    /// empty, so the caller skips auto-download (mirroring the old early return).
+    struct SubscribeResult: Sendable {
+        let podcastID: PersistentIdentifier
+        let episodeIDs: [PersistentIdentifier]
+        let alreadySubscribed: Bool
+    }
+
     /// Refreshes every subscription on the background context, parsing and writing
     /// off the main actor and saving in batches. Mirrors the per-podcast semantics
     /// of `SubscriptionRepository.refresh` exactly (dedup-by-guid, inbox high-water
@@ -103,6 +119,68 @@ actor FeedRefreshActor {
         let outcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
         saveIfNeeded()
         return outcome
+    }
+
+    /// Subscribes to `feedURL` on the background context: the fetch (network I/O)
+    /// and the synchronous RSS parse inside it, plus the per-episode inserts and
+    /// the save, all run here off the main actor so VoiceOver isn't starved while
+    /// an OPML import or a single add does its heavy work (the same lesson as
+    /// refresh). Mirrors the former main-actor `SubscriptionRepository.subscribe`
+    /// per-feed semantics exactly: idempotent by feed URL, backlog pre-dismissed,
+    /// high-water mark seeded to the newest NON-FUTURE pub date (#296), and
+    /// `refreshedAt` stamped.
+    ///
+    /// Returns a ``SubscribeResult`` of `Sendable` identifiers only — never an
+    /// `@Model`. Auto-download is NOT done here: the downloader is `@MainActor`,
+    /// so the caller re-fetches the inserted episodes by `episodeIDs` on the main
+    /// context and enqueues there.
+    func subscribe(feedURL: String, feed: FeedFetching) async throws -> SubscribeResult {
+        let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Idempotency: an existing subscription returns its ID with no fetch,
+        // insert, or save — exactly the old early return.
+        var existingDescriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.feedURL == trimmed })
+        existingDescriptor.fetchLimit = 1
+        if let existing = (try? modelContext.fetch(existingDescriptor))?.first {
+            return SubscribeResult(podcastID: existing.persistentModelID, episodeIDs: [], alreadySubscribed: true)
+        }
+
+        // The fetch (network I/O) and the synchronous parse inside it both run on
+        // this background actor, never the main thread.
+        let parsed = try await feed.fetch(trimmed)
+        let podcast = Podcast(
+            feedURL: trimmed,
+            title: parsed.title.isEmpty ? "Untitled podcast" : parsed.title,
+            author: parsed.author,
+            podcastDescription: parsed.description,
+            artworkURL: parsed.artworkURL,
+            websiteURL: parsed.websiteURL,
+            language: parsed.language,
+            category: parsed.category
+        )
+        modelContext.insert(podcast)
+
+        var insertedEpisodes: [Episode] = []
+        for item in parsed.episodes {
+            let episode = Self.makeEpisode(from: item)
+            episode.podcast = podcast
+            episode.inboxDismissed = true // pre-dismiss backlog on subscribe
+            modelContext.insert(episode)
+            insertedEpisodes.append(episode)
+        }
+        // Seed the high-water mark to the newest NON-FUTURE pub date so a misdated
+        // future episode can't push the mark ahead of real new episodes (#296).
+        let now = Date.now
+        podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsed.episodes, now: now) ?? now
+        podcast.refreshedAt = now
+        saveIfNeeded()
+        AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsed.episodes.count) episodes")
+
+        return SubscribeResult(
+            podcastID: podcast.persistentModelID,
+            episodeIDs: insertedEpisodes.map(\.persistentModelID),
+            alreadySubscribed: false
+        )
     }
 
     // MARK: Per-podcast write (mirrors SubscriptionRepository.refresh)

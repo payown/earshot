@@ -83,51 +83,52 @@ final class SubscriptionRepository {
     /// If a `downloader` was provided at init, auto-downloads the N most recent
     /// episodes where N = the global `autoDownloadCount` setting (default 3).
     /// Download failures are logged and do not roll back the subscription.
+    ///
+    /// The feed fetch, RSS parse, per-episode inserts, and save all run on
+    /// ``FeedRefreshActor`` (a background `@ModelActor`), never the main thread,
+    /// so an OPML import or a single add doesn't starve VoiceOver (the same fix
+    /// applied to refresh, #382). Only `Sendable` identifiers cross back; the
+    /// returned `Podcast` is then re-fetched on the main context so callers
+    /// (`OPMLImportService` folder membership, `AddFeedView`, search) hold a valid
+    /// main-context object.
     @discardableResult
     func subscribe(feedURL: String) async throws -> Podcast {
         let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if let existing = podcast(forFeedURL: trimmed) { return existing }
 
-        let parsed = try await feed.fetch(trimmed)
-        let podcast = Podcast(
-            feedURL: trimmed,
-            title: parsed.title.isEmpty ? "Untitled podcast" : parsed.title,
-            author: parsed.author,
-            podcastDescription: parsed.description,
-            artworkURL: parsed.artworkURL,
-            websiteURL: parsed.websiteURL,
-            language: parsed.language,
-            category: parsed.category
-        )
-        context.insert(podcast)
+        // Hand the fetch/parse/insert/save to the background actor (off the main
+        // thread). It returns only Sendable PersistentIdentifiers.
+        let actor = FeedRefreshActor(modelContainer: context.container)
+        let result = try await actor.subscribe(feedURL: trimmed, feed: feed)
 
-        var insertedEpisodes: [Episode] = []
-        for item in parsed.episodes {
-            let episode = makeEpisode(from: item)
-            episode.podcast = podcast
-            episode.inboxDismissed = true // pre-dismiss backlog on subscribe
-            context.insert(episode)
-            insertedEpisodes.append(episode)
+        // Pull the background context's writes into the main context so the
+        // re-fetch below resolves the freshly-inserted podcast and episodes.
+        mergeBackgroundWrites()
+
+        // Re-fetch the podcast on the main context by its persistentModelID so the
+        // returned object is a valid main-context `Podcast` for callers. If the
+        // feed already existed (actor early return) it was caught above, but guard
+        // anyway: fall back to a feed-URL lookup so we never return a stale object.
+        guard let podcast = self.podcast(forPersistentID: result.podcastID)
+            ?? self.podcast(forFeedURL: trimmed)
+        else {
+            throw SubscriptionError.podcastNotFoundAfterSubscribe
         }
-        // Seed the high-water mark to the newest NON-FUTURE pub date so a misdated
-        // future episode can't push the mark ahead of real new episodes (#296).
-        let now = Date.now
-        podcast.lastSeenPubDate = latestNonFuturePubDate(parsed.episodes, now: now) ?? now
-        podcast.refreshedAt = now
-        try context.save()
-        AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsed.episodes.count) episodes")
 
-        // Auto-download the N most recent episodes (global setting; 0 = off).
-        // Runs after save so episodes are persisted before the download task begins.
-        // Errors from individual downloads are swallowed here -- the download
-        // manager already logs and marks the episode .failed.
-        if let downloader {
+        // Auto-download the N most recent episodes (global setting; 0 = off). The
+        // downloader is @MainActor and needs main-context `Episode`s, so re-fetch
+        // the inserted episodes by ID HERE (never inside the actor), sort newest
+        // first, and enqueue the top N. Errors from individual downloads are
+        // swallowed -- the download manager already logs and marks the episode
+        // .failed -- and never roll back the subscription.
+        if let downloader, !result.episodeIDs.isEmpty {
             let count = AppSettingsStore(context: context).int(
                 SettingsKey.autoDownloadCount,
                 default: SettingsDefault.autoDownloadCount
             )
             if count > 0 {
-                let toDownload = insertedEpisodes
+                let toDownload = result.episodeIDs
+                    .compactMap { episode(forPersistentID: $0) }
                     .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
                     .prefix(count)
                 for episode in toDownload {
@@ -247,26 +248,30 @@ final class SubscriptionRepository {
         return (try? context.fetch(descriptor))?.first
     }
 
-    private func makeEpisode(from item: ParsedEpisode) -> Episode {
-        Episode(
-            guid: item.guid,
-            title: item.title,
-            audioURL: item.audioURL,
-            episodeDescription: item.description,
-            durationSeconds: item.durationSeconds,
-            pubDate: item.pubDate,
-            artworkURL: item.artworkURL,
-            episodeNumber: item.episodeNumber,
-            seasonNumber: item.seasonNumber,
-            chapterURL: item.chapterURL,
-            transcriptURL: item.transcriptURL
-        )
+    /// Resolves a podcast on the MAIN context from an identifier the background
+    /// actor returned, so callers receive a valid main-context object instead of
+    /// one bound to a background `ModelContext`. Uses a predicate fetch (not
+    /// `ModelContext.model(for:)`, which traps on a missing ID) so a vanished row
+    /// returns nil rather than crashing.
+    private func podcast(forPersistentID id: PersistentIdentifier) -> Podcast? {
+        var descriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.persistentModelID == id })
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
     }
 
-    /// The newest episode pub date that is not in the future, or nil if none.
-    /// Future-dated items are excluded so a misdated episode can't advance the
-    /// inbox high-water mark and silently strand later real episodes (#296).
-    private func latestNonFuturePubDate(_ episodes: [ParsedEpisode], now: Date) -> Date? {
-        episodes.compactMap(\.pubDate).filter { $0 <= now }.max()
+    /// Resolves an episode on the MAIN context from a background-actor identifier,
+    /// so the @MainActor downloader enqueues against a main-context `Episode`.
+    private func episode(forPersistentID id: PersistentIdentifier) -> Episode? {
+        var descriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.persistentModelID == id })
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
     }
+}
+
+/// Errors surfaced by ``SubscriptionRepository``.
+enum SubscriptionError: Error {
+    /// The background actor reported a successful subscribe, but the podcast could
+    /// not be resolved on the main context afterward (should not happen in
+    /// practice — guards a stale/missing re-fetch instead of force-unwrapping).
+    case podcastNotFoundAfterSubscribe
 }

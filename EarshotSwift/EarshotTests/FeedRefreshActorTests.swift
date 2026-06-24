@@ -112,6 +112,67 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertTrue(stored.allSatisfy { $0.inboxDismissed }, "Backlog pre-dismissed")
     }
 
+    // MARK: subscribe (off the caller's context)
+
+    /// Subscribing inserts the podcast + every episode on the actor's OWN
+    /// background context (read back via a fresh independent context), with the
+    /// backlog pre-dismissed and the high-water mark seeded to the newest
+    /// non-future pub date (#296).
+    func testActorSubscribeInsertsPodcastAndBacklogOffTheCallerContext() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1), parsedEpisode("b", d2)]))
+
+        let result = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher)
+
+        XCTAssertFalse(result.alreadySubscribed)
+        XCTAssertEqual(result.episodeIDs.count, 2)
+
+        // Read back through an independent context: the actor persisted to the store.
+        let freshCtx = ModelContext(container)
+        let podcasts = try freshCtx.fetch(FetchDescriptor<Podcast>())
+        XCTAssertEqual(podcasts.count, 1)
+        let podcast = try XCTUnwrap(podcasts.first)
+        XCTAssertEqual(podcast.title, "Show")
+        XCTAssertEqual(podcast.author, "Host")
+        XCTAssertEqual(podcast.episodes.count, 2)
+        XCTAssertTrue(podcast.episodes.allSatisfy { $0.inboxDismissed }, "Backlog pre-dismissed")
+        XCTAssertEqual(podcast.lastSeenPubDate, d2, "Mark seeded to newest pub date")
+        XCTAssertNotNil(podcast.refreshedAt)
+    }
+
+    /// Subscribing to an already-subscribed feed URL is idempotent: no fetch, no
+    /// new rows, `alreadySubscribed == true`, and the existing podcast ID returned.
+    func testActorSubscribeIsIdempotentByFeedURL() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1)]))
+
+        let first = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher)
+        let second = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher)
+
+        XCTAssertFalse(first.alreadySubscribed)
+        XCTAssertTrue(second.alreadySubscribed)
+        XCTAssertEqual(first.podcastID, second.podcastID)
+        XCTAssertTrue(second.episodeIDs.isEmpty, "Idempotent return inserts nothing")
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<Podcast>()).count, 1)
+        XCTAssertEqual(try episodes(container).count, 1, "No duplicate episode rows")
+    }
+
+    /// A future-dated episode must not advance the high-water mark past real
+    /// non-future episodes on subscribe (#296).
+    func testActorSubscribeFutureDatedEpisodeDoesNotAdvanceMark() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let future = Date(timeIntervalSinceNow: 60 * 60 * 24 * 30) // 30 days ahead
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1), parsedEpisode("future", future)]))
+
+        _ = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher)
+
+        let podcast = try XCTUnwrap(try ModelContext(container).fetch(FetchDescriptor<Podcast>()).first)
+        XCTAssertEqual(podcast.lastSeenPubDate, d1, "Mark is newest NON-future date, not the future one")
+    }
+
     /// `refreshAll` walks every subscription and reports progress, persisting to
     /// the store readable from a fresh context.
     func testActorRefreshAllProcessesEveryFeedAndPersists() async throws {
