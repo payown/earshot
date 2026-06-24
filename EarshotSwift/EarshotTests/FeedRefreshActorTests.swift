@@ -116,14 +116,15 @@ final class FeedRefreshActorTests: XCTestCase {
 
     /// Subscribing inserts the podcast + every episode on the actor's OWN
     /// background context (read back via a fresh independent context), with the
-    /// backlog pre-dismissed and the high-water mark seeded to the newest
-    /// non-future pub date (#296).
+    /// backlog dismissed when the seed count is 0 and the high-water mark seeded to
+    /// the newest non-future pub date (#296).
     func testActorSubscribeInsertsPodcastAndBacklogOffTheCallerContext() async throws {
         let container = cleanContainer()
         let actor = FeedRefreshActor(modelContainer: container)
         let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1), parsedEpisode("b", d2)]))
 
-        let result = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher)
+        // seed 0 = dismiss the whole backlog (the legacy behavior this asserts).
+        let result = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher, inboxSeedCount: 0)
 
         XCTAssertFalse(result.alreadySubscribed)
         XCTAssertEqual(result.episodeIDs.count, 2)
@@ -136,9 +137,63 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(podcast.title, "Show")
         XCTAssertEqual(podcast.author, "Host")
         XCTAssertEqual(podcast.episodes.count, 2)
-        XCTAssertTrue(podcast.episodes.allSatisfy { $0.inboxDismissed }, "Backlog pre-dismissed")
+        XCTAssertTrue(podcast.episodes.allSatisfy { $0.inboxDismissed }, "Seed 0 dismisses the whole backlog")
         XCTAssertEqual(podcast.lastSeenPubDate, d2, "Mark seeded to newest pub date")
         XCTAssertNotNil(podcast.refreshedAt)
+    }
+
+    /// Subscribing with a seed count of N keeps the newest N non-future episodes in
+    /// the inbox (`status == .newEpisode && !inboxDismissed`) and dismisses the
+    /// older backlog — the core fix for the empty-inbox-on-subscribe parity gap.
+    func testActorSubscribeSeedsNewestNIntoInbox() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        // Five episodes a<b<c<d<e by pub date; seed 2 keeps d and e.
+        let d4 = d3.addingTimeInterval(100_000)
+        let d5 = d4.addingTimeInterval(100_000)
+        let fetcher = FakeFeed(parsedFeed([
+            parsedEpisode("a", d1), parsedEpisode("b", d2), parsedEpisode("c", d3),
+            parsedEpisode("d", d4), parsedEpisode("e", d5),
+        ]))
+
+        _ = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher, inboxSeedCount: 2)
+
+        let stored = try episodes(container)
+        let seeded = stored.filter { !$0.inboxDismissed }
+        XCTAssertEqual(Set(seeded.map(\.guid)), ["d", "e"], "Newest 2 seeded into inbox")
+        XCTAssertTrue(seeded.allSatisfy { $0.status == .newEpisode }, "Seeded episodes are newEpisode")
+        let dismissed = stored.filter { $0.inboxDismissed }
+        XCTAssertEqual(Set(dismissed.map(\.guid)), ["a", "b", "c"], "Older backlog dismissed")
+    }
+
+    /// A seed count of -1 ("All") seeds the entire non-future backlog into the inbox.
+    func testActorSubscribeSeedAllSeedsWholeBacklog() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1), parsedEpisode("b", d2), parsedEpisode("c", d3)]))
+
+        _ = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher, inboxSeedCount: -1)
+
+        let stored = try episodes(container)
+        XCTAssertTrue(stored.allSatisfy { !$0.inboxDismissed && $0.status == .newEpisode }, "Whole backlog seeded")
+    }
+
+    /// Future-dated episodes are never seeded into the inbox even when the seed
+    /// count would otherwise include them (#296). With seed 3 and a feed of one
+    /// real + one future episode, only the real one surfaces.
+    func testActorSubscribeNeverSeedsFutureDatedEpisode() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let future = Date(timeIntervalSinceNow: 60 * 60 * 24 * 30) // 30 days ahead
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1), parsedEpisode("future", future)]))
+
+        _ = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher, inboxSeedCount: 3)
+
+        let stored = try episodes(container)
+        let seeded = stored.filter { !$0.inboxDismissed }
+        XCTAssertEqual(Set(seeded.map(\.guid)), ["a"], "Only the non-future episode is seeded")
+        let futureEp = try XCTUnwrap(stored.first { $0.guid == "future" })
+        XCTAssertTrue(futureEp.inboxDismissed, "Future-dated episode stays dismissed")
     }
 
     /// Subscribing to an already-subscribed feed URL is idempotent: no fetch, no
@@ -148,8 +203,8 @@ final class FeedRefreshActorTests: XCTestCase {
         let actor = FeedRefreshActor(modelContainer: container)
         let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1)]))
 
-        let first = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher)
-        let second = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher)
+        let first = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher, inboxSeedCount: 3)
+        let second = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher, inboxSeedCount: 3)
 
         XCTAssertFalse(first.alreadySubscribed)
         XCTAssertTrue(second.alreadySubscribed)
@@ -167,7 +222,7 @@ final class FeedRefreshActorTests: XCTestCase {
         let future = Date(timeIntervalSinceNow: 60 * 60 * 24 * 30) // 30 days ahead
         let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1), parsedEpisode("future", future)]))
 
-        _ = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher)
+        _ = try await actor.subscribe(feedURL: "https://x/feed.xml", feed: fetcher, inboxSeedCount: 3)
 
         let podcast = try XCTUnwrap(try ModelContext(container).fetch(FetchDescriptor<Podcast>()).first)
         XCTAssertEqual(podcast.lastSeenPubDate, d1, "Mark is newest NON-future date, not the future one")
@@ -222,6 +277,7 @@ final class FeedRefreshActorTests: XCTestCase {
         let results = await actor.subscribeAll(
             feedURLs: urls,
             feed: fetcher,
+            inboxSeedCount: 3,
             onProgress: { completed, total, _ in
                 recorder.calls += 1
                 recorder.lastCompleted = completed
@@ -256,7 +312,8 @@ final class FeedRefreshActorTests: XCTestCase {
 
         let results = await actor.subscribeAll(
             feedURLs: ["https://x/good1.xml", "https://x/bad.xml", "https://x/good2.xml"],
-            feed: fetcher
+            feed: fetcher,
+            inboxSeedCount: 3
         )
 
         XCTAssertEqual(results.count, 2, "Only the two good feeds resolved")
@@ -270,9 +327,9 @@ final class FeedRefreshActorTests: XCTestCase {
         let actor = FeedRefreshActor(modelContainer: container)
         let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1)]))
 
-        _ = await actor.subscribeAll(feedURLs: ["https://x/feed.xml"], feed: fetcher)
+        _ = await actor.subscribeAll(feedURLs: ["https://x/feed.xml"], feed: fetcher, inboxSeedCount: 3)
         let second = await actor.subscribeAll(
-            feedURLs: ["https://x/feed.xml", "https://x/feed2.xml"], feed: fetcher
+            feedURLs: ["https://x/feed.xml", "https://x/feed2.xml"], feed: fetcher, inboxSeedCount: 3
         )
 
         let already = second.filter { $0.alreadySubscribed }

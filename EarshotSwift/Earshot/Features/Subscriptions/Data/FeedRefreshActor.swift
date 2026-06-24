@@ -126,21 +126,22 @@ actor FeedRefreshActor {
     /// the save, all run here off the main actor so VoiceOver isn't starved while
     /// an OPML import or a single add does its heavy work (the same lesson as
     /// refresh). Mirrors the former main-actor `SubscriptionRepository.subscribe`
-    /// per-feed semantics exactly: idempotent by feed URL, backlog pre-dismissed,
-    /// high-water mark seeded to the newest NON-FUTURE pub date (#296), and
-    /// `refreshedAt` stamped.
+    /// per-feed semantics: idempotent by feed URL, the newest `inboxSeedCount`
+    /// non-future episodes seeded into the inbox (the rest dismissed), high-water
+    /// mark seeded to the newest NON-FUTURE pub date (#296), and `refreshedAt`
+    /// stamped.
     ///
     /// Returns a ``SubscribeResult`` of `Sendable` identifiers only — never an
     /// `@Model`. Auto-download is NOT done here: the downloader is `@MainActor`,
     /// so the caller re-fetches the inserted episodes by `episodeIDs` on the main
     /// context and enqueues there.
-    func subscribe(feedURL: String, feed: FeedFetching) async throws -> SubscribeResult {
+    func subscribe(feedURL: String, feed: FeedFetching, inboxSeedCount: Int) async throws -> SubscribeResult {
         // Single-feed path: do the core subscribe, persist this one feed's writes,
         // THEN read the now-permanent identifiers. persistentModelID is temporary
         // until the context saves; capturing it before the save would yield IDs that
         // never resolve on the main context (the batched `subscribeAll` saves in
         // batches but likewise captures IDs only after its saves).
-        let outcome = try await subscribeOne(feedURL: feedURL, feed: feed)
+        let outcome = try await subscribeOne(feedURL: feedURL, feed: feed, inboxSeedCount: inboxSeedCount)
         saveIfNeeded()
         return outcome.result()
     }
@@ -152,9 +153,10 @@ actor FeedRefreshActor {
     /// the whole batch instead of per feed, which is what was starving VoiceOver
     /// while the Library tab was visible during an import.
     ///
-    /// Per-feed semantics are identical to ``subscribe(feedURL:feed:)``: idempotent
-    /// by feed URL, backlog pre-dismissed (`inboxDismissed = true`), high-water mark
-    /// seeded to the newest NON-FUTURE pub date (#296), and `refreshedAt` stamped. A
+    /// Per-feed semantics are identical to ``subscribe(feedURL:feed:inboxSeedCount:)``:
+    /// idempotent by feed URL, newest `inboxSeedCount` non-future episodes seeded
+    /// into the inbox, high-water mark seeded to the newest NON-FUTURE pub date
+    /// (#296), and `refreshedAt` stamped. A
     /// feed that throws (bad URL, parse failure) is logged via `AppLog.subscriptions`
     /// and skipped — it never aborts the rest of the batch.
     ///
@@ -169,6 +171,7 @@ actor FeedRefreshActor {
     func subscribeAll(
         feedURLs: [String],
         feed: FeedFetching,
+        inboxSeedCount: Int,
         onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
     ) async -> [SubscribeResult] {
         let total = feedURLs.count
@@ -192,7 +195,7 @@ actor FeedRefreshActor {
         for url in feedURLs {
             var title: String?
             do {
-                let outcome = try await subscribeOne(feedURL: url, feed: feed)
+                let outcome = try await subscribeOne(feedURL: url, feed: feed, inboxSeedCount: inboxSeedCount)
                 title = outcome.title
                 if outcome.alreadySubscribed {
                     // No insert/save needed: IDs are already permanent.
@@ -240,7 +243,7 @@ actor FeedRefreshActor {
     /// Core subscribe used by both ``subscribe(feedURL:feed:)`` and
     /// ``subscribeAll(feedURLs:feed:onProgress:)``. Does NOT save — the caller decides
     /// when to save and then reads permanent IDs via ``SubscribeOutcome/result()``.
-    private func subscribeOne(feedURL: String, feed: FeedFetching) async throws -> SubscribeOutcome {
+    private func subscribeOne(feedURL: String, feed: FeedFetching, inboxSeedCount: Int) async throws -> SubscribeOutcome {
         let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Idempotency: an existing subscription returns it with no fetch or insert —
@@ -267,22 +270,63 @@ actor FeedRefreshActor {
         )
         modelContext.insert(podcast)
 
+        let now = Date.now
         var insertedEpisodes: [Episode] = []
         for item in parsed.episodes {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
-            episode.inboxDismissed = true // pre-dismiss backlog on subscribe
+            // Start every episode dismissed; the seed pass below un-dismisses the
+            // newest N so they surface in the inbox. This replaces the former
+            // blanket pre-dismiss, which left a fresh subscribe with an empty inbox
+            // (Flutter seeded the newest N instead — parity gap).
+            episode.inboxDismissed = true
             modelContext.insert(episode)
             insertedEpisodes.append(episode)
         }
+        // Seed the inbox with the newest N NON-FUTURE episodes (status stays
+        // .newEpisode), keeping the rest dismissed. N is resolved on the main actor
+        // and passed in; a smaller per-podcast cap (never set on a brand-new
+        // podcast, but honored defensively) wins.
+        seedInbox(insertedEpisodes, seedCount: inboxSeedCount, perPodcastCap: podcast.inboxMaxEpisodes, now: now)
+
         // Seed the high-water mark to the newest NON-FUTURE pub date so a misdated
         // future episode can't push the mark ahead of real new episodes (#296).
-        let now = Date.now
         podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsed.episodes, now: now) ?? now
         podcast.refreshedAt = now
-        AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsed.episodes.count) episodes")
+        AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsed.episodes.count) episodes, seeded \(min(inboxSeedCount < 0 ? insertedEpisodes.count : inboxSeedCount, insertedEpisodes.count)) into inbox")
 
         return SubscribeOutcome(podcast: podcast, episodes: insertedEpisodes, alreadySubscribed: false)
+    }
+
+    /// Un-dismisses the newest N non-future episodes from a just-subscribed
+    /// podcast so they land in the inbox, leaving the older backlog dismissed.
+    ///
+    /// `seedCount` is the global "inbox episodes per new podcast" setting:
+    /// - `< 0` (the "All" sentinel) seeds the entire non-future backlog,
+    /// - `0` seeds nothing (every episode stays dismissed — the legacy behavior),
+    /// - `> 0` seeds the newest that many.
+    ///
+    /// `perPodcastCap` is the podcast's own `inboxMaxEpisodes`; when set and
+    /// smaller than the resolved seed it wins, so a show's own cap is never
+    /// exceeded. Future-dated episodes (#296) are never seeded. Reuses
+    /// ``InboxLogic/idsToDismissForCount`` so the "keep newest, dismiss beyond"
+    /// decision matches the per-podcast inbox cap exactly.
+    private func seedInbox(_ episodes: [Episode], seedCount: Int, perPodcastCap: Int?, now: Date) {
+        // Only non-future episodes are eligible for the inbox (#296).
+        let eligible = episodes
+            .filter { ($0.pubDate ?? .distantPast) <= now }
+            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+        guard !eligible.isEmpty else { return }
+
+        // Resolve the effective cap. "All" (-1) means the whole eligible backlog.
+        var cap = seedCount < 0 ? eligible.count : seedCount
+        if let perPodcastCap { cap = min(cap, perPodcastCap) }
+        guard cap > 0 else { return } // 0 = seed nothing; leave all dismissed.
+
+        let dismiss = Set(InboxLogic.idsToDismissForCount(eligible.map(\.persistentModelID), cap: cap))
+        for episode in eligible where !dismiss.contains(episode.persistentModelID) {
+            episode.inboxDismissed = false
+        }
     }
 
     // MARK: Per-podcast write (mirrors SubscriptionRepository.refresh)

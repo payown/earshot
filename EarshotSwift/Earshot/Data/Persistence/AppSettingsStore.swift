@@ -25,6 +25,11 @@ enum SettingsKey {
     static let defaultLaunchScreen = "default_launch_screen"
     static let lastPlayingEpisodeID = "last_playing_episode_id"
     static let statsStreaksEnabled = "stats_streaks_enabled"
+    // How many of a newly-added podcast's most-recent episodes to seed into the
+    // inbox on subscribe. Mirrors Flutter's getInboxDefaultMaxEpisodes()
+    // (default 3). 0 = seed none (the whole backlog is pre-dismissed);
+    // ``SettingsDefault/inboxDefaultCountAll`` (-1) = seed the entire backlog.
+    static let inboxDefaultCount = "inbox_default_count"
     // Flutter→SwiftUI one-time subscription import.
     static let flutterMigrationComplete = "flutter_migration_complete"
     // Count of launches where the import attempted but the Flutter database
@@ -82,6 +87,12 @@ enum SettingsDefault {
     static let onboardingComplete = false
     static let launchScreen: LaunchScreen = .inbox
     static let statsStreaksEnabled = false
+    /// Default number of most-recent episodes seeded into the inbox when a new
+    /// podcast is added. Matches Flutter's default of 3.
+    static let inboxDefaultCount = 3
+    /// Sentinel stored under ``SettingsKey/inboxDefaultCount`` meaning "seed the
+    /// entire backlog" (no cap). Distinct from 0, which seeds nothing.
+    static let inboxDefaultCountAll = -1
 }
 
 /// Typed access to the generic ``AppSetting`` key/value store. The full
@@ -187,6 +198,18 @@ final class AppSettingsStore {
 
     func setMigrationLastAttemptDate(_ value: Date) {
         setDate(value, for: SettingsKey.migrationLastAttemptDate)
+    }
+
+    /// The number of most-recent episodes to seed into the inbox per podcast on
+    /// subscribe, defaulting to ``SettingsDefault/inboxDefaultCount`` (3) when
+    /// unset. A value of 0 seeds nothing; ``SettingsDefault/inboxDefaultCountAll``
+    /// (-1) seeds the entire backlog.
+    func inboxDefaultCount() -> Int {
+        int(SettingsKey.inboxDefaultCount, default: SettingsDefault.inboxDefaultCount)
+    }
+
+    func setInboxDefaultCount(_ value: Int) {
+        setInt(value, for: SettingsKey.inboxDefaultCount)
     }
 
     func launchScreen() -> LaunchScreen {

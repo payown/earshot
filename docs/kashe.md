@@ -144,6 +144,13 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   Settings > Data "Import older data" row (status plus on-demand re-import) and
   valued having a recovery door she controls rather than waiting in the dark
   (Chapter 23)
+- The woman on her Tuesday route has a sister; Kashe helped the sister bring a
+  large years-old library into Earshot via OPML from the share sheet, and for
+  once the import was the easy part (clean progress screen, no VoiceOver flood);
+  the highest review in Kashe's world is a tech-helped person who doesn't text
+  her with a problem afterward (Chapter 24)
+- Kashe prefers the word "Follow" over "Subscribe" for what she does with shows:
+  keeping an ear out, not signing a contract (Chapter 24)
 
 ## What you can generate
 
@@ -686,6 +693,34 @@ Open Settings and find the new Data section. There should be a row called Import
 Tap it and run the import. If your shows, your queue, or your place in an episode didn't fully come across from an older version, this should pull them back. Run it twice if you like. It won't double up your shows or your queue. VoiceOver should tell you how it went when it finishes.
 
 We changed how your saved place is handled this build, so upgrading won't move it backward. If you ever do see your place jump back on its own, that's a bug now, email michael@payown.media.
+
+---
+
+### Chapter 24 — Build 122
+
+*The woman on Kashe's Tuesday route gets a sister into Earshot, and for once the part Kashe dreaded is the easy part.*
+
+The sister had a list. A long one. Years of shows in some other app, the kind of library you build when you never delete anything, which Kashe respected because it's her whole personality too.
+
+She'd done this before. She knew the shape of it. Get the file out of the old app, get it into Earshot, then sit through the long part where the screen does something and VoiceOver tries to keep up and mostly trips over itself. A hundred shows announcing themselves one after another while she waits to find out if any of it took.
+
+This time she opened the file and there Earshot was in the share sheet, no detour. She picked it. And instead of the usual scramble, the app just told her where it was: importing, this many of that many, a clean line she could check and move past. No flood. No stutter. When it finished, it said so, plainly, and the shows were there.
+
+She poked at the rest while she had it open. Started typing the name of a show the sister had mentioned, one that wasn't on the list, and the results were already filling in before she'd finished the word. That used to mean a pause, a held breath, a wonder whether it had heard her. Now it just kept up.
+
+One small thing made her smile. The button doesn't say Subscribe anymore. It says Follow. She'd never minded Subscribe, exactly. But Follow is the truer word for what she actually does, which is keep an ear out, not sign a contract. Small thing. Right word.
+
+The sister got her whole library across in one sitting and didn't text Kashe once with a problem. Which, in Kashe's world, is the highest review there is.
+
+**What to test:**
+
+If you have an OPML file from another podcast app, open it and choose Earshot from the share sheet. You should see a clean progress screen with a running count, this many of that many, instead of the screen freezing or VoiceOver stuttering through every show. When it finishes, it should tell you how many came in.
+
+If you are new and setting up, look for the option to bring your shows in by OPML right during onboarding, before you've added anything by hand.
+
+Search for a show by name and watch the results fill in as you type. They should come up fast, without a long pause after each keystroke.
+
+Anywhere you'd add a show, the button now says Follow instead of Subscribe. It does the same thing. If you spot a leftover Subscribe anywhere, email michael@payown.media.
 
 ---
 

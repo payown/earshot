@@ -84,9 +84,10 @@ final class SubscriptionRepository {
     }
 
     /// Subscribes to a feed URL. If already subscribed, returns the existing
-    /// podcast. The existing backlog is pre-dismissed from the inbox and the
-    /// high-water mark is set to the newest episode, so subscribing never floods
-    /// the inbox -- only episodes published after this point surface later.
+    /// podcast. The newest N episodes (N = the global `inboxDefaultCount` setting,
+    /// default 3) are seeded into the inbox; the older backlog is dismissed and the
+    /// high-water mark is set to the newest episode, so subscribing surfaces a few
+    /// recent episodes without flooding the inbox.
     ///
     /// If a `downloader` was provided at init, auto-downloads the N most recent
     /// episodes where N = the global `autoDownloadCount` setting (default 3).
@@ -104,10 +105,16 @@ final class SubscriptionRepository {
         let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if let existing = podcast(forFeedURL: trimmed) { return existing }
 
+        // Resolve the inbox seed count on the main actor (AppSettingsStore is
+        // @MainActor) and pass it into the background actor, which must not touch
+        // settings. This is what makes a fresh subscribe land the newest N episodes
+        // in the inbox instead of an empty inbox (Flutter parity).
+        let inboxSeedCount = AppSettingsStore(context: context).inboxDefaultCount()
+
         // Hand the fetch/parse/insert/save to the background actor (off the main
         // thread). It returns only Sendable PersistentIdentifiers.
         let actor = FeedRefreshActor(modelContainer: context.container)
-        let result = try await actor.subscribe(feedURL: trimmed, feed: feed)
+        let result = try await actor.subscribe(feedURL: trimmed, feed: feed, inboxSeedCount: inboxSeedCount)
 
         // Pull the background context's writes into the main context so the
         // re-fetch below resolves the freshly-inserted podcast and episodes.
@@ -269,10 +276,17 @@ final class SubscriptionRepository {
     ) async -> [BulkSubscribeOutcome] {
         guard !feedURLs.isEmpty else { return [] }
 
+        // Resolve the inbox seed count on the main actor (AppSettingsStore is
+        // @MainActor) so the bulk OPML path seeds the inbox identically to the
+        // single-add path. The background actor never reads settings.
+        let inboxSeedCount = AppSettingsStore(context: context).inboxDefaultCount()
+
         // Hand the whole fetch/parse/insert/save loop to the background actor. It
         // returns only Sendable PersistentIdentifiers, batching its saves.
         let actor = FeedRefreshActor(modelContainer: context.container)
-        let results = await actor.subscribeAll(feedURLs: feedURLs, feed: feed, onProgress: onProgress)
+        let results = await actor.subscribeAll(
+            feedURLs: feedURLs, feed: feed, inboxSeedCount: inboxSeedCount, onProgress: onProgress
+        )
 
         // Reconcile the main context ONCE for the entire batch (the essential fix:
         // this used to run once per feed).

@@ -21,6 +21,9 @@ final class SettingsStore {
 
     // Inbox
     var inboxOptInOnly: Bool = SettingsDefault.inboxOptInOnly { didSet { persist { $0.setBool(inboxOptInOnly, for: SettingsKey.inboxOptInOnly) } } }
+    /// Number of most-recent episodes seeded into the inbox when a new podcast is
+    /// added. 0 = none; ``SettingsDefault/inboxDefaultCountAll`` (-1) = all.
+    var inboxDefaultCount: Int = SettingsDefault.inboxDefaultCount { didSet { persist { $0.setInt(inboxDefaultCount, for: SettingsKey.inboxDefaultCount) } } }
 
     // Downloads
     var wifiOnlyDownloads: Bool = SettingsDefault.wifiOnlyDownloads { didSet { persist { $0.setBool(wifiOnlyDownloads, for: SettingsKey.wifiOnlyDownloads) } } }
@@ -54,6 +57,7 @@ final class SettingsStore {
         launchScreen = store.launchScreen()
         groupQueueEpisodes = store.bool(SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes)
         inboxOptInOnly = store.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
+        inboxDefaultCount = store.inboxDefaultCount()
         wifiOnlyDownloads = store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads)
         autoDownloadCount = store.int(SettingsKey.autoDownloadCount, default: SettingsDefault.autoDownloadCount)
         historyRetentionDays = store.int(SettingsKey.historyRetentionDays, default: SettingsDefault.historyRetentionDays)
