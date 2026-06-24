@@ -1,10 +1,22 @@
 import SwiftUI
 import SwiftData
 
-/// Search across local content (podcasts, episodes, bookmarks), with a "Search
-/// Everywhere" button that expands to the iTunes podcast directory. Results are
-/// grouped into clearly-headed sections for a logical VoiceOver structure.
+/// Search across local content (podcasts, episodes, bookmarks) plus the iTunes
+/// podcast directory. The directory search runs automatically as the user types
+/// (debounced), so directory results appear alongside the live local results
+/// without any extra tap. Results are grouped into clearly-headed sections for a
+/// logical VoiceOver structure.
 struct SearchView: View {
+
+    /// The current state of the automatic directory search.
+    private enum DirectoryState: Equatable {
+        case idle
+        case searching
+        case results([PodcastSearchResult])
+        case empty
+        case failed
+    }
+
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
@@ -15,14 +27,21 @@ struct SearchView: View {
     @Query private var bookmarks: [Bookmark]
 
     @State private var query = ""
-    @State private var searchEverywhere = false
-    @State private var directoryResults: [PodcastSearchResult] = []
-    @State private var searchingDirectory = false
+    @State private var directoryState: DirectoryState = .idle
+    @State private var directoryTask: Task<Void, Never>?
+    /// The last directory summary spoken to VoiceOver. Used to suppress repeat
+    /// announcements: because the search fires on a debounce as the user types,
+    /// settling on the same outcome twice (e.g. two "failed" in a row, or the
+    /// same result count) must not re-interrupt the user.
+    @State private var lastAnnouncedSummary = ""
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
 
     private let itunes = ITunesSearchService()
+
+    /// How long the query must be quiet before a directory request fires.
+    private static let debounce: Duration = .milliseconds(350)
 
     private var matchedPodcasts: [Podcast] {
         SearchLogic.filter(podcasts, query: query) { "\($0.title) \($0.author ?? "")" }
@@ -68,7 +87,8 @@ struct SearchView: View {
         }
         .navigationTitle("Search")
         .searchable(text: $query, prompt: "Search podcasts, episodes, bookmarks")
-        .onChange(of: query) { _, _ in if searchEverywhere { runDirectorySearch() } }
+        .onChange(of: query) { _, newValue in scheduleDirectorySearch(for: newValue) }
+        .onDisappear { directoryTask?.cancel() }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
@@ -76,39 +96,47 @@ struct SearchView: View {
         .overlay {
             if query.isEmpty {
                 ContentUnavailableView("Search Earshot", systemImage: "magnifyingglass",
-                                       description: Text("Find podcasts, episodes, and bookmarks. Use Search Everywhere to browse the directory."))
-            } else if !hasLocalResults && !searchEverywhere {
-                ContentUnavailableView.search(text: query)
+                                       description: Text("Find podcasts, episodes, and bookmarks. The directory is searched automatically as you type."))
             }
         }
     }
 
     @ViewBuilder
     private var searchEverywhereSection: some View {
-        if !query.isEmpty {
-            if !searchEverywhere {
-                Section {
-                    Button {
-                        searchEverywhere = true
-                        runDirectorySearch()
-                    } label: {
-                        Label("Search Everywhere", systemImage: "globe")
-                    }
-                    .accessibilityHint("Also search the iTunes podcast directory")
-                }
-            } else {
-                Section(header: Text("From the directory").accessibilityAddTraits(.isHeader)) {
-                    if searchingDirectory {
-                        HStack { ProgressView(); Text("Searching the directory…") }
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Searching the directory")
-                    } else if directoryResults.isEmpty {
-                        Text("No podcasts found in the directory.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(directoryResults) { result in
-                            directoryRow(result)
+        if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+            Section(header: Text("From the directory").accessibilityAddTraits(.isHeader)) {
+                switch directoryState {
+                case .idle:
+                    EmptyView()
+                case .searching:
+                    HStack { ProgressView(); Text("Searching the directory…") }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Searching the directory")
+                case .empty:
+                    Text("No podcasts found in the directory.")
+                        .foregroundStyle(.secondary)
+                case .failed:
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        // Error is signalled by icon + text, not colour alone.
+                        Label {
+                            Text("Couldn't search the directory. Check your connection.")
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
                         }
+                        .accessibilityElement(children: .combine)
+                        Button {
+                            scheduleDirectorySearch(for: query, immediate: true)
+                        } label: {
+                            Label("Try Again", systemImage: "arrow.clockwise")
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityHint("Retry searching the iTunes podcast directory")
+                    }
+                case .results(let results):
+                    ForEach(results) { result in
+                        directoryRow(result)
                     }
                 }
             }
@@ -133,7 +161,9 @@ struct SearchView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel([result.title, result.author].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityValue(subscribed ? "Subscribed" : "")
+        // Only set a value when there's something to say. An empty
+        // accessibilityValue("") is spoken as a pause (dead air) in VoiceOver.
+        .modifier(SubscribedValue(subscribed: subscribed))
         .accessibilityActions {
             if !subscribed { Button("Subscribe") { subscribe(result) } }
         }
@@ -175,20 +205,56 @@ struct SearchView: View {
         )
     }
 
-    private func runDirectorySearch() {
-        let term = query
-        searchingDirectory = true
-        Task {
-            let results = await itunes.search(term)
-            // Ignore stale responses if the query moved on.
-            if term == query {
-                directoryResults = results
-                searchingDirectory = false
-                Announcer.announce(results.isEmpty
-                    ? "No podcasts found in the directory"
-                    : "^[\(results.count) directory result](inflect: true)")
+    /// Debounces directory searches: each keystroke cancels the previous in-flight
+    /// task and schedules a fresh one after a quiet period. Whitespace-only or
+    /// empty queries cancel any pending search and clear results without firing a
+    /// request. Pass `immediate: true` (the retry button) to skip the debounce.
+    private func scheduleDirectorySearch(for term: String, immediate: Bool = false) {
+        directoryTask?.cancel()
+
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            directoryState = .idle
+            // Clearing the field resets the dedup token so the next real search
+            // always announces its outcome.
+            lastAnnouncedSummary = ""
+            return
+        }
+
+        directoryState = .searching
+        directoryTask = Task {
+            if !immediate {
+                try? await Task.sleep(for: Self.debounce)
+                if Task.isCancelled { return }
+            }
+
+            let outcome = await itunes.search(trimmed)
+            if Task.isCancelled { return }
+
+            switch outcome {
+            case .results(let results) where results.isEmpty:
+                directoryState = .empty
+                announceDirectory("No podcasts found in the directory")
+            case .results(let results):
+                directoryState = .results(results)
+                announceDirectory("^[\(results.count) directory result](inflect: true)")
+            case .failure:
+                directoryState = .failed
+                announceDirectory("Couldn't search the directory. Check your connection.")
             }
         }
+    }
+
+    /// Speaks a directory-search summary only when it differs from the last one
+    /// spoken. The search runs on a debounce as the user types, so without this
+    /// guard a user who pauses several times would hear a stack of queued count
+    /// announcements. Announcements stay polite (queued behind the user's current
+    /// speech) so they never cut off the letter the user is typing.
+    @MainActor
+    private func announceDirectory(_ summary: String) {
+        guard summary != lastAnnouncedSummary else { return }
+        lastAnnouncedSummary = summary
+        Announcer.announce(summary)
     }
 
     private func subscribe(_ result: PodcastSearchResult) {
@@ -197,6 +263,7 @@ struct SearchView: View {
                 _ = try await SubscriptionRepository(context: context).subscribe(feedURL: result.feedURL)
                 Announcer.announce("Subscribed to \(result.title)")
             } catch {
+                AppLog.networking.error("Subscribe from search failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 Announcer.announce("Couldn't subscribe to \(result.title)")
             }
         }
@@ -205,5 +272,20 @@ struct SearchView: View {
     private func shareItems(for episode: Episode) -> [Any] {
         if let url = URL(string: episode.audioURL) { return [episode.title, url] }
         return [episode.title]
+    }
+}
+
+/// Applies an `accessibilityValue` only when the podcast is subscribed. Omitting
+/// the modifier entirely (rather than passing "") avoids VoiceOver speaking an
+/// empty value as a pause on every not-yet-subscribed directory row.
+private struct SubscribedValue: ViewModifier {
+    let subscribed: Bool
+
+    func body(content: Content) -> some View {
+        if subscribed {
+            content.accessibilityValue("Subscribed")
+        } else {
+            content
+        }
     }
 }
