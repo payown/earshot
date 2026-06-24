@@ -44,7 +44,7 @@ struct OnboardingView: View {
         }
         .sheet(isPresented: $showingAdd) { AddFeedView() }
         .sheet(isPresented: $showingSearch) {
-            NavigationStack { SearchView() }
+            NavigationStack { SearchView(scope: .everywhere) }
         }
         .fileImporter(
             isPresented: $importingOPML,
@@ -121,29 +121,12 @@ struct OnboardingView: View {
 
     private var addPodcastButtons: some View {
         VStack(spacing: Spacing.md) {
-            Button {
-                showingSearch = true
-            } label: {
-                Label("Search podcasts", systemImage: "magnifyingglass")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-
-            Button {
-                showingAdd = true
-            } label: {
-                Label("Add by RSS URL", systemImage: "link")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-
-            Button {
-                importingOPML = true
-            } label: {
-                Label("Import OPML file", systemImage: "square.and.arrow.down")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
+            // Shared with the Library tab's Add Podcast sheet so the two can't drift.
+            AddPodcastOptions(
+                onSearch: { showingSearch = true },
+                onAddByURL: { showingAdd = true },
+                onImportOPML: { importingOPML = true }
+            )
 
             if hasPodcast {
                 Text("^[\(podcasts.count) podcast](inflect: true) added")

@@ -34,10 +34,13 @@ struct SubscriptionsView: View {
         .navigationTitle("Library")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
+                // Scoped to the user's OWN content — subscribed podcasts, episodes,
+                // and bookmarks. Does NOT search the directory; finding new podcasts
+                // lives behind the "Add podcast" button instead.
                 NavigationLink {
-                    SearchView()
+                    SearchView(scope: .library)
                 } label: {
-                    Label("Search", systemImage: "magnifyingglass")
+                    Label("Search your library", systemImage: "magnifyingglass")
                 }
             }
             ToolbarItem(placement: .topBarLeading) {
@@ -55,7 +58,7 @@ struct SubscriptionsView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingAdd) { AddFeedView() }
+        .sheet(isPresented: $showingAdd) { AddPodcastView() }
         .sheet(item: $sharingPodcast) { podcast in
             ShareSheet(items: shareItems(for: podcast))
         }

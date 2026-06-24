@@ -1,12 +1,37 @@
 import SwiftUI
 import SwiftData
 
-/// Search across local content (podcasts, episodes, bookmarks) plus the iTunes
-/// podcast directory. The directory search runs automatically as the user types
-/// (debounced), so directory results appear alongside the live local results
-/// without any extra tap. Results are grouped into clearly-headed sections for a
-/// logical VoiceOver structure.
+/// Which corpus a ``SearchView`` searches.
+///
+/// - `.library`: the user's OWN content only — their subscribed podcasts plus the
+///   episodes and bookmarks already in the local store. The iTunes directory is
+///   NOT searched at all: no network request fires, no "From the directory"
+///   section appears. This is the Library tab's toolbar search.
+/// - `.everywhere`: local content PLUS the iTunes podcast directory (searched
+///   automatically as the user types). This is the "find new podcasts" search
+///   used by the Add Podcast flow and onboarding.
+enum SearchScope: Equatable {
+    case library
+    case everywhere
+}
+
+/// Search across local content (podcasts, episodes, bookmarks) and — in the
+/// `.everywhere` scope only — the iTunes podcast directory. When the directory is
+/// in scope it is searched automatically as the user types (debounced), so
+/// directory results appear alongside the live local results without any extra
+/// tap. In `.library` scope the directory path is fully disabled: no iTunes call,
+/// no debounce task, no directory section. Results are grouped into clearly-headed
+/// sections for a logical VoiceOver structure.
 struct SearchView: View {
+
+    /// The corpus this instance searches. Defaults to `.everywhere` so existing
+    /// callers keep their behaviour; call sites pass `.library` explicitly to scope
+    /// the search to the user's own content.
+    let scope: SearchScope
+
+    init(scope: SearchScope = .everywhere) {
+        self.scope = scope
+    }
 
     /// The current state of the automatic directory search.
     private enum DirectoryState: Equatable {
@@ -83,21 +108,55 @@ struct SearchView: View {
                 }
             }
 
-            searchEverywhereSection
+            if scope == .everywhere {
+                searchEverywhereSection
+            }
         }
         .navigationTitle("Search")
-        .searchable(text: $query, prompt: "Search podcasts, episodes, bookmarks")
-        .onChange(of: query) { _, newValue in scheduleDirectorySearch(for: newValue) }
+        .searchable(text: $query, prompt: searchPrompt)
+        // The directory search only ever fires in `.everywhere` scope; in
+        // `.library` scope `scheduleDirectorySearch` is never wired up, so no
+        // network request, debounce task, or directory state change can occur.
+        .onChange(of: query) { _, newValue in
+            if scope == .everywhere { scheduleDirectorySearch(for: newValue) }
+        }
         .onDisappear { directoryTask?.cancel() }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
-        .overlay {
-            if query.isEmpty {
+        .overlay { emptyOverlay }
+    }
+
+    /// The prompt shown in the search field, tailored to the scope so VoiceOver and
+    /// sighted users both understand what's being searched.
+    private var searchPrompt: String {
+        switch scope {
+        case .library:
+            return "Search your library"
+        case .everywhere:
+            return "Search podcasts, episodes, bookmarks"
+        }
+    }
+
+    /// The placeholder shown before any query is typed, and — in `.library` scope —
+    /// the "no results" message when a query matches nothing in the user's content.
+    /// In `.library` scope there is no directory fallback, so an empty result set is
+    /// terminal and must be announced clearly rather than implying more is coming.
+    @ViewBuilder
+    private var emptyOverlay: some View {
+        if query.isEmpty {
+            switch scope {
+            case .library:
+                ContentUnavailableView("Search your library", systemImage: "magnifyingglass",
+                                       description: Text("Find your subscribed podcasts, episodes, and bookmarks."))
+            case .everywhere:
                 ContentUnavailableView("Search Earshot", systemImage: "magnifyingglass",
                                        description: Text("Find podcasts, episodes, and bookmarks. The directory is searched automatically as you type."))
             }
+        } else if scope == .library && !hasLocalResults {
+            ContentUnavailableView("No results in your library", systemImage: "magnifyingglass",
+                                   description: Text("Nothing in your podcasts, episodes, or bookmarks matches “\(query)”. To find new podcasts, use Add podcast."))
         }
     }
 

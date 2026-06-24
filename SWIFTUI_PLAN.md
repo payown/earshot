@@ -226,6 +226,24 @@ The SwiftUI side is built and waiting.
 
 ## UI Decisions
 
+- **Library search and "add a new podcast" are split (UX round 1, item 2).** The
+  Library tab toolbar now carries two distinct affordances: a magnifying-glass that
+  opens `SearchView(scope: .library)` (labelled "Search your library"), and a `plus`
+  that opens the new `AddPodcastView` sheet (labelled "Add podcast"). `SearchView`
+  gained a `SearchScope` parameter (`.library` / `.everywhere`, defaulting to
+  `.everywhere` so old call sites are unchanged). In `.library` scope the entire
+  iTunes directory path is gated off — `scheduleDirectorySearch` is never invoked
+  from `onChange`, the "From the directory" section isn't rendered, and the empty
+  state reads "No results in your library" pointing the user at Add podcast — so no
+  network request or debounce task can fire. `AddPodcastView` is a `NavigationStack`
+  sheet (Done button + `.accessibilityAction(.escape)`, never drag-only) offering
+  the three add paths via the new shared `AddPodcastOptions` group: "Search podcasts"
+  pushes `SearchView(scope: .everywhere)`, "Add by RSS URL" presents `AddFeedView`,
+  "Import OPML file" runs `OPMLFileImporter.importFile` with the shared
+  `OPMLImportProgress` (no duplicated announcement — the importer owns it).
+  `AddPodcastOptions` is reused by `OnboardingView` so the onboarding and Library add
+  flows can't drift. Onboarding's in-flow search now passes `.everywhere` explicitly.
+
 - **Import older data lives in an always-visible Settings → Data row (#429).** The
   manual re-import is surfaced as an "Import older data" row in the existing Data
   section of `SettingsScreen` — never gated on `IS_BETA_BUILD` or any migration
