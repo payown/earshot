@@ -60,7 +60,11 @@ final class SubscriptionRepositoryTests: XCTestCase {
         )
     }
 
-    func testSubscribeCreatesPodcastAndPreDismissesBacklog() async throws {
+    /// Subscribing seeds the newest N episodes (N = global `inboxDefaultCount`,
+    /// default 3) into the inbox rather than dismissing the whole backlog, so a
+    /// fresh subscribe is not an empty inbox (Flutter parity). With 2 episodes and
+    /// the default seed of 3, both surface.
+    func testSubscribeCreatesPodcastAndSeedsInbox() async throws {
         let ctx = TestStore.freshContext()
         let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
         let repo = SubscriptionRepository(context: ctx, feed: fetcher)
@@ -68,7 +72,9 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
 
         XCTAssertEqual(podcast.episodes.count, 2)
-        XCTAssertTrue(podcast.episodes.allSatisfy { $0.inboxDismissed })
+        // Both episodes are within the default seed (3), so both are in the inbox.
+        XCTAssertTrue(podcast.episodes.allSatisfy { !$0.inboxDismissed && $0.status == .newEpisode })
+        XCTAssertEqual(InboxRepository(context: ctx).inboxEpisodes().count, 2)
         XCTAssertEqual(podcast.lastSeenPubDate, d2)
         XCTAssertEqual(podcast.author, "Host")
     }

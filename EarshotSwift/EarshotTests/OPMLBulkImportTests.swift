@@ -65,10 +65,17 @@ final class OPMLBulkImportTests: XCTestCase {
 
         XCTAssertEqual(imported, 5)
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 5)
-        // Each feed's three episodes were inserted (backlog pre-dismissed).
+        // Each feed's three episodes were inserted. With the default inbox seed of
+        // 3 and exactly 3 episodes per feed, all of them are seeded into the inbox
+        // (`status == .newEpisode && !inboxDismissed`) — a bulk OPML import lands a
+        // populated inbox, not an empty one (parity fix).
         let episodes = try ctx.fetch(FetchDescriptor<Episode>())
         XCTAssertEqual(episodes.count, 15)
-        XCTAssertTrue(episodes.allSatisfy { $0.inboxDismissed }, "Subscribe pre-dismisses backlog")
+        XCTAssertTrue(
+            episodes.allSatisfy { !$0.inboxDismissed && $0.status == .newEpisode },
+            "Bulk import seeds the newest 3 (all here) per feed into the inbox"
+        )
+        XCTAssertEqual(InboxRepository(context: ctx).inboxEpisodes().count, 15)
     }
 
     // MARK: Folders + memberships

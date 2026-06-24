@@ -28,6 +28,17 @@ struct SettingsScreen: View {
     private static let skipIntervals = [10, 15, 30, 45, 60]
     private static let downloadCounts = [0, 1, 3, 5, 10]
     private static let retentionOptions = [30, 60, 90, 180, 365]
+    // Inbox seed-on-subscribe options. -1 = "All" (seed the whole backlog), 0 =
+    // "None" (nothing surfaces on subscribe). Mirrors PodcastSettingsView's picker
+    // style (label/value pairs, explicit VoiceOver labels).
+    private static let inboxSeedOptions: [(label: String, value: Int)] = [
+        ("None", 0),
+        ("1", 1),
+        ("3", 3),
+        ("5", 5),
+        ("10", 10),
+        ("All", SettingsDefault.inboxDefaultCountAll),
+    ]
 
     var body: some View {
         @Bindable var settings = settings
@@ -61,13 +72,24 @@ struct SettingsScreen: View {
             }
 
             Section {
-                // The section footer already explains this; a matching hint would
-                // make VoiceOver read the same sentence twice.
+                Picker("Inbox episodes per new podcast", selection: $settings.inboxDefaultCount) {
+                    ForEach(Self.inboxSeedOptions, id: \.value) { option in
+                        Text(option.label)
+                            .tag(option.value)
+                            .accessibilityLabel(inboxSeedAccessibilityLabel(for: option))
+                    }
+                }
+                // The picker hint covers this control; keep it out of the footer so
+                // VoiceOver doesn't read the seed-count explanation twice.
+                .accessibilityHint("How many recent episodes appear in the inbox when you add a new podcast")
+
+                // The section footer below explains this toggle; a matching hint
+                // would make VoiceOver read the same sentence twice.
                 Toggle("Opt-in podcasts only", isOn: $settings.inboxOptInOnly)
             } header: {
                 Text("Inbox")
             } footer: {
-                Text("When on, new episodes only reach the inbox for podcasts you've explicitly included.")
+                Text("Opt-in podcasts only: when on, new episodes only reach the inbox for podcasts you've explicitly included.")
             }
 
             Section("Downloads") {
@@ -180,6 +202,19 @@ struct SettingsScreen: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Removes every podcast, episode, download, and setting on this device. This can't be undone.")
+        }
+    }
+
+    // MARK: Inbox seed picker
+
+    /// Spells out the terse picker labels ("3" → "3 episodes") for VoiceOver, and
+    /// gives the sentinels natural phrasings.
+    private func inboxSeedAccessibilityLabel(for option: (label: String, value: Int)) -> String {
+        switch option.value {
+        case 0: return "None"
+        case 1: return "1 episode"
+        case SettingsDefault.inboxDefaultCountAll: return "All episodes"
+        default: return "\(option.value) episodes"
         }
     }
 

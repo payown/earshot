@@ -65,6 +65,25 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(read!.timeIntervalSince1970, when.timeIntervalSince1970, accuracy: 0.001)
     }
 
+    // MARK: Inbox seed-on-subscribe count
+
+    func testInboxDefaultCountDefaultsToThree() throws {
+        let store = try makeStore()
+        XCTAssertEqual(store.inboxDefaultCount(), 3)
+        XCTAssertEqual(SettingsDefault.inboxDefaultCount, 3)
+    }
+
+    func testInboxDefaultCountRoundTrips() throws {
+        let store = try makeStore()
+        store.setInboxDefaultCount(5)
+        XCTAssertEqual(store.inboxDefaultCount(), 5)
+        // The "All" sentinel persists distinctly from 0 (none).
+        store.setInboxDefaultCount(SettingsDefault.inboxDefaultCountAll)
+        XCTAssertEqual(store.inboxDefaultCount(), -1)
+        store.setInboxDefaultCount(0)
+        XCTAssertEqual(store.inboxDefaultCount(), 0)
+    }
+
     // MARK: Migration status (#429)
 
     func testMigrationStatusDefaultsToNotAttempted() throws {
