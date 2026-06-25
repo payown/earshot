@@ -63,6 +63,21 @@ struct SettingsScreen: View {
                 Toggle("Voice enhance", isOn: $settings.voiceEnhanceEnabled)
             }
 
+            Section {
+                // Tightest-to-widest reading order: "after episode" nests inside
+                // "after group", so episode comes first and focus order matches
+                // the boundary nesting.
+                Toggle("Continue after episode ends", isOn: $settings.continueAfterEpisode)
+                Toggle("Continue after group ends", isOn: $settings.continueAfterGroupEnds)
+            } header: {
+                Text("Auto-advance")
+            } footer: {
+                // One footer explains the nesting for both toggles. Per-toggle
+                // accessibilityHints would make VoiceOver read the same sentence
+                // twice (matches the Inbox/Privacy sections' approach).
+                Text("When both are on, playback moves to the next episode automatically. Turn off \"after episode ends\" to stop after each episode, or \"after group ends\" to stop when a podcast's episodes run out.")
+            }
+
             Section("General") {
                 Picker("Launch screen", selection: $settings.launchScreen) {
                     ForEach(LaunchScreen.allCases, id: \.self) { Text($0.displayName).tag($0) }

@@ -538,9 +538,16 @@ final class PlayerService {
         let repo = QueueRepository(context: context)
 
         let queued = repo.queue()
-        let nextID = PlaybackLogic.nextUpID(
-            queue: queued.map(\.persistentModelID),
-            after: finished.persistentModelID
+        let nextID = PlaybackLogic.nextUpHonoringBoundaries(
+            queue: queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) },
+            after: finished.persistentModelID,
+            currentGroupKey: finished.podcast?.persistentModelID,
+            continueAfterEpisode: settings?.bool(
+                SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode
+            ) ?? SettingsDefault.continueAfterEpisode,
+            continueAfterGroupEnds: settings?.bool(
+                SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds
+            ) ?? SettingsDefault.continueAfterGroupEnds
         )
         let nextEpisode = queued.first { $0.persistentModelID == nextID }
 
@@ -958,9 +965,16 @@ final class PlayerService {
         }
 
         let queued = repo.queue()
-        let nextID = PlaybackLogic.nextUpID(
-            queue: queued.map(\.persistentModelID),
-            after: finished.persistentModelID
+        let nextID = PlaybackLogic.nextUpHonoringBoundaries(
+            queue: queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) },
+            after: finished.persistentModelID,
+            currentGroupKey: finished.podcast?.persistentModelID,
+            continueAfterEpisode: settings?.bool(
+                SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode
+            ) ?? SettingsDefault.continueAfterEpisode,
+            continueAfterGroupEnds: settings?.bool(
+                SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds
+            ) ?? SettingsDefault.continueAfterGroupEnds
         )
         let nextEpisode = queued.first { $0.persistentModelID == nextID }
 
@@ -1006,9 +1020,16 @@ final class PlayerService {
             return
         }
         let queued = QueueRepository(context: context).queue()
-        let nextID = PlaybackLogic.nextUpID(
-            queue: queued.map(\.persistentModelID),
-            after: current.persistentModelID
+        let nextID = PlaybackLogic.nextUpHonoringBoundaries(
+            queue: queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) },
+            after: current.persistentModelID,
+            currentGroupKey: current.podcast?.persistentModelID,
+            continueAfterEpisode: settings?.bool(
+                SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode
+            ) ?? SettingsDefault.continueAfterEpisode,
+            continueAfterGroupEnds: settings?.bool(
+                SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds
+            ) ?? SettingsDefault.continueAfterGroupEnds
         )
         guard let next = queued.first(where: { $0.persistentModelID == nextID }) else {
             clearPreload()

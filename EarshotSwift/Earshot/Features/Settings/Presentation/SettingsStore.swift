@@ -14,6 +14,8 @@ final class SettingsStore {
     var skipForwardSeconds: Int = SettingsDefault.skipForwardSeconds { didSet { persist { $0.setInt(skipForwardSeconds, for: SettingsKey.skipForwardSeconds) } } }
     var skipBackSeconds: Int = SettingsDefault.skipBackSeconds { didSet { persist { $0.setInt(skipBackSeconds, for: SettingsKey.skipBackSeconds) } } }
     var voiceEnhanceEnabled = false { didSet { persist { $0.setBool(voiceEnhanceEnabled, for: SettingsKey.voiceEnhanceEnabled) } } }
+    var continueAfterEpisode: Bool = SettingsDefault.continueAfterEpisode { didSet { persist { $0.setBool(continueAfterEpisode, for: SettingsKey.continueAfterEpisode) } } }
+    var continueAfterGroupEnds: Bool = SettingsDefault.continueAfterGroupEnds { didSet { persist { $0.setBool(continueAfterGroupEnds, for: SettingsKey.continueAfterGroupEnds) } } }
 
     // General
     var launchScreen: LaunchScreen = SettingsDefault.launchScreen { didSet { persist { $0.setLaunchScreen(launchScreen) } } }
@@ -54,6 +56,8 @@ final class SettingsStore {
         skipForwardSeconds = store.int(SettingsKey.skipForwardSeconds, default: SettingsDefault.skipForwardSeconds)
         skipBackSeconds = store.int(SettingsKey.skipBackSeconds, default: SettingsDefault.skipBackSeconds)
         voiceEnhanceEnabled = store.bool(SettingsKey.voiceEnhanceEnabled, default: false)
+        continueAfterEpisode = store.bool(SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode)
+        continueAfterGroupEnds = store.bool(SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds)
         launchScreen = store.launchScreen()
         groupQueueEpisodes = store.bool(SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes)
         inboxOptInOnly = store.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)

@@ -101,6 +101,45 @@ enum PlaybackLogic {
         queue.first { $0 != current }
     }
 
+    /// The id of the episode to play next after `current` finishes, honoring the
+    /// two auto-advance boundary settings (#446). A `nil` result means STOP --
+    /// callers clear now-playing / skip preload exactly as they do when the queue
+    /// has no next item.
+    ///
+    /// Precedence, tightest boundary first:
+    /// 1. `continueAfterEpisode` off -> always stop after every episode (makes the
+    ///    group setting moot while off).
+    /// 2. else `continueAfterGroupEnds` off and the next queue item is a different
+    ///    group (podcast) than `currentGroupKey` -> stop at the group boundary.
+    /// 3. else advance to the first queue entry whose id is not `current` (today's
+    ///    behavior; both-on is the default), or `nil` if no such item exists.
+    ///
+    /// This is intentionally independent of the runtime `stopAfterCurrentEpisode`
+    /// one-off action: it neither takes nor consults that flag.
+    ///
+    /// - Parameters:
+    ///   - queue: The ordered queue as `(id, groupKey)` pairs. `groupKey` is the
+    ///     item's podcast identity.
+    ///   - current: The id of the episode that just finished, if any.
+    ///   - currentGroupKey: The group (podcast) key of the finished episode.
+    ///   - continueAfterEpisode: When false, stop at every episode boundary.
+    ///   - continueAfterGroupEnds: When false, stop when the next item is a
+    ///     different group than the current one.
+    static func nextUpHonoringBoundaries<ID: Equatable, Key: Equatable>(
+        queue: [(id: ID, groupKey: Key)],
+        after current: ID?,
+        currentGroupKey: Key?,
+        continueAfterEpisode: Bool,
+        continueAfterGroupEnds: Bool
+    ) -> ID? {
+        guard continueAfterEpisode else { return nil }
+        guard let next = queue.first(where: { $0.id != current }) else { return nil }
+        if !continueAfterGroupEnds, let cur = currentGroupKey, next.groupKey != cur {
+            return nil
+        }
+        return next.id
+    }
+
     /// How often the per-tick playback position is flushed to SwiftData while
     /// audio plays. The periodic time observer fires every second, but a
     /// synchronous main-actor `context.save()` every second starves the main
