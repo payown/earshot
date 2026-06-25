@@ -228,4 +228,103 @@ final class PlaybackLogicTests: XCTestCase {
         XCTAssertNil(PlaybackLogic.nextUpID(queue: [], after: 1))
         XCTAssertNil(PlaybackLogic.nextUpID(queue: [1], after: 1))
     }
+
+    // MARK: Up-next resolution honoring auto-advance boundaries (#446)
+
+    /// A small queue of (episode id, podcast group key) pairs for boundary tests.
+    /// Episode 1 / 2 belong to podcast "A"; episode 3 belongs to podcast "B".
+    private let boundaryQueue: [(id: Int, groupKey: String)] = [
+        (id: 1, groupKey: "A"),
+        (id: 2, groupKey: "A"),
+        (id: 3, groupKey: "B"),
+    ]
+
+    func testBoundaryEpisodeOffStopsEvenWithSamePodcastNext() {
+        // Tightest boundary: episode-continuation off stops after every episode,
+        // even when the next item is the same podcast (group setting is moot).
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: boundaryQueue,
+            after: 1,
+            currentGroupKey: "A",
+            continueAfterEpisode: false,
+            continueAfterGroupEnds: true
+        ))
+    }
+
+    func testBoundaryGroupOffStopsAtDifferentPodcastNext() {
+        // Episode on, group off: finishing the last item of group "A" (id 2),
+        // the next item (id 3) is group "B" -> stop at the group boundary.
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 2, groupKey: "A"), (id: 3, groupKey: "B")],
+            after: 2,
+            currentGroupKey: "A",
+            continueAfterEpisode: true,
+            continueAfterGroupEnds: false
+        ))
+    }
+
+    func testBoundaryGroupOffAdvancesWhenNextIsSamePodcast() {
+        // Episode on, group off: the next item (id 2) is the same group "A" as the
+        // finished item (id 1) -> advance.
+        XCTAssertEqual(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: boundaryQueue,
+            after: 1,
+            currentGroupKey: "A",
+            continueAfterEpisode: true,
+            continueAfterGroupEnds: false
+        ), 2)
+    }
+
+    func testBoundaryBothOnAdvancesWithinGroup() {
+        XCTAssertEqual(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: boundaryQueue,
+            after: 1,
+            currentGroupKey: "A",
+            continueAfterEpisode: true,
+            continueAfterGroupEnds: true
+        ), 2)
+    }
+
+    func testBoundaryBothOnAdvancesAcrossGroup() {
+        // Both on: advancing into a different podcast is allowed.
+        XCTAssertEqual(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 2, groupKey: "A"), (id: 3, groupKey: "B")],
+            after: 2,
+            currentGroupKey: "A",
+            continueAfterEpisode: true,
+            continueAfterGroupEnds: true
+        ), 3)
+    }
+
+    func testBoundaryReturnsNilAtQueueEnd() {
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 1, groupKey: "A")],
+            after: 1,
+            currentGroupKey: "A",
+            continueAfterEpisode: true,
+            continueAfterGroupEnds: true
+        ))
+    }
+
+    func testBoundaryReturnsNilWhenQueueEmpty() {
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [],
+            after: 1,
+            currentGroupKey: "A",
+            continueAfterEpisode: true,
+            continueAfterGroupEnds: true
+        ))
+    }
+
+    func testBoundaryGroupOffWithNilCurrentGroupAdvances() {
+        // A nil current group key cannot define a boundary; advance normally even
+        // with group-continuation off.
+        XCTAssertEqual(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 1, groupKey: "A"), (id: 2, groupKey: "B")],
+            after: nil,
+            currentGroupKey: nil,
+            continueAfterEpisode: true,
+            continueAfterGroupEnds: false
+        ), 1)
+    }
 }
