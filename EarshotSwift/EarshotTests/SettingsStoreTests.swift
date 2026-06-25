@@ -30,6 +30,24 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(store.wifiOnlyDownloads)
     }
 
+    /// Auto-advance settings default true (existing unconditional behavior) and
+    /// round-trip through the store like any other boolean preference (#446).
+    func testAutoAdvanceDefaultsTrueAndPersist() {
+        let ctx = TestStore.freshContext()
+        let store = SettingsStore()
+        store.configure(context: ctx)
+        XCTAssertTrue(store.continueAfterEpisode)
+        XCTAssertTrue(store.continueAfterGroupEnds)
+
+        store.continueAfterEpisode = false
+        store.continueAfterGroupEnds = false
+
+        let reloaded = SettingsStore()
+        reloaded.configure(context: ctx)
+        XCTAssertFalse(reloaded.continueAfterEpisode)
+        XCTAssertFalse(reloaded.continueAfterGroupEnds)
+    }
+
     func testFactoryResetDeletesEverything() {
         let ctx = TestStore.freshContext()
         let p = Podcast(feedURL: "https://x/a.xml", title: "Show")

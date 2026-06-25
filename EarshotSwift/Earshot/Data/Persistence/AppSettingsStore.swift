@@ -22,6 +22,12 @@ enum SettingsKey {
     static let inboxOptInOnly = "inbox_opt_in_only"
     static let wifiOnlyDownloads = "wifi_only_downloads"
     static let groupQueueEpisodes = "group_queue_episodes"
+    // Auto-advance boundary gates (#446). Both default true (existing behavior).
+    // continueAfterEpisode off → stop at every episode boundary.
+    // continueAfterGroupEnds off → stop when the next queue item is a different
+    // podcast. Checked tightest-first at the on-complete handler.
+    static let continueAfterEpisode = "continue_after_episode"
+    static let continueAfterGroupEnds = "continue_after_group_ends"
     static let defaultLaunchScreen = "default_launch_screen"
     static let lastPlayingEpisodeID = "last_playing_episode_id"
     static let statsStreaksEnabled = "stats_streaks_enabled"
@@ -84,6 +90,10 @@ enum SettingsDefault {
     static let directTouchEnabled = false
     static let inboxOptInOnly = false
     static let groupQueueEpisodes = false
+    // Auto-advance defaults true: preserves today's unconditional auto-advance
+    // until the user opts to stop at a boundary (#446).
+    static let continueAfterEpisode = true
+    static let continueAfterGroupEnds = true
     static let onboardingComplete = false
     static let launchScreen: LaunchScreen = .inbox
     static let statsStreaksEnabled = false
