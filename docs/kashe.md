@@ -745,7 +745,7 @@ Search for a show by name and watch the results fill in as you type. They should
 
 Anywhere you'd add a show, the button now says Follow instead of Subscribe. It does the same thing. If you spot a leftover Subscribe anywhere, email michael@payown.media.
 
-### Chapter 25 — Build [next]
+### Chapter 25 — Build 123
 
 *Kashe set her queue to group by show a long time ago. It never quite stayed set. This build makes it stick, gives the headings more to do, and lets her say how far playback should roll on its own.*
 
