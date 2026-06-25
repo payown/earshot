@@ -6,7 +6,7 @@ import SwiftData
 /// to bottom / remove) so reordering never depends on a drag gesture. Move
 /// actions are offered only in flat mode, where position is unambiguous; in
 /// grouped mode the group heading exposes four group-level actions (Play Group,
-/// Play Newest First, Play Oldest First, Shuffle Group) in the actions rotor.
+/// Sort Newest First, Sort Oldest First, Shuffle Group) in the actions rotor.
 struct QueueScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
@@ -86,12 +86,13 @@ struct QueueScreen: View {
 
     /// A single heading element per group. It carries the `.isHeader` trait and
     /// is announced as "[Podcast], N episodes". The four group-level actions
-    /// (Play Group, Play Newest First, Play Oldest First, Shuffle Group) live in
+    /// (Play Group, Sort Newest First, Sort Oldest First, Shuffle Group) live in
     /// the VoiceOver Actions rotor on this one element — no second focusable
     /// button — so reordering and playback never depend on a drag gesture.
     /// The explicit `.accessibilityLabel` overrides the child `Text`, so only
     /// one heading node exists (the SwiftUI analogue of the explicit-label +
-    /// ExcludeSemantics pattern).
+    /// ExcludeSemantics pattern). Only Play Group starts audio; the three
+    /// sort/shuffle actions reorder the group in place without starting playback.
     private func groupHeader(_ group: QueueGroup) -> some View {
         let count = group.episodes.count
         let countPhrase = count == 1 ? "1 episode" : "\(count) episodes"
@@ -100,29 +101,26 @@ struct QueueScreen: View {
             .accessibilityLabel("\(group.podcast.title), \(countPhrase)")
             .accessibilityAddTraits(.isHeader)
             .accessibilityActions {
+                // Play Group starts playback. The three sort/shuffle actions only
+                // reorder the group in place (their @discardableResult Episode? is
+                // ignored) — they never start audio.
                 Button("Play Group") {
                     if let episode = repo.playGroup(group.podcast) {
                         player.play(episode)
                         Announcer.announce("Playing \(group.podcast.title)")
                     }
                 }
-                Button("Play Newest First") {
-                    if let episode = repo.playNewestFirst(group.podcast) {
-                        player.play(episode)
-                        Announcer.announce("\(group.podcast.title), newest first")
-                    }
+                Button("Sort Newest First") {
+                    repo.playNewestFirst(group.podcast)
+                    Announcer.announce("Sorted newest first")
                 }
-                Button("Play Oldest First") {
-                    if let episode = repo.playOldestFirst(group.podcast) {
-                        player.play(episode)
-                        Announcer.announce("\(group.podcast.title), oldest first")
-                    }
+                Button("Sort Oldest First") {
+                    repo.playOldestFirst(group.podcast)
+                    Announcer.announce("Sorted oldest first")
                 }
                 Button("Shuffle Group") {
-                    if let episode = repo.shuffleGroup(group.podcast) {
-                        player.play(episode)
-                        Announcer.announce("\(group.podcast.title), shuffled")
-                    }
+                    repo.shuffleGroup(group.podcast)
+                    Announcer.announce("Shuffled")
                 }
             }
     }
