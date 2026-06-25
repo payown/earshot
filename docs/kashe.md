@@ -155,6 +155,13 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   launch because the setting never persisted, and folded it into her morning
   routine rather than report it; this build makes the grouping choice stick
   across navigation and relaunch (Chapter 25, draft)
+- Now that grouping holds, Kashe runs the queue from the show headings; the
+  per-group heading actions in the VoiceOver rotor gained Play Group, Sort
+  Newest First, Sort Oldest First, and Shuffle Group, and the old standalone
+  "Play group" button is gone (sort/shuffle reorder and announce without
+  starting audio; only Play Group starts playback). She sorts her thrice-daily
+  news show newest first, keeps her long interview show oldest first, and
+  shuffles a backlog show she dips into with no plan (Chapter 25, draft)
 
 ## What you can generate
 
@@ -732,7 +739,7 @@ Anywhere you'd add a show, the button now says Follow instead of Subscribe. It d
 
 ### Chapter 25 — Build [next] (DRAFT — not yet shipped)
 
-*Kashe set her queue to group by show a long time ago. It never quite stayed set. This build makes it stick.*
+*Kashe set her queue to group by show a long time ago. It never quite stayed set. This build makes it stick, and gives the headings more to do.*
 
 Every morning started the same way, and Kashe had stopped noticing the extra step.
 
@@ -746,7 +753,13 @@ She flipped grouping on, and VoiceOver said it plain: "Queue grouped by podcast.
 
 It's a small one. She knows it's a small one. But it's the kind of small she'd been paying for every single morning, a few seconds and a little friction she'd quit counting. Now the app remembers what she told it the first time, so she doesn't have to keep telling it.
 
-She flipped it off once more, just to hear what it would say. "Queue ungrouped." Fair enough. Back on, and out the door.
+Now that it held, she started living in it more than she used to. The headings stopped being just dividers and turned into where she runs the queue from.
+
+There used to be a little button on each show's heading, just to play that whole show. It's gone now, folded into the actions rotor where the move options already live. She flicks down on a show's name and they're all right there: play the group, sort it newest first, sort it oldest first, shuffle it. Four ways to handle a whole show without touching a single episode.
+
+Her news show, the one that posts three times a day, she sorts newest first so the latest sits on top where she wants it. The long interview show she's been saving, oldest first, so it plays in the order it came. And there's a backlog show she dips into with no plan at all, so she shuffles that one and lets it surprise her. None of them start playing when she sorts or shuffles. They just rearrange and say so, "Sorted newest first," "Shuffled," and she decides when to press play. Play group is the only one that starts the audio, pulling the show to the front and going.
+
+She flipped grouping off once more, just to hear what it would say. "Queue ungrouped." Fair enough. Back on, and out the door.
 
 **What to test:**
 
@@ -757,6 +770,12 @@ Go to Settings and find the "Group queue by podcast" toggle. It should already m
 Leave grouping on, move around the app, and come back to the queue. Then force-quit Earshot and open it cold. Your queue should still be grouped. You shouldn't have to turn it on again.
 
 Do the same with grouping turned off. It should stay off across navigation and relaunch.
+
+In a grouped queue, put VoiceOver on a show's heading and open the actions rotor. You should find four actions: Play Group, Sort Newest First, Sort Oldest First, and Shuffle Group. There's no separate "Play group" button anymore. It lives in the rotor now.
+
+Try Sort Newest First, then Sort Oldest First. The show's episodes should reorder within the group, and you should hear "Sorted newest first" or "Sorted oldest first." No audio should start. Try Shuffle Group. The group should shuffle to the front of the queue and announce "Shuffled," again with nothing playing.
+
+Try Play Group. It should bring that show to the front of the queue and start playing.
 
 ---
 
