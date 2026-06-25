@@ -346,6 +346,19 @@ The SwiftUI side is built and waiting.
   on the `swift` branch is **209** (verified via `git stash` on this branch). New
   baseline of record: **209**.
 
+- **Queue grouping reads the persisted setting, not local state (#444).**
+  `QueueScreen` previously branched grouped-vs-flat on a throwaway
+  `@State groupByPodcast`, so the choice reset on navigation/relaunch and the App
+  Settings toggle was dead with respect to the queue. The local state was removed;
+  the screen now reads `@Environment(SettingsStore.self).groupQueueEpisodes`
+  (persisted key `group_queue_episodes`) for the display branch, the EditButton
+  gating, and the in-queue Menu toggle. The toggle binds through a computed
+  `Binding<Bool>` whose setter writes `settings.groupQueueEpisodes` and then posts
+  `Announcer.announce("Queue grouped by podcast"|"Queue ungrouped")` (Flutter
+  parity, announced after the flip so the spoken state is correct). The in-queue and
+  Settings toggles now share one source of truth. View-layer only — no model/schema
+  change; the existing `QueueLogic.group` transform is reused as-is.
+
 ## Networking Decisions
 
 - **#381 Background feed refresh + 15-min skip window.** Registered a
