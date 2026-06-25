@@ -244,6 +244,20 @@ The SwiftUI side is built and waiting.
   `AddPodcastOptions` is reused by `OnboardingView` so the onboarding and Library add
   flows can't drift. Onboarding's in-flow search now passes `.everywhere` explicitly.
 
+- **Grouped-queue header is a single heading element with four rotor actions (#445).**
+  `QueueScreen.groupHeader(_:)` is now one `Text(podcast.title)` node carrying an
+  explicit `.accessibilityLabel("[Podcast], N episodes")` (pluralized — "1 episode"
+  vs "N episodes"), the `.isHeader` trait, and `.accessibilityActions { }` exposing
+  exactly four actions in order — Play Group, Play Newest First, Play Oldest First,
+  Shuffle Group — so they sit in the VoiceOver Actions rotor rather than as a second
+  focusable button. The old standalone "Play group" `Button` was removed. Each action
+  calls the matching silent `QueueRepository` method (added in #448), then
+  `PlayerService.play()` on the returned episode, then `Announcer.announce()` ("Playing
+  [title]" / "[title], newest first" / "[title], oldest first" / "[title], shuffled");
+  an empty group returns `nil` and is a no-op (no play, no announcement). Group-level
+  move actions stay out of grouped mode by design — position is ambiguous there, so
+  grouped mode offers the four play actions and flat mode keeps the move rotor.
+
 - **Library "+" now lands directly in podcast search (UX round 1, follow-up).**
   Device feedback: following a show is the primary action, and the intermediate
   three-option menu was an extra step. The Library toolbar `plus` ("Add podcast")

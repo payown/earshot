@@ -5,7 +5,8 @@ import SwiftData
 /// users and a full set of VoiceOver custom actions (move to top / up / down /
 /// to bottom / remove) so reordering never depends on a drag gesture. Move
 /// actions are offered only in flat mode, where position is unambiguous; in
-/// grouped mode reordering is at the group level ("Play group").
+/// grouped mode the group heading exposes four group-level actions (Play Group,
+/// Play Newest First, Play Oldest First, Shuffle Group) in the actions rotor.
 struct QueueScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
@@ -83,22 +84,47 @@ struct QueueScreen: View {
         }
     }
 
+    /// A single heading element per group. It carries the `.isHeader` trait and
+    /// is announced as "[Podcast], N episodes". The four group-level actions
+    /// (Play Group, Play Newest First, Play Oldest First, Shuffle Group) live in
+    /// the VoiceOver Actions rotor on this one element — no second focusable
+    /// button — so reordering and playback never depend on a drag gesture.
+    /// The explicit `.accessibilityLabel` overrides the child `Text`, so only
+    /// one heading node exists (the SwiftUI analogue of the explicit-label +
+    /// ExcludeSemantics pattern).
     private func groupHeader(_ group: QueueGroup) -> some View {
-        HStack {
-            Text(group.podcast.title)
-                // Header trait on the title text itself, so the headings rotor
-                // lands on it and the Play-group button stays a separate element.
-                .accessibilityAddTraits(.isHeader)
-            Spacer()
-            Button {
-                repo.playGroup(group.podcast)
-                Announcer.announce("Moved \(group.podcast.title) to the front of the queue")
-            } label: {
-                Text("Play group")
+        let count = group.episodes.count
+        let countPhrase = count == 1 ? "1 episode" : "\(count) episodes"
+
+        return Text(group.podcast.title)
+            .accessibilityLabel("\(group.podcast.title), \(countPhrase)")
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityActions {
+                Button("Play Group") {
+                    if let episode = repo.playGroup(group.podcast) {
+                        player.play(episode)
+                        Announcer.announce("Playing \(group.podcast.title)")
+                    }
+                }
+                Button("Play Newest First") {
+                    if let episode = repo.playNewestFirst(group.podcast) {
+                        player.play(episode)
+                        Announcer.announce("\(group.podcast.title), newest first")
+                    }
+                }
+                Button("Play Oldest First") {
+                    if let episode = repo.playOldestFirst(group.podcast) {
+                        player.play(episode)
+                        Announcer.announce("\(group.podcast.title), oldest first")
+                    }
+                }
+                Button("Shuffle Group") {
+                    if let episode = repo.shuffleGroup(group.podcast) {
+                        player.play(episode)
+                        Announcer.announce("\(group.podcast.title), shuffled")
+                    }
+                }
             }
-            .accessibilityLabel("Play \(group.podcast.title) group")
-            .accessibilityHint("Moves these episodes to the front of the queue")
-        }
     }
 
     // MARK: Row
