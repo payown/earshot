@@ -114,4 +114,89 @@ final class QueueLogicTests: XCTestCase {
         let items: [(id: Int, key: String)] = [(1, "A"), (2, "B"), (3, "A")]
         XCTAssertEqual(QueueLogic.moveDownWithinGroup(items, id: 3), [1, 2, 3])
     }
+
+    // MARK: sortedByDate (Play newest / oldest first)
+
+    private func date(_ daysFromEpoch: Double) -> Date {
+        Date(timeIntervalSince1970: daysFromEpoch * 86_400)
+    }
+
+    func testSortedByDateNewestFirstDescending() {
+        let items: [(id: Int, date: Date?)] = [
+            (1, date(3)), (2, date(1)), (3, date(2)),
+        ]
+        XCTAssertEqual(QueueLogic.sortedByDate(items, newestFirst: true), [1, 3, 2])
+    }
+
+    func testSortedByDateOldestFirstAscending() {
+        let items: [(id: Int, date: Date?)] = [
+            (1, date(3)), (2, date(1)), (3, date(2)),
+        ]
+        XCTAssertEqual(QueueLogic.sortedByDate(items, newestFirst: false), [2, 3, 1])
+    }
+
+    func testSortedByDateIsStableForEqualDates() {
+        // Three episodes share a date; their incoming relative order must hold
+        // in both directions.
+        let items: [(id: Int, date: Date?)] = [
+            (1, date(5)), (2, date(5)), (3, date(5)),
+        ]
+        XCTAssertEqual(QueueLogic.sortedByDate(items, newestFirst: true), [1, 2, 3])
+        XCTAssertEqual(QueueLogic.sortedByDate(items, newestFirst: false), [1, 2, 3])
+    }
+
+    func testSortedByDateNilDatesSortLastInBothDirections() {
+        let items: [(id: Int, date: Date?)] = [
+            (1, nil), (2, date(2)), (3, nil), (4, date(1)),
+        ]
+        // Dated items ordered by direction; nils trail keeping their order (1, 3).
+        XCTAssertEqual(QueueLogic.sortedByDate(items, newestFirst: true), [2, 4, 1, 3])
+        XCTAssertEqual(QueueLogic.sortedByDate(items, newestFirst: false), [4, 2, 1, 3])
+    }
+
+    func testSortedByDateSingleItemIsThatItem() {
+        let items: [(id: Int, date: Date?)] = [(7, date(1))]
+        XCTAssertEqual(QueueLogic.sortedByDate(items, newestFirst: true), [7])
+        XCTAssertEqual(QueueLogic.sortedByDate(items, newestFirst: false), [7])
+    }
+
+    func testSortedByDateEmptyIsEmpty() {
+        let items: [(id: Int, date: Date?)] = []
+        XCTAssertTrue(QueueLogic.sortedByDate(items, newestFirst: true).isEmpty)
+    }
+
+    // MARK: shuffled (Shuffle group)
+
+    func testShuffledReturnsPermutationOfSameIdSet() {
+        let ids = Array(1...20)
+        var rng = SeededRNG(seed: 42)
+        let result = QueueLogic.shuffled(ids, using: &rng)
+        XCTAssertEqual(Set(result), Set(ids), "every id is preserved exactly once")
+        XCTAssertEqual(result.count, ids.count)
+    }
+
+    func testShuffledIsDeterministicForASeed() {
+        let ids = Array(1...20)
+        var a = SeededRNG(seed: 7)
+        var b = SeededRNG(seed: 7)
+        XCTAssertEqual(QueueLogic.shuffled(ids, using: &a), QueueLogic.shuffled(ids, using: &b))
+    }
+
+    func testShuffledEmptyIsEmpty() {
+        var rng = SeededRNG(seed: 1)
+        XCTAssertTrue(QueueLogic.shuffled([Int](), using: &rng).isEmpty)
+    }
+}
+
+/// A tiny reproducible RNG (SplitMix64) so shuffle tests are deterministic.
+private struct SeededRNG: RandomNumberGenerator {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
 }

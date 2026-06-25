@@ -122,14 +122,79 @@ final class QueueRepository {
         reorder(episode) { QueueLogic.move($0, $1, toIndex: toIndex) }
     }
 
+    // MARK: Group actions (#445)
+
     /// Brings a podcast's queued episodes to the front in their current order
-    /// ("Play group"), so auto-advance stays within the group.
-    func playGroup(_ podcast: Podcast) {
+    /// ("Play group"), so auto-advance stays within the group. Returns the
+    /// episode now at the front of the group for the caller to start playing.
+    @discardableResult
+    func playGroup(_ podcast: Podcast) -> Episode? {
+        reorderGroupToFront(podcast) { $0.map(\.persistentModelID) }
+    }
+
+    /// Reorders the group's episodes newest-first by publish date, then brings
+    /// the group to the front. Other groups keep their relative order. Returns
+    /// the (now front) newest episode for the caller to start playing.
+    @discardableResult
+    func playNewestFirst(_ podcast: Podcast) -> Episode? {
+        reorderGroupToFront(podcast) { groupItems in
+            QueueLogic.sortedByDate(
+                groupItems.map { (id: $0.persistentModelID, date: $0.episode?.pubDate) },
+                newestFirst: true
+            )
+        }
+    }
+
+    /// Reorders the group's episodes oldest-first by publish date, then brings
+    /// the group to the front. Other groups keep their relative order. Returns
+    /// the (now front) oldest episode for the caller to start playing.
+    @discardableResult
+    func playOldestFirst(_ podcast: Podcast) -> Episode? {
+        reorderGroupToFront(podcast) { groupItems in
+            QueueLogic.sortedByDate(
+                groupItems.map { (id: $0.persistentModelID, date: $0.episode?.pubDate) },
+                newestFirst: false
+            )
+        }
+    }
+
+    /// Shuffles the group's episodes, then brings the group to the front. Other
+    /// groups keep their relative order. Returns the (now front) episode for the
+    /// caller to start playing.
+    @discardableResult
+    func shuffleGroup(_ podcast: Podcast) -> Episode? {
+        reorderGroupToFront(podcast) { groupItems in
+            var rng = SystemRandomNumberGenerator()
+            return QueueLogic.shuffled(groupItems.map(\.persistentModelID), using: &rng)
+        }
+    }
+
+    /// Shared group-action core: collects the podcast's queued items, lets
+    /// `order` decide their new relative order, brings that ordered subset to the
+    /// front (every other item keeps its relative position via
+    /// ``QueueLogic/bringToFront(_:_:)``), persists only when the order actually
+    /// changes, and returns the episode now at the front of the group. An empty
+    /// group (the podcast has nothing queued) returns `nil` and makes no change.
+    @discardableResult
+    private func reorderGroupToFront(
+        _ podcast: Podcast,
+        order: (_ groupItems: [QueueItem]) -> [PersistentIdentifier]
+    ) -> Episode? {
         let items = orderedItems()
-        let subset = items
-            .filter { $0.episode?.podcast?.persistentModelID == podcast.persistentModelID }
-            .map(\.persistentModelID)
-        applyOrder(QueueLogic.bringToFront(items.map(\.persistentModelID), subset), items: items)
+        let groupItems = items.filter {
+            $0.episode?.podcast?.persistentModelID == podcast.persistentModelID
+        }
+        guard !groupItems.isEmpty else { return nil }
+
+        let orderedSubset = order(groupItems)
+        let currentIDs = items.map(\.persistentModelID)
+        let newOrder = QueueLogic.bringToFront(currentIDs, orderedSubset)
+        if newOrder != currentIDs {
+            applyOrder(newOrder, items: items)
+        }
+
+        let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.persistentModelID, $0) })
+        return orderedSubset.first.flatMap { byID[$0]?.episode }
     }
 
     // MARK: Internals
