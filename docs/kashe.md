@@ -151,6 +151,10 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   away instead of an empty hallway after a big import (Chapter 24)
 - Kashe prefers the word "Follow" over "Subscribe" for what she does with shows:
   keeping an ear out, not signing a contract (Chapter 24)
+- Kashe had been manually re-enabling "Group by podcast" on nearly every cold
+  launch because the setting never persisted, and folded it into her morning
+  routine rather than report it; this build makes the grouping choice stick
+  across navigation and relaunch (Chapter 25, draft)
 
 ## What you can generate
 
@@ -725,6 +729,34 @@ If you are new and setting up, look for the option to bring your shows in by OPM
 Search for a show by name and watch the results fill in as you type. They should come up fast, without a long pause after each keystroke.
 
 Anywhere you'd add a show, the button now says Follow instead of Subscribe. It does the same thing. If you spot a leftover Subscribe anywhere, email michael@payown.media.
+
+### Chapter 25 — Build [next] (DRAFT — not yet shipped)
+
+*Kashe set her queue to group by show a long time ago. It never quite stayed set. This build makes it stick.*
+
+Every morning started the same way, and Kashe had stopped noticing the extra step.
+
+Open Earshot, land on the queue, flip grouping back on. She'd set "Group by podcast" so long ago she couldn't tell you when. It was how she ran her mornings, news shows stacked together, the long interview saved for the drive. But every cold launch handed her back a flat list, one long run of episodes with no seams, and she'd turn grouping on again before she could plan anything.
+
+She'd tried fixing it the obvious way once. There was a switch for it down in Settings, the same thing by another name. She turned it on and nothing happened. Off, on again. The queue did what it wanted regardless. So she filed it where she files things like that, under not worth the fight, and went back to flipping it on by hand each morning. One more part of the routine, like the coffee.
+
+This build is the one where it stays.
+
+She flipped grouping on, and VoiceOver said it plain: "Queue grouped by podcast." Then she did the thing she'd taught herself not to expect. Closed the app, opened it cold, landed on the queue. Still grouped. Her shows still in their own little stacks, right where she'd left them. She checked the switch in Settings out of old habit, half expecting it to argue with the queue the way it always had. It didn't. Both of them said the same thing now.
+
+It's a small one. She knows it's a small one. But it's the kind of small she'd been paying for every single morning, a few seconds and a little friction she'd quit counting. Now the app remembers what she told it the first time, so she doesn't have to keep telling it.
+
+She flipped it off once more, just to hear what it would say. "Queue ungrouped." Fair enough. Back on, and out the door.
+
+**What to test:**
+
+Open your queue and turn on "Group by podcast." With VoiceOver on, you should hear "Queue grouped by podcast" when it turns on and "Queue ungrouped" when it turns off.
+
+Go to Settings and find the "Group queue by podcast" toggle. It should already match what you just set on the queue. Flip it there, then go back to the queue. The queue should match. The two should always agree.
+
+Leave grouping on, move around the app, and come back to the queue. Then force-quit Earshot and open it cold. Your queue should still be grouped. You shouldn't have to turn it on again.
+
+Do the same with grouping turned off. It should stay off across navigation and relaunch.
 
 ---
 
