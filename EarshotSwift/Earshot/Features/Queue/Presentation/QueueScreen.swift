@@ -10,15 +10,29 @@ struct QueueScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
     @Environment(QuickActionStore.self) private var quickActions
+    @Environment(SettingsStore.self) private var settings
 
     @Query(sort: \QueueItem.position) private var items: [QueueItem]
 
-    @State private var groupByPodcast = false
     @State private var showNotesEpisode: Episode?
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
 
     private var repo: QueueRepository { QueueRepository(context: context) }
     private var episodes: [Episode] { items.compactMap(\.episode) }
+
+    /// Drives the grouped-vs-flat display from the persisted
+    /// ``SettingsKey/groupQueueEpisodes`` setting, so the choice survives
+    /// navigation and relaunch and stays in sync with the App Settings toggle.
+    /// Writing through it announces the change for VoiceOver (Flutter parity).
+    private var groupByPodcast: Binding<Bool> {
+        Binding(
+            get: { settings.groupQueueEpisodes },
+            set: { newValue in
+                settings.groupQueueEpisodes = newValue
+                Announcer.announce(newValue ? "Queue grouped by podcast" : "Queue ungrouped")
+            }
+        )
+    }
 
     var body: some View {
         content
@@ -35,7 +49,7 @@ struct QueueScreen: View {
                 systemImage: "list.bullet",
                 description: Text("Episodes you add to the queue appear here.")
             )
-        } else if groupByPodcast {
+        } else if settings.groupQueueEpisodes {
             groupedList
         } else {
             flatList
@@ -111,12 +125,12 @@ struct QueueScreen: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        if !episodes.isEmpty && !groupByPodcast {
+        if !episodes.isEmpty && !settings.groupQueueEpisodes {
             ToolbarItem(placement: .topBarLeading) { EditButton() }
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                Toggle(isOn: $groupByPodcast) {
+                Toggle(isOn: groupByPodcast) {
                     Label("Group by podcast", systemImage: "rectangle.3.group")
                 }
                 if !episodes.isEmpty {

@@ -84,6 +84,44 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.inboxDefaultCount(), 0)
     }
 
+    // MARK: Group queue by podcast (#444)
+
+    func testGroupQueueEpisodesDefaultsToFalse() throws {
+        let store = try makeStore()
+        XCTAssertEqual(store.bool(SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes), false)
+        XCTAssertEqual(SettingsDefault.groupQueueEpisodes, false)
+    }
+
+    func testGroupQueueEpisodesRoundTrips() throws {
+        let store = try makeStore()
+        store.setBool(true, for: SettingsKey.groupQueueEpisodes)
+        XCTAssertEqual(store.bool(SettingsKey.groupQueueEpisodes, default: false), true)
+        store.setBool(false, for: SettingsKey.groupQueueEpisodes)
+        XCTAssertEqual(store.bool(SettingsKey.groupQueueEpisodes, default: true), false)
+    }
+
+    /// The queue display toggle and the App Settings toggle both flow through
+    /// SettingsStore.groupQueueEpisodes, which must persist and reload from the
+    /// shared key so the choice survives navigation and relaunch.
+    func testSettingsStorePersistsGroupQueueEpisodes() throws {
+        let context = TestStore.freshContext()
+
+        let settings = SettingsStore()
+        settings.configure(context: context)
+        XCTAssertEqual(settings.groupQueueEpisodes, false)
+
+        settings.groupQueueEpisodes = true
+
+        // A fresh store over the same context (simulating relaunch) reads it back.
+        let reloaded = SettingsStore()
+        reloaded.configure(context: context)
+        XCTAssertEqual(reloaded.groupQueueEpisodes, true)
+
+        // And the raw key matches what the queue toolbar Toggle writes.
+        let raw = AppSettingsStore(context: context)
+        XCTAssertEqual(raw.bool(SettingsKey.groupQueueEpisodes, default: false), true)
+    }
+
     // MARK: Migration status (#429)
 
     func testMigrationStatusDefaultsToNotAttempted() throws {
