@@ -327,4 +327,56 @@ final class PlaybackLogicTests: XCTestCase {
             continueAfterGroupEnds: false
         ), 1)
     }
+
+    func testBoundaryEpisodeOffWinsWhenGroupAlsoOff() {
+        // Both boundaries off: episode-continuation is the tightest, so it must
+        // short-circuit to nil before the group check runs -- proven here by a next
+        // item in the SAME group, which the group rule alone would have advanced to.
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: boundaryQueue,
+            after: 1,
+            currentGroupKey: "A",
+            continueAfterEpisode: false,
+            continueAfterGroupEnds: false
+        ))
+    }
+
+    func testBoundaryGroupOffAdvancesWhenCurrentSitsMidQueue() {
+        // The finished episode (id 1) is not at the head; "next" is the first item
+        // whose id differs from current (id 2, same group "A"), not queue.first.
+        // Group-off must still advance because that next item shares the group.
+        XCTAssertEqual(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 2, groupKey: "A"), (id: 1, groupKey: "A"), (id: 3, groupKey: "B")],
+            after: 1,
+            currentGroupKey: "A",
+            continueAfterEpisode: true,
+            continueAfterGroupEnds: false
+        ), 2)
+    }
+
+    func testBoundaryGroupOffWithNonNilCurrentButUnknownGroupAdvances() {
+        // A real finished episode whose group key we couldn't resolve (nil) cannot
+        // define a group boundary, so group-off still advances to the next item even
+        // though it is a different podcast.
+        XCTAssertEqual(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 1, groupKey: "A"), (id: 2, groupKey: "B")],
+            after: 9,
+            currentGroupKey: nil,
+            continueAfterEpisode: true,
+            continueAfterGroupEnds: false
+        ), 1)
+    }
+
+    func testBoundaryBothOnAdvancesToImmediateNextAcrossMultipleGroups() {
+        // Ordering guard: with three distinct groups and both boundaries on, the
+        // result is the immediate next queue item (id 2, group "B"), never a later
+        // group skipped over.
+        XCTAssertEqual(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 1, groupKey: "A"), (id: 2, groupKey: "B"), (id: 3, groupKey: "C")],
+            after: 1,
+            currentGroupKey: "A",
+            continueAfterEpisode: true,
+            continueAfterGroupEnds: true
+        ), 2)
+    }
 }
