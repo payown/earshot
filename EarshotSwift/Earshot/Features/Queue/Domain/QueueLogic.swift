@@ -63,6 +63,47 @@ enum QueueLogic {
         return front + ids.filter { !frontSet.contains($0) }
     }
 
+    // MARK: Date ordering / shuffle (group actions)
+
+    /// Orders `items` by publish date, returning the ids only. Stable: equal
+    /// dates keep their incoming relative order, and `nil` dates always sort
+    /// LAST regardless of direction (an undated episode has no place at the
+    /// "newest" or "oldest" end, so it trails). `newestFirst` true sorts
+    /// descending (most recent first); false sorts ascending. Backs the
+    /// "Play Newest First" / "Play Oldest First" group actions.
+    static func sortedByDate<ID: Hashable>(
+        _ items: [(id: ID, date: Date?)],
+        newestFirst: Bool
+    ) -> [ID] {
+        items.enumerated()
+            .sorted { lhs, rhs in
+                switch (lhs.element.date, rhs.element.date) {
+                case let (l?, r?):
+                    // Equal dates fall back to original index for a stable order.
+                    if l == r { return lhs.offset < rhs.offset }
+                    return newestFirst ? l > r : l < r
+                case (nil, nil):
+                    return lhs.offset < rhs.offset
+                case (nil, _):
+                    return false // nil sorts last
+                case (_, nil):
+                    return true  // dated item precedes an undated one
+                }
+            }
+            .map(\.element.id)
+    }
+
+    /// A deterministic shuffle through an injected RNG, so callers in production
+    /// pass `SystemRandomNumberGenerator` while tests seed a reproducible one and
+    /// assert the result is a permutation of the same id set. Backs the
+    /// "Shuffle Group" action.
+    static func shuffled<ID: Hashable>(
+        _ ids: [ID],
+        using generator: inout some RandomNumberGenerator
+    ) -> [ID] {
+        ids.shuffled(using: &generator)
+    }
+
     // MARK: Grouping by podcast
 
     /// A display group of consecutive-in-display queue items sharing a key.

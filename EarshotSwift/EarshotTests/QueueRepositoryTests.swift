@@ -213,8 +213,95 @@ final class QueueRepositoryTests: XCTestCase {
         let repo = QueueRepository(context: ctx)
         [a1, b1, a2].forEach(repo.add)
 
-        repo.playGroup(pb)
+        let front = repo.playGroup(pb)
 
         XCTAssertEqual(titles(repo), ["Ep b1", "Ep a1", "Ep a2"])
+        XCTAssertEqual(front?.title, "Ep b1", "returns the episode now at the group front")
+    }
+
+    // MARK: group actions (#445)
+
+    /// Builds a two-podcast queue interleaved as [a1, b1, a2, b2, a3] with A
+    /// episode pub dates a1=day1, a2=day3, a3=day2 and B dates b1=day10, b2=day5.
+    private func makeInterleavedGroups(
+        _ ctx: ModelContext
+    ) -> (repo: QueueRepository, pa: Podcast, pb: Podcast, a: [Episode], b: [Episode]) {
+        let pa = makePodcast(ctx, "A")
+        let pb = makePodcast(ctx, "B")
+        func ep(_ guid: String, _ podcast: Podcast, day: Double) -> Episode {
+            let e = makeEpisode(ctx, guid, podcast: podcast)
+            e.pubDate = Date(timeIntervalSince1970: day * 86_400)
+            return e
+        }
+        let a1 = ep("a1", pa, day: 1)
+        let a2 = ep("a2", pa, day: 3)
+        let a3 = ep("a3", pa, day: 2)
+        let b1 = ep("b1", pb, day: 10)
+        let b2 = ep("b2", pb, day: 5)
+        let repo = QueueRepository(context: ctx)
+        [a1, b1, a2, b2, a3].forEach(repo.add)
+        return (repo, pa, pb, [a1, a2, a3], [b1, b2])
+    }
+
+    func testPlayNewestFirstReordersGroupAndKeepsOtherGroupOrder() {
+        let ctx = TestStore.freshContext()
+        let g = makeInterleavedGroups(ctx)
+
+        let front = g.repo.playNewestFirst(g.pa)
+
+        XCTAssertEqual(titles(g.repo), ["Ep a2", "Ep a3", "Ep a1", "Ep b1", "Ep b2"])
+        XCTAssertEqual(front?.title, "Ep a2", "newest A episode is at the front")
+    }
+
+    func testPlayOldestFirstReordersGroupAndKeepsOtherGroupOrder() {
+        let ctx = TestStore.freshContext()
+        let g = makeInterleavedGroups(ctx)
+
+        let front = g.repo.playOldestFirst(g.pa)
+
+        XCTAssertEqual(titles(g.repo), ["Ep a1", "Ep a3", "Ep a2", "Ep b1", "Ep b2"])
+        XCTAssertEqual(front?.title, "Ep a1", "oldest A episode is at the front")
+    }
+
+    func testShuffleGroupBringsGroupToFrontAndKeepsOtherGroupOrder() {
+        let ctx = TestStore.freshContext()
+        let g = makeInterleavedGroups(ctx)
+
+        let front = g.repo.shuffleGroup(g.pa)
+
+        let result = titles(g.repo)
+        // The three A episodes occupy the front (some order), B keeps [b1, b2].
+        XCTAssertEqual(Set(result.prefix(3)), ["Ep a1", "Ep a2", "Ep a3"])
+        XCTAssertEqual(Array(result.suffix(2)), ["Ep b1", "Ep b2"])
+        XCTAssertEqual(front?.title, result.first, "returns the new front episode")
+        XCTAssertTrue(["Ep a1", "Ep a2", "Ep a3"].contains(front?.title ?? ""))
+    }
+
+    func testGroupActionsOnEmptyGroupReturnNilAndMakeNoChange() {
+        let ctx = TestStore.freshContext()
+        let g = makeInterleavedGroups(ctx)
+        let pc = makePodcast(ctx, "C") // never queued
+        let before = titles(g.repo)
+
+        XCTAssertNil(g.repo.playGroup(pc))
+        XCTAssertNil(g.repo.playNewestFirst(pc))
+        XCTAssertNil(g.repo.playOldestFirst(pc))
+        XCTAssertNil(g.repo.shuffleGroup(pc))
+        XCTAssertEqual(titles(g.repo), before, "an empty group leaves the queue untouched")
+    }
+
+    func testSingleEpisodeGroupReturnsThatEpisodeAndBringsItToFront() {
+        let ctx = TestStore.freshContext()
+        let pa = makePodcast(ctx, "A")
+        let pb = makePodcast(ctx, "B")
+        let a1 = makeEpisode(ctx, "a1", podcast: pa)
+        let b1 = makeEpisode(ctx, "b1", podcast: pb)
+        let repo = QueueRepository(context: ctx)
+        [a1, b1].forEach(repo.add)
+
+        let front = repo.playNewestFirst(pb)
+
+        XCTAssertEqual(front?.title, "Ep b1")
+        XCTAssertEqual(titles(repo), ["Ep b1", "Ep a1"])
     }
 }
