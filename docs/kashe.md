@@ -154,14 +154,22 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 - Kashe had been manually re-enabling "Group by podcast" on nearly every cold
   launch because the setting never persisted, and folded it into her morning
   routine rather than report it; this build makes the grouping choice stick
-  across navigation and relaunch (Chapter 25, draft)
+  across navigation and relaunch (Chapter 25)
 - Now that grouping holds, Kashe runs the queue from the show headings; the
   per-group heading actions in the VoiceOver rotor gained Play Group, Sort
   Newest First, Sort Oldest First, and Shuffle Group, and the old standalone
   "Play group" button is gone (sort/shuffle reorder and announce without
   starting audio; only Play Group starts playback). She sorts her thrice-daily
   news show newest first, keeps her long interview show oldest first, and
-  shuffles a backlog show she dips into with no plan (Chapter 25, draft)
+  shuffles a backlog show she dips into with no plan (Chapter 25)
+- Settings now has an Auto-advance section with two toggles, both default ON
+  (existing behavior): "Continue after episode ends" (off = stop after every
+  episode) and "Continue after group ends" (off = stop when a show's queued
+  episodes run out instead of rolling into the next show). The one-off "Stop
+  after this episode" player action from Chapter 20 is separate and unchanged.
+  This names the night-drift behavior from Chapters 19/20: she'd fall asleep to
+  one show and wake to a different one; she leaves "after episode" on and turns
+  "after group" off (Chapter 25)
 
 ## What you can generate
 
@@ -737,9 +745,9 @@ Search for a show by name and watch the results fill in as you type. They should
 
 Anywhere you'd add a show, the button now says Follow instead of Subscribe. It does the same thing. If you spot a leftover Subscribe anywhere, email michael@payown.media.
 
-### Chapter 25 — Build [next] (DRAFT — not yet shipped)
+### Chapter 25 — Build [next]
 
-*Kashe set her queue to group by show a long time ago. It never quite stayed set. This build makes it stick, and gives the headings more to do.*
+*Kashe set her queue to group by show a long time ago. It never quite stayed set. This build makes it stick, gives the headings more to do, and lets her say how far playback should roll on its own.*
 
 Every morning started the same way, and Kashe had stopped noticing the extra step.
 
@@ -759,6 +767,12 @@ There used to be a little button on each show's heading, just to play that whole
 
 Her news show, the one that posts three times a day, she sorts newest first so the latest sits on top where she wants it. The long interview show she's been saving, oldest first, so it plays in the order it came. And there's a backlog show she dips into with no plan at all, so she shuffles that one and lets it surprise her. None of them start playing when she sorts or shuffles. They just rearrange and say so, "Sorted newest first," "Shuffled," and she decides when to press play. Play group is the only one that starts the audio, pulling the show to the front and going.
 
+One more thing turned up in Settings, and it fit the rest. There's an Auto-advance section now, two switches, both on the way the app had always quietly behaved. One keeps playback rolling after an episode ends. The other keeps it rolling after a whole show's queued episodes run out, on into the next show in line.
+
+She'd never had a name for that second one. She just knew the nights it happened, drifting off to one show and waking to a different one entirely, a voice she didn't recognize talking about something she'd never queued. Now she could tell it to stop when a show ran out instead of wandering into the next. She left the first switch on and turned the second one off.
+
+The one-off "Stop after this episode" is still right there in the player, separate from both switches, for the nights she only wants one more thing and then quiet. Nothing about it changed. It just has company now.
+
 She flipped grouping off once more, just to hear what it would say. "Queue ungrouped." Fair enough. Back on, and out the door.
 
 **What to test:**
@@ -776,6 +790,10 @@ In a grouped queue, put VoiceOver on a show's heading and open the actions rotor
 Try Sort Newest First, then Sort Oldest First. The show's episodes should reorder within the group, and you should hear "Sorted newest first" or "Sorted oldest first." No audio should start. Try Shuffle Group. The group should shuffle to the front of the queue and announce "Shuffled," again with nothing playing.
 
 Try Play Group. It should bring that show to the front of the queue and start playing.
+
+Go to Settings and find the new Auto-advance section with two switches, both on by default (the behavior you already have). "Continue after episode ends" keeps playback going to the next item when one finishes. Turn it off and playback should stop after every episode. "Continue after group ends" keeps playback rolling from one show into the next when a show's queued episodes run out. Turn it off and playback should stop at the end of a show instead of rolling into the next one.
+
+The one-off "Stop after this episode" in the player is separate from both switches and unchanged. It should still stop after the current episode no matter how the Auto-advance switches are set.
 
 ---
 
