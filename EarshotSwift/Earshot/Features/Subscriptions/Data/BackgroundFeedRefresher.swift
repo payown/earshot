@@ -24,6 +24,13 @@ enum BackgroundFeedRefresher {
     /// namespace (`media.payown.earshot`).
     static let taskIdentifier = "media.payown.earshot.feedrefresh"
 
+    /// Reentrancy guard. Foreground (`scenePhase == .active`), cold launch, and
+    /// the background task can all call ``runRefresh`` near-simultaneously; this
+    /// ensures only one pass runs at a time (the throttle alone isn't enough,
+    /// since two callers can both pass `shouldRefresh` before either stamps
+    /// `lastFeedRefresh`). Main-actor isolated, so no locking needed. (#470)
+    @MainActor private static var isRefreshing = false
+
     // MARK: Scheduling
 
     /// Submits a `BGAppRefreshTaskRequest` so the OS can wake the app to refresh.
@@ -58,6 +65,13 @@ enum BackgroundFeedRefresher {
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         notifier: NotificationService = NotificationService()
     ) async -> Bool {
+        guard !isRefreshing else {
+            AppLog.networking.info("Feed refresh already in progress; skipping overlap")
+            return false
+        }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
         let context = container.mainContext
         let settings = AppSettingsStore(context: context)
 

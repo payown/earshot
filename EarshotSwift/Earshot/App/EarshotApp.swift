@@ -55,15 +55,31 @@ struct EarshotApp: App {
                         // "new episodes" category (actions) once, at launch (#72).
                         UNUserNotificationCenter.current().delegate = notificationDelegate
                         await NotificationService().registerCategories()
+                        // Cold-launch feed refresh (throttled). `.onChange(of:
+                        // scenePhase)` below does not fire for the initial
+                        // `.active`, so cover launch explicitly so a returning
+                        // user's inbox isn't a day stale (#470). No-op if a refresh
+                        // ran within the FeedRefreshPolicy window or there are no
+                        // subscriptions yet.
+                        guard !isRunningTests else { return }
+                        await BackgroundFeedRefresher.runRefresh(container: container)
                     }
             }
         }
         .modelContainer(container)
-        // Schedule the next background refresh whenever we leave the foreground,
-        // so the OS can wake us to fetch new episodes. Skipped under tests.
+        // Background: schedule the next OS wake. Active: run a throttled refresh
+        // so returning to the app surfaces new episodes immediately rather than
+        // waiting on an opportunistic BGAppRefreshTask (#470). Skipped under tests.
         .onChange(of: scenePhase) { _, phase in
-            guard !isRunningTests, phase == .background else { return }
-            BackgroundFeedRefresher.scheduleNext()
+            guard !isRunningTests else { return }
+            switch phase {
+            case .background:
+                BackgroundFeedRefresher.scheduleNext()
+            case .active:
+                Task { await BackgroundFeedRefresher.runRefresh(container: container) }
+            default:
+                break
+            }
         }
         // OS-launched background refresh. Re-schedule the chain FIRST, then run a
         // throttled refresh that respects task expiration. Skipped under tests —
