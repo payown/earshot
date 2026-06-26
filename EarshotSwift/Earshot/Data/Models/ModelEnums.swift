@@ -34,3 +34,22 @@ enum LaunchScreen: String, Codable, CaseIterable {
     case library
     case downloads
 }
+
+/// How the Library list is ordered. Persisted as a String raw value under
+/// ``SettingsKey/librarySortOrder``; defaults to ``alphabetical``.
+enum LibrarySortOrder: String, Codable, CaseIterable, Identifiable {
+    /// A→Z by title, ignoring a leading article (see ``LibrarySort``).
+    case alphabetical
+    /// Most recently published episode first (most active feed at the top).
+    case lastPublished
+
+    var id: String { rawValue }
+
+    /// User-facing label for the sort menu.
+    var title: String {
+        switch self {
+        case .alphabetical: return "Alphabetical"
+        case .lastPublished: return "Last published"
+        }
+    }
+}

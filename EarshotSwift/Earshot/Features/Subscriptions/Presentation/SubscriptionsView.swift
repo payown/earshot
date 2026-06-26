@@ -4,10 +4,37 @@ import SwiftData
 struct SubscriptionsView: View {
     @Environment(\.modelContext) private var context
     @Environment(QuickActionStore.self) private var quickActions
-    @Query(sort: \Podcast.createdAt, order: .reverse) private var podcasts: [Podcast]
+    @Environment(SettingsStore.self) private var settings
+    @Query(sort: \Podcast.title) private var podcasts: [Podcast]
     @State private var showingAdd = false
     @State private var sharingPodcast: Podcast?
     @State private var pendingUnsubscribe: Podcast?
+
+    /// Library order, per the user's chosen ``LibrarySortOrder``. The `@Query`
+    /// sort above is a coarse, stored-property base; both orderings are computed
+    /// transforms SwiftData can't express in a `SortDescriptor`, so they run in
+    /// memory. Cheap even for the largest tester libraries (low hundreds of shows).
+    /// Both fall back to the article-aware alphabetical order to stay stable and
+    /// deterministic (important for predictable VoiceOver focus position).
+    private var sortedPodcasts: [Podcast] {
+        switch settings.librarySortOrder {
+        case .alphabetical:
+            return podcasts.sorted { LibrarySort.titlesInOrder($0.title, $1.title) }
+        case .lastPublished:
+            // Sort by the stored `lastSeenPubDate` (maintained on each refresh as
+            // the newest episode's pubDate) — NOT by faulting each podcast's
+            // `episodes` relationship. Faulting inside the comparator iterated
+            // every episode O(n log n) times on the main thread on each render,
+            // which made VoiceOver sluggish for large libraries. This is a cheap
+            // scalar compare. Ties and missing dates fall back to alphabetical.
+            return podcasts.sorted { lhs, rhs in
+                let lDate = lhs.lastSeenPubDate ?? .distantPast
+                let rDate = rhs.lastSeenPubDate ?? .distantPast
+                if lDate == rDate { return LibrarySort.titlesInOrder(lhs.title, rhs.title) }
+                return lDate > rDate
+            }
+        }
+    }
 
     var body: some View {
         Group {
@@ -21,7 +48,7 @@ struct SubscriptionsView: View {
                 }
             } else {
                 List {
-                    ForEach(podcasts) { podcast in
+                    ForEach(sortedPodcasts) { podcast in
                         NavigationLink(value: podcast) {
                             row(for: podcast)
                         }
@@ -48,6 +75,25 @@ struct SubscriptionsView: View {
                     FoldersScreen()
                 } label: {
                     Label("Folders", systemImage: "folder")
+                }
+            }
+            if !podcasts.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Sort library", selection: Binding(
+                            get: { settings.librarySortOrder },
+                            set: { settings.librarySortOrder = $0 }
+                        )) {
+                            ForEach(LibrarySortOrder.allCases) { order in
+                                Text(order.title).tag(order)
+                            }
+                        }
+                    } label: {
+                        Label("Sort library", systemImage: "arrow.up.arrow.down")
+                    }
+                    // Speak the active order on the menu button itself so VoiceOver
+                    // users know the current sort without opening the menu.
+                    .accessibilityValue(settings.librarySortOrder.title)
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -77,6 +123,12 @@ struct SubscriptionsView: View {
             Text("This removes \(podcast.title) and its episodes. This can't be undone.")
         }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
+        // Confirm the reorder for VoiceOver: the menu dismisses and the list
+        // silently re-sorts, so without this the change gives no feedback. Mirrors
+        // StatsScreen's period Picker. Announcer no-ops when VoiceOver is off.
+        .onChange(of: settings.librarySortOrder) { _, newValue in
+            Announcer.announce("Sorted by \(newValue.title)")
+        }
     }
 
     private func row(for podcast: Podcast) -> some View {
@@ -148,9 +200,12 @@ struct SubscriptionsView: View {
     }
 
     private func delete(_ offsets: IndexSet) {
+        // Offsets index into the rendered (sorted) list, so resolve against the
+        // same array the ForEach uses — not the raw @Query order.
+        let visible = sortedPodcasts
         let repo = FolderRepository(context: context)
         for index in offsets {
-            let podcast = podcasts[index]
+            let podcast = visible[index]
             repo.removeFromAllFolders(podcast)
             context.delete(podcast)
         }

@@ -120,6 +120,7 @@
 		9B11AEBD4BA00264B0DA899D /* BookmarkShareLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8352682C90C578F28EE2EA6F /* BookmarkShareLogic.swift */; };
 		9B96460020EE778842F1D5C4 /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B27BB426B5C9992591376435 /* Spacing.swift */; };
 		9C1E3FCE1E702A0C3CA62867 /* RestoreBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F29E86AFF01FA1B90CBBF29 /* RestoreBanner.swift */; };
+		9C2E75E2A60C8669922D7B29 /* LibrarySort.swift in Sources */ = {isa = PBXBuildFile; fileRef = 442194E78DB69E6C501EC546 /* LibrarySort.swift */; };
 		9E710C86EB230B361A7D8B75 /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62ED2FC514BDF3D857EBC8EF /* MockURLProtocol.swift */; };
 		A18F64CF1E9874FBACECD300 /* AddPodcastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7151D01B33B040C471F672D5 /* AddPodcastView.swift */; };
 		A30738B63FB4B7FFF5BF3B04 /* AppInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E7921BD843199173A93C88 /* AppInfoTests.swift */; };
@@ -157,6 +158,7 @@
 		C135742F72316B0AA623460E /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DBB0DBE3C822485265C03BA /* SearchView.swift */; };
 		C2575FA0F95FEF33CA069017 /* PodcastFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20EED9B85C78529A51C7C70 /* PodcastFolder.swift */; };
 		C290A8B98AF505B8C16FB539 /* QuickActionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF2D210574E494DFF9E08AB0 /* QuickActionRepository.swift */; };
+		C35D439E9E576F4A27BFD711 /* LibrarySortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C27CF4D211EF845D99883619 /* LibrarySortTests.swift */; };
 		C50E7E8B943F8A46B218EB53 /* ChapterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 604A1CE8A8148C3DBAB95ECB /* ChapterService.swift */; };
 		C591E706C3B3930635BA9CEE /* InboxLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB277E3AB7A3AD6A261D149A /* InboxLogic.swift */; };
 		C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */; };
@@ -258,6 +260,7 @@
 		4318B4B42ABC13117266E542 /* NotificationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationServiceTests.swift; sourceTree = "<group>"; };
 		43B68C7D3951BA02B70E0F3F /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		43C24AB621B349FF76FF2168 /* SpeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeedTests.swift; sourceTree = "<group>"; };
+		442194E78DB69E6C501EC546 /* LibrarySort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySort.swift; sourceTree = "<group>"; };
 		450C66B85D5547A1E0E62D21 /* BookmarkShareLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkShareLogicTests.swift; sourceTree = "<group>"; };
 		452C18F4928CBA8D25DD7DA9 /* DataImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataImportSheet.swift; sourceTree = "<group>"; };
 		46500BE41B67940E468A98FA /* RetryPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetryPolicyTests.swift; sourceTree = "<group>"; };
@@ -360,6 +363,7 @@
 		C002ED0656263EAD9B8EE896 /* EpisodeStateImporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeStateImporterTests.swift; sourceTree = "<group>"; };
 		C13AC03D8E2F4DB285678051 /* SkipSilenceRemovalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkipSilenceRemovalTests.swift; sourceTree = "<group>"; };
 		C17AC464CF36C31FB5798C0E /* SearchOPMLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOPMLTests.swift; sourceTree = "<group>"; };
+		C27CF4D211EF845D99883619 /* LibrarySortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySortTests.swift; sourceTree = "<group>"; };
 		C2AFBB00F8C76C7C8D5A7BF3 /* PodcastArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastArtwork.swift; sourceTree = "<group>"; };
 		C4C2CEA51FF27CE1EF442176 /* Chapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chapter.swift; sourceTree = "<group>"; };
 		C75A4D2E9D30DDEF48E91230 /* FoldersScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoldersScreen.swift; sourceTree = "<group>"; };
@@ -610,6 +614,7 @@
 				7B15FA7A813A473B18BCE6F4 /* ImportStatusTextTests.swift */,
 				21426D34A6272D33878D6A13 /* InboxExpirationServiceTests.swift */,
 				7D1FF1B05CD9DD1E0A619E9F /* ITunesSearchServiceTests.swift */,
+				C27CF4D211EF845D99883619 /* LibrarySortTests.swift */,
 				6B8A4B380A497E7C23B98896 /* ManualImportTests.swift */,
 				4D597990991560C13A0DF048 /* MigrationDiagnosticsTests.swift */,
 				20327D57A3E7C96599AB594B /* MigrationEpisodeMatcherTests.swift */,
@@ -788,6 +793,7 @@
 			isa = PBXGroup;
 			children = (
 				4936B28AE733CDBC3C66FA97 /* FeedRefreshPolicy.swift */,
+				442194E78DB69E6C501EC546 /* LibrarySort.swift */,
 				7212EBC83A48695F41673C88 /* OPMLDocument.swift */,
 			);
 			path = Domain;
@@ -1291,6 +1297,7 @@
 				C591E706C3B3930635BA9CEE /* InboxLogic.swift in Sources */,
 				00B5AE69A700B0B85F25638B /* InboxRepository.swift in Sources */,
 				DDE214B4D555DF97D11B0253 /* InboxScreen.swift in Sources */,
+				9C2E75E2A60C8669922D7B29 /* LibrarySort.swift in Sources */,
 				32BF15D8A033A13EA5B4F6C3 /* ListeningSession.swift in Sources */,
 				F736F4872226E3D2DDDDD76F /* Logger+Earshot.swift in Sources */,
 				D5C89FEE68669F3EC90C8CBA /* MailComposeView.swift in Sources */,
@@ -1396,6 +1403,7 @@
 				4618A181C1A3CA3A43DBBA71 /* ITunesSearchServiceTests.swift in Sources */,
 				058890ECB22F6C77CB5B91C3 /* ImportStatusTextTests.swift in Sources */,
 				D0EAF35C0542B99058B990D8 /* InboxExpirationServiceTests.swift in Sources */,
+				C35D439E9E576F4A27BFD711 /* LibrarySortTests.swift in Sources */,
 				54C604BC2B781EC7AC3C1FE9 /* ManualImportTests.swift in Sources */,
 				76F866BFB10C241B2CA855B9 /* MigrationDiagnosticsTests.swift in Sources */,
 				97971F8D43AB9E74D6BCF51F /* MigrationEpisodeMatcherTests.swift in Sources */,
