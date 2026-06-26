@@ -30,9 +30,13 @@ struct RootView: View {
 
     var body: some View {
         // Live unplayed-inbox count from the same source of truth as the Inbox
-        // heading. Shown as a native tab badge (the red bubble); SwiftUI auto-hides
-        // the badge when the count is 0. The unused `inboxEpisodes` @Query above
-        // drives the re-render that keeps this current.
+        // heading. Shown via a native `UITabBarItem` badge applied by
+        // `TabBarBadgeApplier` (below), NOT SwiftUI's `.badge` — the latter
+        // exposes the red bubble as its own accessibility element, so VoiceOver
+        // announces the count a second time when flicking past the Inbox tab.
+        // UIKit folds `badgeValue` into the tab's single announcement instead.
+        // The unused `inboxEpisodes` @Query above drives the re-render that keeps
+        // this current; the bubble is hidden automatically when the count is 0.
         let inboxBadgeCount = InboxRepository(context: modelContext).inboxEpisodes().count
 
         TabView(selection: $selectedTab) {
@@ -42,7 +46,6 @@ struct RootView: View {
             }
             .modifier(TabChrome())
             .tabItem { Label("Inbox", systemImage: "tray") }
-            .badge(inboxBadgeCount)
             .tag(RootTab.inbox)
 
             NavigationStack {
@@ -75,12 +78,22 @@ struct RootView: View {
             .tabItem { Label("Settings", systemImage: "gearshape") }
             .tag(RootTab.settings)
         }
+        // Native UITabBarItem badge for the Inbox unread count (#321 follow-up):
+        // re-applies whenever `inboxBadgeCount` changes. Replaces SwiftUI's
+        // `.badge`, which double-announced the count under VoiceOver.
+        .background(TabBarBadgeApplier(tabIndex: 0, count: inboxBadgeCount))
         .environment(importState)
         // Route a notification tap / action into the Library tab + podcast detail
         // (#72). Reacting on the published intent keeps the delegate decoupled
         // from the view tree.
         .onChange(of: notificationRouter.pendingIntent) { _, intent in
             if let intent { route(intent) }
+        }
+        // Re-assert the native Inbox badge after a tab switch: SwiftUI can rebuild
+        // the tab-bar items on selection change and transiently drop a manually
+        // set `badgeValue`. Cheap and idempotent.
+        .onChange(of: selectedTab) { _, _ in
+            TabBarBadgeApplier.apply(tabIndex: 0, count: inboxBadgeCount)
         }
         // VoiceOver magic tap (two-finger double tap) toggles playback anywhere.
         .accessibilityAction(.magicTap) {
