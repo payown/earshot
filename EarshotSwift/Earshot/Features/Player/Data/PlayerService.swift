@@ -1242,6 +1242,24 @@ final class PlayerService {
             return .success
         }
 
+        // Earbuds (AirPods double/triple-press, wired EarPods, BT/AVRCP) send
+        // next-/previous-track, NOT the interval skip command — so without these
+        // handlers an earbud skip does nothing (#474). Map them to the same
+        // interval skip as everything else so an earbud press jumps within the
+        // episode by the user's configured amount, matching the in-app and
+        // lock-screen skip buttons. The skipForward/Backward commands above stay
+        // registered so the lock-screen skip arrows keep working.
+        center.nextTrackCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            self.skipForward()
+            return .success
+        }
+        center.previousTrackCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            self.skipBack()
+            return .success
+        }
+
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let self,
                   let positionEvent = event as? MPChangePlaybackPositionCommandEvent
