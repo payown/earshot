@@ -29,6 +29,9 @@ enum SettingsKey {
     static let continueAfterEpisode = "continue_after_episode"
     static let continueAfterGroupEnds = "continue_after_group_ends"
     static let defaultLaunchScreen = "default_launch_screen"
+    // Library list order (alphabetical / last published). SwiftUI-only preference,
+    // stored as the ``LibrarySortOrder`` raw value.
+    static let librarySortOrder = "library_sort_order"
     static let lastPlayingEpisodeID = "last_playing_episode_id"
     static let statsStreaksEnabled = "stats_streaks_enabled"
     // How many of a newly-added podcast's most-recent episodes to seed into the
@@ -96,6 +99,7 @@ enum SettingsDefault {
     static let continueAfterGroupEnds = true
     static let onboardingComplete = false
     static let launchScreen: LaunchScreen = .inbox
+    static let librarySortOrder: LibrarySortOrder = .alphabetical
     static let statsStreaksEnabled = false
     /// Default number of most-recent episodes seeded into the inbox when a new
     /// podcast is added. Matches Flutter's default of 3.
@@ -231,6 +235,17 @@ final class AppSettingsStore {
 
     func setLaunchScreen(_ screen: LaunchScreen) {
         setRawValue(screen.rawValue, for: SettingsKey.defaultLaunchScreen)
+    }
+
+    func librarySortOrder() -> LibrarySortOrder {
+        guard let raw = rawValue(SettingsKey.librarySortOrder),
+              let order = LibrarySortOrder(rawValue: raw)
+        else { return SettingsDefault.librarySortOrder }
+        return order
+    }
+
+    func setLibrarySortOrder(_ order: LibrarySortOrder) {
+        setRawValue(order.rawValue, for: SettingsKey.librarySortOrder)
     }
 
     private func save() {

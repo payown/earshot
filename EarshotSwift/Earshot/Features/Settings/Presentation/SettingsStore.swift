@@ -19,6 +19,7 @@ final class SettingsStore {
 
     // General
     var launchScreen: LaunchScreen = SettingsDefault.launchScreen { didSet { persist { $0.setLaunchScreen(launchScreen) } } }
+    var librarySortOrder: LibrarySortOrder = SettingsDefault.librarySortOrder { didSet { persist { $0.setLibrarySortOrder(librarySortOrder) } } }
     var groupQueueEpisodes: Bool = SettingsDefault.groupQueueEpisodes { didSet { persist { $0.setBool(groupQueueEpisodes, for: SettingsKey.groupQueueEpisodes) } } }
 
     // Inbox
@@ -59,6 +60,7 @@ final class SettingsStore {
         continueAfterEpisode = store.bool(SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode)
         continueAfterGroupEnds = store.bool(SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds)
         launchScreen = store.launchScreen()
+        librarySortOrder = store.librarySortOrder()
         groupQueueEpisodes = store.bool(SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes)
         inboxOptInOnly = store.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
         inboxDefaultCount = store.inboxDefaultCount()
