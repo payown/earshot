@@ -23,18 +23,4 @@ final class TabBadgeFormatTests: XCTestCase {
     func testBadgeTextMany() {
         XCTAssertEqual(TabBadgeFormat.badgeText(5), "5")
     }
-
-    // MARK: accessibilityValue (what VoiceOver folds into the tab)
-
-    func testAccessibilityValueZeroIsNil() {
-        XCTAssertNil(TabBadgeFormat.accessibilityValue(0))
-    }
-
-    func testAccessibilityValueOneIsSingular() {
-        XCTAssertEqual(TabBadgeFormat.accessibilityValue(1), "1 new episode")
-    }
-
-    func testAccessibilityValueManyIsPlural() {
-        XCTAssertEqual(TabBadgeFormat.accessibilityValue(5), "5 new episodes")
-    }
 }

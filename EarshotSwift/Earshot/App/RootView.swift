@@ -31,12 +31,12 @@ struct RootView: View {
     var body: some View {
         // Live unplayed-inbox count from the same source of truth as the Inbox
         // heading. Shown via a native `UITabBarItem` badge applied by
-        // `TabBarBadgeApplier` (below), NOT SwiftUI's `.badge` — the latter
-        // exposes the red bubble as its own accessibility element, so VoiceOver
-        // announces the count a second time when flicking past the Inbox tab.
-        // UIKit folds `badgeValue` into the tab's single announcement instead.
-        // The unused `inboxEpisodes` @Query above drives the re-render that keeps
-        // this current; the bubble is hidden automatically when the count is 0.
+        // `TabBarBadgeApplier` (below), NOT SwiftUI's `.badge`. Both render the
+        // count as its own VoiceOver element on top of the tab button, so the
+        // count was announced twice when flicking past the Inbox tab; the applier
+        // sets the visible badge and hides that duplicate element. The unused
+        // `inboxEpisodes` @Query above drives the re-render that keeps this
+        // current; the bubble is hidden automatically when the count is 0.
         let inboxBadgeCount = InboxRepository(context: modelContext).inboxEpisodes().count
 
         TabView(selection: $selectedTab) {
