@@ -182,7 +182,21 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   the middle of a list too long to scan; she keeps it alphabetical (Chapter 26)
 - She again invokes the woman on her Tuesday route she'd helped move a library
   over (Chapter 14), who'd once asked how she ever finds anything in a list that
-  long (Chapter 26)
+  long (Chapter 26). That woman is named Renata, and the move was an OPML
+  subscription list (Chapter 27)
+- In a grouped queue, each queued episode's VoiceOver rotor now has Move up /
+  Move down that reorder it within its own show's stack only (stepping over
+  other shows), and the duplicate "Remove from queue" that used to be listed
+  twice is gone. Edge no-ops stay silent. The show headings gained Move Group
+  Up / Move Group Down, which move a whole show as a block and return focus to
+  the moved heading (Chapter 27)
+- Kashe listens largely from earbuds with the phone in a pocket; the earbud /
+  lock-screen skip-forward and skip-back controls now skip within the current
+  episode instead of jumping to a different episode (they used to register as
+  next/previous track). She'd stopped using skip and sat through ads rather
+  than fight it (Chapter 27)
+- An OPML subscription file now opens directly from Files into Earshot instead
+  of stalling (Chapter 27)
 
 ## What you can generate
 
@@ -835,6 +849,40 @@ With VoiceOver, put focus on the Inbox tab and listen for the count. Then flick 
 Open your Library and find the new Sort button at the top. Alphabetical should order your shows A to Z, and it should file "The Archers" under A, skipping a leading The, A, or An. Last published should put the shows with the newest episodes on top.
 
 Switch the sort, force-quit Earshot, and open it cold. It should stay where you set it. With VoiceOver the Sort button tells you the current order, and choosing one announces "Sorted by" and the order you picked.
+
+### Chapter 27 — Build 125
+
+*Kashe keeps living in the grouped queue from Chapter 25, and this build finally lets her hand-order it without leaving VoiceOver. Her earbuds learn to skip the way she means, too.*
+
+The grouped queue stuck (Chapter 25), so she'd been running more of her day out of it. Stacks of shows, headings she could act on. What she couldn't do, until now, was nudge things by hand.
+
+Say her news show had four queued and she wanted today's interview ahead of yesterday's recap. She'd flick the rotor on the episode and find, well, not much. Play it, open the notes, remove it. That was the list. No move up, no move down. And remove sat there twice, the same action said back to back, like the app had a stutter. She'd learned to ignore the second one.
+
+This build gives the episode somewhere to go. Flick down on a queued episode inside a grouped show and there's Move up and Move down, and they keep her inside that show. Move one down and it trades places with the next episode from the same show, stepping over the other shows in between like they aren't there. Her interview show stays her interview show. Nothing leaks across.
+
+And the doubled remove is gone. One Play, one Remove from queue, one Open show notes, plus the two moves. Each thing said once.
+
+The headings got the same idea, one level up. On a show's name she already had play, sort, and shuffle (Chapter 25). Now there's Move Group Up and Move Group Down, so she can take a whole show, every queued episode of it at once, and lift it above the next show or drop it below. The block moves together, and VoiceOver lands her right back on the heading she moved, so she can move it again without going to look for it. She pulled her morning news show to the top of the queue in two flicks and left the long stuff underneath.
+
+Then the part that has nothing to do with the queue and everything to do with how she actually listens. Her earbuds. Hands full, phone in a pocket, she'd reach up to skip past an ad and instead the whole episode would vanish and a different one would start. The skip press was getting read as next track. So she'd quit using it and just sat through the ads.
+
+Now the skip on her earbuds skips. Forward jumps ahead inside the episode, back jumps back, same as the buttons on screen. It stays in the thing she's listening to. For someone who runs the app by feel, from a pocket, between two clients, that's the one she'll feel every single day.
+
+One last quiet thing. That subscription list she'd helped Renata carry over on a Tuesday, the OPML file, opens straight from Files now instead of stalling out. If someone hands her their shows, she can take them in a tap.
+
+She moved her news show to the top, skipped past an ad without looking, and went in.
+
+**What to test:**
+
+Turn on Group by podcast in your queue. With VoiceOver, put focus on a queued episode that has other episodes from the same show, and open the actions rotor. You should find Move up and Move down, and you should hear Remove from queue only once, not twice.
+
+Try Move down. The episode should swap with the next episode from the same show, skipping over episodes from other shows. Move up should do the reverse. On the first or last episode of a show, the move should do nothing and stay silent (no false "Moved" announcement).
+
+Put VoiceOver on a show's heading and open the rotor. Along with Play Group, Sort Newest First, Sort Oldest First, and Shuffle Group, you should now find Move Group Up and Move Group Down. Try one. The whole show should move as a block above or below the next show, and focus should land back on that same heading. At the very top or bottom of the queue, it should do nothing.
+
+With wired or wireless earbuds (or the lock screen controls), start an episode and use skip forward and skip back. They should jump forward and back inside the same episode, not switch to a different episode.
+
+If you have an OPML subscription file in Files, open it and choose Earshot. It should import your shows instead of stalling.
 
 ---
 
