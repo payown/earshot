@@ -170,6 +170,19 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   This names the night-drift behavior from Chapters 19/20: she'd fall asleep to
   one show and wake to a different one; she leaves "after episode" on and turns
   "after group" off (Chapter 25)
+- Earshot now refreshes feeds when she opens or returns to the app, so her inbox
+  is current on launch instead of a day behind; she'd given up on it and assumed
+  new episodes would "turn up by lunch" on their own clock (Chapter 26)
+- The Inbox tab no longer announces its count a second time as a loose standalone
+  number when she flicks past it toward Queue; the count is spoken once, on the
+  tab itself. She'd taught herself to flick past the stray number (Chapter 26)
+- The Library can now be sorted: Alphabetical (ignoring a leading The/A/An, so
+  "The Archers" files under A, not T) or Last published (newest-active shows on
+  top). It used to be fixed in the order shows were added, burying old follows in
+  the middle of a list too long to scan; she keeps it alphabetical (Chapter 26)
+- She again invokes the woman on her Tuesday route she'd helped move a library
+  over (Chapter 14), who'd once asked how she ever finds anything in a list that
+  long (Chapter 26)
 
 ## What you can generate
 
@@ -794,6 +807,34 @@ Try Play Group. It should bring that show to the front of the queue and start pl
 Go to Settings and find the new Auto-advance section with two switches, both on by default (the behavior you already have). "Continue after episode ends" keeps playback going to the next item when one finishes. Turn it off and playback should stop after every episode. "Continue after group ends" keeps playback rolling from one show into the next when a show's queued episodes run out. Turn it off and playback should stop at the end of a show instead of rolling into the next one.
 
 The one-off "Stop after this episode" in the player is separate from both switches and unchanged. It should still stop after the current episode no matter how the Auto-advance switches are set.
+
+### Chapter 26 — Build 124
+
+*Kashe opens the app to a current inbox instead of yesterday's, stops tripping over a loose number by the tab bar, and finally gets to put her giant library in an order she can use.*
+
+For a while, opening Earshot first thing meant getting yesterday. The same episodes she'd already seen, nothing new on top, even though she knew three of her shows had posted overnight. She'd pull down to refresh and wait, or just shrug and figure the new ones would turn up by lunch. They usually did, eventually, on their own clock.
+
+This build, she opened it and the new ones were already there. No pull, no waiting. The app had caught up the second she came back to it, which is all she'd ever wanted it to do.
+
+Then there was the small thing she'd stopped noticing. Flicking across the bottom row, Inbox over to Queue, VoiceOver would land on the Inbox tab, say the count, and then catch for half a beat on the number again. Loose. By itself. Like a coin that fell out of the sentence. She'd taught herself to flick past it. This time it wasn't there. Inbox, then Queue, clean, the count said once where it belongs.
+
+The big one was the Library. Hers is enormous, and she knows it, and we've been over that. It had always come back in the order she added things, newest follow up top, which meant a show she'd had for years lived somewhere in the middle of a list she couldn't really scan. Now there's a Sort button up top. She set it to alphabetical and the whole shelf fell into an order she could move through by letter.
+
+One show made her laugh. The Archers, an old one, filed under A. Not T. The app had the sense to skip the The. That's the right call. She'd have done it the same way.
+
+There's a second way to sort too, by last published, the shows with the newest episodes riding on top. She tried it and her three-times-a-day news show jumped to the front while the ones that had gone quiet sank to the bottom. Two ways to look at the same shelf, and she got to pick. She thought about the woman on her Tuesday route, the one she'd helped move a library over, who'd asked her once how she ever found anything in a list that long. Now there's an answer that isn't just keep scrolling.
+
+She set it back to alphabetical and left it. Opened her inbox one more time, current as of a minute ago, and pressed play before the first client.
+
+**What to test:**
+
+Leave Earshot closed for a while, ideally fifteen minutes or more, and best of all when one of your shows tends to post. Open it back up. New episodes should already be in your inbox without you pulling down to refresh. Open it again right away and it should not refetch every single time.
+
+With VoiceOver, put focus on the Inbox tab and listen for the count. Then flick right toward Queue. You should go straight to the Queue tab with no extra stray number in between. The count is still spoken once, on the Inbox tab itself.
+
+Open your Library and find the new Sort button at the top. Alphabetical should order your shows A to Z, and it should file "The Archers" under A, skipping a leading The, A, or An. Last published should put the shows with the newest episodes on top.
+
+Switch the sort, force-quit Earshot, and open it cold. It should stay where you set it. With VoiceOver the Sort button tells you the current order, and choosing one announces "Sorted by" and the order you picked.
 
 ---
 
