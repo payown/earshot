@@ -157,4 +157,43 @@ enum QueueLogic {
         ids.swapAt(idx, next)
         return ids
     }
+
+    // MARK: Whole-group moves
+
+    /// Moves the entire group identified by `key` up one slot, swapping it with
+    /// the group immediately before it. Re-emits every group contiguously (the
+    /// way the grouped view and the existing group actions already present them),
+    /// so an interleaved flat queue is de-interleaved as a side effect. No-op if
+    /// the group is already first or absent.
+    static func moveGroupUp<ID: Hashable, Key: Hashable>(
+        _ items: [(id: ID, key: Key)],
+        key: Key
+    ) -> [ID] {
+        moveGroup(items, key: key, by: -1)
+    }
+
+    /// Moves the entire group identified by `key` down one slot, swapping it with
+    /// the group immediately after it. See ``moveGroupUp(_:key:)`` for the
+    /// contiguous re-emission behavior. No-op if the group is already last or
+    /// absent.
+    static func moveGroupDown<ID: Hashable, Key: Hashable>(
+        _ items: [(id: ID, key: Key)],
+        key: Key
+    ) -> [ID] {
+        moveGroup(items, key: key, by: 1)
+    }
+
+    private static func moveGroup<ID: Hashable, Key: Hashable>(
+        _ items: [(id: ID, key: Key)],
+        key: Key,
+        by offset: Int
+    ) -> [ID] {
+        let original = items.map(\.id)
+        var groups = group(items)
+        guard let idx = groups.firstIndex(where: { $0.key == key }) else { return original }
+        let target = idx + offset
+        guard groups.indices.contains(target) else { return original }
+        groups.swapAt(idx, target)
+        return groups.flatMap(\.ids)
+    }
 }

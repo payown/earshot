@@ -1,18 +1,29 @@
 import Foundation
 import SwiftData
 
+/// How a queue row's move actions behave, set by the display mode:
+/// - `.flat`: the full set — Move to top / up / down / to bottom — over absolute
+///   queue position.
+/// - `.grouped`: only Move up / down, swapping within the row's podcast group
+///   (top/bottom are ambiguous across groups, so they're dropped).
+/// - `.none`: no move actions at all.
+enum QueueMoveMode {
+    case flat
+    case grouped
+    case none
+}
+
 /// Builds runnable actions for a queue row in the user's configured `order`.
 /// Move/remove run through ``QueueRepository`` and announce the result; `onFocus`
 /// keeps VoiceOver focus oriented after the list re-renders (the moved row, or a
 /// neighbor after removal).
 ///
-/// `moveActionsEnabled` is false in grouped-by-podcast mode, where flat moves
-/// are ambiguous; those actions are dropped from the rotor there.
+/// `moveMode` tailors the move actions to the display mode (see ``QueueMoveMode``).
 @MainActor
 func buildQueueActions(
     episode: Episode,
     order: [QueueItemAction],
-    moveActionsEnabled: Bool,
+    moveMode: QueueMoveMode,
     player: PlayerService,
     context: ModelContext,
     onShowNotes: @escaping () -> Void,
@@ -21,8 +32,15 @@ func buildQueueActions(
     let repo = QueueRepository(context: context)
     let id = episode.persistentModelID
 
-    func moved(_ apply: @escaping (Episode) -> Void, _ announcement: String) -> () -> Void {
-        { apply(episode); Announcer.announce(announcement); onFocus(id) }
+    // Announce + restore focus only when the move actually reordered the queue;
+    // an edge no-op (already at the top/bottom of its group or the queue) must
+    // not falsely announce "Moved … up" or steal VoiceOver focus.
+    func moved(_ apply: @escaping (Episode) -> Bool, _ announcement: String) -> () -> Void {
+        {
+            guard apply(episode) else { return }
+            Announcer.announce(announcement)
+            onFocus(id)
+        }
     }
 
     return order.compactMap { action -> QuickActionItem? in
@@ -39,21 +57,35 @@ func buildQueueActions(
         case .openShowNotes:
             return QuickActionItem(label: "Open show notes", isDestructive: false) { onShowNotes() }
         case .moveToTop:
-            guard moveActionsEnabled else { return nil }
+            guard moveMode == .flat else { return nil }
             return QuickActionItem(label: "Move to top", isDestructive: false,
                                    run: moved(repo.moveToTop, "Moved \(episode.title) to top"))
         case .moveToBottom:
-            guard moveActionsEnabled else { return nil }
+            guard moveMode == .flat else { return nil }
             return QuickActionItem(label: "Move to bottom", isDestructive: false,
                                    run: moved(repo.moveToBottom, "Moved \(episode.title) to bottom"))
         case .moveUp:
-            guard moveActionsEnabled else { return nil }
-            return QuickActionItem(label: "Move up", isDestructive: false,
-                                   run: moved(repo.moveUp, "Moved \(episode.title) up"))
+            switch moveMode {
+            case .flat:
+                return QuickActionItem(label: "Move up", isDestructive: false,
+                                       run: moved(repo.moveUp, "Moved \(episode.title) up"))
+            case .grouped:
+                return QuickActionItem(label: "Move up", isDestructive: false,
+                                       run: moved(repo.moveUpWithinGroup, "Moved \(episode.title) up"))
+            case .none:
+                return nil
+            }
         case .moveDown:
-            guard moveActionsEnabled else { return nil }
-            return QuickActionItem(label: "Move down", isDestructive: false,
-                                   run: moved(repo.moveDown, "Moved \(episode.title) down"))
+            switch moveMode {
+            case .flat:
+                return QuickActionItem(label: "Move down", isDestructive: false,
+                                       run: moved(repo.moveDown, "Moved \(episode.title) down"))
+            case .grouped:
+                return QuickActionItem(label: "Move down", isDestructive: false,
+                                       run: moved(repo.moveDownWithinGroup, "Moved \(episode.title) down"))
+            case .none:
+                return nil
+            }
         }
     }
 }

@@ -115,6 +115,47 @@ final class QueueLogicTests: XCTestCase {
         XCTAssertEqual(QueueLogic.moveDownWithinGroup(items, id: 3), [1, 2, 3])
     }
 
+    // MARK: whole-group moves
+
+    func testMoveGroupUpSwapsWithPreviousGroupAndDeInterleaves() {
+        // Groups by first appearance: A, B, C. Move B up -> B before A; every
+        // group re-emitted contiguously (de-interleaving the queue).
+        let items: [(id: Int, key: String)] = [
+            (1, "A"), (2, "B"), (3, "A"), (4, "C"), (5, "B"),
+        ]
+        XCTAssertEqual(QueueLogic.moveGroupUp(items, key: "B"), [2, 5, 1, 3, 4])
+    }
+
+    func testMoveGroupDownSwapsWithNextGroupAndDeInterleaves() {
+        let items: [(id: Int, key: String)] = [
+            (1, "A"), (2, "B"), (3, "A"), (4, "C"), (5, "B"),
+        ]
+        // Move A down -> swaps with B: B, A, C, contiguous.
+        XCTAssertEqual(QueueLogic.moveGroupDown(items, key: "A"), [2, 5, 1, 3, 4])
+    }
+
+    func testMoveGroupUpIsNoOpWhenAlreadyFirst() {
+        let items: [(id: Int, key: String)] = [(1, "A"), (2, "B"), (3, "A")]
+        XCTAssertEqual(QueueLogic.moveGroupUp(items, key: "A"), [1, 2, 3])
+    }
+
+    func testMoveGroupDownIsNoOpWhenAlreadyLast() {
+        let items: [(id: Int, key: String)] = [(1, "A"), (2, "B"), (3, "A")]
+        XCTAssertEqual(QueueLogic.moveGroupDown(items, key: "B"), [1, 2, 3])
+    }
+
+    func testMoveGroupOnAbsentKeyIsNoOp() {
+        let items: [(id: Int, key: String)] = [(1, "A"), (2, "B")]
+        XCTAssertEqual(QueueLogic.moveGroupUp(items, key: "Z"), [1, 2])
+        XCTAssertEqual(QueueLogic.moveGroupDown(items, key: "Z"), [1, 2])
+    }
+
+    func testMoveGroupWithSingleGroupIsNoOp() {
+        let items: [(id: Int, key: String)] = [(1, "A"), (2, "A")]
+        XCTAssertEqual(QueueLogic.moveGroupUp(items, key: "A"), [1, 2])
+        XCTAssertEqual(QueueLogic.moveGroupDown(items, key: "A"), [1, 2])
+    }
+
     // MARK: sortedByDate (Play newest / oldest first)
 
     private func date(_ daysFromEpoch: Double) -> Date {

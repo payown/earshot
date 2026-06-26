@@ -112,14 +112,38 @@ final class QueueRepository {
 
     // MARK: Moves
 
-    func moveToTop(_ episode: Episode) { reorder(episode) { QueueLogic.moveToTop($0, $1) } }
-    func moveToBottom(_ episode: Episode) { reorder(episode) { QueueLogic.moveToBottom($0, $1) } }
-    func moveUp(_ episode: Episode) { reorder(episode) { QueueLogic.moveUp($0, $1) } }
-    func moveDown(_ episode: Episode) { reorder(episode) { QueueLogic.moveDown($0, $1) } }
+    /// Each move returns whether the order actually changed, so callers only
+    /// announce / restore VoiceOver focus when something moved (an edge no-op
+    /// must not announce "Moved … up").
+    @discardableResult
+    func moveToTop(_ episode: Episode) -> Bool { reorder(episode) { QueueLogic.moveToTop($0, $1) } }
+    @discardableResult
+    func moveToBottom(_ episode: Episode) -> Bool { reorder(episode) { QueueLogic.moveToBottom($0, $1) } }
+    @discardableResult
+    func moveUp(_ episode: Episode) -> Bool { reorder(episode) { QueueLogic.moveUp($0, $1) } }
+    @discardableResult
+    func moveDown(_ episode: Episode) -> Bool { reorder(episode) { QueueLogic.moveDown($0, $1) } }
 
     /// Drag-reorder `episode` to `toIndex`.
-    func move(_ episode: Episode, toIndex: Int) {
+    @discardableResult
+    func move(_ episode: Episode, toIndex: Int) -> Bool {
         reorder(episode) { QueueLogic.move($0, $1, toIndex: toIndex) }
+    }
+
+    /// Swaps `episode` with the previous episode in the same podcast group,
+    /// leaving every other group untouched. Backs grouped-mode "Move up". No-op
+    /// (returns false) when it's already first in its group.
+    @discardableResult
+    func moveUpWithinGroup(_ episode: Episode) -> Bool {
+        reorderWithinGroup(episode) { QueueLogic.moveUpWithinGroup($0, id: $1) }
+    }
+
+    /// Swaps `episode` with the next episode in the same podcast group, leaving
+    /// every other group untouched. Backs grouped-mode "Move down". No-op
+    /// (returns false) when it's already last in its group.
+    @discardableResult
+    func moveDownWithinGroup(_ episode: Episode) -> Bool {
+        reorderWithinGroup(episode) { QueueLogic.moveDownWithinGroup($0, id: $1) }
     }
 
     // MARK: Group actions (#445)
@@ -167,6 +191,25 @@ final class QueueRepository {
             var rng = SystemRandomNumberGenerator()
             return QueueLogic.shuffled(groupItems.map(\.persistentModelID), using: &rng)
         }
+    }
+
+    /// Moves a podcast's whole group up one slot (swapping with the group
+    /// before it) and de-interleaves the queue so each group is contiguous,
+    /// matching the grouped view. Returns whether the order changed. No-op
+    /// (returns false) if the group is already first or the podcast has nothing
+    /// queued.
+    @discardableResult
+    func moveGroupUp(_ podcast: Podcast) -> Bool {
+        reorderGroup(podcast) { QueueLogic.moveGroupUp($0, key: $1) }
+    }
+
+    /// Moves a podcast's whole group down one slot (swapping with the group
+    /// after it). See ``moveGroupUp(_:)``. Returns whether the order changed.
+    /// No-op (returns false) if the group is already last or the podcast has
+    /// nothing queued.
+    @discardableResult
+    func moveGroupDown(_ podcast: Podcast) -> Bool {
+        reorderGroup(podcast) { QueueLogic.moveGroupDown($0, key: $1) }
     }
 
     /// Shared group-action core: collects the podcast's queued items, lets
@@ -229,16 +272,59 @@ final class QueueRepository {
         compact(items)
     }
 
-    /// Applies a ``QueueLogic`` ordering op (keyed on queue-item ids) and persists.
-    private func reorder(_ episode: Episode, _ op: ([PersistentIdentifier], PersistentIdentifier) -> [PersistentIdentifier]) {
+    /// Applies a ``QueueLogic`` ordering op (keyed on queue-item ids) and
+    /// persists. Returns whether the order actually changed.
+    @discardableResult
+    private func reorder(_ episode: Episode, _ op: ([PersistentIdentifier], PersistentIdentifier) -> [PersistentIdentifier]) -> Bool {
         let items = orderedItems()
-        guard let id = episode.queueItem?.persistentModelID else { return }
-        applyOrder(op(items.map(\.persistentModelID), id), items: items)
+        guard let id = episode.queueItem?.persistentModelID else { return false }
+        return applyOrder(op(items.map(\.persistentModelID), id), items: items)
     }
 
-    private func applyOrder(_ orderedIDs: [PersistentIdentifier], items: [QueueItem]) {
+    /// Applies a within-group ``QueueLogic`` op, keyed on each item's podcast id
+    /// (an episode with no podcast keys on its own queue-item id, so it forms a
+    /// singleton group and never swaps with anything). Returns whether the order
+    /// actually changed.
+    @discardableResult
+    private func reorderWithinGroup(
+        _ episode: Episode,
+        _ op: ([(id: PersistentIdentifier, key: PersistentIdentifier)], PersistentIdentifier) -> [PersistentIdentifier]
+    ) -> Bool {
+        let items = orderedItems()
+        guard let id = episode.queueItem?.persistentModelID else { return false }
+        return applyOrder(op(keyedItems(items), id), items: items)
+    }
+
+    /// Applies a whole-group ``QueueLogic`` op, keyed on podcast id (see
+    /// ``reorderWithinGroup(_:_:)`` for the orphan fallback). Returns whether the
+    /// order actually changed.
+    @discardableResult
+    private func reorderGroup(
+        _ podcast: Podcast,
+        _ op: ([(id: PersistentIdentifier, key: PersistentIdentifier)], PersistentIdentifier) -> [PersistentIdentifier]
+    ) -> Bool {
+        let items = orderedItems()
+        return applyOrder(op(keyedItems(items), podcast.persistentModelID), items: items)
+    }
+
+    /// Pairs each queue item's id with its grouping key (podcast id, falling back
+    /// to the item's own id for an episode with no podcast).
+    private func keyedItems(_ items: [QueueItem]) -> [(id: PersistentIdentifier, key: PersistentIdentifier)] {
+        items.map {
+            (id: $0.persistentModelID,
+             key: $0.episode?.podcast?.persistentModelID ?? $0.persistentModelID)
+        }
+    }
+
+    /// Persists `orderedIDs` (a permutation of `items`) by recompacting positions,
+    /// but only when it differs from the current order — a no-op order makes no
+    /// write and posts no change notification. Returns whether anything changed.
+    @discardableResult
+    private func applyOrder(_ orderedIDs: [PersistentIdentifier], items: [QueueItem]) -> Bool {
+        guard orderedIDs != items.map(\.persistentModelID) else { return false }
         let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.persistentModelID, $0) })
         compact(orderedIDs.compactMap { byID[$0] })
+        return true
     }
 
     /// Assigns dense positions `0..<N` over `ordered` and saves.
