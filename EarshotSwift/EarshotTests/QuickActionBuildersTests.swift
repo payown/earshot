@@ -56,13 +56,13 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertTrue(opened)
     }
 
-    func testQueueActionsDropMovesWhenDisabled() {
+    func testQueueActionsDropAllMovesInNoneMode() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)
         let items = buildQueueActions(
             episode: episode,
             order: defaultQueueItemActions,
-            moveActionsEnabled: false,
+            moveMode: .none,
             player: PlayerService(),
             context: ctx,
             onShowNotes: {},
@@ -71,13 +71,28 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Play now", "Remove from queue", "Open show notes"])
     }
 
-    func testQueueActionsIncludeMovesWhenEnabledInConfiguredOrder() {
+    func testQueueActionsGroupedModeKeepsUpDownButDropsTopBottom() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let items = buildQueueActions(
+            episode: episode,
+            order: [.moveToTop, .moveUp, .playNow, .moveDown, .moveToBottom],
+            moveMode: .grouped,
+            player: PlayerService(),
+            context: ctx,
+            onShowNotes: {},
+            onFocus: { _ in }
+        )
+        XCTAssertEqual(items.map(\.label), ["Move up", "Play now", "Move down"])
+    }
+
+    func testQueueActionsFlatModeIncludesAllMovesInConfiguredOrder() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)
         let items = buildQueueActions(
             episode: episode,
             order: [.moveToTop, .playNow, .removeFromQueue],
-            moveActionsEnabled: true,
+            moveMode: .flat,
             player: PlayerService(),
             context: ctx,
             onShowNotes: {},

@@ -171,6 +171,79 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(titles(repo), ["Ep d", "Ep c", "Ep a", "Ep b"])
     }
 
+    // MARK: within-group moves (#476)
+
+    func testMoveDownWithinGroupSwapsWithNextSamePodcastEpisode() {
+        let ctx = TestStore.freshContext()
+        let pa = makePodcast(ctx, "A")
+        let pb = makePodcast(ctx, "B")
+        let a1 = makeEpisode(ctx, "a1", podcast: pa)
+        let b1 = makeEpisode(ctx, "b1", podcast: pb)
+        let a2 = makeEpisode(ctx, "a2", podcast: pa)
+        let repo = QueueRepository(context: ctx)
+        [a1, b1, a2].forEach(repo.add)
+
+        // a1 swaps with a2 (the next A item), leaping over b1; b1 stays put.
+        XCTAssertTrue(repo.moveDownWithinGroup(a1), "a real move reports a change")
+
+        XCTAssertEqual(titles(repo), ["Ep a2", "Ep b1", "Ep a1"])
+        XCTAssertEqual(repo.queue().compactMap { $0.queueItem?.position }, [0, 1, 2])
+    }
+
+    func testMoveUpWithinGroupIsNoOpWhenFirstInGroup() {
+        let ctx = TestStore.freshContext()
+        let pa = makePodcast(ctx, "A")
+        let pb = makePodcast(ctx, "B")
+        let a1 = makeEpisode(ctx, "a1", podcast: pa)
+        let b1 = makeEpisode(ctx, "b1", podcast: pb)
+        let a2 = makeEpisode(ctx, "a2", podcast: pa)
+        let repo = QueueRepository(context: ctx)
+        [a1, b1, a2].forEach(repo.add)
+
+        XCTAssertFalse(repo.moveUpWithinGroup(a1), "an edge no-op reports no change")
+
+        XCTAssertEqual(titles(repo), ["Ep a1", "Ep b1", "Ep a2"])
+    }
+
+    // MARK: whole-group moves (#476)
+
+    func testMoveGroupUpBringsGroupAboveAndDeInterleaves() {
+        let ctx = TestStore.freshContext()
+        let g = makeInterleavedGroups(ctx) // [a1, b1, a2, b2, a3]
+
+        XCTAssertTrue(g.repo.moveGroupUp(g.pb), "B moves above A, both groups contiguous")
+
+        XCTAssertEqual(titles(g.repo), ["Ep b1", "Ep b2", "Ep a1", "Ep a2", "Ep a3"])
+        XCTAssertEqual(g.repo.queue().compactMap { $0.queueItem?.position }, [0, 1, 2, 3, 4])
+    }
+
+    func testMoveGroupDownBringsGroupBelow() {
+        let ctx = TestStore.freshContext()
+        let g = makeInterleavedGroups(ctx) // [a1, b1, a2, b2, a3]
+
+        g.repo.moveGroupDown(g.pa) // A moves below B
+
+        XCTAssertEqual(titles(g.repo), ["Ep b1", "Ep b2", "Ep a1", "Ep a2", "Ep a3"])
+    }
+
+    func testMoveGroupIsNoOpAtEdgeOrWhenNeverQueued() {
+        let ctx = TestStore.freshContext()
+        let g = makeInterleavedGroups(ctx)
+        let pc = makePodcast(ctx, "C") // never queued
+        // A no-op returns the original flat order untouched (it does NOT
+        // de-interleave): A is already first, B already last, C never queued.
+        let unchanged = ["Ep a1", "Ep b1", "Ep a2", "Ep b2", "Ep a3"]
+
+        XCTAssertFalse(g.repo.moveGroupUp(g.pa), "A already first")
+        XCTAssertEqual(titles(g.repo), unchanged)
+
+        XCTAssertFalse(g.repo.moveGroupDown(g.pb), "B already last")
+        XCTAssertEqual(titles(g.repo), unchanged)
+
+        XCTAssertFalse(g.repo.moveGroupUp(pc), "never queued")
+        XCTAssertEqual(titles(g.repo), unchanged)
+    }
+
     func testClearEmptiesQueue() {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx, "A")

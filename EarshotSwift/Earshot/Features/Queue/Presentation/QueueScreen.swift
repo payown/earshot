@@ -2,11 +2,12 @@ import SwiftUI
 import SwiftData
 
 /// The play queue. Flat or grouped-by-podcast, with drag reorder for sighted
-/// users and a full set of VoiceOver custom actions (move to top / up / down /
-/// to bottom / remove) so reordering never depends on a drag gesture. Move
-/// actions are offered only in flat mode, where position is unambiguous; in
-/// grouped mode the group heading exposes four group-level actions (Play Group,
-/// Sort Newest First, Sort Oldest First, Shuffle Group) in the actions rotor.
+/// users and a full set of VoiceOver custom actions so reordering never depends
+/// on a drag gesture. Flat mode offers Move to top / up / down / to bottom over
+/// absolute position. Grouped mode offers Move up / down that reorder within the
+/// row's podcast group (top/bottom are ambiguous across groups, so they're
+/// dropped), and the group heading exposes Play Group, Move Group Up / Down,
+/// Sort Newest First, Sort Oldest First, and Shuffle Group in the actions rotor.
 struct QueueScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
@@ -17,6 +18,7 @@ struct QueueScreen: View {
 
     @State private var showNotesEpisode: Episode?
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
+    @AccessibilityFocusState private var focusedGroup: PersistentIdentifier?
 
     private var repo: QueueRepository { QueueRepository(context: context) }
     private var episodes: [Episode] { items.compactMap(\.episode) }
@@ -62,7 +64,7 @@ struct QueueScreen: View {
     private var flatList: some View {
         List {
             ForEach(Array(episodes.enumerated()), id: \.element.persistentModelID) { index, episode in
-                row(episode, position: index + 1, total: episodes.count, showsMoveActions: true)
+                row(episode, position: index + 1, total: episodes.count, moveMode: .flat)
             }
             .onMove(perform: handleMove)
         }
@@ -75,7 +77,7 @@ struct QueueScreen: View {
             ForEach(repo.groupedQueue()) { group in
                 Section {
                     ForEach(group.episodes) { episode in
-                        row(episode, position: nil, total: nil, showsMoveActions: false)
+                        row(episode, position: nil, total: nil, moveMode: .grouped)
                     }
                 } header: {
                     groupHeader(group)
@@ -96,18 +98,34 @@ struct QueueScreen: View {
     private func groupHeader(_ group: QueueGroup) -> some View {
         let count = group.episodes.count
         let countPhrase = count == 1 ? "1 episode" : "\(count) episodes"
+        let podcastID = group.podcast.persistentModelID
 
         return Text(group.podcast.title)
             .accessibilityLabel("\(group.podcast.title), \(countPhrase)")
             .accessibilityAddTraits(.isHeader)
+            .accessibilityFocused($focusedGroup, equals: podcastID)
             .accessibilityActions {
-                // Play Group starts playback. The three sort/shuffle actions only
-                // reorder the group in place (their @discardableResult Episode? is
-                // ignored) — they never start audio.
+                // Play Group starts playback. The sort/shuffle and move-group
+                // actions only reorder in place (their @discardableResult Episode?,
+                // where any, is ignored) — they never start audio.
                 Button("Play Group") {
                     if let episode = repo.playGroup(group.podcast) {
                         player.play(episode)
                         Announcer.announce("Playing \(group.podcast.title)")
+                    }
+                }
+                Button("Move Group Up") {
+                    // Announce + refocus only on a real move; an edge no-op
+                    // (group already first / last) must stay silent.
+                    if repo.moveGroupUp(group.podcast) {
+                        Announcer.announce("Moved \(group.podcast.title) up")
+                        focusedGroup = podcastID
+                    }
+                }
+                Button("Move Group Down") {
+                    if repo.moveGroupDown(group.podcast) {
+                        Announcer.announce("Moved \(group.podcast.title) down")
+                        focusedGroup = podcastID
                     }
                 }
                 Button("Sort Newest First") {
@@ -127,7 +145,7 @@ struct QueueScreen: View {
 
     // MARK: Row
 
-    private func row(_ episode: Episode, position: Int?, total: Int?, showsMoveActions: Bool) -> some View {
+    private func row(_ episode: Episode, position: Int?, total: Int?, moveMode: QueueMoveMode) -> some View {
         QueueRow(
             episode: episode,
             position: position,
@@ -136,7 +154,7 @@ struct QueueScreen: View {
             actions: buildQueueActions(
                 episode: episode,
                 order: quickActions.queueActions,
-                moveActionsEnabled: showsMoveActions,
+                moveMode: moveMode,
                 player: player,
                 context: context,
                 onShowNotes: { showNotesEpisode = episode },
@@ -223,18 +241,7 @@ private struct QueueRow: View {
                 Button(action.label) { action.run() }
             }
         }
-        .swipeActions(edge: .trailing) {
-            ForEach(actions.filter(\.isDestructive)) { action in
-                Button(role: .destructive) { action.run() } label: { Text(action.label) }
-            }
-        }
-        .contextMenu {
-            ForEach(actions.dropFirst()) { action in
-                Button(role: action.isDestructive ? .destructive : nil) { action.run() } label: {
-                    Text(action.label)
-                }
-            }
-        }
+        .modifier(SightedRowActions(actions: actions))
     }
 
     private var accessibilityLabel: String {
@@ -246,5 +253,38 @@ private struct QueueRow: View {
             parts.append("position \(position) of \(total)")
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// Swipe-to-delete and the context menu for sighted users. SwiftUI promotes both
+/// swipe and context-menu items into the VoiceOver Actions rotor, which duplicated
+/// every action already listed by `.accessibilityActions` (the reported "Remove
+/// from queue" appearing twice). With VoiceOver running these are redundant, so
+/// they're omitted — leaving `.accessibilityActions` as the single rotor source.
+private struct SightedRowActions: ViewModifier {
+    let actions: [QuickActionItem]
+    // Tracked by SwiftUI, so toggling VoiceOver while the Queue is on screen
+    // re-evaluates and removes/restores the swipe + context actions immediately
+    // (reading UIAccessibility.isVoiceOverRunning in body would not invalidate).
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+
+    func body(content: Content) -> some View {
+        if voiceOverEnabled {
+            content
+        } else {
+            content
+                .swipeActions(edge: .trailing) {
+                    ForEach(actions.filter(\.isDestructive)) { action in
+                        Button(role: .destructive) { action.run() } label: { Text(action.label) }
+                    }
+                }
+                .contextMenu {
+                    ForEach(actions.dropFirst()) { action in
+                        Button(role: action.isDestructive ? .destructive : nil) { action.run() } label: {
+                            Text(action.label)
+                        }
+                    }
+                }
+        }
     }
 }
