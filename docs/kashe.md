@@ -991,7 +991,7 @@ With VoiceOver, open the player and find Playback speed. Flick up to speed up, f
 
 Open the Player controls (the sliders button, top right) and find the Sleep timer. Flick up for a longer timer, flick down for shorter, and down again to Off. The same flick-to-change now works on the speed, skip, and limit settings throughout Settings and per-podcast settings too.
 
-### Chapter 31 — Build 129
+### Chapter 31 — Build 130
 
 *Kashe finds a show she wants from the very beginning, and for once the app lets her hear it in order.*
 
