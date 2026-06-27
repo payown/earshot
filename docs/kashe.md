@@ -226,6 +226,16 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   feel," one-handed from a pocket (Chapter 27), and her night sleep-timer habit
   (Chapters 19/20). She fidgets with speed: ~1.5 for dense shows, ~1.1 for fast
   talkers (Chapter 30)
+- Each podcast's episode list now has an All / Unheard filter at the top
+  (segmented control); Unheard hides finished episodes, All shows everything,
+  defaults to Unheard and is remembered per show, and VoiceOver announces the
+  selection plus the new count. And a "Play oldest first" binge action plays a
+  show's episodes oldest to newest and keeps rolling through that show instead
+  of jumping to a random inbox episode at the end; it respects the active
+  All/Unheard filter and leaves the existing queue untouched. Kashe uses it to
+  start a show she wants from the very beginning, in order, having given up
+  before and listened newest-first; she leaves the filter on Unheard so the
+  show stays just what's left as she works through it (Chapter 31)
 
 ## What you can generate
 
@@ -980,6 +990,26 @@ What to test:
 With VoiceOver, open the player and find Playback speed. Flick up to speed up, flick down to slow down. It should change right away and speak the new speed each time. To reach the full options (per-podcast, precise steps, reset), use the Actions rotor and choose "Open speed options."
 
 Open the Player controls (the sliders button, top right) and find the Sleep timer. Flick up for a longer timer, flick down for shorter, and down again to Off. The same flick-to-change now works on the speed, skip, and limit settings throughout Settings and per-podcast settings too.
+
+### Chapter 31 — Build 129
+
+*Kashe finds a show she wants from the very beginning, and for once the app lets her hear it in order.*
+
+**What to test:**
+
+Open a podcast in your Library. At the top of its episode list there's a new All / Unheard filter. Unheard hides episodes you've finished; All shows everything. It defaults to Unheard and remembers your choice per show. With VoiceOver it announces the selection and the new count when you switch.
+
+Select a podcast and tap Play oldest first. It should play that show's episodes from oldest to newest and keep going through the show, instead of jumping to a random inbox episode when one ends. It follows the All/Unheard filter you've set, and it leaves your existing queue alone.
+
+She'd found a show worth starting from the beginning. Not the latest one. The first, then the next, in order, the way the people who made it meant it to go.
+
+That used to be a fight. She'd open the show, find the oldest episode, play it, and the second it ended Earshot grabbed something else off the top of her inbox. A different show, a different voice. She'd back out, find her place, start the next one by hand. Three taps to move one episode forward. She gave up and listened newest first, which is a strange way to hear anything with a thread running through it.
+
+This build put a Play oldest first right on the show. She tapped it once. It started at the beginning and stayed there, episode after episode, rolling forward instead of wandering off. Her queue, whatever she'd lined up for the drive, sat untouched underneath.
+
+And the list kept itself clean while she worked through it. The filter up top, All or Unheard. On Unheard the ones she'd finished fell away, so the next morning the show was just what was left, not a wall she had to find her spot in. When she wanted one she'd already played, she flicked to All and there it was.
+
+She set it going oldest first, left it on Unheard, and let the show tell itself to her in the right order for once.
 
 ---
 
