@@ -61,7 +61,8 @@ final class ArtworkCacheTests: XCTestCase {
         cache.urlCache.removeAllCachedResponses()
     }
 
-    /// `image(for:)` should decode a stored image response into a `UIImage`.
+    /// `image(for:maxPixelSize:)` should decode a stored image response into a
+    /// `UIImage`.
     func test_imageFor_decodesStoredImageData() async throws {
         let cache = ArtworkCache()
         let url = try XCTUnwrap(URL(string: "https://example.test/image-\(UUID().uuidString).png"))
@@ -80,10 +81,66 @@ final class ArtworkCacheTests: XCTestCase {
         cache.urlCache.storeCachedResponse(CachedURLResponse(response: response, data: pngData),
                                            for: request)
 
-        let image = await cache.image(for: url)
-        XCTAssertNotNil(image, "image(for:) should decode a stored PNG response")
+        let image = await cache.image(for: url, maxPixelSize: 56)
+        XCTAssertNotNil(image, "image(for:maxPixelSize:) should decode a stored PNG response")
 
         cache.urlCache.removeAllCachedResponses()
+    }
+
+    // MARK: Downsampling (#481)
+
+    /// `downsampledImage(from:maxPixelSize:)` must decode a large source down so
+    /// its longest edge is at most `maxPixelSize` pixels — this is what keeps a
+    /// full-resolution image from decoding on the main thread during scroll.
+    func test_downsampledImage_capsLongestEdgeToMaxPixelSize() throws {
+        let sourceData = try Self.makeJPEGData(side: 1000)
+
+        let image = try XCTUnwrap(
+            ArtworkCache.downsampledImage(from: sourceData, maxPixelSize: 100),
+            "A valid JPEG should produce a downsampled image"
+        )
+
+        // The thumbnail is built at scale 1, so point size equals pixel size.
+        let longestEdge = max(image.size.width, image.size.height)
+        XCTAssertLessThanOrEqual(longestEdge, 100,
+                                 "Longest edge must be capped at maxPixelSize, was \(longestEdge)")
+        XCTAssertGreaterThan(longestEdge, 0, "A real image must have non-zero size")
+    }
+
+    /// A source already smaller than the cap must not be upscaled — the thumbnail
+    /// stays at the source size rather than being blown up to `maxPixelSize`.
+    func test_downsampledImage_smallSource_isNotUpscaled() throws {
+        let sourceData = try Self.makeJPEGData(side: 40)
+
+        let image = try XCTUnwrap(
+            ArtworkCache.downsampledImage(from: sourceData, maxPixelSize: 200)
+        )
+
+        let longestEdge = max(image.size.width, image.size.height)
+        XCTAssertLessThanOrEqual(longestEdge, 40,
+                                 "A small source must not be upscaled past its own size")
+    }
+
+    /// Non-image bytes must return `nil` (the caller then falls back), not crash.
+    func test_downsampledImage_invalidData_returnsNil() {
+        let garbage = Data("not-an-image".utf8)
+        XCTAssertNil(ArtworkCache.downsampledImage(from: garbage, maxPixelSize: 100),
+                     "Undecodable data must return nil so the caller can fall back")
+    }
+
+    /// JPEG bytes for a solid `side`×`side` square in *pixels*, used to exercise
+    /// downsampling. The renderer scale is pinned to 1 so the encoded pixel
+    /// dimensions equal `side` regardless of the test host's Retina scale —
+    /// downsampling is measured in pixels, so the source pixel size must be exact.
+    private static func makeJPEGData(side: CGFloat) throws -> Data {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
+        let image = renderer.image { ctx in
+            UIColor.systemBlue.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        }
+        return try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
     }
 
     // MARK: Miss returns nil (no crash, no network)
@@ -109,8 +166,8 @@ final class ArtworkCacheTests: XCTestCase {
         let cache = ArtworkCache()
         let url = try XCTUnwrap(URL(string: "unsupported://example.test/missing.png"))
 
-        let image = await cache.image(for: url)
-        XCTAssertNil(image, "image(for:) must return nil when no data can be fetched")
+        let image = await cache.image(for: url, maxPixelSize: 56)
+        XCTAssertNil(image, "image(for:maxPixelSize:) must return nil when no data can be fetched")
     }
 
     // MARK: Memory-only defensive fallback

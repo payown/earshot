@@ -262,6 +262,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   live time in its value, spoken as elapsed of total (for example "12 minutes of
   42 minutes"), matching the on-screen times. Swipe up or down still jumps 30
   seconds. (#480)
+- Scrolling lists feel smoother under VoiceOver. Podcast artwork was being decoded
+  at its full source size (often far larger than it's shown) on the main thread as
+  rows drew, which competed with VoiceOver while you scrolled. Artwork is now
+  decoded once at the size it's actually displayed, off the main thread, so the
+  Library and other artwork lists stay responsive during a flick. The lock-screen
+  and Control Center artwork still looks the same. (#481)
 
 ### Phase 8 complete — Alpha build prep
 

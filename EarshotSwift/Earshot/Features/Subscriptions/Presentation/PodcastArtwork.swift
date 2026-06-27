@@ -18,6 +18,11 @@ struct PodcastArtwork: View {
     /// every redraw and do reload when the URL changes.
     @State private var loadedURLString: String?
 
+    /// The device's pixel-per-point scale, used to size the decoded artwork to the
+    /// actual draw size so it's downsampled rather than decoded full-resolution on
+    /// the main thread during scroll. (#481)
+    @Environment(\.displayScale) private var displayScale
+
     var body: some View {
         Group {
             if let image {
@@ -48,7 +53,10 @@ struct PodcastArtwork: View {
             return
         }
 
-        let fetched = await ArtworkCache.shared.image(for: url)
+        // Decode to the actual draw size in pixels so a large source isn't
+        // decoded full-resolution on the main thread during scroll (#481).
+        let maxPixelSize = size * displayScale
+        let fetched = await ArtworkCache.shared.image(for: url, maxPixelSize: maxPixelSize)
         // The view may have been reused for a different URL while awaiting; only
         // commit if this load is still the current one.
         guard !Task.isCancelled, self.urlString == urlString else { return }
