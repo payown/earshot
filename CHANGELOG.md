@@ -257,6 +257,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redundant accessibility work on every focus move; that's removed, so flicking
   through the Inbox, Library, Queue, and bookmark lists is more responsive. What
   VoiceOver reads for each row, and its actions rotor, are unchanged. (#479)
+- Now Playing: the playback scrubber no longer re-reads its name every second
+  during playback. VoiceOver now hears a steady "Playback position" label with the
+  live time in its value, spoken as elapsed of total (for example "12 minutes of
+  42 minutes"), matching the on-screen times. Swipe up or down still jumps 30
+  seconds. (#480)
 
 ### Phase 8 complete — Alpha build prep
 

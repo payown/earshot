@@ -579,17 +579,21 @@ private struct ScrubberView: View {
     private var scrubberAccessibilityElement: some View {
         Color.clear
             .accessibilityElement()
-            .accessibilityLabel(scrubberLabel)
-            .accessibilityValue(BookmarkLogic.spoken(Int(displaySeconds)))
+            // The label is static so VoiceOver isn't re-reading it every second as
+            // the 1Hz position tick rebuilds this view. The live time rides in the
+            // value, which an adjustable control is expected to update. Previously
+            // the label carried the dynamic "X remaining of Y", so the label itself
+            // changed every second. (#480)
+            .accessibilityLabel("Playback position")
+            .accessibilityValue(scrubberValue)
     }
 
-    /// Stable spoken framing for the value. Remaining and total are spoken in the
-    /// same word format as the value so VoiceOver never flips between "M:SS" and
-    /// word form on the same control (the #328 guarantee).
-    private var scrubberLabel: String {
-        guard hasDuration else { return "Playback position" }
-        let remaining = max(0, duration - displaySeconds)
-        return "Playback position, \(BookmarkLogic.spoken(Int(remaining))) remaining "
-            + "of \(BookmarkLogic.spoken(Int(duration)))"
+    /// Live spoken position: elapsed framed by total, both in the same word format
+    /// so VoiceOver never flips between "M:SS" and word form on the same control
+    /// (the #328 guarantee). Mirrors the visible elapsed / total labels.
+    private var scrubberValue: String {
+        let elapsed = BookmarkLogic.spoken(Int(displaySeconds))
+        guard hasDuration else { return elapsed }
+        return "\(elapsed) of \(BookmarkLogic.spoken(Int(duration)))"
     }
 }
