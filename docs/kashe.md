@@ -210,6 +210,13 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   at display size so fast scrolling no longer hitches. Kashe always has audio
   playing, so she feels all of it at once; the through-line is the app no longer
   fighting VoiceOver while a show plays (Chapter 28)
+- The two queue "add" actions were renamed from "Add to queue (top)" / "Add to
+  queue (bottom)" to "Play next" / "Add to end of queue"; Play next now inserts
+  right after the now-playing episode (front fallback when nothing relevant is
+  queued). And because Kashe runs the grouped queue with "Continue after group
+  ends" off (Chapter 25), an explicit Play next now overrides that group-edge
+  stop for that one advance, so the episode she points at actually plays next
+  even across shows; normal auto-advance at group edges still stops (Chapter 29)
 
 ## What you can generate
 
@@ -920,6 +927,28 @@ With VoiceOver on, start an episode playing. While it plays, flick through your 
 Open the full player and put focus on the seek bar. It should say "Playback position" once, then update the time in its value (like "12 minutes of 42 minutes"). It should not re-read its name every second. Swipe up or down still jumps 30 seconds.
 
 Open your Library and scroll fast with VoiceOver while audio plays. The list should feel smooth as artwork comes in, no stalls. Lock screen and Control Center artwork should still look right.
+
+### Chapter 29 — Build 127
+
+*Kashe finally gets queue actions that say what they do, and the one she means by "next" actually plays next.*
+
+She never loved the two names. To put an episode at the front of her queue, the rotor said "Add to queue, top." For the back, "Add to queue, bottom." Top and bottom. She knew which was which, but only because she'd drilled it in. Every time, a half-second of translating. Top means soon, bottom means later. Like reading a map to cross your own kitchen.
+
+Now they say it plain. "Play next" and "Add to end of queue." The one she wants up front is the one that plays after whatever's on. The long show she saves for the drive home goes to the end, where she's been parking it for months. No translating.
+
+And Play next got honest about the word next.
+
+Here's where it used to bite her. She keeps her shows grouped, and she'd turned off Continue after group ends so one show doesn't bleed into the next while she's driving. Good. Except when a client mentioned something and she flicked over, found the episode, and hit Play next, it would land behind the playing show and then just stop. Her current show ended and the app went quiet, because the next one was a different show and she'd told it to stop at the edges. The thing she asked for got swallowed by a rule she set for something else.
+
+Now Play next wins. If she says play this next, it plays next, group rule or not. The stop-at-the-edge setting still does its job everywhere else. It just stops arguing with her when she's pointing right at the thing.
+
+She told a client's daughter about a show, Play-nexted her own note-to-self, and it came on right as the last one ended. No silence to fill.
+
+**What to test:**
+
+With VoiceOver, open the actions rotor on any episode. The two queue actions now read "Play next" and "Add to end of queue" instead of top and bottom. Play next puts the episode right after what's playing. Add to end of queue puts it last.
+
+If you group your queue and have turned off Continue after group ends in Settings, Auto-advance: start a show, then Play next an episode from a different show. When the current one finishes, your Play-nexted episode should play, even across the group line. Normal auto-advance at a group edge should still stop the way you set it.
 
 ---
 
