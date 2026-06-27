@@ -477,6 +477,42 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(titles(f.repo), before)
     }
 
+    /// Defensive scoping: episodes that all belong to a DIFFERENT podcast are not
+    /// this podcast's run, so binge returns nil and enqueues nothing (the foreign
+    /// episodes must never be pulled into `podcast`'s queue group).
+    func testBingeWithOnlyForeignEpisodesReturnsNilAndMakesNoChange() {
+        let ctx = TestStore.freshContext()
+        let f = makeBingeFixture(ctx)
+        let pc = makePodcast(ctx, "C")
+        let c1 = makeEpisode(ctx, "c1", podcast: pc)
+        let c2 = makeEpisode(ctx, "c2", podcast: pc)
+        let before = titles(f.repo)
+
+        // Ask to binge podcast A but hand it only C's episodes.
+        XCTAssertNil(f.repo.bingeOldestFirst(f.pa, episodes: [c1, c2]))
+        XCTAssertEqual(titles(f.repo), before, "foreign episodes leave the queue untouched")
+        XCTAssertEqual(c1.status, .newEpisode, "foreign episode is not enqueued")
+        XCTAssertEqual(c2.status, .newEpisode, "foreign episode is not enqueued")
+    }
+
+    /// Defensive scoping on a MIXED set: only the episodes belonging to `podcast`
+    /// form the run; foreign episodes in the same array are filtered out and never
+    /// enqueued.
+    func testBingeFiltersOutForeignEpisodesFromMixedSet() {
+        let ctx = TestStore.freshContext()
+        let f = makeBingeFixture(ctx)
+        let pc = makePodcast(ctx, "C")
+        let c1 = makeEpisode(ctx, "c1", podcast: pc)
+
+        // Hand A's three episodes plus one stray C episode.
+        let first = f.repo.bingeOldestFirst(f.pa, episodes: f.newestFirst + [c1])
+
+        XCTAssertEqual(first?.title, "Ep a1", "oldest A episode leads the run")
+        XCTAssertEqual(titles(f.repo), ["Ep a1", "Ep a2", "Ep a3", "Ep b1"],
+                       "only A's episodes are bingeed; the stray C episode is excluded")
+        XCTAssertEqual(c1.status, .newEpisode, "the foreign episode is never enqueued")
+    }
+
     // MARK: 125/127 regression — binge must not disturb playNext / boundaries
 
     /// #486: after a binge seeds the front group, "Play next" still inserts the
