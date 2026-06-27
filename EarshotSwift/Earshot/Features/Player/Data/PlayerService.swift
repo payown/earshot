@@ -40,6 +40,12 @@ final class PlayerService {
     @ObservationIgnored private var context: ModelContext?
     @ObservationIgnored private var settings: AppSettingsStore?
     @ObservationIgnored private var currentEpisode: Episode?
+    /// Episode ids the user explicitly chose to "Play next". Their group-boundary
+    /// stop is bypassed for that one advance, so an explicit Play next always
+    /// plays next even when "continue after group ends" is off (#487). In-memory:
+    /// the override only matters for the immediate next advance while the app is
+    /// alive; a relaunch reverts to the saved boundary setting.
+    @ObservationIgnored private var playNextOverrides: Set<PersistentIdentifier> = []
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var didFinishObserver: NSObjectProtocol?
     @ObservationIgnored private var interruptionObserver: NSObjectProtocol?
@@ -527,6 +533,41 @@ final class PlayerService {
         return stopAfterCurrentEpisode
     }
 
+    /// Records that the user explicitly chose to "Play next" `episode`, so the
+    /// group-end boundary won't stop auto-advance from reaching it (#487). Prunes
+    /// ids that have since left the queue so the set can't grow unbounded.
+    func registerPlayNext(_ episode: Episode) {
+        playNextOverrides.insert(episode.persistentModelID)
+        if let context {
+            let live = Set(QueueRepository(context: context).queue().map(\.persistentModelID))
+            playNextOverrides.formIntersection(live)
+        }
+    }
+
+    /// The next episode to auto-advance to after `finished`, honoring the
+    /// boundary settings — except an episode the user explicitly "Play next"-ed
+    /// bypasses the group-end stop (#487). Returns nil to STOP.
+    private func nextAdvanceID(after finished: Episode, in queued: [Episode]) -> PersistentIdentifier? {
+        let continueEpisode = settings?.bool(
+            SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode
+        ) ?? SettingsDefault.continueAfterEpisode
+        let groupSetting = settings?.bool(
+            SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds
+        ) ?? SettingsDefault.continueAfterGroupEnds
+        let candidate = PlaybackLogic.nextUpID(
+            queue: queued.map(\.persistentModelID), after: finished.persistentModelID
+        )
+        return PlaybackLogic.nextUpHonoringBoundaries(
+            queue: queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) },
+            after: finished.persistentModelID,
+            currentGroupKey: finished.podcast?.persistentModelID,
+            continueAfterEpisode: continueEpisode,
+            continueAfterGroupEnds: PlaybackLogic.continueAfterGroupEnds(
+                setting: groupSetting, nextCandidate: candidate, playNextOverrides: playNextOverrides
+            )
+        )
+    }
+
     /// Manual "mark as played" for the loaded episode: marks it played, removes
     /// it from the queue, and advances to the next queue item WITHOUT playing the
     /// current one to the end. Distinct from the automatic 95% mark in
@@ -538,17 +579,7 @@ final class PlayerService {
         let repo = QueueRepository(context: context)
 
         let queued = repo.queue()
-        let nextID = PlaybackLogic.nextUpHonoringBoundaries(
-            queue: queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) },
-            after: finished.persistentModelID,
-            currentGroupKey: finished.podcast?.persistentModelID,
-            continueAfterEpisode: settings?.bool(
-                SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode
-            ) ?? SettingsDefault.continueAfterEpisode,
-            continueAfterGroupEnds: settings?.bool(
-                SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds
-            ) ?? SettingsDefault.continueAfterGroupEnds
-        )
+        let nextID = nextAdvanceID(after: finished, in: queued)
         let nextEpisode = queued.first { $0.persistentModelID == nextID }
 
         repo.markPlayedAndRemove(finished)
@@ -965,17 +996,7 @@ final class PlayerService {
         }
 
         let queued = repo.queue()
-        let nextID = PlaybackLogic.nextUpHonoringBoundaries(
-            queue: queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) },
-            after: finished.persistentModelID,
-            currentGroupKey: finished.podcast?.persistentModelID,
-            continueAfterEpisode: settings?.bool(
-                SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode
-            ) ?? SettingsDefault.continueAfterEpisode,
-            continueAfterGroupEnds: settings?.bool(
-                SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds
-            ) ?? SettingsDefault.continueAfterGroupEnds
-        )
+        let nextID = nextAdvanceID(after: finished, in: queued)
         let nextEpisode = queued.first { $0.persistentModelID == nextID }
 
         // The finished episode: mark played and remove it from the queue. Reset
@@ -990,6 +1011,8 @@ final class PlayerService {
             updateNowPlayingInfo()
             return
         }
+        // We're advancing to it now, so its Play-next override is spent.
+        playNextOverrides.remove(nextEpisode.persistentModelID)
 
         // Use the pre-buffered item when it's still the right one.
         let prepared = preloadedEpisode?.persistentModelID == nextEpisode.persistentModelID
@@ -1020,17 +1043,7 @@ final class PlayerService {
             return
         }
         let queued = QueueRepository(context: context).queue()
-        let nextID = PlaybackLogic.nextUpHonoringBoundaries(
-            queue: queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) },
-            after: current.persistentModelID,
-            currentGroupKey: current.podcast?.persistentModelID,
-            continueAfterEpisode: settings?.bool(
-                SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode
-            ) ?? SettingsDefault.continueAfterEpisode,
-            continueAfterGroupEnds: settings?.bool(
-                SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds
-            ) ?? SettingsDefault.continueAfterGroupEnds
-        )
+        let nextID = nextAdvanceID(after: current, in: queued)
         guard let next = queued.first(where: { $0.persistentModelID == nextID }) else {
             clearPreload()
             return

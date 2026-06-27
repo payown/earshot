@@ -50,6 +50,7 @@ func buildEpisodeActions(
         case .addToQueueTop:
             return QuickActionItem(label: "Play next", isDestructive: false) {
                 QueueRepository(context: context).playNext(episode, after: player.nowPlayingEpisode)
+                player.registerPlayNext(episode)
                 Announcer.announce("\(episode.title) will play next")
             }
         case .addToQueueBottom:

@@ -125,6 +125,22 @@ enum PlaybackLogic {
     ///   - continueAfterEpisode: When false, stop at every episode boundary.
     ///   - continueAfterGroupEnds: When false, stop when the next item is a
     ///     different group than the current one.
+    /// The effective "continue after group ends" flag for one advance. An
+    /// episode the user explicitly chose to "Play next" outranks the passive
+    /// "stop after group ends" preference: when that episode is the immediate
+    /// next item, its group boundary is ignored so it actually plays next (#487).
+    /// When the setting is already on, or the next item wasn't Play-next-ed, the
+    /// setting passes through unchanged.
+    static func continueAfterGroupEnds<ID: Hashable>(
+        setting: Bool,
+        nextCandidate: ID?,
+        playNextOverrides: Set<ID>
+    ) -> Bool {
+        if setting { return true }
+        guard let nextCandidate else { return false }
+        return playNextOverrides.contains(nextCandidate)
+    }
+
     static func nextUpHonoringBoundaries<ID: Equatable, Key: Equatable>(
         queue: [(id: ID, groupKey: Key)],
         after current: ID?,
