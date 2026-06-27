@@ -232,10 +232,11 @@ struct NowPlayingScreen: View {
 
     // MARK: Speed control row
 
-    /// A compact single-row speed badge. For VoiceOver it's an adjustable
-    /// control: flick up/down changes the speed in place; double-tap still opens
-    /// the full picker sheet (scope, precise stepper, reset). For sighted users
-    /// tapping opens the sheet.
+    /// A compact single-row speed badge. For VoiceOver it's a pure adjustable
+    /// control: flick up/down changes the speed in place, and the full picker
+    /// sheet (scope, precise stepper, reset) is reachable via the "Open speed
+    /// options" custom action in the Actions rotor. For sighted users, tapping
+    /// the capsule opens the sheet.
     private var speedRow: some View {
         HStack {
             Spacer()
@@ -250,17 +251,30 @@ struct NowPlayingScreen: View {
                     .padding(.vertical, Spacing.xs)
                     .background(.thinMaterial, in: Capsule())
             }
-            .accessibilityLabel("Playback speed")
-            .accessibilityValue(speedAccessibilityValue)
-            .accessibilityHint("Flick up or down to change speed. Double tap to open the full speed picker.")
-            // The adjustable action makes VoiceOver treat the badge as adjustable
-            // (flick up/down) while the button's activation still opens the sheet.
-            // The badge's accessibilityValue re-read speaks the new speed, so no
-            // manual announce here.
-            .accessibilityAdjustableAction { direction in
-                adjustBadgeSpeed(direction)
+            // Replace the button's accessibility node with a PURE adjustable
+            // element (no button trait). Combining `.isButton` with the adjustable
+            // trait makes VoiceOver announce "button, adjustable" and suppresses
+            // the value re-read after a flick. A clean adjustable element (the
+            // same idiom as the scrubber) announces "Playback speed, adjustable"
+            // and re-reads the new speed on every flick. The visual capsule still
+            // opens the sheet on tap for sighted users; VoiceOver users open the
+            // full picker via the "Open speed options" custom action.
+            .accessibilityRepresentation {
+                Color.clear
+                    .accessibilityElement()
+                    .accessibilityLabel("Playback speed")
+                    .accessibilityValue(speedAccessibilityValue)
+                    // No hint: VoiceOver already appends "swipe up or down to
+                    // adjust" for an adjustable element (the scrubber omits it for
+                    // the same reason).
+                    .accessibilityAdjustableAction { direction in
+                        adjustBadgeSpeed(direction)
+                    }
+                    .accessibilityAction(named: "Open speed options") {
+                        showingSpeedPicker = true
+                    }
+                    .accessibilityFocused($speedBadgeFocused)
             }
-            .accessibilityFocused($speedBadgeFocused)
             Spacer()
         }
     }
