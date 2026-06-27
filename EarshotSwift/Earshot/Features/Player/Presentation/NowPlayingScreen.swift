@@ -232,8 +232,10 @@ struct NowPlayingScreen: View {
 
     // MARK: Speed control row
 
-    /// A compact single-row speed badge. Tapping opens the full speed picker
-    /// sheet where the user can choose a quick value or use the stepper.
+    /// A compact single-row speed badge. For VoiceOver it's an adjustable
+    /// control: flick up/down changes the speed in place; double-tap still opens
+    /// the full picker sheet (scope, precise stepper, reset). For sighted users
+    /// tapping opens the sheet.
     private var speedRow: some View {
         HStack {
             Spacer()
@@ -250,9 +252,44 @@ struct NowPlayingScreen: View {
             }
             .accessibilityLabel("Playback speed")
             .accessibilityValue(speedAccessibilityValue)
-            .accessibilityHint("Opens speed picker")
+            .accessibilityHint("Flick up or down to change speed. Double tap to open the full speed picker.")
+            // The adjustable action makes VoiceOver treat the badge as adjustable
+            // (flick up/down) while the button's activation still opens the sheet.
+            // The badge's accessibilityValue re-read speaks the new speed, so no
+            // manual announce here.
+            .accessibilityAdjustableAction { direction in
+                adjustBadgeSpeed(direction)
+            }
             .accessibilityFocused($speedBadgeFocused)
             Spacer()
+        }
+    }
+
+    /// Quick in-player speed adjust from the badge: VoiceOver flick up/down steps
+    /// through the curated menu speeds (``PlaybackLogic/speedMenuValues``),
+    /// applied at the active scope — the per-podcast override when one is set,
+    /// otherwise the global speed. Mirrors ``AdjustableOptionPicker`` stepping:
+    /// clamped at both ends, no write (and so no value change) at a boundary.
+    private func adjustBadgeSpeed(_ direction: AccessibilityAdjustmentDirection) {
+        let speeds = PlaybackLogic.speedMenuValues
+        let current = PlaybackLogic.nearestMenuSpeed(player.effectiveRate)
+        let currentIndex = speeds.firstIndex(of: current) ?? 0
+        let delta: Int
+        switch direction {
+        case .increment: delta = 1
+        case .decrement: delta = -1
+        @unknown default: return
+        }
+        let next = OptionStepLogic.steppedIndex(count: speeds.count, current: currentIndex, delta: delta)
+        guard next != currentIndex else { return }
+        let speed = speeds[next]
+        // announce: false — the badge is adjustable, so VoiceOver re-reads its
+        // accessibilityValue (the new speed) automatically; an announce here
+        // would speak it twice.
+        if player.hasPodcastSpeedOverride {
+            player.setPodcastSpeedOverride(speed, announce: false)
+        } else {
+            player.setGlobalSpeed(speed, announce: false)
         }
     }
 
