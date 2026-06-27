@@ -23,8 +23,8 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
     var label: String {
         switch self {
         case .playNow: return "Play now"
-        case .addToQueueTop: return "Add to queue (top)"
-        case .addToQueueBottom: return "Add to queue (bottom)"
+        case .addToQueueTop: return "Play next"
+        case .addToQueueBottom: return "Add to end of queue"
         case .download: return "Download"
         case .markPlayed: return "Mark as played"
         case .viewBookmarks: return "Bookmarks"

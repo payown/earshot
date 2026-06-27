@@ -62,18 +62,11 @@ final class QueueRepository {
         compact(items)
     }
 
-    /// Inserts `episode` at the front when absent; leaves an already-queued
-    /// episode where it sits (backs "Play now").
-    func addToFront(_ episode: Episode) {
-        guard episode.queueItem == nil else { return }
-        var items = orderedItems()
-        items.insert(enqueue(episode), at: 0)
-        compact(items)
-    }
-
-    /// Inserts after the currently-playing item (slot 1). Moves the episode
-    /// there if it's already queued.
-    func addAfterCurrent(_ episode: Episode) {
+    /// Inserts `episode` so it plays immediately after `current`. If `current`
+    /// is in the queue, inserts right after it; otherwise inserts at the front,
+    /// so auto-advance still picks it next. Moves an already-queued episode.
+    /// Backs "Play Next".
+    func playNext(_ episode: Episode, after current: Episode?) {
         var items = orderedItems()
         let item: QueueItem
         if let existing = episode.queueItem {
@@ -82,7 +75,14 @@ final class QueueRepository {
         } else {
             item = enqueue(episode)
         }
-        items.insert(item, at: min(1, items.count))
+        let insertIndex: Int
+        if let currentID = current?.queueItem?.persistentModelID,
+           let idx = items.firstIndex(where: { $0.persistentModelID == currentID }) {
+            insertIndex = idx + 1
+        } else {
+            insertIndex = 0
+        }
+        items.insert(item, at: min(insertIndex, items.count))
         compact(items)
     }
 

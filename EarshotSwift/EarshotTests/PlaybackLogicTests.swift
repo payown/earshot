@@ -379,4 +379,34 @@ final class PlaybackLogicTests: XCTestCase {
             continueAfterGroupEnds: true
         ), 2)
     }
+
+    // MARK: continueAfterGroupEnds override (#487 — explicit Play next)
+
+    func testGroupEndSettingOnPassesThroughRegardlessOfOverrides() {
+        // Setting already on: result is on, overrides irrelevant.
+        XCTAssertTrue(PlaybackLogic.continueAfterGroupEnds(
+            setting: true, nextCandidate: 3, playNextOverrides: []
+        ))
+    }
+
+    func testGroupEndSettingOffStaysOffWhenNextNotPlayNexted() {
+        // Setting off and the next item wasn't Play-next-ed: stays off (stop).
+        XCTAssertFalse(PlaybackLogic.continueAfterGroupEnds(
+            setting: false, nextCandidate: 3, playNextOverrides: [9]
+        ))
+    }
+
+    func testGroupEndSettingOffBypassedWhenNextWasPlayNexted() {
+        // Setting off but the immediate next item was explicitly Play-next-ed:
+        // its explicit intent wins, so the group boundary is bypassed.
+        XCTAssertTrue(PlaybackLogic.continueAfterGroupEnds(
+            setting: false, nextCandidate: 3, playNextOverrides: [3]
+        ))
+    }
+
+    func testGroupEndSettingOffStaysOffWhenNoNextCandidate() {
+        XCTAssertFalse(PlaybackLogic.continueAfterGroupEnds(
+            setting: false, nextCandidate: Int?.none, playNextOverrides: [3]
+        ))
+    }
 }

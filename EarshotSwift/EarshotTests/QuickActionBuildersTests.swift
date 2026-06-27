@@ -28,7 +28,7 @@ final class QuickActionBuildersTests: XCTestCase {
             onShare: {},
             onBookmarks: {}
         )
-        XCTAssertEqual(items.map(\.label), ["Share", "Play now", "Add to queue (top)"])
+        XCTAssertEqual(items.map(\.label), ["Share", "Play now", "Play next"])
     }
 
     func testEpisodeMarkPlayedLabelReflectsState() {

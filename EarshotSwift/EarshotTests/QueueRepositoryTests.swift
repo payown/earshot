@@ -66,35 +66,7 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(positions, [0, 1, 2])
     }
 
-    func testAddToFrontInsertsAtFrontWhenAbsent() {
-        let ctx = TestStore.freshContext()
-        let p = makePodcast(ctx, "A")
-        let a = makeEpisode(ctx, "a", podcast: p)
-        let b = makeEpisode(ctx, "b", podcast: p)
-        let repo = QueueRepository(context: ctx)
-
-        repo.add(a)
-        repo.addToFront(b)
-
-        XCTAssertEqual(titles(repo), ["Ep b", "Ep a"])
-        XCTAssertEqual(b.status, .inQueue)
-    }
-
-    func testAddToFrontLeavesAlreadyQueuedEpisodeInPlace() {
-        let ctx = TestStore.freshContext()
-        let p = makePodcast(ctx, "A")
-        let a = makeEpisode(ctx, "a", podcast: p)
-        let b = makeEpisode(ctx, "b", podcast: p)
-        let repo = QueueRepository(context: ctx)
-        repo.add(a)
-        repo.add(b)
-
-        repo.addToFront(b) // already queued -> stays where it is
-
-        XCTAssertEqual(titles(repo), ["Ep a", "Ep b"])
-    }
-
-    func testAddAfterCurrentInsertsAtSecondPosition() {
+    func testPlayNextInsertsAfterCurrentWhenCurrentQueued() {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx, "A")
         let eps = ["a", "b", "c"].map { makeEpisode(ctx, $0, podcast: p) }
@@ -102,9 +74,38 @@ final class QueueRepositoryTests: XCTestCase {
         eps.forEach(repo.add)
         let d = makeEpisode(ctx, "d", podcast: p)
 
-        repo.addAfterCurrent(d)
+        repo.playNext(d, after: eps[0]) // current = a, queued at front
 
         XCTAssertEqual(titles(repo), ["Ep a", "Ep d", "Ep b", "Ep c"])
+        XCTAssertEqual(d.status, .inQueue)
+    }
+
+    func testPlayNextInsertsAtFrontWhenCurrentNotQueued() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let a = makeEpisode(ctx, "a", podcast: p)
+        let b = makeEpisode(ctx, "b", podcast: p)
+        let repo = QueueRepository(context: ctx)
+        repo.add(a)
+        repo.add(b)
+        let c = makeEpisode(ctx, "c", podcast: p)
+
+        repo.playNext(c, after: nil) // nothing playing / current not in queue
+
+        XCTAssertEqual(titles(repo), ["Ep c", "Ep a", "Ep b"])
+    }
+
+    func testPlayNextMovesAlreadyQueuedEpisodeWithoutDuplicating() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let eps = ["a", "b", "c"].map { makeEpisode(ctx, $0, podcast: p) }
+        let repo = QueueRepository(context: ctx)
+        eps.forEach(repo.add)
+
+        repo.playNext(eps[2], after: eps[0]) // move already-queued c to after a
+
+        XCTAssertEqual(titles(repo), ["Ep a", "Ep c", "Ep b"])
+        XCTAssertEqual(repo.queue().count, 3, "must move, not duplicate")
     }
 
     func testCancelFromQueueRemovesAndRevertsToNewEpisode() {
