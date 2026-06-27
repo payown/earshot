@@ -82,11 +82,13 @@ struct BookmarksListView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            // Combine the label area into one VoiceOver element carrying the jump
-            // activation, plus delete and share as custom rotor actions. The
-            // visible share button below is hidden from VoiceOver to avoid a
-            // duplicate stop — rotor users reach share through the custom action.
-            .accessibilityElement(children: .combine)
+            // The jump Button is already a single VoiceOver element with the
+            // button trait, carrying the explicit label below plus delete/share as
+            // custom rotor actions. No `.accessibilityElement(children: .combine)`
+            // is needed — combining re-walked and merged the label subtree only for
+            // the explicit `.accessibilityLabel` to discard it. The visible share
+            // button below stays hidden from VoiceOver to avoid a duplicate stop;
+            // rotor users reach share through the custom action. (#479)
             .accessibilityLabel(rowLabel(for: bookmark))
             .accessibilityHint("Plays from this spot")
             .accessibilityActions {

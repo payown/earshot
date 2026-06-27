@@ -37,7 +37,13 @@ struct EpisodeRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
+        // A Button is already a single accessibility element with the button
+        // trait, so no `.accessibilityElement(children: .combine)` is needed here.
+        // Combining made VoiceOver re-walk and merge the whole label subtree on
+        // every row realization, only for the explicit `.accessibilityLabel`
+        // below to discard the merged result — wasted work on every focus move.
+        // Dropping it keeps the identical label/hint/actions while removing that
+        // per-row cost. (#479)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
         .accessibilityActions {

@@ -232,7 +232,11 @@ private struct QueueRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
+        // A Button is already a single accessibility element with the button
+        // trait, so combining its children just made VoiceOver re-walk and merge
+        // the label subtree only for the explicit `.accessibilityLabel` below to
+        // discard it — wasted work on every focus move. Dropping it keeps the
+        // identical label/hint/actions/focus while removing that per-row cost. (#479)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
         .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)

@@ -252,7 +252,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saved, which competed with VoiceOver on the main thread. The inbox is now read
   once per render from a maintained query, so flicking through the Inbox stays
   responsive during playback. The inbox contents, order, count, and tab badge are
-  unchanged.
+  unchanged. (#478)
+- Lists feel quicker under VoiceOver. Episode, queue, and bookmark rows were doing
+  redundant accessibility work on every focus move; that's removed, so flicking
+  through the Inbox, Library, Queue, and bookmark lists is more responsive. What
+  VoiceOver reads for each row, and its actions rotor, are unchanged. (#479)
 
 ### Phase 8 complete — Alpha build prep
 
