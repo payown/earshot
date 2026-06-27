@@ -217,6 +217,15 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   ends" off (Chapter 25), an explicit Play next now overrides that group-edge
   stop for that one advance, so the episode she points at actually plays next
   even across shows; normal auto-advance at group edges still stops (Chapter 29)
+- Every value adjuster (playback speed, sleep timer, skip intervals, per-podcast
+  limits, and the inbox/download/history settings) is now a VoiceOver Adjustable
+  control: flick up to increase, flick down to decrease, value spoken instantly.
+  The in-player speed badge changes speed in place by flicking (the full sheet is
+  the "Open speed options" rotor action); the sleep timer flicks from Off up
+  through the presets to End of episode. Reinforces Kashe operating the app "by
+  feel," one-handed from a pocket (Chapter 27), and her night sleep-timer habit
+  (Chapters 19/20). She fidgets with speed: ~1.5 for dense shows, ~1.1 for fast
+  talkers (Chapter 30)
 
 ## What you can generate
 
@@ -949,6 +958,28 @@ She told a client's daughter about a show, Play-nexted her own note-to-self, and
 With VoiceOver, open the actions rotor on any episode. The two queue actions now read "Play next" and "Add to end of queue" instead of top and bottom. Play next puts the episode right after what's playing. Add to end of queue puts it last.
 
 If you group your queue and have turned off Continue after group ends in Settings, Auto-advance: start a show, then Play next an episode from a different show. When the current one finishes, your Play-nexted episode should play, even across the group line. Normal auto-advance at a group edge should still stop the way you set it.
+
+### Chapter 30 — Build 128
+
+*Kashe stops opening menus to change a number. She flicks.*
+
+Kashe stopped opening the speed menu. She just flicks now.
+
+Speed is a thing she fidgets with. A dense interview show she takes at 1.5. A guy who already talks fast, she pulls back to 1.1 so she catches the asides. Changing it used to mean: find the speed, double tap, wait for the sheet, find the number in a grid, tap it, close the sheet. Five steps to nudge one notch.
+
+Now she lands on the speed in the player and flicks. Up a touch, down a touch, and it says the new speed back to her as she goes. One and a half. One and a quarter. One. No sheet, no grid, no hunting.
+
+The whole app works that way now. Anything that's a number you pick, you flick to change. Her sleep timer, the one she leans on at night when she drifts off mid-episode, is the same. Flick up for more time, down for less, all the way down to off. She doesn't feel around for a row of buttons in the dark anymore. She finds the timer and rolls it to where she wants.
+
+It's the difference between operating a thing and just adjusting it. Like the volume knob in an old car. You don't look at a knob. Your hand knows.
+
+She set a fast talker back to 1.1 on the drive out to her Tuesday client, heard "one point one times," and didn't think about it again.
+
+What to test:
+
+With VoiceOver, open the player and find Playback speed. Flick up to speed up, flick down to slow down. It should change right away and speak the new speed each time. To reach the full options (per-podcast, precise steps, reset), use the Actions rotor and choose "Open speed options."
+
+Open the Player controls (the sliders button, top right) and find the Sleep timer. Flick up for a longer timer, flick down for shorter, and down again to Off. The same flick-to-change now works on the speed, skip, and limit settings throughout Settings and per-podcast settings too.
 
 ---
 
