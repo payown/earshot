@@ -378,4 +378,149 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(front?.title, "Ep b1")
         XCTAssertEqual(titles(repo), ["Ep b1", "Ep a1"])
     }
+
+    // MARK: binge oldest first (#488)
+
+    /// Builds a podcast with three dated episodes (newest-first as the view
+    /// supplies them) and a separate already-queued inbox episode from another
+    /// podcast, so binge non-destructiveness can be asserted.
+    private func makeBingeFixture(
+        _ ctx: ModelContext
+    ) -> (repo: QueueRepository, pa: Podcast, newestFirst: [Episode], inbox: Episode) {
+        let pa = makePodcast(ctx, "A")
+        let pb = makePodcast(ctx, "B")
+        func ep(_ guid: String, _ podcast: Podcast, day: Double) -> Episode {
+            let e = makeEpisode(ctx, guid, podcast: podcast)
+            e.pubDate = Date(timeIntervalSince1970: day * 86_400)
+            return e
+        }
+        let a1 = ep("a1", pa, day: 1) // oldest
+        let a2 = ep("a2", pa, day: 2)
+        let a3 = ep("a3", pa, day: 3) // newest
+        let inbox = ep("b1", pb, day: 9)
+        let repo = QueueRepository(context: ctx)
+        repo.add(inbox) // a pre-existing, unrelated queue item
+        // The view hands episodes newest-first (its display sort order).
+        return (repo, pa, [a3, a2, a1], inbox)
+    }
+
+    func testBingeOldestFirstEnqueuesOrdersAndFrontInsertsNonDestructively() {
+        let ctx = TestStore.freshContext()
+        let f = makeBingeFixture(ctx)
+
+        let first = f.repo.bingeOldestFirst(f.pa, episodes: f.newestFirst)
+
+        // Oldest first at the front, then the pre-existing inbox item untouched.
+        XCTAssertEqual(titles(f.repo), ["Ep a1", "Ep a2", "Ep a3", "Ep b1"])
+        XCTAssertEqual(first?.title, "Ep a1", "returns the oldest episode")
+        XCTAssertEqual(f.repo.queue().compactMap { $0.queueItem?.position }, [0, 1, 2, 3])
+        XCTAssertEqual(f.newestFirst.map(\.status), [.inQueue, .inQueue, .inQueue])
+    }
+
+    func testBingeOldestFirstLeavesOtherQueueItemsIntact() {
+        let ctx = TestStore.freshContext()
+        let f = makeBingeFixture(ctx)
+        // Add a second unrelated podcast group behind the inbox item.
+        let pc = makePodcast(ctx, "C")
+        let c1 = makeEpisode(ctx, "c1", podcast: pc)
+        let c2 = makeEpisode(ctx, "c2", podcast: pc)
+        f.repo.add(c1)
+        f.repo.add(c2)
+        // Queue before binge: [b1, c1, c2]
+
+        f.repo.bingeOldestFirst(f.pa, episodes: f.newestFirst)
+
+        // Binge group is at the front; the prior [b1, c1, c2] order is preserved.
+        XCTAssertEqual(titles(f.repo),
+                       ["Ep a1", "Ep a2", "Ep a3", "Ep b1", "Ep c1", "Ep c2"])
+    }
+
+    func testBingeOldestFirstMovesAlreadyQueuedEpisodesWithoutDuplicating() {
+        let ctx = TestStore.freshContext()
+        let f = makeBingeFixture(ctx)
+        // Pre-queue the middle episode so binge must move, not duplicate, it.
+        let a2 = f.newestFirst[1]
+        f.repo.add(a2) // queue: [b1, a2]
+
+        f.repo.bingeOldestFirst(f.pa, episodes: f.newestFirst)
+
+        XCTAssertEqual(titles(f.repo), ["Ep a1", "Ep a2", "Ep a3", "Ep b1"])
+        XCTAssertEqual(f.repo.queue().count, 4, "must move the queued item, not duplicate it")
+    }
+
+    func testBingeUnheardFilterExcludesPlayedAllFilterIncludesEverything() {
+        let ctx = TestStore.freshContext()
+        let f = makeBingeFixture(ctx)
+        let a2 = f.newestFirst[1]
+        a2.isPlayed = true
+
+        // Unheard: the view passes only unplayed episodes (#489 filter applied
+        // upstream), so binge skips the played one.
+        let unheard = EpisodeListFilter.unheard.apply(to: f.newestFirst)
+        f.repo.bingeOldestFirst(f.pa, episodes: unheard)
+        XCTAssertEqual(titles(f.repo), ["Ep a1", "Ep a3", "Ep b1"],
+                       "Unheard binge excludes the played episode")
+
+        // All: every episode is in the set.
+        let all = EpisodeListFilter.all.apply(to: f.newestFirst)
+        f.repo.bingeOldestFirst(f.pa, episodes: all)
+        XCTAssertEqual(titles(f.repo), ["Ep a1", "Ep a2", "Ep a3", "Ep b1"],
+                       "All binge includes the played episode too")
+    }
+
+    func testBingeOnEmptySetReturnsNilAndMakesNoChange() {
+        let ctx = TestStore.freshContext()
+        let f = makeBingeFixture(ctx)
+        let before = titles(f.repo)
+
+        XCTAssertNil(f.repo.bingeOldestFirst(f.pa, episodes: []))
+        XCTAssertEqual(titles(f.repo), before)
+    }
+
+    // MARK: 125/127 regression — binge must not disturb playNext / boundaries
+
+    /// #486: after a binge seeds the front group, "Play next" still inserts the
+    /// episode right after the now-playing episode (not blindly at the front).
+    func testPlayNextStillInsertsAfterCurrentAfterBinge() {
+        let ctx = TestStore.freshContext()
+        let f = makeBingeFixture(ctx)
+        f.repo.bingeOldestFirst(f.pa, episodes: f.newestFirst)
+        // Queue: [a1, a2, a3, b1]; pretend a1 is now playing.
+        let a1 = f.newestFirst[2]
+        let extra = makeEpisode(ctx, "x", podcast: f.pa)
+
+        f.repo.playNext(extra, after: a1)
+
+        XCTAssertEqual(titles(f.repo), ["Ep a1", "Ep x", "Ep a2", "Ep a3", "Ep b1"],
+                       "Play next inserts after the current episode, not at the front")
+    }
+
+    /// #446 / #487: the boundary helpers the binge run relies on still behave —
+    /// group-end off stops at a different-group next, but a Play-next override on
+    /// that next item bypasses the stop for that one advance. Pure-logic guard
+    /// that the binge feature didn't change these semantics.
+    func testBoundaryAndOverrideSemanticsUnchanged() {
+        // #446: continue-after-episode off always stops.
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 1, groupKey: "A"), (id: 2, groupKey: "A")],
+            after: 1, currentGroupKey: "A",
+            continueAfterEpisode: false, continueAfterGroupEnds: true
+        ))
+        // #446: group-end off stops when the next item is a different group.
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 1, groupKey: "A"), (id: 2, groupKey: "B")],
+            after: 1, currentGroupKey: "A",
+            continueAfterEpisode: true, continueAfterGroupEnds: false
+        ))
+        // #446/#488: within the same group (a binge run), advance continues.
+        XCTAssertEqual(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 1, groupKey: "A"), (id: 2, groupKey: "A")],
+            after: 1, currentGroupKey: "A",
+            continueAfterEpisode: true, continueAfterGroupEnds: false
+        ), 2)
+        // #487: a Play-next override on the next candidate bypasses group-end off.
+        XCTAssertTrue(PlaybackLogic.continueAfterGroupEnds(
+            setting: false, nextCandidate: 2, playNextOverrides: [2]
+        ))
+    }
 }

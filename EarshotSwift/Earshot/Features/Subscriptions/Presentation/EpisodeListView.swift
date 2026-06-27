@@ -59,6 +59,11 @@ struct EpisodeListView: View {
                 .pickerStyle(.segmented)
                 .accessibilityLabel("Filter episodes")
             }
+            if !filteredSortedEpisodes.isEmpty {
+                Section {
+                    bingeButton
+                }
+            }
             if sortedEpisodes.isEmpty && podcast.refreshedAt == nil {
                 // Freshly-migrated show whose episodes haven't been fetched yet.
                 // Distinguish "still loading" from a genuinely empty feed so a
@@ -125,6 +130,29 @@ struct EpisodeListView: View {
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
         }
+    }
+
+    /// Podcast-level "Play oldest first" binge entry point (#488). Seeds the
+    /// queue with the active-filter set and starts the oldest episode, so
+    /// auto-advance continues through this podcast oldest→newest instead of
+    /// jumping to an unrelated inbox episode.
+    private var bingeButton: some View {
+        Button(action: playOldestFirst) {
+            Label("Play oldest first", systemImage: "play.circle")
+        }
+        .accessibilityLabel("Play oldest first")
+        .accessibilityHint("Plays this podcast's episodes from oldest to newest")
+    }
+
+    /// Starts the binge run from the currently visible (filtered) episodes.
+    private func playOldestFirst() {
+        let episodes = filteredSortedEpisodes
+        guard !episodes.isEmpty else { return }
+        let repo = QueueRepository(context: context)
+        guard let first = repo.bingeOldestFirst(podcast, episodes: episodes) else { return }
+        player.play(first)
+        let noun = episodes.count == 1 ? "episode" : "episodes"
+        Announcer.announce("Playing \(podcast.title) oldest first, \(episodes.count) \(noun)")
     }
 
     private var header: some View {

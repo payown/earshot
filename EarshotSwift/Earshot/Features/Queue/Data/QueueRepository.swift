@@ -240,6 +240,65 @@ final class QueueRepository {
         return orderedSubset.first.flatMap { byID[$0]?.episode }
     }
 
+    // MARK: Binge (#488)
+
+    /// Establishes an in-podcast play run from the Library: seeds the queue with
+    /// `episodes` (the podcast detail view's active-filter set — Unheard or All),
+    /// orders them oldest-first by publish date, enqueues any not already queued,
+    /// and brings that group to the FRONT of the queue as a contiguous block so
+    /// auto-advance walks the podcast oldest→newest. Returns the oldest episode for
+    /// the caller to start playing.
+    ///
+    /// Unlike ``playOldestFirst(_:)`` (which only reorders what is *already*
+    /// queued), this seeds from the passed-in list, which is the whole point of a
+    /// Library binge: the podcast usually isn't in the queue yet. It is
+    /// non-destructive — every other queue item keeps its relative order via
+    /// ``QueueLogic/bringToFront(_:_:)`` — and never clears the queue. With
+    /// "continue after group ends" off, advance stops cleanly at the podcast's last
+    /// episode (#446); this method does not touch that boundary logic.
+    ///
+    /// Empty input (or none of the episodes belong to `podcast`) returns `nil` and
+    /// makes no change.
+    @discardableResult
+    func bingeOldestFirst(_ podcast: Podcast, episodes: [Episode]) -> Episode? {
+        // Defensive: only this podcast's episodes form the run.
+        let scoped = episodes.filter {
+            $0.podcast?.persistentModelID == podcast.persistentModelID
+        }
+        guard !scoped.isEmpty else { return nil }
+
+        // Oldest-first by publish date (stable; undated episodes trail).
+        let orderedIDs = QueueLogic.sortedByDate(
+            scoped.map { (id: $0.persistentModelID, date: $0.pubDate) },
+            newestFirst: false
+        )
+        let byEpisodeID = Dictionary(uniqueKeysWithValues: scoped.map { ($0.persistentModelID, $0) })
+        let orderedEpisodes = orderedIDs.compactMap { byEpisodeID[$0] }
+
+        // Seed the queue: append any binge episode not already queued, tracking
+        // its queue item directly (the inverse relationship may not be readable
+        // again within the same mutation).
+        var items = orderedItems()
+        var itemByEpisodeID: [PersistentIdentifier: QueueItem] = [:]
+        for item in items {
+            if let epID = item.episode?.persistentModelID { itemByEpisodeID[epID] = item }
+        }
+        for episode in orderedEpisodes where itemByEpisodeID[episode.persistentModelID] == nil {
+            let item = enqueue(episode)
+            items.append(item)
+            itemByEpisodeID[episode.persistentModelID] = item
+        }
+
+        // Bring the run to the front, oldest-first, preserving every other item's
+        // relative order. Then persist dense positions.
+        let frontSubset = orderedEpisodes.compactMap { itemByEpisodeID[$0.persistentModelID]?.persistentModelID }
+        let newOrder = QueueLogic.bringToFront(items.map(\.persistentModelID), frontSubset)
+        let byItemID = Dictionary(uniqueKeysWithValues: items.map { ($0.persistentModelID, $0) })
+        compact(newOrder.compactMap { byItemID[$0] })
+
+        return orderedEpisodes.first
+    }
+
     // MARK: Internals
 
     /// Queue items in position order, with orphans (no episode — only possible
