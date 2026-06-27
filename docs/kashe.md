@@ -22,9 +22,14 @@ here. To prevent drift:
    revealed about Kashe, so future chapters stay consistent.
 3. **The chapter number and build number must match what actually deployed.**
    If they diverged (pubspec vs App Store Connect), note the real numbers.
-4. **Do not leave a chapter only in a memory note or only in App Store Connect.**
+4. **Every chapter is 2500 characters or fewer.** That covers the whole chapter
+   (the "What to test" section plus the story). The full chapter is the text that
+   ships to TestFlight as the `--notes` payload, so there is no separate condensed
+   version. Verify before shipping with `wc -m` on the chapter text; if it is over
+   2500, tighten and re-count before deploying.
+5. **Do not leave a chapter only in a memory note or only in App Store Connect.**
    Those are not the record. This file is.
-5. The `earshot-kashe` agent and the TestFlight story protocol both treat this
+6. The `earshot-kashe` agent and the TestFlight story protocol both treat this
    write-back as a required, non-skippable step.
 
 ---

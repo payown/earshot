@@ -246,6 +246,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   VoiceOver value, so you hear "not imported", "imported on" a date, or "import
   failed" right after the label without opening anything. When the import sheet
   finishes, VoiceOver announces the outcome out loud. (#429)
+- Inbox: the app no longer feels sluggish under VoiceOver while audio is playing.
+  The Inbox tab and its list were re-fetching the whole inbox several times on
+  every render, and again every few seconds as the playing episode's position was
+  saved, which competed with VoiceOver on the main thread. The inbox is now read
+  once per render from a maintained query, so flicking through the Inbox stays
+  responsive during playback. The inbox contents, order, count, and tab badge are
+  unchanged.
 
 ### Phase 8 complete — Alpha build prep
 
