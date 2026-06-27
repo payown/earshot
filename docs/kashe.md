@@ -202,6 +202,14 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   than fight it (Chapter 27)
 - An OPML subscription file now opens directly from Files into Earshot instead
   of stalling (Chapter 27)
+- A VoiceOver-responsiveness tune-up with no new buttons: the inbox stopped
+  re-fetching itself repeatedly during playback, the episode/queue/bookmark lists
+  shed redundant per-focus accessibility work, the player scrubber stopped
+  re-announcing its name every second (name said once, live time now in its
+  value as elapsed of total), and podcast artwork now decodes off the main thread
+  at display size so fast scrolling no longer hitches. Kashe always has audio
+  playing, so she feels all of it at once; the through-line is the app no longer
+  fighting VoiceOver while a show plays (Chapter 28)
 
 ## What you can generate
 
@@ -888,6 +896,30 @@ Put VoiceOver on a show's heading and open the rotor. Along with Play Group, Sor
 With wired or wireless earbuds (or the lock screen controls), start an episode and use skip forward and skip back. They should jump forward and back inside the same episode, not switch to a different episode.
 
 If you have an OPML subscription file in Files, open it and choose Earshot. It should import your shows instead of stalling.
+
+### Chapter 28 — Build 126
+
+*The app gets quieter and quicker under VoiceOver while something's playing. Kashe runs her whole day with audio on, so this is the one she feels everywhere at once.*
+
+Here's the thing about how Kashe actually uses Earshot. There's always something playing. She's not stopping the show to check the inbox or shuffle the queue. The audio runs while she flicks around with VoiceOver, one-handed, between two clients.
+
+And for a while that's exactly where the app dragged. Show going, and every flick came a half-beat late. The inbox especially. She'd open it mid-episode and VoiceOver would stutter, like it was waiting in line behind the playback. She figured that was the cost of doing two things at once, and learned to let it catch up.
+
+This build keeps up. The inbox stopped quietly redoing the same work over and over while a show played, so flicking through it during playback is quick now, not syrupy. The episode, queue, and bookmark lists got the same once-over, a little less busywork on every move, so each flick lands when she expects it.
+
+Then the scrubber, the seek bar in the player. It used to re-announce its own name every second while the time ticked, talking over itself. Now it says its name once and just updates the time in the value. She can sit on it and hear where she is without it interrupting itself.
+
+Last one, while scrolling. Her Library is huge, we've been over that. Cover art used to get unpacked at full size right as she scrolled past, on the same thread doing the talking, so a fast flick down the list would hitch. Now the art comes in already sized for the row, off to the side, and the scroll stays smooth under her finger.
+
+None of it is a new button. It's the app getting out of its own way while it works. For someone who never turns the audio off, that's most of the day.
+
+**What to test:**
+
+With VoiceOver on, start an episode playing. While it plays, flick through your Inbox. It should stay quick, not lag behind the audio. Same for the Queue, your episode lists, and bookmarks.
+
+Open the full player and put focus on the seek bar. It should say "Playback position" once, then update the time in its value (like "12 minutes of 42 minutes"). It should not re-read its name every second. Swipe up or down still jumps 30 seconds.
+
+Open your Library and scroll fast with VoiceOver while audio plays. The list should feel smooth as artwork comes in, no stalls. Lock screen and Control Center artwork should still look right.
 
 ---
 
