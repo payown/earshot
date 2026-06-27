@@ -83,6 +83,20 @@ enum PlaybackLogic {
     /// the most common values without requiring the full stepper.
     static let speedShortcuts: [Double] = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
 
+    /// Curated, ascending speeds for the menu / VoiceOver-adjustable speed
+    /// pickers (Settings + per-podcast). Short enough to flick through quickly;
+    /// the in-player precise `Stepper` still covers the full
+    /// ``minSpeed``…``maxSpeed`` range at ``speedStep`` for anyone who needs an
+    /// exact or higher value. Matches the per-podcast override list.
+    static let speedMenuValues: [Double] = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
+
+    /// The curated menu speed closest to `speed`, for displaying an off-grid
+    /// stored value (e.g. one set via the precise in-player stepper) in a menu
+    /// picker without silently rewriting it. Ties resolve to the lower value.
+    static func nearestMenuSpeed(_ speed: Double) -> Double {
+        speedMenuValues.min(by: { abs($0 - speed) < abs($1 - speed) }) ?? 1.0
+    }
+
     // MARK: Completion / resume logic
 
     /// The result of evaluating a playback position against its duration.

@@ -21,10 +21,6 @@ struct SettingsScreen: View {
     @State private var importStatus: MigrationStatus = .notAttempted
     @State private var importLastAttempt: Date?
 
-    // Full 0.5x-5.0x range in 0.1x increments (PRD 5.5). Generated at compile
-    // time so the Picker covers the complete allowed range.
-    private static let speeds: [Double] = stride(from: 0.5, through: 5.0, by: 0.1)
-        .map { (($0 * 10).rounded() / 10) }
     private static let skipIntervals = [10, 15, 30, 45, 60]
     private static let downloadCounts = [0, 1, 3, 5, 10]
     private static let retentionOptions = [30, 60, 90, 180, 365]
@@ -40,26 +36,65 @@ struct SettingsScreen: View {
         ("All", SettingsDefault.inboxDefaultCountAll),
     ]
 
+    // MARK: Adjustable-picker option builders
+    // Ordered ascending so a VoiceOver flick up means "more" (faster, longer,
+    // more episodes). The spoken value reuses the existing per-option labels.
+
+    private var speedAdjustableOptions: [AdjustableOptionPicker<Double>.Option] {
+        PlaybackLogic.speedMenuValues.map {
+            .init(value: $0, title: String(format: "%g×", $0), spoken: PlaybackLogic.spokenRate($0))
+        }
+    }
+
+    private var skipAdjustableOptions: [AdjustableOptionPicker<Int>.Option] {
+        Self.skipIntervals.map { .init(value: $0, title: "\($0)s", spoken: "\($0) seconds") }
+    }
+
+    private var inboxSeedAdjustableOptions: [AdjustableOptionPicker<Int>.Option] {
+        Self.inboxSeedOptions.map {
+            .init(value: $0.value, title: $0.label, spoken: inboxSeedAccessibilityLabel(for: $0))
+        }
+    }
+
+    private var autoDownloadAdjustableOptions: [AdjustableOptionPicker<Int>.Option] {
+        Self.downloadCounts.map {
+            .init(value: $0, title: $0 == 0 ? "Off" : "\($0)", spoken: $0 == 0 ? "Off" : "\($0) episodes")
+        }
+    }
+
+    private var historyAdjustableOptions: [AdjustableOptionPicker<Int>.Option] {
+        Self.retentionOptions.map { .init(value: $0, title: "\($0) days", spoken: "\($0) days") }
+    }
+
     var body: some View {
         @Bindable var settings = settings
         Form {
             Section("Playback") {
-                Picker("Playback speed", selection: $settings.globalSpeed) {
-                    ForEach(Self.speeds, id: \.self) { speed in
-                        Text("\(speed, specifier: "%g")×").tag(speed)
-                            .accessibilityLabel("\(speed, specifier: "%g") times speed")
-                    }
-                }
-                Picker("Skip forward", selection: $settings.skipForwardSeconds) {
-                    ForEach(Self.skipIntervals, id: \.self) { secs in
-                        Text("\(secs)s").tag(secs).accessibilityLabel("\(secs) seconds")
-                    }
-                }
-                Picker("Skip back", selection: $settings.skipBackSeconds) {
-                    ForEach(Self.skipIntervals, id: \.self) { secs in
-                        Text("\(secs)s").tag(secs).accessibilityLabel("\(secs) seconds")
-                    }
-                }
+                // VoiceOver: flick up/down to change. The visual menu still opens
+                // on tap for sighted/low-vision users. Off-grid stored speeds
+                // (set via the in-player precise stepper) display as the nearest
+                // curated value and only snap to grid when actually adjusted.
+                AdjustableOptionPicker(
+                    "Playback speed",
+                    options: speedAdjustableOptions,
+                    selection: Binding(
+                        get: { PlaybackLogic.nearestMenuSpeed(settings.globalSpeed) },
+                        set: { settings.globalSpeed = $0 }
+                    ),
+                    hint: "Flick up for faster, down for slower"
+                )
+                AdjustableOptionPicker(
+                    "Skip forward",
+                    options: skipAdjustableOptions,
+                    selection: $settings.skipForwardSeconds,
+                    hint: "Flick up for a longer skip, down for shorter"
+                )
+                AdjustableOptionPicker(
+                    "Skip back",
+                    options: skipAdjustableOptions,
+                    selection: $settings.skipBackSeconds,
+                    hint: "Flick up for a longer skip, down for shorter"
+                )
                 Toggle("Voice enhance", isOn: $settings.voiceEnhanceEnabled)
             }
 
@@ -87,16 +122,12 @@ struct SettingsScreen: View {
             }
 
             Section {
-                Picker("Inbox episodes per new podcast", selection: $settings.inboxDefaultCount) {
-                    ForEach(Self.inboxSeedOptions, id: \.value) { option in
-                        Text(option.label)
-                            .tag(option.value)
-                            .accessibilityLabel(inboxSeedAccessibilityLabel(for: option))
-                    }
-                }
-                // The picker hint covers this control; keep it out of the footer so
-                // VoiceOver doesn't read the seed-count explanation twice.
-                .accessibilityHint("How many recent episodes appear in the inbox when you add a new podcast")
+                AdjustableOptionPicker(
+                    "Inbox episodes per new podcast",
+                    options: inboxSeedAdjustableOptions,
+                    selection: $settings.inboxDefaultCount,
+                    hint: "How many recent episodes appear in the inbox when you add a new podcast. Flick up for more."
+                )
 
                 // The section footer below explains this toggle; a matching hint
                 // would make VoiceOver read the same sentence twice.
@@ -109,19 +140,22 @@ struct SettingsScreen: View {
 
             Section("Downloads") {
                 Toggle("Download on Wi-Fi only", isOn: $settings.wifiOnlyDownloads)
-                Picker("Auto-download recent", selection: $settings.autoDownloadCount) {
-                    ForEach(Self.downloadCounts, id: \.self) { count in
-                        Text(count == 0 ? "Off" : "\(count)").tag(count)
-                            .accessibilityLabel(count == 0 ? "Off" : "\(count) episodes")
-                    }
-                }
+                AdjustableOptionPicker(
+                    "Auto-download recent",
+                    options: autoDownloadAdjustableOptions,
+                    selection: $settings.autoDownloadCount,
+                    hint: "How many recent episodes download automatically. Flick up for more, down to turn off."
+                )
             }
 
             Section("History") {
                 NavigationLink("Listening stats") { StatsScreen() }
-                Picker("Keep listening history", selection: $settings.historyRetentionDays) {
-                    ForEach(Self.retentionOptions, id: \.self) { Text("\($0) days").tag($0) }
-                }
+                AdjustableOptionPicker(
+                    "Keep listening history",
+                    options: historyAdjustableOptions,
+                    selection: $settings.historyRetentionDays,
+                    hint: "How long listening history is kept. Flick up for longer."
+                )
             }
 
             Section {

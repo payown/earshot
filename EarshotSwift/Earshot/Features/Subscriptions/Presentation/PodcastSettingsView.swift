@@ -176,46 +176,61 @@ struct PodcastSettingsView: View {
 
     // MARK: Pickers
 
-    private var speedPicker: some View {
-        Picker("Playback speed", selection: speedOverrideBinding) {
-            ForEach(Self.speedOptions, id: \.label) { option in
-                Text(option.label)
-                    .tag(option.value)
-                    .accessibilityLabel(speedAccessibilityLabel(for: option))
-            }
+    // Adjustable options reuse the existing curated lists (sentinel first), so a
+    // VoiceOver flick steps through them; the visual menu still opens on tap.
+
+    private var speedAdjustableOptions: [AdjustableOptionPicker<Double?>.Option] {
+        Self.speedOptions.map {
+            .init(value: $0.value, title: $0.label, spoken: speedAccessibilityLabel(for: $0))
         }
-        .accessibilityLabel("Playback speed override")
-        .accessibilityHint("Sets the playback speed for this podcast. Use global uses the app-wide setting.")
+    }
+
+    private var queueAgeAdjustableOptions: [AdjustableOptionPicker<Int?>.Option] {
+        Self.queueAgeLimitOptions.map { .init(value: $0.value, title: $0.label, spoken: $0.label) }
+    }
+
+    private var inboxMaxAdjustableOptions: [AdjustableOptionPicker<Int?>.Option] {
+        Self.inboxMaxOptions.map { .init(value: $0.value, title: $0.label, spoken: $0.label) }
+    }
+
+    private var inboxAgeAdjustableOptions: [AdjustableOptionPicker<Int?>.Option] {
+        Self.inboxAgeLimitOptions.map { .init(value: $0.value, title: $0.label, spoken: $0.label) }
+    }
+
+    private var speedPicker: some View {
+        AdjustableOptionPicker(
+            "Playback speed",
+            options: speedAdjustableOptions,
+            selection: speedOverrideBinding,
+            hint: "Playback speed for this podcast. Use global uses the app-wide setting. Flick up for faster."
+        )
     }
 
     private var queueAgeLimitPicker: some View {
-        Picker("Remove from queue after", selection: queueAgeLimitBinding) {
-            ForEach(Self.queueAgeLimitOptions, id: \.label) { option in
-                Text(option.label).tag(option.value)
-            }
-        }
-        .accessibilityLabel("Remove from queue after")
-        .accessibilityHint("Episodes older than this are automatically removed from the queue")
+        AdjustableOptionPicker(
+            "Remove from queue after",
+            options: queueAgeAdjustableOptions,
+            selection: queueAgeLimitBinding,
+            hint: "Episodes older than this are automatically removed from the queue"
+        )
     }
 
     private var inboxMaxPicker: some View {
-        Picker("Inbox episode limit", selection: inboxMaxBinding) {
-            ForEach(Self.inboxMaxOptions, id: \.label) { option in
-                Text(option.label).tag(option.value)
-            }
-        }
-        .accessibilityLabel("Inbox episode limit")
-        .accessibilityHint("Maximum number of episodes from this podcast in the inbox at one time")
+        AdjustableOptionPicker(
+            "Inbox episode limit",
+            options: inboxMaxAdjustableOptions,
+            selection: inboxMaxBinding,
+            hint: "Maximum number of episodes from this podcast in the inbox at one time"
+        )
     }
 
     private var inboxAgeLimitPicker: some View {
-        Picker("Remove from inbox after", selection: inboxAgeLimitBinding) {
-            ForEach(Self.inboxAgeLimitOptions, id: \.label) { option in
-                Text(option.label).tag(option.value)
-            }
-        }
-        .accessibilityLabel("Remove from inbox after")
-        .accessibilityHint("Episodes older than this are automatically removed from the inbox")
+        AdjustableOptionPicker(
+            "Remove from inbox after",
+            options: inboxAgeAdjustableOptions,
+            selection: inboxAgeLimitBinding,
+            hint: "Episodes older than this are automatically removed from the inbox"
+        )
     }
 
     // MARK: Bindings

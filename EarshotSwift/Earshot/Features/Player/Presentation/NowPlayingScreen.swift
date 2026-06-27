@@ -32,6 +32,14 @@ struct NowPlayingScreen: View {
     @AccessibilityFocusState private var titleFocused: Bool
     @AccessibilityFocusState private var speedBadgeFocused: Bool
 
+    /// Latches the speed a VoiceOver flick just set, so the badge's spoken value
+    /// updates immediately on the same step. The badge's value otherwise derives
+    /// from the external @Observable `player.effectiveRate`, which isn't refreshed
+    /// in lockstep with VoiceOver's post-adjust re-read (unlike the in-action
+    /// @Binding writes that make the other adjustable pickers update instantly).
+    /// Cleared once `effectiveRate` converges. Mirrors the scrubber's adjustTarget.
+    @State private var speedAdjustLatch: Double?
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -232,8 +240,11 @@ struct NowPlayingScreen: View {
 
     // MARK: Speed control row
 
-    /// A compact single-row speed badge. Tapping opens the full speed picker
-    /// sheet where the user can choose a quick value or use the stepper.
+    /// A compact single-row speed badge. For VoiceOver it's a pure adjustable
+    /// control: flick up/down changes the speed in place, and the full picker
+    /// sheet (scope, precise stepper, reset) is reachable via the "Open speed
+    /// options" custom action in the Actions rotor. For sighted users, tapping
+    /// the capsule opens the sheet.
     private var speedRow: some View {
         HStack {
             Spacer()
@@ -248,16 +259,81 @@ struct NowPlayingScreen: View {
                     .padding(.vertical, Spacing.xs)
                     .background(.thinMaterial, in: Capsule())
             }
-            .accessibilityLabel("Playback speed")
-            .accessibilityValue(speedAccessibilityValue)
-            .accessibilityHint("Opens speed picker")
-            .accessibilityFocused($speedBadgeFocused)
+            // Replace the button's accessibility node with a PURE adjustable
+            // element (no button trait). Combining `.isButton` with the adjustable
+            // trait makes VoiceOver announce "button, adjustable" and suppresses
+            // the value re-read after a flick. A clean adjustable element (the
+            // same idiom as the scrubber) announces "Playback speed, adjustable"
+            // and re-reads the new speed on every flick. The visual capsule still
+            // opens the sheet on tap for sighted users; VoiceOver users open the
+            // full picker via the "Open speed options" custom action.
+            .accessibilityRepresentation {
+                Color.clear
+                    .accessibilityElement()
+                    .accessibilityLabel("Playback speed")
+                    .accessibilityValue(speedAccessibilityValue)
+                    // No hint: VoiceOver already appends "swipe up or down to
+                    // adjust" for an adjustable element (the scrubber omits it for
+                    // the same reason).
+                    .accessibilityAdjustableAction { direction in
+                        adjustBadgeSpeed(direction)
+                    }
+                    .accessibilityAction(named: "Open speed options") {
+                        showingSpeedPicker = true
+                    }
+                    .accessibilityFocused($speedBadgeFocused)
+            }
             Spacer()
+        }
+        .onChange(of: player.effectiveRate) { _, newValue in
+            // Drop the latch once the player catches up, so external speed changes
+            // (the sheet, a per-podcast override) drive the spoken value again.
+            if let latch = speedAdjustLatch, abs(newValue - latch) < 0.001 {
+                speedAdjustLatch = nil
+            }
         }
     }
 
+    /// Quick in-player speed adjust from the badge: VoiceOver flick up/down steps
+    /// through the curated menu speeds (``PlaybackLogic/speedMenuValues``),
+    /// applied at the active scope — the per-podcast override when one is set,
+    /// otherwise the global speed. Mirrors ``AdjustableOptionPicker`` stepping:
+    /// clamped at both ends, no write (and so no value change) at a boundary.
+    private func adjustBadgeSpeed(_ direction: AccessibilityAdjustmentDirection) {
+        let speeds = PlaybackLogic.speedMenuValues
+        // Step from the latched value when a previous flick hasn't converged yet,
+        // so rapid flicks move one step each instead of restepping a stale rate.
+        let base = speedAdjustLatch ?? player.effectiveRate
+        let current = PlaybackLogic.nearestMenuSpeed(base)
+        let currentIndex = speeds.firstIndex(of: current) ?? 0
+        let delta: Int
+        switch direction {
+        case .increment: delta = 1
+        case .decrement: delta = -1
+        @unknown default: return
+        }
+        let next = OptionStepLogic.steppedIndex(count: speeds.count, current: currentIndex, delta: delta)
+        guard next != currentIndex else { return }
+        let speed = speeds[next]
+        // Latch first so the spoken accessibilityValue reflects the new speed on
+        // this same step, before the external player change propagates back.
+        speedAdjustLatch = speed
+        // announce: false — the badge is adjustable, so VoiceOver re-reads its
+        // accessibilityValue (the new speed) automatically; an announce here
+        // would speak it twice.
+        if player.hasPodcastSpeedOverride {
+            player.setPodcastSpeedOverride(speed, announce: false)
+        } else {
+            player.setGlobalSpeed(speed, announce: false)
+        }
+    }
+
+    /// The rate to display/speak: the just-flicked latched value until the player
+    /// catches up, otherwise the live effective rate.
+    private var displayRate: Double { speedAdjustLatch ?? player.effectiveRate }
+
     private var speedLabel: String {
-        let rate = player.effectiveRate
+        let rate = displayRate
         let formatted = rate.truncatingRemainder(dividingBy: 1) == 0
             ? String(format: "%.0f", rate)
             : String(format: "%g", rate)
@@ -266,7 +342,7 @@ struct NowPlayingScreen: View {
     }
 
     private var speedAccessibilityValue: String {
-        let label = PlaybackLogic.spokenRate(player.effectiveRate)
+        let label = PlaybackLogic.spokenRate(displayRate)
         return player.hasPodcastSpeedOverride ? "\(label), podcast override active" : label
     }
 

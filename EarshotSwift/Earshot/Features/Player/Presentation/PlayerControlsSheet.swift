@@ -45,12 +45,22 @@ struct PlayerControlsSheet: View {
     @ViewBuilder
     private var sleepTimerSection: some View {
         Section("Sleep timer") {
+            // VoiceOver: flick up for a longer timer, down for shorter, all the
+            // way down to Off (which cancels). The visual menu still opens on tap
+            // for sighted/low-vision users. Setting the value here is what speaks
+            // the change (the picker re-reads its value), so no extra announce.
+            AdjustableOptionPicker(
+                "Sleep timer",
+                options: sleepTimerOptions,
+                selection: sleepTimerBinding,
+                hint: "Flick up for a longer timer, down for shorter or off"
+            )
             if sleepTimer.isActive {
                 // Visual shows the live countdown; the spoken value is coarse and
                 // stable so a parked VoiceOver cursor isn't re-spoken every second.
-                LabeledContent("Active", value: sleepTimerValue)
+                LabeledContent("Time left", value: sleepTimerValue)
                     .accessibilityElement()
-                    .accessibilityLabel("Sleep timer active")
+                    .accessibilityLabel("Sleep timer remaining")
                     .accessibilityValue(sleepTimer.endOfEpisode
                         ? "End of episode"
                         : SleepTimerLogic.spokenRemaining(sleepTimer.remainingSeconds))
@@ -64,15 +74,38 @@ struct PlayerControlsSheet: View {
                     sleepTimer.cancel()
                     Announcer.announce("Sleep timer off")
                 }
-            } else {
-                ForEach(SleepTimerPreset.allCases) { preset in
-                    Button(preset.label) {
-                        sleepTimer.set(preset)
-                        Announcer.announce(sleepTimer.announcement)
-                    }
-                }
             }
         }
+    }
+
+    /// Sleep-timer presets as adjustable options, ordered shortest-to-longest
+    /// after Off, with end-of-episode (open-ended) last. Binding writes go
+    /// straight to the controller: a real preset starts it, Off cancels.
+    private var sleepTimerOptions: [AdjustableOptionPicker<SleepTimerPreset?>.Option] {
+        var options: [AdjustableOptionPicker<SleepTimerPreset?>.Option] = [
+            .init(value: nil, title: "Off", spoken: "off")
+        ]
+        let ordered: [SleepTimerPreset] = [
+            .fiveMinutes, .tenMinutes, .fifteenMinutes,
+            .thirtyMinutes, .fortyFiveMinutes, .sixtyMinutes, .endOfEpisode,
+        ]
+        for preset in ordered {
+            options.append(.init(value: preset, title: preset.label, spoken: preset.label))
+        }
+        return options
+    }
+
+    private var sleepTimerBinding: Binding<SleepTimerPreset?> {
+        Binding(
+            get: { sleepTimer.isActive ? sleepTimer.preset : nil },
+            set: { newValue in
+                if let preset = newValue {
+                    sleepTimer.set(preset)
+                } else {
+                    sleepTimer.cancel()
+                }
+            }
+        )
     }
 
     private var sleepTimerValue: String {
