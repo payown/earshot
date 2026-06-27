@@ -15,12 +15,17 @@ struct RootView: View {
     @State private var showOnboarding = false
     @State private var importState = MigrationImportState()
 
-    /// Unfiltered episode query. Its sole purpose is to trigger a re-render of
-    /// RootView whenever any `Episode` row changes, so the Inbox tab badge stays
-    /// live as items are added or removed. The real membership rules live in
-    /// `InboxRepository.inboxEpisodes()`; the count below comes from there, not
-    /// from this raw (unfiltered) query. Mirrors InboxScreen's pattern.
-    @Query private var inboxEpisodes: [Episode]
+    /// Candidate inbox episodes: non-dismissed, newest first. SwiftData keeps
+    /// this result current, so it both triggers a RootView re-render when inbox
+    /// membership changes AND supplies the rows the badge count is computed from
+    /// — without a fresh `context.fetch` on every body evaluation. The remaining
+    /// in-memory rules (status + per-podcast exclusion) are applied by
+    /// `InboxRepository.inbox(from:)`. Mirrors InboxScreen's pattern. The
+    /// predicate matches `inboxEpisodes()` exactly so the badge count is
+    /// identical to the Inbox heading.
+    @Query(filter: #Predicate<Episode> { $0.inboxDismissed == false },
+           sort: \Episode.pubDate, order: .reverse)
+    private var inboxCandidates: [Episode]
 
     /// Which tab is selected. Bound so a notification tap can switch to Library.
     @State private var selectedTab: RootTab = .inbox
@@ -34,10 +39,14 @@ struct RootView: View {
         // `TabBarBadgeApplier` (below), NOT SwiftUI's `.badge`. Both render the
         // count as its own VoiceOver element on top of the tab button, so the
         // count was announced twice when flicking past the Inbox tab; the applier
-        // sets the visible badge and hides that duplicate element. The unused
-        // `inboxEpisodes` @Query above drives the re-render that keeps this
-        // current; the bubble is hidden automatically when the count is 0.
-        let inboxBadgeCount = InboxRepository(context: modelContext).inboxEpisodes().count
+        // sets the visible badge and hides that duplicate element. The
+        // `inboxCandidates` @Query above drives the re-render that keeps this
+        // current AND supplies the rows, so the count is computed with
+        // `inbox(from:)` over the maintained query result rather than a fresh
+        // `context.fetch` on every render (a position save no longer fans out
+        // into a full inbox re-fetch). The bubble is hidden automatically when
+        // the count is 0.
+        let inboxBadgeCount = InboxRepository(context: modelContext).inbox(from: inboxCandidates).count
 
         TabView(selection: $selectedTab) {
             NavigationStack {

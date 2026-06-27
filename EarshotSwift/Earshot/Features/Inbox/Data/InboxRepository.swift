@@ -24,13 +24,31 @@ final class InboxRepository {
     /// starve VoiceOver). Status and per-podcast exclusion are applied in-memory
     /// on the already-small candidate set. (#396)
     func inboxEpisodes() -> [Episode] {
-        let optInOnly = settings.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
         var descriptor = FetchDescriptor<Episode>(
             predicate: #Predicate { $0.inboxDismissed == false },
             sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
         )
         descriptor.relationshipKeyPathsForPrefetching = [\Episode.podcast]
         let candidates = (try? context.fetch(descriptor)) ?? []
+        return inbox(from: candidates)
+    }
+
+    /// Applies the in-memory inbox membership rules (status + per-podcast
+    /// exclusion) to an already-fetched, already-sorted candidate set — the
+    /// non-dismissed episodes, newest first.
+    ///
+    /// This lets a view drive its list and counts off a predicate-filtered
+    /// `@Query` (whose result SwiftData maintains and keeps current) and pay only
+    /// this cheap in-memory pass per render, instead of a fresh `context.fetch`
+    /// on every body evaluation. Previously every `Episode` save — including the
+    /// 5-second playback-position save — re-rendered RootView and InboxScreen,
+    /// and each re-ran `inboxEpisodes()` (InboxScreen ~6x per body), so the
+    /// per-position save fanned out into repeated synchronous fetches on the main
+    /// thread that starved VoiceOver. Order is preserved (`filter` keeps the
+    /// candidate sort), so contents and ordering are identical to
+    /// `inboxEpisodes()`.
+    func inbox(from candidates: [Episode]) -> [Episode] {
+        let optInOnly = settings.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
         return candidates.filter { $0.status == .newEpisode && !isExcluded($0.podcast, optInOnly: optInOnly) }
     }
 

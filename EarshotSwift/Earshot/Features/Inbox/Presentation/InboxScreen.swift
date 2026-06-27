@@ -10,9 +10,16 @@ struct InboxScreen: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
 
-    // Drives re-rendering when episode state changes; the list itself comes from
-    // InboxRepository so the filtering rules live in one place.
-    @Query private var allEpisodes: [Episode]
+    // Candidate inbox episodes: non-dismissed, newest first. SwiftData keeps this
+    // result current, so it both drives re-rendering when inbox membership changes
+    // AND supplies the rows the list/count come from — without a fresh
+    // `context.fetch` on every body evaluation. The remaining in-memory rules
+    // (status + per-podcast exclusion) are applied by `InboxRepository.inbox(from:)`,
+    // so the filtering rules still live in one place. The predicate matches
+    // `inboxEpisodes()` exactly, preserving contents and order.
+    @Query(filter: #Predicate<Episode> { $0.inboxDismissed == false },
+           sort: \Episode.pubDate, order: .reverse)
+    private var inboxCandidates: [Episode]
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
@@ -20,10 +27,12 @@ struct InboxScreen: View {
     @State private var confirmingClear = false
     @AccessibilityFocusState private var focusEmpty: Bool
 
-    private var inbox: [Episode] { InboxRepository(context: context).inboxEpisodes() }
-
     var body: some View {
-        Group {
+        // Compute the inbox once per body so the list, empty-state check, title,
+        // count, and Clear dialog all read a single value instead of re-running
+        // the filter (formerly a re-fetch) several times per render.
+        let inbox = InboxRepository(context: context).inbox(from: inboxCandidates)
+        return Group {
             if inbox.isEmpty {
                 ContentUnavailableView(
                     "Inbox is empty",
