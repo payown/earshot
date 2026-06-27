@@ -48,14 +48,14 @@ func buildEpisodeActions(
                 }
             }
         case .addToQueueTop:
-            return QuickActionItem(label: "Add to queue (top)", isDestructive: false) {
-                QueueRepository(context: context).addToFront(episode)
-                Announcer.announce("Added \(episode.title) to the top of the queue")
+            return QuickActionItem(label: "Play next", isDestructive: false) {
+                QueueRepository(context: context).playNext(episode, after: player.nowPlayingEpisode)
+                Announcer.announce("\(episode.title) will play next")
             }
         case .addToQueueBottom:
-            return QuickActionItem(label: "Add to queue (bottom)", isDestructive: false) {
+            return QuickActionItem(label: "Add to end of queue", isDestructive: false) {
                 QueueRepository(context: context).add(episode)
-                Announcer.announce("Added \(episode.title) to the queue")
+                Announcer.announce("Added \(episode.title) to the end of the queue")
             }
         case .markPlayed:
             let played = episode.isPlayed
