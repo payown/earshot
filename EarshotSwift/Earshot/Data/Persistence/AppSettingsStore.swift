@@ -63,6 +63,16 @@ enum SettingsKey {
     // run (automatic launch import or manual re-import). nil until the first
     // attempt (#429).
     static let migrationLastAttemptDate = "migration_last_attempt_date"
+    // Prefix for the per-podcast episode-list filter (Unheard / All). The full
+    // key is `podcast_filter_<feedURL>`, built by ``podcastFilter(feedURL:)``.
+    // Keyed by the podcast's unique feed URL so the choice survives store
+    // rebuilds and OPML re-import with no SwiftData schema change (#489).
+    static let podcastFilterPrefix = "podcast_filter_"
+
+    /// The full per-podcast filter key for a given feed URL (#489).
+    static func podcastFilter(feedURL: String) -> String {
+        podcastFilterPrefix + feedURL
+    }
 }
 
 /// Outcome of the most recent Flutter→SwiftUI data import (#429). Persisted as a
@@ -100,6 +110,8 @@ enum SettingsDefault {
     static let onboardingComplete = false
     static let launchScreen: LaunchScreen = .inbox
     static let librarySortOrder: LibrarySortOrder = .alphabetical
+    /// Per-podcast episode-list filter default: hide played episodes (#489).
+    static let episodeListFilter: EpisodeListFilter = .unheard
     static let statsStreaksEnabled = false
     /// Default number of most-recent episodes seeded into the inbox when a new
     /// podcast is added. Matches Flutter's default of 3.
@@ -246,6 +258,21 @@ final class AppSettingsStore {
 
     func setLibrarySortOrder(_ order: LibrarySortOrder) {
         setRawValue(order.rawValue, for: SettingsKey.librarySortOrder)
+    }
+
+    /// The episode-list filter last used for the podcast with this feed URL,
+    /// defaulting to ``SettingsDefault/episodeListFilter`` (.unheard) when unset
+    /// or unparseable (#489). Keyed by feed URL (the model's unique key) so it
+    /// survives store rebuilds and OPML re-import without a schema change.
+    func episodeListFilter(forFeedURL feedURL: String) -> EpisodeListFilter {
+        guard let raw = rawValue(SettingsKey.podcastFilter(feedURL: feedURL)),
+              let filter = EpisodeListFilter(rawValue: raw)
+        else { return SettingsDefault.episodeListFilter }
+        return filter
+    }
+
+    func setEpisodeListFilter(_ filter: EpisodeListFilter, forFeedURL feedURL: String) {
+        setRawValue(filter.rawValue, for: SettingsKey.podcastFilter(feedURL: feedURL))
     }
 
     private func save() {
