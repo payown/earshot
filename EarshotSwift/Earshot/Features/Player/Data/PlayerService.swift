@@ -1165,7 +1165,10 @@ final class PlayerService {
 
         // ArtworkCache serves from its disk cache when present and fetches
         // (then caches) otherwise; it returns nil instead of throwing on failure.
-        guard let image = await ArtworkCache.shared.image(for: url) else { return }
+        guard let image = await ArtworkCache.shared.image(
+            for: url,
+            maxPixelSize: ArtworkCache.nowPlayingMaxPixelSize
+        ) else { return }
         lastArtworkURL = url
         setArtwork(image)
     }

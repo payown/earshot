@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import UIKit
 
 /// Disk-backed cache for podcast artwork shared by the UI (``PodcastArtwork``)
@@ -30,6 +31,11 @@ final class ArtworkCache: Sendable {
 
     /// Subdirectory name under the Caches directory that holds the URLCache.
     static let directoryName = "artwork"
+
+    /// Longest-edge pixel cap for the lock-screen / Control Center artwork. The
+    /// Now Playing art tops out around the device's screen width, so 1024px is
+    /// ample while still avoiding a full-resolution (often 3000px) decode. (#481)
+    static let nowPlayingMaxPixelSize: CGFloat = 1024
 
     let urlCache: URLCache
     private let session: URLSession
@@ -95,14 +101,57 @@ final class ArtworkCache: Sendable {
         }
     }
 
-    /// Decoded artwork image for `url`, or `nil` if it can't be fetched/decoded.
-    func image(for url: URL) async -> UIImage? {
+    /// Decoded artwork image for `url`, downsampled so its longest edge is at most
+    /// `maxPixelSize` pixels, or `nil` if it can't be fetched/decoded.
+    ///
+    /// Callers pass the target draw size in pixels (points × display scale). The
+    /// image is decoded once, here, off the main actor — this method is a
+    /// `nonisolated async` member of a `Sendable` type, so its body runs on the
+    /// cooperative pool rather than the caller's actor — and returned already
+    /// decoded at draw size, so nothing decodes the full-resolution source on the
+    /// main thread at draw time during scroll. (#481)
+    func image(for url: URL, maxPixelSize: CGFloat) async -> UIImage? {
         guard let data = await data(for: url) else { return nil }
+        if let downsampled = Self.downsampledImage(from: data, maxPixelSize: maxPixelSize) {
+            return downsampled
+        }
+        // ImageIO couldn't read this source (an unusual/unsupported container).
+        // Fall back to a direct decode so we still show artwork; this path is rare
+        // and not on the hot scroll path.
         guard let image = UIImage(data: data) else {
             AppLog.networking.error("Artwork data for \(url.absoluteString, privacy: .public) could not be decoded")
             return nil
         }
         return image
+    }
+
+    /// Decodes `data` into a `UIImage` whose longest edge is at most
+    /// `maxPixelSize` pixels, forcing the decode immediately so the returned image
+    /// carries no deferred main-thread decode. Returns `nil` if ImageIO can't
+    /// create a thumbnail from the source.
+    ///
+    /// Uses `CGImageSourceCreateThumbnailAtIndex`, which decodes straight to the
+    /// downsampled size instead of decoding the full image and scaling after.
+    /// `kCGImageSourceShouldCacheImmediately` performs the decode now (off the main
+    /// thread, since callers `await` this from a background context) rather than
+    /// lazily at first draw.
+    static func downsampledImage(from data: Data, maxPixelSize: CGFloat) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
+            return nil
+        }
+        let thumbnailOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixelSize),
+        ] as CFDictionary
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else {
+            return nil
+        }
+        // Scale 1: the thumbnail is already sized in pixels, so its point size
+        // equals its pixel size and the SwiftUI frame controls the layout size.
+        return UIImage(cgImage: cgImage, scale: 1, orientation: .up)
     }
 
     /// Drops every cached artwork response from memory and disk. Used by the
