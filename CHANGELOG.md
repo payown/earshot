@@ -246,6 +246,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   VoiceOver value, so you hear "not imported", "imported on" a date, or "import
   failed" right after the label without opening anything. When the import sheet
   finishes, VoiceOver announces the outcome out loud. (#429)
+- Lists feel quicker under VoiceOver. Episode, queue, and bookmark rows were doing
+  redundant accessibility work on every focus move; that's removed, so flicking
+  through the Inbox, Library, Queue, and bookmark lists is more responsive. What
+  VoiceOver reads for each row, and its actions rotor, are unchanged. (#479)
 
 ### Phase 8 complete — Alpha build prep
 
