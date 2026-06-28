@@ -231,6 +231,14 @@ struct SettingsScreen: View {
             }
         }
         .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Settings")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+            }
+        }
         .onAppear(perform: refreshImportStatus)
         .sheet(isPresented: $showingDataImport, onDismiss: refreshImportStatus) {
             DataImportSheet()

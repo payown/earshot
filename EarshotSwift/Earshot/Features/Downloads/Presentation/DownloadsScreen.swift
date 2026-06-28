@@ -56,6 +56,14 @@ struct DownloadsScreen: View {
             }
         }
         .navigationTitle("Downloads")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Downloads")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+            }
+        }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
