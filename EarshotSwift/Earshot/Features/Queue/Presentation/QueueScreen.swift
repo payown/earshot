@@ -39,7 +39,15 @@ struct QueueScreen: View {
 
     var body: some View {
         content
+            // Mirrors the Inbox pattern (#422): a plain `navigationTitle` keeps the
+            // bar's title identity (back-button context) while `.inline` collapses
+            // the large title out of the scrollable content area. The visible,
+            // heading-trait "Queue" rides on the `.principal` toolbar item below.
+            // Without this, the large title lives in the content area and VoiceOver
+            // sweeps the trailing "Queue options" bar item before reaching it, so
+            // options was announced before the heading (#490).
             .navigationTitle("Queue")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
             .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
     }
@@ -167,6 +175,14 @@ struct QueueScreen: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        // The on-screen "Queue" heading. A `.principal` bar element is traversed
+        // before the trailing "Queue options", so the heading is announced first
+        // (and carries the heading trait). Mirrors InboxScreen's principal heading.
+        ToolbarItem(placement: .principal) {
+            Text("Queue")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+        }
         if !episodes.isEmpty && !settings.groupQueueEpisodes {
             ToolbarItem(placement: .topBarLeading) { EditButton() }
         }

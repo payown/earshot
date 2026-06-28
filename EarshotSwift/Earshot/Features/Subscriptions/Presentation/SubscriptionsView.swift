@@ -58,8 +58,19 @@ struct SubscriptionsView: View {
                 .refreshable { await refreshAll() }
             }
         }
+        // Inline title + a `.principal` heading, matching Inbox/Queue (#490). With
+        // a large title the four toolbar buttons (search, folders, sort, add) are
+        // all swept before the content-area title, so "Library" was announced last;
+        // the principal heading is traversed before the trailing items and carries
+        // the heading trait. The plain `navigationTitle` keeps back-button identity.
         .navigationTitle("Library")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Library")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+            }
             ToolbarItem(placement: .topBarLeading) {
                 // Scoped to the user's OWN content — subscribed podcasts, episodes,
                 // and bookmarks. Does NOT search the directory; finding new podcasts
