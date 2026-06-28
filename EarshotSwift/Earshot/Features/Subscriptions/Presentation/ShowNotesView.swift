@@ -23,21 +23,10 @@ struct ShowNotesView: View {
         }
     }
 
-    /// Minimal HTML strip so notes are readable in the slice.
+    /// Readable show notes via the shared HTML strip (#495), with a friendly
+    /// placeholder when the episode has no description.
     private var plainNotes: String {
-        let raw = episode.episodeDescription ?? "No show notes for this episode."
-        let stripped = raw.replacingOccurrences(
-            of: "<[^>]+>",
-            with: "",
-            options: .regularExpression
-        )
-        let decoded = stripped
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-        return decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = EpisodeSummary.plainText(episode.episodeDescription)
+        return text.isEmpty ? "No show notes for this episode." : text
     }
 }
