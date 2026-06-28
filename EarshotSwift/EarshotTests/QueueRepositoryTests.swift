@@ -25,6 +25,40 @@ final class QueueRepositoryTests: XCTestCase {
         repo.queue().map(\.title)
     }
 
+    // MARK: displayedCount (tab badge reducer, #491)
+
+    func testDisplayedCountMatchesQueuedEpisodes() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let repo = QueueRepository(context: ctx)
+        repo.add(makeEpisode(ctx, "a", podcast: p))
+        repo.add(makeEpisode(ctx, "b", podcast: p))
+
+        let items = try! ctx.fetch(FetchDescriptor<QueueItem>())
+        XCTAssertEqual(QueueRepository.displayedCount(from: items), 2)
+    }
+
+    func testDisplayedCountIsZeroForEmptyQueue() {
+        XCTAssertEqual(QueueRepository.displayedCount(from: []), 0)
+    }
+
+    func testDisplayedCountExcludesOrphanRows() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let repo = QueueRepository(context: ctx)
+        repo.add(makeEpisode(ctx, "a", podcast: p))
+
+        // An orphan row (episode == nil) can exist from corrupt/aged data; the
+        // badge count must drop it so it equals what QueueScreen renders.
+        let orphan = QueueItem(position: 99)
+        ctx.insert(orphan)
+        try! ctx.save()
+
+        let items = try! ctx.fetch(FetchDescriptor<QueueItem>())
+        XCTAssertEqual(items.count, 2, "fixture: one real row + one orphan")
+        XCTAssertEqual(QueueRepository.displayedCount(from: items), 1)
+    }
+
     // MARK: add / status transitions
 
     func testAddAppendsToEndAndSetsStatusInQueue() {

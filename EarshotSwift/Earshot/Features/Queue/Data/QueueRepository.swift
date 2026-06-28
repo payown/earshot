@@ -34,6 +34,15 @@ final class QueueRepository {
         orderedItems().compactMap(\.episode)
     }
 
+    /// The number of episodes the queue shows: raw rows backing a real episode.
+    /// Orphan rows (`episode == nil`, only possible from corrupt/aged data) are
+    /// excluded so this equals what ``orderedItems()``/``queue()`` render and what
+    /// `QueueScreen` displays. Pure and static so the RootView tab-count badge can
+    /// be unit-tested without a tab bar (mirrors `InboxRepository.inbox(from:)`).
+    static func displayedCount(from items: [QueueItem]) -> Int {
+        items.reduce(0) { $0 + ($1.episode == nil ? 0 : 1) }
+    }
+
     /// The queue grouped by podcast, groups in first-appearance order, episodes
     /// in queue order within each group. Episodes with no podcast are omitted
     /// from groups (they still appear in ``queue()``).

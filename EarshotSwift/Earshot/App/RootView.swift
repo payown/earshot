@@ -27,6 +27,13 @@ struct RootView: View {
            sort: \Episode.pubDate, order: .reverse)
     private var inboxCandidates: [Episode]
 
+    /// Every queue row. SwiftData keeps this current, so it both drives the
+    /// re-render when the queue changes AND supplies the rows the Queue tab badge
+    /// count is reduced from — without a fresh fetch per body. Reduced through
+    /// `QueueRepository.displayedCount(from:)` so the count drops orphan rows and
+    /// equals exactly what `QueueScreen` shows (#491). Mirrors `inboxCandidates`.
+    @Query(sort: \QueueItem.position) private var queueItems: [QueueItem]
+
     /// Which tab is selected. Bound so a notification tap can switch to Library.
     @State private var selectedTab: RootTab = .inbox
     /// Navigation path for the Library tab, so a notification can push a podcast
@@ -47,6 +54,12 @@ struct RootView: View {
         // into a full inbox re-fetch). The bubble is hidden automatically when
         // the count is 0.
         let inboxBadgeCount = InboxRepository(context: modelContext).inbox(from: inboxCandidates).count
+        // Live queue count for the Queue tab badge, reduced the same way the Queue
+        // screen builds its list (orphan rows dropped). Shown via the same native
+        // `UITabBarItem` badge mechanism as Inbox so UIKit folds ", N items" into
+        // the single tab element ("Queue, N items") with no extra VoiceOver stop
+        // (#491).
+        let queueBadgeCount = QueueRepository.displayedCount(from: queueItems)
 
         TabView(selection: $selectedTab) {
             NavigationStack {
@@ -91,6 +104,9 @@ struct RootView: View {
         // re-applies whenever `inboxBadgeCount` changes. Replaces SwiftUI's
         // `.badge`, which double-announced the count under VoiceOver.
         .background(TabBarBadgeApplier(tabIndex: 0, count: inboxBadgeCount))
+        // Native UITabBarItem badge for the Queue episode count (#491): same
+        // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
+        .background(TabBarBadgeApplier(tabIndex: 1, count: queueBadgeCount))
         .environment(importState)
         // Route a notification tap / action into the Library tab + podcast detail
         // (#72). Reacting on the published intent keeps the delegate decoupled
@@ -103,6 +119,7 @@ struct RootView: View {
         // set `badgeValue`. Cheap and idempotent.
         .onChange(of: selectedTab) { _, _ in
             TabBarBadgeApplier.apply(tabIndex: 0, count: inboxBadgeCount)
+            TabBarBadgeApplier.apply(tabIndex: 1, count: queueBadgeCount)
         }
         // VoiceOver magic tap (two-finger double tap) toggles playback anywhere.
         .accessibilityAction(.magicTap) {

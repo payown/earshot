@@ -226,6 +226,47 @@ The SwiftUI side is built and waiting.
 
 ## UI Decisions
 
+- **Tab screens read heading-first via inline title + `.principal` heading (#490).**
+  A large `.navigationTitle` renders the title in the scrollable content area while
+  toolbar items live in the bar chrome, which VoiceOver sweeps first — so a screen
+  with toolbar items announced those items before its own title. The fix (proven on
+  Inbox in #422) is `.navigationBarTitleDisplayMode(.inline)` plus a
+  `ToolbarItem(placement: .principal)` `Text(...).font(.headline)` carrying
+  `.accessibilityAddTraits(.isHeader)`; the plain `navigationTitle` stays for
+  back-button identity. Applied to **Queue** and **Library** (both had the
+  large-title-with-toolbar-items bug). **Inbox** already used this pattern.
+  **Downloads** and **Settings** have no toolbar items, so their large titles
+  already read heading-first and were intentionally left unchanged — meaning two
+  tabs keep the large-title spring while three are inline. Note: when a screen has
+  leading toolbar items (Queue's conditional EditButton, Library's search/folders),
+  bar order is leading → principal → trailing, so those leading items are read
+  before the heading. That is conventional iOS (a leading action before a centered
+  title) and the primary bug (trailing options before the heading) is resolved.
+  `accessibilitySortPriority` cannot fix this — it only reorders siblings within one
+  container, and the large title (content) and toolbar items (bar) are different
+  containers.
+
+- **Now Playing bar is one named accessibility container (#490).** The
+  `.safeAreaInset(edge: .bottom) { NowPlayingBar() }` in `RootView.TabChrome` wraps
+  the bar with `.accessibilityElement(children: .contain)` and
+  `.accessibilityLabel("Now Playing")`, so reaching it reads as a "Now Playing"
+  group with each transport control still individually navigable. `.contain` (not
+  `.combine`) preserves per-button focus. This does not change VoiceOver's standard
+  first→last wrap (reaching the bar by back-flicking from the first element is
+  expected). `NowPlayingBar` renders nothing while idle, so the inset adds no height
+  and the #366 layout (bar never covers the system tab bar) is unchanged.
+
+- **Queue tab announces its episode count via a native badge (#491).** Same
+  mechanism as the Inbox tab (#422): a live `@Query` over `QueueItem` in `RootView`
+  reduced through the new pure `QueueRepository.displayedCount(from:)` (drops orphan
+  rows so the count equals what `QueueScreen` shows), surfaced as a native
+  `UITabBarItem.badgeValue` via a second `TabBarBadgeApplier(tabIndex: 1, …)` and
+  re-asserted on tab switch. UIKit folds the badge into the tab's VoiceOver
+  announcement ("Queue, N items") with no extra VoiceOver stop, and the existing
+  recursive hider suppresses the duplicate standalone badge element while the red
+  bubble stays visible. Decided (vs. spoken-count-only): a visible red badge matching
+  Inbox, phrasing "Queue, N items" — true Inbox parity, no override path needed.
+
 - **Library search and "add a new podcast" are split (UX round 1, item 2).** The
   Library tab toolbar now carries two distinct affordances: a magnifying-glass that
   opens `SearchView(scope: .library)` (labelled "Search your library"), and a `plus`

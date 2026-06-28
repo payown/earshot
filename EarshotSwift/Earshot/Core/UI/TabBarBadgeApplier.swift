@@ -32,7 +32,9 @@ enum TabBadgeFormat {
 /// the connected window scenes, which assumes the app has a single
 /// `UITabBarController` (true for Earshot's root `TabView`).
 struct TabBarBadgeApplier: UIViewRepresentable {
-    /// Zero-based index of the tab to badge (Inbox is 0 in RootView's TabView).
+    /// Zero-based index of the tab to badge (Inbox is 0, Queue is 1 in RootView's
+    /// TabView). UIKit folds the badge into that tab's VoiceOver announcement
+    /// ("Inbox, N items" / "Queue, N items") — see #491.
     let tabIndex: Int
     /// Count to show. Zero or negative clears the badge entirely.
     let count: Int
