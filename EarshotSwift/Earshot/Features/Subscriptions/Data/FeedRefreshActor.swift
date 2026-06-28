@@ -407,6 +407,8 @@ actor FeedRefreshActor {
             AppLog.subscriptions.info(
                 "Auto-queue: enrolled \(autoQueued.count) episode(s) for \(podcast.title, privacy: .public)"
             )
+            // Trim auto-queue pile-up to the per-podcast count cap (#494).
+            enforceQueueCap(for: podcast)
         }
 
         if added > 0 {
@@ -428,6 +430,75 @@ actor FeedRefreshActor {
             episode.status = .inQueue
             items.append(item)
         }
+        for (index, item) in items.enumerated() where item.position != index {
+            item.position = index
+        }
+    }
+
+    /// Enforces the per-podcast queue COUNT cap right after auto-queue enrollment,
+    /// mirroring the inbox count cap by reusing `Podcast.inboxMaxEpisodes`
+    /// (nil = unlimited → no enforcement). Keeps the most-recently-queued `cap`
+    /// episodes of this podcast and dequeues the oldest beyond it, never the
+    /// currently-playing episode. The decision math is the pure
+    /// ``QueueLogic/idsToEvictForCount(_:cap:nowPlaying:)``.
+    ///
+    /// Recency is keyed on `QueueItem.addedAt`, NOT publish date: a manually
+    /// "Play next"-ed older episode has a recent `addedAt`, so it sorts as newest
+    /// and is kept. The cap therefore trims auto-queue pile-up without fighting an
+    /// explicit user enqueue. Eviction removes only the `QueueItem` (status reverts
+    /// to `.newEpisode`); the episode stays in the library and keeps its
+    /// `inboxDismissed` flag, so it never floods the inbox and is not deleted.
+    private func enforceQueueCap(for podcast: Podcast) {
+        guard let cap = podcast.inboxMaxEpisodes else { return } // nil = unlimited
+
+        let podcastID = podcast.persistentModelID
+        let descriptor = FetchDescriptor<QueueItem>(sortBy: [SortDescriptor(\.position)])
+        let queued = ((try? modelContext.fetch(descriptor)) ?? [])
+            .filter { $0.episode?.podcast?.persistentModelID == podcastID }
+            .sorted { $0.addedAt > $1.addedAt } // newest-added first
+
+        let evictIDs = Set(
+            QueueLogic.idsToEvictForCount(
+                queued.map(\.persistentModelID),
+                cap: cap,
+                nowPlaying: currentlyPlayingQueueItemID()
+            )
+        )
+        guard !evictIDs.isEmpty else { return }
+
+        for item in queued where evictIDs.contains(item.persistentModelID) {
+            // Dequeue only: keep the episode in the library, dismissed as
+            // auto-queue left it, so it neither floods the inbox nor is deleted.
+            item.episode?.status = .newEpisode
+            modelContext.delete(item)
+        }
+        recompactQueue()
+        AppLog.subscriptions.info(
+            "Queue cap: evicted \(evictIDs.count) over-cap item(s) for \(podcast.title, privacy: .public)"
+        )
+    }
+
+    /// The queue-item id of the currently/last-playing episode, resolved on the
+    /// background context via the durable `SettingsKey.lastPlayingEpisodeID` (the
+    /// episode `guid` PlayerService persists). Returns nil when nothing is playing
+    /// or the playing episode isn't queued, so the cap never dequeues it.
+    private func currentlyPlayingQueueItemID() -> PersistentIdentifier? {
+        let key = SettingsKey.lastPlayingEpisodeID
+        var settingDescriptor = FetchDescriptor<AppSetting>(predicate: #Predicate { $0.key == key })
+        settingDescriptor.fetchLimit = 1
+        guard let guid = (try? modelContext.fetch(settingDescriptor))?.first?.value,
+              !guid.isEmpty else { return nil }
+        var episodeDescriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == guid })
+        episodeDescriptor.fetchLimit = 1
+        guard let episode = (try? modelContext.fetch(episodeDescriptor))?.first else { return nil }
+        return episode.queueItem?.persistentModelID
+    }
+
+    /// Reassigns dense queue positions `0..<N` over all real (non-orphan) items
+    /// after a cap eviction, mirroring `QueueRepository`'s compaction invariant.
+    private func recompactQueue() {
+        let descriptor = FetchDescriptor<QueueItem>(sortBy: [SortDescriptor(\.position)])
+        let items = ((try? modelContext.fetch(descriptor)) ?? []).filter { $0.episode != nil }
         for (index, item) in items.enumerated() where item.position != index {
             item.position = index
         }
