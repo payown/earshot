@@ -236,6 +236,17 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   start a show she wants from the very beginning, in order, having given up
   before and listened newest-first; she leaves the filter on Unheard so the
   show stays just what's left as she works through it (Chapter 31)
+- Every one of the five tabs (Inbox, Queue, Library, Downloads, Settings) now
+  reads its screen title FIRST as a proper heading before any toolbar/options
+  button, instead of handing her "Queue options" and the like ahead of the
+  name; the Now Playing mini-player bar above the tabs now reads as a single
+  group labeled "Now Playing" instead of scattered loose controls. She'd
+  normalized waiting a beat for the title and skipping whatever came first
+  (Chapter 32)
+- The Queue tab now carries an episode count and red badge and announces
+  "Queue, N items," matching the Inbox tab's count (Chapter 22), so she can
+  tell how deep the queue is from the tab bar without opening it; no stray
+  extra number when flicking past (Chapter 32)
 
 ## What you can generate
 
@@ -1010,6 +1021,28 @@ This build put a Play oldest first right on the show. She tapped it once. It sta
 And the list kept itself clean while she worked through it. The filter up top, All or Unheard. On Unheard the ones she'd finished fell away, so the next morning the show was just what was left, not a wall she had to find her spot in. When she wanted one she'd already played, she flicked to All and there it was.
 
 She set it going oldest first, left it on Unheard, and let the show tell itself to her in the right order for once.
+
+### Chapter 32 — Build 132
+
+*Kashe lands on a screen and hears where she is before what she can do to it, and the Queue tab finally tells her how much is waiting.*
+
+**What to test:**
+
+With VoiceOver, open each of the five tabs: Inbox, Queue, Library, Downloads, Settings. On each one the screen's title should read first, as a heading, before any toolbar or options buttons. Before this, you'd hear something like "Queue options" before the word Queue.
+
+Check the Now Playing bar that sits above the tabs while something's loaded. It should read as one group labeled "Now Playing," not as loose, scattered controls.
+
+Look at the Queue tab in the tab bar. With episodes queued it should show a count and a red badge, and VoiceOver should say "Queue, N items," the same way the Inbox tab already does. No stray extra number when you flick past it.
+
+She runs the whole day off the bottom tabs, we've been over that, and lately mostly off the Queue (Chapter 21, Chapter 25). So she knows the exact shape of landing on a screen. Flick into a tab and the first thing the app would hand her, before the name of where she was, was the button to do something to it. "Queue options." She'd be acting on a place before she'd been told she'd arrived.
+
+She'd stopped hearing it, the way she stops hearing most of these. You learn to wait one beat for the title and skip whatever comes ahead of it.
+
+This build leads with the title. Inbox, Queue, Library, Downloads, Settings, each one says where she is first, as a heading, then the buttons. She lands and she knows she's landed. The Now Playing bar pulled itself together too, one tidy group with its name on it instead of a handful of stray controls she had to sort by feel.
+
+And the Queue tab finally carries its number. The Inbox tab has told her how much was waiting for a while now (Chapter 22). The Queue never did, so she'd open it just to find out how deep the morning was. Now the count rides on the tab, said once, clean. She can tell from the bar whether it's two things or twelve before she goes in.
+
+Small ones, both. But she touches that bar more than anything else she owns.
 
 ---
 
