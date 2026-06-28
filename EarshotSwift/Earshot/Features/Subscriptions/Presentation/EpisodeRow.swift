@@ -66,7 +66,11 @@ struct EpisodeRow: View {
         // where a user who dwells hears the useful detail without it bloating the
         // label. The summary is served from a per-episode cache so the HTML strip
         // never runs in this body on a focus move (#495).
-        .accessibilityValue(accessibilityValue)
+        //
+        // Applied only when there's something to say: a played episode with no
+        // description yields an empty value, and `.accessibilityValue("")` makes
+        // VoiceOver speak a stray pause (dead air), so we omit it in that case.
+        .accessibilityValueIfPresent(accessibilityValue)
         .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
         .accessibilityActions {
             ForEach(actions) { action in
@@ -100,5 +104,20 @@ struct EpisodeRow: View {
             parts.append(summary)
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+private extension View {
+    /// Applies `.accessibilityValue` only when there's something to say. An empty
+    /// value string makes VoiceOver speak a stray pause (dead air), so callers
+    /// with no value to communicate must omit the modifier entirely rather than
+    /// set "".
+    @ViewBuilder
+    func accessibilityValueIfPresent(_ value: String) -> some View {
+        if value.isEmpty {
+            self
+        } else {
+            accessibilityValue(value)
+        }
     }
 }
