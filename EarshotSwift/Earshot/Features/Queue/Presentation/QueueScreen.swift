@@ -229,6 +229,15 @@ private struct QueueRow: View {
 
     var body: some View {
         let primary = actions.first
+        // Castro-style "X min left" / total length, the same treatment EpisodeRow
+        // gives every other list. The Queue was the original surface this was
+        // requested for but #493 only reached the shared row, not this bespoke
+        // one (#504). Cheap arithmetic, safe to evaluate per realization.
+        let timeText = EpisodeTimeLogic.visibleText(
+            positionSeconds: episode.positionSeconds,
+            durationSeconds: episode.durationSeconds,
+            isPlayed: episode.isPlayed
+        )
 
         Button {
             primary?.run()
@@ -243,6 +252,14 @@ private struct QueueRow: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
                 }
+                // Time-left / total length, matching EpisodeRow's caption +
+                // secondary treatment. Absent (nil) for a played or
+                // unknown-duration episode, so no "--" artifact shows.
+                if let timeText {
+                    Text(timeText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -254,6 +271,13 @@ private struct QueueRow: View {
         // discard it — wasted work on every focus move. Dropping it keeps the
         // identical label/hint/actions/focus while removing that per-row cost. (#479)
         .accessibilityLabel(accessibilityLabel)
+        // VoiceOver value carries the spoken time-left/length (#493/#504). The
+        // label stays title-first (title, podcast, position) so quick flicking
+        // still leads with the title; the time rides as the value, where a user
+        // who dwells hears it without it bloating the label. Applied only when
+        // there's something to speak: `.accessibilityValue("")` makes VoiceOver
+        // utter a stray pause, so a played/unknown-duration row omits it.
+        .accessibilityValueIfPresent(accessibilityValue)
         .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
         .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
         .accessibilityActions {
@@ -273,6 +297,32 @@ private struct QueueRow: View {
             parts.append("position \(position) of \(total)")
         }
         return parts.joined(separator: ", ")
+    }
+
+    /// The row's VoiceOver value: the spoken time-left/length (#493/#504), or an
+    /// empty string when the episode is played or has no known duration, so
+    /// VoiceOver announces no stray value.
+    private var accessibilityValue: String {
+        EpisodeTimeLogic.spokenText(
+            positionSeconds: episode.positionSeconds,
+            durationSeconds: episode.durationSeconds,
+            isPlayed: episode.isPlayed
+        ) ?? ""
+    }
+}
+
+private extension View {
+    /// Applies `.accessibilityValue` only when there's something to say. An empty
+    /// value string makes VoiceOver speak a stray pause (dead air), so callers
+    /// with no value to communicate must omit the modifier entirely rather than
+    /// set "".
+    @ViewBuilder
+    func accessibilityValueIfPresent(_ value: String) -> some View {
+        if value.isEmpty {
+            self
+        } else {
+            accessibilityValue(value)
+        }
     }
 }
 
