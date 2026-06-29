@@ -34,8 +34,13 @@ struct RootView: View {
     /// equals exactly what `QueueScreen` shows (#491). Mirrors `inboxCandidates`.
     @Query(sort: \QueueItem.position) private var queueItems: [QueueItem]
 
-    /// Which tab is selected. Bound so a notification tap can switch to Library.
-    @State private var selectedTab: RootTab = .inbox
+    /// Which tab is selected. Optional so the first paint can resolve the saved
+    /// launch-screen preference synchronously (#492) instead of rendering Inbox
+    /// and then jumping. `nil` means "not chosen yet" — the selection binding
+    /// below falls back to ``resolvedLaunchTab`` until either the user navigates
+    /// or the `.task` seeds it from the loaded preference. A notification tap can
+    /// also set it to switch to Library.
+    @State private var selectedTab: RootTab?
     /// Navigation path for the Library tab, so a notification can push a podcast
     /// detail screen onto it (#72).
     @State private var libraryPath: [Podcast] = []
@@ -61,7 +66,17 @@ struct RootView: View {
         // (#491).
         let queueBadgeCount = QueueRepository.displayedCount(from: queueItems)
 
-        TabView(selection: $selectedTab) {
+        // Selection binding that honors the saved Launch screen on cold launch
+        // (#492): while `selectedTab` is still nil it reports the persisted launch
+        // tab (read synchronously), so the first frame already shows the right
+        // tab. Any user tap — or the `.task` seed / notification routing — writes
+        // a concrete tab, after which `resolvedLaunchTab` is no longer consulted.
+        let tabSelection = Binding<RootTab>(
+            get: { selectedTab ?? resolvedLaunchTab },
+            set: { selectedTab = $0 }
+        )
+
+        TabView(selection: tabSelection) {
             NavigationStack {
                 InboxScreen()
                     .contextualTip(.inbox)
@@ -184,6 +199,14 @@ struct RootView: View {
             quickActions.configure(context: modelContext)
             downloads.configure(context: modelContext)
             settings.configure(context: modelContext)
+            // Seed the launch tab from the now-loaded preference exactly once, so
+            // the saved Launch screen choice is honored on cold launch (#492).
+            // Only applies while the user hasn't already navigated; it never
+            // re-asserts on later settings loads, leaving mid-session tab
+            // switching and notification routing to Library intact.
+            if selectedTab == nil {
+                selectedTab = RootTab(launchScreen: settings.launchScreen)
+            }
             tips.configure(context: modelContext)
             ExpirationService(context: modelContext).runExpiration()
             StatsRepository(context: modelContext).applyRetention(days: settings.historyRetentionDays)
@@ -301,6 +324,18 @@ struct RootView: View {
         }
     }
 
+    // MARK: Launch tab (#492)
+
+    /// The launch tab resolved straight from persisted settings, read
+    /// synchronously so the very first render already shows the user's chosen tab
+    /// rather than flashing Inbox and jumping (#492). `settings.launchScreen` is
+    /// still the default at first body evaluation (it loads in `.task`), so this
+    /// reads ``AppSettingsStore`` directly. Consulted only while `selectedTab` is
+    /// nil — a handful of launch renders — after which the seeded value is used.
+    private var resolvedLaunchTab: RootTab {
+        RootTab(launchScreen: AppSettingsStore(context: modelContext).launchScreen())
+    }
+
     // MARK: Migration state restore (#426)
 
     /// Overlays the user's Flutter per-episode state (played / inbox / position)
@@ -394,9 +429,22 @@ struct RootView: View {
 }
 
 /// The five root tabs. Backs the `TabView` selection so notification routing can
-/// switch to Library programmatically (#72).
-private enum RootTab: Hashable {
+/// switch to Library programmatically (#72). Internal (not private) so the
+/// launch-screen mapping is unit-testable (#492).
+enum RootTab: Hashable {
     case inbox, queue, library, downloads, settings
+
+    /// Maps a persisted ``LaunchScreen`` preference to the tab Earshot opens on
+    /// cold launch (#492). `LaunchScreen` has no Settings case, so every case
+    /// maps to its matching content tab.
+    init(launchScreen: LaunchScreen) {
+        switch launchScreen {
+        case .inbox: self = .inbox
+        case .queue: self = .queue
+        case .library: self = .library
+        case .downloads: self = .downloads
+        }
+    }
 }
 
 /// Per-tab chrome: the restore-progress banner inset above the content (top) and
