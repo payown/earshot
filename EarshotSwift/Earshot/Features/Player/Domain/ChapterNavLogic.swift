@@ -54,4 +54,15 @@ enum ChapterNavLogic {
         let previous = currentIndex - 1
         return previous >= 0 ? previous : 0
     }
+
+    /// Whether the visible Previous/Next chapter buttons that flank the chapter
+    /// name in the player should be shown (#515).
+    ///
+    /// Shown only when the episode actually has chapters AND the user hasn't
+    /// turned the buttons off in Settings. Hiding them never removes chapter
+    /// navigation: the chapter-name button and the artwork VoiceOver rotor keep
+    /// their own Previous/Next actions regardless of this setting.
+    static func shouldShowNavButtons(chapterCount: Int, settingEnabled: Bool) -> Bool {
+        chapterCount > 0 && settingEnabled
+    }
 }

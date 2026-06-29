@@ -254,7 +254,10 @@ struct NowPlayingScreen: View {
     /// (#515). Gated on `chapterCount > 0` for safety, though the enclosing
     /// `currentChapterTitle` check already implies it.
     private var showChapterNavButtons: Bool {
-        player.chapterCount > 0 && settings.chapterNavButtonsVisible
+        ChapterNavLogic.shouldShowNavButtons(
+            chapterCount: player.chapterCount,
+            settingEnabled: settings.chapterNavButtonsVisible
+        )
     }
 
     /// The current-chapter name as a button opening ``ChapterListView`` (#509).
