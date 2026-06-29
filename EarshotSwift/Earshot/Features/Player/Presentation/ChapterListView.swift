@@ -206,20 +206,27 @@ private struct ChapterListRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // One element for the whole row. The seek is the primary (double-tap)
-        // action; the include/skip toggle is a rotor action on the same element,
-        // so the row is a single VoiceOver stop.
-        .accessibilityElement(children: .ignore)
+        // One VoiceOver stop for the whole row. The outer Button is already a
+        // single accessibility element and keeps its own tap as the primary
+        // (double-tap) action = jump — the proven EpisodeRow pattern (#479). The
+        // sighted include/skip control is `.accessibilityHidden`, so it is not a
+        // second stop. We deliberately do NOT add
+        // `.accessibilityElement(children: .ignore)`: wrapping the Button in a
+        // synthesized element can drop the Button's own activation (the
+        // documented "tap widget inside an outer a11y element" trap), leaving the
+        // double-tap with no primary action. Overriding the label on the Button
+        // is sufficient and keeps activation intact.
         .accessibilityLabel(state.accessibilityLabel(
             number: number,
             title: chapter.title,
             spokenTime: BookmarkLogic.spoken(Int(chapter.startTime))
         ))
         .accessibilityHint("Jumps to this chapter")
-        .accessibilityAddTraits(.isButton)
         // `.isSelected` is the standard list "current item" trait — VoiceOver
         // says "Selected". Carries the current-chapter state without a value node.
         .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
+        // Include/skip is a rotor action on the SAME element, so it costs no
+        // extra flick. The engine announces the result; we do not re-announce.
         .accessibilityAction(named: Text(state.toggleActionName), onToggleSkip)
     }
 }
