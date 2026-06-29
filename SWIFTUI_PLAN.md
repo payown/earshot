@@ -476,6 +476,29 @@ The SwiftUI side is built and waiting.
   "Unfollowed X" only on a `true` result. `SubscriptionsView`, the search row, and
   the preview now share this one path; #500's unfollow-from-search half is delivered.
 
+- **Directory search "result N of M" position context + native scroll bar (#501).**
+  Robin (VoiceOver) found stepping through long directory result lists one swipe at a
+  time slow with no sense of size or place. Decision (Michael): rely on the SYSTEM
+  VoiceOver vertical scroll bar (touch the far-right edge → "vertical scroll bar,
+  adjustable", swipe up/down ≈10%) rather than building a custom scrollbar or an A–Z
+  index (an alphabetical index was explicitly rejected — it would destroy iTunes
+  relevance ordering). The results already render in a `List` with default scroll
+  indicators and nothing suppresses them (no `.scrollIndicators(.hidden)` exists in
+  the codebase), so the affordance is present without code change — confirmed by code
+  inspection; the actual gesture is device-VoiceOver-only and noted for Michael to
+  verify. On top of that, each directory row's `accessibilityValue` now carries
+  "result N of M" position-in-set context via the pure `SearchResultPosition` helper
+  (`Features/Search/Domain/`). It composes cleanly with #499's subscribed state: a
+  subscribed row reads "Following, result 4 of 50", an un-subscribed one
+  "result 4 of 50" — the value is now always non-empty (no dead-air pause) and the
+  title stays in the label. The `ForEach` enumerates the already-materialized
+  `[PodcastSearchResult]` (max ~50, not a `@Query`) so index/count follow displayed
+  relevance order. The settled-result count announcement (from #499) was moved to the
+  same helper (`countAnnouncement`) for testability, keeping its deduped/polite
+  once-per-query behavior. The removed `SubscribedValue` modifier is superseded by the
+  always-present value. Position/count formatting is unit-tested
+  (`SearchResultPositionTests`).
+
 ## Networking Decisions
 
 - **#381 Background feed refresh + 15-min skip window.** Registered a
@@ -1371,3 +1394,43 @@ Release build clean.
 Feature suggestions identified: none this round.
 
 New agents created: none. Overall: PASS.
+
+## Security Review — Issue #501
+
+earshot-security review complete. Branch `feat/issue-501-search-nav-aid`. Scope =
+diff vs the #499 branch: `SearchResultPosition.swift` (new pure helper),
+`SearchView.swift` (row value + count announcement now route through the helper;
+`ForEach` enumerates the materialized `[PodcastSearchResult]`), `OnboardingView.swift`
+(comment-only — two stale `SubscribedValue` doc references updated), and
+`SearchResultPositionTests.swift` (+13 tests).
+
+Checklist:
+- [x] Force-unwraps: PASS — none in any changed file. Helper is pure `min`/`max`
+  arithmetic; SearchView changes add no `!`.
+- [x] Silent try?: PASS — no new `try?`. The pre-existing `try? await Task.sleep`
+  is unchanged and canonical (throws only on cancellation, checked next line).
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new closures. The directory `Task` lives in a value-type
+  SwiftUI View (no self cycle) and is cancelled in `.onDisappear`. Unchanged here.
+- [x] @MainActor: PASS — `announceDirectory` is `@MainActor`; the changed call passes a
+  pure String. No new off-main UI-state mutation; no SwiftData @Model background access.
+- [x] IS_BETA_BUILD Release build: PASS (build) / N/A (guard) — no migration files;
+  no IS_BETA_BUILD in changed code or project.yml Release. xcodegen regen = no pbxproj
+  drift. Release build, iPhone 17 sim: ** BUILD SUCCEEDED **.
+- [x] Entitlements: N/A — no entitlement/project.yml entitlement changes.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new error types introduced.
+- [x] AppLog coverage: PASS — no new catch blocks; existing subscribe() catch logs
+  AppLog.networking.
+
+Index/total mapping (user-facing a11y focus): `phrase(index:total:)` clamps into
+`1...max(total,1)` — traced negative index (→1), overflow (99→50), and total<=0 (→1).
+Pure arithmetic, no array indexing, so an out-of-range index cannot crash; worst case
+is a clamped but well-formed phrase. Off-by-one correct (zero-based +1 → one-based;
+last row == total). `rowValue` composes position after #499's "Following" state and is
+never empty in either state. `countAnnouncement` handles singular/plural explicitly,
+replacing the iOS inflect markup with testable logic. All 13 tests trace correctly.
+
+Feature suggestions identified: none this review.
+
+No fixes required; no commits made to the branch. Overall: PASS.
