@@ -6,12 +6,10 @@ struct PlayerControlsSheet: View {
     @Environment(PlayerService.self) private var player
     @Environment(\.dismiss) private var dismiss
 
-    @State private var chapters: [Chapter] = []
-    @State private var loadingChapters = true
-    // Local mirror of the engine's in-memory skipped-chapter set, keyed by chapter
-    // index, so toggling re-renders rows immediately (the engine map isn't an
-    // observed property). Seeded from the engine when chapters load.
-    @State private var skipState: [Int: Bool] = [:]
+    // Opens the shared chapter list (#509). The controls sheet and the Now
+    // Playing chapter line present the SAME ``ChapterListView`` so there is one
+    // chapter UI, not two divergent ones.
+    @State private var showingChapters = false
 
     private var sleepTimer: SleepTimerController { player.sleepTimer }
 
@@ -36,7 +34,9 @@ struct PlayerControlsSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .task { await loadChapters() }
+            .sheet(isPresented: $showingChapters) {
+                ChapterListView()
+            }
         }
     }
 
@@ -118,120 +118,30 @@ struct PlayerControlsSheet: View {
 
     // MARK: Chapters
 
+    /// Entry point to the shared chapter list (#509). The full list — jump,
+    /// include/skip toggles, current-chapter marker — lives in
+    /// ``ChapterListView``, reachable from here and from the Now Playing chapter
+    /// line. `chapterCount` is an observed engine property (the engine loads
+    /// chapters on episode load), so this stays in sync without re-loading here.
     @ViewBuilder
     private var chaptersSection: some View {
         Section("Chapters") {
-            if loadingChapters {
-                HStack(spacing: Spacing.sm) {
-                    ProgressView()
-                    Text("Loading chapters…").foregroundStyle(.secondary)
+            if player.chapterCount > 0 {
+                Button {
+                    showingChapters = true
+                } label: {
+                    LabeledContent("Chapters", value: "\(player.chapterCount)")
+                        .frame(minHeight: Spacing.minTouchTarget)
+                        .contentShape(Rectangle())
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Loading chapters")
-            } else if chapters.isEmpty {
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Chapters")
+                .accessibilityValue("\(player.chapterCount)")
+                .accessibilityHint("Opens the chapter list to jump or skip chapters")
+            } else {
                 Text("No chapters for this episode.")
                     .foregroundStyle(.secondary)
-            } else {
-                ForEach(chapters) { chapter in
-                    chapterRow(chapter)
-                }
             }
         }
-    }
-
-    private func chapterRow(_ chapter: Chapter) -> some View {
-        let isCurrent = activeChapterIndex == chapter.index
-        let isSkipped = skipState[chapter.index] ?? player.isChapterSkipped(chapter)
-        return Button {
-            player.seek(to: chapter.startTime)
-            Announcer.announce("Playing \(chapter.title)")
-        } label: {
-            HStack(spacing: Spacing.md) {
-                Image(systemName: isCurrent ? "play.circle.fill" : "circle")
-                    .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text(chapter.title)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                    Text(SleepTimerLogic.clock(chapter.startTime))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Spacer(minLength: Spacing.sm)
-                // Visible "skip" indicator so the state isn't color-only: a filled
-                // forward-slash icon when this chapter will be auto-skipped.
-                if isSkipped {
-                    Image(systemName: "forward.end.alt.fill")
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                }
-            }
-            .frame(minHeight: Spacing.minTouchTarget)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button {
-                toggleSkip(chapter)
-            } label: {
-                Label(isSkipped ? "Don't skip" : "Skip", systemImage: isSkipped ? "play.circle" : "forward.end.alt")
-            }
-            .tint(isSkipped ? .gray : .orange)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(chapterAccessibilityLabel(chapter, isSkipped: isSkipped))
-        .accessibilityHint("Jumps to this chapter")
-        // The skip toggle is offered to VoiceOver as a custom action (rotor),
-        // mirroring the swipe action for sighted users.
-        .accessibilityAction(named: isSkipped ? "Don't skip this chapter" : "Skip this chapter") {
-            toggleSkip(chapter)
-        }
-        // `.isSelected` is the standard list "current item" trait — VoiceOver says
-        // "Selected". No empty-string value (that registers a node VO reads as a
-        // pause); the trait alone carries the current-chapter state.
-        .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
-    }
-
-    /// VoiceOver name for a chapter row, folding in the skipped state as words so
-    /// it isn't conveyed by the trailing icon alone.
-    private func chapterAccessibilityLabel(_ chapter: Chapter, isSkipped: Bool) -> String {
-        let base = "\(chapter.title), \(BookmarkLogic.spoken(Int(chapter.startTime)))"
-        return isSkipped ? "\(base), set to skip" : base
-    }
-
-    /// Flips the skipped state in the engine and mirrors it locally so the row
-    /// re-renders immediately (the engine map isn't observed).
-    private func toggleSkip(_ chapter: Chapter) {
-        let nowSkipped = player.toggleChapterSkipped(chapter)
-        skipState[chapter.index] = nowSkipped
-    }
-
-    private var activeChapterIndex: Int? {
-        chapters.activeChapterIndex(at: player.currentPositionSeconds)
-    }
-
-    private func loadChapters() async {
-        guard let episode = player.nowPlayingEpisode else {
-            chapters = []
-            loadingChapters = false
-            return
-        }
-        loadingChapters = true
-        let found = await ChapterService().chapters(
-            chapterURL: episode.chapterURL,
-            audioURL: episode.audioURL,
-            descriptionHTML: episode.episodeDescription
-        )
-        chapters = found
-        // Hand the list to the engine so auto-skip can evaluate the active
-        // chapter on each tick, and seed the local skip mirror from any state
-        // already set this session.
-        player.setChapters(found)
-        skipState = Dictionary(
-            uniqueKeysWithValues: found.map { ($0.index, player.isChapterSkipped($0)) }
-        )
-        loadingChapters = false
     }
 }

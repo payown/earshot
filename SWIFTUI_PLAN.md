@@ -262,6 +262,29 @@ The SwiftUI side is built and waiting.
 
 ## UI Decisions
 
+- **Chapter list is ONE shared component, ONE VoiceOver stop per row (#509).**
+  `ChapterListView` is a standalone modal sheet reached from BOTH the Now Playing
+  current-chapter line (the #508 seam, now a button) and the controls sheet's
+  Chapters section, so there is one chapter UI rather than two divergent ones.
+  Adopts Michael's "included by default, deselect to skip" framing over the old
+  "Skip" verb: every chapter shows a checkmark (included); deselecting marks it
+  skipped via the existing in-memory engine (`PlayerService.toggleChapterSkipped`,
+  #373) — no skip engine was rebuilt. Each row is a single accessibility element
+  (`.accessibilityElement(children: .ignore)`): the **primary** action (VoiceOver
+  double-tap / sighted tap) seeks + resumes from that chapter; the include/skip
+  toggle is a **rotor** action (`.accessibilityAction(named:)`) whose label
+  reflects state ("Skip this chapter" / "Include this chapter"). The visible
+  sighted checkmark/slash toggle is a real `Button` but `.accessibilityHidden(true)`
+  so it adds NO second stop — a 20-chapter list stays ~20 flicks. State is never
+  color-only: a leading now-playing marker, a "Now playing"/"Skipped" status word,
+  and strikethrough on skipped titles carry it visibly, and the combined a11y
+  label folds "now playing"/"skipped" into words. The engine map isn't observed,
+  so the view mirrors skip state locally for immediate re-render (same idiom the
+  controls sheet used). The (included/skipped/now-playing) -> label/indicator
+  mapping is extracted to the pure, unit-tested `ChapterRowState`. The controls
+  sheet's old inline chapters Section is replaced by a single button that opens
+  the same `ChapterListView`. Skip memory stays per-session (resets on restart).
+
 - **Inbox-row "Unfollow this podcast" is a single trailing swipe action, not a
   second explicit rotor source (#500).** Inbox episode rows let a user unfollow the
   owning show (`episode.podcast`) straight from the inbox, via the centralized
