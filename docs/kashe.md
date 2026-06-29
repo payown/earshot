@@ -296,6 +296,16 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   downloaded file once saved, so chapters finally appear on her years-old tech
   show. Reinforces her default skepticism ("a thing that works in the demo and
   not in your hands") landing in trust when it actually delivers (Chapter 36)
+- The player now shows tap targets for chapter navigation: a Previous chapter
+  button to the LEFT of the chapter name and a Next chapter button to the RIGHT,
+  on by default. A new Settings > Playback > "Chapter navigation buttons" toggle
+  hides them for a cleaner player or for someone who prefers the artwork rotor
+  flick; hiding them never removes chapter navigation (the artwork rotor
+  Previous/Next chapter actions still work either way). Kashe had been working
+  the chapters from Chapters 35/36 by the rotor (find the action, fire it, two
+  steps); she tries the buttons, likes the fixed spot, and leaves them on while
+  keeping the rotor as the other option. A beat of the app giving her both and
+  letting her choose, in character with her independence (Chapter 37)
 
 ## What you can generate
 
@@ -1180,6 +1190,26 @@ This build it's there. Same show, same Play, and the list came up full. The segm
 The pieces had been inside the file the whole time. The app just hadn't been reading them. Now it does, even while it's pulling the show down over the air, and still does once it's saved to her phone.
 
 She flicked to the part she always skips, told it to step over, and let the rest run.
+
+### Chapter 37 — Build 137
+
+*Kashe has been moving through chapters by the VoiceOver rotor; this build puts plain Previous and Next buttons right beside the chapter name, and lets her hide them if she'd rather not.*
+
+**What to test:**
+
+Play a show with chapters (one of the chaptered shows from the last couple of builds works). In the player, a chaptered show now shows a Previous chapter button to the LEFT of the chapter name and a Next chapter button to the RIGHT. Tap them to jump back or forward a chapter.
+
+These buttons are on by default.
+
+If you'd rather move through chapters with the VoiceOver rotor on the artwork, or just want a cleaner player, go to Settings, Playback, "Chapter navigation buttons" and turn it off to hide them.
+
+Hiding the buttons never takes chapter navigation away. The artwork rotor Previous chapter / Next chapter actions still work whether the buttons show or not.
+
+She'd been moving through her interview show by the rotor, flicking on the artwork to find Previous or Next chapter, then flicking again to fire it. It worked. It was a couple of steps, every time.
+
+This build set two buttons right next to the chapter name. Previous on the left, Next on the right, a fixed spot she could land on and press, no digging through the rotor for the action first. She tried them a few mornings. Liked knowing exactly where they sat.
+
+Then she went into Settings, Playback, and found the switch that hides them. Thought about it. Left it on. The rotor's still there under the artwork if she wants it, and now there's a button too. For once the app handed her both and let her keep whichever one her thumb went for.
 
 ---
 
