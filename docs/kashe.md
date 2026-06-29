@@ -262,6 +262,18 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   longer piles up unbounded in the Queue; the oldest auto-queued episodes are
   evicted to keep only the newest few. It never evicts the now-playing
   episode or anything she sent with Play next (Chapter 29) (Chapter 33)
+- In Search, Activating a result now opens a preview (description plus recent
+  episodes) instead of following on the spot, and Follow is a real toggle that
+  flips to Unfollow; this lets Kashe look before she leaps instead of every tap
+  adding another show to her pile (the over-subscribing thread, Chapters 1, 8,
+  19). Search results announce "result N of M," speak a count when they settle,
+  and expose the native iOS VoiceOver vertical scroll bar. She can now Unfollow
+  a show straight from an Inbox row swipe (with a confirm), removing the show
+  and its episodes without a trip to settings, which finally makes the pruning
+  she's put off for years easy. Renata again mentions a show in passing, the way
+  she did in Chapter 8. Queue rows now show "X min left" / full length too,
+  completing the Chapter 33 time-remaining feature that had missed the Queue
+  (Chapter 34)
 
 ## What you can generate
 
@@ -1078,6 +1090,30 @@ She'd set it to open on the Queue ages ago (Chapter 9), back when one extra tap 
 Then the thing she hadn't caught. Her news show posts three times a day and she keeps just the latest in her inbox (Chapter 19). But the queue had been hoarding. Every newscast it auto-added stayed, a little stack of yesterday's and the day before's, stale by the time she reached them. Now the queue holds the same line: newest few, the old ones fall off on their own. It won't touch the one that's playing, and it leaves alone anything she sent with Play next (Chapter 29).
 
 And the rows started telling her time. Not just a title now, but how long, and on the ones she's partway into, how much is left. "Twelve minutes left." She reads the queue before a stop and knows what fits in the driveway and what waits for the road. VoiceOver says it too, with a quick line on what each one's about, before she's opened a thing.
+
+### Chapter 34 — Build 134
+
+*Renata mentions a show again, and for once Kashe gets to look before she leaps, then drops one she never meant to follow without leaving her inbox.*
+
+**What to test:**
+
+In Search, find a podcast and Activate it (double-tap). It should open a preview with the show's description and recent episodes, not follow it on the spot. "Follow" is now a real toggle: follow it and the button reads "Unfollow." With VoiceOver, focus a result, use the rotor "Follow" action ("Now following X"), then it reads "Unfollow."
+
+Swipe an Inbox row and choose "Unfollow this podcast." Confirm when asked. It removes the whole show and its episodes. VoiceOver users reach it as a rotor action.
+
+In Search results, each result announces "result N of M," and a count is spoken when results settle. Touch the far-right edge of the list for the native iOS vertical scroll bar ("vertical scroll bar, adjustable") and flick up or down to jump about ten percent. If you use VoiceOver, please confirm that right-edge gesture on your device.
+
+Queue rows now show "X min left" or full length, spoken and visible, matching the other lists.
+
+Renata mentioned a show again. Easy, the way she does, like it costs nothing, knowing exactly where it lands on Kashe's pile.
+
+This time Kashe searched it instead of following on faith. She found it in the results and double-tapped, braced for the old thing where a tap meant she'd already followed, one more name on the heap. Instead it opened. The description, the last few episodes, room to decide. She read a bit, heard what it was, and then chose. Follow. The button turned to Unfollow, plain, like it had been waiting for her to mean it.
+
+The results read themselves out now too. Result four of nine, so she knew how far down she was instead of swiping into the dark.
+
+And the other end of it, the pruning she's put off for years, got easier. A show she'd followed on a whim turned up in her inbox and she swiped the row. Unfollow this podcast. Gone, show and episodes both, no trip to a settings screen to find the door.
+
+She didn't clean up the whole list. She never does. But she followed one on purpose and dropped one without a fight, same morning. For her that's new.
 
 ---
 
