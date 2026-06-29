@@ -247,6 +247,21 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   "Queue, N items," matching the Inbox tab's count (Chapter 22), so she can
   tell how deep the queue is from the tab bar without opening it; no stray
   extra number when flicking past (Chapter 32)
+- Her Default launch screen choice (Queue, set back in Chapter 9) had quietly
+  regressed to always opening on the Inbox; she'd been flicking over to the
+  Queue on every cold launch without thinking. This build honors the chosen
+  launch tab again (Chapter 33)
+- Episode rows now show time on them: "X min left" for an episode she's
+  started, or the full length for one she hasn't, in Queue, Inbox, and
+  Library. She reads it to plan what fits before a stop (Chapter 33)
+- VoiceOver now speaks a brief one-sentence summary of each episode as she
+  navigates the rows (after title, show, and time), broader than the
+  inbox-only spoken preview from Chapter 17 (Chapter 33)
+- The per-podcast inbox cap (Chapter 19) now also caps the Queue: a show
+  capped in its Inbox settings (e.g. her thrice-daily news show kept to 1) no
+  longer piles up unbounded in the Queue; the oldest auto-queued episodes are
+  evicted to keep only the newest few. It never evicts the now-playing
+  episode or anything she sent with Play next (Chapter 29) (Chapter 33)
 
 ## What you can generate
 
@@ -1043,6 +1058,26 @@ This build leads with the title. Inbox, Queue, Library, Downloads, Settings, eac
 And the Queue tab finally carries its number. The Inbox tab has told her how much was waiting for a while now (Chapter 22). The Queue never did, so she'd open it just to find out how deep the morning was. Now the count rides on the tab, said once, clean. She can tell from the bar whether it's two things or twelve before she goes in.
 
 Small ones, both. But she touches that bar more than anything else she owns.
+
+### Chapter 33 — Build 133
+
+*Kashe's app finally opens where she told it to, the queue stops hoarding stale newscasts, and every row tells her how much time is left.*
+
+**What to test:**
+
+Set Settings, General, Default launch screen to Queue (or anything but Inbox). Force-quit Earshot and open it cold. It should open to the screen you picked, not always Inbox.
+
+In Queue, Inbox, and Library, each episode row now shows time: "X min left" on one you've started, or the full length on one you haven't. Check the number matches where you are.
+
+With VoiceOver, flick through episode rows. After the title, show, and time, you should hear a short one-sentence summary of the episode.
+
+If you cap a show in its Inbox settings (say a news show kept to 1), its auto-queued episodes shouldn't pile up forever in the Queue. The oldest auto-queued ones drop off so only the newest stay. It won't remove the episode that's playing, or anything you sent with Play next.
+
+She'd set it to open on the Queue ages ago (Chapter 9), back when one extra tap a day was worth fixing. Somewhere along the way it forgot. Cold launch kept dropping her on the Inbox, and she'd flick over to the Queue without thinking, the way you re-tuck a shirt. This build it lands where she told it. Queue, first thing, no detour.
+
+Then the thing she hadn't caught. Her news show posts three times a day and she keeps just the latest in her inbox (Chapter 19). But the queue had been hoarding. Every newscast it auto-added stayed, a little stack of yesterday's and the day before's, stale by the time she reached them. Now the queue holds the same line: newest few, the old ones fall off on their own. It won't touch the one that's playing, and it leaves alone anything she sent with Play next (Chapter 29).
+
+And the rows started telling her time. Not just a title now, but how long, and on the ones she's partway into, how much is left. "Twelve minutes left." She reads the queue before a stop and knows what fits in the driveway and what waits for the road. VoiceOver says it too, with a quick line on what each one's about, before she's opened a thing.
 
 ---
 
