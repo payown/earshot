@@ -296,8 +296,14 @@ struct SearchView<HeaderContent: View>: View {
                         .accessibilityHint("Retry searching the iTunes podcast directory")
                     }
                 case .results(let results):
-                    ForEach(results) { result in
-                        directoryRow(result)
+                    // Enumerate so each row knows its one-based position and the
+                    // total, for the "result N of M" VoiceOver value (#501). The
+                    // index/count follow the displayed relevance order. `results`
+                    // is a plain in-memory array (max ~50 iTunes hits), not a
+                    // SwiftData `@Query`, so `enumerated()` here doesn't defeat
+                    // lazy `@Query` rendering.
+                    ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
+                        directoryRow(result, index: index, total: results.count)
                     }
                 }
             }
@@ -318,7 +324,12 @@ struct SearchView<HeaderContent: View>: View {
     /// `.default` action navigates, and the toggle is exposed as a named action —
     /// keeping Activate and Follow genuinely separate. Sighted users still get two
     /// real tap targets: the row body navigates, the trailing button toggles.
-    private func directoryRow(_ result: PodcastSearchResult) -> some View {
+    ///
+    /// `index` (zero-based) and `total` drive the "result N of M" position context
+    /// in the row's accessibility value (#501), composed after the "Following"
+    /// state so a subscribed row reads "Following, result 4 of 50" and an
+    /// un-subscribed one "result 4 of 50".
+    private func directoryRow(_ result: PodcastSearchResult, index: Int, total: Int) -> some View {
         let subscribed = isSubscribed(result)
         let toggleLabel = FollowToggle.actionLabel(subscribed: subscribed)
         return HStack(spacing: Spacing.md) {
@@ -347,9 +358,13 @@ struct SearchView<HeaderContent: View>: View {
         .accessibilityLabel([result.title, result.author].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Opens this podcast")
-        // Only set a value when there's something to say. An empty
-        // accessibilityValue("") is spoken as a pause (dead air) in VoiceOver.
-        .modifier(SubscribedValue(subscribed: subscribed))
+        // Value carries "result N of M" position-in-set context (#501), prefixed
+        // with "Following, " when subscribed. The phrase is always present, so the
+        // value is never empty in either state — no VoiceOver dead-air pause — and
+        // the title stays in the label above, never buried in the value.
+        .accessibilityValue(
+            SearchResultPosition.rowValue(subscribed: subscribed, index: index, total: total)
+        )
         // Default action = Activate (double-tap): navigate, never follow.
         .accessibilityAction { openDetail(result) }
         // Single follow control, a toggle that reads "Follow" / "Unfollow".
@@ -447,7 +462,7 @@ struct SearchView<HeaderContent: View>: View {
                 announceDirectory("No podcasts found in the directory")
             case .results(let results):
                 directoryState = .results(results)
-                announceDirectory("^[\(results.count) directory result](inflect: true)")
+                announceDirectory(SearchResultPosition.countAnnouncement(results.count))
             case .failure:
                 directoryState = .failed
                 announceDirectory("Couldn't search the directory. Check your connection.")
@@ -523,21 +538,6 @@ private struct SearchFieldFocus: ViewModifier {
                         focused = true
                     }
                 }
-        } else {
-            content
-        }
-    }
-}
-
-/// Applies an `accessibilityValue` only when the podcast is subscribed. Omitting
-/// the modifier entirely (rather than passing "") avoids VoiceOver speaking an
-/// empty value as a pause on every not-yet-subscribed directory row.
-private struct SubscribedValue: ViewModifier {
-    let subscribed: Bool
-
-    func body(content: Content) -> some View {
-        if subscribed {
-            content.accessibilityValue("Following")
         } else {
             content
         }

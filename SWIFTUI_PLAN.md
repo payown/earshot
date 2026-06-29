@@ -458,6 +458,29 @@ The SwiftUI side is built and waiting.
   "Unfollowed X" only on a `true` result. `SubscriptionsView`, the search row, and
   the preview now share this one path; #500's unfollow-from-search half is delivered.
 
+- **Directory search "result N of M" position context + native scroll bar (#501).**
+  Robin (VoiceOver) found stepping through long directory result lists one swipe at a
+  time slow with no sense of size or place. Decision (Michael): rely on the SYSTEM
+  VoiceOver vertical scroll bar (touch the far-right edge → "vertical scroll bar,
+  adjustable", swipe up/down ≈10%) rather than building a custom scrollbar or an A–Z
+  index (an alphabetical index was explicitly rejected — it would destroy iTunes
+  relevance ordering). The results already render in a `List` with default scroll
+  indicators and nothing suppresses them (no `.scrollIndicators(.hidden)` exists in
+  the codebase), so the affordance is present without code change — confirmed by code
+  inspection; the actual gesture is device-VoiceOver-only and noted for Michael to
+  verify. On top of that, each directory row's `accessibilityValue` now carries
+  "result N of M" position-in-set context via the pure `SearchResultPosition` helper
+  (`Features/Search/Domain/`). It composes cleanly with #499's subscribed state: a
+  subscribed row reads "Following, result 4 of 50", an un-subscribed one
+  "result 4 of 50" — the value is now always non-empty (no dead-air pause) and the
+  title stays in the label. The `ForEach` enumerates the already-materialized
+  `[PodcastSearchResult]` (max ~50, not a `@Query`) so index/count follow displayed
+  relevance order. The settled-result count announcement (from #499) was moved to the
+  same helper (`countAnnouncement`) for testability, keeping its deduped/polite
+  once-per-query behavior. The removed `SubscribedValue` modifier is superseded by the
+  always-present value. Position/count formatting is unit-tested
+  (`SearchResultPositionTests`).
+
 ## Networking Decisions
 
 - **#381 Background feed refresh + 15-min skip window.** Registered a

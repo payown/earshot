@@ -164,9 +164,9 @@ struct OnboardingView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!hasPodcast)
                 // Only attach a hint when the button is disabled. Passing "" can be
-                // spoken as a pause (dead air) by VoiceOver, the same reason
-                // SubscribedValue avoids an empty accessibilityValue. When enabled,
-                // the "Start Listening" label is self-explanatory and needs no hint.
+                // spoken as a pause (dead air) by VoiceOver, so we omit the modifier
+                // entirely when there's nothing to say. When enabled, the
+                // "Start Listening" label is self-explanatory and needs no hint.
                 .modifier(DisabledHint(isDisabled: !hasPodcast,
                                        hint: "Add a podcast first to continue."))
             } else {
@@ -195,11 +195,11 @@ struct OnboardingView: View {
     }
 }
 
-/// Attaches an `accessibilityHint` only while the control is disabled. Mirrors
-/// `SubscribedValue` in SearchView: applying the modifier conditionally (rather
-/// than passing "" when there's nothing to say) avoids VoiceOver speaking an
-/// empty hint as a pause. A disabled button is announced as "dimmed" by
-/// VoiceOver, and this hint then explains how to enable it.
+/// Attaches an `accessibilityHint` only while the control is disabled. Applying
+/// the modifier conditionally (rather than passing "" when there's nothing to
+/// say) avoids VoiceOver speaking an empty hint as a pause. A disabled button is
+/// announced as "dimmed" by VoiceOver, and this hint then explains how to enable
+/// it.
 private struct DisabledHint: ViewModifier {
     let isDisabled: Bool
     let hint: String
