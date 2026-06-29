@@ -158,6 +158,34 @@ final class SubscriptionRepository {
         return podcast
     }
 
+    /// Unsubscribes from `podcast`: removes every folder membership first (the
+    /// `FolderMembership` → `Podcast` relationship has no cascade from the podcast
+    /// side, so a leftover row would dangle — see `FolderRepository.removeFromAllFolders`),
+    /// then deletes the podcast (its episodes cascade) and saves.
+    ///
+    /// Centralizes the unsubscribe path that previously lived inline in
+    /// `SubscriptionsView.unsubscribe` so search, the library, and the inbox all
+    /// share one implementation (#499/#500). Returns `true` when the delete saved,
+    /// `false` (logged) when the save threw, so the caller can decide whether to
+    /// announce success. This method does NOT post a VoiceOver announcement —
+    /// announcing is the presentation layer's job.
+    @discardableResult
+    func unsubscribe(_ podcast: Podcast) -> Bool {
+        let title = podcast.title
+        FolderRepository(context: context).removeFromAllFolders(podcast)
+        context.delete(podcast)
+        do {
+            try context.save()
+            AppLog.subscriptions.info("Unsubscribed from \(title, privacy: .public)")
+            return true
+        } catch {
+            AppLog.subscriptions.error(
+                "Failed to unsubscribe from \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+    }
+
     /// Re-fetches a feed and inserts only episodes not already present (by guid).
     /// Episodes newer than the high-water mark surface in the inbox; older ones
     /// are pre-dismissed. The high-water mark then advances to the newest seen.

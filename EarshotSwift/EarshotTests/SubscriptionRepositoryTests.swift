@@ -531,6 +531,63 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let added = await mock.addedRequests
         XCTAssertEqual(added.count, 1, "Notification delivered once by the foreground path; never lost")
     }
+
+    // MARK: Unsubscribe (#499/#500)
+
+    /// Unsubscribing deletes the podcast and cascades its episodes, so the store is
+    /// empty afterward and a fresh feed-URL lookup no longer finds it.
+    func testUnsubscribeRemovesPodcastAndEpisodes() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 1)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Episode>()).count, 2)
+
+        let ok = repo.unsubscribe(podcast)
+
+        XCTAssertTrue(ok, "A clean delete saves and reports success")
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 0)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Episode>()).count, 0, "Episodes cascade with the podcast")
+    }
+
+    /// Unsubscribing first removes folder memberships, so no dangling
+    /// `FolderMembership` row survives the podcast delete (the F2 no-cascade case).
+    func testUnsubscribeRemovesFolderMemberships() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        let folder = PodcastFolder(name: "News")
+        ctx.insert(folder)
+        FolderRepository(context: ctx).add(podcast, to: folder)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 1)
+
+        XCTAssertTrue(repo.unsubscribe(podcast))
+
+        XCTAssertEqual(
+            try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 0,
+            "Membership rows are removed before the podcast delete so none dangles"
+        )
+        // The folder itself survives an unsubscribe — only its membership is gone.
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<PodcastFolder>()).count, 1)
+    }
+
+    /// After unsubscribe the same feed URL can be subscribed again from scratch,
+    /// proving the unique-feedURL row was truly removed (the search re-follow path).
+    func testResubscribeAfterUnsubscribeSucceeds() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+
+        let first = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        XCTAssertTrue(repo.unsubscribe(first))
+        let second = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        XCTAssertNotEqual(first.persistentModelID, second.persistentModelID)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 1)
+    }
 }
 
 /// Local actor-isolated mock of ``NotificationScheduling`` for the foreground
