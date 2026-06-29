@@ -226,6 +226,24 @@ The SwiftUI side is built and waiting.
 
 ## UI Decisions
 
+- **Inbox-row "Unfollow this podcast" is a single trailing swipe action, not a
+  second explicit rotor source (#500).** Inbox episode rows let a user unfollow the
+  owning show (`episode.podcast`) straight from the inbox, via the centralized
+  `SubscriptionRepository.unsubscribe(_:)` (the same path Library and search use —
+  no inline delete). It's surfaced as one `.swipeActions(edge: .trailing,
+  allowsFullSwipe: false)` button with a `Label` (icon + text, never color alone).
+  A single swipe action covers BOTH populations: it's the visible affordance
+  sighted users expect, and SwiftUI automatically surfaces a swipe action to the
+  VoiceOver Actions rotor, so it lands in the same rotor as the row's episode Quick
+  Actions for VoiceOver users. We deliberately did **not** also append an
+  "Unfollow" item to `EpisodeRow`'s explicit `actions` array: a second source would
+  produce a duplicate rotor entry, and it would risk the existing episode Quick
+  Actions ordering. `allowsFullSwipe` is off so an over-swipe can't fast-path a
+  podcast-level delete — every path lands on a destructive `confirmationDialog`
+  whose wording/structure mirror Library's unfollow dialog ("Unfollow <title>?",
+  message spelling out the whole show leaves the library). Success announces
+  "Unfollowed <title>" only when the repo reports the delete saved; if the unfollow
+  empties the inbox, focus moves to the empty state (mirrors `clearInbox`).
 - **Tab screens read heading-first via inline title + `.principal` heading (#490).**
   A large `.navigationTitle` renders the title in the scrollable content area while
   toolbar items live in the bar chrome, which VoiceOver sweeps first — so a screen

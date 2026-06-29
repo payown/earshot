@@ -588,6 +588,37 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertNotEqual(first.persistentModelID, second.persistentModelID)
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 1)
     }
+
+    /// The inbox-unfollow path (#500): an inbox row reaches its owning show via
+    /// `episode.podcast` and hands THAT to the shared `unsubscribe(_:)`. Unfollowing
+    /// from one episode must remove the whole podcast, cascade its episodes, and
+    /// empty the inbox of every one of its episodes — not just the row swiped.
+    func testUnfollowFromInboxEpisodeRemovesOwningPodcastAndClearsItsInboxEpisodes() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        _ = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        // Both seeded episodes are sitting in the inbox before the unfollow.
+        let inboxBefore = InboxRepository(context: ctx).inboxEpisodes()
+        XCTAssertEqual(inboxBefore.count, 2)
+
+        // Take ONE inbox episode and resolve its owning show, exactly as the inbox
+        // row's swipe action does (`episode.podcast`), then unfollow that show.
+        let owningPodcast = try XCTUnwrap(inboxBefore.first?.podcast)
+        let removed = repo.unsubscribe(owningPodcast)
+
+        XCTAssertTrue(removed, "A clean delete saves and reports success")
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 0)
+        XCTAssertEqual(
+            try ctx.fetch(FetchDescriptor<Episode>()).count, 0,
+            "Every episode of the unfollowed show cascades away, not only the swiped row"
+        )
+        XCTAssertTrue(
+            InboxRepository(context: ctx).inboxEpisodes().isEmpty,
+            "The unfollowed show's episodes all leave the inbox"
+        )
+    }
 }
 
 /// Local actor-isolated mock of ``NotificationScheduling`` for the foreground
