@@ -418,6 +418,46 @@ The SwiftUI side is built and waiting.
   Settings toggles now share one source of truth. View-layer only — no model/schema
   change; the existing `QueueLogic.group` transform is reused as-is.
 
+- **Directory search rows: Activate navigates, a single Follow/Unfollow toggle is a
+  rotor action (#499).** The old `directoryRow` collapsed an HStack whose only
+  control was a Follow button with `children: .combine`, which made the row's default
+  Activate fire `subscribe`, and ALSO added a duplicate "Follow" rotor action calling
+  the same thing — so Activate and Follow were identical and nothing navigated. The
+  row is now one accessibility element built with `children: .ignore` (so the inner
+  navigate Button and Follow Button don't each make a VoiceOver stop), marked
+  `.isButton`, with a `.default` `accessibilityAction` that navigates and a SINGLE
+  named `accessibilityAction` whose label is `FollowToggle.actionLabel(subscribed:)`
+  ("Follow"/"Unfollow"). Sighted users still get two real tap targets (row body
+  navigates, trailing button toggles). Primary Activate routes through programmatic
+  `navigationDestination(item:)`: an un-subscribed hit opens the new read-first
+  `PodcastPreviewView`, an already-followed one routes to the existing
+  `EpisodeListView` (so subscribed results behave exactly as the local Podcasts
+  section). `PodcastSearchResult` gained `Hashable` to drive that item navigation.
+  The toggle's label/announcement text lives in the pure `FollowToggle` enum (unit-
+  tested); the announcements are "Now following X" / "Unfollowed X" via `Announcer`.
+
+- **`PodcastPreviewView` previews an UN-subscribed directory result (#499).** It is
+  NOT `EpisodeListView` (which needs a subscribed `Podcast` `@Model` and reads
+  `podcast.episodes` from the store). The preview takes a `PodcastSearchResult` and
+  uses `PodcastPreviewModel` (`@MainActor @Observable`) to fetch the feed once via
+  the existing `FeedFetching` abstraction — the same path the subscribe flow uses, so
+  no new network risk — exposing `.loading / .loaded(description, episodes) / .failed`
+  with explicit loading and error+retry states. It shows artwork, a heading title,
+  author, the feed description ("About" section), a few recent episodes (read-only
+  value-type `PreviewEpisode`s, newest-first, no store writes), and a prominent
+  borderedProminent Follow/Unfollow button (icon+label, 44pt, Dynamic Type) sharing
+  the same toggle + announcements. The model's `recentEpisodes(from:limit:)` and
+  `cleanedDescription(_:)` are pure and unit-tested. Recent-episodes-in-preview WAS
+  included (the `FeedFetching` path made it low-risk), not deferred.
+
+- **`SubscriptionRepository.unsubscribe(_:)` centralizes unsubscribe (#499/#500).**
+  The inline logic in `SubscriptionsView.unsubscribe` (removeFromAllFolders → delete
+  → save) moved to the repository as `@discardableResult func unsubscribe(_:) -> Bool`
+  (true when the save succeeded), with AppLog + error handling. It does NOT post the
+  VoiceOver announcement — that stays in the presentation layer, which announces
+  "Unfollowed X" only on a `true` result. `SubscriptionsView`, the search row, and
+  the preview now share this one path; #500's unfollow-from-search half is delivered.
+
 ## Networking Decisions
 
 - **#381 Background feed refresh + 15-min skip window.** Registered a

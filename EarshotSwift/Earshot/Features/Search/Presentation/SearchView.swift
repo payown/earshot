@@ -136,6 +136,10 @@ struct SearchView<HeaderContent: View>: View {
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
+    /// Programmatic navigation target for a directory row (#499). Set by the row's
+    /// primary tap and its VoiceOver Activate action alike, so both paths land on
+    /// the same destination.
+    @State private var directoryNavigation: DirectoryNavigation?
 
     private let itunes = ITunesSearchService()
 
@@ -211,6 +215,15 @@ struct SearchView<HeaderContent: View>: View {
         }
         .onDisappear { directoryTask?.cancel() }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
+        // Programmatic destination for a directory row's primary Activate / tap.
+        // An un-subscribed hit opens the lightweight preview; an already-subscribed
+        // one routes to the existing EpisodeListView (acceptance #4, #499).
+        .navigationDestination(item: $directoryNavigation) { destination in
+            switch destination {
+            case let .preview(result): PodcastPreviewView(result: result)
+            case let .subscribed(podcast): EpisodeListView(podcast: podcast)
+            }
+        }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
@@ -291,34 +304,83 @@ struct SearchView<HeaderContent: View>: View {
         }
     }
 
+    /// A directory result row with TWO distinct VoiceOver actions (#499):
+    ///
+    /// - Primary Activate (double-tap) opens the podcast: an un-subscribed hit goes
+    ///   to ``PodcastPreviewView`` to read about the show first; an already-followed
+    ///   one to the existing `EpisodeListView`. It does NOT follow.
+    /// - A single Follow / Unfollow rotor action toggles subscription, with the
+    ///   label reflecting current state and an announcement on completion.
+    ///
+    /// The whole row is collapsed into ONE accessibility element with
+    /// `children: .ignore`, so the inner navigate Button and Follow Button don't
+    /// each create their own VoiceOver stop. The element is marked a button, its
+    /// `.default` action navigates, and the toggle is exposed as a named action —
+    /// keeping Activate and Follow genuinely separate. Sighted users still get two
+    /// real tap targets: the row body navigates, the trailing button toggles.
     private func directoryRow(_ result: PodcastSearchResult) -> some View {
         let subscribed = isSubscribed(result)
+        let toggleLabel = FollowToggle.actionLabel(subscribed: subscribed)
         return HStack(spacing: Spacing.md) {
-            PodcastArtwork(urlString: result.artworkURL)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(result.title).font(.headline)
-                if let author = result.author {
-                    Text(author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Button {
+                openDetail(result)
+            } label: {
+                HStack(spacing: Spacing.md) {
+                    PodcastArtwork(urlString: result.artworkURL)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(result.title).font(.headline).lineLimit(2)
+                        if let author = result.author {
+                            Text(author).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                    Spacer(minLength: 0)
                 }
+                .contentShape(Rectangle())
             }
-            Spacer()
-            Button(subscribed ? "Following" : "Follow") { subscribe(result) }
+            .buttonStyle(.plain)
+
+            Button(toggleLabel) { toggleFollow(result) }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
-                .disabled(subscribed)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel([result.title, result.author].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Opens this podcast")
         // Only set a value when there's something to say. An empty
         // accessibilityValue("") is spoken as a pause (dead air) in VoiceOver.
         .modifier(SubscribedValue(subscribed: subscribed))
-        .accessibilityActions {
-            if !subscribed { Button("Follow") { subscribe(result) } }
-        }
+        // Default action = Activate (double-tap): navigate, never follow.
+        .accessibilityAction { openDetail(result) }
+        // Single follow control, a toggle that reads "Follow" / "Unfollow".
+        .accessibilityAction(named: Text(toggleLabel)) { toggleFollow(result) }
     }
 
     private func isSubscribed(_ result: PodcastSearchResult) -> Bool {
         podcasts.contains { $0.feedURL == result.feedURL }
+    }
+
+    /// Routes a directory row's primary tap / Activate: an already-followed show to
+    /// the existing episode list, an un-subscribed one to the read-first preview.
+    private func openDetail(_ result: PodcastSearchResult) {
+        if let existing = podcasts.first(where: { $0.feedURL == result.feedURL }) {
+            directoryNavigation = .subscribed(existing)
+        } else {
+            directoryNavigation = .preview(result)
+        }
+    }
+
+    /// Follow / Unfollow toggle for a directory row. The `@Query` updates
+    /// reactively, so the row's label, value, and rotor action flip on completion
+    /// without the user re-entering the row.
+    private func toggleFollow(_ result: PodcastSearchResult) {
+        if let existing = podcasts.first(where: { $0.feedURL == result.feedURL }) {
+            if SubscriptionRepository(context: context).unsubscribe(existing) {
+                Announcer.announce(FollowToggle.announcement(nowFollowing: false, title: result.title))
+            }
+        } else {
+            subscribe(result)
+        }
     }
 
     private func bookmarkRow(_ bookmark: Bookmark) -> some View {
@@ -409,7 +471,7 @@ struct SearchView<HeaderContent: View>: View {
         Task {
             do {
                 _ = try await SubscriptionRepository(context: context).subscribe(feedURL: result.feedURL)
-                Announcer.announce("Now following \(result.title)")
+                Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
             } catch {
                 AppLog.networking.error("Subscribe from search failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 Announcer.announce("Couldn't follow \(result.title)")
@@ -421,6 +483,15 @@ struct SearchView<HeaderContent: View>: View {
         if let url = URL(string: episode.audioURL) { return [episode.title, url] }
         return [episode.title]
     }
+}
+
+/// The destination a directory search row navigates to on its primary Activate /
+/// tap (#499). `Hashable` so it drives `navigationDestination(item:)`. An
+/// un-subscribed result opens the read-first ``PodcastPreviewView``; an
+/// already-followed one routes to the existing `EpisodeListView`.
+private enum DirectoryNavigation: Hashable {
+    case preview(PodcastSearchResult)
+    case subscribed(Podcast)
 }
 
 /// Optionally moves keyboard focus onto the `.searchable` field as the screen

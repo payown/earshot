@@ -185,13 +185,10 @@ struct SubscriptionsView: View {
 
     private func unsubscribe(_ podcast: Podcast) {
         let title = podcast.title
-        FolderRepository(context: context).removeFromAllFolders(podcast)
-        context.delete(podcast)
-        do {
-            try context.save()
+        // Centralized unsubscribe (removeFromAllFolders + delete + save). The repo
+        // logs failures; announce only on a successful delete (#499/#500).
+        if SubscriptionRepository(context: context).unsubscribe(podcast) {
             Announcer.announce("Unfollowed \(title)")
-        } catch {
-            AppLog.subscriptions.error("Failed to unsubscribe: \(error.localizedDescription, privacy: .public)")
         }
     }
 

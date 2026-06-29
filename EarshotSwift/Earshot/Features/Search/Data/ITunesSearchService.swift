@@ -1,7 +1,12 @@
 import Foundation
 
 /// A podcast found in the iTunes directory (for directory discovery in Search).
-struct PodcastSearchResult: Identifiable, Equatable, Sendable {
+///
+/// `Hashable` so it can drive value-based SwiftUI navigation
+/// (`navigationDestination(item:)`) to the podcast preview from a directory row's
+/// VoiceOver Activate action and a sighted tap alike (#499). Every stored
+/// property is a value type, so the conformance is synthesized.
+struct PodcastSearchResult: Identifiable, Equatable, Hashable, Sendable {
     let id: String
     let title: String
     let author: String?
