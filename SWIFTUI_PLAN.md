@@ -1376,3 +1376,43 @@ Release build clean.
 Feature suggestions identified: none this round.
 
 New agents created: none. Overall: PASS.
+
+## Security Review — Issue #501
+
+earshot-security review complete. Branch `feat/issue-501-search-nav-aid`. Scope =
+diff vs the #499 branch: `SearchResultPosition.swift` (new pure helper),
+`SearchView.swift` (row value + count announcement now route through the helper;
+`ForEach` enumerates the materialized `[PodcastSearchResult]`), `OnboardingView.swift`
+(comment-only — two stale `SubscribedValue` doc references updated), and
+`SearchResultPositionTests.swift` (+13 tests).
+
+Checklist:
+- [x] Force-unwraps: PASS — none in any changed file. Helper is pure `min`/`max`
+  arithmetic; SearchView changes add no `!`.
+- [x] Silent try?: PASS — no new `try?`. The pre-existing `try? await Task.sleep`
+  is unchanged and canonical (throws only on cancellation, checked next line).
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new closures. The directory `Task` lives in a value-type
+  SwiftUI View (no self cycle) and is cancelled in `.onDisappear`. Unchanged here.
+- [x] @MainActor: PASS — `announceDirectory` is `@MainActor`; the changed call passes a
+  pure String. No new off-main UI-state mutation; no SwiftData @Model background access.
+- [x] IS_BETA_BUILD Release build: PASS (build) / N/A (guard) — no migration files;
+  no IS_BETA_BUILD in changed code or project.yml Release. xcodegen regen = no pbxproj
+  drift. Release build, iPhone 17 sim: ** BUILD SUCCEEDED **.
+- [x] Entitlements: N/A — no entitlement/project.yml entitlement changes.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new error types introduced.
+- [x] AppLog coverage: PASS — no new catch blocks; existing subscribe() catch logs
+  AppLog.networking.
+
+Index/total mapping (user-facing a11y focus): `phrase(index:total:)` clamps into
+`1...max(total,1)` — traced negative index (→1), overflow (99→50), and total<=0 (→1).
+Pure arithmetic, no array indexing, so an out-of-range index cannot crash; worst case
+is a clamped but well-formed phrase. Off-by-one correct (zero-based +1 → one-based;
+last row == total). `rowValue` composes position after #499's "Following" state and is
+never empty in either state. `countAnnouncement` handles singular/plural explicitly,
+replacing the iOS inflect markup with testable logic. All 13 tests trace correctly.
+
+Feature suggestions identified: none this review.
+
+No fixes required; no commits made to the branch. Overall: PASS.
