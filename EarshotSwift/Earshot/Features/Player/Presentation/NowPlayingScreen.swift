@@ -19,6 +19,9 @@ struct NowPlayingScreen: View {
     @State private var showingNotes = false
     @State private var showingSpeedPicker = false
     @State private var showingBookmarks = false
+    // The full chapter list (#509), opened by activating the current-chapter
+    // display below the title. The same list is reachable from the controls sheet.
+    @State private var showingChapters = false
 
     // Export audio file (#371): the prepared local-file URL to share, and a flag
     // covering the download-then-share wait so the action can show progress and
@@ -103,6 +106,9 @@ struct NowPlayingScreen: View {
                 if let episode = player.nowPlayingEpisode {
                     BookmarksListView(episode: episode)
                 }
+            }
+            .sheet(isPresented: $showingChapters) {
+                ChapterListView()
             }
         }
         .task {
@@ -204,28 +210,36 @@ struct NowPlayingScreen: View {
     /// title as its value); the label updates silently as chapters change during
     /// playback (the engine announces only on MANUAL prev/next, never per tick).
     ///
-    /// #509: this line becomes a button that opens the full chapter list. For
-    /// #508 it stays a plain readable display.
+    /// #509: this line is a button that opens the full chapter list. Activating
+    /// it (VoiceOver double-tap / sighted tap) presents ``ChapterListView``.
     @ViewBuilder
     private var chapterRow: some View {
         if let title = player.currentChapterTitle {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "list.bullet")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
+            Button {
+                showingChapters = true
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "list.bullet")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity)
+            .buttonStyle(.plain)
             // Collapse into one node labeled "Chapter" whose value is the title,
-            // so VoiceOver reads "Chapter, <title>" rather than a stray icon stop.
+            // so VoiceOver reads "Chapter, <title>, button" rather than a stray
+            // icon stop. The hint tells the user what activating it does.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Chapter")
             .accessibilityValue(title)
+            .accessibilityHint("Opens the chapter list")
         }
     }
 
