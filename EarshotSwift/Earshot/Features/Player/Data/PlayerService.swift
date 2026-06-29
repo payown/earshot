@@ -30,6 +30,21 @@ final class PlayerService {
     /// Loaded episode duration in seconds, if known.
     var durationSeconds: Double = 0
 
+    /// Title of the active chapter for the loaded episode (#508). `nil` when the
+    /// episode has no chapters or playback is before the first chapter starts.
+    /// Updated from the per-tick handler, but only when the active chapter index
+    /// actually changes (so it doesn't thrash `@Observable` every tick). The
+    /// chapter ENGINE still reads the private `currentChapters`; this is the
+    /// observable surface the UI binds to.
+    var currentChapterTitle: String?
+    /// Index of the active chapter, paired with ``currentChapterTitle``. `nil`
+    /// under the same conditions. Manual previous/next navigate relative to this.
+    var currentChapterIndex: Int?
+    /// Number of chapters loaded for the current episode (0 when none). Observable
+    /// so the UI can decide whether to show the chapter line and prev/next
+    /// controls without reaching into the private `currentChapters`.
+    var chapterCount: Int = 0
+
     /// The sleep timer. Observed so the UI shows the live countdown; the player
     /// pauses when it fires.
     let sleepTimer = SleepTimerController()
@@ -252,6 +267,7 @@ final class PlayerService {
         // is keyed by guid so it survives the switch (and still resets on app
         // restart, which is the intended lifetime).
         currentChapters = []
+        resetChapterObservables()
         lastAutoSkipFromChapterIndex = nil
         isFastForwarding = false
         rateBeforeFastForward = nil
@@ -311,6 +327,7 @@ final class PlayerService {
         // Like the play() path, switching the loaded episode invalidates the
         // chapter list, the auto-skip loop guard, and any fast-forward scan.
         currentChapters = []
+        resetChapterObservables()
         lastAutoSkipFromChapterIndex = nil
         isFastForwarding = false
         rateBeforeFastForward = nil
@@ -670,6 +687,12 @@ final class PlayerService {
     func setChapters(_ chapters: [Chapter]) {
         currentChapters = chapters
         lastAutoSkipFromChapterIndex = nil
+        chapterCount = chapters.count
+        // Force a refresh: a fresh list means the cached index may now point at a
+        // different chapter (or none), so don't let updateCurrentChapter's
+        // same-index early-return keep a stale title.
+        currentChapterIndex = nil
+        updateCurrentChapter()
     }
 
     /// Resolves and installs the loaded episode's chapters in the engine so
@@ -698,7 +721,84 @@ final class PlayerService {
                   self.currentEpisode?.guid == guid else { return }
             self.currentChapters = found
             self.lastAutoSkipFromChapterIndex = nil
+            self.chapterCount = found.count
+            // A fresh list invalidates the cached index; clear it so the refresh
+            // below isn't suppressed by the same-index early-return.
+            self.currentChapterIndex = nil
+            self.updateCurrentChapter()
         }
+    }
+
+    /// Recomputes the observable ``currentChapterIndex`` / ``currentChapterTitle``
+    /// from the live position. Called from the per-tick handler and whenever a new
+    /// chapter list is installed. Cheap and idempotent: when the active chapter
+    /// index hasn't changed it returns without touching `@Observable` state, so it
+    /// can run every tick without churn (#508). Never announces — automatic
+    /// chapter changes during playback update the label silently; only MANUAL
+    /// previous/next announces (too chatty otherwise).
+    private func updateCurrentChapter() {
+        let activeIndex = currentChapters.activeChapterIndex(at: currentPositionSeconds)
+        guard activeIndex != currentChapterIndex else { return }
+        currentChapterIndex = activeIndex
+        if let activeIndex, currentChapters.indices.contains(activeIndex) {
+            currentChapterTitle = currentChapters[activeIndex].title
+        } else {
+            currentChapterTitle = nil
+        }
+    }
+
+    /// Clears the observable chapter surface on an episode switch (before the new
+    /// episode's chapters resolve). Paired with `currentChapters = []`.
+    private func resetChapterObservables() {
+        chapterCount = 0
+        currentChapterIndex = nil
+        currentChapterTitle = nil
+    }
+
+    /// Manual "Next chapter": seeks to the start of the chapter after the active
+    /// one, by index, regardless of the per-episode skip set (a manual override).
+    /// No-op when there are no chapters or already in the last chapter. Announces
+    /// the chapter landed on for VoiceOver.
+    func nextChapter() {
+        guard !currentChapters.isEmpty else { return }
+        let activeIndex = currentChapters.activeChapterIndex(at: currentPositionSeconds)
+        guard let target = ChapterNavLogic.nextIndex(
+            currentIndex: activeIndex,
+            count: currentChapters.count
+        ), currentChapters.indices.contains(target) else { return }
+        seekToChapter(at: target)
+    }
+
+    /// Manual "Previous chapter": follows the common podcast-player convention —
+    /// more than ``ChapterNavLogic/previousRestartThreshold`` seconds into the
+    /// current chapter restarts it, otherwise steps to the prior chapter. Clamped
+    /// at the first chapter (restarts it). No-op when there are no chapters.
+    /// Navigates by index regardless of the skip set; announces for VoiceOver.
+    func previousChapter() {
+        guard !currentChapters.isEmpty else { return }
+        let activeIndex = currentChapters.activeChapterIndex(at: currentPositionSeconds)
+        let withinChapter: Double
+        if let activeIndex, currentChapters.indices.contains(activeIndex) {
+            withinChapter = currentPositionSeconds - currentChapters[activeIndex].startTime
+        } else {
+            withinChapter = 0
+        }
+        guard let target = ChapterNavLogic.previousIndex(
+            currentIndex: activeIndex,
+            count: currentChapters.count,
+            positionWithinChapter: withinChapter
+        ), currentChapters.indices.contains(target) else { return }
+        seekToChapter(at: target)
+    }
+
+    /// Seeks to a chapter's start and announces it. Shared by manual prev/next.
+    /// `seek(to:)` updates `currentPositionSeconds` synchronously, so the
+    /// follow-up `updateCurrentChapter()` reflects the new chapter immediately.
+    private func seekToChapter(at index: Int) {
+        let chapter = currentChapters[index]
+        seek(to: chapter.startTime)
+        updateCurrentChapter()
+        Announcer.announce("Chapter: \(chapter.title)")
     }
 
     /// Whether `chapter` is currently marked skipped for the loaded episode.
@@ -842,6 +942,7 @@ final class PlayerService {
         recordListeningTick()
         updateNowPlayingElapsedThrottled(currentSecond: Int(currentSeconds))
         evaluateChapterAutoSkip()
+        updateCurrentChapter()
 
         // Mark played once we cross the threshold.
         let duration = currentEpisode?.durationSeconds ?? (durationSeconds > 0 ? Int(durationSeconds) : nil)

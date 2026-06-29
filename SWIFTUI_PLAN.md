@@ -224,6 +224,42 @@ The SwiftUI side is built and waiting.
   **Files:** `RoutePickerView.swift` (new), `PlayerService.swift`,
   `NowPlayingScreen.swift`, `project.pbxproj`. 248 tests green.
 
+- **Decision (#508 — observe current chapter + previous/next navigation):** The
+  chapter ENGINE (resolution + `activeChapterIndex(at:)` + auto-skip) already
+  existed but `currentChapters` is `@ObservationIgnored private`, so the UI could
+  not surface the active chapter. **Added an observable surface alongside** the
+  private list: `currentChapterTitle: String?`, `currentChapterIndex: Int?`, and
+  `chapterCount: Int` on `PlayerService`. The index/title are recomputed by a new
+  private `updateCurrentChapter()` called from `handleTick`. **Per-tick thrash is
+  avoided** by an early-return when `activeChapterIndex(at:)` equals the cached
+  `currentChapterIndex` — `@Observable` state is only written when the active
+  chapter actually changes, not every 1 Hz tick. The surface is reset on episode
+  switch (`resetChapterObservables()`, paired with `currentChapters = []`) and
+  refreshed when a chapter list is installed (both `setChapters` and the async
+  `loadChaptersForCurrentEpisode` completion clear the cached index first so the
+  refresh isn't suppressed by the same-index guard). The auto-skip engine
+  (`evaluateChapterAutoSkip` / `toggleChapterSkipped` / `lastAutoSkipFromChapterIndex`)
+  was left untouched. **Manual prev/next:** `previousChapter()` / `nextChapter()`
+  navigate by index regardless of the deselected/skip set (a manual override),
+  driven by a new pure, unit-tested `ChapterNavLogic` (returns a target index
+  from `currentIndex + count + positionWithinChapter`). `nextChapter` seeks to
+  the next chapter start, no-op past the last; `previousChapter` restarts the
+  current chapter when > `ChapterNavLogic.previousRestartThreshold` (3s) in,
+  otherwise steps to the prior chapter, clamped at the first. Both seek via the
+  existing `seek(to:)` and announce "Chapter: <title>" via `Announcer` — MANUAL
+  changes announce; automatic chapter changes during playback update the label
+  **silently** (too chatty otherwise). **UI:** `NowPlayingScreen` shows a chapter
+  line below the title (plain labeled element, label "Chapter" / value = title;
+  `// #509:` seam to make it the chapter-list button later) and a prev/next
+  control row below the transport (44pt targets via the shared `transportButton`),
+  both shown only when `chapterCount > 0`; prev/next are also artwork rotor
+  actions. **Files:** `ChapterNavLogic.swift` (new), `PlayerService.swift`,
+  `NowPlayingScreen.swift`, `ChapterNavLogicTests.swift` (new, +13 tests). 781
+  tests (768 baseline + 13); the lone failure
+  (`SettingsStoreTests.testFactoryResetRemovesArtworkCacheDirectory`) is a
+  pre-existing full-suite isolation flake unrelated to chapters — passes in
+  isolation. **Issue:** #508 (#509 stacks: chapter list + deselect-to-skip UI).
+
 ## UI Decisions
 
 - **Inbox-row "Unfollow this podcast" is a single trailing swipe action, not a

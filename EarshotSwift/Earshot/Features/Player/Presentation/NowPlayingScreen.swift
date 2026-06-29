@@ -48,8 +48,10 @@ struct NowPlayingScreen: View {
                         .padding(.top, Spacing.lg)
 
                     titleBlock
+                    chapterRow
                     ScrubberView(player: player)
                     transportRow
+                    chapterControlsRow
                     speedRow
                     sleepTimerRow
                     airPlayRow
@@ -153,6 +155,13 @@ struct NowPlayingScreen: View {
                 if player.nowPlayingEpisode != nil {
                     Button("Bookmarks") { showingBookmarks = true }
                 }
+                // Mirror the visible prev/next chapter controls into the artwork
+                // rotor so VoiceOver users reach them the same way they reach the
+                // episode actions (#508). Only when the episode has chapters.
+                if player.chapterCount > 0 {
+                    Button("Previous chapter") { player.previousChapter() }
+                    Button("Next chapter") { player.nextChapter() }
+                }
             }
 
         // Only attach a value node while actually scanning. An empty-string value
@@ -185,6 +194,66 @@ struct NowPlayingScreen: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Current chapter (#508)
+
+    /// The active chapter title, shown below the episode title only while the
+    /// episode has chapters AND playback is within one (nil before the first
+    /// chapter). For VoiceOver it's a single labeled element ("Chapter" + the
+    /// title as its value); the label updates silently as chapters change during
+    /// playback (the engine announces only on MANUAL prev/next, never per tick).
+    ///
+    /// #509: this line becomes a button that opens the full chapter list. For
+    /// #508 it stays a plain readable display.
+    @ViewBuilder
+    private var chapterRow: some View {
+        if let title = player.currentChapterTitle {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "list.bullet")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity)
+            // Collapse into one node labeled "Chapter" whose value is the title,
+            // so VoiceOver reads "Chapter, <title>" rather than a stray icon stop.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Chapter")
+            .accessibilityValue(title)
+        }
+    }
+
+    // MARK: Chapter navigation (#508)
+
+    /// Previous / Next chapter controls, shown only when the episode has chapters.
+    /// Both are also offered as artwork rotor actions for VoiceOver. 44pt targets
+    /// via the shared `transportButton` helper.
+    @ViewBuilder
+    private var chapterControlsRow: some View {
+        if player.chapterCount > 0 {
+            HStack(spacing: Spacing.xl) {
+                transportButton(
+                    systemImage: "backward.end.fill",
+                    label: "Previous chapter",
+                    font: .title2,
+                    action: player.previousChapter
+                )
+                transportButton(
+                    systemImage: "forward.end.fill",
+                    label: "Next chapter",
+                    font: .title2,
+                    action: player.nextChapter
+                )
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Spacing.xs)
+        }
     }
 
     // MARK: Transport

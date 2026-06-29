@@ -68,6 +68,7 @@
 		3EEF6B6A6FDDBADE20EE821C /* FlutterMigrationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733BAE969BAD299432E1627C /* FlutterMigrationService.swift */; };
 		41AFCC8DA6210A4533048FBD /* QueueRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28A65FBFCB276A5A5134554C /* QueueRepositoryTests.swift */; };
 		42869DD60F4501823D1CA306 /* AudioEnhancementLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A4B44C2C554B50C2C1A846A /* AudioEnhancementLogic.swift */; };
+		429FFC04816560C23839EEC4 /* ChapterNavLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 348F44335395C6A2494D041E /* ChapterNavLogic.swift */; };
 		42C670F214460BADA919C9DB /* EpisodeActionsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F9762C13BCD2647A7BBDAD /* EpisodeActionsBuilder.swift */; };
 		4618A181C1A3CA3A43DBBA71 /* ITunesSearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D1FF1B05CD9DD1E0A619E9F /* ITunesSearchServiceTests.swift */; };
 		4A96AC7CA53D6D1AD19EDA3E /* Podcast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CF61D55C48D468680AB681C /* Podcast.swift */; };
@@ -210,6 +211,7 @@
 		EF4531D32B453FFD8667C030 /* QueueLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71BD562BB534B0133D9733ED /* QueueLogic.swift */; };
 		F0CF93FBA3262643F8E54460 /* ModelGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935DE9BF07F90D248001ADE9 /* ModelGraphTests.swift */; };
 		F1B461F346E5F616B6040FAF /* ExpirationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BCA26B22E21066A09DA54E7 /* ExpirationService.swift */; };
+		F2ECA4001F4F916A5DB6FA46 /* ChapterNavLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BE39373E98A58E407434D3F /* ChapterNavLogicTests.swift */; };
 		F54B64171A689EB7079ECAD5 /* OPMLFileImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4DB54C0B93DED983D53DD4B /* OPMLFileImporterTests.swift */; };
 		F6D4582CC60766923E89BEBD /* AudioEnhancementLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D46224649A8922ADD5EEB593 /* AudioEnhancementLogicTests.swift */; };
 		F736F4872226E3D2DDDDD76F /* Logger+Earshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D504E12C18259B246B251C7B /* Logger+Earshot.swift */; };
@@ -270,6 +272,7 @@
 		2DE6692C5C3E4749C0B62772 /* NotificationCenterProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCenterProtocol.swift; sourceTree = "<group>"; };
 		339F4A0A7A0FCC29DAFD1150 /* EpisodeExportLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeExportLogicTests.swift; sourceTree = "<group>"; };
 		33D8853AB932B8147D824DA5 /* QueueActionsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueActionsBuilder.swift; sourceTree = "<group>"; };
+		348F44335395C6A2494D041E /* ChapterNavLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterNavLogic.swift; sourceTree = "<group>"; };
 		36675F86C38097082B8F8A9A /* PodcastPreviewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastPreviewModel.swift; sourceTree = "<group>"; };
 		36E58C1C8D0069EACC139345 /* ModelContainerFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelContainerFactory.swift; sourceTree = "<group>"; };
 		3B8FAAB1BF4458FE225DA93D /* ArtworkCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkCacheTests.swift; sourceTree = "<group>"; };
@@ -306,6 +309,7 @@
 		59BE4582317C4948ECEF3288 /* RSSParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSSParserTests.swift; sourceTree = "<group>"; };
 		5A75305271794B66E7428788 /* TabBadgeFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBadgeFormatTests.swift; sourceTree = "<group>"; };
 		5B0DA96A716D9C8977EA90EF /* SleepTimerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepTimerController.swift; sourceTree = "<group>"; };
+		5BE39373E98A58E407434D3F /* ChapterNavLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterNavLogicTests.swift; sourceTree = "<group>"; };
 		5D1D28B26DA693A5CEB8AE85 /* DownloadGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadGate.swift; sourceTree = "<group>"; };
 		5DA06952463063521A170CEC /* EarshotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotApp.swift; sourceTree = "<group>"; };
 		5DCB8C22497B68AC497A8046 /* OnboardingOPMLImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingOPMLImportTests.swift; sourceTree = "<group>"; };
@@ -634,6 +638,7 @@
 				D46224649A8922ADD5EEB593 /* AudioEnhancementLogicTests.swift */,
 				5716DC7465AF0422B02CD0CF /* BookmarkRepositoryTests.swift */,
 				450C66B85D5547A1E0E62D21 /* BookmarkShareLogicTests.swift */,
+				5BE39373E98A58E407434D3F /* ChapterNavLogicTests.swift */,
 				E561A2C8B10CB27A76F73D67 /* ChapterSkipLogicTests.swift */,
 				3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */,
 				278A76C6E3AB1F92AFACB741 /* CoreServicesTests.swift */,
@@ -975,6 +980,7 @@
 			children = (
 				7A4B44C2C554B50C2C1A846A /* AudioEnhancementLogic.swift */,
 				C4C2CEA51FF27CE1EF442176 /* Chapter.swift */,
+				348F44335395C6A2494D041E /* ChapterNavLogic.swift */,
 				F02DD508062C57130CC40137 /* ChapterParser.swift */,
 				9FD316F5819C53E890B613A2 /* ChapterSkipLogic.swift */,
 				F59E6B431FF3AB66D1412802 /* EpisodeExportLogic.swift */,
@@ -1312,6 +1318,7 @@
 				9B11AEBD4BA00264B0DA899D /* BookmarkShareLogic.swift in Sources */,
 				B2B931F27D1BEAB5FFD77BC6 /* BookmarksListView.swift in Sources */,
 				144409D942BD6D9647CFD91D /* Chapter.swift in Sources */,
+				429FFC04816560C23839EEC4 /* ChapterNavLogic.swift in Sources */,
 				D1738164A815F57F4845D2F9 /* ChapterParser.swift in Sources */,
 				C50E7E8B943F8A46B218EB53 /* ChapterService.swift in Sources */,
 				DA8A89E9C242146855F938FE /* ChapterSkipLogic.swift in Sources */,
@@ -1450,6 +1457,7 @@
 				F6D4582CC60766923E89BEBD /* AudioEnhancementLogicTests.swift in Sources */,
 				387A6B9D205F92CFF6C98F8B /* BookmarkRepositoryTests.swift in Sources */,
 				C083251185DA72F96AD0612C /* BookmarkShareLogicTests.swift in Sources */,
+				F2ECA4001F4F916A5DB6FA46 /* ChapterNavLogicTests.swift in Sources */,
 				3B2C35CAA573FA40C23EF216 /* ChapterSkipLogicTests.swift in Sources */,
 				C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */,
 				51AB6A682FF34A1A768BCF68 /* CoreServicesTests.swift in Sources */,
