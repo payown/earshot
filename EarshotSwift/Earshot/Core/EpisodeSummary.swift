@@ -16,13 +16,18 @@ enum EpisodeSummary {
             with: "",
             options: .regularExpression
         )
-        let decoded = stripped
+        var decoded = stripped
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&#39;", with: "'")
             .replacingOccurrences(of: "&quot;", with: "\"")
             .replacingOccurrences(of: "&nbsp;", with: " ")
+        // Decode the general numeric character references feeds use for curly
+        // quotes, apostrophes, em dashes, etc. — decimal (&#8217;) and hex
+        // (&#x2019; / &#X2019;). Named entities are handled above; this catches
+        // everything the common named set misses.
+        decoded = Self.decodingNumericEntities(in: decoded)
         // Collapse the whitespace runs that tag removal leaves behind so the
         // spoken summary doesn't carry awkward gaps.
         let collapsed = decoded.replacingOccurrences(
@@ -31,6 +36,47 @@ enum EpisodeSummary {
             options: .regularExpression
         )
         return collapsed.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Replaces decimal (`&#NNN;`) and hexadecimal (`&#xHHH;` / `&#XHHH;`)
+    /// numeric HTML character references with their Unicode scalars. Leaves any
+    /// reference that doesn't resolve to a valid scalar untouched so malformed
+    /// input degrades gracefully rather than vanishing.
+    private static func decodingNumericEntities(in text: String) -> String {
+        guard text.contains("&#") else { return text }
+        // &#  optional x/X  digits  ;
+        let pattern = "&#[xX]?[0-9A-Fa-f]+;"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+
+        let nsText = text as NSString
+        var result = ""
+        var lastEnd = 0
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+
+        for match in matches {
+            let range = match.range
+            // Append the untouched run before this match.
+            result += nsText.substring(with: NSRange(location: lastEnd, length: range.location - lastEnd))
+
+            let token = nsText.substring(with: range)
+            // Strip leading "&#" and trailing ";".
+            var body = String(token.dropFirst(2).dropLast())
+            let isHex = body.first == "x" || body.first == "X"
+            if isHex { body.removeFirst() }
+
+            if let code = UInt32(body, radix: isHex ? 16 : 10),
+               let scalar = Unicode.Scalar(code) {
+                result += String(scalar)
+            } else {
+                // Unresolvable reference: keep the original token verbatim.
+                result += token
+            }
+            lastEnd = range.location + range.length
+        }
+
+        // Append the trailing run after the final match.
+        result += nsText.substring(from: lastEnd)
+        return result
     }
 
     /// A brief, length-capped plain-text summary for a row's VoiceOver value
