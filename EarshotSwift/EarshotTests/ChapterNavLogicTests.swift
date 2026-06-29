@@ -66,6 +66,15 @@ final class ChapterNavLogicTests: XCTestCase {
             currentIndex: 0, count: 4, positionWithinChapter: 30), 0)
     }
 
+    func testPreviousSingleChapterClampsToSelf() {
+        // Only one chapter: near its start clamps to 0 (never underflows)...
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: 0, count: 1, positionWithinChapter: 1), 0)
+        // ...and deep into it restarts the same chapter.
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: 0, count: 1, positionWithinChapter: 30), 0)
+    }
+
     // MARK: threshold boundary
 
     func testPreviousExactlyAtThresholdStepsToPrior() {
