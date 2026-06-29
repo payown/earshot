@@ -302,8 +302,15 @@ struct SearchView<HeaderContent: View>: View {
                     // is a plain in-memory array (max ~50 iTunes hits), not a
                     // SwiftData `@Query`, so `enumerated()` here doesn't defeat
                     // lazy `@Query` rendering.
-                    ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
-                        directoryRow(result, index: index, total: results.count)
+                    //
+                    // Identify rows by the enumerated `offset` (always unique
+                    // 0..<count), NOT by `element.id`. A result's `id` is its feed
+                    // URL, and iTunes can return the same feed twice; the upstream
+                    // dedupe collapses those, but keying on `offset` guarantees
+                    // index↔row can never desync even if any other field ever
+                    // collides, so the "result N of M" position stays in step (#501).
+                    ForEach(Array(results.enumerated()), id: \.offset) { offset, result in
+                        directoryRow(result, index: offset, total: results.count)
                     }
                 }
             }

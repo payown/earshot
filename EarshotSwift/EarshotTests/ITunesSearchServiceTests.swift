@@ -75,6 +75,85 @@ final class ITunesSearchServiceTests: XCTestCase {
         XCTAssertEqual(results.map(\.title), ["Good Show"])
     }
 
+    // MARK: Dedupe by feed URL (pure helper)
+
+    /// iTunes can return the same show more than once under different collection
+    /// entries that share a `feedUrl`. Later duplicates are dropped and the first
+    /// occurrence (highest relevance) is kept, so the result `id`s stay unique and
+    /// the "result N of M" count is honest (#501).
+    func test_dedupe_collapsesDuplicateFeedURLs_keepingFirstOccurrence() {
+        let input = [
+            PodcastSearchResult(id: "https://a.com/feed", title: "A (primary)", author: "x",
+                                artworkURL: nil, feedURL: "https://a.com/feed"),
+            PodcastSearchResult(id: "https://b.com/feed", title: "B", author: "y",
+                                artworkURL: nil, feedURL: "https://b.com/feed"),
+            PodcastSearchResult(id: "https://a.com/feed", title: "A (duplicate)", author: "x",
+                                artworkURL: nil, feedURL: "https://a.com/feed"),
+        ]
+
+        let deduped = ITunesSearchService.dedupedByFeedURL(input)
+
+        XCTAssertEqual(deduped.map(\.feedURL), ["https://a.com/feed", "https://b.com/feed"])
+        // First occurrence wins: the "primary" A is kept, the later duplicate dropped.
+        XCTAssertEqual(deduped.map(\.title), ["A (primary)", "B"])
+        XCTAssertEqual(deduped.count, 2)
+    }
+
+    /// Relevance order is preserved across a dedupe: surviving rows stay in their
+    /// original first-seen positions, only later duplicates are removed.
+    func test_dedupe_preservesRelevanceOrder() {
+        let input = ["c", "a", "b", "a", "c", "d"].enumerated().map { offset, key in
+            PodcastSearchResult(id: "https://\(key).com/feed", title: "\(key)\(offset)",
+                                author: nil, artworkURL: nil, feedURL: "https://\(key).com/feed")
+        }
+
+        let deduped = ITunesSearchService.dedupedByFeedURL(input)
+
+        XCTAssertEqual(
+            deduped.map(\.feedURL),
+            ["https://c.com/feed", "https://a.com/feed", "https://b.com/feed", "https://d.com/feed"]
+        )
+    }
+
+    /// Input with no duplicates is returned unchanged (same elements, same order).
+    func test_dedupe_noDuplicates_returnsInputUnchanged() {
+        let input = (0..<5).map { i in
+            PodcastSearchResult(id: "https://\(i).com/feed", title: "Show \(i)", author: nil,
+                                artworkURL: nil, feedURL: "https://\(i).com/feed")
+        }
+
+        let deduped = ITunesSearchService.dedupedByFeedURL(input)
+
+        XCTAssertEqual(deduped, input)
+    }
+
+    /// An empty input yields an empty output.
+    func test_dedupe_emptyInput_returnsEmpty() {
+        XCTAssertEqual(ITunesSearchService.dedupedByFeedURL([]), [])
+    }
+
+    /// End to end through the decode path: a response carrying the same feed twice
+    /// collapses to a single result, so the displayed count matches the unique
+    /// show count rather than the raw iTunes hit count.
+    func test_search_dedupesDuplicateFeedsFromResponse() async {
+        let body = Data("""
+        {"resultCount":3,"results":[
+          {"collectionName":"Daily News","feedUrl":"https://news.com/feed"},
+          {"collectionName":"Tech Weekly","feedUrl":"https://tech.com/feed"},
+          {"collectionName":"Daily News (rerun listing)","feedUrl":"https://news.com/feed"}
+        ]}
+        """.utf8)
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: body)])
+
+        let outcome = await makeService().search("news")
+
+        guard case .results(let results) = outcome else {
+            return XCTFail("Expected .results, got \(outcome)")
+        }
+        XCTAssertEqual(results.map(\.feedURL), ["https://news.com/feed", "https://tech.com/feed"])
+        XCTAssertEqual(results.count, 2)
+    }
+
     // MARK: Success but empty
 
     func test_emptyResults_returnsEmptyResultsOutcome() async {

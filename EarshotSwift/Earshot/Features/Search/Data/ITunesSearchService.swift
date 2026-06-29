@@ -76,7 +76,8 @@ struct ITunesSearchService: Sendable {
             // Decode directly from the bytes; do not trust the Content-Type
             // header (iTunes mislabels JSON as text/javascript).
             let decoded = try JSONDecoder().decode(ITunesResponse.self, from: data)
-            return .results(decoded.results.compactMap { $0.asResult })
+            let mapped = decoded.results.compactMap { $0.asResult }
+            return .results(Self.dedupedByFeedURL(mapped))
         } catch is DecodingError {
             AppLog.networking.error("iTunes search decode failed for term \(trimmed, privacy: .public)")
             return .failure
@@ -84,6 +85,24 @@ struct ITunesSearchService: Sendable {
             AppLog.networking.error("iTunes search failed: \(error.localizedDescription, privacy: .public)")
             return .failure
         }
+    }
+
+    /// Collapses duplicate shows that share a feed URL, keeping the first
+    /// occurrence so the original relevance order is preserved.
+    ///
+    /// iTunes frequently returns the same podcast more than once (the same
+    /// `feedUrl` under different collection entries). Because a result's `id` IS
+    /// its feed URL, those duplicates produced colliding `id`s, which desynced
+    /// SwiftUI's `ForEach` index→row binding and mis-numbered the "result N of M"
+    /// VoiceOver position (#501). Deduping here fixes that at the source AND makes
+    /// the count honest — the user never sees, or hears a total inflated by, the
+    /// same show twice.
+    ///
+    /// Pure and `static` so the order-preserving, first-wins behaviour is
+    /// unit-testable without a network round-trip.
+    static func dedupedByFeedURL(_ results: [PodcastSearchResult]) -> [PodcastSearchResult] {
+        var seen = Set<String>()
+        return results.filter { seen.insert($0.feedURL).inserted }
     }
 }
 
