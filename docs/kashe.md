@@ -274,6 +274,19 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   she did in Chapter 8. Queue rows now show "X min left" / full length too,
   completing the Chapter 33 time-remaining feature that had missed the Queue
   (Chapter 34)
+- The player now surfaces chapters on chaptered shows: the current chapter shows
+  under the title and updates as it plays, with Previous chapter / Next chapter
+  controls (VoiceOver rotor actions on the artwork that announce the chapter
+  name). Activating the chapter name opens a chapter list where each chapter is
+  one VoiceOver stop; double-tap plays from there. A rotor action "Skip this
+  chapter" / "Include this chapter" deselects a chapter so playback steps over
+  it; all chapters play by default and skip choices last only the listening
+  session ("It forgets by morning"). Kashe uses it on her long oldest-first
+  interview show (Chapter 25) to skip the recurring sponsor/listener-mail
+  housekeeping block she'd spent years thumbing past by feel in the dark, and to
+  jump straight to the guest. Search results also now count correctly ("result 1
+  of N, 2 of N, 3 of N"), with duplicate listings of the same show removed and an
+  honest count, finishing the Chapter 34 search numbering (Chapter 35)
 
 ## What you can generate
 
@@ -1114,6 +1127,26 @@ The results read themselves out now too. Result four of nine, so she knew how fa
 And the other end of it, the pruning she's put off for years, got easier. A show she'd followed on a whim turned up in her inbox and she swiped the row. Unfollow this podcast. Gone, show and episodes both, no trip to a settings screen to find the door.
 
 She didn't clean up the whole list. She never does. But she followed one on purpose and dropped one without a fight, same morning. For her that's new.
+
+### Chapter 35 — Build 135
+
+*The long show she saves has a stretch she's always skipped by feel; this build gives it chapters she can aim at, name, and tell the app to step over.*
+
+**What to test:**
+
+Play a chaptered show. The current chapter now shows under the title and updates as it plays. Use Previous chapter / Next chapter to jump between them; with VoiceOver they're rotor actions on the artwork, and each jump announces the chapter name.
+
+Activate the chapter name to open the chapter list. Tap any chapter to play from there. With VoiceOver each chapter is one stop; double-tap to jump. Use the rotor action "Skip this chapter" to deselect one so playback skips it, "Include this chapter" to put it back. All chapters play by default; skip choices last the listening session.
+
+In Search, results now count correctly: "result 1 of N, 2 of N, 3 of N." Duplicate listings of the same show are gone and the count is honest.
+
+The long interview show she keeps oldest-first has a stretch in the middle of every episode she's never wanted. Housekeeping. Sponsor reads, a listener-mail bit, ten minutes before they get to the guest. For years she'd thumbed the skip button in the dark, guessing, overshooting, backing up, landing wrong twice before she gave up and sat through it.
+
+This build gave the show its chapters. The player tells her which one's playing now, right under the title. She can step Previous and Next, and it says the name as she goes. The intro. The mail bit. The guest. She found the name, opened the list, and there the whole episode was, laid out in pieces she could aim at.
+
+Better than that, she told it to skip the parts she skips. Flicked to the sponsor chapter, "Skip this chapter," and the next time around the show stepped over it on its own. Quiet where the ten minutes used to be. It forgets by morning, which is fine. She'll tell it again.
+
+She jumped straight to the guest and let the rest keep itself.
 
 ---
 
