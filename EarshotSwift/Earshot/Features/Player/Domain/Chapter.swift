@@ -2,7 +2,7 @@ import Foundation
 
 /// A single chapter within an episode, from a Podcasting 2.0 chapters file,
 /// embedded (ID3/AVAsset) metadata, or timestamps parsed from the show notes.
-struct Chapter: Equatable, Identifiable {
+struct Chapter: Equatable, Identifiable, Sendable {
     let index: Int
     /// Start offset in seconds.
     let startTime: Double
