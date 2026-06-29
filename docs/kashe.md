@@ -287,6 +287,15 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   jump straight to the guest. Search results also now count correctly ("result 1
   of N, 2 of N, 3 of N"), with duplicate listings of the same show removed and an
   honest count, finishing the Chapter 34 search numbering (Chapter 35)
+- The chapter controls from Chapter 35 worked, but on the MP3 shows Kashe
+  actually listens to (chaptered by tools like Auphonic), the list came up
+  empty ("No chapters") because AVFoundation doesn't read ID3 chapters out of
+  MP3s; she'd quietly filed it as the show not doing chapters or the feature
+  only half-working. This build parses embedded ID3 chapters itself, even
+  while streaming (reading just the tag, not the whole file) and from the
+  downloaded file once saved, so chapters finally appear on her years-old tech
+  show. Reinforces her default skepticism ("a thing that works in the demo and
+  not in your hands") landing in trust when it actually delivers (Chapter 36)
 
 ## What you can generate
 
@@ -1147,6 +1156,30 @@ This build gave the show its chapters. The player tells her which one's playing 
 Better than that, she told it to skip the parts she skips. Flicked to the sponsor chapter, "Skip this chapter," and the next time around the show stepped over it on its own. Quiet where the ten minutes used to be. It forgets by morning, which is fine. She'll tell it again.
 
 She jumped straight to the guest and let the rest keep itself.
+
+### Chapter 36 — Build 136
+
+*Last build gave her chapter controls but her own MP3 shows came up empty; this build reads the chapters embedded in those files so they finally appear.*
+
+**What to test:**
+
+Play a chaptered MP3 show, the kind made with tools like Auphonic (a long-running tech show is a good bet). The chapter list should now populate where it used to say "No chapters." It works while streaming, just hit Play, no need to download first.
+
+Confirm the current chapter shows under the title and updates as it plays. Previous chapter / Next chapter jump and announce the name. Activate the chapter name to open the list, then tap a chapter to play from there. With VoiceOver, the rotor "Skip this chapter" steps over it on playback.
+
+If you download the episode, the chapters should still show, read from the local file.
+
+Last build handed Kashe chapters and she went straight to the show she'd wanted them on most. Her tech show, the one she's followed for years, the kind that runs long and wanders before it gets where it's going.
+
+She opened the list and it said No chapters. Empty. The thing she'd just been given, missing on the one place she'd have reached for it.
+
+She didn't say anything. Figured maybe that show just didn't do chapters, or the app only managed them on some and not others. Filed it under the usual: a thing that works in the demo and not in your hands. She'd had a build tease her before.
+
+This build it's there. Same show, same Play, and the list came up full. The segments laid out and named, the way the people who make it must see them when they put it together. Streaming, no download first. She hit play and they were waiting.
+
+The pieces had been inside the file the whole time. The app just hadn't been reading them. Now it does, even while it's pulling the show down over the air, and still does once it's saved to her phone.
+
+She flicked to the part she always skips, told it to step over, and let the rest run.
 
 ---
 
