@@ -227,6 +227,82 @@ final class QueueLogicTests: XCTestCase {
         var rng = SeededRNG(seed: 1)
         XCTAssertTrue(QueueLogic.shuffled([Int](), using: &rng).isEmpty)
     }
+
+    // MARK: idsToEvictForCount (#494 — per-podcast queue count cap)
+    //
+    // Ids model queued items newest-first (the caller orders by addedAt recency),
+    // so the eviction walks the tail (oldest) and keeps the head (newest `cap`).
+
+    func testEvictOverCapDropsOldestDownToN() {
+        // newest-first [4,3,2,1], cap 2 → keep 4,3; evict oldest 2,1.
+        XCTAssertEqual(
+            QueueLogic.idsToEvictForCount([4, 3, 2, 1], cap: 2, nowPlaying: nil),
+            [1, 2]
+        )
+    }
+
+    func testEvictAtCapIsNoOp() {
+        XCTAssertEqual(
+            QueueLogic.idsToEvictForCount([3, 2, 1], cap: 3, nowPlaying: nil),
+            []
+        )
+    }
+
+    func testEvictUnderCapIsNoOp() {
+        XCTAssertEqual(
+            QueueLogic.idsToEvictForCount([2, 1], cap: 5, nowPlaying: nil),
+            []
+        )
+    }
+
+    func testEvictEmptyIsNoOp() {
+        XCTAssertEqual(
+            QueueLogic.idsToEvictForCount([Int](), cap: 3, nowPlaying: nil),
+            []
+        )
+    }
+
+    func testEvictNeverDropsNowPlayingEvenWhenOldest() {
+        // Oldest item (1) is playing → skip it, evict the next-oldest (2) instead.
+        XCTAssertEqual(
+            QueueLogic.idsToEvictForCount([4, 3, 2, 1], cap: 2, nowPlaying: 1),
+            [2, 3]
+        )
+    }
+
+    func testEvictNowPlayingInKeepZoneIsUnaffected() {
+        // Now-playing (4) is in the newest/keep zone → ordinary oldest eviction.
+        XCTAssertEqual(
+            QueueLogic.idsToEvictForCount([4, 3, 2, 1], cap: 2, nowPlaying: 4),
+            [1, 2]
+        )
+    }
+
+    func testEvictLeavesOverCapWhenOnlyOverflowItemIsNowPlaying() {
+        // cap 0 with a single now-playing item: protecting it leaves nothing to
+        // evict, so the queue is left one over the cap rather than dequeue it.
+        XCTAssertEqual(
+            QueueLogic.idsToEvictForCount([1], cap: 0, nowPlaying: 1),
+            []
+        )
+    }
+
+    func testEvictCapOneKeepsNowPlayingAndDropsTheRest() {
+        // cap 1, playing item (2) is the oldest → keep it, evict everything newer.
+        XCTAssertEqual(
+            QueueLogic.idsToEvictForCount([4, 3, 2], cap: 1, nowPlaying: 2),
+            [3, 4]
+        )
+    }
+
+    func testEvictMixedPodcastsAreIndependentPerCall() {
+        // The function operates on one podcast's items; a second podcast's list is
+        // evaluated separately and never interacts with the first.
+        let podcastA = QueueLogic.idsToEvictForCount([40, 30, 20, 10], cap: 1, nowPlaying: nil)
+        let podcastB = QueueLogic.idsToEvictForCount([2, 1], cap: 5, nowPlaying: nil)
+        XCTAssertEqual(podcastA, [10, 20, 30])
+        XCTAssertEqual(podcastB, [])
+    }
 }
 
 /// A tiny reproducible RNG (SplitMix64) so shuffle tests are deterministic.

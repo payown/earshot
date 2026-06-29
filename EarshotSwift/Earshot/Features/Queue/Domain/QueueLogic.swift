@@ -104,6 +104,42 @@ enum QueueLogic {
         ids.shuffled(using: &generator)
     }
 
+    // MARK: Count cap (#494)
+
+    /// Ids to evict for the per-podcast queue COUNT cap: keep the newest `cap`
+    /// queued items of one podcast and evict the rest, but NEVER the currently
+    /// playing item. This is the queue analogue of
+    /// ``InboxLogic/idsToDismissForCount(_:cap:)`` — same "keep newest N, drop the
+    /// overflow" decision — so the queue cap reuses `Podcast.inboxMaxEpisodes`
+    /// (nil = unlimited; the caller skips this entirely when it is nil).
+    ///
+    /// `itemsNewestFirst` is this podcast's queued items ordered newest-first; the
+    /// caller chooses the recency key (the enforcement uses `QueueItem.addedAt`, so
+    /// a freshly "Play next"-ed older episode is treated as newest and kept,
+    /// trimming only auto-queue pile-up rather than explicit user enqueues).
+    ///
+    /// Eviction walks oldest→newest and skips `nowPlaying`: when the playing item
+    /// falls in the overflow zone it is left in place and the next-oldest item is
+    /// evicted instead. If protecting it leaves fewer evictable items than the
+    /// overflow, the queue is left over the cap rather than dequeue the episode the
+    /// user is listening to (e.g. cap 1 with only the now-playing item over the
+    /// cap evicts nothing).
+    static func idsToEvictForCount<ID: Hashable>(
+        _ itemsNewestFirst: [ID],
+        cap: Int,
+        nowPlaying: ID?
+    ) -> [ID] {
+        guard cap >= 0, itemsNewestFirst.count > cap else { return [] }
+        let overflow = itemsNewestFirst.count - cap
+        var evict: [ID] = []
+        for id in itemsNewestFirst.reversed() { // oldest first
+            if evict.count == overflow { break }
+            if let nowPlaying, id == nowPlaying { continue } // never evict the playing item
+            evict.append(id)
+        }
+        return evict
+    }
+
     // MARK: Grouping by podcast
 
     /// A display group of consecutive-in-display queue items sharing a key.
