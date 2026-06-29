@@ -93,6 +93,19 @@ final class ID3ChapterParserTests: XCTestCase {
         }
     }
 
+    func testDecodesUTF16BETitleWithoutBOM() {
+        // Encoding byte 2 = UTF-16BE with no byte-order mark. A distinct branch
+        // from encoding 1 (UTF-16 with BOM); without it the title would decode
+        // as garbage or fail.
+        let title = "UTF16BE Café ☕"
+        let frame = ID3Fixture.chap(id: "c", startMs: 0, title: title, encoding: 2, major: 4)
+        let tag = ID3Fixture.tag(major: 4, frames: [frame])
+
+        let chapters = ID3ChapterParser.parse(tag)
+
+        XCTAssertEqual(chapters.first?.title, title)
+    }
+
     // MARK: Defaults
 
     func testChapterWithoutTitleGetsDefault() {
@@ -121,6 +134,36 @@ final class ID3ChapterParserTests: XCTestCase {
 
         XCTAssertEqual(chapters.map(\.title), ["One", "Two"])
         XCTAssertEqual(chapters.map(\.startTime), [0, 12])
+    }
+
+    func testParsesV24PerFrameUnsynchronisedFrame() {
+        // v2.4 format flag 0x02: the individual frame is unsynchronised. The
+        // CHAP offset fields (0xFFFFFFFF) force inserted nulls. The parser must
+        // reverse this per frame before reading the body.
+        let frame = ID3Fixture.chapV24Unsync(
+            id: "c0", startMs: 45_000, title: "Per-frame", dataLengthIndicator: false
+        )
+        let tag = ID3Fixture.tag(major: 4, frames: [frame])
+
+        let chapters = ID3ChapterParser.parse(tag)
+
+        XCTAssertEqual(chapters.map(\.title), ["Per-frame"])
+        XCTAssertEqual(chapters.map(\.startTime), [45])
+    }
+
+    func testParsesV24FrameWithDataLengthIndicator() {
+        // v2.4 format flags 0x02 + 0x01: unsynchronised AND prefixed with a
+        // 4-byte synchsafe data-length indicator that must be stripped after
+        // de-unsynchronising.
+        let frame = ID3Fixture.chapV24Unsync(
+            id: "c0", startMs: 90_000, title: "With DLI", dataLengthIndicator: true
+        )
+        let tag = ID3Fixture.tag(major: 4, frames: [frame])
+
+        let chapters = ID3ChapterParser.parse(tag)
+
+        XCTAssertEqual(chapters.map(\.title), ["With DLI"])
+        XCTAssertEqual(chapters.map(\.startTime), [90])
     }
 
     // MARK: Malformed / truncated input
@@ -231,7 +274,7 @@ private enum ID3Fixture {
     }
 
     /// A `TIT2` text frame: encoding byte + encoded text.
-    private static func tit2(_ text: String, encoding: UInt8, major: UInt8) -> [UInt8] {
+    static func tit2(_ text: String, encoding: UInt8, major: UInt8) -> [UInt8] {
         var payload: [UInt8] = [encoding]
         switch encoding {
         case 0: // ISO-8859-1
@@ -240,6 +283,10 @@ private enum ID3Fixture {
             payload += [0xFF, 0xFE]
             for unit in text.utf16 {
                 payload += [UInt8(unit & 0xFF), UInt8(unit >> 8)]
+            }
+        case 2: // UTF-16BE, no BOM
+            for unit in text.utf16 {
+                payload += [UInt8(unit >> 8), UInt8(unit & 0xFF)]
             }
         default: // UTF-8
             payload += Array(text.utf8)
@@ -289,8 +336,40 @@ private enum ID3Fixture {
         return Data(out)
     }
 
+    /// A v2.4 `CHAP` frame whose data is per-frame unsynchronised (format flag
+    /// 0x02), optionally prefixed with a synchsafe data-length indicator
+    /// (format flag 0x01). Mirrors how a v2.4 encoder emits an unsynchronised
+    /// frame: the DLI bytes are inside the data the unsynchronisation is applied
+    /// to, exactly as the parser reverses it.
+    static func chapV24Unsync(
+        id: String,
+        startMs: UInt32,
+        title: String?,
+        dataLengthIndicator: Bool
+    ) -> [UInt8] {
+        var chapData = Array(id.utf8)
+        chapData.append(0)
+        chapData += bigEndian32(startMs)
+        chapData += bigEndian32(startMs + 1)
+        chapData += [0xFF, 0xFF, 0xFF, 0xFF]
+        chapData += [0xFF, 0xFF, 0xFF, 0xFF]
+        if let title { chapData += tit2(title, encoding: 3, major: 4) }
+
+        var payload = chapData
+        if dataLengthIndicator { payload = synchsafe(chapData.count) + payload }
+        let unsynced = unsynchronise(payload)
+
+        var out = Array("CHAP".utf8)
+        out += synchsafe(unsynced.count)
+        var formatFlags: UInt8 = 0x02 // unsynchronisation
+        if dataLengthIndicator { formatFlags |= 0x01 }
+        out += [0, formatFlags]
+        out += unsynced
+        return out
+    }
+
     /// Inserts a 0x00 after every 0xFF (the encoder side of unsynchronisation).
-    private static func unsynchronise(_ b: [UInt8]) -> [UInt8] {
+    static func unsynchronise(_ b: [UInt8]) -> [UInt8] {
         var out: [UInt8] = []
         for byte in b {
             out.append(byte)
