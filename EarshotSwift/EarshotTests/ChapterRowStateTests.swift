@@ -18,6 +18,18 @@ final class ChapterRowStateTests: XCTestCase {
         XCTAssertEqual(state.markerSystemImage, "circle")
     }
 
+    func testMarkerIgnoresSkippedWhenCurrent() {
+        // The leading marker reflects playhead position only — a deselected
+        // current chapter still shows the filled play badge.
+        let state = ChapterRowState(isCurrent: true, isSkipped: true)
+        XCTAssertEqual(state.markerSystemImage, "play.circle.fill")
+    }
+
+    func testMarkerIsHollowWhenSkippedButNotCurrent() {
+        let state = ChapterRowState(isCurrent: false, isSkipped: true)
+        XCTAssertEqual(state.markerSystemImage, "circle")
+    }
+
     // MARK: Indicator (trailing included/skipped icon)
 
     func testIndicatorIsCheckmarkWhenIncluded() {
@@ -29,6 +41,18 @@ final class ChapterRowStateTests: XCTestCase {
 
     func testIndicatorIsSlashWhenSkipped() {
         let state = ChapterRowState(isCurrent: false, isSkipped: true)
+        XCTAssertEqual(state.indicatorSystemImage, "circle.slash")
+    }
+
+    func testIndicatorIgnoresCurrentWhenIncluded() {
+        // The trailing indicator reflects included/skipped only — the current
+        // chapter, when included, still shows the checkmark.
+        let state = ChapterRowState(isCurrent: true, isSkipped: false)
+        XCTAssertEqual(state.indicatorSystemImage, "checkmark.circle.fill")
+    }
+
+    func testIndicatorIsSlashWhenCurrentAndSkipped() {
+        let state = ChapterRowState(isCurrent: true, isSkipped: true)
         XCTAssertEqual(state.indicatorSystemImage, "circle.slash")
     }
 
@@ -105,5 +129,22 @@ final class ChapterRowStateTests: XCTestCase {
         let label = state.accessibilityLabel(
             number: 1, title: "", spokenTime: "0 seconds")
         XCTAssertFalse(label.isEmpty)
+    }
+
+    // MARK: Equatable
+
+    func testEqualWhenSameState() {
+        XCTAssertEqual(
+            ChapterRowState(isCurrent: true, isSkipped: false),
+            ChapterRowState(isCurrent: true, isSkipped: false))
+    }
+
+    func testNotEqualWhenStateDiffers() {
+        XCTAssertNotEqual(
+            ChapterRowState(isCurrent: true, isSkipped: false),
+            ChapterRowState(isCurrent: true, isSkipped: true))
+        XCTAssertNotEqual(
+            ChapterRowState(isCurrent: true, isSkipped: false),
+            ChapterRowState(isCurrent: false, isSkipped: false))
     }
 }
