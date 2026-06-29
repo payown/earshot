@@ -1532,3 +1532,40 @@ green (832 tests, Debug+Release clean).
 Feature suggestions identified: none this review.
 
 No fixes required; no commits made to the branch. Overall: PASS.
+
+## Security Review — Issue #518
+
+earshot-security review complete. Issue #518 (strip HTML / decode numeric
+entities in podcast descriptions). Branch `fix/518-strip-html-descriptions`.
+
+Checklist:
+- [x] Force-unwraps: PASS — none introduced.
+- [x] Silent try?: PASS — one `try? NSRegularExpression(pattern:)` on a
+  hardcoded constant pattern with a safe `guard ... else { return text }`
+  fallback. Accepted idiom (provably-valid compile-time pattern, graceful
+  degradation), not runtime error suppression.
+- [x] fatalError: PASS — none.
+- [x] Retain cycles: PASS — pure static funcs, no closures capturing self.
+- [x] @MainActor: N/A — synchronous, side-effect-free static string work; no
+  UI state, no actor isolation, no threading concern.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration files.
+- [ ] Entitlements: N/A — none changed.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new error types; failures degrade to verbatim text.
+- [x] AppLog coverage: PASS — no new catch blocks.
+
+Hostile-feed safety (focus of this change):
+- Regex `&#[xX]?[0-9A-Fa-f]+;` is single-quantifier, anchored by literal `&#`
+  and `;`, no nested quantifiers/alternation — no catastrophic backtracking.
+- `UInt32(body, radix:)` returns nil on overflow (giant entity bodies) → token
+  kept verbatim, O(n), no hang.
+- `Unicode.Scalar(code)` is failable: surrogate (0xD800–0xDFFF) and
+  out-of-range (>0x10FFFF) values return nil → kept verbatim, no crash.
+- UTF-16 (NSString) match ranges fall on ASCII `&#...;` boundaries, so the
+  verbatim runs between matches can't split a surrogate pair.
+- Tests cover surrogate, out-of-range, non-hex shape, empty body, hex a–f
+  letters, uppercase X — all hostile paths asserted.
+
+Feature suggestions identified: none this review.
+
+No fixes required; no commits made to the branch. Overall: PASS.
