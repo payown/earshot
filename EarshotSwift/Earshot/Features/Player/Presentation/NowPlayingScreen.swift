@@ -13,6 +13,7 @@ import AVKit
 struct NowPlayingScreen: View {
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
+    @Environment(SettingsStore.self) private var settings
     @Environment(\.dismiss) private var dismiss
 
     @State private var showingControls = false
@@ -54,7 +55,6 @@ struct NowPlayingScreen: View {
                     chapterRow
                     ScrubberView(player: player)
                     transportRow
-                    chapterControlsRow
                     speedRow
                     sleepTimerRow
                     airPlayRow
@@ -202,72 +202,90 @@ struct NowPlayingScreen: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: Current chapter (#508)
+    // MARK: Current chapter (#508, #509, #515)
 
-    /// The active chapter title, shown below the episode title only while the
-    /// episode has chapters AND playback is within one (nil before the first
-    /// chapter). For VoiceOver it's a single labeled element ("Chapter" + the
-    /// title as its value); the label updates silently as chapters change during
-    /// playback (the engine announces only on MANUAL prev/next, never per tick).
+    /// The chapter row: the current-chapter name as a button that opens the full
+    /// chapter list (#509), flanked by Previous- and Next-chapter buttons (#515).
+    /// Shown only while the episode has chapters AND playback is within one
+    /// (`currentChapterTitle` is nil before the first chapter, which also implies
+    /// `chapterCount > 0`).
     ///
-    /// #509: this line is a button that opens the full chapter list. Activating
-    /// it (VoiceOver double-tap / sighted tap) presents ``ChapterListView``.
+    /// Reads left-to-right: [Previous chapter] — [Chapter name] — [Next chapter].
+    /// The flanking buttons are hidden when the user turns off
+    /// ``SettingsStore/chapterNavButtonsVisible`` (#515); the chapter-name button
+    /// always stays, and the artwork VoiceOver rotor keeps its own Previous/Next
+    /// chapter actions regardless of this setting, so hiding the buttons never
+    /// removes chapter navigation.
+    ///
+    /// Accessibility: three distinct stops in visual order — "Previous chapter"
+    /// button, the chapter-name button ("Chapter, <title>", hint "Opens the
+    /// chapter list"), "Next chapter" button. The HStack is intentionally NOT
+    /// collapsed into one element so each button keeps its own action.
     @ViewBuilder
     private var chapterRow: some View {
         if let title = player.currentChapterTitle {
-            Button {
-                showingChapters = true
-            } label: {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "list.bullet")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                    Text(title)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
+            HStack(spacing: Spacing.md) {
+                if showChapterNavButtons {
+                    transportButton(
+                        systemImage: "backward.end.fill",
+                        label: "Previous chapter",
+                        font: .title3,
+                        action: player.previousChapter
+                    )
                 }
-                .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
-                .contentShape(Rectangle())
+
+                chapterNameButton(title: title)
+
+                if showChapterNavButtons {
+                    transportButton(
+                        systemImage: "forward.end.fill",
+                        label: "Next chapter",
+                        font: .title3,
+                        action: player.nextChapter
+                    )
+                }
             }
-            .buttonStyle(.plain)
-            // Collapse into one node labeled "Chapter" whose value is the title,
-            // so VoiceOver reads "Chapter, <title>, button" rather than a stray
-            // icon stop. The hint tells the user what activating it does.
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Chapter")
-            .accessibilityValue(title)
-            .accessibilityHint("Opens the chapter list")
+            .frame(maxWidth: .infinity)
         }
     }
 
-    // MARK: Chapter navigation (#508)
+    /// Whether the visible Previous/Next chapter buttons flank the chapter name.
+    /// Default on; users who prefer the artwork rotor turn it off in Settings
+    /// (#515). Gated on `chapterCount > 0` for safety, though the enclosing
+    /// `currentChapterTitle` check already implies it.
+    private var showChapterNavButtons: Bool {
+        ChapterNavLogic.shouldShowNavButtons(
+            chapterCount: player.chapterCount,
+            settingEnabled: settings.chapterNavButtonsVisible
+        )
+    }
 
-    /// Previous / Next chapter controls, shown only when the episode has chapters.
-    /// Both are also offered as artwork rotor actions for VoiceOver. 44pt targets
-    /// via the shared `transportButton` helper.
-    @ViewBuilder
-    private var chapterControlsRow: some View {
-        if player.chapterCount > 0 {
-            HStack(spacing: Spacing.xl) {
-                transportButton(
-                    systemImage: "backward.end.fill",
-                    label: "Previous chapter",
-                    font: .title2,
-                    action: player.previousChapter
-                )
-                transportButton(
-                    systemImage: "forward.end.fill",
-                    label: "Next chapter",
-                    font: .title2,
-                    action: player.nextChapter
-                )
+    /// The current-chapter name as a button opening ``ChapterListView`` (#509).
+    /// Collapsed into one node labeled "Chapter" whose value is the title, so
+    /// VoiceOver reads "Chapter, <title>, button" rather than a stray icon stop.
+    private func chapterNameButton(title: String) -> some View {
+        Button {
+            showingChapters = true
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "list.bullet")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Spacing.xs)
+            .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Chapter")
+        .accessibilityValue(title)
+        .accessibilityHint("Opens the chapter list")
     }
 
     // MARK: Transport

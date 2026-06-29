@@ -92,4 +92,28 @@ final class ChapterNavLogicTests: XCTestCase {
             count: 4,
             positionWithinChapter: ChapterNavLogic.previousRestartThreshold + 0.01), 2)
     }
+
+    // MARK: flanking nav-button visibility (#515)
+
+    func testNavButtonsShownWhenChaptersExistAndSettingOn() {
+        // Acceptance criterion: buttons visible by default when the episode has
+        // chapters and the setting is on.
+        XCTAssertTrue(ChapterNavLogic.shouldShowNavButtons(chapterCount: 5, settingEnabled: true))
+    }
+
+    func testNavButtonsHiddenWhenSettingOff() {
+        // Acceptance criterion: turning the setting off hides the flanking buttons
+        // even when the episode has chapters.
+        XCTAssertFalse(ChapterNavLogic.shouldShowNavButtons(chapterCount: 5, settingEnabled: false))
+    }
+
+    func testNavButtonsHiddenWhenNoChaptersEvenIfSettingOn() {
+        // No chapters: nothing to navigate, so the buttons stay hidden regardless
+        // of the setting.
+        XCTAssertFalse(ChapterNavLogic.shouldShowNavButtons(chapterCount: 0, settingEnabled: true))
+    }
+
+    func testNavButtonsHiddenWhenNoChaptersAndSettingOff() {
+        XCTAssertFalse(ChapterNavLogic.shouldShowNavButtons(chapterCount: 0, settingEnabled: false))
+    }
 }

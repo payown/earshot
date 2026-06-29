@@ -1493,3 +1493,42 @@ replacing the iOS inflect markup with testable logic. All 13 tests trace correct
 Feature suggestions identified: none this review.
 
 No fixes required; no commits made to the branch. Overall: PASS.
+
+## Security Review — Issue #515
+
+earshot-security review complete. Branch `feat/515-chapter-nav-buttons-flanking-name`.
+Scope = diff vs `swift` tip: `NowPlayingScreen.swift` (chapter row restructured so
+Previous/Next chapter buttons flank the chapter-name button, gated on the new
+`showChapterNavButtons` computed flag), `ChapterNavLogic.swift` (+pure
+`shouldShowNavButtons(chapterCount:settingEnabled:)`), `AppSettingsStore.swift`
+(+`SettingsKey`/`SettingsDefault.chapterNavButtonsVisible`, default true),
+`SettingsStore.swift` (+observed Bool with persist `didSet`, loaded in
+`configure`), `SettingsScreen.swift` (+Toggle with explanatory footer), and tests
+(`ChapterNavLogicTests.swift` +4, `AppSettingsStoreTests.swift` +3).
+
+Checklist:
+- [x] Force-unwraps: PASS — none introduced. Flagged `try?` (AppSettingsStore:149/157)
+  and `Task {` / `try? await Task.sleep` (NowPlayingScreen) are pre-existing lines
+  outside this diff.
+- [x] Silent try?: PASS — none added by #515.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new closures/Tasks. The two `transportButton`
+  actions take MainActor method references (`player.previousChapter`/`nextChapter`)
+  invoked synchronously from a SwiftUI Button; views are value types, no self capture.
+- [x] @MainActor: PASS — `SettingsStore` is `@MainActor @Observable`; the new
+  `chapterNavButtonsVisible` is a plain Bool read on the main actor. PlayerService
+  chapter access stays on MainActor. No data race.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration files; schema frozen per #425.
+- [ ] Entitlements: N/A — no entitlement/project.yml changes.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — pure value logic + key/value setting; no new error types.
+- [x] AppLog coverage: PASS — no new catch blocks.
+
+The new AppSetting follows the existing safe pattern exactly (Key + Default
+constants, `didSet` persist, `configure` load). Tests cover default, round-trip,
+persist-across-relaunch, and the 4-case pure gating logic. Testing gate already
+green (832 tests, Debug+Release clean).
+
+Feature suggestions identified: none this review.
+
+No fixes required; no commits made to the branch. Overall: PASS.

@@ -16,6 +16,7 @@ final class SettingsStore {
     var voiceEnhanceEnabled = false { didSet { persist { $0.setBool(voiceEnhanceEnabled, for: SettingsKey.voiceEnhanceEnabled) } } }
     var continueAfterEpisode: Bool = SettingsDefault.continueAfterEpisode { didSet { persist { $0.setBool(continueAfterEpisode, for: SettingsKey.continueAfterEpisode) } } }
     var continueAfterGroupEnds: Bool = SettingsDefault.continueAfterGroupEnds { didSet { persist { $0.setBool(continueAfterGroupEnds, for: SettingsKey.continueAfterGroupEnds) } } }
+    var chapterNavButtonsVisible: Bool = SettingsDefault.chapterNavButtonsVisible { didSet { persist { $0.setBool(chapterNavButtonsVisible, for: SettingsKey.chapterNavButtonsVisible) } } }
 
     // General
     var launchScreen: LaunchScreen = SettingsDefault.launchScreen { didSet { persist { $0.setLaunchScreen(launchScreen) } } }
@@ -59,6 +60,7 @@ final class SettingsStore {
         voiceEnhanceEnabled = store.bool(SettingsKey.voiceEnhanceEnabled, default: false)
         continueAfterEpisode = store.bool(SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode)
         continueAfterGroupEnds = store.bool(SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds)
+        chapterNavButtonsVisible = store.bool(SettingsKey.chapterNavButtonsVisible, default: SettingsDefault.chapterNavButtonsVisible)
         launchScreen = store.launchScreen()
         librarySortOrder = store.librarySortOrder()
         groupQueueEpisodes = store.bool(SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes)

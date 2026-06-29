@@ -122,6 +122,42 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(raw.bool(SettingsKey.groupQueueEpisodes, default: false), true)
     }
 
+    // MARK: Chapter navigation buttons (#515)
+
+    func testChapterNavButtonsDefaultToVisible() throws {
+        let store = try makeStore()
+        XCTAssertEqual(store.bool(SettingsKey.chapterNavButtonsVisible, default: SettingsDefault.chapterNavButtonsVisible), true)
+        XCTAssertEqual(SettingsDefault.chapterNavButtonsVisible, true)
+    }
+
+    func testChapterNavButtonsRoundTrips() throws {
+        let store = try makeStore()
+        store.setBool(false, for: SettingsKey.chapterNavButtonsVisible)
+        XCTAssertEqual(store.bool(SettingsKey.chapterNavButtonsVisible, default: true), false)
+        store.setBool(true, for: SettingsKey.chapterNavButtonsVisible)
+        XCTAssertEqual(store.bool(SettingsKey.chapterNavButtonsVisible, default: false), true)
+    }
+
+    /// The Settings toggle flows through SettingsStore.chapterNavButtonsVisible,
+    /// which must default visible and persist/reload so the player honors it
+    /// across relaunch (#515).
+    func testSettingsStorePersistsChapterNavButtonsVisible() throws {
+        let context = TestStore.freshContext()
+
+        let settings = SettingsStore()
+        settings.configure(context: context)
+        XCTAssertEqual(settings.chapterNavButtonsVisible, true)
+
+        settings.chapterNavButtonsVisible = false
+
+        let reloaded = SettingsStore()
+        reloaded.configure(context: context)
+        XCTAssertEqual(reloaded.chapterNavButtonsVisible, false)
+
+        let raw = AppSettingsStore(context: context)
+        XCTAssertEqual(raw.bool(SettingsKey.chapterNavButtonsVisible, default: true), false)
+    }
+
     // MARK: Migration status (#429)
 
     func testMigrationStatusDefaultsToNotAttempted() throws {

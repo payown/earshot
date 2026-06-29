@@ -69,7 +69,7 @@ struct SettingsScreen: View {
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Section("Playback") {
+            Section {
                 // VoiceOver: flick up/down to change. The visual menu still opens
                 // on tap for sighted/low-vision users. Off-grid stored speeds
                 // (set via the in-player precise stepper) display as the nearest
@@ -96,6 +96,14 @@ struct SettingsScreen: View {
                     hint: "Flick up for a longer skip, down for shorter"
                 )
                 Toggle("Voice enhance", isOn: $settings.voiceEnhanceEnabled)
+
+                // The footer below explains this toggle; a matching hint would make
+                // VoiceOver read the same sentence twice (#515).
+                Toggle("Chapter navigation buttons", isOn: $settings.chapterNavButtonsVisible)
+            } header: {
+                Text("Playback")
+            } footer: {
+                Text("Shows Previous and Next chapter buttons beside the chapter name in the player. Turn off to navigate chapters with the VoiceOver rotor on the artwork.")
             }
 
             Section {

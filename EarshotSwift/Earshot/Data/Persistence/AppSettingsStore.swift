@@ -19,6 +19,11 @@ enum SettingsKey {
     static let skipForwardSeconds = "skip_forward_seconds"
     static let skipBackSeconds = "skip_back_seconds"
     static let directTouchEnabled = "direct_touch_enabled"
+    // Whether the Previous/Next chapter buttons flanking the chapter name in the
+    // player are shown. Default true (#515). Turning it off hides only the two
+    // buttons; the chapter-name button and the artwork VoiceOver rotor
+    // Previous/Next chapter actions stay available regardless.
+    static let chapterNavButtonsVisible = "chapter_nav_buttons_visible"
     static let inboxOptInOnly = "inbox_opt_in_only"
     static let wifiOnlyDownloads = "wifi_only_downloads"
     static let groupQueueEpisodes = "group_queue_episodes"
@@ -101,6 +106,9 @@ enum SettingsDefault {
     static let skipBackSeconds = 15
     static let wifiOnlyDownloads = true
     static let directTouchEnabled = false
+    /// Chapter navigation buttons shown by default; users who prefer the artwork
+    /// VoiceOver rotor can turn them off (#515).
+    static let chapterNavButtonsVisible = true
     static let inboxOptInOnly = false
     static let groupQueueEpisodes = false
     // Auto-advance defaults true: preserves today's unconditional auto-advance
