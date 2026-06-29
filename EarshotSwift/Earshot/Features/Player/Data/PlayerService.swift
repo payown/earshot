@@ -706,6 +706,7 @@ final class PlayerService {
         let guid = episode.guid
         let chapterURL = episode.chapterURL
         let audioURL = episode.audioURL
+        let downloadPath = episode.downloadPath
         let descriptionHTML = episode.episodeDescription
         chapterLoadEpisodeGUID = guid
         Task { @MainActor [weak self] in
@@ -713,6 +714,7 @@ final class PlayerService {
             let found = await self.chapterService.chapters(
                 chapterURL: chapterURL,
                 audioURL: audioURL,
+                downloadPath: downloadPath,
                 descriptionHTML: descriptionHTML
             )
             // Drop a stale load: only apply if this is still the loaded episode
