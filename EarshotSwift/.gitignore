@@ -4,3 +4,8 @@ xcuserdata/
 DerivedData/
 build/
 .DS_Store
+
+# sourcekit-lsp build server config
+buildServer.json
+.bsp/
+.compile
