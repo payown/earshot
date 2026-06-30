@@ -65,4 +65,39 @@ final class QuickActionMoveLogicTests: XCTestCase {
             }
         }
     }
+
+    /// Small real-world set sizes round-trip through `Array.move`, including the
+    /// `count == 2` collapse where "Move down" (index + 2) and "Move to bottom"
+    /// (count) resolve to the same offset and same resulting index. The count-5
+    /// round-trip above never exercises these boundary sizes.
+    func testOffsetsRoundTripAcrossSmallCounts() {
+        let alphabet = Array("abcdefgh").map(String.init)
+        for count in 2...6 {
+            for index in 0..<count {
+                for target in QuickActionMoveLogic.targets(index: index, count: count) {
+                    var array = Array(alphabet.prefix(count))
+                    let moved = array[index]
+                    array.move(fromOffsets: IndexSet(integer: index),
+                               toOffset: target.destinationOffset)
+                    XCTAssertEqual(array.firstIndex(of: moved), target.resultingIndex,
+                                   "\(target.label) from index \(index) of count \(count)")
+                    XCTAssertTrue((0..<count).contains(target.resultingIndex),
+                                  "resultingIndex out of bounds for \(target.label) at \(index)/\(count)")
+                }
+            }
+        }
+    }
+
+    /// A two-element set offers exactly one move per row, and the destination
+    /// offset lands where the announcement claims — the tightest edge of the
+    /// edge-suppression logic.
+    func testTwoElementSetCollapsesToSingleMovePerRow() {
+        let top = QuickActionMoveLogic.targets(index: 0, count: 2)
+        XCTAssertEqual(top.map(\.label), ["Move down", "Move to bottom"])
+        XCTAssertEqual(Set(top.map(\.resultingIndex)), [1])
+
+        let bottom = QuickActionMoveLogic.targets(index: 1, count: 2)
+        XCTAssertEqual(bottom.map(\.label), ["Move to top", "Move up"])
+        XCTAssertEqual(Set(bottom.map(\.resultingIndex)), [0])
+    }
 }
