@@ -1220,7 +1220,7 @@ This build set two buttons right next to the chapter name. Previous on the left,
 
 Then she went into Settings, Playback, and found the switch that hides them. Thought about it. Left it on. The rotor's still there under the artwork if she wants it, and now there's a button too. For once the app handed her both and let her keep whichever one her thumb went for.
 
-### Chapter 38 — Build 138
+### Chapter 38 — Build 139
 
 *Kashe could read a show in the search preview but never hear it; this build lets her play an episode straight from there, streaming, and cleans up the descriptions that used to come through as raw HTML.*
 
