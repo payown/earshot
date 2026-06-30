@@ -260,6 +260,43 @@ The SwiftUI side is built and waiting.
   pre-existing full-suite isolation flake unrelated to chapters — passes in
   isolation. **Issue:** #508 (#509 stacks: chapter list + deselect-to-skip UI).
 
+- **Decision (#517 — stream-only from Search directory preview):** Episode rows in
+  a directory result's `PodcastPreviewView` are now playable, streaming directly
+  through the existing player engine WITHOUT subscribing, downloading, or writing
+  anything to the store (confirmed by Michael: stream-only, no library/Stats/queue
+  side effects, schema frozen per #425). **Approach:** `PlayerService.playPreview(...)`
+  builds a detached `Episode` (created via `init`, NEVER inserted into a
+  `ModelContext`) and plays it through the shared private `play(_:preparedItem:transient:)`
+  path with a new `transient` flag. A real-but-detached `@Model` lets the whole
+  engine (rate, audio session, scrubber, Now Playing bar, lock screen, chapters via
+  `loadChaptersForCurrentEpisode`, resume/pause/seek which need `currentEpisode != nil`)
+  work unchanged. `currentEpisodeIsTransient` gates every persistence sink:
+  `flushListeningSession` (the real pollution vector — `context.insert(session)`
+  would pull the detached Episode in), `persistCurrentPosition`,
+  `persistPositionThrottled`, `markCurrentEpisodePlayed`, and
+  `persistLastPlayingEpisode`. The flag is set exactly where `currentEpisode` is
+  assigned, so it always reflects the loaded episode; every real entry point
+  (`play(_:)`, `play(_:at:)`, `load(_:)`, auto-advance) passes/sets `transient =
+  false`, restoring full persistence after a preview. **Completion path is clean
+  WITHOUT extra gating:** `handlePlaybackEnded` → `markPlayedAndRemove` →
+  `remove` guards on `episode.queueItem` (nil for a detached episode) so it
+  no-ops; `nextAdvanceID` for an id not in the queue returns nil → playback stops
+  with `currentEpisode = nil`; the `finished.positionSeconds = 0` write mutates a
+  detached object so `context.hasChanges` stays false and `saveContext` no-ops.
+  The preview row is a `Button` (a single VoiceOver element — one stop per row
+  preserved) that announces "Streaming <title>"; rows with no enclosure URL render
+  as static, non-playable rows. `PreviewEpisode` carries `audioURL` +
+  `episodeDescription`/`artworkURL`/`chapterURL` through from the parsed feed; it
+  is a plain Search-feature value type, NOT a `@Model`, so this does not touch the
+  frozen schema. **Swift 6 note for the gate:** `playPreview` and the new flag are
+  `@MainActor`-isolated on `PlayerService` like all surrounding state; the detached
+  `Episode` is a main-actor `@Model` and never crosses an actor/Sendable boundary
+  (only Sendable strings cross into `ChapterService` via the existing
+  `loadChaptersForCurrentEpisode` path). **Files:** `PlayerService.swift`,
+  `PodcastPreviewModel.swift`, `PodcastPreviewView.swift`,
+  `AdvancedPlaybackTests.swift` (+3), `PodcastPreviewModelTests.swift` (+1).
+  **Issue:** #517.
+
 ## UI Decisions
 
 - **Chapter list is ONE shared component, ONE VoiceOver stop per row (#509).**

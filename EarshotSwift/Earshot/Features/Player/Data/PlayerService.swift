@@ -55,6 +55,12 @@ final class PlayerService {
     @ObservationIgnored private var context: ModelContext?
     @ObservationIgnored private var settings: AppSettingsStore?
     @ObservationIgnored private var currentEpisode: Episode?
+    /// True when ``currentEpisode`` is a transient, NON-inserted ``Episode`` built
+    /// for a stream-only Search directory preview (#517). While set, every
+    /// persistence sink (position, played, listening sessions, last-playing) is a
+    /// no-op so a preview stream never pollutes the store. Cleared the moment a
+    /// real episode is played or loaded, restoring full persistence.
+    @ObservationIgnored private var currentEpisodeIsTransient = false
     /// Episode ids the user explicitly chose to "Play next". Their group-boundary
     /// stop is bypassed for that one advance, so an explicit Play next always
     /// plays next even when "continue after group ends" is off (#487). In-memory:
@@ -226,9 +232,55 @@ final class PlayerService {
         seek(to: startSeconds)
     }
 
+    /// Streams a one-off episode straight from a Search directory preview (#517)
+    /// WITHOUT subscribing, downloading, or persisting anything. Builds a detached
+    /// ``Episode`` — created via `init`, NEVER inserted into any `ModelContext` —
+    /// so the whole engine (rate, audio session, scrubber, Now Playing bar, lock
+    /// screen, chapters) works unchanged, then flags it transient so every
+    /// persistence sink is skipped while it plays. The detached episode has no
+    /// `podcast`, so the show name is set explicitly for the Now Playing surfaces.
+    /// No-op (logged) when `audioURL` is empty.
+    func playPreview(
+        guid: String,
+        title: String,
+        audioURL: String,
+        showTitle: String,
+        episodeDescription: String? = nil,
+        artworkURL: String? = nil,
+        chapterURL: String? = nil,
+        durationSeconds: Int? = nil
+    ) {
+        guard !audioURL.isEmpty else {
+            AppLog.player.error("playPreview called with no audio URL for \(title, privacy: .public)")
+            return
+        }
+        // A detached @Model: built with `init` and deliberately never inserted into
+        // a ModelContext, so mutating it leaves `context.hasChanges` false and no
+        // store rows are ever created by a preview stream.
+        let episode = Episode(
+            guid: guid,
+            title: title,
+            audioURL: audioURL,
+            episodeDescription: episodeDescription,
+            durationSeconds: durationSeconds,
+            artworkURL: artworkURL,
+            chapterURL: chapterURL
+        )
+        play(episode, preparedItem: nil, transient: true)
+        // The detached episode has no `podcast`, so `play` left the artist empty.
+        // Set the show name so the Now Playing bar / lock screen read correctly.
+        currentArtist = showTitle
+        updateNowPlayingInfo()
+        Announcer.announce("Streaming \(title)")
+    }
+
     /// Shared play path. `preparedItem`, when supplied, is a pre-buffered
     /// `AVPlayerItem` from the gapless preload, used for near-seamless advance.
-    private func play(_ episode: Episode, preparedItem: AVPlayerItem?) {
+    /// `transient` is true only for a stream-only Search preview (#517): the
+    /// `episode` is a detached, non-inserted `@Model` and every persistence sink
+    /// is gated off while it plays. All real entry points pass the default `false`,
+    /// so a normal play after a preview restores full persistence.
+    private func play(_ episode: Episode, preparedItem: AVPlayerItem?, transient: Bool = false) {
         let item: AVPlayerItem
         if let preparedItem {
             item = preparedItem
@@ -280,6 +332,7 @@ final class PlayerService {
         }
 
         currentEpisode = episode
+        currentEpisodeIsTransient = transient
         currentTitle = episode.title
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
@@ -333,6 +386,7 @@ final class PlayerService {
         rateBeforeFastForward = nil
 
         currentEpisode = episode
+        currentEpisodeIsTransient = false
         currentTitle = episode.title
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
@@ -958,6 +1012,8 @@ final class PlayerService {
     /// switch — the durability anchors). Resets the per-tick throttle so the next
     /// tick doesn't redundantly re-save the same second.
     private func persistCurrentPosition() {
+        // A transient Search-preview stream is never persisted (#517).
+        guard !currentEpisodeIsTransient else { return }
         guard let episode = currentEpisode, currentPositionSeconds.isFinite else { return }
         let second = Int(max(0, currentPositionSeconds))
         episode.positionSeconds = second
@@ -971,6 +1027,8 @@ final class PlayerService {
     /// lock-screen elapsed time still update every tick — only the SwiftData
     /// write is coarsened.
     private func persistPositionThrottled(currentSecond: Int) {
+        // A transient Search-preview stream is never persisted (#517).
+        guard !currentEpisodeIsTransient else { return }
         guard let episode = currentEpisode else { return }
         guard PlaybackLogic.shouldPersistTick(
             currentSecond: currentSecond,
@@ -1002,6 +1060,14 @@ final class PlayerService {
     /// the accumulator. Called on the flush threshold and on pause / stop /
     /// episode switch. `minSeconds` drops trivial spans.
     private func flushListeningSession(minSeconds: Int = 2) {
+        // A transient Search-preview stream never records a ListeningSession —
+        // this is the real pollution vector, since `context.insert(session)`
+        // references the current episode and would pull the detached preview
+        // Episode into the store (#517). Just discard the accumulator.
+        guard !currentEpisodeIsTransient else {
+            accumulatedListenSeconds = 0
+            return
+        }
         guard let episode = currentEpisode, let context else {
             accumulatedListenSeconds = 0
             return
@@ -1029,6 +1095,9 @@ final class PlayerService {
     }
 
     private func markCurrentEpisodePlayed() {
+        // A transient Search-preview stream is never marked played in the store
+        // (#517); it has no store row to update.
+        guard !currentEpisodeIsTransient else { return }
         guard let episode = currentEpisode else { return }
         episode.isPlayed = true
         episode.positionSeconds = 0
@@ -1037,6 +1106,10 @@ final class PlayerService {
     }
 
     private func persistLastPlayingEpisode(_ episode: Episode) {
+        // A transient Search-preview stream must not be remembered as the last
+        // playing episode — its guid isn't in the store, so restoring it on
+        // relaunch would find nothing (#517).
+        guard !currentEpisodeIsTransient else { return }
         // Use the stable feed-level guid as the durable identifier.
         settings?.setRawValue(episode.guid, for: SettingsKey.lastPlayingEpisodeID)
     }

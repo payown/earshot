@@ -17,6 +17,11 @@ struct PodcastPreviewView: View {
 
     @Environment(\.modelContext) private var context
 
+    /// The shared playback engine, so a preview episode can STREAM directly from
+    /// here without subscribing or downloading (#517). Injected the same way the
+    /// search flow injects it (see `SearchView`).
+    @Environment(PlayerService.self) private var player
+
     /// Subscriptions, so the Follow / Unfollow control reflects live state and the
     /// label flips the moment the toggle completes — without re-entering the view.
     @Query private var podcasts: [Podcast]
@@ -104,7 +109,28 @@ struct PodcastPreviewView: View {
 
     // MARK: Loaded content rows
 
+    @ViewBuilder
     private func episodeRow(_ episode: PreviewEpisode) -> some View {
+        if episode.audioURL.isEmpty {
+            // No enclosure URL: render a static, non-playable row so a feed missing
+            // audio degrades gracefully rather than offering a dead play action.
+            episodeRowContent(episode)
+                .accessibilityElement(children: .combine)
+        } else {
+            // A Button is already a single VoiceOver element with the button trait,
+            // so the one-stop-per-row requirement is preserved without combining.
+            Button {
+                streamPreview(episode)
+            } label: {
+                episodeRowContent(episode)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Streams this episode")
+        }
+    }
+
+    private func episodeRowContent(_ episode: PreviewEpisode) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(episode.title)
                 .font(.body)
@@ -116,7 +142,6 @@ struct PodcastPreviewView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
     }
 
     /// Visible date + length line for a preview episode. Returns nil when neither
@@ -169,6 +194,23 @@ struct PodcastPreviewView: View {
     }
 
     // MARK: Actions
+
+    /// Streams a preview episode straight from the player engine WITHOUT
+    /// subscribing, downloading, or persisting anything (#517). Falls back to the
+    /// show artwork for the Now Playing surfaces when the episode has none, and
+    /// passes the show title so the lock screen reads the podcast name.
+    private func streamPreview(_ episode: PreviewEpisode) {
+        player.playPreview(
+            guid: episode.id,
+            title: episode.title,
+            audioURL: episode.audioURL,
+            showTitle: result.title,
+            episodeDescription: episode.episodeDescription,
+            artworkURL: episode.artworkURL ?? result.artworkURL,
+            chapterURL: episode.chapterURL,
+            durationSeconds: episode.durationSeconds
+        )
+    }
 
     /// Follow when not subscribed, unfollow when subscribed. The `@Query` updates
     /// reactively, so the button label and value flip on completion without the

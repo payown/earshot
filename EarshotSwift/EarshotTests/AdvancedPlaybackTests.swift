@@ -155,4 +155,71 @@ final class AdvancedPlaybackTests: XCTestCase {
         // No assertion beyond "did not crash"; auto-skip is a no-op with no list.
         XCTAssertNotNil(player.nowPlayingEpisode)
     }
+
+    // MARK: Stream-only Search preview (#517)
+
+    private func storeCounts(_ ctx: ModelContext) -> (episodes: Int, sessions: Int, queue: Int) {
+        let episodes = (try? ctx.fetch(FetchDescriptor<Episode>()))?.count ?? -1
+        let sessions = (try? ctx.fetch(FetchDescriptor<ListeningSession>()))?.count ?? -1
+        let queue = (try? ctx.fetch(FetchDescriptor<QueueItem>()))?.count ?? -1
+        return (episodes, sessions, queue)
+    }
+
+    func test_playPreview_setsNowPlayingAndInsertsNothing() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        let before = storeCounts(ctx)
+
+        player.playPreview(
+            guid: "preview-guid",
+            title: "Preview Episode",
+            audioURL: "https://example.com/audio.mp3",
+            showTitle: "Some Show",
+            episodeDescription: "Notes",
+            artworkURL: "https://example.com/art.jpg",
+            chapterURL: nil,
+            durationSeconds: 1800
+        )
+
+        // Now-playing surfaces reflect the streamed episode and the show name.
+        XCTAssertEqual(player.currentTitle, "Preview Episode")
+        XCTAssertEqual(player.currentArtist, "Some Show")
+        XCTAssertNotNil(player.nowPlayingEpisode)
+
+        // No store rows were created by the preview stream.
+        let after = storeCounts(ctx)
+        XCTAssertEqual(after.episodes, before.episodes, "Preview must not insert an Episode")
+        XCTAssertEqual(after.sessions, before.sessions, "Preview must not insert a ListeningSession")
+        XCTAssertEqual(after.queue, before.queue, "Preview must not insert a QueueItem")
+    }
+
+    func test_playPreview_emptyAudioURL_isNoOp() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        player.playPreview(
+            guid: "g", title: "T", audioURL: "", showTitle: "Show"
+        )
+        XCTAssertNil(player.nowPlayingEpisode, "An empty audio URL must not load anything")
+    }
+
+    func test_playPreview_realPlayAfterPreview_restoresPersistence() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        player.playPreview(
+            guid: "preview", title: "Preview", audioURL: "https://x/p.mp3", showTitle: "Show"
+        )
+        // A real episode played after a preview must persist again: its position
+        // writes prove the transient flag was cleared by the normal play path.
+        let real = makeEpisode(ctx, guid: "real")
+        player.play(real)
+        player.seek(to: 42)
+
+        XCTAssertEqual(real.positionSeconds, 42, "Real play after preview must persist position")
+    }
 }
