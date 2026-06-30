@@ -152,6 +152,42 @@ The SwiftUI side is built and waiting.
   tracker; eager paths reset it), `PlaybackLogicTests.swift` (+6 cadence tests).
   210 tests green, Debug strict-concurrency clean.
 
+- **Decision (#522 — streaming stalls + overheating, no stall recovery):**
+  `PlayerService` had no buffer/stall resilience — no `playbackStalledNotification`
+  observer, no `isPlaybackBufferEmpty`/`isPlaybackLikelyToKeepUp` KVO, no
+  `timeControlStatus` watch, and `automaticallyWaitsToMinimizeStalling` was never
+  set. When a streamed item's buffer emptied, AVPlayer paused and nothing
+  re-issued `play()`, so the user had to manually resume (the "stopped 3 times,
+  magic-tap" report); the heat was the radio thrashing through repeated
+  rebuffering. **Fix:** explicitly set `automaticallyWaitsToMinimizeStalling =
+  true`; observe the player's `timeControlStatus` (logging `reasonForWaitingToPlay`
+  while `.waitingToPlayAtSpecifiedRate`), the per-item buffer KVO, and the stall
+  notification; and re-issue `play()` exactly once the buffer recovers AND the
+  user still intends playback. The decision is a pure, unit-tested
+  `StallRecoveryLogic.shouldResume(intendedToPlay:isLikelyToKeepUp:timeControlStatus:)`
+  that returns true only when intent holds, the player has settled into `.paused`
+  (the `.waiting` case is left to AVPlayer's own auto-resume), and the buffer is
+  `likelyToKeepUp`. A new `intendsToPlay` flag (set on play/resume, cleared on
+  pause and every end-of-playback stop) keeps a deliberate pause from being
+  overridden and stops a finished/ended item from being auto-replayed. The
+  `.paused` gate means one recovery flips the player to `.playing`, so repeat
+  observer callbacks no-op — no busy-loop, no repeated hammering. **Buffer policy:**
+  `preferredForwardBufferDuration` left at default (0 = automatic) on each item —
+  a fixed large value raises startup latency/memory and a fixed small value
+  invites more rebuffering, so AVPlayer's adaptive buffering plus the auto-resume
+  is the lower-risk pairing rather than a guessed pin. Per-item KVO tokens are
+  invalidated before each `replaceCurrentItem` so there are no dangling
+  observers; all observer closures hop to the main actor via `Task { @MainActor }`
+  with `[weak self]`. **Secondary:** `ID3TagFetcher.prefix(of:upTo:)` accumulated
+  the ranged prefix one byte at a time into `Data` (per-byte `Data.append` was the
+  hot spot for a multi-hundred-KB tag); now buffers into a contiguous `[UInt8]`
+  and converts to `Data` once, still streaming with the 2 MB cap (not a single-shot
+  `data(for:)`) so a server that ignores `Range` and returns `200` still stops at
+  the cap. **Issue:** #522. **Files:** `StallRecoveryLogic.swift` (new pure type),
+  `PlayerService.swift` (observers + `intendsToPlay` + recovery glue),
+  `ID3TagFetcher.swift` (chunked buffer), `StallRecoveryLogicTests.swift` (+6 tests).
+  Debug build green on iPhone 17 simulator.
+
 - **Decision (#412 — device overheats / sustained high CPU during playback):**
   The 1 Hz periodic time observer's `handleTick` called `updateNowPlayingElapsed()`
   on **every** tick, which read and rewrote the entire

@@ -75,6 +75,27 @@ final class PlayerService {
     /// True when playback was paused by a system interruption that may resume.
     @ObservationIgnored private var pausedByInterruption = false
 
+    /// The user's playback intent (#522), independent of whether audio is
+    /// momentarily moving. `true` after play/resume, `false` after a deliberate
+    /// or interruption pause. The stall-recovery observers only auto-resume when
+    /// this is `true`, so a deliberate pause is never overridden. Distinct from
+    /// `isPlaying`, which a silent buffer stall leaves untouched — that's exactly
+    /// the window where we want to recover.
+    @ObservationIgnored private var intendsToPlay = false
+
+    // Streaming stall resilience (#522). With no buffer/stall observers a
+    // streamed item whose buffer empties leaves AVPlayer paused with nothing to
+    // re-issue play(), so the user has to manually resume and the radio thrashes
+    // through repeated rebuffering (the reported overheating). We watch the
+    // player's `timeControlStatus`, the item's buffer KVO, and the stall
+    // notification, and re-issue play() via `StallRecoveryLogic` once the buffer
+    // recovers AND the user still intends playback. KVO tokens auto-invalidate on
+    // dealloc; the per-item tokens are invalidated whenever the item is replaced.
+    @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
+    @ObservationIgnored private var bufferEmptyObservation: NSKeyValueObservation?
+    @ObservationIgnored private var likelyToKeepUpObservation: NSKeyValueObservation?
+    @ObservationIgnored private var stallObserver: NSObjectProtocol?
+
     /// Generation token for the sleep-timer volume fade (review P1-4). Each fade
     /// captures the current value; every queued fade step bails if it no longer
     /// matches, so a new play/resume during the ~0.6s fade can cancel the
@@ -167,6 +188,7 @@ final class PlayerService {
         observePeriodicTime()
         observeItemDidPlayToEnd()
         observeQueueChanges()
+        observeStallRecovery()
         sleepTimer.onExpired = { [weak self] in self?.handleSleepTimerExpired() }
     }
 
@@ -338,6 +360,7 @@ final class PlayerService {
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
 
         player.replaceCurrentItem(with: item)
+        observeCurrentItem(item)
 
         // Resume position: honor saved progress unless past the threshold.
         let decision = PlaybackLogic.completionDecision(
@@ -355,6 +378,7 @@ final class PlayerService {
         applyRate()
         player.play()
         isPlaying = true
+        intendsToPlay = true
         pausedByInterruption = false
 
         persistLastPlayingEpisode(episode)
@@ -393,6 +417,7 @@ final class PlayerService {
 
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
+        observeCurrentItem(item)
 
         let decision = PlaybackLogic.completionDecision(
             position: episode.positionSeconds,
@@ -422,6 +447,7 @@ final class PlayerService {
         applyRate()
         player.play()
         isPlaying = true
+        intendsToPlay = true
         pausedByInterruption = false
         updateNowPlayingInfo()
     }
@@ -429,6 +455,7 @@ final class PlayerService {
     func pause() {
         player.pause()
         isPlaying = false
+        intendsToPlay = false
         persistCurrentPosition()
         flushListeningSession()
         updateNowPlayingInfo()
@@ -1138,6 +1165,7 @@ final class PlayerService {
     private func handlePlaybackEnded() {
         guard let finished = currentEpisode, let context else {
             isPlaying = false
+            intendsToPlay = false
             markCurrentEpisodePlayed()
             updateNowPlayingInfo()
             return
@@ -1156,6 +1184,7 @@ final class PlayerService {
             finished.positionSeconds = 0
             saveContext()
             isPlaying = false
+            intendsToPlay = false
             currentEpisode = nil
             updateNowPlayingInfo()
             Announcer.announce("Sleep timer ended. Playback stopped.")
@@ -1172,6 +1201,7 @@ final class PlayerService {
             finished.positionSeconds = 0
             saveContext()
             isPlaying = false
+            intendsToPlay = false
             currentEpisode = nil
             updateNowPlayingInfo()
             Announcer.announce("Stopped after this episode")
@@ -1190,6 +1220,7 @@ final class PlayerService {
 
         guard let nextEpisode else {
             isPlaying = false
+            intendsToPlay = false
             currentEpisode = nil
             updateNowPlayingInfo()
             return
@@ -1300,6 +1331,92 @@ final class PlayerService {
         if reason == .oldDeviceUnavailable, isPlaying {
             pause()
         }
+    }
+
+    // MARK: Private — streaming stall recovery (#522)
+
+    /// Installs the player-level stall resilience: explicitly opts into automatic
+    /// stall-minimizing buffering, watches `timeControlStatus` so we notice when
+    /// the player settles into `.paused` (or sits `.waitingToPlayAtSpecifiedRate`),
+    /// and listens for the per-item stall notification. Per-item buffer KVO is
+    /// added separately in ``observeCurrentItem(_:)`` as items are replaced.
+    ///
+    /// Buffer policy: `automaticallyWaitsToMinimizeStalling = true` lets AVPlayer
+    /// adaptively size its forward buffer. We deliberately leave
+    /// `preferredForwardBufferDuration` at its default (0 = automatic) on each
+    /// item: a fixed large value raises startup latency and memory, while a fixed
+    /// small value invites more frequent rebuffering. AVPlayer's adaptive buffering
+    /// plus the auto-resume below is the lower-risk combination, so we don't pin a
+    /// guessed value.
+    private func observeStallRecovery() {
+        player.automaticallyWaitsToMinimizeStalling = true
+        timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in self?.handleTimeControlStatusChanged() }
+        }
+        stallObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.playbackStalledNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handlePlaybackStalled() }
+        }
+    }
+
+    /// Adds buffer KVO for the newly set item, tearing down the previous item's
+    /// observers first so there are no dangling KVO registrations (which crash on
+    /// dealloc) and no leaks. Called right after every `replaceCurrentItem`.
+    private func observeCurrentItem(_ item: AVPlayerItem) {
+        bufferEmptyObservation?.invalidate()
+        likelyToKeepUpObservation?.invalidate()
+        bufferEmptyObservation = item.observe(\.isPlaybackBufferEmpty, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in self?.handleBufferEmptyChanged() }
+        }
+        likelyToKeepUpObservation = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in self?.handleLikelyToKeepUpChanged() }
+        }
+    }
+
+    private func handleTimeControlStatusChanged() {
+        if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+            let reason = player.reasonForWaitingToPlay?.rawValue ?? "unknown"
+            AppLog.player.info("Player waiting to play (reason: \(reason, privacy: .public))")
+        }
+        attemptStallRecovery()
+    }
+
+    private func handlePlaybackStalled() {
+        AppLog.player.info("Playback stalled; will auto-resume when the buffer recovers if still intended")
+        attemptStallRecovery()
+    }
+
+    private func handleBufferEmptyChanged() {
+        if player.currentItem?.isPlaybackBufferEmpty == true {
+            AppLog.player.info("Playback buffer empty; waiting for it to refill")
+        }
+        attemptStallRecovery()
+    }
+
+    private func handleLikelyToKeepUpChanged() {
+        attemptStallRecovery()
+    }
+
+    /// Re-issues `play()` exactly when ``StallRecoveryLogic`` says we should: the
+    /// user still intends playback, the player has settled into `.paused` after a
+    /// stall, and the buffer can sustain playback again. The `.paused` gate means
+    /// one recovery flips the player to `.playing`, so repeat observer callbacks
+    /// no-op — no busy loop, no repeated hammering. `applyRate()` restores the
+    /// exact effective (or fast-forward) rate the user was at.
+    private func attemptStallRecovery() {
+        guard currentEpisode != nil, let item = player.currentItem else { return }
+        guard StallRecoveryLogic.shouldResume(
+            intendedToPlay: intendsToPlay,
+            isLikelyToKeepUp: item.isPlaybackLikelyToKeepUp,
+            timeControlStatus: player.timeControlStatus
+        ) else { return }
+        AppLog.player.info("Stall recovery: buffer recovered, resuming playback")
+        player.play()
+        applyRate()
+        updateNowPlayingInfo()
     }
 
     // MARK: Private — Now Playing info
