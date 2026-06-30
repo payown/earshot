@@ -81,3 +81,8 @@ lib/core/config/api_keys.dart
 
 # Local test fixtures (sample OPML feed lists)
 *.opml
+
+# sourcekit-lsp build server config (machine-specific, absolute paths)
+buildServer.json
+.bsp/
+.compile
