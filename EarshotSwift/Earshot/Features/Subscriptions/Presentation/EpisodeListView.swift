@@ -168,8 +168,9 @@ struct EpisodeListView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
-            if let description = podcast.podcastDescription, !description.isEmpty {
-                Text(description)
+            let cleanedDescription = EpisodeSummary.plainText(podcast.podcastDescription)
+            if !cleanedDescription.isEmpty {
+                Text(cleanedDescription)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
