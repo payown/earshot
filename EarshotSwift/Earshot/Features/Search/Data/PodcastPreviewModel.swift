@@ -27,6 +27,20 @@ struct PreviewEpisode: Identifiable, Equatable, Sendable {
     let title: String
     let pubDate: Date?
     let durationSeconds: Int?
+    /// The enclosure URL carried straight through from the parsed feed so the
+    /// preview can STREAM the episode without subscribing or downloading (#517).
+    /// Empty when the feed item has no playable enclosure — the view renders such
+    /// a row as non-playable rather than offering a dead play action.
+    let audioURL: String
+    /// Show-notes HTML, passed through so a streamed preview can surface chapters
+    /// embedded in the description and a sensible Now Playing description.
+    let episodeDescription: String?
+    /// Per-episode artwork when the feed provides it; the Now Playing surfaces
+    /// fall back to the show artwork when this is nil.
+    let artworkURL: String?
+    /// Podcasting 2.0 chapter feed URL, passed through so a streamed preview still
+    /// gets chapter navigation.
+    let chapterURL: String?
 }
 
 /// Drives the podcast preview: fetches an UN-subscribed feed once via
@@ -87,7 +101,11 @@ final class PodcastPreviewModel {
                     id: $0.guid,
                     title: $0.title,
                     pubDate: $0.pubDate,
-                    durationSeconds: $0.durationSeconds
+                    durationSeconds: $0.durationSeconds,
+                    audioURL: $0.audioURL,
+                    episodeDescription: $0.description,
+                    artworkURL: $0.artworkURL,
+                    chapterURL: $0.chapterURL
                 )
             }
     }

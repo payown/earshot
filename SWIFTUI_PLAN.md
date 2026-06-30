@@ -260,6 +260,50 @@ The SwiftUI side is built and waiting.
   pre-existing full-suite isolation flake unrelated to chapters — passes in
   isolation. **Issue:** #508 (#509 stacks: chapter list + deselect-to-skip UI).
 
+- **Decision (#517 — stream-only from Search directory preview):** Episode rows in
+  a directory result's `PodcastPreviewView` are now playable, streaming directly
+  through the existing player engine WITHOUT subscribing, downloading, or writing
+  anything to the store (confirmed by Michael: stream-only, no library/Stats/queue
+  side effects, schema frozen per #425). **Approach:** `PlayerService.playPreview(...)`
+  builds a detached `Episode` (created via `init`, NEVER inserted into a
+  `ModelContext`) and plays it through the shared private `play(_:preparedItem:transient:)`
+  path with a new `transient` flag. A real-but-detached `@Model` lets the whole
+  engine (rate, audio session, scrubber, Now Playing bar, lock screen, chapters via
+  `loadChaptersForCurrentEpisode`, resume/pause/seek which need `currentEpisode != nil`)
+  work unchanged. `currentEpisodeIsTransient` gates every persistence sink:
+  `flushListeningSession` (the real pollution vector — `context.insert(session)`
+  would pull the detached Episode in), `persistCurrentPosition`,
+  `persistPositionThrottled`, `markCurrentEpisodePlayed`, and
+  `persistLastPlayingEpisode`. The flag is set exactly where `currentEpisode` is
+  assigned, so it always reflects the loaded episode; every real entry point
+  (`play(_:)`, `play(_:at:)`, `load(_:)`, auto-advance) passes/sets `transient =
+  false`, restoring full persistence after a preview. **Completion path is clean
+  WITHOUT extra gating:** `handlePlaybackEnded` → `markPlayedAndRemove` →
+  `remove` guards on `episode.queueItem` (nil for a detached episode) so it
+  no-ops; `nextAdvanceID` for an id not in the queue returns nil → playback stops
+  with `currentEpisode = nil`; the `finished.positionSeconds = 0` write mutates a
+  detached object so `context.hasChanges` stays false and `saveContext` no-ops.
+  The preview row is a `Button` (a single VoiceOver element — one stop per row
+  preserved) that announces "Streaming <title>"; rows with no enclosure URL render
+  as static, non-playable rows. `PreviewEpisode` carries `audioURL` +
+  `episodeDescription`/`artworkURL`/`chapterURL` through from the parsed feed; it
+  is a plain Search-feature value type, NOT a `@Model`, so this does not touch the
+  frozen schema. **Swift 6 note for the gate:** `playPreview` and the new flag are
+  `@MainActor`-isolated on `PlayerService` like all surrounding state; the detached
+  `Episode` is a main-actor `@Model` and never crosses an actor/Sendable boundary
+  (only Sendable strings cross into `ChapterService` via the existing
+  `loadChaptersForCurrentEpisode` path). **Files:** `PlayerService.swift`,
+  `PodcastPreviewModel.swift`, `PodcastPreviewView.swift`,
+  `AdvancedPlaybackTests.swift` (+4), `PodcastPreviewModelTests.swift` (+1).
+  **Issue:** #517. **Testing gate (earshot-testing):** 837 tests, 0 failures
+  (swift-tip baseline 832 → +4 implementer +1 gate); Release build clean. The
+  gate added `test_playPreview_playbackEnds_stopsCleanlyWithoutInserting` to cover
+  the natural-end-of-track invariant directly (posts
+  `AVPlayerItem.didPlayToEndTimeNotification`, polls until `nowPlayingEpisode ==
+  nil`, asserts Episode/ListeningSession/QueueItem counts unchanged). The
+  implementer's suite already covered no-store-writes on play, empty-audioURL
+  no-op, and persistence-restored-after-preview. **Test baseline of record: 837.**
+
 ## UI Decisions
 
 - **Chapter list is ONE shared component, ONE VoiceOver stop per row (#509).**
@@ -1532,6 +1576,45 @@ green (832 tests, Debug+Release clean).
 Feature suggestions identified: none this review.
 
 No fixes required; no commits made to the branch. Overall: PASS.
+
+## Security Review — Issue #517
+
+Stream-only playback from the Search podcast preview via a transient, detached
+(never-inserted) `Episode`. Files reviewed in full: `PlayerService.swift`,
+`PodcastPreviewModel.swift`, `PodcastPreviewView.swift`, plus the two test files.
+
+- [x] Force-unwraps: PASS — none. Added-line `!` are all boolean negation; URL
+  handling goes through optional `PlaybackLogic.resolvePlaybackURL` + guard.
+- [x] Silent try?: PASS — none in production; two `try?` live in the test
+  `storeCounts` helper with a `-1` sentinel (acceptable XCTest exception).
+- [x] fatalError: PASS — none.
+- [x] Retain cycles: PASS — `playPreview` is straight-line, no new closures; the
+  pre-existing chapter/artwork Tasks and observers use `[weak self]`, unmodified.
+- [x] @MainActor: PASS — `PlayerService` is `@MainActor`; the detached `@Model`
+  is only touched on the main actor and NEVER crosses a Sendable boundary — only
+  Strings reach `ChapterService`, only `URL?` reaches the artwork fetch.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration files; schema frozen (#425).
+- [ ] Entitlements: N/A — no entitlement/project.yml changes.
+- [x] No secrets: PASS — none.
+- [x] Error types: PASS — empty/malformed URL is a logged no-op, not an error.
+- [x] AppLog coverage: PASS — no-audio-URL guard logs; no new catch blocks.
+
+CRITICAL invariant (preview = NO store writes) verified in code: all five sinks
+(`persistCurrentPosition`, `persistPositionThrottled`, `flushListeningSession`
+[the `context.insert(session)` vector], `markCurrentEpisodePlayed`,
+`persistLastPlayingEpisode`) early-return on `currentEpisodeIsTransient`. The
+flag is set (line 335) AFTER the outgoing-episode persist/flush (lines 302-303),
+so neither direction leaks. The completion path is structurally safe too:
+`markPlayedAndRemove(detached)` no-ops because `queueItem == nil`, mutating a
+non-inserted model leaves `context.hasChanges` false, and `saveContext` guards on
+that. Speed-override writes guard on the (nil) `podcast`. The detached `Episode`
+is built via `init` only and never inserted anywhere — #425 freeze intent intact.
+Behavioral note: a preview that ends with a non-empty queue auto-advances into
+the queue (persistence restored via `transient: false`); no preview-side write.
+
+Feature suggestions identified: none this review.
+
+No code fixes required. Overall: PASS.
 
 ## Security Review — Issue #518
 

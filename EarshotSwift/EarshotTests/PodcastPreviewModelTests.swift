@@ -82,6 +82,24 @@ final class PodcastPreviewModelTests: XCTestCase {
         XCTAssertEqual(recent.first?.pubDate, d1)
     }
 
+    func testRecentEpisodesCarryAudioURLAndStreamFields() {
+        // #517: the enclosure URL (plus description, artwork, chapters) must reach
+        // the PreviewEpisode so the preview row can stream without subscribing.
+        let parsed = ParsedEpisode(
+            guid: "g", title: "Ep g", audioURL: "https://x/g.mp3",
+            description: "Show notes", pubDate: d1, durationSeconds: 1200,
+            artworkURL: "https://x/art.jpg", episodeNumber: nil, seasonNumber: nil,
+            chapterURL: "https://x/chapters.json", transcriptURL: nil
+        )
+        let recent = PodcastPreviewModel.recentEpisodes(from: parsedFeed([parsed]), limit: 5)
+
+        let first = recent.first
+        XCTAssertEqual(first?.audioURL, "https://x/g.mp3")
+        XCTAssertEqual(first?.episodeDescription, "Show notes")
+        XCTAssertEqual(first?.artworkURL, "https://x/art.jpg")
+        XCTAssertEqual(first?.chapterURL, "https://x/chapters.json")
+    }
+
     // MARK: cleanedDescription (pure)
 
     func testCleanedDescriptionTrimsAndNilsEmpty() {
