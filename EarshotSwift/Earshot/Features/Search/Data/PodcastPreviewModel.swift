@@ -114,8 +114,11 @@ final class PodcastPreviewModel {
     /// to `nil` so the view can decide cleanly whether to render a description
     /// section at all (no empty box, no dead VoiceOver stop).
     static func cleanedDescription(_ raw: String?) -> String? {
-        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !trimmed.isEmpty else { return nil }
-        return trimmed
+        // Strip HTML tags and decode entities first (some feeds emit raw markup
+        // and numeric entities in the show description, #518), then collapse an
+        // empty/whitespace-only result to nil so the "About" section hides.
+        let stripped = EpisodeSummary.plainText(raw)
+        guard !stripped.isEmpty else { return nil }
+        return stripped
     }
 }

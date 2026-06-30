@@ -108,6 +108,21 @@ final class PodcastPreviewModelTests: XCTestCase {
         XCTAssertNil(PodcastPreviewModel.cleanedDescription(nil))
     }
 
+    func testCleanedDescriptionStripsTagsAndEntities() {
+        // Raw markup plus a numeric entity (#518): tags removed, entity decoded.
+        XCTAssertEqual(
+            PodcastPreviewModel.cleanedDescription("<p>Not That &amp; That&#8217;s it</p>"),
+            "Not That & That\u{2019}s it"
+        )
+    }
+
+    func testCleanedDescriptionTagsOnlyYieldsNil() {
+        // A description that is only markup/whitespace collapses to nil so the
+        // preview "About" section hides cleanly.
+        XCTAssertNil(PodcastPreviewModel.cleanedDescription("<p></p>"))
+        XCTAssertNil(PodcastPreviewModel.cleanedDescription("<br/> \n <span></span>"))
+    }
+
     // MARK: load() state transitions
 
     func testLoadPublishesDescriptionAndRecentEpisodes() async {

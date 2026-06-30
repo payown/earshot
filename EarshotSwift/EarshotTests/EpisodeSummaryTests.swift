@@ -21,6 +21,66 @@ final class EpisodeSummaryTests: XCTestCase {
         )
     }
 
+    func testPodcastLevelHTMLAndAmpEntity() {
+        XCTAssertEqual(
+            EpisodeSummary.plainText("<p>Hello &amp; bye</p>"),
+            "Hello & bye"
+        )
+    }
+
+    func testDecodesDecimalNumericEntity() {
+        // &#8217; is the right single quotation mark (curly apostrophe).
+        XCTAssertEqual(EpisodeSummary.plainText("&#8217;"), "\u{2019}")
+    }
+
+    func testDecodesHexNumericEntity() {
+        // &#x2019; is the same character expressed in hex.
+        XCTAssertEqual(EpisodeSummary.plainText("&#x2019;"), "\u{2019}")
+        // Uppercase X form must decode the same way.
+        XCTAssertEqual(EpisodeSummary.plainText("&#X2019;"), "\u{2019}")
+    }
+
+    func testPlainTextInputPassesThroughTrimmed() {
+        // Clean input with no tags or entities is returned trimmed/unchanged.
+        XCTAssertEqual(
+            EpisodeSummary.plainText("  Just a normal sentence.  "),
+            "Just a normal sentence."
+        )
+    }
+
+    func testNumericEntitiesInSentence() {
+        XCTAssertEqual(
+            EpisodeSummary.plainText("It&#8217;s a &#x201C;great&#x201D; show"),
+            "It\u{2019}s a \u{201C}great\u{201D} show"
+        )
+    }
+
+    func testMalformedNumericEntityKeptVerbatim() {
+        // Matches the numeric-entity shape but 0xFFFFFF is past the valid Unicode
+        // range, so it can't resolve — keep the token as-is rather than drop it.
+        XCTAssertEqual(EpisodeSummary.plainText("a &#xFFFFFF; b"), "a &#xFFFFFF; b")
+    }
+
+    func testDecodesHexEntityWithLetterDigits() {
+        // #518: hex references for accented letters use a–f digits. é is U+00E9.
+        XCTAssertEqual(EpisodeSummary.plainText("caf&#xe9;"), "caf\u{00E9}")
+        // Uppercase hex digits decode identically.
+        XCTAssertEqual(EpisodeSummary.plainText("caf&#xE9;"), "caf\u{00E9}")
+    }
+
+    func testSurrogateRangeNumericEntityKeptVerbatim() {
+        // 0xD800 is a valid UInt32 but a UTF-16 surrogate, so Unicode.Scalar
+        // returns nil. The shape matches yet can't resolve — keep it verbatim.
+        XCTAssertEqual(EpisodeSummary.plainText("a &#xD800; b"), "a &#xD800; b")
+    }
+
+    func testNonNumericEntityShapeLeftUntouched() {
+        // Tokens that don't match the numeric-reference shape (non-hex letters,
+        // empty body) are not entities and must pass through unchanged.
+        XCTAssertEqual(EpisodeSummary.plainText("x &#xZZ; y"), "x &#xZZ; y")
+        XCTAssertEqual(EpisodeSummary.plainText("&#; here"), "&#; here")
+    }
+
     func testCollapsesWhitespaceLeftByTags() {
         XCTAssertEqual(
             EpisodeSummary.plainText("<p>One</p>\n\n<p>Two</p>"),
