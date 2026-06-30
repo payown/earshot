@@ -1576,3 +1576,42 @@ green (832 tests, Debug+Release clean).
 Feature suggestions identified: none this review.
 
 No fixes required; no commits made to the branch. Overall: PASS.
+
+## Security Review — Issue #517
+
+Stream-only playback from the Search podcast preview via a transient, detached
+(never-inserted) `Episode`. Files reviewed in full: `PlayerService.swift`,
+`PodcastPreviewModel.swift`, `PodcastPreviewView.swift`, plus the two test files.
+
+- [x] Force-unwraps: PASS — none. Added-line `!` are all boolean negation; URL
+  handling goes through optional `PlaybackLogic.resolvePlaybackURL` + guard.
+- [x] Silent try?: PASS — none in production; two `try?` live in the test
+  `storeCounts` helper with a `-1` sentinel (acceptable XCTest exception).
+- [x] fatalError: PASS — none.
+- [x] Retain cycles: PASS — `playPreview` is straight-line, no new closures; the
+  pre-existing chapter/artwork Tasks and observers use `[weak self]`, unmodified.
+- [x] @MainActor: PASS — `PlayerService` is `@MainActor`; the detached `@Model`
+  is only touched on the main actor and NEVER crosses a Sendable boundary — only
+  Strings reach `ChapterService`, only `URL?` reaches the artwork fetch.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration files; schema frozen (#425).
+- [ ] Entitlements: N/A — no entitlement/project.yml changes.
+- [x] No secrets: PASS — none.
+- [x] Error types: PASS — empty/malformed URL is a logged no-op, not an error.
+- [x] AppLog coverage: PASS — no-audio-URL guard logs; no new catch blocks.
+
+CRITICAL invariant (preview = NO store writes) verified in code: all five sinks
+(`persistCurrentPosition`, `persistPositionThrottled`, `flushListeningSession`
+[the `context.insert(session)` vector], `markCurrentEpisodePlayed`,
+`persistLastPlayingEpisode`) early-return on `currentEpisodeIsTransient`. The
+flag is set (line 335) AFTER the outgoing-episode persist/flush (lines 302-303),
+so neither direction leaks. The completion path is structurally safe too:
+`markPlayedAndRemove(detached)` no-ops because `queueItem == nil`, mutating a
+non-inserted model leaves `context.hasChanges` false, and `saveContext` guards on
+that. Speed-override writes guard on the (nil) `podcast`. The detached `Episode`
+is built via `init` only and never inserted anywhere — #425 freeze intent intact.
+Behavioral note: a preview that ends with a non-empty queue auto-advances into
+the queue (persistence restored via `transient: false`); no preview-side write.
+
+Feature suggestions identified: none this review.
+
+No code fixes required. Overall: PASS.
