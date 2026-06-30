@@ -306,6 +306,15 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   steps); she tries the buttons, likes the fixed spot, and leaves them on while
   keeping the rotor as the other option. A beat of the app giving her both and
   letting her choose, in character with her independence (Chapter 37)
+- From a search-result podcast preview (the look-before-you-leap screen from
+  Chapter 34) she can now tap an episode and stream it on the spot, no Follow
+  first, nothing added to her library or queue. This completes the order she's
+  wanted on the over-following thread (Chapters 1, 8, 19, 34): look, then
+  listen, then decide; she played ten minutes of one, decided no, closed it,
+  nothing to undo. And feed descriptions that used to render raw HTML (literal
+  tags and bracket-clutter where the words should be) now read as clean plain
+  text everywhere a description shows, including for VoiceOver; she'd taught
+  herself to read around the tag soup (Chapter 38)
 
 ## What you can generate
 
@@ -1210,6 +1219,26 @@ She'd been moving through her interview show by the rotor, flicking on the artwo
 This build set two buttons right next to the chapter name. Previous on the left, Next on the right, a fixed spot she could land on and press, no digging through the rotor for the action first. She tried them a few mornings. Liked knowing exactly where they sat.
 
 Then she went into Settings, Playback, and found the switch that hides them. Thought about it. Left it on. The rotor's still there under the artwork if she wants it, and now there's a button too. For once the app handed her both and let her keep whichever one her thumb went for.
+
+### Chapter 38 — Build 138
+
+*Kashe could read a show in the search preview but never hear it; this build lets her play an episode straight from there, streaming, and cleans up the descriptions that used to come through as raw HTML.*
+
+**What to test:**
+
+In Search, find a show and open its preview (double-tap a result). Tap any episode in there and it should start playing right away, streaming, with no need to Follow first. Nothing gets added to your library or queue, it just plays.
+
+Open a show whose description used to come through as raw HTML, literal tags and code-looking text instead of words. The description should now read as clean, normal text. With VoiceOver, it should speak the readable text, never the tag soup.
+
+She'd learned to look before she followed (Chapter 34). A name turns up, Renata mentions something, and she searches it, opens the preview, reads what it is before she commits to one more show on the pile.
+
+But the preview only got her so far. She could read about a show. She couldn't hear it. To actually listen she had to follow first, then go dig it out of her library, then back it out if it wasn't for her. So mostly she'd guess from the description and follow on faith, which is how the pile got to be a pile.
+
+This build she taps an episode right there in the preview and it plays. Streaming, nothing saved, nothing queued. Just the show in her ears so she can tell in two minutes what a paragraph never could. She played ten minutes of one, decided it wasn't for her, closed it. Nothing to undo.
+
+And the description itself reads like a person wrote it now. One show she'd checked used to hand her a mess, literal tags and bracket-clutter where the words should be, and she'd read around it the way she reads around most things. This time it was plain sentences, start to finish. She didn't have to translate.
+
+Look, then listen, then decide. For someone who's followed too much and pruned too little, that's the order she's wanted the whole time.
 
 ---
 
