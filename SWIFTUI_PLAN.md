@@ -294,8 +294,15 @@ The SwiftUI side is built and waiting.
   (only Sendable strings cross into `ChapterService` via the existing
   `loadChaptersForCurrentEpisode` path). **Files:** `PlayerService.swift`,
   `PodcastPreviewModel.swift`, `PodcastPreviewView.swift`,
-  `AdvancedPlaybackTests.swift` (+3), `PodcastPreviewModelTests.swift` (+1).
-  **Issue:** #517.
+  `AdvancedPlaybackTests.swift` (+4), `PodcastPreviewModelTests.swift` (+1).
+  **Issue:** #517. **Testing gate (earshot-testing):** 837 tests, 0 failures
+  (swift-tip baseline 832 → +4 implementer +1 gate); Release build clean. The
+  gate added `test_playPreview_playbackEnds_stopsCleanlyWithoutInserting` to cover
+  the natural-end-of-track invariant directly (posts
+  `AVPlayerItem.didPlayToEndTimeNotification`, polls until `nowPlayingEpisode ==
+  nil`, asserts Episode/ListeningSession/QueueItem counts unchanged). The
+  implementer's suite already covered no-store-writes on play, empty-audioURL
+  no-op, and persistence-restored-after-preview. **Test baseline of record: 837.**
 
 ## UI Decisions
 

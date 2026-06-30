@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import AVFoundation
 @testable import Earshot
 
 /// Tests for the #373 advanced-playback engine state on ``PlayerService``:
@@ -204,6 +205,43 @@ final class AdvancedPlaybackTests: XCTestCase {
             guid: "g", title: "T", audioURL: "", showTitle: "Show"
         )
         XCTAssertNil(player.nowPlayingEpisode, "An empty audio URL must not load anything")
+    }
+
+    func test_playPreview_playbackEnds_stopsCleanlyWithoutInserting() async {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        player.playPreview(
+            guid: "preview", title: "Preview", audioURL: "https://x/p.mp3", showTitle: "Show"
+        )
+        XCTAssertNotNil(player.nowPlayingEpisode)
+        let before = storeCounts(ctx)
+
+        // Drive natural end-of-track. The observer registered in configure()
+        // listens for this notification (object: nil) and routes to the private
+        // completion handler on the main actor.
+        NotificationCenter.default.post(
+            name: AVPlayerItem.didPlayToEndTimeNotification, object: nil
+        )
+
+        // The handler runs in a hopped main-actor Task; poll until it clears the
+        // transient episode (network is irrelevant — completion is synchronous).
+        var cleared = false
+        for _ in 0..<200 {
+            if player.nowPlayingEpisode == nil { cleared = true; break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertTrue(cleared, "Preview completion must stop cleanly (currentEpisode == nil)")
+        XCTAssertFalse(player.isPlaying)
+
+        // The empty queue has no next item, so a finished preview must leave the
+        // store exactly as it was — no Episode, ListeningSession, or QueueItem.
+        let after = storeCounts(ctx)
+        XCTAssertEqual(after.episodes, before.episodes, "Completion must not insert an Episode")
+        XCTAssertEqual(after.sessions, before.sessions, "Completion must not insert a ListeningSession")
+        XCTAssertEqual(after.queue, before.queue, "Completion must not insert a QueueItem")
     }
 
     func test_playPreview_realPlayAfterPreview_restoresPersistence() {
