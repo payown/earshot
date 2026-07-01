@@ -315,6 +315,21 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   tags and bracket-clutter where the words should be) now read as clean plain
   text everywhere a description shows, including for VoiceOver; she'd taught
   herself to read around the tag soup (Chapter 38)
+- Not every drive is out past signal (Chapter 5); most are just spotty, one bar,
+  and when she streams on those weak stretches a buffering dip used to go silent
+  and stay silent until she found the phone and pressed play again, both hands
+  busy (a wheelchair half into the trunk, Chapter 14). This build makes streaming
+  recover on its own after a dip (a manual pause stays paused), and the phone runs
+  cooler through a rough-connection stretch instead of the warm brick it became by
+  the far end of the route (distinct from the Chapter 15 runaway-loop warmth). She
+  notices the recovery once, then stops noticing it (Chapter 39)
+- Kashe's Quick Actions had a fixed order she'd set once and never changed, because
+  reordering meant dragging a row to a new spot and "a drag you can't see is a drag
+  you can't do," so "Play now" sat third or fourth down and she reached past the
+  rest. This build puts Move to top / up / down / bottom in the VoiceOver Actions
+  rotor on each Quick Actions settings row, so she reorders by flick instead of
+  drag; she moves "Play now" to the top so one flick fires her most-used action
+  (Chapter 39)
 
 ## What you can generate
 
@@ -1239,6 +1254,28 @@ This build she taps an episode right there in the preview and it plays. Streamin
 And the description itself reads like a person wrote it now. One show she'd checked used to hand her a mess, literal tags and bracket-clutter where the words should be, and she'd read around it the way she reads around most things. This time it was plain sentences, start to finish. She didn't have to translate.
 
 Look, then listen, then decide. For someone who's followed too much and pruned too little, that's the order she's wanted the whole time.
+
+---
+
+### Chapter 39 — Build 140
+
+*Kashe streams on spotty roads and had given up on reordering her Quick Actions; this build makes streaming pick itself back up after a buffering dip, and lets her reorder those actions by VoiceOver instead of a drag.*
+
+**What to test:**
+
+On a weak connection, stream an episode (don't download it) and let a buffering dip happen without touching the phone. Playback should pick itself back up on its own, no manual play tap. If you pause it yourself, it should stay paused.
+
+Go to Settings, Quick Actions. Focus a row, open the Actions rotor, and use Move to top, Move up, Move down, or Move to bottom to reorder them, for example putting "Play now" first. No dragging needed.
+
+Not every drive is out past signal. Most are just spotty. A stretch of road where the bars drop to one and the show she's streaming hits a wall, goes quiet, and used to stay quiet until she found the phone and pressed play again.
+
+Both hands are usually busy when it happens. A wheelchair half into the trunk. By the time she got to the phone the quiet had been sitting there a while, and she'd missed whatever she missed.
+
+This build the quiet doesn't last. The show dips, waits out the bad patch, and comes back on its own. She caught it the second time and then stopped catching it, which is the point. The phone ran cooler through the rough stretch too, not the warm brick it used to be by the far end of the route.
+
+Then the Quick Actions. She'd set them once and never touched them again, because touching them meant dragging a row to a new spot, and a drag you can't see is a drag you can't do. So "Play now" sat wherever it had landed, third or fourth down, and she reached past the rest to get to it.
+
+This time the reorder lived in the rotor. Move to top. She put Play now first, so one flick does the thing she does most. No dragging, no guessing where the row went. She wondered why it took this long, then let that go too.
 
 ---
 
