@@ -85,9 +85,11 @@ final class StoreMigrationV3toV4Tests: XCTestCase {
         // The repository reports the persisted order, no hidden actions, and the
         // rotor default (first visible) is the first stored action.
         let repo = QuickActionRepository(context: ctx)
+        // The stored V3 order predates `unfollowPodcast` (#528); it loads intact
+        // with the newly-added action appended (visible) at the end.
         XCTAssertEqual(
             repo.episodeOrder(),
-            [.share, .playNow, .openShowNotes, .markPlayed, .download, .addToQueueTop, .addToQueueBottom, .viewBookmarks]
+            [.share, .playNow, .openShowNotes, .markPlayed, .download, .addToQueueTop, .addToQueueBottom, .viewBookmarks, .unfollowPodcast]
         )
         XCTAssertTrue(repo.episodeHidden().isEmpty)
         XCTAssertTrue(repo.queueHidden().isEmpty)

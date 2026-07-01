@@ -140,7 +140,7 @@ final class RSSParserTests: XCTestCase {
     func testDefaultEpisodeActionsOrder() {
         XCTAssertEqual(
             defaultEpisodeActions,
-            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .markPlayed, .viewBookmarks, .openShowNotes, .share]
+            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .markPlayed, .viewBookmarks, .openShowNotes, .share, .unfollowPodcast]
         )
     }
 }
