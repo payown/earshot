@@ -72,18 +72,26 @@ struct ID3TagFetcher: Sendable {
     /// (range ignored, full body streamed), the read stops once `cap` bytes have
     /// arrived. Runs the byte-stream loop wherever the caller's executor is — the
     /// service calls this from a detached task so it stays off the main actor.
+    ///
+    /// Bytes are accumulated into a contiguous `[UInt8]` buffer (cheap amortized
+    /// appends) and converted to `Data` once at the end, instead of paying
+    /// `Data.append(UInt8)` per byte — that per-byte `Data` mutation was the hot
+    /// spot when reading a multi-hundred-KB tag. We keep streaming with the cap
+    /// rather than switching to a single-shot ranged `data(for:)` so a server that
+    /// ignores `Range` and returns `200` still stops at the cap instead of pulling
+    /// the whole episode.
     private func prefix(of url: URL, upTo cap: Int) async throws -> Data {
         guard cap > 0 else { return Data() }
         var request = URLRequest(url: url)
         request.setValue("bytes=0-\(cap - 1)", forHTTPHeaderField: "Range")
 
         let (bytes, _) = try await session.bytes(for: request)
-        var out = Data()
+        var out = [UInt8]()
         out.reserveCapacity(min(cap, 65_536))
         for try await byte in bytes {
             out.append(byte)
             if out.count >= cap { break }
         }
-        return out
+        return Data(out)
     }
 }
