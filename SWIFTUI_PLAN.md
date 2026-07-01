@@ -1228,6 +1228,44 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 
 ## Data Decisions
 
+### Issue #524 — Quick Action hide/restore (freeze V3, add V4)
+- **`isHidden: Bool?`, not `isEnabled`.** `QuickActionConfig` gains an OPTIONAL
+  `isHidden` (nil = visible/enabled). Optional is deliberate on two fronts:
+  (1) SwiftData lightweight migration cannot add a non-optional attribute and
+  ignores Swift defaults, so an optional keeps V3→V4 lightweight and never
+  aborts; (2) nil = visible makes "pre-existing row AND any future action default
+  to enabled" fall out for free with zero migration. `isHidden` (vs `isEnabled`)
+  is chosen so the default (nil) reads as "not hidden" = visible without a
+  coalesce at every call site.
+- **Schema freeze.** `EarshotSchemaV3` was converted from a live-referencing
+  schema into a verbatim frozen nested snapshot (mirroring V2), capturing the
+  pre-#524 shape (`Podcast.notificationEnabled` optional, `QuickActionConfig`
+  WITHOUT `isHidden`). `EarshotSchemaV4` (`Schema.Version(4,0,0)`) is now the only
+  schema that references the LIVE top-level types and backs the app's
+  `ModelContainer`. Freezing V3 was required, not optional: leaving V3 pointing
+  at live types would silently change the 3.0.0 shape when `isHidden` was added,
+  re-creating the #425 launch-crash class. `ModelContainerFactory` and
+  `StoreMigration` now open V4; `EarshotMigrationPlan` appends V4 + a lightweight
+  `migrateV3toV4` stage.
+- **Drift test re-baselined.** `SchemaDriftTests` now compares the live graph
+  against frozen V3 and asserts the only delta is `QuickActionConfig.isHidden`
+  (optional Bool added); the entity-name lockstep check points at V4.
+- **Hide is restorable, never destructive.** No rows are deleted. The full
+  ordered arrays on `QuickActionStore` (`episodeActions`, …) keep hidden actions
+  so the settings screen can list + restore them; new `visible…Actions` computed
+  arrays are the rotor/default-tap surface. All 6 content-row rotor call sites
+  (EpisodeListView, InboxScreen, DownloadsScreen, SearchView, QueueScreen,
+  SubscriptionsView) were switched to the `visible…` arrays so hidden actions
+  disappear from real rows; the default double-tap is the first VISIBLE action.
+- **Guard.** `QuickActionVisibilityLogic.canHide` refuses hiding the last visible
+  action in a set; the store's `set…ActionHidden` returns `false` on refusal and
+  the settings UI announces "At least one Quick Action must remain". Reorder
+  writers preserve hidden flags (a reorder never re-enables a hidden action).
+- **Restore reachability.** Hidden actions stay in their list in the settings
+  screen, labelled "Hidden" in words (not colour alone) for sighted users and
+  ", hidden" in the VoiceOver row label, each carrying a "Restore to Quick
+  Actions" rotor action; visible rows carry "Remove from Quick Actions".
+
 ### Issue #425 — Freeze V2, add V3 + drift detection (launch-crash hardening)
 - **Frozen-schema architecture.** `EarshotSchemaV2` is now a verbatim frozen
   snapshot (nested `@Model` types) of the 10-entity graph as it shipped at #337

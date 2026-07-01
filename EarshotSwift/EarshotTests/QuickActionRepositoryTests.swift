@@ -64,4 +64,54 @@ final class QuickActionRepositoryTests: XCTestCase {
         QuickActionRepository(context: ctx).setQueueOrder(custom)
         XCTAssertEqual(QuickActionRepository(context: ctx).queueOrder(), custom)
     }
+
+    // MARK: Hidden flag (#524)
+
+    func testHiddenDefaultsEmptyWhenNothingStored() {
+        let repo = QuickActionRepository(context: TestStore.freshContext())
+        XCTAssertTrue(repo.episodeHidden().isEmpty)
+        XCTAssertTrue(repo.podcastHidden().isEmpty)
+        XCTAssertTrue(repo.queueHidden().isEmpty)
+    }
+
+    func testHiddenRoundTripsWithOrder() {
+        let ctx = TestStore.freshContext()
+        QuickActionRepository(context: ctx).setEpisode(
+            order: defaultEpisodeActions, hidden: [EpisodeAction.share.rawValue])
+
+        let fresh = QuickActionRepository(context: ctx)
+        XCTAssertEqual(fresh.episodeHidden(), [EpisodeAction.share.rawValue])
+        XCTAssertEqual(fresh.episodeOrder(), defaultEpisodeActions, "order preserved alongside hidden")
+    }
+
+    func testReorderPreservesHiddenFlags() {
+        let ctx = TestStore.freshContext()
+        let repo = QuickActionRepository(context: ctx)
+        repo.setEpisode(order: defaultEpisodeActions, hidden: [EpisodeAction.download.rawValue])
+
+        // A plain reorder (no hidden argument) must not re-enable the hidden action.
+        var reordered = defaultEpisodeActions
+        reordered.reverse()
+        repo.setEpisodeOrder(reordered)
+
+        XCTAssertEqual(QuickActionRepository(context: ctx).episodeHidden(), [EpisodeAction.download.rawValue])
+    }
+
+    func testRestoreClearsHiddenFlag() {
+        let ctx = TestStore.freshContext()
+        let repo = QuickActionRepository(context: ctx)
+        repo.setEpisode(order: defaultEpisodeActions, hidden: [EpisodeAction.share.rawValue])
+        repo.setEpisode(order: defaultEpisodeActions, hidden: [])
+
+        XCTAssertTrue(QuickActionRepository(context: ctx).episodeHidden().isEmpty)
+    }
+
+    func testHiddenSetsAreIndependentPerContentType() {
+        let ctx = TestStore.freshContext()
+        let repo = QuickActionRepository(context: ctx)
+        repo.setEpisode(order: defaultEpisodeActions, hidden: [EpisodeAction.share.rawValue])
+
+        XCTAssertTrue(repo.podcastHidden().isEmpty)
+        XCTAssertTrue(repo.queueHidden().isEmpty)
+    }
 }

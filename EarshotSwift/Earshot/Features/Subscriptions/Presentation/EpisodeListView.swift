@@ -88,7 +88,7 @@ struct EpisodeListView: View {
                             episode: episode,
                             actions: buildEpisodeActions(
                                 episode: episode,
-                                order: quickActions.episodeActions,
+                                order: quickActions.visibleEpisodeActions,
                                 player: player,
                                 downloads: downloads,
                                 context: context,

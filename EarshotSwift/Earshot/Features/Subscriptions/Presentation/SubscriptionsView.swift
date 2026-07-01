@@ -175,7 +175,7 @@ struct SubscriptionsView: View {
     private func rotorActions(for podcast: Podcast) -> [QuickActionItem] {
         buildPodcastActions(
             podcast: podcast,
-            order: quickActions.podcastActions.filter { $0 != .openDetail },
+            order: quickActions.visiblePodcastActions.filter { $0 != .openDetail },
             context: context,
             onOpenDetail: {},
             onShare: { sharingPodcast = podcast },

@@ -25,7 +25,7 @@ enum ModelContainerFactory {
     /// failure recovery and an in-memory last resort.
     @MainActor
     static func makeShared() -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV3.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV4.self)
 
         // 1. Normal path — open as the current schema (V3) through the migration
         //    plan: a V2 store is lightweight-migrated, and an original (V1) store
@@ -66,7 +66,7 @@ enum ModelContainerFactory {
 
     /// An ephemeral in-memory container for tests and previews.
     static func makeInMemory() throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV3.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV4.self)
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: config)
     }

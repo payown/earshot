@@ -10,14 +10,14 @@ import SwiftData
 /// stamped `N.0.0` whose on-disk shape no longer matches the code's `N.0.0`
 /// shape and aborts the open (NSCocoaErrorDomain 134110, often uncatchable).
 ///
-/// `EarshotSchemaV3` is the current schema and the only `VersionedSchema` that
-/// references the live types; V1 and V2 are frozen nested snapshots. To make
+/// `EarshotSchemaV4` is the current schema and the only `VersionedSchema` that
+/// references the live types; V1, V2, and V3 are frozen nested snapshots. To make
 /// "the live graph drifted from its last frozen snapshot" a CI failure, this test
-/// compares the LIVE graph against the FROZEN ``EarshotSchemaV2`` snapshot and
-/// asserts the ONLY difference is the single documented, intentional V2→V3 delta:
-/// `Podcast.notificationEnabled` went from non-optional `Bool` to optional
-/// `Bool?`. Any OTHER difference means a live model changed shape without a new
-/// frozen version + migration stage being added.
+/// compares the LIVE graph against the FROZEN ``EarshotSchemaV3`` snapshot and
+/// asserts the ONLY difference is the single documented, intentional V3→V4 delta:
+/// `QuickActionConfig` gained an optional `isHidden: Bool?`. Any OTHER difference
+/// means a live model changed shape without a new frozen version + migration
+/// stage being added.
 ///
 /// IF THIS TEST FAILS with a difference other than the expected delta: a live
 /// `@Model` changed shape without the schema being versioned. Do NOT just edit a
@@ -34,7 +34,7 @@ import SwiftData
 @MainActor
 final class SchemaDriftTests: XCTestCase {
 
-    /// The live model graph, kept in lockstep with `EarshotSchemaV3.models`.
+    /// The live model graph, kept in lockstep with `EarshotSchemaV4.models`.
     private static let liveModels: [any PersistentModel.Type] = [
         Podcast.self,
         Episode.self,
@@ -60,43 +60,48 @@ final class SchemaDriftTests: XCTestCase {
         return result
     }
 
-    func testLiveGraphDiffersFromFrozenV2OnlyByIntentionalDelta() {
-        let frozenV2 = attributeMap(Schema(versionedSchema: EarshotSchemaV2.self))
+    func testLiveGraphDiffersFromFrozenV3OnlyByIntentionalDelta() {
+        let frozenV3 = attributeMap(Schema(versionedSchema: EarshotSchemaV3.self))
         let live = attributeMap(Schema(Self.liveModels))
 
-        // Same entity + attribute *names* on both sides (V2→V3 added no fields
-        // and removed none — it only changed one field's optionality).
+        // Same entity + attribute *names* on both sides EXCEPT the one added
+        // field: V3→V4 only added QuickActionConfig.isHidden.
+        let addedKeys = Set(live.keys).subtracting(frozenV3.keys)
+        let removedKeys = Set(frozenV3.keys).subtracting(live.keys)
         XCTAssertEqual(
-            Set(frozenV2.keys), Set(live.keys),
-            "An entity or attribute was added/removed in the live graph vs frozen "
-                + "EarshotSchemaV2. See this file's header: freeze a new version + "
-                + "migration stage."
+            addedKeys, ["QuickActionConfig.isHidden"],
+            "Unexpected attribute(s) added in the live graph vs frozen "
+                + "EarshotSchemaV3. See this file's header: freeze a new version + "
+                + "migration stage. Added: \(addedKeys.sorted())."
+        )
+        XCTAssertTrue(
+            removedKeys.isEmpty,
+            "An entity or attribute was removed in the live graph vs frozen "
+                + "EarshotSchemaV3. Removed: \(removedKeys.sorted())."
         )
 
-        // The set of keys whose value (optionality|type) differs between V2 and
-        // the live graph must be EXACTLY the documented intentional delta.
-        let drifted = Set(frozenV2.keys).filter { key in
-            frozenV2[key] != live[key]
+        // No SHARED key changed optionality/type between V3 and the live graph.
+        let drifted = Set(frozenV3.keys).filter { key in
+            frozenV3[key] != live[key]
         }
-        let expectedDelta: Set<String> = ["Podcast.notificationEnabled"]
-        XCTAssertEqual(
-            drifted, expectedDelta,
-            "Live graph drifted from frozen EarshotSchemaV2 in a way that is NOT "
-                + "the documented V2→V3 delta (\(expectedDelta)). Drifted keys: "
+        XCTAssertTrue(
+            drifted.isEmpty,
+            "A shared attribute changed shape between frozen EarshotSchemaV3 and "
+                + "the live graph, which is NOT the documented V3→V4 delta "
+                + "(QuickActionConfig.isHidden added). Drifted keys: "
                 + "\(drifted.sorted()). See this file's header for the fix."
         )
 
-        // And spell out the expected delta precisely: V2 non-optional Bool ->
-        // live optional Bool.
-        XCTAssertEqual(frozenV2["Podcast.notificationEnabled"], "false|Bool")
-        XCTAssertEqual(live["Podcast.notificationEnabled"], "true|Optional<Bool>")
+        // Spell out the expected delta precisely: the new field is an optional Bool.
+        XCTAssertNil(frozenV3["QuickActionConfig.isHidden"])
+        XCTAssertEqual(live["QuickActionConfig.isHidden"], "true|Optional<Bool>")
     }
 
     /// Guards the lockstep assumption: the live list this test compares against
-    /// must equal what `EarshotSchemaV3` actually registers, by entity name.
-    func testLiveListMatchesV3ModelsList() {
-        let v3Names = Set(Schema(versionedSchema: EarshotSchemaV3.self).entities.map(\.name))
+    /// must equal what `EarshotSchemaV4` actually registers, by entity name.
+    func testLiveListMatchesV4ModelsList() {
+        let v4Names = Set(Schema(versionedSchema: EarshotSchemaV4.self).entities.map(\.name))
         let liveNames = Set(Schema(Self.liveModels).entities.map(\.name))
-        XCTAssertEqual(v3Names, liveNames)
+        XCTAssertEqual(v4Names, liveNames)
     }
 }

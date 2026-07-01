@@ -3,14 +3,14 @@ import SwiftData
 
 /// Store open + manual V1 migration (issues #355, #425).
 ///
-/// The current schema is ``EarshotSchemaV3`` and the normal open path runs the
-/// ``EarshotMigrationPlan`` (V2→V3 is a SwiftData-native lightweight stage, so it
-/// migrates rather than aborts). SwiftData still can't infer the original V1→V2
-/// jump (2 entities become 10, with new non-optional attributes), so a store
-/// still at the original V1 schema is handled here by a manual export/reimport:
-/// read it through ``EarshotSchemaV1``, snapshot it into plain values, replace
-/// the store file, and reinsert the data as current (V3) objects. This preserves
-/// the tester's subscriptions, episodes, and played state.
+/// The current schema is ``EarshotSchemaV4`` and the normal open path runs the
+/// ``EarshotMigrationPlan`` (V2→V3 and V3→V4 are SwiftData-native lightweight
+/// stages, so it migrates rather than aborts). SwiftData still can't infer the
+/// original V1→V2 jump (2 entities become 10, with new non-optional attributes),
+/// so a store still at the original V1 schema is handled here by a manual
+/// export/reimport: read it through ``EarshotSchemaV1``, snapshot it into plain
+/// values, replace the store file, and reinsert the data as current objects.
+/// This preserves the tester's subscriptions, episodes, and played state.
 enum StoreMigration {
 
     // Plain snapshots so no managed objects outlive the V1 container.
@@ -39,7 +39,7 @@ enum StoreMigration {
     /// neither.
     @MainActor
     static func openOrMigrate(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV3.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV4.self)
 
         // Fresh installs, already-V3 stores, and V2 stores (lightweight V2→V3)
         // all open through the migration plan.
@@ -60,7 +60,7 @@ enum StoreMigration {
             configurations: ModelConfiguration(schema: schema, url: url)
         )
         try write(snapshots, into: container.mainContext)
-        AppLog.data.info("Migrated \(snapshots.count) podcast(s) from V1 to V3")
+        AppLog.data.info("Migrated \(snapshots.count) podcast(s) from V1 to current schema")
         return container
     }
 

@@ -430,7 +430,7 @@ struct SearchView<HeaderContent: View>: View {
 
     private func episodeActions(_ episode: Episode) -> [QuickActionItem] {
         buildEpisodeActions(
-            episode: episode, order: quickActions.episodeActions, player: player,
+            episode: episode, order: quickActions.visibleEpisodeActions, player: player,
             downloads: downloads, context: context,
             onShowNotes: { showNotesEpisode = episode }, onShare: { sharingEpisode = episode },
             onBookmarks: { bookmarksEpisode = episode }

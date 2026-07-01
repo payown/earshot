@@ -114,7 +114,7 @@ struct DownloadsScreen: View {
     private func actions(for episode: Episode) -> [QuickActionItem] {
         buildEpisodeActions(
             episode: episode,
-            order: quickActions.episodeActions,
+            order: quickActions.visibleEpisodeActions,
             player: player,
             downloads: downloads,
             context: context,

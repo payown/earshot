@@ -25,9 +25,24 @@ final class QuickActionRepository {
         resolve(.queueItem, all: QueueItemAction.allCases, fallback: defaultQueueItemActions)
     }
 
-    func setEpisodeOrder(_ actions: [EpisodeAction]) { store(.episode, actions.map(\.rawValue)) }
-    func setPodcastOrder(_ actions: [PodcastAction]) { store(.podcast, actions.map(\.rawValue)) }
-    func setQueueOrder(_ actions: [QueueItemAction]) { store(.queueItem, actions.map(\.rawValue)) }
+    // Reorder writers preserve any existing hidden flags (a reorder must never
+    // silently re-enable a hidden action).
+    func setEpisodeOrder(_ actions: [EpisodeAction]) { store(.episode, actions.map(\.rawValue), hidden: hiddenKeys(for: .episode)) }
+    func setPodcastOrder(_ actions: [PodcastAction]) { store(.podcast, actions.map(\.rawValue), hidden: hiddenKeys(for: .podcast)) }
+    func setQueueOrder(_ actions: [QueueItemAction]) { store(.queueItem, actions.map(\.rawValue), hidden: hiddenKeys(for: .queueItem)) }
+
+    // Combined writers persist order and the hidden set together, so the store
+    // can flush its full in-memory state (order + visibility) in one save (#524).
+    func setEpisode(order: [EpisodeAction], hidden: Set<String>) { store(.episode, order.map(\.rawValue), hidden: hidden) }
+    func setPodcast(order: [PodcastAction], hidden: Set<String>) { store(.podcast, order.map(\.rawValue), hidden: hidden) }
+    func setQueue(order: [QueueItemAction], hidden: Set<String>) { store(.queueItem, order.map(\.rawValue), hidden: hidden) }
+
+    /// The set of hidden action keys for a content type. A missing/nil `isHidden`
+    /// flag counts as visible, so pre-existing rows and any future action default
+    /// to enabled with zero migration.
+    func episodeHidden() -> Set<String> { hiddenKeys(for: .episode) }
+    func podcastHidden() -> Set<String> { hiddenKeys(for: .podcast) }
+    func queueHidden() -> Set<String> { hiddenKeys(for: .queueItem) }
 
     // MARK: Internals
 
@@ -45,10 +60,19 @@ final class QuickActionRepository {
         return result
     }
 
-    private func store(_ type: QuickActionContentType, _ keys: [String]) {
+    private func hiddenKeys(for type: QuickActionContentType) -> Set<String> {
+        Set(configs(for: type).filter { $0.isHidden == true }.map(\.actionKey))
+    }
+
+    private func store(_ type: QuickActionContentType, _ keys: [String], hidden: Set<String>) {
         configs(for: type).forEach(context.delete)
         for (index, key) in keys.enumerated() {
-            context.insert(QuickActionConfig(contentType: type, actionKey: key, sortOrder: index))
+            context.insert(QuickActionConfig(
+                contentType: type,
+                actionKey: key,
+                sortOrder: index,
+                isHidden: hidden.contains(key) ? true : nil
+            ))
         }
         do {
             try context.save()

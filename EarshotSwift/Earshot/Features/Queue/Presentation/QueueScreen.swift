@@ -161,7 +161,7 @@ struct QueueScreen: View {
             focusedEpisode: $focusedEpisode,
             actions: buildQueueActions(
                 episode: episode,
-                order: quickActions.queueActions,
+                order: quickActions.visibleQueueActions,
                 moveMode: moveMode,
                 player: player,
                 context: context,
