@@ -12,8 +12,12 @@ struct QuickActionsSettingsView: View {
     @Environment(QuickActionStore.self) private var store
 
     /// Keeps VoiceOver focus on a row after a rotor move so the user stays
-    /// oriented. The three sets share one binding because their ids (the action
-    /// raw values) never collide across sets.
+    /// oriented. One binding serves all three sets, but the focus value is
+    /// namespaced by section title (see `focusID`) because the raw action ids
+    /// DO collide across sets (e.g. `playNow` and `openShowNotes` appear in both
+    /// the Episode and Queue sets, `share` in both Episode and Podcast). Without
+    /// the namespace, moving a row in one section could land focus on a
+    /// same-ided row in another section.
     @AccessibilityFocusState private var focusedActionID: String?
 
     var body: some View {
@@ -53,16 +57,19 @@ struct QuickActionsSettingsView: View {
         Section(title) {
             ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
                 let name = action[keyPath: label]
+                // Namespace the focus value by section so a move in this section
+                // can't steal focus onto a same-ided row in another section.
+                let focusID = "\(title).\(action.id)"
                 Text(name)
                     .accessibilityLabel(rowLabel(name, index: index, count: actions.count))
                     .accessibilityHint("Reorderable in Edit mode. Position 1 is the default action. Use the actions rotor to move without dragging.")
-                    .accessibilityFocused($focusedActionID, equals: action.id)
+                    .accessibilityFocused($focusedActionID, equals: focusID)
                     .accessibilityActions {
                         ForEach(QuickActionMoveLogic.targets(index: index, count: actions.count), id: \.label) { target in
                             Button(target.label) {
                                 move(IndexSet(integer: index), target.destinationOffset)
                                 Announcer.announce("Moved \(name) to position \(target.resultingIndex + 1) of \(actions.count)")
-                                focusedActionID = action.id
+                                focusedActionID = focusID
                             }
                         }
                     }
