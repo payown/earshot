@@ -13,6 +13,9 @@ struct EpisodeListView: View {
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var showingPodcastSettings = false
+    // Drives the shared destructive unfollow confirmation for the episode
+    // "Unfollow this podcast" Quick Action (#528).
+    @State private var pendingUnfollow: Podcast?
 
     /// Played/unheard filter for this podcast's list. Loaded per podcast on
     /// appear (default ``EpisodeListFilter/unheard``) and persisted on change
@@ -94,7 +97,8 @@ struct EpisodeListView: View {
                                 context: context,
                                 onShowNotes: { showNotesEpisode = episode },
                                 onShare: { sharingEpisode = episode },
-                                onBookmarks: { bookmarksEpisode = episode }
+                                onBookmarks: { bookmarksEpisode = episode },
+                                onUnfollow: episode.podcast.map { pod in { pendingUnfollow = pod } }
                             )
                         )
                     }
@@ -130,6 +134,7 @@ struct EpisodeListView: View {
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
         }
+        .unfollowConfirmation($pendingUnfollow, context: context)
     }
 
     /// Podcast-level "Play oldest first" binge entry point (#488). Seeds the

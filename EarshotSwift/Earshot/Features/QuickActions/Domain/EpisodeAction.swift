@@ -15,6 +15,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
     case viewBookmarks
     case openShowNotes
     case share
+    case unfollowPodcast
 
     var id: String { rawValue }
 
@@ -30,6 +31,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
         case .viewBookmarks: return "Bookmarks"
         case .openShowNotes: return "Open show notes"
         case .share: return "Share"
+        case .unfollowPodcast: return "Unfollow this podcast"
         }
     }
 }
@@ -43,4 +45,5 @@ let defaultEpisodeActions: [EpisodeAction] = [
     .viewBookmarks,
     .openShowNotes,
     .share,
+    .unfollowPodcast,
 ]

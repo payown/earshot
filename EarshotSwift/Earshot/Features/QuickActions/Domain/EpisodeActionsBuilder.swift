@@ -27,9 +27,15 @@ func buildEpisodeActions(
     context: ModelContext,
     onShowNotes: @escaping () -> Void,
     onShare: @escaping () -> Void,
-    onBookmarks: @escaping () -> Void
+    onBookmarks: @escaping () -> Void,
+    // Presents the destructive unfollow confirmation for this episode's podcast.
+    // Nil when the surface can't unfollow (or the episode has no persisted
+    // podcast, e.g. a detached search preview), which drops the action entirely
+    // (#528). The builder never unfollows directly — it hands off to the host
+    // view, which owns the shared `.unfollowConfirmation` dialog.
+    onUnfollow: (() -> Void)? = nil
 ) -> [QuickActionItem] {
-    order.map { action in
+    order.compactMap { action -> QuickActionItem? in
         switch action {
         case .playNow:
             return QuickActionItem(label: "Play now", isDestructive: false) {
@@ -78,6 +84,13 @@ func buildEpisodeActions(
         case .share:
             return QuickActionItem(label: "Share", isDestructive: false) {
                 onShare()
+            }
+        case .unfollowPodcast:
+            // Destructive, mirroring PodcastAction.unsubscribe. Dropped when the
+            // host provides no handler so it never appears where it can't act.
+            guard let onUnfollow else { return nil }
+            return QuickActionItem(label: "Unfollow this podcast", isDestructive: true) {
+                onUnfollow()
             }
         }
     }

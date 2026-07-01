@@ -25,9 +25,9 @@ struct InboxScreen: View {
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var confirmingClear = false
-    // The podcast a pending "Unfollow this podcast" swipe targets. Non-nil drives
-    // the destructive confirmation dialog (#500). Mirrors the Library unfollow
-    // flow (`SubscriptionsView.pendingUnsubscribe`) so the UX is identical.
+    // The podcast a pending "Unfollow this podcast" action targets, from either
+    // the episode Quick Action rotor entry (#528) or the sighted swipe (#500).
+    // Non-nil drives the shared `.unfollowConfirmation` dialog.
     @State private var pendingUnfollow: Podcast?
     @AccessibilityFocusState private var focusEmpty: Bool
 
@@ -50,21 +50,21 @@ struct InboxScreen: View {
                     ForEach(inbox) { episode in
                         EpisodeRow(episode: episode, actions: actions(for: episode))
                             // Unfollow the whole show straight from one of its
-                            // inbox episodes (#500). A trailing swipe is the
-                            // visible affordance sighted users expect; SwiftUI
-                            // also surfaces a swipe action to the VoiceOver
-                            // Actions rotor automatically, so the SAME single
-                            // control reaches VoiceOver users (Robin) in the same
-                            // rotor as the row's episode Quick Actions — without
-                            // adding a duplicate rotor entry that a second,
-                            // explicit `.accessibilityActions` source would. It
-                            // does not touch the row's existing episode actions,
-                            // so their order can't regress. `allowsFullSwipe` is
-                            // off so an over-swipe can't fast-path a podcast-level
-                            // delete; every path lands on the confirmation below.
+                            // inbox episodes (#500/#528). For VoiceOver users the
+                            // affordance is now a first-class episode Quick Action
+                            // ("Unfollow this podcast") in the row's Actions rotor,
+                            // so it can be reordered (#523) and hidden (#524) like
+                            // every other action — and there's a single rotor
+                            // source. Sighted users still get the trailing swipe
+                            // they expect, but SIGHTED-ONLY (mirroring
+                            // `QueueScreen.SightedRowActions`): the swipe is
+                            // suppressed under VoiceOver so it can't promote a
+                            // duplicate rotor entry. `allowsFullSwipe` is off so an
+                            // over-swipe can't fast-path a podcast-level delete;
+                            // every path lands on the shared confirmation below.
                             // The Label gives the destructive action an icon +
                             // text (never color alone).
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            .sightedSwipeActions(allowsFullSwipe: false) {
                                 if let podcast = episode.podcast {
                                     Button(role: .destructive) {
                                         pendingUnfollow = podcast
@@ -129,24 +129,20 @@ struct InboxScreen: View {
         } message: {
             Text("Hides all \(inbox.count) episodes from the inbox. They stay in your podcasts.")
         }
-        // Podcast-level destructive confirmation for the inbox-row "Unfollow"
-        // swipe (#500). Wording and structure mirror Library's unfollow dialog
-        // (`SubscriptionsView`) for consistency; the message spells out that the
-        // whole show leaves the library, since the action is reached from a single
-        // episode's context and shouldn't be mistaken for an inbox-only dismiss.
-        .confirmationDialog(
-            "Unfollow \(pendingUnfollow?.title ?? "this podcast")?",
-            isPresented: Binding(
-                get: { pendingUnfollow != nil },
-                set: { if !$0 { pendingUnfollow = nil } }
-            ),
-            titleVisibility: .visible,
-            presenting: pendingUnfollow
-        ) { podcast in
-            Button("Unfollow", role: .destructive) { unfollow(podcast) }
-            Button("Cancel", role: .cancel) { pendingUnfollow = nil }
-        } message: { podcast in
-            Text("This removes \(podcast.title) and its episodes from your library. This can't be undone.")
+        // Podcast-level destructive confirmation for the inbox-row "Unfollow this
+        // podcast" affordance — reached from either the episode Quick Action rotor
+        // entry (#528) or the sighted swipe (#500). Uses the shared
+        // `.unfollowConfirmation` modifier so the wording/structure match Library's
+        // dialog and every episode surface guards the destructive action
+        // identically. On success, if the unfollow emptied the inbox the focused
+        // row is gone, so move VoiceOver focus to the empty state (mirrors
+        // `clearInbox`).
+        .unfollowConfirmation($pendingUnfollow, context: context) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if InboxRepository(context: context).inboxEpisodes().isEmpty {
+                    focusEmpty = true
+                }
+            }
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
@@ -163,25 +159,6 @@ struct InboxScreen: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { focusEmpty = true }
     }
 
-    /// Unfollows `podcast` via the centralized repository path shared with
-    /// Library and search (#499/#500) — never an inline delete. The repo logs
-    /// failures and returns whether the delete saved, so we announce success only
-    /// on `true`. The unfollowed show's episodes drop out of the @Query-backed
-    /// inbox automatically; if that empties the inbox the focused row is gone, so
-    /// move VoiceOver focus to the empty state (mirrors `clearInbox`).
-    private func unfollow(_ podcast: Podcast) {
-        let title = podcast.title
-        let removed = SubscriptionRepository(context: context).unsubscribe(podcast)
-        pendingUnfollow = nil
-        guard removed else { return }
-        Announcer.announce("Unfollowed \(title)")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if InboxRepository(context: context).inboxEpisodes().isEmpty {
-                focusEmpty = true
-            }
-        }
-    }
-
     private func actions(for episode: Episode) -> [QuickActionItem] {
         buildEpisodeActions(
             episode: episode,
@@ -191,7 +168,10 @@ struct InboxScreen: View {
             context: context,
             onShowNotes: { showNotesEpisode = episode },
             onShare: { sharingEpisode = episode },
-            onBookmarks: { bookmarksEpisode = episode }
+            onBookmarks: { bookmarksEpisode = episode },
+            // Nil when the episode has no persisted podcast, which drops the
+            // action; otherwise route to the shared confirmation dialog.
+            onUnfollow: episode.podcast.map { podcast in { pendingUnfollow = podcast } }
         )
     }
 

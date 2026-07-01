@@ -56,6 +56,37 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertTrue(opened)
     }
 
+    func testEpisodeUnfollowActionDroppedWhenNoHandler() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        // No `onUnfollow` provided (the default): the destructive action must not
+        // appear where it can't act (#528).
+        let items = buildEpisodeActions(
+            episode: episode, order: [.playNow, .unfollowPodcast], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}
+        )
+        XCTAssertEqual(items.map(\.label), ["Play now"])
+    }
+
+    func testEpisodeUnfollowActionPresentDestructiveAndInvokesHandler() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        var requested = false
+        let items = buildEpisodeActions(
+            episode: episode, order: [.unfollowPodcast], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {},
+            onUnfollow: { requested = true }
+        )
+        XCTAssertEqual(items.map(\.label), ["Unfollow this podcast"])
+        XCTAssertEqual(items.first?.isDestructive, true, "unfollow is destructive")
+        // Running it hands off to the host (which presents the confirmation) — it
+        // must NOT unfollow directly.
+        items.first?.run()
+        XCTAssertTrue(requested)
+    }
+
     func testQueueActionsDropAllMovesInNoneMode() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)

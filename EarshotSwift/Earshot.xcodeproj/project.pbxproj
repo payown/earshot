@@ -131,6 +131,7 @@
 		87D55A542BD1471B1F6DCA83 /* EpisodeRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A621AE99537538C3A0AD021C /* EpisodeRow.swift */; };
 		8E9B046EC870926B325058F2 /* FolderPodcastPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F67B8AAA16F69CB84C899E27 /* FolderPodcastPickerView.swift */; };
 		90B302BC78F413A2F575AC1A /* DownloadGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1D28B26DA693A5CEB8AE85 /* DownloadGate.swift */; };
+		9227371C2256C912946E952A /* UnfollowConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0708E7BD3B3A0A5145EC590 /* UnfollowConfirmation.swift */; };
 		937D978ADE376CB4C7C1DCD2 /* QueueActionsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D8853AB932B8147D824DA5 /* QueueActionsBuilder.swift */; };
 		9384CF21515C9BA9F322A177 /* EpisodeExportLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59E6B431FF3AB66D1412802 /* EpisodeExportLogic.swift */; };
 		95EB752511153A1A64B2D402 /* EpisodeStateImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99CE379005F26F2F99DF2D59 /* EpisodeStateImporter.swift */; };
@@ -211,6 +212,7 @@
 		DDD9859D39A5A68259B0DA38 /* NotificationPermissionTrigger.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2139AAC938323A76B008595 /* NotificationPermissionTrigger.swift */; };
 		DDE214B4D555DF97D11B0253 /* InboxScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = D160839A12DBFE58F2A68B55 /* InboxScreen.swift */; };
 		DF0AB7339887FFF84B765FDE /* DownloadsInboxLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F413BCD620A311C966B89FD /* DownloadsInboxLogicTests.swift */; };
+		DF6CD8935BDECD2EEC44275A /* SightedSwipeActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EDA534AD67C84B7582CB05F /* SightedSwipeActions.swift */; };
 		E1326BBBB921376DFEF73272 /* EarshotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DA06952463063521A170CEC /* EarshotApp.swift */; };
 		E40C8D42A6D9245D3CEE9681 /* ExpirationLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0CB078CBF0DF39C849DEE81 /* ExpirationLogic.swift */; };
 		E429E07C7020CDB4C7C46ED3 /* SearchResultPositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A951F33F168DD2CF36836C6D /* SearchResultPositionTests.swift */; };
@@ -252,6 +254,7 @@
 		0BCA26B22E21066A09DA54E7 /* ExpirationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpirationService.swift; sourceTree = "<group>"; };
 		0D2B3B5179CB07407BC8C98D /* EarshotURLSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotURLSession.swift; sourceTree = "<group>"; };
 		0D404C59CC052B4721EF162F /* SearchLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchLogic.swift; sourceTree = "<group>"; };
+		0EDA534AD67C84B7582CB05F /* SightedSwipeActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SightedSwipeActions.swift; sourceTree = "<group>"; };
 		0FAE84EA17DC1E88FAFAA276 /* NotificationRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationRouter.swift; sourceTree = "<group>"; };
 		153E920C6B22C967CFB67F3E /* ITunesSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITunesSearchService.swift; sourceTree = "<group>"; };
 		156FD523B84AC0CFFE5973CD /* ImportProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProgressView.swift; sourceTree = "<group>"; };
@@ -390,6 +393,7 @@
 		9F26BC474C78EFA81CDFB7AA /* ImportStatusText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportStatusText.swift; sourceTree = "<group>"; };
 		9F413BCD620A311C966B89FD /* DownloadsInboxLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsInboxLogicTests.swift; sourceTree = "<group>"; };
 		9FD316F5819C53E890B613A2 /* ChapterSkipLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterSkipLogic.swift; sourceTree = "<group>"; };
+		A0708E7BD3B3A0A5145EC590 /* UnfollowConfirmation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnfollowConfirmation.swift; sourceTree = "<group>"; };
 		A07D0FB71CEEBC26226F4066 /* MigrationEpisodeMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationEpisodeMatcher.swift; sourceTree = "<group>"; };
 		A0CB078CBF0DF39C849DEE81 /* ExpirationLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpirationLogic.swift; sourceTree = "<group>"; };
 		A201BE0E62AF4F48FB841958 /* StoreMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreMigration.swift; sourceTree = "<group>"; };
@@ -1216,7 +1220,9 @@
 				7EDFB91871F32318649D4749 /* OptionStepLogic.swift */,
 				E43D20EBF7730F2069525A18 /* RoutePickerView.swift */,
 				7436039DC8D115F1F457E3C3 /* ShareSheet.swift */,
+				0EDA534AD67C84B7582CB05F /* SightedSwipeActions.swift */,
 				8B3BE83021D9D2D3FBC6E08B /* TabBarBadgeApplier.swift */,
+				A0708E7BD3B3A0A5145EC590 /* UnfollowConfirmation.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -1469,6 +1475,7 @@
 				2770F2A93C5278E71C214601 /* SettingsStore.swift in Sources */,
 				D466FE5826600E4D347FBFED /* ShareSheet.swift in Sources */,
 				0C34726CCF898D3B224D7296 /* ShowNotesView.swift in Sources */,
+				DF6CD8935BDECD2EEC44275A /* SightedSwipeActions.swift in Sources */,
 				08CE6FDC6BF27D427FFBFBC1 /* SleepTimer.swift in Sources */,
 				FE10F8BBC14151987F725410 /* SleepTimerController.swift in Sources */,
 				9B96460020EE778842F1D5C4 /* Spacing.swift in Sources */,
@@ -1484,6 +1491,7 @@
 				BA2FEB2E6D8058574743F17E /* TabBarBadgeApplier.swift in Sources */,
 				13E19F2F290C84B2A26D72A5 /* Tip.swift in Sources */,
 				D1D8FED1FF178F0258395B35 /* TipsStore.swift in Sources */,
+				9227371C2256C912946E952A /* UnfollowConfirmation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -15,6 +15,9 @@ struct DownloadsScreen: View {
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
+    // Drives the shared destructive unfollow confirmation for the episode
+    // "Unfollow this podcast" Quick Action (#528).
+    @State private var pendingUnfollow: Podcast?
 
     private var downloaded: [Episode] {
         allEpisodes
@@ -67,6 +70,7 @@ struct DownloadsScreen: View {
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
+        .unfollowConfirmation($pendingUnfollow, context: context)
     }
 
     private func expiredRow(_ episode: Episode, expiredAt: Date) -> some View {
@@ -120,7 +124,8 @@ struct DownloadsScreen: View {
             context: context,
             onShowNotes: { showNotesEpisode = episode },
             onShare: { sharingEpisode = episode },
-            onBookmarks: { bookmarksEpisode = episode }
+            onBookmarks: { bookmarksEpisode = episode },
+            onUnfollow: episode.podcast.map { pod in { pendingUnfollow = pod } }
         )
     }
 

@@ -136,6 +136,9 @@ struct SearchView<HeaderContent: View>: View {
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
+    // Drives the shared destructive unfollow confirmation for the episode
+    // "Unfollow this podcast" Quick Action (#528).
+    @State private var pendingUnfollow: Podcast?
     /// Programmatic navigation target for a directory row (#499). Set by the row's
     /// primary tap and its VoiceOver Activate action alike, so both paths land on
     /// the same destination.
@@ -227,6 +230,7 @@ struct SearchView<HeaderContent: View>: View {
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
+        .unfollowConfirmation($pendingUnfollow, context: context)
         .overlay { emptyOverlay }
     }
 
@@ -433,7 +437,8 @@ struct SearchView<HeaderContent: View>: View {
             episode: episode, order: quickActions.visibleEpisodeActions, player: player,
             downloads: downloads, context: context,
             onShowNotes: { showNotesEpisode = episode }, onShare: { sharingEpisode = episode },
-            onBookmarks: { bookmarksEpisode = episode }
+            onBookmarks: { bookmarksEpisode = episode },
+            onUnfollow: episode.podcast.map { pod in { pendingUnfollow = pod } }
         )
     }
 

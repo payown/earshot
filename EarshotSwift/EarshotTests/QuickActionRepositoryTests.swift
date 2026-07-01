@@ -22,7 +22,9 @@ final class QuickActionRepositoryTests: XCTestCase {
 
     func testEpisodeOrderRoundTrips() {
         let ctx = TestStore.freshContext()
-        let custom: [EpisodeAction] = [.share, .openShowNotes, .viewBookmarks, .markPlayed, .download, .addToQueueTop, .addToQueueBottom, .playNow]
+        // Must list EVERY case: a stored order missing any action gets it
+        // appended on read, which would break the round-trip equality.
+        let custom: [EpisodeAction] = [.share, .openShowNotes, .viewBookmarks, .markPlayed, .download, .addToQueueTop, .addToQueueBottom, .unfollowPodcast, .playNow]
         QuickActionRepository(context: ctx).setEpisodeOrder(custom)
 
         // A fresh repository over the same store reads the persisted order.
@@ -46,6 +48,27 @@ final class QuickActionRepositoryTests: XCTestCase {
         let order = QuickActionRepository(context: ctx).episodeOrder()
         XCTAssertEqual(Array(order.prefix(2)), [.share, .playNow])
         XCTAssertEqual(Set(order), Set(EpisodeAction.allCases), "every action is present")
+    }
+
+    func testUnfollowPodcastAppendedVisibleWhenMissingFromSavedConfig() {
+        let ctx = TestStore.freshContext()
+        // Simulate an existing user whose saved episode config predates the
+        // `unfollowPodcast` action (#528): every case EXCEPT the new one, in a
+        // custom order, none hidden.
+        let legacy = EpisodeAction.allCases.filter { $0 != .unfollowPodcast }
+        QuickActionRepository(context: ctx).setEpisode(order: legacy, hidden: [])
+
+        let fresh = QuickActionRepository(context: ctx)
+        let order = fresh.episodeOrder()
+
+        // The new action loads appended at the END of the stored order...
+        XCTAssertEqual(order.last, .unfollowPodcast, "newly-added action appends after stored order")
+        XCTAssertEqual(Set(order), Set(EpisodeAction.allCases), "every action is present")
+        // ...and VISIBLE (not hidden), so the #500 Inbox unfollow behavior is
+        // preserved with zero migration (#524 extensibility contract).
+        XCTAssertFalse(
+            fresh.episodeHidden().contains(EpisodeAction.unfollowPodcast.rawValue),
+            "a newly-added action defaults to visible")
     }
 
     func testSetsAreIndependentPerContentType() {

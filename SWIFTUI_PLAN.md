@@ -306,6 +306,30 @@ The SwiftUI side is built and waiting.
 
 ## UI Decisions
 
+- **"Unfollow this podcast" is a first-class episode Quick Action (#528).** Promoted
+  from Inbox's hard-coded `.swipeActions` (which SwiftUI auto-promoted into the
+  VoiceOver rotor, bypassing #523 reorder / #524 hide). New
+  `EpisodeAction.unfollowPodcast` (raw `"unfollowPodcast"`), appended LAST in
+  `defaultEpisodeActions`, default VISIBLE — the repository's existing
+  append-missing-as-visible `resolve(...)` handles it with zero migration (only
+  explicitly-hidden keys live in the hidden set), so existing users keep the #500
+  Inbox behavior. Marked `isDestructive: true`, mirroring `PodcastAction.unsubscribe`.
+  The builder never unfollows directly: `buildEpisodeActions` gained
+  `onUnfollow: (() -> Void)? = nil` and switched `map`→`compactMap`, dropping the
+  action when the host supplies no handler (or the episode has no persisted podcast,
+  e.g. a detached Search preview). Confirmation is guarded on ALL FOUR episode
+  surfaces (Inbox, EpisodeListView, Downloads, Search) via a shared
+  `UnfollowConfirmation` ViewModifier (`.unfollowConfirmation($pending, context:)`,
+  Core/UI) that reuses Library/Inbox dialog wording and the centralized
+  `SubscriptionRepository.unsubscribe` + "Unfollowed X" announcement — one source of
+  truth instead of four dialogs. Inbox's sighted swipe survives but is now
+  SIGHTED-ONLY via a new reusable `SightedSwipeActions` modifier
+  (`.sightedSwipeActions`, Core/UI) mirroring `QueueScreen.SightedRowActions`
+  (reads `\.accessibilityVoiceOverEnabled`), so the rotor has a single source (the
+  Quick Action) with no duplicate entry. Settings lists/reorders/hides it
+  automatically (the QuickActionsSettingsView is keypath-driven, no exhaustive
+  switch).
+
 - **Chapter list is ONE shared component, ONE VoiceOver stop per row (#509).**
   `ChapterListView` is a standalone modal sheet reached from BOTH the Now Playing
   current-chapter line (the #508 seam, now a button) and the controls sheet's
