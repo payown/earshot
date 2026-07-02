@@ -34,10 +34,6 @@ final class SettingsStore {
     var autoDownloadCount: Int = SettingsDefault.autoDownloadCount { didSet { persist { $0.setInt(autoDownloadCount, for: SettingsKey.autoDownloadCount) } } }
     var historyRetentionDays: Int = SettingsDefault.historyRetentionDays { didSet { persist { $0.setInt(historyRetentionDays, for: SettingsKey.historyRetentionDays) } } }
 
-    // Privacy
-    var crashReportingEnabled: Bool = SettingsDefault.crashReportingEnabled { didSet { persist { $0.setBool(crashReportingEnabled, for: SettingsKey.crashReportingEnabled) } } }
-    var analyticsEnabled: Bool = SettingsDefault.analyticsEnabled { didSet { persist { $0.setBool(analyticsEnabled, for: SettingsKey.analyticsEnabled) } } }
-
     // Stats
     var statsStreaksEnabled: Bool = SettingsDefault.statsStreaksEnabled { didSet { persist { $0.setBool(statsStreaksEnabled, for: SettingsKey.statsStreaksEnabled) } } }
 
@@ -69,8 +65,6 @@ final class SettingsStore {
         wifiOnlyDownloads = store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads)
         autoDownloadCount = store.int(SettingsKey.autoDownloadCount, default: SettingsDefault.autoDownloadCount)
         historyRetentionDays = store.int(SettingsKey.historyRetentionDays, default: SettingsDefault.historyRetentionDays)
-        crashReportingEnabled = store.bool(SettingsKey.crashReportingEnabled, default: SettingsDefault.crashReportingEnabled)
-        analyticsEnabled = store.bool(SettingsKey.analyticsEnabled, default: SettingsDefault.analyticsEnabled)
         directTouchEnabled = store.bool(SettingsKey.directTouchEnabled, default: SettingsDefault.directTouchEnabled)
         statsStreaksEnabled = store.bool(SettingsKey.statsStreaksEnabled, default: SettingsDefault.statsStreaksEnabled)
         onboardingComplete = store.bool(SettingsKey.onboardingComplete, default: SettingsDefault.onboardingComplete)

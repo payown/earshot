@@ -41,7 +41,7 @@ enum OnboardingContent {
         OnboardingPage(
             id: 2, symbol: "lock.shield",
             title: "Your privacy",
-            body: "Earshot collects anonymous, opt-out crash reports and usage data to improve the app — never third-party trackers or advertising IDs. You can change all privacy settings any time in Settings → Privacy."
+            body: "Earshot collects no data. Your subscriptions, listening history, and settings stay on this device. No crash reporting, no analytics, no third-party trackers, no advertising IDs."
         ),
         OnboardingPage(
             id: 3, symbol: "bolt.circle",

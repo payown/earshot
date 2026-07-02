@@ -8,6 +8,10 @@ enum SettingsKey {
     static let historyRetentionDays = "history_retention_days"
     static let downloadRetentionDays = "download_retention_days"
     static let onboardingComplete = "onboarding_complete"
+    // crash_reporting_enabled / analytics_enabled: retained for data
+    // compatibility only. No crash reporter or analytics SDK ships in the app;
+    // the SettingsStore properties and Settings UI toggles were removed so the
+    // App Store privacy label ("Data Not Collected") matches reality.
     static let crashReportingEnabled = "crash_reporting_enabled"
     static let analyticsEnabled = "analytics_enabled"
     // skip_silence_enabled: retained for data compatibility only. The feature
@@ -98,8 +102,8 @@ enum MigrationStatus: String {
 enum SettingsDefault {
     static let autoDownloadCount = 3
     static let historyRetentionDays = 90
-    static let crashReportingEnabled = true
-    static let analyticsEnabled = true
+    static let crashReportingEnabled = true  // retained; not read by SettingsStore (no telemetry ships)
+    static let analyticsEnabled = true  // retained; not read by SettingsStore (no telemetry ships)
     static let skipSilenceEnabled = false  // retained; not read by SettingsStore (#369)
     static let globalSpeed = 1.0
     static let skipForwardSeconds = 30
