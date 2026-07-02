@@ -166,6 +166,7 @@
 		B288D6F2C8567E87055FDAA2 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51E28D436B615198BA5E7588 /* SettingsScreen.swift */; };
 		B2B931F27D1BEAB5FFD77BC6 /* BookmarksListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D40AFBC69A987AAC98236BF /* BookmarksListView.swift */; };
 		B30814ED8290A53F37FF3952 /* AddFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B06F7F65FB0DBA6132EE39E /* AddFeedView.swift */; };
+		B3F50CB656FEE95546017680 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 12C01B02A39EC9D1F2D40E13 /* PrivacyInfo.xcprivacy */; };
 		B420A9580D5A5606098C51CD /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE41691F0E4E9DEF6111C5CA /* AboutView.swift */; };
 		B485218BA32829A9DC997E32 /* FeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1908FA7002380BE2E52E7F8A /* FeedService.swift */; };
 		B976F875CA2E076695C9B30B /* StatsPeriod.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA719A9EE6C298B619478083 /* StatsPeriod.swift */; };
@@ -254,6 +255,7 @@
 		0D2B3B5179CB07407BC8C98D /* EarshotURLSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotURLSession.swift; sourceTree = "<group>"; };
 		0D404C59CC052B4721EF162F /* SearchLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchLogic.swift; sourceTree = "<group>"; };
 		0FAE84EA17DC1E88FAFAA276 /* NotificationRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationRouter.swift; sourceTree = "<group>"; };
+		12C01B02A39EC9D1F2D40E13 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		153E920C6B22C967CFB67F3E /* ITunesSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITunesSearchService.swift; sourceTree = "<group>"; };
 		156FD523B84AC0CFFE5973CD /* ImportProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProgressView.swift; sourceTree = "<group>"; };
 		170AE875D8FF8A76ADB1DC83 /* StallRecoveryLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StallRecoveryLogicTests.swift; sourceTree = "<group>"; };
@@ -785,6 +787,7 @@
 			children = (
 				5DA06952463063521A170CEC /* EarshotApp.swift */,
 				EF4559A7D750A9F7AFFC5652 /* Info.plist */,
+				12C01B02A39EC9D1F2D40E13 /* PrivacyInfo.xcprivacy */,
 				2BE919DDCD5DBE1272334FF6 /* RootView.swift */,
 				3567554662E05141E06E4D95 /* StoreRecoveryScreen.swift */,
 			);
@@ -1328,6 +1331,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CA3E5F0D6D2AF976C2915FE3 /* Assets.xcassets in Resources */,
+				B3F50CB656FEE95546017680 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

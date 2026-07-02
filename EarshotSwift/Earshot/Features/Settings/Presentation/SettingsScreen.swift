@@ -167,14 +167,15 @@ struct SettingsScreen: View {
             }
 
             Section {
-                // The Privacy footer below covers both toggles; per-control hints
-                // would make VoiceOver repeat it.
-                Toggle("Crash reporting", isOn: $settings.crashReportingEnabled)
-                Toggle("Anonymous analytics", isOn: $settings.analyticsEnabled)
+                // No telemetry of any kind ships in the app — no crash reporter,
+                // no analytics SDK. State that plainly instead of showing toggles
+                // that imply collection is happening (App Store privacy-label
+                // truthfulness; the old dead toggles were a rejection risk).
+                Label("Earshot collects no data", systemImage: "hand.raised")
             } header: {
                 Text("Privacy")
             } footer: {
-                Text("Both are opt-out and anonymized. No third-party trackers or advertising IDs.")
+                Text("Your subscriptions, listening history, and settings stay on this device. No crash reporting, no analytics, no third-party trackers, no advertising IDs.")
             }
 
             Section("Accessibility") {
