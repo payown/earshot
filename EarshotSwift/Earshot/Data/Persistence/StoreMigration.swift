@@ -1,3 +1,4 @@
+import CoreData
 import Foundation
 import SwiftData
 
@@ -11,7 +12,43 @@ import SwiftData
 /// read it through ``EarshotSchemaV1``, snapshot it into plain values, replace
 /// the store file, and reinsert the data as current (V3) objects. This preserves
 /// the tester's subscriptions, episodes, and played state.
+/// Why a terminal store-open failure happened, so ``ModelContainerFactory`` can
+/// react safely instead of blindly deleting the store (issue #529).
+///
+/// - ``storeNewerThanApp``: the on-disk store was written by a NEWER schema than
+///   this build knows how to open — a downgrade. The store is intact and must
+///   never be destroyed; the user just needs a newer app.
+/// - ``unreadable``: the store could be opened as neither the current schema nor
+///   the original (V1) schema — genuine corruption. Only this case is a
+///   candidate for a (backed-up, user-consented) reset.
+enum StoreOpenError: Error {
+    case storeNewerThanApp(underlying: Error)
+    case unreadable(underlying: Error)
+}
+
 enum StoreMigration {
+
+    /// True when `error` (or anything in its underlying-error chain) indicates
+    /// the store was written by a newer schema than this build can open. SwiftData
+    /// wraps the underlying CoreData error, so the whole chain is walked.
+    /// `NSPersistentStoreIncompatibleVersionHashError` is the version-hash
+    /// mismatch a downgrade produces; `NSMigrationMissingMappingModelError` is a
+    /// required-but-unmapped forward migration. Either means "intact store, wrong
+    /// (older) app" — never destroy it.
+    static func indicatesNewerStore(_ error: Error) -> Bool {
+        let incompatibleCodes: Set<Int> = [
+            NSPersistentStoreIncompatibleVersionHashError,
+            NSMigrationMissingMappingModelError,
+        ]
+        var current: NSError? = error as NSError
+        while let ns = current {
+            if ns.domain == NSCocoaErrorDomain && incompatibleCodes.contains(ns.code) {
+                return true
+            }
+            current = ns.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
+    }
 
     // Plain snapshots so no managed objects outlive the V1 container.
     struct PodcastSnapshot {
@@ -35,24 +72,47 @@ enum StoreMigration {
     /// Opens the store at `url` as the current schema (V3) using
     /// ``EarshotMigrationPlan`` (so a V2 store is lightweight-migrated forward).
     /// If that fails, the store is treated as an original (V1) store and migrated
-    /// manually via export/reimport. Throws if the store can be opened as
-    /// neither.
+    /// manually via export/reimport.
+    ///
+    /// Throws ``StoreOpenError`` if the store can be opened as neither: a store
+    /// written by a newer app is ``StoreOpenError/storeNewerThanApp`` (must not
+    /// be destroyed), anything else is ``StoreOpenError/unreadable``. The primary
+    /// open error is captured (not swallowed) so the two cases can be told apart.
     @MainActor
     static func openOrMigrate(at url: URL) throws -> ModelContainer {
         let schema = Schema(versionedSchema: EarshotSchemaV3.self)
 
         // Fresh installs, already-V3 stores, and V2 stores (lightweight V2→V3)
-        // all open through the migration plan.
-        if let container = try? ModelContainer(
-            for: schema,
-            migrationPlan: EarshotMigrationPlan.self,
-            configurations: ModelConfiguration(schema: schema, url: url)
-        ) {
-            return container
+        // all open through the migration plan. Capture the failure so a
+        // newer-than-app store can be distinguished from real corruption below,
+        // rather than silently falling through to the (destructive) V1 path.
+        let primaryError: Error
+        do {
+            return try ModelContainer(
+                for: schema,
+                migrationPlan: EarshotMigrationPlan.self,
+                configurations: ModelConfiguration(schema: schema, url: url)
+            )
+        } catch {
+            primaryError = error
         }
 
-        // Otherwise treat it as an original (V1) store and migrate it manually.
-        let snapshots = try readV1(at: url)
+        // A store newer than this build never gets the V1 treatment (a V1 read
+        // would fail and mislead) and must never be deleted — surface it.
+        if indicatesNewerStore(primaryError) {
+            throw StoreOpenError.storeNewerThanApp(underlying: primaryError)
+        }
+
+        // Otherwise try to treat it as an original (V1) store and migrate it
+        // manually. If it reads as V1, migrate; if not, it is genuinely
+        // unreadable — report that WITHOUT touching the file.
+        let snapshots: [PodcastSnapshot]
+        do {
+            snapshots = try readV1(at: url)
+        } catch {
+            throw StoreOpenError.unreadable(underlying: primaryError)
+        }
+
         ModelContainerFactory.removeStoreFiles(at: url)
         let container = try ModelContainer(
             for: schema,
