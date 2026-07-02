@@ -16,6 +16,10 @@ struct EarshotApp: App {
     @State private var importProgress = OPMLImportProgress()
     @State private var notificationRouter: NotificationRouter
     private let container: ModelContainer
+    /// A launch-time store recovery condition (downgrade or corruption), or `nil`
+    /// on the normal path. When set, the app shows ``StoreRecoveryScreen`` instead
+    /// of the main UI so no data is ever silently destroyed (#529).
+    private let storeRecovery: StoreRecoveryState?
     /// Retains the notification delegate for the process lifetime;
     /// `UNUserNotificationCenter.delegate` is a weak reference.
     private let notificationDelegate: NotificationDelegate
@@ -29,8 +33,11 @@ struct EarshotApp: App {
     init() {
         if NSClassFromString("XCTestCase") != nil {
             container = ModelContainerFactory.makeTestHostPlaceholder()
+            storeRecovery = nil
         } else {
-            container = ModelContainerFactory.makeShared()
+            let load = ModelContainerFactory.makeShared()
+            container = load.container
+            storeRecovery = load.recovery
         }
         let router = NotificationRouter()
         _notificationRouter = State(initialValue: router)
@@ -41,6 +48,12 @@ struct EarshotApp: App {
         WindowGroup {
             if isRunningTests {
                 Color.clear
+            } else if let storeRecovery {
+                // The store couldn't be opened safely. Show a recovery screen
+                // rather than the main UI (which would be empty and, worse, might
+                // tempt a silent wipe). No data is destroyed without explicit
+                // consent here (#529).
+                StoreRecoveryScreen(state: storeRecovery)
             } else {
                 RootView()
                     .environment(player)
