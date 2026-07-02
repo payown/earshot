@@ -17,6 +17,13 @@ struct StoreRecoveryScreen: View {
     @State private var confirmingReset = false
     @State private var didReset = false
     @State private var backupName: String?
+    /// Lands VoiceOver on the heading at launch. This screen replaces the main UI
+    /// as the WindowGroup root, where auto-focus is unreliable, so focus is
+    /// requested explicitly (matches the InboxScreen empty-state pattern).
+    @AccessibilityFocusState private var focusedHeader: Bool
+    /// Moves VoiceOver to the result text after a reset, so focus isn't orphaned
+    /// on the Reset button that was just removed from the tree.
+    @AccessibilityFocusState private var focusedDone: Bool
     /// Decorative glyph size, scaled with Dynamic Type so it grows for low-vision
     /// users alongside the text (the glyph itself is hidden from VoiceOver).
     @ScaledMetric private var iconSize: CGFloat = 52
@@ -33,6 +40,7 @@ struct StoreRecoveryScreen: View {
                     .font(.title2.weight(.bold))
                     .multilineTextAlignment(.center)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($focusedHeader)
 
                 Text(message)
                     .font(.body)
@@ -45,7 +53,13 @@ struct StoreRecoveryScreen: View {
         }
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { Announcer.announce(title) }
+        .onAppear {
+            // Cold-launch screen replace: VoiceOver's auto-focus is unreliable
+            // here, so land focus on the heading explicitly rather than announcing
+            // the title — an announce would double-read the header once focus
+            // arrives. Delay mirrors InboxScreen's focus-request timing.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { focusedHeader = true }
+        }
     }
 
     // MARK: Actions
@@ -64,6 +78,7 @@ struct StoreRecoveryScreen: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityFocused($focusedDone)
             } else {
                 Button(role: .destructive) {
                     confirmingReset = true
@@ -91,10 +106,14 @@ struct StoreRecoveryScreen: View {
         let backup = ModelContainerFactory.resetCorruptStore(at: ModelContainerFactory.storeURL)
         backupName = backup?.lastPathComponent
         didReset = true
-        // Delay so the announcement lands after the confirmation dialog finishes
-        // dismissing (matches the Settings factory-reset timing).
+        // The Reset button just left the tree, so VoiceOver focus would be
+        // orphaned at the top of the screen. Move it to the result text — which
+        // carries the "force-quit and reopen" instruction the user must act on —
+        // once the confirmation dialog has finished dismissing. Focus landing
+        // reads the message once, so no separate announce is needed (that would
+        // double-read it). Delay matches InboxScreen.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            Announcer.announce(resetDoneMessage)
+            focusedDone = true
         }
     }
 
