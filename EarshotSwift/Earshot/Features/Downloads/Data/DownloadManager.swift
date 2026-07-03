@@ -47,11 +47,15 @@ final class DownloadManager {
             AppLog.networking.info("Download gated (no Wi-Fi): \(episode.title, privacy: .public)")
             return
         }
-        guard let url = URL(string: episode.audioURL) else {
+        guard let rawURL = URL(string: episode.audioURL) else {
             episode.downloadStatus = .failed
             save()
             return
         }
+        // A download is a non-media URLSession fetch (unlike AVFoundation
+        // streaming), so upgrade http→https under the media-only ATS policy
+        // (#387). HTTP-only hosts can still stream; only the download is affected.
+        let url = SecureURL.upgradedForNonMedia(rawURL)
 
         episode.downloadStatus = .downloading
         save()
