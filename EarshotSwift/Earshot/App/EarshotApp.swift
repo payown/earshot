@@ -1,10 +1,12 @@
 import SwiftUI
 import SwiftData
+import UIKit
 import UserNotifications
 
 @main
 struct EarshotApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var player = PlayerService()
     @State private var quickActions = QuickActionStore()
     @State private var downloads = DownloadManager()
@@ -38,6 +40,11 @@ struct EarshotApp: App {
             let load = ModelContainerFactory.makeShared()
             container = load.container
             storeRecovery = load.recovery
+            // Wire the shared background download session to this container so
+            // downloads that finish while suspended resolve on relaunch (#544).
+            if load.recovery == nil {
+                DownloadManager.activate(container: load.container)
+            }
         }
         let router = NotificationRouter()
         _notificationRouter = State(initialValue: router)
@@ -98,6 +105,29 @@ struct EarshotApp: App {
         // throttled refresh that respects task expiration. Skipped under tests —
         // BGTaskScheduler isn't available in the test host. (#381)
         .backgroundRefreshTask(isEnabled: !isRunningTests, container: container)
+    }
+}
+
+/// Captures the system's background URL-session completion handler so
+/// ``DownloadManager`` can invoke it once every download event has been
+/// delivered (#544). iOS calls this when it relaunches the app to finish
+/// downloads that completed while it was suspended.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        MainActor.assumeIsolated {
+            guard identifier == DownloadManager.sessionIdentifier else {
+                completionHandler()
+                return
+            }
+            DownloadManager.backgroundCompletionHandler = completionHandler
+            // Force the shared session into existence so its delegate reconnects
+            // and delivers the pending events (then calls the handler).
+            _ = DownloadManager.session
+        }
     }
 }
 
