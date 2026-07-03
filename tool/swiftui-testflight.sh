@@ -120,6 +120,60 @@ xcodebuild -exportArchive \
   -exportPath "$EXPORT_PATH" \
   -exportOptionsPlist /tmp/ExportOptions.plist \
   | grep -E "error:|Export" || true
+
+# Fallback: automatic signing can fail when the Xcode-managed cloud profile is
+# stale (e.g. "iOS Team Store Provisioning Profile ... doesn't include signing
+# certificate 'Apple Distribution'"). Retry with manual signing using the
+# newest locally installed App Store profile for this bundle id, which we mint
+# via `asc profiles create` and which does include the current cert.
+if [ ! -f "$IPA_PATH" ]; then
+  echo "⚠️  Automatic-signing export failed; retrying with manual signing..."
+  PROFILE_NAME=$(
+    for p in "$HOME/Library/MobileDevice/Provisioning Profiles"/*.mobileprovision; do
+      [ -f "$p" ] || continue
+      security cms -D -i "$p" 2>/dev/null > /tmp/_earshot_prof.plist || continue
+      APPID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" /tmp/_earshot_prof.plist 2>/dev/null || true)
+      [ "$APPID" = "72PH974742.media.payown.earshot" ] || continue
+      # App Store profiles have no device list; skip development/ad-hoc ones.
+      /usr/libexec/PlistBuddy -c "Print :ProvisionedDevices" /tmp/_earshot_prof.plist >/dev/null 2>&1 && continue
+      echo "$(stat -f %m "$p") $(/usr/libexec/PlistBuddy -c "Print :Name" /tmp/_earshot_prof.plist)"
+    done | sort -rn | head -1 | cut -d' ' -f2-
+  )
+  if [ -z "$PROFILE_NAME" ]; then
+    echo "❌ No installed App Store provisioning profile found for media.payown.earshot."
+    exit 1
+  fi
+  echo "▶ Using profile: $PROFILE_NAME"
+  cat > /tmp/ExportOptions.plist << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key>
+  <string>app-store-connect</string>
+  <key>teamID</key>
+  <string>72PH974742</string>
+  <key>uploadSymbols</key>
+  <true/>
+  <key>signingStyle</key>
+  <string>manual</string>
+  <key>signingCertificate</key>
+  <string>Apple Distribution</string>
+  <key>provisioningProfiles</key>
+  <dict>
+    <key>media.payown.earshot</key>
+    <string>$PROFILE_NAME</string>
+  </dict>
+</dict>
+</plist>
+PLIST
+  xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE_PATH" \
+    -exportPath "$EXPORT_PATH" \
+    -exportOptionsPlist /tmp/ExportOptions.plist \
+    | grep -E "error:|Export" || true
+fi
+
 [ -f "$IPA_PATH" ] || { echo "❌ Export failed (no IPA produced)"; exit 1; }
 
 # ── Upload ────────────────────────────────────────────────────────────────────
