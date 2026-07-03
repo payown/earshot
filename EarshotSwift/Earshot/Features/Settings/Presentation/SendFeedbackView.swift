@@ -47,10 +47,18 @@ struct SendFeedbackView: View {
 
             if let fallbackMessage {
                 Section {
-                    Text(fallbackMessage)
-                        .font(.callout)
-                        .foregroundStyle(AppColor.error)
-                        .accessibilityLabel("Can't send mail. \(fallbackMessage)")
+                    // Red icon + default-color text, never colour alone: bare systemRed
+                    // body text is only ~3.6:1 in light mode (below AA). The icon carries
+                    // the red (graphical, ≥3:1); the message stays at label contrast (#462).
+                    Label {
+                        Text(fallbackMessage)
+                            .font(.callout)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(AppColor.error)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Can't send mail. \(fallbackMessage)")
                 }
             }
         }

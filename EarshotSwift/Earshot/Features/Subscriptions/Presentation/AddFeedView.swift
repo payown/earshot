@@ -37,10 +37,20 @@ struct AddFeedView: View {
 
                 if let errorMessage {
                     Section {
-                        Text(errorMessage)
-                            .font(.callout)
-                            .foregroundStyle(AppColor.error)
-                            .accessibilityLabel("Error: \(errorMessage)")
+                        // Error is signalled by a red icon + default-color text, never
+                        // colour alone. Bare systemRed body text is only ~3.6:1 in light
+                        // mode (below AA); the icon carries the red (graphical, ≥3:1) and
+                        // the message stays at label contrast (~21:1). Matches
+                        // PodcastPreviewView's error pattern (#462).
+                        Label {
+                            Text(errorMessage)
+                                .font(.callout)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(AppColor.error)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Error: \(errorMessage)")
                     }
                 }
             }
