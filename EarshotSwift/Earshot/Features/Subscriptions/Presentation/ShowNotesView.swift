@@ -50,7 +50,23 @@ struct ShowNotesView: View {
         let paragraphs = EpisodeSummary.attributedParagraphs(episode.episodeDescription)
         return paragraphs.isEmpty
             ? [AttributedString("No show notes for this episode.")]
-            : paragraphs
+            : paragraphs.map(Self.underliningLinks)
+    }
+
+    /// Underlines every `.link` run so links are distinguished from surrounding
+    /// body text by an underline, not tint color alone (WCAG 1.4.1 Use of Color).
+    /// This is done here in the SwiftUI layer rather than in the Foundation-only
+    /// `EpisodeSummary` builder, which has no access to `Text.LineStyle`. Ranges
+    /// are collected first so mutation doesn't invalidate the run iterator; a link
+    /// run's character range stays valid when only its attributes change.
+    private static func underliningLinks(_ input: AttributedString) -> AttributedString {
+        let linkRanges = input.runs.compactMap { $0.link != nil ? $0.range : nil }
+        guard !linkRanges.isEmpty else { return input }
+        var output = input
+        for range in linkRanges {
+            output[range].underlineStyle = Text.LineStyle.single
+        }
+        return output
     }
 
     /// Schemes the notes will actually open. Mirrors the builder's allow-list.
