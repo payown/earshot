@@ -30,6 +30,24 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(store.wifiOnlyDownloads)
     }
 
+    /// Season/episode numbering is OFF by default and round-trips like any other
+    /// boolean preference (#452). Default-off means rows show/speak no numbering
+    /// until the user opts in.
+    func testShowEpisodeNumbersDefaultsFalseAndPersists() {
+        XCTAssertFalse(SettingsDefault.showEpisodeNumbers)
+
+        let ctx = TestStore.freshContext()
+        let store = SettingsStore()
+        store.configure(context: ctx)
+        XCTAssertFalse(store.showEpisodeNumbers, "Numbering must be off by default")
+
+        store.showEpisodeNumbers = true
+
+        let reloaded = SettingsStore()
+        reloaded.configure(context: ctx)
+        XCTAssertTrue(reloaded.showEpisodeNumbers, "The opt-in must persist")
+    }
+
     /// Auto-advance settings default true (existing unconditional behavior) and
     /// round-trip through the store like any other boolean preference (#446).
     func testAutoAdvanceDefaultsTrueAndPersist() {
