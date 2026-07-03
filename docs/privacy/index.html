@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Earshot Privacy Policy</title>
+  <meta name="description" content="Earshot collects no data. Everything stays on your device.">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff;
+      --fg: #1a1a1a;
+      --muted: #444444;
+      --accent: #0b5cad;
+      --rule: #d8d8d8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111315;
+        --fg: #f2f2f2;
+        --muted: #c4c4c4;
+        --accent: #6fb2ff;
+        --rule: #333638;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 1.125rem/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    main {
+      max-width: 42rem;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+    h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 0.25rem; }
+    h2 { font-size: 1.375rem; margin: 2.5rem 0 0.5rem; }
+    p, li { color: var(--fg); }
+    .muted { color: var(--muted); }
+    /* Keep the underline explicit: link-vs-text contrast is under 3:1, so the
+       underline (not color) is what satisfies WCAG 1.4.1 here. */
+    a { color: var(--accent); text-decoration: underline; }
+    a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    hr { border: 0; border-top: 1px solid var(--rule); margin: 2rem 0; }
+    ul { padding-left: 1.25rem; }
+    li { margin: 0.35rem 0; }
+    .effective { font-size: 1rem; }
+    footer {
+      max-width: 42rem;
+      margin: 0 auto;
+      padding: 0 1.25rem 4rem;
+      font-size: 1rem;
+      color: var(--muted);
+    }
+    footer hr { margin-top: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Earshot Privacy Policy</h1>
+    <p class="effective muted">Effective July 2, 2026</p>
+
+    <p>
+      Earshot is an accessibility-first podcast player. The short version: Earshot
+      collects nothing about you. There is no account, no sign-in, and no tracking.
+      Everything you do in the app stays on your device.
+    </p>
+
+    <h2 id="what-we-collect">What Earshot collects</h2>
+    <p>Nothing. To be specific, Earshot does not collect, store off your device, or share:</p>
+    <ul>
+      <li>Your identity. There is no account and no login.</li>
+      <li>Your subscriptions, listening history, queue, folders, bookmarks, or settings. These live only on your device.</li>
+      <li>Analytics or usage data. There is no analytics SDK in the app.</li>
+      <li>Crash reports. There is no crash reporter in the app.</li>
+      <li>Advertising identifiers. There are no ads and no ad IDs.</li>
+      <li>Third-party trackers. There are none.</li>
+    </ul>
+
+    <h2>What stays on your device</h2>
+    <p>
+      Your subscriptions, listening history, queue, folders, bookmarks, and
+      settings are saved locally on your device. They are not uploaded to Payown
+      Media or anyone else. If you delete the app, that data goes with it.
+    </p>
+
+    <h2>Network connections Earshot makes</h2>
+    <p>
+      Earshot connects to the internet only to do the things a podcast player has
+      to do, and only with servers you choose by following a show:
+    </p>
+    <ul>
+      <li>Downloading podcast feeds and episode audio from the show's own host.</li>
+      <li>Fetching show artwork.</li>
+      <li>Searching the public podcast directory when you use search.</li>
+    </ul>
+    <p>
+      These requests go directly to those services. Their own privacy practices
+      are their own. Earshot does not add any identifier of you to these requests.
+    </p>
+
+    <h2>Children</h2>
+    <p>
+      Earshot does not collect data from anyone, including children, because it
+      does not collect data at all.
+    </p>
+
+    <h2>Changes to this policy</h2>
+    <p>
+      If this ever changes, the change will show up on this page with a new
+      effective date. Earshot is open source under the MIT license, so the code
+      behind these claims is public and anyone can verify it.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      Questions? Email <a href="mailto:michael@payown.media">michael@payown.media</a>.
+    </p>
+  </main>
+
+  <footer>
+    <hr>
+    <p>
+      Earshot is a Payown Media LLC project. Earshot source on
+      <a href="https://github.com/payown/earshot">GitHub</a>.
+    </p>
+    <p>Michael</p>
+  </footer>
+</body>
+</html>

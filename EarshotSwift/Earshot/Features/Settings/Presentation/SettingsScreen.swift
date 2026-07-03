@@ -178,6 +178,21 @@ struct SettingsScreen: View {
                 // that imply collection is happening (App Store privacy-label
                 // truthfulness; the old dead toggles were a rejection risk).
                 Label("Earshot collects no data", systemImage: "hand.raised")
+
+                // Hosted policy links (#463). Real SwiftUI `Link`s so the system
+                // opens Safari; hints make clear they leave the app.
+                if let url = PrivacyPolicy.policyURL {
+                    Link(destination: url) {
+                        Label("Read the privacy policy", systemImage: "arrow.up.right.square")
+                    }
+                    .accessibilityHint("Opens the privacy policy in your browser, outside Earshot")
+                }
+                if let url = PrivacyPolicy.collectionURL {
+                    Link(destination: url) {
+                        Label("What does Earshot collect?", systemImage: "arrow.up.right.square")
+                    }
+                    .accessibilityHint("Opens the data-collection summary in your browser, outside Earshot")
+                }
             } header: {
                 Text("Privacy")
             } footer: {
