@@ -330,6 +330,24 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   rotor on each Quick Actions settings row, so she reorders by flick instead of
   drag; she moves "Play now" to the top so one flick fires her most-used action
   (Chapter 39)
+- Inbox and Downloads rows now speak the podcast's name right after the episode
+  title (matching the Queue), with the show name as a small caption under the
+  title for sighted users. Half her inbox titles episodes like paperwork
+  ("Episode 214," "March mailbag"), and she used to sit on a row and guess, or
+  open it just to learn whose voice she was about to get (Chapter 40)
+- The privacy screen she once audited (Chapter 6) got shorter and truer: the two
+  old crash-report and analytics toggles are gone and the copy in onboarding and
+  Settings plainly says Earshot collects no data. The rebuilt app (Chapter 22)
+  had never been sending anything; the words just caught up. "Fewer promises,
+  all of them true" is her kind of screen (Chapter 40)
+- Settings has an Appearance section: theme override (Follow System default,
+  Light, Dark, High Contrast Light, High Contrast Dark), accent color, and
+  layout density (Comfortable or Compact; Compact never shrinks touch targets).
+  Kashe picks nothing for herself but files it as an answer for the folks on her
+  routes who still read the screen, big and bright (Chapter 40)
+- The version is 1.0.0 now, the App Store release candidate line; she recalls
+  Renata's "still rough around the edges" from the very first phone call and
+  just notices, no text to anyone (Chapter 40)
 
 ## What you can generate
 
@@ -1276,6 +1294,28 @@ This build the quiet doesn't last. The show dips, waits out the bad patch, and c
 Then the Quick Actions. She'd set them once and never touched them again, because touching them meant dragging a row to a new spot, and a drag you can't see is a drag you can't do. So "Play now" sat wherever it had landed, third or fourth down, and she reached past the rest to get to it.
 
 This time the reorder lived in the rotor. Move to top. She put Play now first, so one flick does the thing she does most. No dragging, no guessing where the row went. She wondered why it took this long, then let that go too.
+
+---
+
+### Chapter 40 — Build 141
+
+*Kashe's inbox rows finally say which show they belong to, the privacy screen gets shorter and truer, and the version number quietly turns 1.0.0.*
+
+**What to test:**
+
+Go to Settings, Appearance. Try the theme override (Follow System, Light, Dark, High Contrast Light, High Contrast Dark), the accent color, and the layout density (Comfortable or Compact). Each change should apply immediately, VoiceOver should announce your selection, and Compact should never shrink buttons below an easy tap.
+
+With VoiceOver, flick through rows in your Inbox and Downloads. After the episode title you should hear the podcast's name, the way the Queue already does. Sighted testers: the show name is a small caption under the title.
+
+Read the privacy wording in onboarding (fresh install) and in Settings. It now says plainly that Earshot collects no data, and the old crash-report and analytics toggles are gone. Settings should show version 1.0.0.
+
+Half her inbox is shows that title episodes like paperwork. "Episode 214." "March mailbag." The Queue tells her whose episode it is, right after the title. The Inbox never did, so she'd sit on a row and guess, or open it just to learn whose voice she was about to get. Now every row carries the show's name. Title, show, time left. She triages by ear, and the rows finally hold everything she triages with.
+
+Settings sent her somewhere she'd been before. She's the one who went into the privacy screen way back, read what those two toggles actually sent, flipped one off to see if it stuck. This build the screen got shorter. No toggles to weigh. One plain line: Earshot collects nothing. The rebuilt app never had been sending anything; the words just hadn't caught up until now. Fewer promises, all of them true. Her kind of screen.
+
+There's an Appearance section now too. Themes, accent colors, high contrast, tighter rows. She flicked through it once, because she flicks through everything once, picked nothing, and filed it away. Some of the folks on her routes still read the screen, big and bright. Now she has an answer for them.
+
+On the way out she passed the version. 1.0.0. Still rough around the edges, Renata had said on the phone, back before any of this. She didn't text anyone. She just noticed.
 
 ---
 
