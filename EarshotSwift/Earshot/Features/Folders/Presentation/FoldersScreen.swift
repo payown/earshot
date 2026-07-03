@@ -10,6 +10,7 @@ struct FoldersScreen: View {
 
     @State private var showingCreate = false
     @State private var newName = ""
+    @AccessibilityFocusState private var focusedFolderID: PersistentIdentifier?
 
     var body: some View {
         Group {
@@ -23,9 +24,30 @@ struct FoldersScreen: View {
                 }
             } else {
                 List {
-                    ForEach(folders) { folder in
+                    ForEach(Array(folders.enumerated()), id: \.element.persistentModelID) { index, folder in
                         NavigationLink(value: folder) {
                             row(for: folder)
+                        }
+                        // The drag handle (`.onMove`) stays for sighted users; these
+                        // rotor move actions are the non-drag alternative every other
+                        // reorderable list in the app already offers (Queue, Quick
+                        // Actions). Same vocabulary, same tested `QuickActionMoveLogic`.
+                        .accessibilityLabel(rowLabel(for: folder, index: index, count: folders.count))
+                        .accessibilityHint("Use the actions rotor to move this folder without dragging.")
+                        .accessibilityFocused($focusedFolderID, equals: folder.persistentModelID)
+                        .accessibilityActions {
+                            ForEach(
+                                QuickActionMoveLogic.targets(index: index, count: folders.count),
+                                id: \.label
+                            ) { target in
+                                Button(target.label) {
+                                    move(IndexSet(integer: index), target.destinationOffset)
+                                    Announcer.announce(
+                                        "Moved \(folder.name) to position \(target.resultingIndex + 1) of \(folders.count)"
+                                    )
+                                    focusedFolderID = folder.persistentModelID
+                                }
+                            }
                         }
                     }
                     .onMove(perform: move)
@@ -58,6 +80,9 @@ struct FoldersScreen: View {
 
     private func row(for folder: PodcastFolder) -> some View {
         let count = folder.memberships.count
+        // Visual only — the accessible label (with reorder position) is set on the
+        // enclosing NavigationLink so the row is one element carrying the rotor
+        // move actions.
         return HStack(spacing: Spacing.md) {
             Image(systemName: "folder")
                 .foregroundStyle(.secondary)
@@ -69,8 +94,14 @@ struct FoldersScreen: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(folder.name), \(count) \(count == 1 ? "podcast" : "podcasts")")
+    }
+
+    /// The row's VoiceOver label, including its reorder position so a rotor move
+    /// tells the user what changed — matching `QuickActionsSettingsView`.
+    private func rowLabel(for folder: PodcastFolder, index: Int, count: Int) -> String {
+        let n = folder.memberships.count
+        let podcasts = "\(n) \(n == 1 ? "podcast" : "podcasts")"
+        return "\(folder.name), \(podcasts), position \(index + 1) of \(count)"
     }
 
     private func startCreate() {
