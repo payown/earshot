@@ -77,6 +77,37 @@ final class StatsRepository {
         AppLog.data.info("Deleted all listening history")
     }
 
+    /// Deletes every ``ListeningSession`` belonging to `podcast` — matched either
+    /// by its direct `podcast` reference or by an `episode` that belongs to the
+    /// podcast. Returns the number removed.
+    ///
+    /// Call this *before* deleting the podcast, while the relationships are still
+    /// intact — the same ordering ``FolderRepository/removeFromAllFolders(_:)``
+    /// requires. `ListeningSession` holds plain to-one references to `Podcast`
+    /// and `Episode` with no inverse and no cascade (the F2 decision), so
+    /// unsubscribing leaves the session rows dangling: their `podcast` faults to
+    /// nil and they pollute stats as "Unknown Podcast" (#377). Cleaning them up
+    /// here keeps stats correct without adding an inverse relationship, which
+    /// would force a schema migration.
+    @discardableResult
+    func removeSessions(for podcast: Podcast) -> Int {
+        let podcastID = podcast.persistentModelID
+        let episodeIDs = Set(podcast.episodes.map(\.persistentModelID))
+        let all = (try? context.fetch(FetchDescriptor<ListeningSession>())) ?? []
+        let toDelete = all.filter { session in
+            if session.podcast?.persistentModelID == podcastID { return true }
+            if let episodeID = session.episode?.persistentModelID {
+                return episodeIDs.contains(episodeID)
+            }
+            return false
+        }
+        guard !toDelete.isEmpty else { return 0 }
+        toDelete.forEach(context.delete)
+        save()
+        AppLog.data.info("Removed \(toDelete.count) listening session(s) for unsubscribed podcast")
+        return toDelete.count
+    }
+
     /// All sessions as CSV (date,podcast,episode,seconds,speed), newest first.
     func csv(now: Date = .now) -> String {
         let formatter = ISO8601DateFormatter()

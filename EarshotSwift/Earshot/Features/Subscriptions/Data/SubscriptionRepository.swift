@@ -161,7 +161,9 @@ final class SubscriptionRepository {
     /// Unsubscribes from `podcast`: removes every folder membership first (the
     /// `FolderMembership` → `Podcast` relationship has no cascade from the podcast
     /// side, so a leftover row would dangle — see `FolderRepository.removeFromAllFolders`),
-    /// then deletes the podcast (its episodes cascade) and saves.
+    /// removes its dangling listening sessions (same no-cascade problem, which
+    /// would otherwise corrupt stats as "Unknown Podcast" — #377), then deletes the
+    /// podcast (its episodes cascade) and saves.
     ///
     /// Centralizes the unsubscribe path that previously lived inline in
     /// `SubscriptionsView.unsubscribe` so search, the library, and the inbox all
@@ -173,6 +175,7 @@ final class SubscriptionRepository {
     func unsubscribe(_ podcast: Podcast) -> Bool {
         let title = podcast.title
         FolderRepository(context: context).removeFromAllFolders(podcast)
+        StatsRepository(context: context).removeSessions(for: podcast)
         context.delete(podcast)
         do {
             try context.save()

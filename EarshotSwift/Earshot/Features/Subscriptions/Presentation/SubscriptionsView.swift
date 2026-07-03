@@ -212,9 +212,14 @@ struct SubscriptionsView: View {
         // same array the ForEach uses — not the raw @Query order.
         let visible = sortedPodcasts
         let repo = FolderRepository(context: context)
+        let stats = StatsRepository(context: context)
         for index in offsets {
             let podcast = visible[index]
             repo.removeFromAllFolders(podcast)
+            // Same no-cascade cleanup as the centralized unsubscribe path: drop the
+            // podcast's listening sessions before deleting it so they don't dangle
+            // and corrupt stats as "Unknown Podcast" (#377).
+            stats.removeSessions(for: podcast)
             context.delete(podcast)
         }
         do {
