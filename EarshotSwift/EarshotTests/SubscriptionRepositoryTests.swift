@@ -574,6 +574,49 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<PodcastFolder>()).count, 1)
     }
 
+    /// A podcast's ``ListeningSession`` rows are dangling references (no cascade,
+    /// the F2 decision), so unsubscribing must delete them or they survive as
+    /// "Unknown Podcast" and corrupt stats (#377). Sessions belonging to other
+    /// podcasts — and sessions reached only via `episode` (no `podcast` ref) —
+    /// are handled correctly: the doomed show's are removed, the keeper's is not.
+    func testUnsubscribeRemovesListeningSessionsButKeepsOthers() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let doomed = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        let doomedEpisodes = try ctx.fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(doomedEpisodes.count, 2)
+
+        // A second podcast whose session must survive the unsubscribe untouched.
+        let keeper = Podcast(feedURL: "https://y/feed.xml", title: "Keeper")
+        ctx.insert(keeper)
+
+        // Three sessions on the doomed show — including one reached ONLY through
+        // its episode (no direct `podcast` ref) — plus one on the keeper.
+        ctx.insert(ListeningSession(episode: doomedEpisodes[0], podcast: doomed, durationSeconds: 600, date: d1))
+        ctx.insert(ListeningSession(episode: doomedEpisodes[1], podcast: doomed, durationSeconds: 300, date: d2))
+        ctx.insert(ListeningSession(episode: doomedEpisodes[0], podcast: nil, durationSeconds: 120, date: d3))
+        ctx.insert(ListeningSession(episode: nil, podcast: keeper, durationSeconds: 900, date: d1))
+        try ctx.save()
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<ListeningSession>()).count, 4)
+
+        XCTAssertTrue(repo.unsubscribe(doomed))
+
+        let remaining = try ctx.fetch(FetchDescriptor<ListeningSession>())
+        XCTAssertEqual(
+            remaining.count, 1,
+            "All three of the doomed show's sessions are gone, including the episode-only one"
+        )
+        XCTAssertEqual(remaining.first?.podcast?.title, "Keeper", "The other podcast's session survives")
+
+        // Nothing dangles into "Unknown Podcast" in the aggregated stats.
+        let stats = StatsRepository(context: ctx).stats(for: .allTime)
+        XCTAssertFalse(
+            stats.perPodcast.contains { $0.podcastTitle == "Unknown Podcast" },
+            "No dangling sessions remain to pollute stats"
+        )
+    }
+
     /// After unsubscribe the same feed URL can be subscribed again from scratch,
     /// proving the unique-feedURL row was truly removed (the search re-follow path).
     func testResubscribeAfterUnsubscribeSucceeds() async throws {
