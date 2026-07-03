@@ -208,6 +208,9 @@ struct RootView: View {
             player.configure(context: modelContext)
             quickActions.configure(context: modelContext)
             downloads.configure(context: modelContext)
+            // Reset downloads left stuck at .downloading by a kill mid-transfer,
+            // so they don't hang forever; in-flight background tasks are kept (#544).
+            await downloads.reconcileStuckDownloads()
             settings.configure(context: modelContext)
             // Seed the launch tab from the now-loaded preference exactly once, so
             // the saved Launch screen choice is honored on cold launch (#492).
