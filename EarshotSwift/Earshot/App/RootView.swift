@@ -71,6 +71,9 @@ struct RootView: View {
         // tab (read synchronously), so the first frame already shows the right
         // tab. Any user tap — or the `.task` seed / notification routing — writes
         // a concrete tab, after which `resolvedLaunchTab` is no longer consulted.
+        // Appearance preferences resolved once per body evaluation (#461).
+        let appearance = resolvedAppearance
+
         let tabSelection = Binding<RootTab>(
             get: { selectedTab ?? resolvedLaunchTab },
             set: { selectedTab = $0 }
@@ -136,6 +139,13 @@ struct RootView: View {
             TabBarBadgeApplier.apply(tabIndex: 0, count: inboxBadgeCount)
             TabBarBadgeApplier.apply(tabIndex: 1, count: queueBadgeCount)
         }
+        // Appearance preferences (#461): theme override, accent tint, and layout
+        // density, applied at the root so every tab, push, and sheet follows.
+        // SettingsStore is observed, so a change in Settings → Appearance
+        // re-applies live. `resolvedAppearance` serves the persisted values
+        // synchronously on the first launch frames, so an overridden theme
+        // doesn't flash the system appearance while settings load.
+        .appearance(theme: appearance.theme, accent: appearance.accent, density: appearance.density)
         // VoiceOver magic tap (two-finger double tap) toggles playback anywhere.
         .accessibilityAction(.magicTap) {
             player.togglePlayPause()
@@ -334,6 +344,29 @@ struct RootView: View {
     /// nil — a handful of launch renders — after which the seeded value is used.
     private var resolvedLaunchTab: RootTab {
         RootTab(launchScreen: AppSettingsStore(context: modelContext).launchScreen())
+    }
+
+    // MARK: Appearance (#461)
+
+    /// The appearance preferences to apply this frame. Reads the observed
+    /// SettingsStore properties FIRST — unconditionally — so Observation always
+    /// registers them as dependencies and a change in Settings → Appearance
+    /// re-renders RootView. While the store hasn't loaded yet (the handful of
+    /// launch frames before the `.task` runs `configure`), the persisted values
+    /// are read synchronously from ``AppSettingsStore`` instead, so a saved
+    /// theme override is already applied on the first paint with no
+    /// default-theme flash (mirrors ``resolvedLaunchTab``, #492).
+    private var resolvedAppearance: (theme: ThemeOverride, accent: AccentChoice, density: LayoutDensity) {
+        var theme = settings.themeOverride
+        var accent = settings.accentColor
+        var density = settings.layoutDensity
+        if !settings.loaded {
+            let store = AppSettingsStore(context: modelContext)
+            theme = store.themeOverride()
+            accent = store.accentChoice()
+            density = store.layoutDensity()
+        }
+        return (theme, accent, density)
     }
 
     // MARK: Migration state restore (#426)

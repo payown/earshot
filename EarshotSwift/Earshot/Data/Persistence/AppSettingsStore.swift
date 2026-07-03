@@ -72,6 +72,12 @@ enum SettingsKey {
     // run (automatic launch import or manual re-import). nil until the first
     // attempt (#429).
     static let migrationLastAttemptDate = "migration_last_attempt_date"
+    // Appearance (#461): manual theme override, accent color, and layout
+    // density. SwiftUI-only preferences, stored as the ``ThemeOverride`` /
+    // ``AccentChoice`` / ``LayoutDensity`` raw values.
+    static let themeOverride = "theme_override"
+    static let accentColor = "accent_color"
+    static let layoutDensity = "layout_density"
     // Prefix for the per-podcast episode-list filter (Unheard / All). The full
     // key is `podcast_filter_<feedURL>`, built by ``podcastFilter(feedURL:)``.
     // Keyed by the podcast's unique feed URL so the choice survives store
@@ -124,6 +130,11 @@ enum SettingsDefault {
     static let librarySortOrder: LibrarySortOrder = .alphabetical
     /// Per-podcast episode-list filter default: hide played episodes (#489).
     static let episodeListFilter: EpisodeListFilter = .unheard
+    // Appearance defaults (#461): follow the system everywhere until the user
+    // explicitly overrides.
+    static let themeOverride: ThemeOverride = .followSystem
+    static let accentColor: AccentChoice = .systemDefault
+    static let layoutDensity: LayoutDensity = .comfortable
     static let statsStreaksEnabled = false
     /// Default number of most-recent episodes seeded into the inbox when a new
     /// podcast is added. Matches Flutter's default of 3.
@@ -270,6 +281,41 @@ final class AppSettingsStore {
 
     func setLibrarySortOrder(_ order: LibrarySortOrder) {
         setRawValue(order.rawValue, for: SettingsKey.librarySortOrder)
+    }
+
+    // MARK: Appearance (#461)
+
+    func themeOverride() -> ThemeOverride {
+        guard let raw = rawValue(SettingsKey.themeOverride),
+              let theme = ThemeOverride(rawValue: raw)
+        else { return SettingsDefault.themeOverride }
+        return theme
+    }
+
+    func setThemeOverride(_ theme: ThemeOverride) {
+        setRawValue(theme.rawValue, for: SettingsKey.themeOverride)
+    }
+
+    func accentChoice() -> AccentChoice {
+        guard let raw = rawValue(SettingsKey.accentColor),
+              let accent = AccentChoice(rawValue: raw)
+        else { return SettingsDefault.accentColor }
+        return accent
+    }
+
+    func setAccentChoice(_ accent: AccentChoice) {
+        setRawValue(accent.rawValue, for: SettingsKey.accentColor)
+    }
+
+    func layoutDensity() -> LayoutDensity {
+        guard let raw = rawValue(SettingsKey.layoutDensity),
+              let density = LayoutDensity(rawValue: raw)
+        else { return SettingsDefault.layoutDensity }
+        return density
+    }
+
+    func setLayoutDensity(_ density: LayoutDensity) {
+        setRawValue(density.rawValue, for: SettingsKey.layoutDensity)
     }
 
     /// The episode-list filter last used for the podcast with this feed URL,
