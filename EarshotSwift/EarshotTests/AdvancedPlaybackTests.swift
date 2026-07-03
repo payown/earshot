@@ -318,6 +318,70 @@ final class AdvancedPlaybackTests: XCTestCase {
         XCTAssertEqual(after.queue, before.queue, "Completion must not insert a QueueItem")
     }
 
+    // MARK: Open full player on play (#562)
+
+    /// Acceptance criterion: with the openPlayerOnPlay setting ON (the default),
+    /// the deliberate "Play now" row path raises the full player by setting
+    /// pendingFullPlayerPresentation.
+    func test_playFromEpisodeList_settingOn_setsPendingFullPlayerPresentation() {
+        let ctx = TestStore.freshContext()
+        // Default is ON; set it explicitly so the test states its precondition.
+        let store = AppSettingsStore(context: ctx)
+        store.setBool(true, for: SettingsKey.openPlayerOnPlay)
+        let player = PlayerService()
+        player.configure(context: ctx)
+        XCTAssertFalse(player.pendingFullPlayerPresentation, "precondition: flag starts clear")
+
+        player.playFromEpisodeList(makeEpisode(ctx))
+
+        XCTAssertTrue(player.pendingFullPlayerPresentation,
+                      "Play now with setting ON must raise the full player")
+    }
+
+    /// Acceptance criterion: with openPlayerOnPlay OFF, the same row path plays in
+    /// the background and never raises the full player.
+    func test_playFromEpisodeList_settingOff_doesNotSetPendingFullPlayerPresentation() {
+        let ctx = TestStore.freshContext()
+        let store = AppSettingsStore(context: ctx)
+        store.setBool(false, for: SettingsKey.openPlayerOnPlay)
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        player.playFromEpisodeList(makeEpisode(ctx))
+
+        XCTAssertFalse(player.pendingFullPlayerPresentation,
+                       "Play now with setting OFF must not raise the full player")
+    }
+
+    /// Acceptance criterion: the plain play(_:) path — used by queue auto-advance,
+    /// resume, and jump-to-bookmark — must never raise the full player, even when
+    /// the setting is ON.
+    func test_play_settingOn_neverSetsPendingFullPlayerPresentation() {
+        let ctx = TestStore.freshContext()
+        let store = AppSettingsStore(context: ctx)
+        store.setBool(true, for: SettingsKey.openPlayerOnPlay)
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        player.play(makeEpisode(ctx))
+
+        XCTAssertFalse(player.pendingFullPlayerPresentation,
+                       "Non-deliberate play(_:) must never raise the full player")
+    }
+
+    /// The default (no explicit write to the setting) is ON, so a fresh store's
+    /// Play now still raises the player — guards the SettingsDefault fallback.
+    func test_playFromEpisodeList_defaultSetting_setsPendingFullPlayerPresentation() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        player.playFromEpisodeList(makeEpisode(ctx))
+
+        XCTAssertTrue(player.pendingFullPlayerPresentation,
+                      "Default (unset) openPlayerOnPlay is true, so Play now raises the player")
+    }
+
     func test_playPreview_realPlayAfterPreview_restoresPersistence() {
         let ctx = TestStore.freshContext()
         let player = PlayerService()
