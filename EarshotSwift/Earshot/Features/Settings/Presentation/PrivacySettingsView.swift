@@ -26,9 +26,10 @@ struct PrivacySettingsView: View {
                     }
                     .accessibilityHint("Opens the data-collection summary in your browser, outside Earshot")
                 }
-            } header: {
-                Text("Privacy")
             } footer: {
+                // No section header: the "Privacy" navigation title already names
+                // the screen, so a matching header would be a redundant VoiceOver
+                // heading stop.
                 Text("Your subscriptions, listening history, and settings stay on this device. No crash reporting, no analytics, no third-party trackers, no advertising IDs.")
             }
         }

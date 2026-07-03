@@ -22,7 +22,10 @@ struct DataSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Data") {
+            // No section header: the "Data" navigation title already names the
+            // screen, so a matching header would be a redundant VoiceOver heading
+            // stop.
+            Section {
                 Button {
                     exportURL = makeExportFile()
                 } label: {

@@ -9,7 +9,10 @@ struct AccessibilitySettingsView: View {
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Section("Accessibility") {
+            // No section header: the "Accessibility" navigation title already
+            // names the screen, so a matching header would be a redundant
+            // VoiceOver heading stop.
+            Section {
                 Toggle("Direct-touch playback area", isOn: $settings.directTouchEnabled)
             }
         }

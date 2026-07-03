@@ -36,9 +36,10 @@ struct InboxSettingsView: View {
                 // The section footer below explains this toggle; a matching hint
                 // would make VoiceOver read the same sentence twice.
                 Toggle("Opt-in podcasts only", isOn: $settings.inboxOptInOnly)
-            } header: {
-                Text("Inbox")
             } footer: {
+                // No section header: the "Inbox" navigation title already names the
+                // screen, so a matching header would be a redundant VoiceOver
+                // heading stop.
                 Text("Opt-in podcasts only: when on, new episodes only reach the inbox for podcasts you've explicitly included.")
             }
         }

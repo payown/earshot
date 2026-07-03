@@ -54,9 +54,11 @@ struct PlaybackSettingsView: View {
                 // The footer below explains this toggle; a matching hint would make
                 // VoiceOver read the same sentence twice (#515).
                 Toggle("Chapter navigation buttons", isOn: $settings.chapterNavButtonsVisible)
-            } header: {
-                Text("Playback")
             } footer: {
+                // No section header: the "Playback" navigation title already names
+                // the screen, so a matching header would be a redundant VoiceOver
+                // heading stop. The distinct Auto-advance and Queue sections keep
+                // their headers.
                 Text("Shows Previous and Next chapter buttons beside the chapter name in the player. Turn off to navigate chapters with the VoiceOver rotor on the artwork.")
             }
 

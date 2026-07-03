@@ -5,7 +5,10 @@ import SwiftUI
 struct HelpSettingsView: View {
     var body: some View {
         Form {
-            Section("Help & About") {
+            // No section header: the "Help & About" navigation title already
+            // names the screen, so a matching header would be a redundant
+            // VoiceOver heading stop.
+            Section {
                 NavigationLink {
                     SendFeedbackView()
                 } label: {

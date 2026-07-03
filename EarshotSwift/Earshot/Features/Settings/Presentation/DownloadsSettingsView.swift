@@ -16,7 +16,10 @@ struct DownloadsSettingsView: View {
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Section("Downloads") {
+            // No section header: the "Downloads" navigation title already names
+            // the screen, so a matching header would be a redundant VoiceOver
+            // heading stop.
+            Section {
                 Toggle("Download on Wi-Fi only", isOn: $settings.wifiOnlyDownloads)
                 AdjustableOptionPicker(
                     "Auto-download recent",

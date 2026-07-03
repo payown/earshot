@@ -14,7 +14,10 @@ struct HistorySettingsView: View {
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Section("History") {
+            // No section header: the "History & Stats" navigation title already
+            // names the screen, so a matching header would be a redundant
+            // VoiceOver heading stop.
+            Section {
                 NavigationLink("Listening stats") { StatsScreen() }
                 AdjustableOptionPicker(
                     "Keep listening history",
