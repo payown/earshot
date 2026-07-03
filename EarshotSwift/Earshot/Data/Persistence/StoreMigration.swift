@@ -72,7 +72,10 @@ enum StoreMigration {
     /// Opens the store at `url` as the current schema (V3) using
     /// ``EarshotMigrationPlan`` (so a V2 store is lightweight-migrated forward).
     /// If that fails, the store is treated as an original (V1) store and migrated
-    /// manually via export/reimport.
+    /// manually via export/reimport. On the manual V1 path the original store is
+    /// backed up (``ModelContainerFactory/backupStoreFiles(at:)``) before it is
+    /// deleted, so a failed fresh-store rebuild can't lose the tester's only copy
+    /// of the data (#529).
     ///
     /// Throws ``StoreOpenError`` if the store can be opened as neither: a store
     /// written by a newer app is ``StoreOpenError/storeNewerThanApp`` (must not
@@ -113,6 +116,17 @@ enum StoreMigration {
             throw StoreOpenError.unreadable(underlying: primaryError)
         }
 
+        // Back the V1 store up before replacing it (#529): the snapshots only
+        // live in memory, so if the fresh-store build or reinsert below throws,
+        // the backup is the only remaining copy of the tester's data. A nil
+        // return means there was nothing to copy (empty/absent store) or the
+        // copy failed — proceed either way, since deleting the old file is still
+        // required to build the fresh store.
+        if let backupURL = ModelContainerFactory.backupStoreFiles(at: url) {
+            AppLog.data.info("Backed up V1 store to \(backupURL.lastPathComponent, privacy: .public) before replacement")
+        } else {
+            AppLog.data.info("No V1 store backup made before replacement (store may have been empty or absent)")
+        }
         ModelContainerFactory.removeStoreFiles(at: url)
         let container = try ModelContainer(
             for: schema,
