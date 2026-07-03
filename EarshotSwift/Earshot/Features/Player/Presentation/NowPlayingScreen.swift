@@ -298,6 +298,13 @@ struct NowPlayingScreen: View {
                 font: .title,
                 action: player.skipBack
             )
+            // Pair "Previous chapter" with Skip back as a VoiceOver custom action
+            // (#560), the same rotor-action pattern the artwork uses. Additive:
+            // the button keeps its default Skip back activation. Announces a clear
+            // "no chapters" response when the episode has none, never a silent no-op.
+            .accessibilityAction(named: "Previous chapter") {
+                player.previousChapterOrAnnounceNoChapters()
+            }
 
             // Dynamic VoiceOver name reflecting the action the button performs
             // ("Play" when paused, "Pause" when playing), matching the mini bar.
@@ -318,6 +325,11 @@ struct NowPlayingScreen: View {
                 font: .title,
                 action: player.skipForward
             )
+            // Pair "Next chapter" with Skip forward as a VoiceOver custom action
+            // (#560); mirrors the Skip back / Previous chapter pairing above.
+            .accessibilityAction(named: "Next chapter") {
+                player.nextChapterOrAnnounceNoChapters()
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Spacing.sm)

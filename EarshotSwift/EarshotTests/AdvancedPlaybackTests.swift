@@ -157,6 +157,80 @@ final class AdvancedPlaybackTests: XCTestCase {
         XCTAssertNotNil(player.nowPlayingEpisode)
     }
 
+    // MARK: Chapter nav as VoiceOver transport actions (#560)
+
+    /// Acceptance criterion: activating the rotor action on an episode with no
+    /// chapters must NOT seek — it announces instead of silently no-oping. Here
+    /// we assert the "no seek" half (Announcer is a no-op with VoiceOver off).
+    func test_nextChapterOrAnnounce_noChapters_doesNotChangePosition() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.load(makeEpisode(ctx))
+        player.setChapters([])
+        player.currentPositionSeconds = 42
+
+        player.nextChapterOrAnnounceNoChapters()
+
+        XCTAssertEqual(player.chapterCount, 0)
+        XCTAssertEqual(player.currentPositionSeconds, 42, "no-chapters next must not seek")
+    }
+
+    /// Acceptance criterion: previous-chapter rotor action with no chapters must
+    /// not seek either.
+    func test_previousChapterOrAnnounce_noChapters_doesNotChangePosition() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.load(makeEpisode(ctx))
+        player.setChapters([])
+        player.currentPositionSeconds = 42
+
+        player.previousChapterOrAnnounceNoChapters()
+
+        XCTAssertEqual(player.chapterCount, 0)
+        XCTAssertEqual(player.currentPositionSeconds, 42, "no-chapters previous must not seek")
+    }
+
+    /// Acceptance criterion: with chapters present, the wrapper defers to the
+    /// existing next-chapter navigation and seeks to the following chapter start.
+    func test_nextChapterOrAnnounce_withChapters_defersToNextChapter() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.load(makeEpisode(ctx))
+        player.setChapters([
+            Chapter(index: 0, startTime: 0, title: "Intro"),
+            Chapter(index: 1, startTime: 60, title: "Main"),
+            Chapter(index: 2, startTime: 120, title: "Outro"),
+        ])
+        player.currentPositionSeconds = 10 // active chapter 0
+
+        player.nextChapterOrAnnounceNoChapters()
+
+        XCTAssertEqual(player.currentPositionSeconds, 60, "should seek to chapter 1 start")
+    }
+
+    /// Acceptance criterion: with chapters present, previous-chapter wrapper
+    /// defers to the existing previous-chapter navigation and seeks backward.
+    func test_previousChapterOrAnnounce_withChapters_defersToPreviousChapter() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.load(makeEpisode(ctx))
+        player.setChapters([
+            Chapter(index: 0, startTime: 0, title: "Intro"),
+            Chapter(index: 1, startTime: 60, title: "Main"),
+            Chapter(index: 2, startTime: 120, title: "Outro"),
+        ])
+        // 1s into chapter 1 (below the restart threshold) steps back to chapter 0.
+        player.currentPositionSeconds = 61
+
+        player.previousChapterOrAnnounceNoChapters()
+
+        XCTAssertEqual(player.currentPositionSeconds, 0, "should seek back to chapter 0 start")
+    }
+
     // MARK: Stream-only Search preview (#517)
 
     private func storeCounts(_ ctx: ModelContext) -> (episodes: Int, sessions: Int, queue: Int) {

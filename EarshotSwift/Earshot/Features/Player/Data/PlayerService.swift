@@ -874,6 +874,27 @@ final class PlayerService {
         seekToChapter(at: target)
     }
 
+    /// VoiceOver custom-action entry points for chapter nav from the transport
+    /// Skip back / Skip forward controls (#560). Unlike ``previousChapter()`` /
+    /// ``nextChapter()`` — which silently no-op when the episode has no chapters —
+    /// these give a clear spoken response so the rotor action never fails
+    /// silently. When chapters exist they defer to the same seek+announce path.
+    func nextChapterOrAnnounceNoChapters() {
+        guard chapterCount > 0 else {
+            Announcer.announce("This episode has no chapters")
+            return
+        }
+        nextChapter()
+    }
+
+    func previousChapterOrAnnounceNoChapters() {
+        guard chapterCount > 0 else {
+            Announcer.announce("This episode has no chapters")
+            return
+        }
+        previousChapter()
+    }
+
     /// Seeks to a chapter's start and announces it. Shared by manual prev/next.
     /// `seek(to:)` updates `currentPositionSeconds` synchronously, so the
     /// follow-up `updateCurrentChapter()` reflects the new chapter immediately.
