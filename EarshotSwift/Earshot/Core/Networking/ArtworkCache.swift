@@ -43,7 +43,14 @@ final class ArtworkCache: Sendable {
     /// Builds the cache. Falls back to a memory-only ``URLCache`` if the Caches
     /// directory can't be located, so callers never crash and still get an
     /// in-process cache for the current launch.
-    init() {
+    ///
+    /// `session` is a test seam only. In production it is nil and a real
+    /// disk-cache-backed session is built here (unchanged behavior). Tests inject a
+    /// ``MockURLProtocol`` session so `data(for:)`'s miss path never reaches the
+    /// real network — otherwise a cache miss fetched a reserved `example.test` host
+    /// and intermittently failed with `-1003` (a shared-cache eviction race between
+    /// parallel tests). The injected session's own configuration is used as-is.
+    init(session: URLSession? = nil) {
         let directory = Self.cacheDirectoryURL()
         let cache: URLCache
         if let directory {
@@ -59,12 +66,16 @@ final class ArtworkCache: Sendable {
         }
         self.urlCache = cache
 
-        let config = URLSessionConfiguration.default
-        config.urlCache = cache
-        // Serve cached data when present so a relaunch reads from disk instead of
-        // re-downloading; only reach the network on a true miss.
-        config.requestCachePolicy = .returnCacheDataElseLoad
-        self.session = URLSession(configuration: config)
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.urlCache = cache
+            // Serve cached data when present so a relaunch reads from disk instead
+            // of re-downloading; only reach the network on a true miss.
+            config.requestCachePolicy = .returnCacheDataElseLoad
+            self.session = URLSession(configuration: config)
+        }
     }
 
     /// Location of the artwork cache directory inside the app's Caches directory,
