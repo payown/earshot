@@ -80,6 +80,11 @@ struct EpisodeRow: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    // Downloaded / streaming indicator (#513): icon + short text so
+                    // the user can tell before choosing Play whether audio is local
+                    // or will stream. Hidden from VoiceOver inside the badge — the
+                    // spoken state rides in this row's single `accessibilityLabel`.
+                    DownloadStateBadge(status: episode.downloadStatus)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -122,7 +127,11 @@ struct EpisodeRow: View {
             seasonNumber: settings.showEpisodeNumbers ? episode.seasonNumber : nil,
             episodeNumber: settings.showEpisodeNumbers ? episode.episodeNumber : nil,
             isPlayed: episode.isPlayed,
-            pubDate: episode.pubDate
+            pubDate: episode.pubDate,
+            // Fold the downloaded / streaming state into the same single row label
+            // so VoiceOver announces it as part of this one element, not a new
+            // stop (#513).
+            downloadState: episode.downloadStatus
         )
     }
 

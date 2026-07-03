@@ -276,6 +276,10 @@ private struct QueueRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                // Downloaded / streaming indicator (#513), matching EpisodeRow.
+                // Hidden from VoiceOver inside the badge — the spoken state is
+                // folded into this row's single `accessibilityLabel` below.
+                DownloadStateBadge(status: episode.downloadStatus)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -320,6 +324,9 @@ private struct QueueRow: View {
         if let position, let total {
             parts.append("position \(position) of \(total)")
         }
+        // Downloaded / streaming state, last, matching EpisodeRow's order (#513).
+        // Folded into this single label so it never becomes a separate stop.
+        parts.append(EpisodeRowLabel.spokenDownloadState(episode.downloadStatus))
         return parts.joined(separator: ", ")
     }
 
