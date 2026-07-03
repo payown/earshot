@@ -160,6 +160,18 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
         }
+        // Raise the full player when the user plays an episode from a row and the
+        // "open player on play" setting is on (#562). Presented here at the single
+        // TabView root, not on NowPlayingBar — the mini bar is inset into all five
+        // tabs (#366), so a per-bar sheet would present up to five times. The row
+        // "Play now" action sets `pendingFullPlayerPresentation`; the binding
+        // clears it on dismiss so it never re-presents.
+        .sheet(isPresented: Binding(
+            get: { player.pendingFullPlayerPresentation },
+            set: { player.pendingFullPlayerPresentation = $0 }
+        )) {
+            NowPlayingScreen()
+        }
         // Bulk OPML import progress, presented over whichever tab is active. The
         // binding is read-only off the shared state: it appears when an import calls
         // `start()` and auto-dismisses when `finish()` flips `isImporting` false.

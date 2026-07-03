@@ -33,7 +33,9 @@ func buildEpisodeActions(
         switch action {
         case .playNow:
             return QuickActionItem(label: "Play now", isDestructive: false) {
-                player.play(episode)
+                // Row "Play now" — raises the full player when the user's
+                // openPlayerOnPlay setting is on (#562).
+                player.playFromEpisodeList(episode)
             }
         case .download:
             let downloaded = episode.downloadStatus == .downloaded

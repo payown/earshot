@@ -45,6 +45,13 @@ final class PlayerService {
     /// controls without reaching into the private `currentChapters`.
     var chapterCount: Int = 0
 
+    /// Set true when a user-initiated "Play now" should also open the full player
+    /// screen (#562), gated on the `openPlayerOnPlay` setting. RootView — the
+    /// single instance above all five inset mini bars — binds a sheet to this and
+    /// clears it on dismiss. Only the row "Play now" path sets it; queue
+    /// auto-advance and resume use `play(_:)` directly and never raise the player.
+    var pendingFullPlayerPresentation = false
+
     /// The sleep timer. Observed so the UI shows the live countdown; the player
     /// pauses when it fires.
     let sleepTimer = SleepTimerController()
@@ -236,6 +243,19 @@ final class PlayerService {
     /// the episode is below the played threshold, otherwise starts from the top.
     func play(_ episode: Episode) {
         play(episode, preparedItem: nil)
+    }
+
+    /// Plays `episode` from a user tap on an episode row (the "Play now" default
+    /// Quick Action). Same as ``play(_:)`` but also raises the full player when the
+    /// `openPlayerOnPlay` setting is on (#562). Kept distinct from ``play(_:)`` so
+    /// only this deliberate, user-initiated path can present the player — queue
+    /// auto-advance, resume, and jump-to-bookmark never do.
+    func playFromEpisodeList(_ episode: Episode) {
+        play(episode, preparedItem: nil)
+        if settings?.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
+            ?? SettingsDefault.openPlayerOnPlay {
+            pendingFullPlayerPresentation = true
+        }
     }
 
     /// The currently loaded episode, if any. Exposed read-only for features that

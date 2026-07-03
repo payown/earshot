@@ -77,6 +77,12 @@ struct PlaybackSettingsView: View {
                 Text("When both are on, playback moves to the next episode automatically. Turn off \"after episode ends\" to stop after each episode, or \"after group ends\" to stop when a podcast's episodes run out.")
             }
 
+            Section {
+                Toggle("Open the player when you play an episode", isOn: $settings.openPlayerOnPlay)
+            } footer: {
+                Text("When on, playing an episode opens the full player screen. When off, it plays in the background — tap the mini player to open it.")
+            }
+
             Section("Queue") {
                 Toggle("Group queue by podcast", isOn: $settings.groupQueueEpisodes)
             }

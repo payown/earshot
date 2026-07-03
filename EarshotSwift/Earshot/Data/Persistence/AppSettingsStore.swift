@@ -32,6 +32,9 @@ enum SettingsKey {
     static let wifiOnlyDownloads = "wifi_only_downloads"
     static let groupQueueEpisodes = "group_queue_episodes"
     static let showEpisodeNumbers = "show_episode_numbers"
+    // Whether playing an episode (the "Play now" default row action) also opens
+    // the full player screen. Default true (#562).
+    static let openPlayerOnPlay = "open_player_on_play"
     // Auto-advance boundary gates (#446). Both default true (existing behavior).
     // continueAfterEpisode off → stop at every episode boundary.
     // continueAfterGroupEnds off → stop when the next queue item is a different
@@ -125,6 +128,9 @@ enum SettingsDefault {
     /// Season/episode numbering in rows is OFF by default: most feeds don't set
     /// these, and users who don't care shouldn't have it read out (#452).
     static let showEpisodeNumbers = false
+    /// Playing an episode opens the full player by default (#562); users who
+    /// prefer to keep browsing can turn it off and use the mini player.
+    static let openPlayerOnPlay = true
     // Auto-advance defaults true: preserves today's unconditional auto-advance
     // until the user opts to stop at a boundary (#446).
     static let continueAfterEpisode = true
