@@ -365,6 +365,31 @@ The SwiftUI side is built and waiting.
   sheet's old inline chapters Section is replaced by a single button that opens
   the same `ChapterListView`. Skip memory stays per-session (resets on restart).
 
+- **Transcript viewer is a sheet mirroring ShowNotesView, ONE VoiceOver stop per
+  segment (#451).** `TranscriptView` (Features/Transcripts/Presentation) is a
+  `NavigationStack`-wrapped sheet with an inline "Transcript" title and a Done
+  button, presented from Now Playing right below the Show notes row (same layout,
+  chevron, and 44pt+ row height, so the two entry points read as a pair). It's
+  purely presentational: a `@MainActor @Observable` `TranscriptViewModel` holds the
+  async state as a sealed `LoadState` enum (`.loading` / `.loaded([TranscriptSegment])`
+  / `.failed(TranscriptError)`) — the exact PodcastPreviewModel idiom — and calls
+  the existing `TranscriptService` (no parsing/fetch logic in the view). Loaded
+  segments render one `Text` per segment in a `ScrollView`+`LazyVStack`
+  (`id: \.offset`), mirroring ShowNotesView's per-paragraph #547 model so each
+  segment is one VoiceOver element. Each segment is
+  `.accessibilityElement(children: .ignore)` with an authored label of
+  "Speaker: text" when the segment carries a speaker (the speaker also shows as a
+  distinct `.caption`/secondary label above the line), so VoiceOver names who is
+  speaking before reading the line; visible text stays `.textSelection(.enabled)`.
+  Error state is icon + headline + specific `errorDescription` (never color-only)
+  with a Retry button that re-runs `model.load`; `.empty` gets a gentle
+  "No transcript available for this episode." headline (with a neutral icon) instead
+  of an error tone, and a nil/blank URL folds straight to `.empty` without a network
+  attempt. The Now Playing entry point is gated on `hasTranscript`
+  (`transcriptURL` non-nil/non-empty) so it never offers a dead action. MVP only —
+  no tap-to-seek/synced highlighting (segments are timing-free) and no
+  search-within-transcript (deferred).
+
 - **Inbox-row "Unfollow this podcast" is a single trailing swipe action, not a
   second explicit rotor source (#500).** Inbox episode rows let a user unfollow the
   owning show (`episode.podcast`) straight from the inbox, via the centralized
@@ -736,6 +761,36 @@ The SwiftUI side is built and waiting.
   `RetryPolicy: Sendable`, the `@Sendable` injected `sleep` closure on
   `HTTPClient`, and the lock-guarded mutable static queue in `MockURLProtocol`
   (test-only). No actors added; no SwiftUI view changed (no accessibility gate).
+- **#451 Transcript fetch + parse (data layer).** New `Features/Transcripts/`
+  (`Domain/TranscriptFormat.swift`, `TranscriptSegment.swift`,
+  `TranscriptParser.swift`; `Data/TranscriptService.swift`). Format is resolved
+  at fetch time, not from the feed: `RSSParser` only stored the transcript `url`
+  (not the MIME `type`), so `TranscriptFormat.detect(url:contentType:)` keys off
+  the URL path extension first, then the response `Content-Type` (charset param
+  stripped), defaulting to `.plainText`. Reused `HTTPClient` for retry/timeouts:
+  added an additive `dataWithResponse(from:)` that returns the body **plus** the
+  `HTTPURLResponse` (the data-only path discarded headers, so there was no way to
+  read `Content-Type`); `data(from:)` now routes through the same shared retry
+  loop and is behaviourally unchanged. `TranscriptParser` is pure/synchronous/
+  Foundation-only (SwiftData-free) and never throws — malformed input yields a
+  best-effort (possibly empty) array. WebVTT and SRT share one cue-block
+  extractor (keyed on `-->` lines, so the `WEBVTT` header and numeric indices are
+  ignored); tag/entity decoding reuses `EpisodeSummary.plainText`; HTML reuses
+  `EpisodeSummary.paragraphs`. Speaker extraction: WebVTT `<v Name>` voice spans,
+  else a leading `Name:` label **requiring a space after the colon** so
+  `https://…` can't masquerade as a speaker. JSON (`{segments:[{speaker,body}]}`)
+  is parsed defensively with `JSONSerialization` (missing/bad keys skipped, `text`
+  accepted as a `body` fallback) and consecutive same-speaker entries are coalesced
+  into ≤320-char paragraphs so word-level transcripts don't become thousands of
+  VoiceOver stops. `TranscriptService.load(from:)` returns
+  `Result<[TranscriptSegment], TranscriptError>` (cases: `invalidURL`, `network`,
+  `empty`, `decodingFailed`, `tooLarge`); UTF-8 decode with Latin-1 fallback;
+  5 MB post-fetch size cap. **Flag for earshot-swift6:** all new types are value
+  types with `Sendable` stored properties (`TranscriptSegment: Sendable`); no
+  actors, no SwiftUI view (viewer is a separate earshot-ui pass; no a11y gate here).
+  **Flag for earshot-testing:** `MockURLProtocol.Outcome.response` sets
+  `headerFields: nil`, so Content-Type-path detection tests need it extended to
+  carry headers; extension-based detection is testable as-is.
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
