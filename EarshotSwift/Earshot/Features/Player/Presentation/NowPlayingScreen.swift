@@ -576,6 +576,9 @@ struct NowPlayingScreen: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
+            // Guarantee a 44pt-plus tap target at default Dynamic Type; the
+            // vertical padding alone leaves the row short of the minimum.
+            .frame(minHeight: Spacing.minTouchTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
