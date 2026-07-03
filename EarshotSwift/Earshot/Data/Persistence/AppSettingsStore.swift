@@ -45,6 +45,11 @@ enum SettingsKey {
     // Library list order (alphabetical / last published). SwiftUI-only preference,
     // stored as the ``LibrarySortOrder`` raw value.
     static let librarySortOrder = "library_sort_order"
+    // Order for a podcast's episode list (alphabetical / latest first / latest
+    // last). Global SwiftUI-only preference, stored as the ``EpisodeSortOrder``
+    // raw value; defaults to ``EpisodeSortOrder/latestFirst`` which preserves the
+    // pre-existing pubDate-descending order (#459).
+    static let episodeSortOrder = "episode_sort_order"
     static let lastPlayingEpisodeID = "last_playing_episode_id"
     static let statsStreaksEnabled = "stats_streaks_enabled"
     // How many of a newly-added podcast's most-recent episodes to seed into the
@@ -138,6 +143,9 @@ enum SettingsDefault {
     static let onboardingComplete = false
     static let launchScreen: LaunchScreen = .inbox
     static let librarySortOrder: LibrarySortOrder = .alphabetical
+    /// Episode-list order default: newest published first, preserving the
+    /// pre-existing pubDate-descending order (#459).
+    static let episodeSortOrder: EpisodeSortOrder = .latestFirst
     /// Per-podcast episode-list filter default: hide played episodes (#489).
     static let episodeListFilter: EpisodeListFilter = .unheard
     // Appearance defaults (#461): follow the system everywhere until the user
@@ -291,6 +299,20 @@ final class AppSettingsStore {
 
     func setLibrarySortOrder(_ order: LibrarySortOrder) {
         setRawValue(order.rawValue, for: SettingsKey.librarySortOrder)
+    }
+
+    /// The episode-list sort order, defaulting to
+    /// ``SettingsDefault/episodeSortOrder`` (.latestFirst) when unset or
+    /// unparseable (#459).
+    func episodeSortOrder() -> EpisodeSortOrder {
+        guard let raw = rawValue(SettingsKey.episodeSortOrder),
+              let order = EpisodeSortOrder(rawValue: raw)
+        else { return SettingsDefault.episodeSortOrder }
+        return order
+    }
+
+    func setEpisodeSortOrder(_ order: EpisodeSortOrder) {
+        setRawValue(order.rawValue, for: SettingsKey.episodeSortOrder)
     }
 
     // MARK: Appearance (#461)
