@@ -38,6 +38,40 @@ enum EpisodeSummary {
         return collapsed.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Splits an episode description into plain-text paragraphs, preserving the
+    /// block structure that ``plainText(_:)`` deliberately flattens (#547).
+    ///
+    /// ``plainText(_:)`` collapses *all* whitespace — including newlines — into
+    /// single spaces, which is right for a one-line row summary but is exactly why
+    /// the full Show Notes screen read as a single VoiceOver block. This splits on
+    /// block-level HTML boundaries (`</p>`, `<br>`, `</div>`, `</li>`, `</h1-6>`,
+    /// `</tr>`) and any literal newlines *before* that collapse, then runs each
+    /// chunk through the shared strip so every returned paragraph is its own clean,
+    /// entity-decoded plain-text string. Empty chunks are dropped. Returns an empty
+    /// array for nil/empty input (callers supply their own placeholder copy).
+    ///
+    /// Rendering one `Text` per element gives each paragraph its own accessibility
+    /// element, so VoiceOver navigates the notes paragraph by paragraph instead of
+    /// speaking the whole description at once.
+    static func paragraphs(_ html: String?) -> [String] {
+        guard let html, !html.isEmpty else { return [] }
+        // Turn block-level closers/breaks into newlines so paragraph structure
+        // survives the tag strip. Case-insensitive; tolerates `<br>`, `<br/>`,
+        // `<br />`. Inline tags (e.g. <a>, <strong>) are left for plainText to strip.
+        let withBreaks = html.replacingOccurrences(
+            of: "(?i)</p>|<br\\s*/?>|</div>|</li>|</h[1-6]>|</tr>",
+            with: "\n",
+            options: .regularExpression
+        )
+        // Split on the inserted (and any original) newlines, run each chunk through
+        // the shared strip (tags + entities + intra-line whitespace collapse), and
+        // drop anything that reduces to empty.
+        return withBreaks
+            .components(separatedBy: "\n")
+            .map { plainText($0) }
+            .filter { !$0.isEmpty }
+    }
+
     /// Replaces decimal (`&#NNN;`) and hexadecimal (`&#xHHH;` / `&#XHHH;`)
     /// numeric HTML character references with their Unicode scalars. Leaves any
     /// reference that doesn't resolve to a valid scalar untouched so malformed

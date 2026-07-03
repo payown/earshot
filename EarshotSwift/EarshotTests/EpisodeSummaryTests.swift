@@ -141,4 +141,68 @@ final class EpisodeSummaryTests: XCTestCase {
         XCTAssertFalse(summary!.contains("<"))
         XCTAssertTrue(summary!.contains("Important:"))
     }
+
+    // MARK: paragraphs (#547)
+
+    func testParagraphsSplitsOnParagraphTags() {
+        let html = "<p>First paragraph.</p><p>Second paragraph.</p><p>Third.</p>"
+        XCTAssertEqual(
+            EpisodeSummary.paragraphs(html),
+            ["First paragraph.", "Second paragraph.", "Third."]
+        )
+    }
+
+    func testParagraphsSplitsOnLineBreaks() {
+        // <br> variants all count as paragraph boundaries.
+        let html = "Line one<br>Line two<br/>Line three<br />Line four"
+        XCTAssertEqual(
+            EpisodeSummary.paragraphs(html),
+            ["Line one", "Line two", "Line three", "Line four"]
+        )
+    }
+
+    func testParagraphsDropsEmptyChunks() {
+        // Consecutive breaks / empty paragraphs must not yield blank elements.
+        let html = "<p>Only content.</p><p></p><p>   </p>"
+        XCTAssertEqual(EpisodeSummary.paragraphs(html), ["Only content."])
+    }
+
+    func testParagraphsStripsInlineTagsAndDecodesEntities() {
+        let html = "<p><strong>Bold</strong> &amp; <em>italic</em> &#8217;fun&#8217;</p><p>Next.</p>"
+        XCTAssertEqual(
+            EpisodeSummary.paragraphs(html),
+            ["Bold & italic \u{2019}fun\u{2019}", "Next."]
+        )
+    }
+
+    func testParagraphsSplitsPlainTextOnNewlines() {
+        // A plain-text (no-HTML) description with real newlines still splits.
+        let text = "Intro line.\n\nBody line.\nClosing line."
+        XCTAssertEqual(
+            EpisodeSummary.paragraphs(text),
+            ["Intro line.", "Body line.", "Closing line."]
+        )
+    }
+
+    func testParagraphsSingleBlockReturnsOneElement() {
+        // No block boundaries -> one paragraph (still better than nothing, and the
+        // caller renders it as a single Text).
+        XCTAssertEqual(
+            EpisodeSummary.paragraphs("Just one continuous sentence with no breaks."),
+            ["Just one continuous sentence with no breaks."]
+        )
+    }
+
+    func testParagraphsNilAndEmptyReturnEmptyArray() {
+        XCTAssertEqual(EpisodeSummary.paragraphs(nil), [])
+        XCTAssertEqual(EpisodeSummary.paragraphs(""), [])
+    }
+
+    func testParagraphsSplitsOnListAndHeadingTags() {
+        let html = "<h2>Topics</h2><ul><li>One</li><li>Two</li></ul>"
+        XCTAssertEqual(
+            EpisodeSummary.paragraphs(html),
+            ["Topics", "One", "Two"]
+        )
+    }
 }
