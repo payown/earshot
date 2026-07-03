@@ -68,6 +68,20 @@ struct InboxScreen: View {
                                     Label("Mark as played", systemImage: "checkmark.circle")
                                 }
                                 .tint(.green)
+                                // The row already exposes "Mark as played" in the
+                                // VoiceOver Actions rotor via the `.markPlayed`
+                                // episode Quick Action (always present — Quick
+                                // Actions are reorder-only, never removable, so
+                                // `resolve()` always includes it). SwiftUI mirrors
+                                // this swipe button into the SAME rotor, which would
+                                // give VoiceOver users a duplicate "Mark as played"
+                                // stop. This swipe is purely the visible affordance
+                                // sighted users lacked (#546), so hide it from
+                                // VoiceOver and let the single Quick Action own the
+                                // rotor — mirroring the Downloads "Restore" pattern
+                                // (visible button + `.accessibilityHidden(true)`,
+                                // action lives in the rotor).
+                                .accessibilityHidden(true)
                             }
                             // Unfollow the whole show straight from one of its
                             // inbox episodes (#500). A trailing swipe is the
