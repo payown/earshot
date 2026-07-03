@@ -221,6 +221,10 @@ struct QueueScreen: View {
 /// reorder, or remove without a drag gesture. Swipe exposes the destructive
 /// actions; the context menu exposes the non-default ones.
 private struct QueueRow: View {
+    // Requires SettingsStore in the environment (injected at the app root); every
+    // QueueRow renders under QueueScreen, which is under that root. Gates the
+    // opt-in season/episode numbering (#452).
+    @Environment(SettingsStore.self) private var settings
     let episode: Episode
     let position: Int?
     let total: Int?
@@ -251,6 +255,18 @@ private struct QueueRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
+                }
+                // Season/episode badge ("S2 · E14"), matching EpisodeRow. Shown
+                // only when the user opted in (off by default) and the feed
+                // provides numbers; the spoken form is folded into the label below
+                // so this visible Text isn't announced separately (#452).
+                if settings.showEpisodeNumbers,
+                   let numberBadge = EpisodeRowLabel.numberBadge(
+                       season: episode.seasonNumber, episode: episode.episodeNumber
+                   ) {
+                    Text(numberBadge)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 // Time-left / total length, matching EpisodeRow's caption +
                 // secondary treatment. Absent (nil) for a played or
@@ -292,6 +308,14 @@ private struct QueueRow: View {
         var parts = [episode.title]
         if let podcast = episode.podcast?.title {
             parts.append(podcast)
+        }
+        // Spoken "Season 2, Episode 14" when opted in, after the show name and
+        // before position — matching EpisodeRow's order (#452).
+        if settings.showEpisodeNumbers,
+           let numbering = EpisodeRowLabel.spokenNumber(
+               season: episode.seasonNumber, episode: episode.episodeNumber
+           ) {
+            parts.append(numbering)
         }
         if let position, let total {
             parts.append("position \(position) of \(total)")
