@@ -39,7 +39,7 @@ struct DownloadsScreen: View {
                     if !downloaded.isEmpty {
                         Section(header: Text("Downloaded").accessibilityAddTraits(.isHeader)) {
                             ForEach(downloaded) { episode in
-                                EpisodeRow(episode: episode, actions: actions(for: episode))
+                                EpisodeRow(episode: episode, actions: actions(for: episode), includesPodcastName: true)
                             }
                         }
                     }

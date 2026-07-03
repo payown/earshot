@@ -48,7 +48,7 @@ struct InboxScreen: View {
             } else {
                 List {
                     ForEach(inbox) { episode in
-                        EpisodeRow(episode: episode, actions: actions(for: episode))
+                        EpisodeRow(episode: episode, actions: actions(for: episode), includesPodcastName: true)
                             // Unfollow the whole show straight from one of its
                             // inbox episodes (#500). A trailing swipe is the
                             // visible affordance sighted users expect; SwiftUI
