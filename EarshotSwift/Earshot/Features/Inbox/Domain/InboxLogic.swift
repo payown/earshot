@@ -27,6 +27,15 @@ enum InboxLogic {
             .map(\.id)
     }
 
+    /// Resolves `inboxDismissed` after a played-state change (#546). Marking an
+    /// episode played dismisses it from the inbox; marking it unplayed leaves any
+    /// existing dismissal in place, so a triaged episode never jumps back into
+    /// the inbox. `inboxDismissed` is therefore sticky once set here — the same
+    /// one-directional contract the per-podcast caps rely on.
+    static func inboxDismissedAfterPlayedChange(nowPlayed: Bool, wasDismissed: Bool) -> Bool {
+        nowPlayed ? true : wasDismissed
+    }
+
     /// Ids to dismiss for the count cap: everything beyond the newest `cap`.
     /// `itemsNewestFirst` is the inbox candidates ordered newest first.
     static func idsToDismissForCount<ID>(_ itemsNewestFirst: [ID], cap: Int) -> [ID] {

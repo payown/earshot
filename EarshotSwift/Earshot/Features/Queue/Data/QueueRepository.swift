@@ -107,7 +107,13 @@ final class QueueRepository {
     /// Intentionally does NOT reset `positionSeconds` — position-zeroing is owned
     /// elsewhere, so a spurious completion can't destroy a saved place.
     func markPlayedAndRemove(_ episode: Episode) {
-        remove(episode) { $0.isPlayed = true }
+        // Also dismiss from the inbox: an episode played to completion should
+        // leave the inbox durably, matching the mark-played Quick Action and
+        // swipe (#546). `inboxDismissed` stays set even if later marked unplayed.
+        remove(episode) {
+            $0.isPlayed = true
+            $0.inboxDismissed = true
+        }
     }
 
     /// Empties the queue, reverting every episode to `newEpisode`.

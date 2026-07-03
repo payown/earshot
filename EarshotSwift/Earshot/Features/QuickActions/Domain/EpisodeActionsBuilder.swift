@@ -64,7 +64,14 @@ func buildEpisodeActions(
                 label: played ? "Mark as unplayed" : "Mark as played",
                 isDestructive: false
             ) {
-                episode.isPlayed.toggle()
+                // Marking played dismisses the episode from the inbox durably;
+                // marking unplayed leaves any dismissal sticky so a triaged
+                // episode never jumps back into the inbox (#546).
+                let nowPlayed = !played
+                episode.isPlayed = nowPlayed
+                episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
+                    nowPlayed: nowPlayed, wasDismissed: episode.inboxDismissed
+                )
                 saveQuickAction(context, "played state")
             }
         case .viewBookmarks:

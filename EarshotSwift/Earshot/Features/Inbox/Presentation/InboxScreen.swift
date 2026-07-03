@@ -49,6 +49,26 @@ struct InboxScreen: View {
                 List {
                     ForEach(inbox) { episode in
                         EpisodeRow(episode: episode, actions: actions(for: episode), includesPodcastName: true)
+                            // Visible affordance for sighted users to clear a
+                            // finished episode out of the inbox (#546): a leading
+                            // swipe marks it played and dismisses it. Testers had
+                            // no visible way to do this — the mark-played Quick
+                            // Action only surfaced in the VoiceOver rotor / default
+                            // tap. Leading edge + a constructive green tint keeps it
+                            // distinct from the trailing destructive unfollow swipe;
+                            // a full swipe completes it since the action is safe and
+                            // reversible (the episode stays in the podcast). SwiftUI
+                            // also mirrors this swipe into the VoiceOver Actions
+                            // rotor, so it reaches VoiceOver users too. The Label
+                            // gives it an icon + text (never color alone).
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    markPlayed(episode)
+                                } label: {
+                                    Label("Mark as played", systemImage: "checkmark.circle")
+                                }
+                                .tint(.green)
+                            }
                             // Unfollow the whole show straight from one of its
                             // inbox episodes (#500). A trailing swipe is the
                             // visible affordance sighted users expect; SwiftUI
@@ -161,6 +181,20 @@ struct InboxScreen: View {
         // Delay so the list has collapsed to the empty state (the focus target)
         // before we request focus on it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { focusEmpty = true }
+    }
+
+    /// Marks `episode` played and dismisses it from the inbox via the shared
+    /// repository path (#546), then announces it. If that empties the inbox the
+    /// focused row is gone, so move VoiceOver focus to the empty state (mirrors
+    /// `clearInbox` / `unfollow`).
+    private func markPlayed(_ episode: Episode) {
+        InboxRepository(context: context).markPlayed(episode)
+        Announcer.announce("Marked as played")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if InboxRepository(context: context).inboxEpisodes().isEmpty {
+                focusEmpty = true
+            }
+        }
     }
 
     /// Unfollows `podcast` via the centralized repository path shared with

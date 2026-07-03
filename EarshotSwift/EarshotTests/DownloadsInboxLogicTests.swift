@@ -77,6 +77,53 @@ final class DownloadsInboxLogicTests: XCTestCase {
         XCTAssertEqual(InboxLogic.inboxTitleAccessibilityLabel(count: 0), "Inbox")
     }
 
+    // MARK: InboxLogic — played-state dismissal (#546)
+
+    func testMarkingPlayedDismissesFromInbox() {
+        XCTAssertTrue(InboxLogic.inboxDismissedAfterPlayedChange(nowPlayed: true, wasDismissed: false))
+    }
+
+    func testMarkingPlayedStaysDismissed() {
+        XCTAssertTrue(InboxLogic.inboxDismissedAfterPlayedChange(nowPlayed: true, wasDismissed: true))
+    }
+
+    func testMarkingUnplayedDoesNotResurfaceDismissed() {
+        // Sticky: a previously-triaged (dismissed) episode marked unplayed must
+        // not jump back into the inbox.
+        XCTAssertTrue(InboxLogic.inboxDismissedAfterPlayedChange(nowPlayed: false, wasDismissed: true))
+    }
+
+    func testMarkingUnplayedLeavesUndismissedAlone() {
+        XCTAssertFalse(InboxLogic.inboxDismissedAfterPlayedChange(nowPlayed: false, wasDismissed: false))
+    }
+
+    // MARK: InboxRepository.markPlayed — end-to-end (#546)
+
+    @MainActor
+    func testMarkPlayedRemovesEpisodeFromInboxAndKeepsItOut() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/feed.xml", title: "Show")
+        ctx.insert(podcast)
+        let ep = Episode(guid: "e1", title: "Ep 1", audioURL: "https://x/e1.mp3")
+        ep.podcast = podcast
+        ctx.insert(ep)
+        try ctx.save()
+
+        let repo = InboxRepository(context: ctx)
+        XCTAssertEqual(repo.inboxEpisodes().map(\.guid), ["e1"], "seeded episode should start in the inbox")
+
+        repo.markPlayed(ep)
+        XCTAssertTrue(ep.isPlayed)
+        XCTAssertTrue(ep.inboxDismissed)
+        XCTAssertTrue(repo.inboxEpisodes().isEmpty, "marking played should clear it from the inbox")
+
+        // Marking unplayed again must not resurface it (#546: sticky dismissal).
+        ep.isPlayed = false
+        try ctx.save()
+        XCTAssertTrue(ep.inboxDismissed)
+        XCTAssertTrue(repo.inboxEpisodes().isEmpty, "an un-played episode must not jump back into the inbox")
+    }
+
     // MARK: ExpirationLogic
 
     func testQueueItemExpiresOlderThanAgeLimit() {
