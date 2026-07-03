@@ -4,10 +4,20 @@ import UIKit
 
 /// Tests for the disk-backed artwork cache (#385).
 ///
-/// These avoid real network access: the cache-hit path is exercised by
-/// pre-seeding the backing `URLCache` with a stored response, and the directory
-/// derivation / clear paths are pure filesystem work.
+/// These avoid real network access: the fetch/decode paths are driven through an
+/// injected `MockURLProtocol` session, and the directory derivation / clear paths
+/// are pure filesystem work. The fetch tests previously seeded the shared on-disk
+/// `URLCache` and read back through the production session; a parallel test's
+/// `removeAllCachedResponses()` could evict the seed between store and read,
+/// dropping to a real fetch of the reserved `example.test` host and failing
+/// intermittently with `-1003`. Serving the response via the mock protocol removes
+/// both the real-network dependency and the shared-cache race.
 final class ArtworkCacheTests: XCTestCase {
+
+    override func tearDown() {
+        MockURLProtocol.reset()
+        super.tearDown()
+    }
 
     // MARK: Directory derivation
 
@@ -41,50 +51,39 @@ final class ArtworkCacheTests: XCTestCase {
     /// When a response is already stored for a URL, `data(for:)` must return the
     /// stored bytes without hitting the network. We seed the cache directly and
     /// assert the round-trip, which models the post-relaunch disk-hit path.
-    func test_dataFor_returnsStoredResponseWithoutNetwork() async throws {
-        let cache = ArtworkCache()
-        let url = try XCTUnwrap(URL(string: "https://example.test/artwork-\(UUID().uuidString).jpg"))
-        let payload = Data("seeded-artwork-bytes".utf8)
+    func test_dataFor_returnsFetchedResponseViaMock() async throws {
+        let payload = Data("artwork-bytes".utf8)
+        MockURLProtocol.reset()
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: payload)])
 
-        let response = try XCTUnwrap(HTTPURLResponse(
-            url: url, statusCode: 200, httpVersion: nil,
-            headerFields: ["Content-Type": "image/jpeg"]
-        ))
-        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad)
-        cache.urlCache.storeCachedResponse(CachedURLResponse(response: response, data: payload),
-                                           for: request)
+        // Inject the mock session so the fetch is deterministic and never touches
+        // the real network — a unique URL guarantees a cache miss, so `data(for:)`
+        // falls through to the stubbed response instead of a shared-cache seed.
+        let cache = ArtworkCache(session: MockURLProtocol.makeSession())
+        let url = try XCTUnwrap(URL(string: "https://example.test/artwork-\(UUID().uuidString).jpg"))
 
         let result = await cache.data(for: url)
         XCTAssertEqual(result, payload,
-                       "data(for:) should return the stored response without a network call")
-
-        cache.urlCache.removeAllCachedResponses()
+                       "data(for:) should return the fetched bytes served by the mock protocol")
     }
 
     /// `image(for:maxPixelSize:)` should decode a stored image response into a
     /// `UIImage`.
-    func test_imageFor_decodesStoredImageData() async throws {
-        let cache = ArtworkCache()
-        let url = try XCTUnwrap(URL(string: "https://example.test/image-\(UUID().uuidString).png"))
-
+    func test_imageFor_decodesFetchedImageDataViaMock() async throws {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10))
         let pngData = try XCTUnwrap(renderer.image { ctx in
             UIColor.systemRed.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: 10, height: 10))
         }.pngData())
 
-        let response = try XCTUnwrap(HTTPURLResponse(
-            url: url, statusCode: 200, httpVersion: nil,
-            headerFields: ["Content-Type": "image/png"]
-        ))
-        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad)
-        cache.urlCache.storeCachedResponse(CachedURLResponse(response: response, data: pngData),
-                                           for: request)
+        MockURLProtocol.reset()
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: pngData)])
+
+        let cache = ArtworkCache(session: MockURLProtocol.makeSession())
+        let url = try XCTUnwrap(URL(string: "https://example.test/image-\(UUID().uuidString).png"))
 
         let image = await cache.image(for: url, maxPixelSize: 56)
-        XCTAssertNotNil(image, "image(for:maxPixelSize:) should decode a stored PNG response")
-
-        cache.urlCache.removeAllCachedResponses()
+        XCTAssertNotNil(image, "image(for:maxPixelSize:) should decode the PNG served by the mock protocol")
     }
 
     // MARK: Downsampling (#481)
