@@ -205,4 +205,181 @@ final class EpisodeSummaryTests: XCTestCase {
             ["Topics", "One", "Two"]
         )
     }
+
+    // MARK: attributedParagraphs (#565)
+
+    /// The visible plain-text string of an attributed paragraph, ignoring runs.
+    private func plainString(_ attributed: AttributedString) -> String {
+        String(attributed.characters)
+    }
+
+    /// The first run in `attributed` carrying a `.link`, or nil if none.
+    private func firstLinkRun(
+        in attributed: AttributedString
+    ) -> AttributedString.Runs.Run? {
+        attributed.runs.first { $0.link != nil }
+    }
+
+    /// The visible text of a specific run.
+    private func text(
+        of run: AttributedString.Runs.Run,
+        in attributed: AttributedString
+    ) -> String {
+        String(attributed[run.range].characters)
+    }
+
+    /// The inline presentation intent applied to the run whose visible text is
+    /// exactly `text`, or nil if no such run exists.
+    private func intent(
+        forText text: String,
+        in attributed: AttributedString
+    ) -> InlinePresentationIntent? {
+        for run in attributed.runs where self.text(of: run, in: attributed) == text {
+            return run.inlinePresentationIntent
+        }
+        return nil
+    }
+
+    // Acceptance criterion: paragraph count/order matches paragraphs(_:) — the
+    // #547 lockstep guarantee — across the full spread of block boundaries.
+    func testAttributedParagraphsMatchParagraphsCountAndOrder() {
+        let inputs = [
+            "<p>First paragraph.</p><p>Second paragraph.</p><p>Third.</p>",
+            "Line one<br>Line two<br/>Line three<br />Line four",
+            "<div>Div one</div><div>Div two</div>",
+            "<ul><li>One</li><li>Two</li></ul>",
+            "<h2>Topics</h2><p>Body copy here.</p>",
+            "Intro line.\n\nBody line.\nClosing line.",
+            "<p>Visit <a href=\"https://example.com\">the site</a> now.</p><p><strong>Bold</strong> tail.</p>",
+            "<p>Only content.</p><p></p><p>   </p>",
+        ]
+        for html in inputs {
+            let plain = EpisodeSummary.paragraphs(html)
+            let attributed = EpisodeSummary.attributedParagraphs(html)
+            XCTAssertEqual(
+                attributed.count, plain.count,
+                "count mismatch for \(html)"
+            )
+            XCTAssertEqual(
+                attributed.map(plainString), plain,
+                "order/text mismatch for \(html)"
+            )
+        }
+    }
+
+    // Acceptance criterion: an <a href="https://…"> produces a run whose .link is
+    // that URL and whose visible text is the anchor text.
+    func testAttributedHTTPSLinkKeepsURLAndVisibleText() throws {
+        let result = EpisodeSummary.attributedParagraphs(
+            "<p>See <a href=\"https://example.com\">text</a> here</p>"
+        )
+        let para = try XCTUnwrap(result.first)
+        let run = try XCTUnwrap(firstLinkRun(in: para))
+        XCTAssertEqual(run.link, try XCTUnwrap(URL(string: "https://example.com")))
+        XCTAssertEqual(text(of: run, in: para), "text")
+        XCTAssertEqual(plainString(para), "See text here")
+    }
+
+    // Acceptance criterion: mailto links are kept tappable.
+    func testAttributedMailtoLinkKept() throws {
+        let result = EpisodeSummary.attributedParagraphs(
+            "<p>Email <a href=\"mailto:me@example.com\">me</a> today</p>"
+        )
+        let para = try XCTUnwrap(result.first)
+        let run = try XCTUnwrap(firstLinkRun(in: para))
+        XCTAssertEqual(run.link, try XCTUnwrap(URL(string: "mailto:me@example.com")))
+        XCTAssertEqual(text(of: run, in: para), "me")
+    }
+
+    // Acceptance criterion: hrefs entity-encode ampersands; the query must survive.
+    func testAttributedLinkDecodesAmpEntityInHref() throws {
+        let result = EpisodeSummary.attributedParagraphs(
+            "<p><a href=\"https://example.com/?a=1&amp;b=2\">q</a></p>"
+        )
+        let para = try XCTUnwrap(result.first)
+        let run = try XCTUnwrap(firstLinkRun(in: para))
+        XCTAssertEqual(
+            run.link,
+            try XCTUnwrap(URL(string: "https://example.com/?a=1&b=2"))
+        )
+    }
+
+    // Acceptance criterion: <strong>/<b> apply .stronglyEmphasized and <em>/<i>
+    // apply .emphasized inline presentation intent.
+    func testAttributedBoldAndItalicApplyIntents() {
+        let result = EpisodeSummary.attributedParagraphs(
+            "<p><strong>bold</strong> <b>bee</b> <em>ital</em> <i>eye</i> plain</p>"
+        )
+        XCTAssertEqual(result.count, 1)
+        let para = result[0]
+        XCTAssertEqual(intent(forText: "bold", in: para)?.contains(.stronglyEmphasized), true)
+        XCTAssertEqual(intent(forText: "bee", in: para)?.contains(.stronglyEmphasized), true)
+        XCTAssertEqual(intent(forText: "ital", in: para)?.contains(.emphasized), true)
+        XCTAssertEqual(intent(forText: "eye", in: para)?.contains(.emphasized), true)
+        // Plain text carries no emphasis intent.
+        let plainIntent = intent(forText: "plain", in: para)
+        XCTAssertNotEqual(plainIntent?.contains(.stronglyEmphasized), true)
+        XCTAssertNotEqual(plainIntent?.contains(.emphasized), true)
+    }
+
+    // Acceptance criterion: javascript:, an unknown scheme, and a scheme-less
+    // relative href each produce NO .link; the anchor text renders plain.
+    func testAttributedUnsafeSchemesDropLinkButKeepText() {
+        let cases = [
+            "<p><a href=\"javascript:alert(1)\">jsx</a></p>",
+            "<p><a href=\"ftp://host/file\">ftpx</a></p>",
+            "<p><a href=\"/relative/path\">relx</a></p>",
+        ]
+        let expectedText = ["jsx", "ftpx", "relx"]
+        for (html, expected) in zip(cases, expectedText) {
+            let result = EpisodeSummary.attributedParagraphs(html)
+            let hasLink = result.contains { firstLinkRun(in: $0) != nil }
+            XCTAssertFalse(hasLink, "\(html) must not produce a tappable link")
+            XCTAssertEqual(
+                result.map(plainString).joined(), expected,
+                "anchor text must survive as plain text for \(html)"
+            )
+        }
+    }
+
+    // Acceptance criterion: named + numeric entities decode identically to plainText.
+    func testAttributedEntitiesDecodeIdenticallyToPlainText() {
+        let inputs = [
+            "<p>Tom &amp; Jerry</p>",
+            "<p>It&#8217;s a &#x201C;great&#x201D; show</p>",
+            "<p>&lt;tag&gt; &quot;quote&quot; spaces&nbsp;here</p>",
+        ]
+        for html in inputs {
+            let attributed = EpisodeSummary.attributedParagraphs(html).map(plainString)
+            let plain = EpisodeSummary.paragraphs(html)
+            XCTAssertEqual(attributed, plain, "entity mismatch for \(html)")
+        }
+    }
+
+    // Acceptance criterion: malformed HTML (unclosed tags) does not crash and
+    // yields non-empty text via the fallback.
+    func testAttributedMalformedHTMLDoesNotCrashAndKeepsText() throws {
+        let result = EpisodeSummary.attributedParagraphs(
+            "<p>Unclosed <strong>bold and <em>ital text</p>"
+        )
+        let para = try XCTUnwrap(result.first)
+        let visible = plainString(para)
+        XCTAssertFalse(visible.isEmpty)
+        XCTAssertTrue(visible.contains("bold"))
+        XCTAssertTrue(visible.contains("ital text"))
+    }
+
+    // Acceptance criterion: an <a> with no href yields no .link and renders plain.
+    func testAttributedAnchorWithNoHrefRendersPlain() throws {
+        let result = EpisodeSummary.attributedParagraphs("<p><a>bare anchor</a> follows</p>")
+        let para = try XCTUnwrap(result.first)
+        XCTAssertNil(firstLinkRun(in: para))
+        XCTAssertEqual(plainString(para), "bare anchor follows")
+    }
+
+    // Acceptance criterion: nil/empty input returns an empty array.
+    func testAttributedNilAndEmptyReturnEmptyArray() {
+        XCTAssertTrue(EpisodeSummary.attributedParagraphs(nil).isEmpty)
+        XCTAssertTrue(EpisodeSummary.attributedParagraphs("").isEmpty)
+    }
 }
