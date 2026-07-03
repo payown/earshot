@@ -122,6 +122,12 @@ struct SettingsScreen: View {
             }
 
             Section("General") {
+                NavigationLink {
+                    AppearanceSettingsView()
+                } label: {
+                    Label("Appearance", systemImage: "paintpalette")
+                }
+                .accessibilityHint("Theme, accent color, and layout density")
                 Picker("Launch screen", selection: $settings.launchScreen) {
                     ForEach(LaunchScreen.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }

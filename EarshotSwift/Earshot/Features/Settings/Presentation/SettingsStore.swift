@@ -23,6 +23,11 @@ final class SettingsStore {
     var librarySortOrder: LibrarySortOrder = SettingsDefault.librarySortOrder { didSet { persist { $0.setLibrarySortOrder(librarySortOrder) } } }
     var groupQueueEpisodes: Bool = SettingsDefault.groupQueueEpisodes { didSet { persist { $0.setBool(groupQueueEpisodes, for: SettingsKey.groupQueueEpisodes) } } }
 
+    // Appearance (#461)
+    var themeOverride: ThemeOverride = SettingsDefault.themeOverride { didSet { persist { $0.setThemeOverride(themeOverride) } } }
+    var accentColor: AccentChoice = SettingsDefault.accentColor { didSet { persist { $0.setAccentChoice(accentColor) } } }
+    var layoutDensity: LayoutDensity = SettingsDefault.layoutDensity { didSet { persist { $0.setLayoutDensity(layoutDensity) } } }
+
     // Inbox
     var inboxOptInOnly: Bool = SettingsDefault.inboxOptInOnly { didSet { persist { $0.setBool(inboxOptInOnly, for: SettingsKey.inboxOptInOnly) } } }
     /// Number of most-recent episodes seeded into the inbox when a new podcast is
@@ -44,7 +49,11 @@ final class SettingsStore {
     var directTouchEnabled: Bool = SettingsDefault.directTouchEnabled { didSet { persist { $0.setBool(directTouchEnabled, for: SettingsKey.directTouchEnabled) } } }
 
     @ObservationIgnored private var store: AppSettingsStore?
-    @ObservationIgnored private var loaded = false
+    /// Whether ``configure(context:)`` has loaded persisted values. Readable so
+    /// RootView can serve the persisted appearance synchronously on the first
+    /// launch frames (no default-theme flash) until the load lands (#461,
+    /// mirrors the #492 launch-tab pattern).
+    @ObservationIgnored private(set) var loaded = false
 
     func configure(context: ModelContext) {
         let store = AppSettingsStore(context: context)
@@ -60,6 +69,9 @@ final class SettingsStore {
         launchScreen = store.launchScreen()
         librarySortOrder = store.librarySortOrder()
         groupQueueEpisodes = store.bool(SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes)
+        themeOverride = store.themeOverride()
+        accentColor = store.accentChoice()
+        layoutDensity = store.layoutDensity()
         inboxOptInOnly = store.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
         inboxDefaultCount = store.inboxDefaultCount()
         wifiOnlyDownloads = store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads)
