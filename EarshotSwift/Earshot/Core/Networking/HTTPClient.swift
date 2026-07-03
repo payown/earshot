@@ -56,6 +56,11 @@ struct HTTPClient {
 
     /// Fetches raw data for a URL, retrying transient failures with backoff.
     func data(from url: URL) async throws -> Data {
+        // Upgrade http→https for these non-media fetches (feed XML, ID3 tag
+        // reads, etc.). Under the media-only ATS policy (ADR 001, #387) a plain
+        // http URLSession request is blocked; hosts that also serve HTTPS keep
+        // working after the upgrade.
+        let url = SecureURL.upgradedForNonMedia(url)
         var attempt = 0
         while true {
             attempt += 1

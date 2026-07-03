@@ -80,6 +80,10 @@ final class ArtworkCache: Sendable {
     /// fetched (then cached) otherwise. Returns `nil` on any failure rather than
     /// throwing — artwork is decorative, so callers fall back to a placeholder.
     func data(for url: URL) async -> Data? {
+        // Artwork is a non-media URLSession fetch, so upgrade http→https under the
+        // media-only ATS policy (#387). HTTP-only hosts simply fall back to the
+        // placeholder (this method returns nil on failure).
+        let url = SecureURL.upgradedForNonMedia(url)
         let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad)
 
         // Fast path: a stored response (memory or disk) avoids the network and,

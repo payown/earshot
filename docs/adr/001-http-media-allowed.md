@@ -29,3 +29,23 @@ This exception applies **only to media content** (audio and video streams). It d
 3. The benefit (accessibility for a community we exist to serve) outweighs the theoretical risk.
 
 **Future consideration:** Opportunistically prefer HTTPS stream URLs when a feed provides both. Surface a non-blocking indicator in the UI for HTTP-only feeds so technically aware users can make an informed choice. Revisit this ADR if a significant portion of the target feed catalogue moves to HTTPS.
+
+## Implementation (SwiftUI rebuild, #387)
+
+Implemented on the SwiftUI app 2026-07-02:
+
+- `Earshot/App/Info.plist` now sets `NSAllowsArbitraryLoadsForMedia = true` and
+  no longer sets the blanket `NSAllowsArbitraryLoads`. Plain HTTP is therefore
+  permitted only for audio/video loaded through AVFoundation (the AVPlayer
+  streaming path).
+- Auditing the code showed the original consequence analysis was incomplete:
+  feed XML, artwork, episode downloads, and ID3 tag reads all go through
+  `URLSession`, not AVFoundation, so a media-only policy would block those for a
+  plain-HTTP host. To keep HTTPS-capable hosts working, those non-media fetches
+  are upgraded `http`→`https` via `Core/Networking/SecureURL.swift`
+  (`HTTPClient`, `ArtworkCache`, `DownloadManager`). The AVPlayer stream URL is
+  deliberately **not** upgraded, so audio from an HTTP-only host still streams
+  under the media exemption.
+- Net effect: an HTTP-only host loses artwork/refresh/download (its data was
+  never protected anyway) but its audio still plays; every host that also serves
+  HTTPS is now fully protected.
