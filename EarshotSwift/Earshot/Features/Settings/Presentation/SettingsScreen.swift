@@ -132,6 +132,7 @@ struct SettingsScreen: View {
                     ForEach(LaunchScreen.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }
                 Toggle("Group queue by podcast", isOn: $settings.groupQueueEpisodes)
+                Toggle("Show season and episode numbers", isOn: $settings.showEpisodeNumbers)
                 NavigationLink("Quick Actions") { QuickActionsSettingsView() }
             }
 

@@ -22,6 +22,7 @@ final class SettingsStore {
     var launchScreen: LaunchScreen = SettingsDefault.launchScreen { didSet { persist { $0.setLaunchScreen(launchScreen) } } }
     var librarySortOrder: LibrarySortOrder = SettingsDefault.librarySortOrder { didSet { persist { $0.setLibrarySortOrder(librarySortOrder) } } }
     var groupQueueEpisodes: Bool = SettingsDefault.groupQueueEpisodes { didSet { persist { $0.setBool(groupQueueEpisodes, for: SettingsKey.groupQueueEpisodes) } } }
+    var showEpisodeNumbers: Bool = SettingsDefault.showEpisodeNumbers { didSet { persist { $0.setBool(showEpisodeNumbers, for: SettingsKey.showEpisodeNumbers) } } }
 
     // Appearance (#461)
     var themeOverride: ThemeOverride = SettingsDefault.themeOverride { didSet { persist { $0.setThemeOverride(themeOverride) } } }
@@ -69,6 +70,7 @@ final class SettingsStore {
         launchScreen = store.launchScreen()
         librarySortOrder = store.librarySortOrder()
         groupQueueEpisodes = store.bool(SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes)
+        showEpisodeNumbers = store.bool(SettingsKey.showEpisodeNumbers, default: SettingsDefault.showEpisodeNumbers)
         themeOverride = store.themeOverride()
         accentColor = store.accentChoice()
         layoutDensity = store.layoutDensity()

@@ -68,4 +68,66 @@ final class EpisodeRowLabelTests: XCTestCase {
         )
         XCTAssertEqual(label, "The Big Rewrite, NosillaCast")
     }
+
+    // MARK: Season / episode numbering (#452)
+
+    func testNumberBadgeBothNumbers() {
+        XCTAssertEqual(EpisodeRowLabel.numberBadge(season: 2, episode: 14), "S2 · E14")
+    }
+
+    func testNumberBadgeEpisodeOnly() {
+        XCTAssertEqual(EpisodeRowLabel.numberBadge(season: nil, episode: 14), "E14")
+    }
+
+    func testNumberBadgeSeasonOnly() {
+        XCTAssertEqual(EpisodeRowLabel.numberBadge(season: 3, episode: nil), "S3")
+    }
+
+    func testNumberBadgeNeitherIsNil() {
+        XCTAssertNil(EpisodeRowLabel.numberBadge(season: nil, episode: nil))
+    }
+
+    func testNumberBadgeNonPositiveTreatedAsAbsent() {
+        // A feed's 0/negative placeholder must not render as "S0"/"E0".
+        XCTAssertNil(EpisodeRowLabel.numberBadge(season: 0, episode: 0))
+        XCTAssertEqual(EpisodeRowLabel.numberBadge(season: 0, episode: 5), "E5")
+    }
+
+    func testSpokenNumberBothNumbers() {
+        XCTAssertEqual(EpisodeRowLabel.spokenNumber(season: 2, episode: 14), "Season 2, Episode 14")
+    }
+
+    func testSpokenNumberEpisodeOnly() {
+        XCTAssertEqual(EpisodeRowLabel.spokenNumber(season: nil, episode: 14), "Episode 14")
+    }
+
+    func testSpokenNumberNeitherIsNil() {
+        XCTAssertNil(EpisodeRowLabel.spokenNumber(season: nil, episode: nil))
+    }
+
+    func testLabelIncludesSpokenNumberingAfterPodcast() {
+        let label = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            seasonNumber: 2,
+            episodeNumber: 14,
+            isPlayed: true,
+            pubDate: date
+        )
+        XCTAssertEqual(label, "The Big Rewrite, NosillaCast, Season 2, Episode 14, Played, \(dateText!)")
+    }
+
+    func testLabelWithoutNumbersUnchanged() {
+        // Defaulted nil season/episode must leave the existing label composition
+        // byte-for-byte identical (no regression for feeds without numbering).
+        let label = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            seasonNumber: nil,
+            episodeNumber: nil,
+            isPlayed: false,
+            pubDate: date
+        )
+        XCTAssertEqual(label, "The Big Rewrite, NosillaCast, \(dateText!)")
+    }
 }

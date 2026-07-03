@@ -6,6 +6,11 @@ import SwiftUI
 /// rotor) in the user's order. Reordering in Settings changes this live — no
 /// relaunch, because the rotor order is just the order we hand SwiftUI here.
 struct EpisodeRow: View {
+    // Requires SettingsStore in the environment (injected at the app root in
+    // EarshotApp). All current call sites render under that root; any future
+    // #Preview or detached host must supply `.environment(SettingsStore())` or
+    // this row traps at runtime (#452 gate note).
+    @Environment(SettingsStore.self) private var settings
     let episode: Episode
     let actions: [EpisodeActionItem]
     /// Whether the row names its podcast, visually and in the VoiceOver label.
@@ -43,6 +48,19 @@ struct EpisodeRow: View {
                         .multilineTextAlignment(.leading)
                 }
                 HStack(spacing: 8) {
+                    // Season/episode badge ("S2 · E14"), when the user has opted in
+                    // (off by default, #452) and the feed provides numbers. The row
+                    // is one accessibility element with an explicit label below, so
+                    // this visible Text is not spoken separately — the spoken form is
+                    // folded into `accessibilityLabel`.
+                    if settings.showEpisodeNumbers,
+                       let numberBadge = EpisodeRowLabel.numberBadge(
+                           season: episode.seasonNumber, episode: episode.episodeNumber
+                       ) {
+                        Text(numberBadge)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if episode.isPlayed {
                         Label("Played", systemImage: "checkmark.circle.fill")
                             .labelStyle(.titleAndIcon)
@@ -99,6 +117,10 @@ struct EpisodeRow: View {
         EpisodeRowLabel.label(
             episodeTitle: episode.title,
             podcastName: includesPodcastName ? episode.podcast?.title : nil,
+            // Numbering is spoken only when the user has opted in (#452); pass nil
+            // when off so `label` omits it entirely.
+            seasonNumber: settings.showEpisodeNumbers ? episode.seasonNumber : nil,
+            episodeNumber: settings.showEpisodeNumbers ? episode.episodeNumber : nil,
             isPlayed: episode.isPlayed,
             pubDate: episode.pubDate
         )

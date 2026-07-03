@@ -31,6 +31,7 @@ enum SettingsKey {
     static let inboxOptInOnly = "inbox_opt_in_only"
     static let wifiOnlyDownloads = "wifi_only_downloads"
     static let groupQueueEpisodes = "group_queue_episodes"
+    static let showEpisodeNumbers = "show_episode_numbers"
     // Auto-advance boundary gates (#446). Both default true (existing behavior).
     // continueAfterEpisode off → stop at every episode boundary.
     // continueAfterGroupEnds off → stop when the next queue item is a different
@@ -121,6 +122,9 @@ enum SettingsDefault {
     static let chapterNavButtonsVisible = true
     static let inboxOptInOnly = false
     static let groupQueueEpisodes = false
+    /// Season/episode numbering in rows is OFF by default: most feeds don't set
+    /// these, and users who don't care shouldn't have it read out (#452).
+    static let showEpisodeNumbers = false
     // Auto-advance defaults true: preserves today's unconditional auto-advance
     // until the user opts to stop at a boundary (#446).
     static let continueAfterEpisode = true
