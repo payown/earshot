@@ -8,6 +8,12 @@ import SwiftUI
 struct EpisodeRow: View {
     let episode: Episode
     let actions: [EpisodeActionItem]
+    /// Whether the row names its podcast, visually and in the VoiceOver label.
+    /// True in mixed-show lists (Inbox, Downloads) where the user can't otherwise
+    /// tell which show an episode belongs to (#535); false (default) in
+    /// single-show lists (a podcast's episode list, the search preview) where
+    /// repeating the show on every row is noise.
+    var includesPodcastName = false
 
     var body: some View {
         let primary = actions.first
@@ -26,6 +32,16 @@ struct EpisodeRow: View {
                 Text(episode.title)
                     .font(.body)
                     .multilineTextAlignment(.leading)
+                // Podcast name in mixed-show lists, matching the Queue row's
+                // caption treatment (#535). The explicit accessibilityLabel below
+                // already carries it for VoiceOver.
+                if includesPodcastName, let podcast = episode.podcast?.title,
+                   !podcast.isEmpty {
+                    Text(podcast)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
                 HStack(spacing: 8) {
                     if episode.isPlayed {
                         Label("Played", systemImage: "checkmark.circle.fill")
@@ -80,12 +96,12 @@ struct EpisodeRow: View {
     }
 
     private var accessibilityLabel: String {
-        var parts = [episode.title]
-        if episode.isPlayed { parts.append("Played") }
-        if let date = episode.pubDate {
-            parts.append(date.formatted(date: .abbreviated, time: .omitted))
-        }
-        return parts.joined(separator: ", ")
+        EpisodeRowLabel.label(
+            episodeTitle: episode.title,
+            podcastName: includesPodcastName ? episode.podcast?.title : nil,
+            isPlayed: episode.isPlayed,
+            pubDate: episode.pubDate
+        )
     }
 
     /// The row's VoiceOver value: spoken time-left/length (#493) then a brief
