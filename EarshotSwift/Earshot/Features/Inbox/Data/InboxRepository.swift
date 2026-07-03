@@ -69,6 +69,17 @@ final class InboxRepository {
         save()
     }
 
+    /// Marks `episode` played and dismisses it from the inbox durably (#546).
+    /// Backs the inbox "Mark as played" swipe: setting `.played` alone already
+    /// drops it from the membership filter, but also setting `inboxDismissed`
+    /// makes the removal sticky, so later marking it unplayed can't resurface a
+    /// finished episode. Idempotent.
+    func markPlayed(_ episode: Episode) {
+        episode.isPlayed = true
+        episode.inboxDismissed = true
+        save()
+    }
+
     // MARK: Internals
 
     private func applyForPodcast(_ podcast: Podcast, now: Date) {

@@ -77,6 +77,121 @@ final class DownloadsInboxLogicTests: XCTestCase {
         XCTAssertEqual(InboxLogic.inboxTitleAccessibilityLabel(count: 0), "Inbox")
     }
 
+    // MARK: InboxLogic — played-state dismissal (#546)
+
+    func testMarkingPlayedDismissesFromInbox() {
+        XCTAssertTrue(InboxLogic.inboxDismissedAfterPlayedChange(nowPlayed: true, wasDismissed: false))
+    }
+
+    func testMarkingPlayedStaysDismissed() {
+        XCTAssertTrue(InboxLogic.inboxDismissedAfterPlayedChange(nowPlayed: true, wasDismissed: true))
+    }
+
+    func testMarkingUnplayedDoesNotResurfaceDismissed() {
+        // Sticky: a previously-triaged (dismissed) episode marked unplayed must
+        // not jump back into the inbox.
+        XCTAssertTrue(InboxLogic.inboxDismissedAfterPlayedChange(nowPlayed: false, wasDismissed: true))
+    }
+
+    func testMarkingUnplayedLeavesUndismissedAlone() {
+        XCTAssertFalse(InboxLogic.inboxDismissedAfterPlayedChange(nowPlayed: false, wasDismissed: false))
+    }
+
+    // MARK: InboxRepository.markPlayed — end-to-end (#546)
+
+    @MainActor
+    func testMarkPlayedRemovesEpisodeFromInboxAndKeepsItOut() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/feed.xml", title: "Show")
+        ctx.insert(podcast)
+        let ep = Episode(guid: "e1", title: "Ep 1", audioURL: "https://x/e1.mp3")
+        ep.podcast = podcast
+        ctx.insert(ep)
+        try ctx.save()
+
+        let repo = InboxRepository(context: ctx)
+        XCTAssertEqual(repo.inboxEpisodes().map(\.guid), ["e1"], "seeded episode should start in the inbox")
+
+        repo.markPlayed(ep)
+        XCTAssertTrue(ep.isPlayed)
+        XCTAssertTrue(ep.inboxDismissed)
+        XCTAssertTrue(repo.inboxEpisodes().isEmpty, "marking played should clear it from the inbox")
+
+        // Marking unplayed again must not resurface it (#546: sticky dismissal).
+        ep.isPlayed = false
+        try ctx.save()
+        XCTAssertTrue(ep.inboxDismissed)
+        XCTAssertTrue(repo.inboxEpisodes().isEmpty, "an un-played episode must not jump back into the inbox")
+    }
+
+    // MARK: EpisodeActionsBuilder — Mark-played Quick Action, both directions (#546)
+
+    @MainActor
+    func testMarkPlayedQuickActionDismissesFromInboxThenStaysStickyWhenToggledUnplayed() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/feed.xml", title: "Show")
+        ctx.insert(podcast)
+        let ep = Episode(guid: "e1", title: "Ep 1", audioURL: "https://x/e1.mp3")
+        ep.podcast = podcast
+        ctx.insert(ep)
+        try ctx.save()
+
+        let inbox = InboxRepository(context: ctx)
+        XCTAssertEqual(inbox.inboxEpisodes().map(\.guid), ["e1"], "seeded episode should start in the inbox")
+
+        // Build the Quick Action while unplayed and run it. The played direction
+        // must mark played AND dismiss from the inbox durably.
+        let playedItems = buildEpisodeActions(
+            episode: ep, order: [.markPlayed], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}
+        )
+        XCTAssertEqual(playedItems.map(\.label), ["Mark as played"])
+        playedItems.first?.run()
+        XCTAssertTrue(ep.isPlayed)
+        XCTAssertTrue(ep.inboxDismissed)
+        XCTAssertTrue(inbox.inboxEpisodes().isEmpty, "mark-played Quick Action should clear it from the inbox")
+
+        // Rebuild (label is state-derived) and run the unplayed direction. It
+        // must un-play the episode but leave the dismissal sticky (#546), so a
+        // triaged episode never jumps back into the inbox.
+        let unplayedItems = buildEpisodeActions(
+            episode: ep, order: [.markPlayed], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}
+        )
+        XCTAssertEqual(unplayedItems.map(\.label), ["Mark as unplayed"])
+        unplayedItems.first?.run()
+        XCTAssertFalse(ep.isPlayed)
+        XCTAssertTrue(ep.inboxDismissed, "marking unplayed must not clear a prior dismissal")
+        XCTAssertTrue(inbox.inboxEpisodes().isEmpty, "an un-played episode must not jump back into the inbox")
+    }
+
+    // MARK: QueueRepository.markPlayedAndRemove — completion dismisses inbox (#546)
+
+    @MainActor
+    func testQueueMarkPlayedAndRemoveDismissesEpisodeFromInbox() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/feed.xml", title: "Show")
+        ctx.insert(podcast)
+        let ep = Episode(guid: "e1", title: "Ep 1", audioURL: "https://x/e1.mp3")
+        ep.podcast = podcast
+        ctx.insert(ep)
+        try ctx.save()
+
+        // Queue the episode, then complete it. markPlayedAndRemove only acts on
+        // a queued episode (it removes the queue item), so it must be enqueued
+        // first to exercise the completion path.
+        let queue = QueueRepository(context: ctx)
+        queue.add(ep)
+        queue.markPlayedAndRemove(ep)
+
+        let inbox = InboxRepository(context: ctx)
+        XCTAssertTrue(ep.isPlayed)
+        XCTAssertTrue(ep.inboxDismissed, "completion path must set inboxDismissed")
+        XCTAssertTrue(inbox.inboxEpisodes().isEmpty, "a completed episode must leave the inbox")
+    }
+
     // MARK: ExpirationLogic
 
     func testQueueItemExpiresOlderThanAgeLimit() {
