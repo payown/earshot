@@ -32,11 +32,32 @@ while [[ $# -gt 0 ]]; do
     --notes|-n) NOTES="$2"; shift 2 ;;
     --public)   GROUP="Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
     --both)     GROUP="Internal Testing Group,Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
+    --resume)   RESUME=true; shift ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
 
+# ── Resume mode ───────────────────────────────────────────────────────────────
+# --resume skips checks, bump, xcodegen, and archive, and goes straight to
+# export + upload using the archive already at $ARCHIVE_PATH. Use it when a
+# prior run archived successfully but died during export or upload, so a
+# retry doesn't bump the build number a second time.
+RESUME="${RESUME:-false}"
+if [[ "$RESUME" == true ]]; then
+  [ -d "$ARCHIVE_PATH" ] || { echo "❌ --resume: no archive at $ARCHIVE_PATH"; exit 1; }
+  NEXT_BUILD=$(grep 'CURRENT_PROJECT_VERSION' "$PROJECT_YML" \
+    | head -1 | sed 's/.*CURRENT_PROJECT_VERSION: "//' | tr -d '"')
+  ARCHIVE_BUILD=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" \
+    "$ARCHIVE_PATH/Info.plist" 2>/dev/null || echo "unknown")
+  if [[ "$ARCHIVE_BUILD" != "$NEXT_BUILD" ]]; then
+    echo "❌ --resume: archive is build $ARCHIVE_BUILD but project.yml says $NEXT_BUILD."
+    exit 1
+  fi
+  echo "▶ Resuming export + upload for build $NEXT_BUILD"
+fi
+
 # ── Safety checks ─────────────────────────────────────────────────────────────
+if [[ "$RESUME" != true ]]; then
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 if [[ "$BRANCH" != "swift" ]]; then
@@ -95,6 +116,9 @@ xcodebuild archive \
 # Gate on the real artifact, not grep's exit code: under `set -o pipefail` a
 # grep with no match returns non-zero and would abort an otherwise-good build.
 [ -d "$ARCHIVE_PATH" ] || { echo "❌ Archive failed (no .xcarchive produced)"; exit 1; }
+
+fi  # end of non-resume (checks + bump + xcodegen + archive)
+rm -rf "$EXPORT_PATH"
 
 # ── Export IPA ────────────────────────────────────────────────────────────────
 echo "▶ Exporting IPA..."
