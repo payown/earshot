@@ -16,18 +16,10 @@ enum EpisodeSummary {
             with: "",
             options: .regularExpression
         )
-        var decoded = stripped
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-        // Decode the general numeric character references feeds use for curly
-        // quotes, apostrophes, em dashes, etc. — decimal (&#8217;) and hex
-        // (&#x2019; / &#X2019;). Named entities are handled above; this catches
-        // everything the common named set misses.
-        decoded = Self.decodingNumericEntities(in: decoded)
+        // Decode the named entities feeds commonly emit plus the general numeric
+        // character references (curly quotes, em dashes, etc.). Shared with the
+        // inline attributed builder so both paths decode identically.
+        let decoded = Self.decodingEntities(in: stripped)
         // Collapse the whitespace runs that tag removal leaves behind so the
         // spoken summary doesn't carry awkward gaps.
         let collapsed = decoded.replacingOccurrences(
@@ -54,22 +46,206 @@ enum EpisodeSummary {
     /// element, so VoiceOver navigates the notes paragraph by paragraph instead of
     /// speaking the whole description at once.
     static func paragraphs(_ html: String?) -> [String] {
-        guard let html, !html.isEmpty else { return [] }
-        // Turn block-level closers/breaks into newlines so paragraph structure
-        // survives the tag strip. Case-insensitive; tolerates `<br>`, `<br/>`,
-        // `<br />`. Inline tags (e.g. <a>, <strong>) are left for plainText to strip.
+        guard let chunks = blockChunks(html) else { return [] }
+        // Run each chunk through the shared strip (tags + entities + intra-line
+        // whitespace collapse) and drop anything that reduces to empty.
+        return chunks
+            .map { plainText($0) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// The attributed sibling of ``paragraphs(_:)`` (#565). Splits the description
+    /// on the *exact same* block boundaries as ``paragraphs(_:)`` — via the shared
+    /// ``blockChunks(_:)`` — and drops chunks by the *exact same* rule
+    /// (``plainText(_:)`` reduces to empty), so the returned array has an identical
+    /// count and ordering to `paragraphs(_:)`. This is what preserves the #547
+    /// per-paragraph VoiceOver navigation: one element in, one `Text` out.
+    ///
+    /// Each surviving chunk is parsed for the inline HTML subset feeds actually
+    /// use — `<a href>` (as a tappable `.link`), `<strong>`/`<b>` (bold) and
+    /// `<em>`/`<i>` (italic) — with named and numeric entities decoded the same
+    /// way ``plainText(_:)`` decodes them. Any other inline tag is stripped while
+    /// its text is kept, matching `plainText`'s resilience. Only `http`, `https`,
+    /// and `mailto` links are kept tappable; `javascript:`, unknown schemes, and
+    /// relative URLs (which we have no reliable base to resolve) render as plain
+    /// text with no target. If a chunk fails to parse or yields no visible text,
+    /// it falls back to `AttributedString(plainText(chunk))` so text is never lost.
+    ///
+    /// Pure, SwiftData-free, side-effect-free, synchronous. Returns an empty array
+    /// for nil/empty input (callers supply their own placeholder copy).
+    static func attributedParagraphs(_ html: String?) -> [AttributedString] {
+        guard let chunks = blockChunks(html) else { return [] }
+        var result: [AttributedString] = []
+        for chunk in chunks {
+            // Identical drop rule to paragraphs(_:) keeps boundaries in lockstep.
+            let plain = plainText(chunk)
+            guard !plain.isEmpty else { continue }
+
+            let attributed = attributedInline(from: chunk) ?? AttributedString(plain)
+            // Defense in depth: if the inline parse produced no visible text but
+            // the plain strip did, prefer the plain text so nothing is dropped.
+            if attributed.characters.isEmpty {
+                result.append(AttributedString(plain))
+            } else {
+                result.append(attributed)
+            }
+        }
+        return result
+    }
+
+    /// Turns block-level closers/breaks into newlines and splits on them so
+    /// paragraph structure survives the tag strip, returning the raw (still
+    /// HTML-bearing) chunks. Case-insensitive; tolerates `<br>`, `<br/>`,
+    /// `<br />`. Inline tags (e.g. `<a>`, `<strong>`) are left in each chunk for
+    /// the caller to strip or parse. Returns `nil` for nil/empty input so callers
+    /// can short-circuit to their empty result. Shared by ``paragraphs(_:)`` and
+    /// ``attributedParagraphs(_:)`` so both split on exactly the same boundaries.
+    private static func blockChunks(_ html: String?) -> [String]? {
+        guard let html, !html.isEmpty else { return nil }
         let withBreaks = html.replacingOccurrences(
             of: "(?i)</p>|<br\\s*/?>|</div>|</li>|</h[1-6]>|</tr>",
             with: "\n",
             options: .regularExpression
         )
-        // Split on the inserted (and any original) newlines, run each chunk through
-        // the shared strip (tags + entities + intra-line whitespace collapse), and
-        // drop anything that reduces to empty.
-        return withBreaks
-            .components(separatedBy: "\n")
-            .map { plainText($0) }
-            .filter { !$0.isEmpty }
+        return withBreaks.components(separatedBy: "\n")
+    }
+
+    /// Named + numeric HTML entity decoding, factored out of ``plainText(_:)`` so
+    /// the inline attributed builder decodes byte-for-byte identically (the named
+    /// pass runs first, then the numeric pass — order matters for inputs like
+    /// `&amp;lt;`). Decimal (`&#8217;`) and hex (`&#x2019;`) references are handled
+    /// by ``decodingNumericEntities(in:)``.
+    private static func decodingEntities(in text: String) -> String {
+        let named = text
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+        return decodingNumericEntities(in: named)
+    }
+
+    /// The schemes we keep tappable. Anything else (including `javascript:` and
+    /// scheme-less relative URLs) is rendered as plain, non-tappable text.
+    private static let allowedLinkSchemes: Set<String> = ["http", "https", "mailto"]
+
+    /// Parses the inline HTML subset of a single paragraph chunk into an
+    /// `AttributedString`, applying bold/italic presentation intent and `.link`
+    /// runs. Returns `nil` on a parser setup failure so the caller can fall back
+    /// to plain text. Kept synchronous and pure — notes are small.
+    private static func attributedInline(from chunk: String) -> AttributedString? {
+        guard let tagRegex = try? NSRegularExpression(pattern: "<[^>]+>") else { return nil }
+
+        var result = AttributedString()
+        // Start `true` so any leading whitespace is trimmed, matching plainText's
+        // trim + `\s+`→" " collapse without a second pass over attributed runs.
+        var lastWasSpace = true
+        var boldDepth = 0
+        var italicDepth = 0
+        var linkURL: URL?
+
+        func currentAttributes() -> AttributeContainer {
+            var container = AttributeContainer()
+            var intent: InlinePresentationIntent = []
+            if boldDepth > 0 { intent.insert(.stronglyEmphasized) }
+            if italicDepth > 0 { intent.insert(.emphasized) }
+            if !intent.isEmpty { container.inlinePresentationIntent = intent }
+            if let linkURL { container.link = linkURL }
+            return container
+        }
+
+        func appendText(_ raw: String) {
+            let decoded = decodingEntities(in: raw)
+            var out = ""
+            for character in decoded {
+                if character.isWhitespace {
+                    if lastWasSpace { continue }
+                    out.append(" ")
+                    lastWasSpace = true
+                } else {
+                    out.append(character)
+                    lastWasSpace = false
+                }
+            }
+            guard !out.isEmpty else { return }
+            var piece = AttributedString(out)
+            piece.mergeAttributes(currentAttributes())
+            result.append(piece)
+        }
+
+        func applyTag(_ tag: String) {
+            var body = tag
+            body.removeFirst()                               // drop leading '<'
+            if body.hasSuffix(">") { body.removeLast() }     // drop trailing '>'
+            body = body.trimmingCharacters(in: .whitespaces)
+            let isClosing = body.hasPrefix("/")
+            if isClosing { body.removeFirst() }
+            let name = body.prefix { $0.isLetter || $0.isNumber }.lowercased()
+            switch name {
+            case "strong", "b":
+                boldDepth = max(0, boldDepth + (isClosing ? -1 : 1))
+            case "em", "i":
+                italicDepth = max(0, italicDepth + (isClosing ? -1 : 1))
+            case "a":
+                linkURL = isClosing ? nil : safeHref(in: tag)
+            default:
+                break                                        // strip, keep text
+            }
+        }
+
+        let ns = chunk as NSString
+        let fullRange = NSRange(location: 0, length: ns.length)
+        var cursor = 0
+        for match in tagRegex.matches(in: chunk, range: fullRange) {
+            let range = match.range
+            if range.location > cursor {
+                appendText(ns.substring(with: NSRange(location: cursor, length: range.location - cursor)))
+            }
+            applyTag(ns.substring(with: range))
+            cursor = range.location + range.length
+        }
+        if cursor < ns.length {
+            appendText(ns.substring(from: cursor))
+        }
+
+        // Trim the single trailing space the collapse may have left.
+        while let last = result.characters.last, last.isWhitespace {
+            let end = result.endIndex
+            result.removeSubrange(result.index(beforeCharacter: end)..<end)
+        }
+        return result
+    }
+
+    /// Extracts and validates the `href` of an `<a>` tag. Returns a `URL` only for
+    /// the allowed schemes (`http`/`https`/`mailto`); returns `nil` for
+    /// `javascript:`, unknown schemes, and scheme-less relative URLs (we have no
+    /// reliable base to resolve those against), so the anchor text renders plain.
+    private static func safeHref(in tag: String) -> URL? {
+        let pattern = "(?i)href\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s>]+))"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = tag as NSString
+        guard let match = regex.firstMatch(in: tag, range: NSRange(location: 0, length: ns.length)) else {
+            return nil
+        }
+        // Groups 2/3/4 are the double-quoted, single-quoted, and unquoted values.
+        var value = ""
+        for group in [2, 3, 4] {
+            let groupRange = match.range(at: group)
+            if groupRange.location != NSNotFound {
+                value = ns.substring(with: groupRange)
+                break
+            }
+        }
+        // hrefs entity-encode query separators (e.g. `&amp;`), so decode first.
+        let raw = decodingEntities(in: value).trimmingCharacters(in: .whitespaces)
+        guard !raw.isEmpty,
+              let url = URL(string: raw),
+              let scheme = url.scheme?.lowercased(),
+              allowedLinkSchemes.contains(scheme) else {
+            return nil
+        }
+        return url
     }
 
     /// Replaces decimal (`&#NNN;`) and hexadecimal (`&#xHHH;` / `&#XHHH;`)
