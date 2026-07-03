@@ -71,6 +71,34 @@ final class FolderRepositoryTests: XCTestCase {
         XCTAssertEqual(repo.folders().map(\.name), ["C", "A", "B"])
     }
 
+    /// The folder-row rotor actions (#539) perform `folders.move(fromOffsets:toOffset:)`
+    /// with the offsets from `QuickActionMoveLogic`, then persist via
+    /// `reorderFolders`. This verifies that pairing lands the moved folder at each
+    /// target's `resultingIndex`, so the rotor's Move to top/up/down/to bottom end
+    /// up where their "position N of M" announcement claims — exactly what the
+    /// FoldersScreen buttons do.
+    func testRotorMoveOffsetsLandFolderAtResultingIndex() {
+        let names = ["A", "B", "C", "D"]
+        for indexToMove in names.indices {
+            for target in QuickActionMoveLogic.targets(index: indexToMove, count: names.count) {
+                let ctx = TestStore.freshContext()
+                let repo = FolderRepository(context: ctx)
+                _ = names.map { repo.createFolder(name: $0) }
+                var ordered = repo.folders()
+                XCTAssertEqual(ordered.map(\.name), names, "Starts in canonical order")
+
+                ordered.move(fromOffsets: IndexSet(integer: indexToMove), toOffset: target.destinationOffset)
+                repo.reorderFolders(ordered)
+
+                let result = repo.folders().map(\.name)
+                XCTAssertEqual(
+                    result[target.resultingIndex], names[indexToMove],
+                    "\(target.label) from index \(indexToMove) should land at \(target.resultingIndex); got \(result)"
+                )
+            }
+        }
+    }
+
     // MARK: Membership
 
     func testAddIsIdempotentAndOrdered() {
