@@ -43,6 +43,17 @@ struct EpisodeRow: View {
                         .multilineTextAlignment(.leading)
                 }
                 HStack(spacing: 8) {
+                    // Season/episode badge ("S2 · E14"), when the feed provides
+                    // numbers. The row is one accessibility element with an explicit
+                    // label below, so this visible Text is not spoken separately —
+                    // the spoken form is folded into `accessibilityLabel` (#452).
+                    if let numberBadge = EpisodeRowLabel.numberBadge(
+                        season: episode.seasonNumber, episode: episode.episodeNumber
+                    ) {
+                        Text(numberBadge)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if episode.isPlayed {
                         Label("Played", systemImage: "checkmark.circle.fill")
                             .labelStyle(.titleAndIcon)
@@ -99,6 +110,8 @@ struct EpisodeRow: View {
         EpisodeRowLabel.label(
             episodeTitle: episode.title,
             podcastName: includesPodcastName ? episode.podcast?.title : nil,
+            seasonNumber: episode.seasonNumber,
+            episodeNumber: episode.episodeNumber,
             isPlayed: episode.isPlayed,
             pubDate: episode.pubDate
         )
