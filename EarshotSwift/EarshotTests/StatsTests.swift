@@ -146,6 +146,68 @@ final class StatsTests: XCTestCase {
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<ListeningSession>()).count, 0)
     }
 
+    // MARK: removeSessions(for:) — dangling-session cleanup on unsubscribe (#377)
+
+    /// The new primitive deletes exactly the target podcast's sessions and returns
+    /// the count removed; another podcast's sessions are left intact.
+    func testRemoveSessionsForPodcastDeletesOnlyThatPodcastsAndReturnsCount() throws {
+        let ctx = TestStore.freshContext()
+        let doomed = makePodcast(ctx, "Doomed")
+        let keeper = makePodcast(ctx, "Keeper")
+        makeSession(ctx, podcast: doomed, seconds: 60, date: now)
+        makeSession(ctx, podcast: doomed, seconds: 30, date: now)
+        makeSession(ctx, podcast: keeper, seconds: 90, date: now)
+        try ctx.save()
+
+        let removed = StatsRepository(context: ctx).removeSessions(for: doomed)
+
+        XCTAssertEqual(removed, 2, "Both of the doomed podcast's sessions are removed")
+        let remaining = try ctx.fetch(FetchDescriptor<ListeningSession>())
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining.first?.podcast?.title, "Keeper")
+    }
+
+    /// A podcast with no listening sessions is a clean no-op: nothing is deleted,
+    /// the return count is zero, and no unrelated rows are touched (exercises the
+    /// `guard !toDelete.isEmpty` early return).
+    func testRemoveSessionsForPodcastWithNoSessionsIsNoOpReturningZero() throws {
+        let ctx = TestStore.freshContext()
+        let empty = makePodcast(ctx, "Empty")
+        let other = makePodcast(ctx, "Other")
+        makeSession(ctx, podcast: other, seconds: 60, date: now)
+        try ctx.save()
+
+        let removed = StatsRepository(context: ctx).removeSessions(for: empty)
+
+        XCTAssertEqual(removed, 0, "No sessions reference this podcast, so nothing is removed")
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<ListeningSession>()).count, 1, "Unrelated session untouched")
+    }
+
+    /// Regression guard: removing one podcast's sessions must not perturb a
+    /// surviving podcast's aggregated stats — totals, time-saved, per-podcast
+    /// breakdown, and episode counts all match what they were before the cleanup.
+    func testSurvivingPodcastStatsUnaffectedAfterRemovingAnothers() throws {
+        let ctx = TestStore.freshContext()
+        let doomed = makePodcast(ctx, "Doomed")
+        let keeper = makePodcast(ctx, "Keeper")
+        makeSession(ctx, podcast: doomed, seconds: 60, speed: 2.0, date: now)
+        makeSession(ctx, podcast: keeper, seconds: 120, speed: 1.5, date: now)
+        makeSession(ctx, podcast: keeper, seconds: 60, speed: 1.0, date: now)
+        try ctx.save()
+
+        StatsRepository(context: ctx).removeSessions(for: doomed)
+
+        let stats = StatsRepository(context: ctx).stats(for: .allTime, now: now)
+        XCTAssertEqual(stats.totalSeconds, 180, "Only the keeper's 120 + 60 remain")
+        XCTAssertEqual(stats.timeSavedSeconds, 40, "120@1.5x saves 40; the doomed 60@2x is gone")
+        XCTAssertEqual(stats.perPodcast.map(\.podcastTitle), ["Keeper"], "Doomed no longer appears")
+        XCTAssertEqual(stats.perPodcast.first?.episodeCount, 2)
+        XCTAssertFalse(
+            stats.perPodcast.contains { $0.podcastTitle == "Unknown Podcast" },
+            "No dangling session survives to show as Unknown Podcast"
+        )
+    }
+
     func testCSVExportHasHeaderAndRows() {
         let ctx = TestStore.freshContext()
         let a = makePodcast(ctx, "Alpha, Inc")
