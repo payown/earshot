@@ -47,15 +47,29 @@ struct HTTPClient {
 
     /// Fetches raw data for an `http`/`https` URL string.
     func data(from urlString: String) async throws -> Data {
-        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed), url.scheme?.hasPrefix("http") == true else {
-            throw HTTPError.badURL
-        }
-        return try await data(from: url)
+        try await dataWithResponse(from: urlString).data
     }
 
     /// Fetches raw data for a URL, retrying transient failures with backoff.
     func data(from url: URL) async throws -> Data {
+        try await fetchWithResponse(from: url).data
+    }
+
+    /// Like ``data(from:)-(String)`` but also surfaces the `HTTPURLResponse` so
+    /// callers can inspect headers (e.g. `Content-Type`) that the data-only
+    /// path discards. Used by ``TranscriptService`` to detect the transcript
+    /// format from the response MIME type when the URL extension is ambiguous.
+    func dataWithResponse(from urlString: String) async throws -> (data: Data, response: HTTPURLResponse?) {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), url.scheme?.hasPrefix("http") == true else {
+            throw HTTPError.badURL
+        }
+        return try await fetchWithResponse(from: url)
+    }
+
+    /// The shared retry loop: performs the request, retrying transient failures
+    /// with backoff, and returns the body alongside the `HTTPURLResponse`.
+    private func fetchWithResponse(from url: URL) async throws -> (data: Data, response: HTTPURLResponse?) {
         // Upgrade http→https for these non-media fetches (feed XML, ID3 tag
         // reads, etc.). Under the media-only ATS policy (ADR 001, #387) a plain
         // http URLSession request is blocked; hosts that also serve HTTPS keep
@@ -86,14 +100,16 @@ struct HTTPClient {
 
     /// A single network attempt: performs the request and throws either an
     /// ``HTTPError/server(status:)`` for a non-2xx response or the raw
-    /// transport error (so the caller can classify it for retry).
-    private func performFetch(from url: URL) async throws -> Data {
+    /// transport error (so the caller can classify it for retry). Returns the
+    /// body and the `HTTPURLResponse` (nil for non-HTTP responses) on success.
+    private func performFetch(from url: URL) async throws -> (data: Data, response: HTTPURLResponse?) {
         let (data, response) = try await session.data(from: url)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+        let http = response as? HTTPURLResponse
+        if let http, !(200...299).contains(http.statusCode) {
             AppLog.networking.error("HTTP \(http.statusCode, privacy: .public) for \(url.absoluteString, privacy: .public)")
             throw HTTPError.server(status: http.statusCode)
         }
-        return data
+        return (data, http)
     }
 
     /// Maps a fetch failure to the user-facing ``HTTPError``, preserving the

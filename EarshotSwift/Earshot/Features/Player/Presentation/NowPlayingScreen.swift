@@ -18,6 +18,9 @@ struct NowPlayingScreen: View {
 
     @State private var showingControls = false
     @State private var showingNotes = false
+    // The transcript reader sheet (#451), shown only when the current episode's
+    // feed advertised a transcript URL.
+    @State private var showingTranscript = false
     @State private var showingSpeedPicker = false
     @State private var showingBookmarks = false
     // The full chapter list (#509), opened by activating the current-chapter
@@ -62,6 +65,10 @@ struct NowPlayingScreen: View {
                     if hasShowNotes {
                         showNotesButton
                     }
+
+                    if hasTranscript {
+                        transcriptButton
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, Spacing.lg)
@@ -98,6 +105,9 @@ struct NowPlayingScreen: View {
                 if let episode = player.nowPlayingEpisode {
                     ShowNotesView(episode: episode)
                 }
+            }
+            .sheet(isPresented: $showingTranscript) {
+                TranscriptView(transcriptURL: player.nowPlayingEpisode?.transcriptURL)
             }
             .sheet(item: $exportURL) { file in
                 ShareSheet(items: [file.url])
@@ -568,6 +578,34 @@ struct NowPlayingScreen: View {
         .accessibilityHint("Opens the episode show notes")
     }
 
+    // MARK: Transcript (#451)
+
+    /// Opens the transcript reader. Mirrors the Show notes row exactly (same
+    /// layout, chevron, and 44pt-plus row height) so the two entry points read as a
+    /// pair. Shown only when the current episode advertised a transcript URL, so it
+    /// never offers a dead action.
+    private var transcriptButton: some View {
+        Button {
+            showingTranscript = true
+        } label: {
+            HStack {
+                Text("Transcript")
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            // Guarantee a 44pt-plus tap target at default Dynamic Type; the
+            // vertical padding alone leaves the row short of the minimum.
+            .frame(minHeight: Spacing.minTouchTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, Spacing.sm)
+        .accessibilityHint("Opens the episode transcript")
+    }
+
     // MARK: Episode actions menu (#371)
 
     /// The toolbar overflow menu surfacing the three episode actions as a visible
@@ -657,6 +695,12 @@ struct NowPlayingScreen: View {
 
     private var hasShowNotes: Bool {
         !(player.nowPlayingEpisode?.episodeDescription?.isEmpty ?? true)
+    }
+
+    /// Whether the current episode advertised a transcript URL. Gates the transcript
+    /// entry point so it only appears when there's something to load (#451).
+    private var hasTranscript: Bool {
+        !(player.nowPlayingEpisode?.transcriptURL?.isEmpty ?? true)
     }
 
     /// Pluralizes a seconds count so VoiceOver never reads "1 seconds".
