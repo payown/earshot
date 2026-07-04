@@ -8,6 +8,7 @@ struct EpisodeListView: View {
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
+    @Environment(SettingsStore.self) private var settings
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
@@ -19,10 +20,11 @@ struct EpisodeListView: View {
     /// under the `podcast_filter_<feedURL>` AppSetting key (#489).
     @State private var filter: EpisodeListFilter = SettingsDefault.episodeListFilter
 
-    /// All episodes, newest-first. The filter is applied on top of this so the
-    /// existing sort order is preserved.
+    /// All episodes in the user's chosen order (global ``EpisodeSortOrder``,
+    /// default ``EpisodeSortOrder/latestFirst`` which preserves the pre-existing
+    /// newest-first order). The filter is applied on top of this (#459).
     private var sortedEpisodes: [Episode] {
-        podcast.episodes.sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+        settings.episodeSortOrder.sorted(podcast.episodes)
     }
 
     /// The visible set: the active filter applied to the sorted episodes.
@@ -41,6 +43,20 @@ struct EpisodeListView: View {
                 let store = AppSettingsStore(context: context)
                 store.setEpisodeListFilter(newValue, forFeedURL: podcast.feedURL)
                 Announcer.announce(newValue.announcement(count: newValue.apply(to: sortedEpisodes).count))
+            }
+        )
+    }
+
+    /// Persists and announces only on a genuine user change. The global sort is
+    /// loaded by ``SettingsStore/configure(context:)`` (not by this view), so the
+    /// binding fires only on a real pick and never speaks on load.
+    private var sortSelection: Binding<EpisodeSortOrder> {
+        Binding(
+            get: { settings.episodeSortOrder },
+            set: { newValue in
+                guard newValue != settings.episodeSortOrder else { return }
+                settings.episodeSortOrder = newValue
+                Announcer.announce(newValue.announcement)
             }
         )
     }
@@ -112,6 +128,20 @@ struct EpisodeListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await refresh() }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Sort episodes", selection: sortSelection) {
+                        ForEach(EpisodeSortOrder.allCases) { order in
+                            Text(order.title).tag(order)
+                        }
+                    }
+                } label: {
+                    Label("Sort episodes", systemImage: "arrow.up.arrow.down")
+                }
+                // Speak the active order on the menu button itself so VoiceOver
+                // users know the current sort without opening the menu.
+                .accessibilityValue(settings.episodeSortOrder.title)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingPodcastSettings = true

@@ -342,6 +342,27 @@ The SwiftUI side is built and waiting.
 
 ## UI Decisions
 
+- **Episode-list sort control is a pure enum (#459), episode lists only.** A
+  single `EpisodeSortOrder` (Alphabetical / Latest first / Latest last, in
+  `Features/Subscriptions/Domain/`) with `sorted(_ episodes:)` orders a podcast's
+  episode list. Alphabetical reuses `LibrarySort.titlesInOrder` (article-aware);
+  the date cases sort by `Episode.pubDate`, undated items always last, ties →
+  alphabetical for stable VoiceOver focus. **Persistence is GLOBAL** (a
+  `SettingsStore.episodeSortOrder` prop + `episode_sort_order` key, default
+  `latestFirst`), mirroring `librarySortOrder`, chosen over per-podcast because a
+  sort preference is a reading habit not a per-show attribute; the #489
+  per-podcast *filter* is unaffected and still coexists. **Default `latestFirst`
+  preserves the old hardcoded `pubDate` desc.** The control is a toolbar
+  `Menu`+`Picker` (identical idiom to the Library sort), labeled "Sort episodes",
+  `.accessibilityValue(currentSort.title)` on the button so VoiceOver speaks the
+  active order without opening the menu; the binding guards `newValue != current`
+  before announcing, and the stored value loads via `SettingsStore.configure`
+  (not the view) so opening a screen never speaks a sort announcement.
+  **Folder-contents sort was deliberately deferred** (not shipped in #459):
+  applying a sort there collides with the existing folder-contents drag-reorder
+  (the same manual-order-vs-sort conflict as #458). Left for Michael's decision
+  rather than silently removing the reorder; `FolderDetailScreen` is unchanged.
+
 - **Chapter list is ONE shared component, ONE VoiceOver stop per row (#509).**
   `ChapterListView` is a standalone modal sheet reached from BOTH the Now Playing
   current-chapter line (the #508 seam, now a button) and the controls sheet's
