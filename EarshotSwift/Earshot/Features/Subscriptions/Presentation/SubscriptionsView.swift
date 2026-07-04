@@ -160,11 +160,9 @@ struct SubscriptionsView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(rowLabel(for: podcast))
-        .accessibilityActions {
-            ForEach(rotorActions(for: podcast)) { action in
-                Button(action.label) { action.run() }
-            }
-        }
+        // Rotor order goes through the shared helper, which compensates for the
+        // OS emitting `.accessibilityActions` children in reverse (#572).
+        .quickActionsRotor(rotorActions(for: podcast))
     }
 
     /// The podcast Quick Actions for the row's VoiceOver rotor, in the user's

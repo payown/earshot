@@ -111,11 +111,10 @@ struct EpisodeRow: View {
         // VoiceOver speak a stray pause (dead air), so we omit it in that case.
         .accessibilityValueIfPresent(accessibilityValue)
         .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
-        .accessibilityActions {
-            ForEach(actions) { action in
-                Button(action.label) { action.run() }
-            }
-        }
+        // Rotor order goes through the shared helper, which compensates for the
+        // OS emitting `.accessibilityActions` children in reverse (#572). The
+        // default double-tap and hint above keep the UN-reversed `actions.first`.
+        .quickActionsRotor(actions)
     }
 
     private var accessibilityLabel: String {

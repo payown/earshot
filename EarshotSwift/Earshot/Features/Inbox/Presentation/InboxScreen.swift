@@ -25,11 +25,18 @@ struct InboxScreen: View {
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var confirmingClear = false
-    // The podcast a pending "Unfollow this podcast" swipe targets. Non-nil drives
-    // the destructive confirmation dialog (#500). Mirrors the Library unfollow
-    // flow (`SubscriptionsView.pendingUnsubscribe`) so the UX is identical.
+    // The podcast a pending "Unfollow this podcast" targets — reached from the
+    // trailing swipe (sighted, #500) or the row's `.unfollow` Quick Action in the
+    // VoiceOver rotor (#572). Non-nil drives the destructive confirmation dialog.
+    // Mirrors the Library unfollow flow (`SubscriptionsView.pendingUnsubscribe`)
+    // so the UX is identical.
     @State private var pendingUnfollow: Podcast?
     @AccessibilityFocusState private var focusEmpty: Bool
+    // Tracked by SwiftUI, so toggling VoiceOver while the Inbox is on screen
+    // re-renders the rows and attaches/removes the swipe actions immediately —
+    // no relaunch. (Reading UIAccessibility.isVoiceOverRunning in body would
+    // not invalidate.) Mirrors the Queue's SightedRowActions gate.
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
     var body: some View {
         // Compute the inbox once per body so the list, empty-state check, title,
@@ -47,66 +54,60 @@ struct InboxScreen: View {
                 .accessibilityFocused($focusEmpty)
             } else {
                 List {
+                    // The rotor is owned EXCLUSIVELY by the row's configurable
+                    // episode Quick Actions ("Mark as played" via `.markPlayed`,
+                    // "Unfollow this podcast" via `.unfollow`, #572). Both swipes
+                    // below are sighted-only affordances, attached only when
+                    // VoiceOver is off: on device, iOS mirrors swipe actions into
+                    // the rotor even through `.accessibilityHidden(true)` — the
+                    // hidden-swipe suppression this file used to rely on for
+                    // mark-played did NOT survive contact with iOS (a duplicate
+                    // "Mark as played" stop, #572), and the unfollow swipe's
+                    // mirror was made redundant by the `.unfollow` Quick Action.
+                    // Toggling VoiceOver mid-session updates `voiceOverEnabled`
+                    // and re-renders these rows — no relaunch needed.
                     ForEach(inbox) { episode in
-                        EpisodeRow(episode: episode, actions: actions(for: episode), includesPodcastName: true)
-                            // Visible affordance for sighted users to clear a
-                            // finished episode out of the inbox (#546): a leading
-                            // swipe marks it played and dismisses it. Testers had
-                            // no visible way to do this — the mark-played Quick
-                            // Action only surfaced in the VoiceOver rotor / default
-                            // tap. Leading edge + a constructive green tint keeps it
-                            // distinct from the trailing destructive unfollow swipe;
-                            // a full swipe completes it since the action is safe and
-                            // reversible (the episode stays in the podcast). SwiftUI
-                            // also mirrors this swipe into the VoiceOver Actions
-                            // rotor, so it reaches VoiceOver users too. The Label
-                            // gives it an icon + text (never color alone).
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                Button {
-                                    markPlayed(episode)
-                                } label: {
-                                    Label("Mark as played", systemImage: "checkmark.circle")
-                                }
-                                .tint(.green)
-                                // The row already exposes "Mark as played" in the
-                                // VoiceOver Actions rotor via the `.markPlayed`
-                                // episode Quick Action (always present — Quick
-                                // Actions are reorder-only, never removable, so
-                                // `resolve()` always includes it). SwiftUI mirrors
-                                // this swipe button into the SAME rotor, which would
-                                // give VoiceOver users a duplicate "Mark as played"
-                                // stop. This swipe is purely the visible affordance
-                                // sighted users lacked (#546), so hide it from
-                                // VoiceOver and let the single Quick Action own the
-                                // rotor — mirroring the Downloads "Restore" pattern
-                                // (visible button + `.accessibilityHidden(true)`,
-                                // action lives in the rotor).
-                                .accessibilityHidden(true)
-                            }
-                            // Unfollow the whole show straight from one of its
-                            // inbox episodes (#500). A trailing swipe is the
-                            // visible affordance sighted users expect; SwiftUI
-                            // also surfaces a swipe action to the VoiceOver
-                            // Actions rotor automatically, so the SAME single
-                            // control reaches VoiceOver users (Robin) in the same
-                            // rotor as the row's episode Quick Actions — without
-                            // adding a duplicate rotor entry that a second,
-                            // explicit `.accessibilityActions` source would. It
-                            // does not touch the row's existing episode actions,
-                            // so their order can't regress. `allowsFullSwipe` is
-                            // off so an over-swipe can't fast-path a podcast-level
-                            // delete; every path lands on the confirmation below.
-                            // The Label gives the destructive action an icon +
-                            // text (never color alone).
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                if let podcast = episode.podcast {
-                                    Button(role: .destructive) {
-                                        pendingUnfollow = podcast
+                        let row = EpisodeRow(episode: episode, actions: actions(for: episode), includesPodcastName: true)
+                        if voiceOverEnabled {
+                            row
+                        } else {
+                            row
+                                // Visible affordance for sighted users to clear a
+                                // finished episode out of the inbox (#546): a
+                                // leading swipe marks it played and dismisses it.
+                                // Leading edge + a constructive green tint keeps it
+                                // distinct from the trailing destructive unfollow
+                                // swipe; a full swipe completes it since the action
+                                // is safe and reversible (the episode stays in the
+                                // podcast). The Label gives it an icon + text
+                                // (never color alone).
+                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                    Button {
+                                        markPlayed(episode)
                                     } label: {
-                                        Label("Unfollow this podcast", systemImage: "xmark.bin")
+                                        Label("Mark as played", systemImage: "checkmark.circle")
+                                    }
+                                    .tint(.green)
+                                }
+                                // Unfollow the whole show straight from one of its
+                                // inbox episodes (#500), for sighted users;
+                                // VoiceOver users reach the same flow through the
+                                // `.unfollow` Quick Action in the rotor (#572).
+                                // `allowsFullSwipe` is off so an over-swipe can't
+                                // fast-path a podcast-level delete; every path
+                                // lands on the confirmation below. The Label gives
+                                // the destructive action an icon + text (never
+                                // color alone).
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    if let podcast = episode.podcast {
+                                        Button(role: .destructive) {
+                                            pendingUnfollow = podcast
+                                        } label: {
+                                            Label("Unfollow this podcast", systemImage: "xmark.bin")
+                                        }
                                     }
                                 }
-                            }
+                        }
                     }
                 }
             }
@@ -239,7 +240,11 @@ struct InboxScreen: View {
             context: context,
             onShowNotes: { showNotesEpisode = episode },
             onShare: { sharingEpisode = episode },
-            onBookmarks: { bookmarksEpisode = episode }
+            onBookmarks: { bookmarksEpisode = episode },
+            // Rotor "Unfollow this podcast" (#572): opens the SAME destructive
+            // confirmation the trailing swipe uses — activation never unfollows
+            // directly.
+            onUnfollow: { pendingUnfollow = episode.podcast }
         )
     }
 

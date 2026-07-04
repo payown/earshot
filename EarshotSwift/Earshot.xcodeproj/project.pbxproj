@@ -20,6 +20,7 @@
 		08CE6FDC6BF27D427FFBFBC1 /* SleepTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297BEC6C00A3076AF4CC7259 /* SleepTimer.swift */; };
 		0A8A235C5A3F36EA1884989D /* StallRecoveryLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7B3441D6FAADB5EF76D830C /* StallRecoveryLogic.swift */; };
 		0AC159C874E82D55B53CE092 /* DataImportViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 216733399E0EACFEECDB9FBA /* DataImportViewModelTests.swift */; };
+		0BB4A4FC921661297F645A0C /* QuickActionsRotor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6853F0BDF24EE6ED3311E2B7 /* QuickActionsRotor.swift */; };
 		0C34726CCF898D3B224D7296 /* ShowNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C2A7F38E26A61D91D5846A4 /* ShowNotesView.swift */; };
 		0EA843CE44BDF92F60286C83 /* QuickActionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */; };
 		0EF6284395E00C7CCA166C44 /* FeedRefreshPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23C18264777CD2FA64FC2A58 /* FeedRefreshPolicyTests.swift */; };
@@ -261,6 +262,7 @@
 		EE9986D2EC3F6DE5E32BDBE8 /* ModelContainerFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36E58C1C8D0069EACC139345 /* ModelContainerFactory.swift */; };
 		EF4531D32B453FFD8667C030 /* QueueLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71BD562BB534B0133D9733ED /* QueueLogic.swift */; };
 		F0CF93FBA3262643F8E54460 /* ModelGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935DE9BF07F90D248001ADE9 /* ModelGraphTests.swift */; };
+		F13611B3E04BBD655E4887D6 /* QuickActionsRotorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F402886F5BBB7E16BCE8E077 /* QuickActionsRotorTests.swift */; };
 		F1B461F346E5F616B6040FAF /* ExpirationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BCA26B22E21066A09DA54E7 /* ExpirationService.swift */; };
 		F2ECA4001F4F916A5DB6FA46 /* ChapterNavLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BE39373E98A58E407434D3F /* ChapterNavLogicTests.swift */; };
 		F54B64171A689EB7079ECAD5 /* OPMLFileImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4DB54C0B93DED983D53DD4B /* OPMLFileImporterTests.swift */; };
@@ -398,6 +400,7 @@
 		65E3C3EA1C30C4564C25EC3A /* DownloadSessionDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadSessionDelegate.swift; sourceTree = "<group>"; };
 		674A52C5A01DB62EB0279424 /* SendFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendFeedbackView.swift; sourceTree = "<group>"; };
 		682B36BB7BE40E963A213FAF /* OPMLImportProgressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMLImportProgressTests.swift; sourceTree = "<group>"; };
+		6853F0BDF24EE6ED3311E2B7 /* QuickActionsRotor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsRotor.swift; sourceTree = "<group>"; };
 		68C1822B403C990C9F0C4303 /* TranscriptFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFormatTests.swift; sourceTree = "<group>"; };
 		69299B483CD421B7655974FC /* ArtworkCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkCache.swift; sourceTree = "<group>"; };
 		6957506EF32CD52A4F68D4E4 /* AppearanceSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsTests.swift; sourceTree = "<group>"; };
@@ -542,6 +545,7 @@
 		F0E82F35CB949845DE1189C9 /* ModelEnums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelEnums.swift; sourceTree = "<group>"; };
 		F2139AAC938323A76B008595 /* NotificationPermissionTrigger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPermissionTrigger.swift; sourceTree = "<group>"; };
 		F29EFE156F619DD326A85C61 /* FlutterMigrationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterMigrationServiceTests.swift; sourceTree = "<group>"; };
+		F402886F5BBB7E16BCE8E077 /* QuickActionsRotorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsRotorTests.swift; sourceTree = "<group>"; };
 		F4EB4F7F597FCC1DD27CEEE4 /* FolderRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRepository.swift; sourceTree = "<group>"; };
 		F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsSettingsView.swift; sourceTree = "<group>"; };
 		F59E6B431FF3AB66D1412802 /* EpisodeExportLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeExportLogic.swift; sourceTree = "<group>"; };
@@ -799,6 +803,7 @@
 				4250FA40569C87B3F4F943A8 /* QuickActionBuildersTests.swift */,
 				32C854CBB6345415DEF95114 /* QuickActionMoveLogicTests.swift */,
 				9DC944C7D4C1D3D3D7C4E1A9 /* QuickActionRepositoryTests.swift */,
+				F402886F5BBB7E16BCE8E077 /* QuickActionsRotorTests.swift */,
 				46500BE41B67940E468A98FA /* RetryPolicyTests.swift */,
 				50E92710292D1147A3786684 /* RootTabLaunchTests.swift */,
 				59BE4582317C4948ECEF3288 /* RSSParserTests.swift */,
@@ -1366,6 +1371,7 @@
 				200AF8715178EB80E8153925 /* DownloadStateBadge.swift */,
 				D047C968CE1D5423AA6844E6 /* MailComposeView.swift */,
 				7EDFB91871F32318649D4749 /* OptionStepLogic.swift */,
+				6853F0BDF24EE6ED3311E2B7 /* QuickActionsRotor.swift */,
 				E43D20EBF7730F2069525A18 /* RoutePickerView.swift */,
 				7436039DC8D115F1F457E3C3 /* ShareSheet.swift */,
 				8B3BE83021D9D2D3FBC6E08B /* TabBarBadgeApplier.swift */,
@@ -1622,6 +1628,7 @@
 				A4B28DBC8BAF35773BD2AA29 /* QuickActionMoveLogic.swift in Sources */,
 				C290A8B98AF505B8C16FB539 /* QuickActionRepository.swift in Sources */,
 				DAE5B17F783B9608A4E356A3 /* QuickActionStore.swift in Sources */,
+				0BB4A4FC921661297F645A0C /* QuickActionsRotor.swift in Sources */,
 				0EA843CE44BDF92F60286C83 /* QuickActionsSettingsView.swift in Sources */,
 				13797CCEF4754E2CB175CA74 /* RSSParser.swift in Sources */,
 				500EB520CE09383649EA453D /* RecentlyExpired.swift in Sources */,
@@ -1734,6 +1741,7 @@
 				C8CF2F0E0FDDC190BC14C478 /* QuickActionBuildersTests.swift in Sources */,
 				844DA1379F4D40F7E1996B5A /* QuickActionMoveLogicTests.swift in Sources */,
 				388BE077DBF1E14B55493529 /* QuickActionRepositoryTests.swift in Sources */,
+				F13611B3E04BBD655E4887D6 /* QuickActionsRotorTests.swift in Sources */,
 				78792212EF7E1CCAE13117F8 /* RSSParserTests.swift in Sources */,
 				ED3EB7E296F674C8C0B0720D /* RetryPolicyTests.swift in Sources */,
 				EBE39E32A533DAD0229FC3B0 /* RootTabLaunchTests.swift in Sources */,

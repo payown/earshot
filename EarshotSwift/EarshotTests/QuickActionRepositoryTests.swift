@@ -22,11 +22,50 @@ final class QuickActionRepositoryTests: XCTestCase {
 
     func testEpisodeOrderRoundTrips() {
         let ctx = TestStore.freshContext()
+        // A pre-#572 saved order: all 8 actions that existed before `.unfollow`.
         let custom: [EpisodeAction] = [.share, .openShowNotes, .viewBookmarks, .markPlayed, .download, .addToQueueTop, .addToQueueBottom, .playNow]
         QuickActionRepository(context: ctx).setEpisodeOrder(custom)
 
-        // A fresh repository over the same store reads the persisted order.
-        XCTAssertEqual(QuickActionRepository(context: ctx).episodeOrder(), custom)
+        // A fresh repository over the same store reads the persisted order back
+        // exactly, and appends the newer `.unfollow` LAST — the no-migration
+        // guarantee for existing users' saved 8-action orders (#572).
+        let resolved = QuickActionRepository(context: ctx).episodeOrder()
+        XCTAssertEqual(Array(resolved.prefix(custom.count)), custom, "stored actions come back in saved order")
+        XCTAssertEqual(resolved.last, .unfollow, "actions added after the save are appended last")
+        XCTAssertEqual(resolved.count, EpisodeAction.allCases.count, "every action is present exactly once")
+    }
+
+    // MARK: #572 — `.unfollow` joins the episode set with no migration
+
+    func testFreshInstallEpisodeOrderEndsWithUnfollow() {
+        // Acceptance criterion: #572 — unfollow defaults last (destructive
+        // actions never default early), with nothing stored.
+        let repo = QuickActionRepository(context: TestStore.freshContext())
+        let order = repo.episodeOrder()
+        XCTAssertEqual(order, defaultEpisodeActions)
+        XCTAssertEqual(order.last, .unfollow)
+    }
+
+    func testEpisodeOrderRoundTripsAfterUserMovesUnfollow() {
+        // Acceptance criterion: #572 — once the user reorders `.unfollow`
+        // themselves, that position persists; resolve() must not force it last.
+        let ctx = TestStore.freshContext()
+        let moved: [EpisodeAction] = [.unfollow, .share, .openShowNotes, .viewBookmarks, .markPlayed, .download, .addToQueueTop, .addToQueueBottom, .playNow]
+        QuickActionRepository(context: ctx).setEpisodeOrder(moved)
+
+        XCTAssertEqual(QuickActionRepository(context: ctx).episodeOrder(), moved)
+    }
+
+    func testPartialStoredOrderResolvesWithUnfollowAppended() {
+        // Acceptance criterion: #572 — a partial pre-unfollow save still
+        // resolves to the full set with `.unfollow` among the appended tail.
+        let ctx = TestStore.freshContext()
+        QuickActionRepository(context: ctx).setEpisodeOrder([.share, .playNow])
+
+        let order = QuickActionRepository(context: ctx).episodeOrder()
+        XCTAssertEqual(Array(order.prefix(2)), [.share, .playNow])
+        XCTAssertTrue(order.contains(.unfollow))
+        XCTAssertEqual(order.count, EpisodeAction.allCases.count)
     }
 
     func testSetReplacesRatherThanAppends() {

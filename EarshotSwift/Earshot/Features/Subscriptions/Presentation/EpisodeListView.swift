@@ -9,11 +9,17 @@ struct EpisodeListView: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.dismiss) private var dismiss
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var showingPodcastSettings = false
+    // The pending "Unfollow this podcast" rotor Quick Action (#572). This is a
+    // single-show screen, so unfollow always targets the shown `podcast`; it
+    // still confirms, and the screen pops after the delete since its podcast is
+    // gone. Wording matches InboxScreen / SubscriptionsView.
+    @State private var pendingUnfollow: Podcast?
 
     /// Played/unheard filter for this podcast's list. Loaded per podcast on
     /// appear (default ``EpisodeListFilter/unheard``) and persisted on change
@@ -110,7 +116,11 @@ struct EpisodeListView: View {
                                 context: context,
                                 onShowNotes: { showNotesEpisode = episode },
                                 onShare: { sharingEpisode = episode },
-                                onBookmarks: { bookmarksEpisode = episode }
+                                onBookmarks: { bookmarksEpisode = episode },
+                                // Rotor "Unfollow this podcast" (#572): opens the
+                                // destructive confirmation below — activation
+                                // never unfollows directly.
+                                onUnfollow: { pendingUnfollow = podcast }
                             )
                         )
                     }
@@ -160,6 +170,37 @@ struct EpisodeListView: View {
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
         }
+        // Podcast-level destructive confirmation for the row's "Unfollow this
+        // podcast" Quick Action (#572). Wording copied from InboxScreen so the
+        // flow reads identically everywhere it appears.
+        .confirmationDialog(
+            "Unfollow \(pendingUnfollow?.title ?? "this podcast")?",
+            isPresented: Binding(
+                get: { pendingUnfollow != nil },
+                set: { if !$0 { pendingUnfollow = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingUnfollow
+        ) { podcast in
+            Button("Unfollow", role: .destructive) { unfollow(podcast) }
+            Button("Cancel", role: .cancel) { pendingUnfollow = nil }
+        } message: { podcast in
+            Text("This removes \(podcast.title) and its episodes from your library. This can't be undone.")
+        }
+    }
+
+    /// Unfollows the shown podcast via the centralized repository path shared
+    /// with Library, search, and the inbox (#499/#500) — never an inline delete.
+    /// The repo logs failures and returns whether the delete saved, so we
+    /// announce and pop only on `true`; this screen's subject no longer exists,
+    /// so it dismisses back to the list it was pushed from.
+    private func unfollow(_ podcast: Podcast) {
+        let title = podcast.title
+        let removed = SubscriptionRepository(context: context).unsubscribe(podcast)
+        pendingUnfollow = nil
+        guard removed else { return }
+        Announcer.announce("Unfollowed \(title)")
+        dismiss()
     }
 
     /// Podcast-level "Play oldest first" binge entry point (#488). Seeds the

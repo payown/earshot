@@ -300,11 +300,10 @@ private struct QueueRow: View {
         .accessibilityValueIfPresent(accessibilityValue)
         .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
         .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
-        .accessibilityActions {
-            ForEach(actions) { action in
-                Button(action.label) { action.run() }
-            }
-        }
+        // Rotor order goes through the shared helper, which compensates for the
+        // OS emitting `.accessibilityActions` children in reverse (#572). The
+        // default double-tap and hint above keep the UN-reversed `actions.first`.
+        .quickActionsRotor(actions)
         .modifier(SightedRowActions(actions: actions))
     }
 

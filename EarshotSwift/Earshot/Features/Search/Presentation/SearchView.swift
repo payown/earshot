@@ -429,6 +429,10 @@ struct SearchView<HeaderContent: View>: View {
     }
 
     private func episodeActions(_ episode: Episode) -> [QuickActionItem] {
+        // Deliberately no `onUnfollow` (default nil), so the `.unfollow` Quick
+        // Action is omitted from search rows' rotors (#572). Unfollow from
+        // search already lives on the result row's Follow toggle (#499), and
+        // preview episodes are detached — zero store writes (#517).
         buildEpisodeActions(
             episode: episode, order: quickActions.episodeActions, player: player,
             downloads: downloads, context: context,
