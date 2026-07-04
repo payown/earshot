@@ -15,7 +15,8 @@ enum EpisodeRowLabel {
         seasonNumber: Int? = nil,
         episodeNumber: Int? = nil,
         isPlayed: Bool,
-        pubDate: Date?
+        pubDate: Date?,
+        downloadState: DownloadStatus? = nil
     ) -> String {
         var parts = [episodeTitle]
         if let podcastName, !podcastName.isEmpty {
@@ -30,7 +31,50 @@ enum EpisodeRowLabel {
         if let pubDate {
             parts.append(pubDate.formatted(date: .abbreviated, time: .omitted))
         }
+        // Downloaded / streaming state, last so the user always hears — before
+        // choosing Play — whether the audio is local or will stream (#513). Folded
+        // into this single comma-joined label so it's part of the one row element,
+        // never a separate VoiceOver stop. Omitted entirely when a caller passes
+        // nil (e.g. surfaces that don't carry the state).
+        if let downloadState {
+            parts.append(spokenDownloadState(downloadState))
+        }
         return parts.joined(separator: ", ")
+    }
+
+    /// Naturally spoken download/streaming state for VoiceOver (#513), folded into
+    /// the row label so it never adds a second stop. Three buckets:
+    /// - ``DownloadStatus/downloaded`` → `"Downloaded"`
+    /// - ``DownloadStatus/downloading``, ``DownloadStatus/pending`` → `"Downloading"`
+    /// - ``DownloadStatus/none``, ``DownloadStatus/failed`` → `"Streams when played"`
+    ///   (a failed download falls back to streaming, so it reads the same as an
+    ///   episode that was never downloaded).
+    static func spokenDownloadState(_ status: DownloadStatus) -> String {
+        switch status {
+        case .downloaded: return "Downloaded"
+        case .downloading, .pending: return "Downloading"
+        case .none, .failed: return "Streams when played"
+        }
+    }
+
+    /// Pure data for the compact visible download/streaming badge (#513): an SF
+    /// Symbol name plus a short label. Rendered as icon + text (never colour-only,
+    /// never icon-only) by ``DownloadStateBadge``; colour is layered on in the
+    /// view. Mirrors ``spokenDownloadState(_:)``'s three buckets.
+    struct DownloadBadge: Equatable {
+        let systemImage: String
+        let text: String
+    }
+
+    static func downloadBadge(_ status: DownloadStatus) -> DownloadBadge {
+        switch status {
+        case .downloaded:
+            return DownloadBadge(systemImage: "arrow.down.circle.fill", text: "Downloaded")
+        case .downloading, .pending:
+            return DownloadBadge(systemImage: "arrow.down.circle", text: "Downloading")
+        case .none, .failed:
+            return DownloadBadge(systemImage: "dot.radiowaves.up.forward", text: "Streaming")
+        }
     }
 
     /// Compact visible badge for a row, e.g. `"S2 · E14"`, `"E14"`, `"S2"`, or nil

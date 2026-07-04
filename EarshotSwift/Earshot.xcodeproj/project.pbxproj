@@ -175,6 +175,7 @@
 		AB89D4F368E38728AA8BE166 /* Announcer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9754C877DA03DC598F4567 /* Announcer.swift */; };
 		ACABC15BDF7B8C9532023B3C /* OPMLImportProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F23041C02EEE7AEC54DEC93 /* OPMLImportProgress.swift */; };
 		ADC44000EF93EA6B3448E8D0 /* FeedbackComposerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C88F8A12481CD8B9986F26 /* FeedbackComposerTests.swift */; };
+		AE2B47C61C095E5CCE625394 /* DownloadStateBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200AF8715178EB80E8153925 /* DownloadStateBadge.swift */; };
 		AE76F1D97425A86747DC9B1B /* QueueImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A953290B5AF0EF79CA218D /* QueueImporter.swift */; };
 		AF2A15536CD0217DE88D1CC2 /* DataImportViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DF46E9C212635AE9F19C511 /* DataImportViewModel.swift */; };
 		B02A3E45F1D53182B2A57ECA /* SettingsReset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B744CD0D217BC04C25FAB2B /* SettingsReset.swift */; };
@@ -295,6 +296,7 @@
 		1CC39C15B55034A61C9FB060 /* EarshotTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EarshotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1D66609E1693F8666E32AB85 /* ID3ChapterParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ID3ChapterParserTests.swift; sourceTree = "<group>"; };
 		1F55BF5AA01D0A88E6D4E0A8 /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
+		200AF8715178EB80E8153925 /* DownloadStateBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStateBadge.swift; sourceTree = "<group>"; };
 		20327D57A3E7C96599AB594B /* MigrationEpisodeMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationEpisodeMatcherTests.swift; sourceTree = "<group>"; };
 		21426D34A6272D33878D6A13 /* InboxExpirationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxExpirationServiceTests.swift; sourceTree = "<group>"; };
 		216733399E0EACFEECDB9FBA /* DataImportViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataImportViewModelTests.swift; sourceTree = "<group>"; };
@@ -1293,6 +1295,7 @@
 			isa = PBXGroup;
 			children = (
 				529CD873497726F485AA6B7B /* AdjustableOptionPicker.swift */,
+				200AF8715178EB80E8153925 /* DownloadStateBadge.swift */,
 				D047C968CE1D5423AA6844E6 /* MailComposeView.swift */,
 				7EDFB91871F32318649D4749 /* OptionStepLogic.swift */,
 				E43D20EBF7730F2069525A18 /* RoutePickerView.swift */,
@@ -1455,6 +1458,7 @@
 				8532449E849F6F3F61DAB744 /* DownloadPaths.swift in Sources */,
 				711B90B4EE66D44EDCF39709 /* DownloadReconciliation.swift in Sources */,
 				53CB76F3763F79E3304F5A55 /* DownloadSessionDelegate.swift in Sources */,
+				AE2B47C61C095E5CCE625394 /* DownloadStateBadge.swift in Sources */,
 				7FBDB46131548E8BECAE13ED /* DownloadsScreen.swift in Sources */,
 				8D9E9D1D6DFBA5A966686091 /* DownloadsSettingsView.swift in Sources */,
 				E1326BBBB921376DFEF73272 /* EarshotApp.swift in Sources */,

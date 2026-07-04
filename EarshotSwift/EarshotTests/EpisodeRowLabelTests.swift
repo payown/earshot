@@ -130,4 +130,91 @@ final class EpisodeRowLabelTests: XCTestCase {
         )
         XCTAssertEqual(label, "The Big Rewrite, NosillaCast, \(dateText!)")
     }
+
+    // MARK: Download / streaming state (#513)
+
+    func testSpokenDownloadStateDownloaded() {
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.downloaded), "Downloaded")
+    }
+
+    func testSpokenDownloadStateDownloadingAndPendingBothReadDownloading() {
+        // Both in-flight buckets read the same to VoiceOver.
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.downloading), "Downloading")
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.pending), "Downloading")
+    }
+
+    func testSpokenDownloadStateNoneAndFailedBothReadStreams() {
+        // A never-downloaded episode and a failed download both fall back to
+        // streaming, so they must read identically.
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.none), "Streams when played")
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.failed), "Streams when played")
+    }
+
+    func testLabelAppendsDownloadStateLast() {
+        // Download state is the final segment, after Played and the date.
+        let label = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            isPlayed: true,
+            pubDate: date,
+            downloadState: .downloaded
+        )
+        XCTAssertEqual(label, "The Big Rewrite, NosillaCast, Played, \(dateText!), Downloaded")
+    }
+
+    func testLabelWithNilDownloadStateIsByteIdenticalToPreChange() {
+        // Existing callers pass no downloadState (defaults to nil); the label must
+        // be byte-for-byte identical to the pre-#513 output.
+        let withDefault = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            isPlayed: true,
+            pubDate: date
+        )
+        let explicitNil = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            isPlayed: true,
+            pubDate: date,
+            downloadState: nil
+        )
+        XCTAssertEqual(withDefault, "The Big Rewrite, NosillaCast, Played, \(dateText!)")
+        XCTAssertEqual(explicitNil, withDefault)
+    }
+
+    func testLabelFullyPopulatedRowOrdersDownloadStateLast() {
+        // Title, podcast, S/E numbering, Played, date, then download state last.
+        let label = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            seasonNumber: 2,
+            episodeNumber: 14,
+            isPlayed: true,
+            pubDate: date,
+            downloadState: .downloaded
+        )
+        XCTAssertEqual(
+            label,
+            "The Big Rewrite, NosillaCast, Season 2, Episode 14, Played, \(dateText!), Downloaded"
+        )
+    }
+
+    func testDownloadBadgeDownloaded() {
+        XCTAssertEqual(
+            EpisodeRowLabel.downloadBadge(.downloaded),
+            EpisodeRowLabel.DownloadBadge(systemImage: "arrow.down.circle.fill", text: "Downloaded")
+        )
+    }
+
+    func testDownloadBadgeDownloadingAndPending() {
+        let expected = EpisodeRowLabel.DownloadBadge(systemImage: "arrow.down.circle", text: "Downloading")
+        XCTAssertEqual(EpisodeRowLabel.downloadBadge(.downloading), expected)
+        XCTAssertEqual(EpisodeRowLabel.downloadBadge(.pending), expected)
+    }
+
+    func testDownloadBadgeNoneAndFailedRenderStreaming() {
+        let expected = EpisodeRowLabel.DownloadBadge(systemImage: "dot.radiowaves.up.forward", text: "Streaming")
+        XCTAssertEqual(EpisodeRowLabel.downloadBadge(.none), expected)
+        XCTAssertEqual(EpisodeRowLabel.downloadBadge(.failed), expected)
+    }
 }

@@ -190,6 +190,11 @@ struct NowPlayingScreen: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
                 .accessibilityAddTraits(.isHeader)
+                // Fold the downloaded / streaming state into the title heading so
+                // VoiceOver announces "Title, Downloaded" on the one element the
+                // player lands on — no extra stop (#513). Falls back to the plain
+                // title when nothing is loaded.
+                .accessibilityLabel(titleAccessibilityLabel)
                 .accessibilityFocused($titleFocused)
             if let artist = player.currentArtist {
                 Text(artist)
@@ -198,8 +203,23 @@ struct NowPlayingScreen: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
             }
+            // Visible downloaded / streaming indicator for the current episode
+            // (#513), the same icon + text treatment the rows use. Hidden from
+            // VoiceOver inside the badge; the spoken state rides on the title above.
+            if let status = player.nowPlayingEpisode?.downloadStatus {
+                DownloadStateBadge(status: status)
+            }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// The title heading's spoken label: the episode title with the downloaded /
+    /// streaming state appended, so the player's landing element carries the same
+    /// state the rows do (#513). Plain title when nothing is loaded.
+    private var titleAccessibilityLabel: String {
+        let title = player.currentTitle ?? ""
+        guard let status = player.nowPlayingEpisode?.downloadStatus else { return title }
+        return "\(title), \(EpisodeRowLabel.spokenDownloadState(status))"
     }
 
     // MARK: Current chapter (#508, #509, #515)
