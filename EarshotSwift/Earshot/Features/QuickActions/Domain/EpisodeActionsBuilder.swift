@@ -18,6 +18,11 @@ typealias EpisodeActionItem = QuickActionItem
 /// Builds the runnable actions for `episode` in the user's configured `order`.
 /// The order is preserved exactly. Dynamic labels (Mark as played/unplayed) are
 /// resolved here from the episode's state.
+///
+/// `onUnfollow` is optional: surfaces that can't unfollow (the search preview's
+/// detached episodes — zero store writes, #517 contract) pass nil and the
+/// `.unfollow` action is simply omitted from their rotor. Surfaces that pass a
+/// runner must open a confirmation dialog, never unfollow directly.
 @MainActor
 func buildEpisodeActions(
     episode: Episode,
@@ -27,9 +32,10 @@ func buildEpisodeActions(
     context: ModelContext,
     onShowNotes: @escaping () -> Void,
     onShare: @escaping () -> Void,
-    onBookmarks: @escaping () -> Void
+    onBookmarks: @escaping () -> Void,
+    onUnfollow: (() -> Void)? = nil
 ) -> [QuickActionItem] {
-    order.map { action in
+    order.compactMap { action -> QuickActionItem? in
         switch action {
         case .playNow:
             return QuickActionItem(label: "Play now", isDestructive: false) {
@@ -87,6 +93,17 @@ func buildEpisodeActions(
         case .share:
             return QuickActionItem(label: "Share", isDestructive: false) {
                 onShare()
+            }
+        case .unfollow:
+            // Podcast-level unfollow from an episode row (#500/#572). Omitted
+            // (nil) when the surface can't unfollow or the episode has no
+            // podcast (a detached search-preview episode). The runner opens the
+            // caller's confirmation dialog; the actual delete goes through the
+            // one `SubscriptionRepository.unsubscribe` path (sessions/#377 +
+            // folders cleanup live there).
+            guard let onUnfollow, episode.podcast != nil else { return nil }
+            return QuickActionItem(label: "Unfollow this podcast", isDestructive: true) {
+                onUnfollow()
             }
         }
     }

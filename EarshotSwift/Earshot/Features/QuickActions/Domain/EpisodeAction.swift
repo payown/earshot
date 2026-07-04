@@ -15,6 +15,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
     case viewBookmarks
     case openShowNotes
     case share
+    case unfollow
 
     var id: String { rawValue }
 
@@ -30,10 +31,16 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
         case .viewBookmarks: return "Bookmarks"
         case .openShowNotes: return "Open show notes"
         case .share: return "Share"
+        // Podcast-level, reached from an episode row (#500/#572). Activation
+        // opens a confirmation dialog — it never unfollows directly.
+        case .unfollow: return "Unfollow this podcast"
         }
     }
 }
 
+// `.unfollow` is deliberately LAST: destructive actions never default early,
+// and existing users who saved an order before it existed get it appended by
+// `QuickActionRepository.resolve()` with no migration.
 let defaultEpisodeActions: [EpisodeAction] = [
     .playNow,
     .addToQueueBottom,
@@ -43,4 +50,5 @@ let defaultEpisodeActions: [EpisodeAction] = [
     .viewBookmarks,
     .openShowNotes,
     .share,
+    .unfollow,
 ]
