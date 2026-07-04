@@ -348,6 +348,23 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 - The version is 1.0.0 now, the App Store release candidate line; she recalls
   Renata's "still rough around the edges" from the very first phone call and
   just notices, no text to anyone (Chapter 40)
+- The Actions rotor on episode rows had been reading her Quick Actions in
+  reverse: after the Chapter 39 reorder put Play now on top, the rotor handed
+  it back last, so she reversed her whole Settings list on purpose so the
+  rotor came out right side up. That workaround is the unstated cost behind
+  Chapter 39's "one flick does the thing she does most." She never reported
+  it. This build reads the order as written; her upside-down list came out
+  backwards on the first flick, she straightened it to plain order for the
+  first time, and it held (Chapter 41)
+- The duplicate "Mark as played" that had leaked into the rotor from the
+  sighted swipe is gone; said once, like the doubled Remove fix in Chapter 27
+  (Chapter 41)
+- "Unfollow this podcast" is now the ninth Quick Action, reorderable like the
+  rest, with a confirmation dialog, available on Inbox, Downloads, and a
+  show's episode list rows (never on search preview episodes); the sighted
+  swipe still works with VoiceOver off. She placed it at the bottom of her
+  list: a thing that removes a whole show should be a reach, not a reflex
+  (Chapter 41)
 
 ## What you can generate
 
@@ -1299,6 +1316,8 @@ This time the reorder lived in the rotor. Move to top. She put Play now first, s
 
 ### Chapter 40 — Build 142
 
+*(Canon note: these notes shipped on builds 142 and 143. Build 142 (1.0.0) stalled in Public beta review, so build 143 (0.1.0) re-shipped the same content.)*
+
 *Kashe's show notes links finally work, her rows tell her what's downloaded versus streaming, transcripts open from the player, and the privacy screen gets shorter and truer as the version quietly turns 1.0.0.*
 
 **What to test:**
@@ -1322,6 +1341,30 @@ She's learned which stretches of her route go dark. So before one she checks the
 One show she'd want to read back, not just hear. The transcript opens from the player now, plain text, hers to scroll.
 
 On the way out she passed the version. 1.0.0. Earshot collects nothing, the screen says now, and for once the words match what the app was already doing. Renata had called it rough around the edges, back before any of this. Kashe didn't text anyone. She just noticed.
+
+---
+
+### Chapter 41 — Build 144
+
+*The rotor Kashe reordered last build had been reading her list backwards; this build reads it her way, drops a doubled Mark as played, and makes Unfollow a Quick Action she can place herself.*
+
+**What to test:**
+
+Set your order in Settings, Quick Actions. Then flick down on any episode row with VoiceOver: the Actions rotor should offer your actions in that exact order, first one first. It used to read the list exactly backwards. If you'd reversed your settings to compensate, straighten them out; the order holds now.
+
+Flick through a row's actions: "Mark as played" should be listed once, not twice.
+
+Settings, Quick Actions has a ninth action: "Unfollow this podcast." Reorder it like the rest. Fire it from a row in Inbox, Downloads, or a show's episode list; it asks to confirm, then removes the show and its episodes. It doesn't appear on search preview episodes, and the sighted swipe still works with VoiceOver off.
+
+Last build she moved Play now to the top (Chapter 39). What she never said was what happened next. She flicked down on an episode and Play now came up last. Dead last, after everything she reaches for least. She checked Settings. First, right where she'd put it. Back on the row: last. The list was coming out backwards.
+
+She didn't report it. She reversed the whole list instead, upside down in Settings on purpose so the rotor would read it right side up. Two minutes. One flick fired Play now, same as promised. She just never said what it cost.
+
+This build reads the list the way she wrote it, which meant her upside-down workaround came out backwards on the first flick. She went back to Settings and put the list in plain order for the first time. First is first. It held.
+
+The stutter went with it. Mark as played had been showing up twice in the actions, the same words back to back, and she'd learned to flick past the echo like the doubled Remove from a while ago. Said once now.
+
+And there's a ninth action to place: Unfollow this podcast. The pruning swipe is hers to position now. She put it at the bottom. A thing that removes a whole show should be a reach, not a reflex. It asks first. She's already used it twice.
 
 ---
 
