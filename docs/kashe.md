@@ -1297,25 +1297,31 @@ This time the reorder lived in the rotor. Move to top. She put Play now first, s
 
 ---
 
-### Chapter 40 — Build 141
+### Chapter 40 — Build 142
 
-*Kashe's inbox rows finally say which show they belong to, the privacy screen gets shorter and truer, and the version number quietly turns 1.0.0.*
+*Kashe's show notes links finally work, her rows tell her what's downloaded versus streaming, transcripts open from the player, and the privacy screen gets shorter and truer as the version quietly turns 1.0.0.*
 
 **What to test:**
 
-Go to Settings, Appearance. Try the theme override (Follow System, Light, Dark, High Contrast Light, High Contrast Dark), the accent color, and the layout density (Comfortable or Compact). Each change should apply immediately, VoiceOver should announce your selection, and Compact should never shrink buttons below an easy tap.
+Open an episode's show notes. Links should be tappable and open in your browser, and bold and italic should read as text, not tags. With VoiceOver, links announce as links. No images or trackers load.
 
-With VoiceOver, flick through rows in your Inbox and Downloads. After the episode title you should hear the podcast's name, the way the Queue already does. Sighted testers: the show name is a small caption under the title.
+On episode rows and in Now Playing, each episode says whether it's Downloaded, Downloading, or Streams when played. VoiceOver should speak that state.
 
-Read the privacy wording in onboarding (fresh install) and in Settings. It now says plainly that Earshot collects no data, and the old crash-report and analytics toggles are gone. Settings should show version 1.0.0.
+When an episode has a transcript, open it from Now Playing. The text should read cleanly whether it came as VTT, SRT, JSON, HTML, or plain text.
 
-Half her inbox is shows that title episodes like paperwork. "Episode 214." "March mailbag." The Queue tells her whose episode it is, right after the title. The Inbox never did, so she'd sit on a row and guess, or open it just to learn whose voice she was about to get. Now every row carries the show's name. Title, show, time left. She triages by ear, and the rows finally hold everything she triages with.
+In a show's episode list, open the sort menu and pick Alphabetical, Latest first, or Latest last. The order should change and VoiceOver should announce your choice.
 
-Settings sent her somewhere she'd been before. She's the one who went into the privacy screen way back, read what those two toggles actually sent, flipped one off to see if it stuck. This build the screen got shorter. No toggles to weigh. One plain line: Earshot collects nothing. The rebuilt app never had been sending anything; the words just hadn't caught up until now. Fewer promises, all of them true. Her kind of screen.
+Start a download, then close the app fully. Come back later. It should have kept going and finished on its own.
 
-There's an Appearance section now too. Themes, accent colors, high contrast, tighter rows. She flicked through it once, because she flicks through everything once, picked nothing, and filed it away. Some of the folks on her routes still read the screen, big and bright. Now she has an answer for them.
+Privacy: onboarding and Settings now say plainly that Earshot collects no data, the old crash and analytics toggles are gone, and Settings shows version 1.0.0. Settings, Appearance also has theme, accent, and density, and Inbox and Downloads rows now say the show's name after the title.
 
-On the way out she passed the version. 1.0.0. Still rough around the edges, Renata had said on the phone, back before any of this. She didn't text anyone. She just noticed.
+A name comes up on the drive between clients, a resource somebody swears by, and it's sitting right there in the show notes as a link. It used to be dead text she'd read out and try to remember and never did. This build she taps it and it opens. No image clutter loading behind it, nothing following her out the door.
+
+She's learned which stretches of her route go dark. So before one she checks the rows, and now the rows tell her: Downloaded, Downloading, Streams when played. No more guessing which show is actually on the phone. She queued three, saw two already down and one still coming, closed the app, drove. It finished while the app was shut. When she hit the dead patch the shows were just there.
+
+One show she'd want to read back, not just hear. The transcript opens from the player now, plain text, hers to scroll.
+
+On the way out she passed the version. 1.0.0. Earshot collects nothing, the screen says now, and for once the words match what the app was already doing. Renata had called it rough around the edges, back before any of this. Kashe didn't text anyone. She just noticed.
 
 ---
 
