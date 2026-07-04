@@ -262,6 +262,7 @@
 		EE9986D2EC3F6DE5E32BDBE8 /* ModelContainerFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36E58C1C8D0069EACC139345 /* ModelContainerFactory.swift */; };
 		EF4531D32B453FFD8667C030 /* QueueLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71BD562BB534B0133D9733ED /* QueueLogic.swift */; };
 		F0CF93FBA3262643F8E54460 /* ModelGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935DE9BF07F90D248001ADE9 /* ModelGraphTests.swift */; };
+		F13611B3E04BBD655E4887D6 /* QuickActionsRotorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F402886F5BBB7E16BCE8E077 /* QuickActionsRotorTests.swift */; };
 		F1B461F346E5F616B6040FAF /* ExpirationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BCA26B22E21066A09DA54E7 /* ExpirationService.swift */; };
 		F2ECA4001F4F916A5DB6FA46 /* ChapterNavLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BE39373E98A58E407434D3F /* ChapterNavLogicTests.swift */; };
 		F54B64171A689EB7079ECAD5 /* OPMLFileImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4DB54C0B93DED983D53DD4B /* OPMLFileImporterTests.swift */; };
@@ -544,6 +545,7 @@
 		F0E82F35CB949845DE1189C9 /* ModelEnums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelEnums.swift; sourceTree = "<group>"; };
 		F2139AAC938323A76B008595 /* NotificationPermissionTrigger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPermissionTrigger.swift; sourceTree = "<group>"; };
 		F29EFE156F619DD326A85C61 /* FlutterMigrationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterMigrationServiceTests.swift; sourceTree = "<group>"; };
+		F402886F5BBB7E16BCE8E077 /* QuickActionsRotorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsRotorTests.swift; sourceTree = "<group>"; };
 		F4EB4F7F597FCC1DD27CEEE4 /* FolderRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRepository.swift; sourceTree = "<group>"; };
 		F5725AE54EE0504CA412713C /* QuickActionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsSettingsView.swift; sourceTree = "<group>"; };
 		F59E6B431FF3AB66D1412802 /* EpisodeExportLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeExportLogic.swift; sourceTree = "<group>"; };
@@ -801,6 +803,7 @@
 				4250FA40569C87B3F4F943A8 /* QuickActionBuildersTests.swift */,
 				32C854CBB6345415DEF95114 /* QuickActionMoveLogicTests.swift */,
 				9DC944C7D4C1D3D3D7C4E1A9 /* QuickActionRepositoryTests.swift */,
+				F402886F5BBB7E16BCE8E077 /* QuickActionsRotorTests.swift */,
 				46500BE41B67940E468A98FA /* RetryPolicyTests.swift */,
 				50E92710292D1147A3786684 /* RootTabLaunchTests.swift */,
 				59BE4582317C4948ECEF3288 /* RSSParserTests.swift */,
@@ -1738,6 +1741,7 @@
 				C8CF2F0E0FDDC190BC14C478 /* QuickActionBuildersTests.swift in Sources */,
 				844DA1379F4D40F7E1996B5A /* QuickActionMoveLogicTests.swift in Sources */,
 				388BE077DBF1E14B55493529 /* QuickActionRepositoryTests.swift in Sources */,
+				F13611B3E04BBD655E4887D6 /* QuickActionsRotorTests.swift in Sources */,
 				78792212EF7E1CCAE13117F8 /* RSSParserTests.swift in Sources */,
 				ED3EB7E296F674C8C0B0720D /* RetryPolicyTests.swift in Sources */,
 				EBE39E32A533DAD0229FC3B0 /* RootTabLaunchTests.swift in Sources */,

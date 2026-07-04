@@ -138,9 +138,11 @@ final class RSSParserTests: XCTestCase {
     }
 
     func testDefaultEpisodeActionsOrder() {
+        // `.unfollow` is deliberately LAST — destructive actions never default
+        // early (#572).
         XCTAssertEqual(
             defaultEpisodeActions,
-            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .markPlayed, .viewBookmarks, .openShowNotes, .share]
+            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .markPlayed, .viewBookmarks, .openShowNotes, .share, .unfollow]
         )
     }
 }
