@@ -64,15 +64,21 @@ struct QuickActionsSettingsView: View {
                     .accessibilityLabel(rowLabel(name, index: index, count: actions.count))
                     .accessibilityHint("Reorderable in Edit mode. Position 1 is the default action. Use the actions rotor to move without dragging.")
                     .accessibilityFocused($focusedActionID, equals: focusID)
-                    .accessibilityActions {
-                        ForEach(QuickActionMoveLogic.targets(index: index, count: actions.count), id: \.label) { target in
-                            Button(target.label) {
-                                move(IndexSet(integer: index), target.destinationOffset)
-                                Announcer.announce("Moved \(name) to position \(target.resultingIndex + 1) of \(actions.count)")
-                                focusedActionID = focusID
+                    // Routed through the shared helper so the rotor announces
+                    // "Move to top" first — the same order the compensated Queue
+                    // rows use — despite the OS's reversed emission (#572, #577).
+                    // `QuickActionMoveLogic.targets` already returns the designed
+                    // order.
+                    .rotorActions(
+                        QuickActionMoveLogic.targets(index: index, count: actions.count)
+                            .map { target in
+                                QuickActionItem(label: target.label, isDestructive: false) {
+                                    move(IndexSet(integer: index), target.destinationOffset)
+                                    Announcer.announce("Moved \(name) to position \(target.resultingIndex + 1) of \(actions.count)")
+                                    focusedActionID = focusID
+                                }
                             }
-                        }
-                    }
+                    )
             }
             .onMove { move($0, $1) }
         }

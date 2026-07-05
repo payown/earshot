@@ -21,6 +21,13 @@ struct BookmarksListView: View {
     // there's no episode deep-link handler in SwiftUI yet (#383).
     @State private var shareItem: BookmarkShareItem?
 
+    // Tracked by SwiftUI, so toggling VoiceOver while this sheet is open
+    // re-renders the rows and attaches/removes the sighted-only swipe actions
+    // immediately. Mirrors the Queue's SightedRowActions / Inbox gate (#573):
+    // iOS mirrors swipe actions into the VoiceOver rotor, which duplicated the
+    // rows' custom Share/Delete actions (#577).
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+
     var body: some View {
         NavigationStack {
             Group {
@@ -35,7 +42,11 @@ struct BookmarksListView: View {
                         ForEach(bookmarks) { bookmark in
                             row(for: bookmark)
                         }
-                        .onDelete(perform: delete)
+                        // Sighted-only, like the explicit swipes below: with the
+                        // custom swipes gated off under VoiceOver, an ungated
+                        // `.onDelete` would surface its own system delete swipe
+                        // and mirror a second "Delete" into the rotor (#577).
+                        .onDelete(perform: voiceOverEnabled ? nil : { delete($0) })
                     }
                 }
             }
@@ -57,8 +68,9 @@ struct BookmarksListView: View {
         bookmarks = BookmarkRepository(context: context).bookmarks(for: episode)
     }
 
+    @ViewBuilder
     private func row(for bookmark: Bookmark) -> some View {
-        HStack(spacing: Spacing.md) {
+        let base = HStack(spacing: Spacing.md) {
             // The jump target: the label area. Tapping (or activating with
             // VoiceOver) plays from the bookmarked spot.
             Button {
@@ -91,10 +103,13 @@ struct BookmarksListView: View {
             // rotor users reach share through the custom action. (#479)
             .accessibilityLabel(rowLabel(for: bookmark))
             .accessibilityHint("Plays from this spot")
-            .accessibilityActions {
-                Button("Share bookmark") { share(bookmark) }
-                Button("Delete bookmark") { delete(bookmark) }
-            }
+            // Routed through the shared helper so the rotor announces Share
+            // before Delete — never the destructive action first — despite the
+            // OS's reversed emission (#572, #577).
+            .rotorActions([
+                QuickActionItem(label: "Share bookmark", isDestructive: false) { share(bookmark) },
+                QuickActionItem(label: "Delete bookmark", isDestructive: true) { delete(bookmark) },
+            ])
 
             // A visible, sighted-only share control. Its 44pt target sits beside
             // the label so a tap doesn't also trigger the jump. Hidden from
@@ -110,18 +125,29 @@ struct BookmarksListView: View {
             .foregroundStyle(.tint)
             .accessibilityHidden(true)
         }
-        .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                delete(bookmark)
-            } label: {
-                Label("Delete", systemImage: "trash")
+
+        // The swipes are sighted-only affordances, attached only when VoiceOver
+        // is off: iOS mirrors swipe actions into the VoiceOver rotor, which
+        // announced Delete and Share twice each — destructive Delete first —
+        // alongside the row's custom actions above (#577). The custom actions
+        // cover everything the swipes offer. Toggling VoiceOver mid-session
+        // updates `voiceOverEnabled` and re-renders — no relaunch needed.
+        if voiceOverEnabled {
+            base
+        } else {
+            base.swipeActions(edge: .trailing) {
+                Button(role: .destructive) {
+                    delete(bookmark)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                Button {
+                    share(bookmark)
+                } label: {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .tint(.accentColor)
             }
-            Button {
-                share(bookmark)
-            } label: {
-                Label("Share", systemImage: "square.and.arrow.up")
-            }
-            .tint(.accentColor)
         }
     }
 
