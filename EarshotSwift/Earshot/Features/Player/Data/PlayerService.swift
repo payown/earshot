@@ -864,10 +864,18 @@ final class PlayerService {
     func exportCurrentEpisodeAudio(using downloads: DownloadManager) async -> URL? {
         guard let episode = currentEpisode else { return nil }
 
-        // Ensure the file is local first. download() is a no-op when already
-        // downloaded; otherwise it writes downloadPath / downloadStatus.
+        // Ensure the file is local first. download() returns at ENQUEUE (#544),
+        // so we must wait for the terminal event or the guard below always
+        // fails for a not-yet-downloaded episode and every export reports
+        // failure (#576). downloadAndWait() is an immediate true when already
+        // downloaded, an immediate false when the download can't start (Wi-Fi
+        // gate, bad URL), and false after its internal timeout.
         if !currentEpisodeIsDownloaded {
-            await downloads.download(episode)
+            let downloaded = await downloads.downloadAndWait(episode)
+            guard downloaded else {
+                AppLog.player.error("Export failed: download did not complete for \(episode.title, privacy: .public)")
+                return nil
+            }
         }
 
         guard let localURL = episode.localAudioURL,
@@ -1343,8 +1351,14 @@ final class PlayerService {
         // playing episode — its guid isn't in the store, so restoring it on
         // relaunch would find nothing (#517).
         guard !currentEpisodeIsTransient else { return }
-        // Use the stable feed-level guid as the durable identifier.
-        settings?.setRawValue(episode.guid, for: SettingsKey.lastPlayingEpisodeID)
+        // Composite "feedURL|guid" (#576): feed-level guids repeat across
+        // podcasts, so a bare guid could restore the wrong show's episode.
+        // Readers (PlaybackStartup, FeedRefreshActor) still resolve legacy
+        // bare-guid values by guid alone.
+        settings?.setRawValue(
+            DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
+            for: SettingsKey.lastPlayingEpisodeID
+        )
     }
 
     private func saveContext() {

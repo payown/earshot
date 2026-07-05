@@ -479,17 +479,16 @@ actor FeedRefreshActor {
 
     /// The queue-item id of the currently/last-playing episode, resolved on the
     /// background context via the durable `SettingsKey.lastPlayingEpisodeID` (the
-    /// episode `guid` PlayerService persists). Returns nil when nothing is playing
-    /// or the playing episode isn't queued, so the cap never dequeues it.
+    /// composite `"feedURL|guid"` key PlayerService persists, #576; legacy
+    /// bare-guid values still resolve by guid alone). Returns nil when nothing is
+    /// playing or the playing episode isn't queued, so the cap never dequeues it.
     private func currentlyPlayingQueueItemID() -> PersistentIdentifier? {
         let key = SettingsKey.lastPlayingEpisodeID
         var settingDescriptor = FetchDescriptor<AppSetting>(predicate: #Predicate { $0.key == key })
         settingDescriptor.fetchLimit = 1
-        guard let guid = (try? modelContext.fetch(settingDescriptor))?.first?.value,
-              !guid.isEmpty else { return nil }
-        var episodeDescriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == guid })
-        episodeDescriptor.fetchLimit = 1
-        guard let episode = (try? modelContext.fetch(episodeDescriptor))?.first else { return nil }
+        guard let stored = (try? modelContext.fetch(settingDescriptor))?.first?.value,
+              !stored.isEmpty else { return nil }
+        guard let episode = DownloadTaskKey.episode(matching: stored, in: modelContext) else { return nil }
         return episode.queueItem?.persistentModelID
     }
 

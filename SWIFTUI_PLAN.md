@@ -821,6 +821,34 @@ ship; OPML export/import is the supported way to carry a library over.
   **Flag for earshot-testing:** `MockURLProtocol.Outcome.response` sets
   `headerFields: nil`, so Content-Type-path detection tests need it extended to
   carry headers; extension-based detection is testable as-is.
+- **#576 Download pipeline hardening.** (1) `DownloadSessionDelegate.
+  didFinishDownloadingTo` now rejects non-2xx statuses and `text/html` bodies
+  before moving the file (an error page was previously saved as audio and marked
+  `.downloaded`), and the silent move-failure catch logs via `AppLog.networking`.
+  (2) Episodes are identified everywhere a string identity is persisted by the
+  composite `DownloadTaskKey` `"feedURL|guid"` (guids repeat across podcasts):
+  the background task's `taskDescription` and `SettingsKey.lastPlayingEpisodeID`.
+  `DownloadTaskKey` (in `DownloadPaths.swift`) is the single parse/resolve
+  helper; legacy bare-guid values (old in-flight tasks, old stored setting)
+  still resolve by guid alone. NOT a schema change — both stores were already
+  strings. (3) `DownloadManager.downloadAndWait(_:timeout:)` (default 120 s)
+  parks per-caller continuations keyed by task key, resolved exactly once by the
+  terminal complete/fail event or a paired per-waiter timeout task (removal
+  from the dictionary before resume is the ownership point; all main-actor).
+  `PlayerService.exportCurrentEpisodeAudio` uses it, fixing the #544 regression
+  where export always failed for non-downloaded episodes. (4) `.pending`
+  (Wi-Fi-gated) downloads now start on the `NWPathMonitor` Wi-Fi transition and
+  on the first path report after launch; `EpisodeRowLabel` reads `.pending` as
+  "Waiting for Wi-Fi" (spoken + badge) instead of the false "Downloading".
+  (5) Terminal-path `try? context.save()` replaced by a static logging save
+  helper shared with the instance `save()`. **Flag for earshot-testing:**
+  `DownloadReconciliationTests` must move to the new
+  `orphanedIndices(markedDownloading:liveTaskKeys:)` API (compile-breaking) and
+  `EpisodeRowLabelTests` `.pending` expectations change to "Waiting for Wi-Fi";
+  `DownloadTaskKey.key/parse/episode(matching:)` are pure/fetch-only and unit-
+  testable. **Known follow-up:** notification routing in `RootView.swift`
+  (~line 322) still resolves `episodeGUID` guid-only despite carrying the feed
+  URL — UI-owned, out of #576's scope.
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 

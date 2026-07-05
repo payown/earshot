@@ -1,4 +1,61 @@
 import Foundation
+import SwiftData
+
+/// Composite episode identifier `"feedURL|guid"` used wherever an episode must
+/// be re-found from a persisted string: a background download task's
+/// `taskDescription` and `SettingsKey.lastPlayingEpisodeID` (#576).
+///
+/// Episode guids are NOT unique across podcasts (bare integers and slugs exist
+/// in the wild), so resolving by guid alone can attach a finished download — or
+/// restore playback — to the wrong show's episode. The feed URL is unique per
+/// podcast (`@Attribute(.unique)`), so the composite is unambiguous. Values
+/// written by earlier builds are bare guids; ``parse(_:)`` and
+/// ``episode(matching:in:)`` keep resolving those by guid alone.
+enum DownloadTaskKey {
+    static let separator = "|"
+
+    /// The composite key for an episode. Falls back to the bare guid when the
+    /// episode has no podcast (defensive; subscribed episodes always do).
+    static func key(feedURL: String?, guid: String) -> String {
+        guard let feedURL, !feedURL.isEmpty else { return guid }
+        return feedURL + separator + guid
+    }
+
+    /// Splits a stored key at the FIRST separator (guids may themselves contain
+    /// `"|"`; URLs never do — it's not a legal URL character). A value with no
+    /// separator is a legacy bare guid and returns a nil `feedURL` so callers
+    /// fall back to guid-only matching.
+    static func parse(_ key: String) -> (feedURL: String?, guid: String) {
+        guard let range = key.range(of: separator) else { return (nil, key) }
+        let feedURL = String(key[..<range.lowerBound])
+        let guid = String(key[range.upperBound...])
+        guard !feedURL.isEmpty, !guid.isEmpty else { return (nil, key) }
+        return (feedURL, guid)
+    }
+
+    /// Resolves a stored key (composite or legacy bare guid) to its episode.
+    ///
+    /// Composite keys require the feed URL to match when more than one episode
+    /// shares the guid; a single guid match is accepted even when the feed URL
+    /// differs (the podcast's feed URL can change between write and read). As a
+    /// last resort the WHOLE key is tried as a guid, covering a legacy guid
+    /// that happens to contain the separator. Legacy bare-guid keys resolve by
+    /// guid alone, preserving pre-#576 behavior. Synchronous; runs on whatever
+    /// context the caller owns (main or a ModelActor's).
+    static func episode(matching key: String, in context: ModelContext) -> Episode? {
+        let (feedURL, guid) = parse(key)
+        let byGUID = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == guid })
+        let candidates = (try? context.fetch(byGUID)) ?? []
+        guard let feedURL else { return candidates.first }
+        if let match = candidates.first(where: { $0.podcast?.feedURL == feedURL }) {
+            return match
+        }
+        if candidates.count == 1 { return candidates.first }
+        var wholeKeyAsGUID = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == key })
+        wholeKeyAsGUID.fetchLimit = 1
+        return (try? context.fetch(wholeKeyAsGUID))?.first
+    }
+}
 
 /// Pure filesystem-path logic for downloaded episode audio. Kept separate from
 /// ``DownloadManager`` so the destination naming is unit-testable and so the
