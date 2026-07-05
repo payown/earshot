@@ -99,6 +99,7 @@
 		51AD1C7F1F9FD6F060631657 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43B68C7D3951BA02B70E0F3F /* OnboardingView.swift */; };
 		51EE602096FEE0FF490A7CBB /* PlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E565903CF72B66FF3E108C5B /* PlayerService.swift */; };
 		51FCE985808351F9473615DF /* NotificationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4318B4B42ABC13117266E542 /* NotificationServiceTests.swift */; };
+		520B62E4129189F55B830FCE /* PlayerDeletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF4AFC0CE5DA58091C93ADAF /* PlayerDeletionTests.swift */; };
 		5300063D3DF0F8B0C230D30E /* EpisodeAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F71AE13AFCDD1550650672 /* EpisodeAction.swift */; };
 		53CB76F3763F79E3304F5A55 /* DownloadSessionDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65E3C3EA1C30C4564C25EC3A /* DownloadSessionDelegate.swift */; };
 		53CF65CE64BE6F05A72B4686 /* MigrationImportState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF9CBE5DA98EB620F0AD4CEF /* MigrationImportState.swift */; };
@@ -557,6 +558,7 @@
 		FBCA06917D3490C5734BED12 /* StoreMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreMigrationTests.swift; sourceTree = "<group>"; };
 		FE4C9FFA1E2D81C45CDDADF0 /* NewEpisodeNotificationDecision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewEpisodeNotificationDecision.swift; sourceTree = "<group>"; };
 		FE5BA6494F4104585146F85D /* DownloadReconciliation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadReconciliation.swift; sourceTree = "<group>"; };
+		FF4AFC0CE5DA58091C93ADAF /* PlayerDeletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerDeletionTests.swift; sourceTree = "<group>"; };
 		FF7EB271B05EE735D3F8EEAA /* FeedRefreshActorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedRefreshActorTests.swift; sourceTree = "<group>"; };
 		FF9E5DE17E14375162AAC109 /* EpisodeTimeLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeTimeLogic.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -795,6 +797,7 @@
 				682B36BB7BE40E963A213FAF /* OPMLImportProgressTests.swift */,
 				B357DAC84CCC33219624171F /* OptionStepLogicTests.swift */,
 				2767329BD74341CFE704F947 /* PlaybackLogicTests.swift */,
+				FF4AFC0CE5DA58091C93ADAF /* PlayerDeletionTests.swift */,
 				721E8302930DFEBC4F7391B7 /* PodcastPreviewModelTests.swift */,
 				D5FB4A956315335A6C680461 /* PodcastSettingsViewTests.swift */,
 				D48EF8C6009D89958AE56C3E /* QueueImporterTests.swift */,
@@ -1733,6 +1736,7 @@
 				154356CD59BB0B1D7668F20E /* OnboardingTipsTests.swift in Sources */,
 				D42E542BF3A8A79E39DC70FA /* OptionStepLogicTests.swift in Sources */,
 				14767E36BB627235213229DF /* PlaybackLogicTests.swift in Sources */,
+				520B62E4129189F55B830FCE /* PlayerDeletionTests.swift in Sources */,
 				FFF39F13C407440CBADB3D72 /* PodcastPreviewModelTests.swift in Sources */,
 				1967375AFD5417F58B4FE874 /* PodcastSettingsViewTests.swift in Sources */,
 				D54D0B940EC5A02BA5B9A97C /* QueueImporterTests.swift in Sources */,
