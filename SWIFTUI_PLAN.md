@@ -849,6 +849,32 @@ ship; OPML export/import is the supported way to carry a library over.
   testable. **Known follow-up:** notification routing in `RootView.swift`
   (~line 322) still resolves `episodeGUID` guid-only despite carrying the feed
   URL — UI-owned, out of #576's scope.
+- **#384 RSS parser robustness (partial results + fallback art + iTunes
+  fields).** (1) **Partial results on malformed XML:** `RSSParser.parse` no
+  longer discards everything when `XMLParser.parse()` fails mid-document. If
+  any episodes or a feed title were accumulated before the abort point, it
+  returns the partial `ParsedFeed` (title falls back to "Untitled podcast"
+  when the channel head never parsed) and logs the parser error, line/column,
+  and salvaged episode count via `AppLog.networking`. `nil` is still returned
+  only when nothing was salvageable (no episodes AND no title) — so
+  `FeedService`'s `FeedError.parse` behavior is unchanged for truly broken
+  input. No half-items are possible: `finishItem()` only runs on an item's
+  closing tag. (2) **Channel `<image><url>` artwork fallback:** tracked with an
+  `inChannelImage` flag; used only when `itunes:image`/Atom logo/icon are
+  absent (`feedImage ?? channelImageURL`). The flag also stops `<image>`'s
+  `<title>`/`<link>` children from shadowing the channel's title/link.
+  (3) **`itunes:explicit` / `itunes:episodeType`: PARSE-LEVEL ONLY, NO SCHEMA
+  CHANGE.** Persisting them on `Podcast`/`Episode` would require new SwiftData
+  attributes (schema bump); per the schema-window rule they live only on
+  `ParsedFeed.explicit: Bool?` (yes/true → true; no/false/clean → false; else
+  nil) and `ParsedEpisode.episodeType: String?` (normalized "full"/"trailer"/
+  "bonus", else nil), both defaulted so existing memberwise-init call sites
+  compile. Plumbing to the models is deferred to the next schema window.
+  (4) **`parseDuration` overflow (readiness-audit P2-11):** the naive
+  `reduce(0) { $0 * 60 + $1 }` trapped on hostile values like
+  "999999999999999999:00:00"; now uses `multipliedReportingOverflow`/
+  `addingReportingOverflow`, rejects >3 segments and negatives, returns nil
+  instead of crashing.
 
 ## Phase 3 Work Queue (post-parity audit, 2026-06-21)
 
