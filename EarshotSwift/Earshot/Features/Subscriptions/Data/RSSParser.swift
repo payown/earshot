@@ -12,6 +12,12 @@ struct ParsedEpisode: Sendable {
     var seasonNumber: Int?
     var chapterURL: String?
     var transcriptURL: String?
+    /// `itunes:episodeType` — "full", "trailer", or "bonus" (normalized
+    /// lowercase); nil when absent or unrecognized. Parse-level only for now:
+    /// persisting it on `Episode` needs a SwiftData schema change, deferred to
+    /// the next schema window (#384). Defaulted so memberwise call sites keep
+    /// compiling.
+    var episodeType: String? = nil
 }
 
 struct ParsedFeed: Sendable {
@@ -23,6 +29,12 @@ struct ParsedFeed: Sendable {
     var language: String?
     var category: String?
     var episodes: [ParsedEpisode]
+    /// Channel-level `itunes:explicit` — true for "yes"/"true", false for
+    /// "no"/"false"/"clean", nil when absent or unrecognized. Parse-level only
+    /// for now: persisting it on `Podcast` needs a SwiftData schema change,
+    /// deferred to the next schema window (#384). Useful offline regardless
+    /// (e.g. deriving the App Store age-rating answer from a feed check).
+    var explicit: Bool? = nil
 }
 
 /// An `XMLParser`-based RSS reader covering the standard RSS elements plus the
@@ -33,14 +45,23 @@ final class RSSParser: NSObject, XMLParserDelegate {
     // Feed-level
     private var feedTitle = ""
     private var feedImage: String?
+    /// Standard RSS `<image><url>` channel art. Kept separate from
+    /// ``feedImage`` (itunes:image / Atom logo/icon) so it can act as a
+    /// lower-priority fallback regardless of element order in the feed.
+    private var channelImageURL: String?
     private var feedDescription: String?
     private var feedSummary: String?
     private var feedAuthor: String?
     private var feedLink: String?
     private var feedLanguage: String?
     private var feedCategory: String?
+    private var feedExplicit: Bool?
 
     private var inItem = false
+    /// True while inside a channel-level RSS `<image>` block, whose child
+    /// `<url>` is the artwork and whose `<title>`/`<link>` children must not
+    /// pollute the feed's own title/link.
+    private var inChannelImage = false
     private var text = ""
 
     // Item-level
@@ -56,6 +77,7 @@ final class RSSParser: NSObject, XMLParserDelegate {
     private var itemSeason: String = ""
     private var itemChapterURL: String?
     private var itemTranscriptURL: String?
+    private var itemEpisodeType: String = ""
 
     private var episodes: [ParsedEpisode] = []
 
@@ -109,16 +131,48 @@ final class RSSParser: NSObject, XMLParserDelegate {
     func parse(_ data: Data) -> ParsedFeed? {
         let parser = XMLParser(data: data)
         parser.delegate = self
-        guard parser.parse() else { return nil }
+        let succeeded = parser.parse()
+        var title = feedTitle.trimmed
+        if !succeeded {
+            // Malformed XML somewhere in the document. Everything delegate
+            // callbacks accumulated before the abort point is still good, so
+            // return a partial feed instead of discarding it all — a broken
+            // feed used to subscribe with zero episodes, silently (#384).
+            // `episodes` can never hold a half-parsed item: `finishItem()`
+            // only runs on an item's closing tag, so an item in progress at
+            // the failure point is simply dropped.
+            let reason = parser.parserError?.localizedDescription ?? "unknown XML error"
+            guard !episodes.isEmpty || !title.isEmpty else {
+                AppLog.networking.error(
+                    """
+                    Feed parse failed with nothing salvageable at line \
+                    \(parser.lineNumber), column \(parser.columnNumber): \
+                    \(reason, privacy: .public)
+                    """
+                )
+                return nil
+            }
+            AppLog.networking.error(
+                """
+                Feed parse failed at line \(parser.lineNumber), column \
+                \(parser.columnNumber) (\(reason, privacy: .public)); returning \
+                partial feed with \(self.episodes.count) salvaged episode(s)
+                """
+            )
+            if title.isEmpty { title = "Untitled podcast" }
+        }
         return ParsedFeed(
-            title: feedTitle.trimmed,
-            artworkURL: feedImage,
+            title: title,
+            // itunes:image (or Atom logo/icon) wins; the standard RSS
+            // <image><url> channel art is the fallback.
+            artworkURL: feedImage ?? channelImageURL,
             description: (feedDescription ?? feedSummary)?.trimmed,
             author: feedAuthor?.trimmed,
             websiteURL: feedLink?.trimmed,
             language: feedLanguage?.trimmed,
             category: feedCategory?.trimmed,
-            episodes: episodes
+            episodes: episodes,
+            explicit: feedExplicit
         )
     }
 
@@ -128,11 +182,35 @@ final class RSSParser: NSObject, XMLParserDelegate {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
         if s.contains(":") {
-            let parts = s.split(separator: ":").map { Int($0) ?? -1 }
-            guard !parts.contains(-1) else { return nil }
-            return parts.reduce(0) { $0 * 60 + $1 }
+            let parts = s.split(separator: ":").map { Int($0) }
+            // At most HH:MM:SS; more segments is not a duration.
+            guard (1...3).contains(parts.count) else { return nil }
+            var total = 0
+            for part in parts {
+                guard let part, part >= 0 else { return nil }
+                // Overflow-safe accumulation: a hostile feed can carry values
+                // like "999999999999999999:00:00" that trap in the naive
+                // `$0 * 60 + $1` reduce (readiness-audit P2-11).
+                let (scaled, mulOverflow) = total.multipliedReportingOverflow(by: 60)
+                let (sum, addOverflow) = scaled.addingReportingOverflow(part)
+                guard !mulOverflow, !addOverflow else { return nil }
+                total = sum
+            }
+            return total
         }
-        return Int(s)
+        guard let seconds = Int(s), seconds >= 0 else { return nil }
+        return seconds
+    }
+
+    /// Maps an `itunes:explicit` value to a tri-state flag. Apple documents
+    /// "true"/"false", but real feeds still carry the legacy "yes"/"no"/"clean"
+    /// values. Unrecognized input is nil (unknown), never a guess.
+    static func parseExplicit(_ raw: String) -> Bool? {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "yes", "true": return true
+        case "no", "false", "clean": return false
+        default: return nil
+        }
     }
 
     func parser(
@@ -150,6 +228,9 @@ final class RSSParser: NSObject, XMLParserDelegate {
             itemDescription = ""; itemSummary = ""; itemPubDate = ""
             itemDuration = ""; itemImage = nil; itemEpisode = ""
             itemSeason = ""; itemChapterURL = nil; itemTranscriptURL = nil
+            itemEpisodeType = ""
+        case "image":
+            if !inItem { inChannelImage = true }
         case "enclosure":
             if let url = attributeDict["url"], inItem { itemAudio = url }
         case "link":
@@ -218,6 +299,7 @@ final class RSSParser: NSObject, XMLParserDelegate {
             case "itunes:duration": itemDuration = value
             case "itunes:episode": itemEpisode = value
             case "itunes:season": itemSeason = value
+            case "itunes:episodeType": itemEpisodeType = value
             case "item", "entry":
                 finishItem()
             default:
@@ -225,7 +307,9 @@ final class RSSParser: NSObject, XMLParserDelegate {
             }
         } else {
             switch elementName {
-            case "title": if feedTitle.isEmpty { feedTitle = value }
+            // <image> has its own <title>/<link> children; don't let them
+            // shadow the channel's title/link when <image> comes first.
+            case "title": if feedTitle.isEmpty, !inChannelImage { feedTitle = value }
             case "description": if feedDescription == nil { feedDescription = value }
             // Atom feed-level description / image / author.
             case "subtitle": if feedDescription == nil { feedDescription = value }
@@ -233,8 +317,12 @@ final class RSSParser: NSObject, XMLParserDelegate {
             case "itunes:author": if feedAuthor == nil { feedAuthor = value }
             case "name": if feedAuthor == nil { feedAuthor = value }
             case "logo", "icon": if feedImage == nil, !value.isEmpty { feedImage = value }
-            case "link": if feedLink == nil, !value.isEmpty { feedLink = value }
+            case "link": if feedLink == nil, !inChannelImage, !value.isEmpty { feedLink = value }
             case "language": if feedLanguage == nil { feedLanguage = value }
+            // Standard RSS channel art: <image><url>…</url></image>.
+            case "url": if inChannelImage, channelImageURL == nil, !value.isEmpty { channelImageURL = value }
+            case "image": inChannelImage = false
+            case "itunes:explicit": if feedExplicit == nil { feedExplicit = Self.parseExplicit(value) }
             default:
                 break
             }
@@ -251,6 +339,10 @@ final class RSSParser: NSObject, XMLParserDelegate {
         let guid = itemGUID.isEmpty ? itemAudio : itemGUID
         let desc = !itemDescription.isEmpty ? itemDescription
             : (itemSummary.isEmpty ? nil : itemSummary)
+        // Only the three values Apple defines; anything else is noise.
+        let episodeType = itemEpisodeType.lowercased()
+        let validEpisodeType = ["full", "trailer", "bonus"].contains(episodeType)
+            ? episodeType : nil
         episodes.append(
             ParsedEpisode(
                 guid: guid,
@@ -263,7 +355,8 @@ final class RSSParser: NSObject, XMLParserDelegate {
                 episodeNumber: Int(itemEpisode),
                 seasonNumber: Int(itemSeason),
                 chapterURL: itemChapterURL,
-                transcriptURL: itemTranscriptURL
+                transcriptURL: itemTranscriptURL,
+                episodeType: validEpisodeType
             )
         )
     }
