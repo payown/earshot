@@ -64,11 +64,12 @@ final class QuickActionBuildersTests: XCTestCase {
             order: defaultQueueItemActions,
             moveMode: .none,
             player: PlayerService(),
+            downloads: DownloadManager(),
             context: ctx,
             onShowNotes: {},
             onFocus: { _ in }
         )
-        XCTAssertEqual(items.map(\.label), ["Play now", "Remove from queue", "Open show notes"])
+        XCTAssertEqual(items.map(\.label), ["Play now", "Remove from queue", "Open show notes", "Download"])
     }
 
     func testQueueActionsGroupedModeKeepsUpDownButDropsTopBottom() {
@@ -79,6 +80,7 @@ final class QuickActionBuildersTests: XCTestCase {
             order: [.moveToTop, .moveUp, .playNow, .moveDown, .moveToBottom],
             moveMode: .grouped,
             player: PlayerService(),
+            downloads: DownloadManager(),
             context: ctx,
             onShowNotes: {},
             onFocus: { _ in }
@@ -94,6 +96,7 @@ final class QuickActionBuildersTests: XCTestCase {
             order: [.moveToTop, .playNow, .removeFromQueue],
             moveMode: .flat,
             player: PlayerService(),
+            downloads: DownloadManager(),
             context: ctx,
             onShowNotes: {},
             onFocus: { _ in }
@@ -298,6 +301,7 @@ final class QuickActionBuildersTests: XCTestCase {
             order: [.removeFromQueue],
             moveMode: .flat,
             player: PlayerService(),
+            downloads: DownloadManager(),
             context: ctx,
             onShowNotes: {},
             onFocus: onFocus,
@@ -384,7 +388,7 @@ final class QuickActionBuildersTests: XCTestCase {
         let episode = makeEpisode(ctx)
         let items = buildQueueActions(
             episode: episode, order: [.playNow], moveMode: .flat,
-            player: player, context: ctx, onShowNotes: {}, onFocus: { _ in }
+            player: player, downloads: DownloadManager(), context: ctx, onShowNotes: {}, onFocus: { _ in }
         )
         XCTAssertEqual(items.map(\.label), ["Play now"])
         XCTAssertFalse(player.pendingFullPlayerPresentation, "precondition: flag starts clear")
@@ -401,7 +405,7 @@ final class QuickActionBuildersTests: XCTestCase {
         let episode = makeEpisode(ctx)
         let items = buildQueueActions(
             episode: episode, order: [.playNow], moveMode: .flat,
-            player: player, context: ctx, onShowNotes: {}, onFocus: { _ in }
+            player: player, downloads: DownloadManager(), context: ctx, onShowNotes: {}, onFocus: { _ in }
         )
         items.first?.run()
         XCTAssertFalse(player.pendingFullPlayerPresentation,
@@ -471,6 +475,64 @@ final class QuickActionBuildersTests: XCTestCase {
         playerOff.playFromEpisodeList(firstOff!)
         XCTAssertFalse(playerOff.pendingFullPlayerPresentation,
                        "Play oldest first with setting OFF must not raise the full player")
+    }
+
+    // MARK: Queue Download action (Item 3)
+
+    private func queueDownloadItem(_ ctx: ModelContext, episode: Episode, downloads: DownloadManager) -> QuickActionItem? {
+        buildQueueActions(
+            episode: episode, order: [.download], moveMode: .flat,
+            player: PlayerService(), downloads: downloads, context: ctx,
+            onShowNotes: {}, onFocus: { _ in }
+        ).first
+    }
+
+    func testQueueDownloadActionLabelWhenNotDownloaded() {
+        // Acceptance criterion: Item 3 — a not-downloaded episode offers a
+        // non-destructive "Download", mirroring the episode-row builder.
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx) // default status .none
+        let item = queueDownloadItem(ctx, episode: episode, downloads: DownloadManager())
+        XCTAssertEqual(item?.label, "Download")
+        XCTAssertEqual(item?.isDestructive, false)
+    }
+
+    func testQueueDownloadActionLabelWhenDownloaded() {
+        // Acceptance criterion: Item 3 — a downloaded episode flips the label to
+        // the destructive "Remove download".
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        episode.downloadStatus = .downloaded
+        let item = queueDownloadItem(ctx, episode: episode, downloads: DownloadManager())
+        XCTAssertEqual(item?.label, "Remove download")
+        XCTAssertEqual(item?.isDestructive, true)
+    }
+
+    func testQueueRemoveDownloadRunResetsStatus() {
+        // Acceptance criterion: Item 3 — running the action on a downloaded
+        // episode removes the download (status resets, path cleared).
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        episode.downloadStatus = .downloaded
+        episode.downloadPath = "ep.mp3"
+        let downloads = DownloadManager()
+        downloads.configure(context: ctx)
+        queueDownloadItem(ctx, episode: episode, downloads: downloads)?.run()
+        XCTAssertEqual(episode.downloadStatus, .none, "Remove download resets the status")
+        XCTAssertNil(episode.downloadPath, "Remove download clears the stored path")
+    }
+
+    func testQueueDefaultActionsAppendDownloadLast() {
+        // Acceptance criterion: Item 3 — Download is the last default queue
+        // action, so existing users get it appended at the end of their rotor.
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let items = buildQueueActions(
+            episode: episode, order: defaultQueueItemActions, moveMode: .flat,
+            player: PlayerService(), downloads: DownloadManager(), context: ctx,
+            onShowNotes: {}, onFocus: { _ in }
+        )
+        XCTAssertEqual(items.map(\.label).last, "Download")
     }
 
     func testPodcastToggleLabelsReflectState() {

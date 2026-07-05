@@ -11,6 +11,7 @@ enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
     case moveUp
     case moveDown
     case openShowNotes
+    case download
 
     var id: String { rawValue }
 
@@ -23,6 +24,9 @@ enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
         case .moveUp: return "Move up"
         case .moveDown: return "Move down"
         case .openShowNotes: return "Open show notes"
+        // The row's runtime label flips to "Remove download" when downloaded;
+        // this is the static Settings-list name (see buildQueueActions).
+        case .download: return "Download"
         }
     }
 }
@@ -35,4 +39,5 @@ let defaultQueueItemActions: [QueueItemAction] = [
     .moveUp,
     .moveDown,
     .openShowNotes,
+    .download,
 ]
