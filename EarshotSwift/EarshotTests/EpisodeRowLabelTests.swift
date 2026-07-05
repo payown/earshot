@@ -137,10 +137,14 @@ final class EpisodeRowLabelTests: XCTestCase {
         XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.downloaded), "Downloaded")
     }
 
-    func testSpokenDownloadStateDownloadingAndPendingBothReadDownloading() {
-        // Both in-flight buckets read the same to VoiceOver.
+    func testSpokenDownloadStateDownloading() {
         XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.downloading), "Downloading")
-        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.pending), "Downloading")
+    }
+
+    func testSpokenDownloadStatePendingReadsWaitingForWiFi() {
+        // Acceptance criterion: #576 — a Wi-Fi-gated episode is NOT transferring,
+        // so VoiceOver must say why nothing is happening, not claim "Downloading".
+        XCTAssertEqual(EpisodeRowLabel.spokenDownloadState(.pending), "Waiting for Wi-Fi")
     }
 
     func testSpokenDownloadStateNoneAndFailedBothReadStreams() {
@@ -206,10 +210,20 @@ final class EpisodeRowLabelTests: XCTestCase {
         )
     }
 
-    func testDownloadBadgeDownloadingAndPending() {
-        let expected = EpisodeRowLabel.DownloadBadge(systemImage: "arrow.down.circle", text: "Downloading")
-        XCTAssertEqual(EpisodeRowLabel.downloadBadge(.downloading), expected)
-        XCTAssertEqual(EpisodeRowLabel.downloadBadge(.pending), expected)
+    func testDownloadBadgeDownloading() {
+        XCTAssertEqual(
+            EpisodeRowLabel.downloadBadge(.downloading),
+            EpisodeRowLabel.DownloadBadge(systemImage: "arrow.down.circle", text: "Downloading")
+        )
+    }
+
+    func testDownloadBadgePendingShowsWaitingForWiFi() {
+        // Acceptance criterion: #576 — the visible badge matches the spoken state:
+        // a Wi-Fi glyph plus "Waiting for Wi-Fi", never the "Downloading" arrow.
+        XCTAssertEqual(
+            EpisodeRowLabel.downloadBadge(.pending),
+            EpisodeRowLabel.DownloadBadge(systemImage: "wifi", text: "Waiting for Wi-Fi")
+        )
     }
 
     func testDownloadBadgeNoneAndFailedRenderStreaming() {

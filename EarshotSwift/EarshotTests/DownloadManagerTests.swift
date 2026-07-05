@@ -211,6 +211,51 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
+    // MARK: downloadAndWait fast paths (#576)
+
+    // Only the paths that return WITHOUT parking a continuation are testable
+    // here: a parked waiter needs a real background-session terminal event (or
+    // its 120s timeout), which needs a device transfer. The Wi-Fi-gated
+    // `.pending` → false fast path is likewise not coverable in-process:
+    // `isOnWifi` is private(set) and driven only by a live NWPathMonitor, and
+    // the simulator host always reports Wi-Fi/wired, so there is no seam to
+    // force the gate closed. The gating decision itself is pure and covered by
+    // the DownloadGate tests in DownloadsInboxLogicTests.
+
+    func test_downloadAndWait_alreadyDownloaded_returnsTrueImmediately() async {
+        // Acceptance criterion: #576 — export must not park a waiter (and risk a
+        // 120s stall) for audio that is already local.
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "w1", title: "Local", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: "a.mp3")
+        context.insert(episode)
+        let manager = makeManager(context)
+
+        let result = await manager.downloadAndWait(episode)
+
+        XCTAssertTrue(result)
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertEqual(episode.downloadPath, "a.mp3", "The fast path must not touch state")
+    }
+
+    func test_downloadAndWait_failedToStart_returnsFalseWithoutWaiting() async {
+        // Acceptance criterion: #576 — a download that can never produce a
+        // terminal event (invalid URL → .failed at enqueue) must return false
+        // immediately instead of parking a waiter until the timeout.
+        let context = TestStore.freshContext()
+        let episode = Episode(guid: "w2", title: "Bad URL", audioURL: "")
+        context.insert(episode)
+        let manager = makeManager(context)
+
+        let start = Date()
+        let result = await manager.downloadAndWait(episode)
+
+        XCTAssertFalse(result)
+        XCTAssertEqual(episode.downloadStatus, .failed)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5,
+                          "Must return via the fast path, never the 120s timeout")
+    }
+
     func testReconcileLeavesNonDownloadingEpisodesUntouched() async {
         let context = TestStore.freshContext()
         let done = Episode(guid: "d", title: "Done", audioURL: "https://h/d.mp3",
