@@ -137,6 +137,247 @@ final class RSSParserTests: XCTestCase {
         XCTAssertNil(RSSParser.parseDate(""))
     }
 
+    // MARK: Partial results on malformed XML (#384)
+
+    func testMalformedMidFeedReturnsSalvagedEpisodesAndTitle() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+          <channel>
+            <title>Partial Show</title>
+            <item>
+              <title>Good One</title>
+              <guid>g1</guid>
+              <enclosure url="https://example.com/1.mp3" type="audio/mpeg"/>
+            </item>
+            <item>
+              <title>Good Two</title>
+              <guid>g2</guid>
+              <enclosure url="https://example.com/2.mp3" type="audio/mpeg"/>
+            </item>
+            </wrongclose>
+        """
+        let feed = try XCTUnwrap(RSSParser().parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.title, "Partial Show")
+        XCTAssertEqual(feed.episodes.count, 2)
+        XCTAssertEqual(feed.episodes[0].guid, "g1")
+        XCTAssertEqual(feed.episodes[1].guid, "g2")
+    }
+
+    func testMalformedBeforeAnythingSalvageableReturnsNil() {
+        // Error hits before any title or item is captured — the old
+        // all-or-nothing contract still applies when there's nothing to salvage.
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            </wrongclose>
+            <title>Never Reached</title>
+          </channel>
+        </rss>
+        """
+        XCTAssertNil(RSSParser().parse(Data(xml.utf8)))
+    }
+
+    func testHalfOpenItemAtAbortPointIsDropped() throws {
+        // The abort happens inside the third item, after it has a title and an
+        // enclosure. It must not appear in the salvaged results — finishItem()
+        // only runs on a closing tag.
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Partial Show</title>
+            <item>
+              <title>Good One</title>
+              <guid>g1</guid>
+              <enclosure url="https://example.com/1.mp3" type="audio/mpeg"/>
+            </item>
+            <item>
+              <title>Half Item</title>
+              <guid>half</guid>
+              <enclosure url="https://example.com/half.mp3" type="audio/mpeg"/>
+              </wrongclose>
+            </item>
+          </channel>
+        </rss>
+        """
+        let feed = try XCTUnwrap(RSSParser().parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.episodes.count, 1)
+        XCTAssertEqual(feed.episodes[0].guid, "g1")
+        XCTAssertFalse(feed.episodes.contains { $0.title == "Half Item" })
+    }
+
+    // MARK: Channel <image><url> artwork fallback (#384)
+
+    func testChannelImageURLUsedWhenNoItunesImage() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Image Show</title>
+            <image>
+              <url>https://example.com/channel-art.png</url>
+              <title>Image Show</title>
+              <link>https://example.com/</link>
+            </image>
+          </channel>
+        </rss>
+        """
+        let feed = try XCTUnwrap(RSSParser().parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.artworkURL, "https://example.com/channel-art.png")
+    }
+
+    func testItunesImageWinsOverChannelImageWhenItunesComesFirst() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+          <channel>
+            <title>Image Show</title>
+            <itunes:image href="https://example.com/itunes-art.jpg"/>
+            <image>
+              <url>https://example.com/channel-art.png</url>
+            </image>
+          </channel>
+        </rss>
+        """
+        let feed = try XCTUnwrap(RSSParser().parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.artworkURL, "https://example.com/itunes-art.jpg")
+    }
+
+    func testItunesImageWinsOverChannelImageWhenImageComesFirst() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+          <channel>
+            <title>Image Show</title>
+            <image>
+              <url>https://example.com/channel-art.png</url>
+            </image>
+            <itunes:image href="https://example.com/itunes-art.jpg"/>
+          </channel>
+        </rss>
+        """
+        let feed = try XCTUnwrap(RSSParser().parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.artworkURL, "https://example.com/itunes-art.jpg")
+    }
+
+    func testImageFirstFeedDoesNotShadowChannelTitleAndLink() throws {
+        // The <image> block's own <title>/<link> children arrive before the
+        // channel's — they must not win.
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <image>
+              <url>https://example.com/channel-art.png</url>
+              <title>Image Block Title</title>
+              <link>https://example.com/image-block-link</link>
+            </image>
+            <title>Real Channel Title</title>
+            <link>https://example.com/real-link</link>
+          </channel>
+        </rss>
+        """
+        let feed = try XCTUnwrap(RSSParser().parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.title, "Real Channel Title")
+        XCTAssertEqual(feed.websiteURL, "https://example.com/real-link")
+        XCTAssertEqual(feed.artworkURL, "https://example.com/channel-art.png")
+    }
+
+    // MARK: itunes:explicit / itunes:episodeType (#384)
+
+    func testParseExplicitRecognizedValues() {
+        XCTAssertEqual(RSSParser.parseExplicit("yes"), true)
+        XCTAssertEqual(RSSParser.parseExplicit("true"), true)
+        XCTAssertEqual(RSSParser.parseExplicit("Yes"), true)
+        XCTAssertEqual(RSSParser.parseExplicit("no"), false)
+        XCTAssertEqual(RSSParser.parseExplicit("false"), false)
+        XCTAssertEqual(RSSParser.parseExplicit("clean"), false)
+        XCTAssertNil(RSSParser.parseExplicit("sometimes"))
+        XCTAssertNil(RSSParser.parseExplicit(""))
+    }
+
+    func testFeedExplicitParsedFromChannel() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+          <channel>
+            <title>Explicit Show</title>
+            <itunes:explicit>yes</itunes:explicit>
+          </channel>
+        </rss>
+        """
+        let feed = try XCTUnwrap(RSSParser().parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.explicit, true)
+    }
+
+    func testFeedExplicitNilWhenAbsent() throws {
+        let feed = try XCTUnwrap(RSSParser().parse(Data(sampleRSS.utf8)))
+        XCTAssertNil(feed.explicit)
+    }
+
+    func testEpisodeTypeCapturedLowercasedAndGarbageIsNil() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+          <channel>
+            <title>Type Show</title>
+            <item>
+              <title>A</title>
+              <itunes:episodeType>Full</itunes:episodeType>
+              <enclosure url="https://example.com/a.mp3" type="audio/mpeg"/>
+            </item>
+            <item>
+              <title>B</title>
+              <itunes:episodeType>trailer</itunes:episodeType>
+              <enclosure url="https://example.com/b.mp3" type="audio/mpeg"/>
+            </item>
+            <item>
+              <title>C</title>
+              <itunes:episodeType>Bonus</itunes:episodeType>
+              <enclosure url="https://example.com/c.mp3" type="audio/mpeg"/>
+            </item>
+            <item>
+              <title>D</title>
+              <itunes:episodeType>teaser</itunes:episodeType>
+              <enclosure url="https://example.com/d.mp3" type="audio/mpeg"/>
+            </item>
+            <item>
+              <title>E</title>
+              <enclosure url="https://example.com/e.mp3" type="audio/mpeg"/>
+            </item>
+          </channel>
+        </rss>
+        """
+        let feed = try XCTUnwrap(RSSParser().parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.episodes.count, 5)
+        XCTAssertEqual(feed.episodes[0].episodeType, "full")
+        XCTAssertEqual(feed.episodes[1].episodeType, "trailer")
+        XCTAssertEqual(feed.episodes[2].episodeType, "bonus")
+        XCTAssertNil(feed.episodes[3].episodeType)
+        XCTAssertNil(feed.episodes[4].episodeType)
+    }
+
+    // MARK: parseDuration hardening (#384)
+
+    func testParseDurationOverflowingValueReturnsNilWithoutTrapping() {
+        XCTAssertNil(RSSParser.parseDuration("999999999999999999:00:00"))
+    }
+
+    func testParseDurationHHMMSS() {
+        XCTAssertEqual(RSSParser.parseDuration("1:02:03"), 3723)
+    }
+
+    func testParseDurationRejectsNegatives() {
+        XCTAssertNil(RSSParser.parseDuration("-5"))
+        XCTAssertNil(RSSParser.parseDuration("1:-2:03"))
+    }
+
+    func testParseDurationRejectsMoreThanThreeSegments() {
+        XCTAssertNil(RSSParser.parseDuration("1:2:3:4"))
+    }
+
     func testDefaultEpisodeActionsOrder() {
         // `.unfollow` is deliberately LAST — destructive actions never default
         // early (#572).
