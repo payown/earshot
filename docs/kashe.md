@@ -365,6 +365,16 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   swipe still works with VoiceOver off. She placed it at the bottom of her
   list: a thing that removes a whole show should be a reach, not a reflex
   (Chapter 41)
+- She had an unspoken rule about update nights: re-download the drive shows
+  AFTER updating, not before, because updates quietly ate the files (rows
+  still said Downloaded, but past the last bar there was silence). She never
+  reported it, just moved the chore. Downloads now survive updates and the
+  update heals the ones already gone hollow, so the rule is retired
+  (Chapter 42)
+- Inbox, Queue, and Downloads can now be searched in place by pulling down,
+  with VoiceOver announcing the match count; she surfaces an episode a client
+  mentioned weeks earlier from deep in her queue with three letters instead
+  of flicking through the backlog (Chapter 42)
 
 ## What you can generate
 
@@ -1365,6 +1375,34 @@ This build reads the list the way she wrote it, which meant her upside-down work
 The stutter went with it. Mark as played had been showing up twice in the actions, the same words back to back, and she'd learned to flick past the echo like the doubled Remove from a while ago. Said once now.
 
 And there's a ninth action to place: Unfollow this podcast. The pruning swipe is hers to position now. She put it at the bottom. A thing that removes a whole show should be a reach, not a reflex. It asks first. She's already used it twice.
+
+---
+
+### Chapter 42 — Build 145
+
+*Kashe's downloads stop vanishing after updates, and her longest lists finally take a question instead of a scroll.*
+
+**What to test:**
+
+Pull down on Inbox, Queue, or Downloads to search that screen in place. VoiceOver announces how many episodes match when you submit. In the Queue, drag reorder pauses while a search is active; rotor moves still work.
+
+Downloads survive app updates now, and this update repairs your existing ones. "Export audio file" works on episodes you haven't downloaded. With Wi-Fi-only downloads on, a cellular attempt says "Waiting for Wi-Fi" and starts by itself when Wi-Fi returns. A dead link can't fake-finish as an error page.
+
+The garbled pitch-shifted blip before an export or download is gone, and the 4x scan is pitch-correct.
+
+Unfollowing the show you're listening to stops playback cleanly, no crash.
+
+The Actions rotor reads your order everywhere now: Now Playing artwork, Queue group headings, and the move actions in Folders and Quick Actions. Bookmark and folder rows say Delete and Share once each.
+
+Rotor Delete in Library and Folders asks to confirm first.
+
+Also: the Show notes row is easier to tap, Mark as played speaks and moves focus to the next row, and full-player artwork shrinks at big text sizes so the controls stay on screen.
+
+She had a rule about update nights she'd never said out loud: re-download the drive shows after, not before. Updates had a way of eating the files. The rows still said Downloaded, but out past the last bar the truth came out, silence where a show should be. She never reported it. She just moved the chore to the other side of the update.
+
+This build retires the rule. Downloads hold through an update, and this one goes back and heals the ones that had already gone hollow. She updated, re-downloaded nothing, and drove out past signal with the shows just there.
+
+Then she found the search. Pull down on the Queue and ask. A client had mentioned an episode weeks back and it was in there somewhere, buried in a list she runs deep. Three letters and it surfaced, and VoiceOver said how many matched. She's spent years flicking through her own backlog like it was somebody else's filing. Now the list answers.
 
 ---
 
