@@ -169,6 +169,27 @@ final class PlayerDeletionTests: XCTestCase {
         )
     }
 
+    /// Item 2 / #574: the observed now-playing mirror must be cleared by the
+    /// pre-delete release, so a list row never shows "Now Playing" for an episode
+    /// that was just deleted out from under the player.
+    func test_unsubscribe_whilePlayingThatPodcast_clearsNowPlayingEpisodeID() throws {
+        let ctx = TestStore.freshContext()
+        let (podcast, episode) = makePodcastWithEpisode(ctx)
+        let player = makePlayer(ctx)
+        player.play(episode)
+        XCTAssertEqual(
+            player.nowPlayingEpisodeID, episode.persistentModelID,
+            "precondition: the mirror points at the loaded episode"
+        )
+
+        XCTAssertTrue(SubscriptionRepository(context: ctx).unsubscribe(podcast))
+
+        XCTAssertNil(
+            player.nowPlayingEpisodeID,
+            "the pre-delete release clears the mirror so no row shows Now Playing for a deleted episode"
+        )
+    }
+
     /// Unfollowing a DIFFERENT show must leave playback completely untouched —
     /// the handler's podcast-ID guard keeps unrelated audio running.
     func test_unsubscribe_ofUnrelatedPodcast_leavesPlaybackRunning() throws {

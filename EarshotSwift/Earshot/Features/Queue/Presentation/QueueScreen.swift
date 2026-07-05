@@ -298,6 +298,10 @@ private struct QueueRow: View {
     // QueueRow renders under QueueScreen, which is under that root. Gates the
     // opt-in season/episode numbering (#452).
     @Environment(SettingsStore.self) private var settings
+    // Observed now-playing identity so the row re-renders when the loaded episode
+    // changes and its badge/label update (Item 2). Every QueueRow renders under
+    // QueueScreen, which is under the app root that injects PlayerService.
+    @Environment(PlayerService.self) private var player
     let episode: Episode
     let position: Int?
     let total: Int?
@@ -323,6 +327,16 @@ private struct QueueRow: View {
                 Text(episode.title)
                     .font(.body)
                     .multilineTextAlignment(.leading)
+                // Now-playing indicator (Item 2): icon + text, accent-tinted,
+                // never colour alone. Hidden from VoiceOver here — the row is one
+                // element and the spoken state rides in accessibilityLabel below.
+                if isNowPlaying {
+                    Label("Now Playing", systemImage: "waveform")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityHidden(true)
+                }
                 if let podcast = episode.podcast?.title {
                     Text(podcast)
                         .font(.caption)
@@ -380,8 +394,17 @@ private struct QueueRow: View {
         .modifier(SightedRowActions(actions: actions))
     }
 
+    /// True when this row's episode is the one loaded in the player, compared by
+    /// persistent identity against the observed ``PlayerService/nowPlayingEpisodeID``
+    /// so the row re-renders as the loaded episode changes (Item 2).
+    private var isNowPlaying: Bool {
+        player.nowPlayingEpisodeID == episode.persistentModelID
+    }
+
     private var accessibilityLabel: String {
-        var parts = [episode.title]
+        // "Now Playing" leads the label so VoiceOver announces the current
+        // episode's state before its title, mirroring EpisodeRowLabel (Item 2).
+        var parts = isNowPlaying ? ["Now Playing", episode.title] : [episode.title]
         if let podcast = episode.podcast?.title {
             parts.append(podcast)
         }

@@ -203,6 +203,60 @@ final class EpisodeRowLabelTests: XCTestCase {
         )
     }
 
+    // MARK: Now Playing (Item 2)
+
+    func testNowPlayingLeadsTheLabel() {
+        // Acceptance criterion: Item 2 — "Now Playing" is the FIRST thing spoken,
+        // before the title.
+        let label = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            isPlayed: false,
+            pubDate: date,
+            isNowPlaying: true
+        )
+        XCTAssertEqual(label, "Now Playing, The Big Rewrite, NosillaCast, \(dateText!)")
+        XCTAssertTrue(label.hasPrefix("Now Playing, "), "Now Playing must lead the label")
+    }
+
+    func testNowPlayingLeadsEvenOnAFullyPopulatedRow() {
+        // "Now Playing" precedes title, podcast, numbering, Played, date, download.
+        let label = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            seasonNumber: 2,
+            episodeNumber: 14,
+            isPlayed: true,
+            pubDate: date,
+            downloadState: .downloaded,
+            isNowPlaying: true
+        )
+        XCTAssertEqual(
+            label,
+            "Now Playing, The Big Rewrite, NosillaCast, Season 2, Episode 14, Played, \(dateText!), Downloaded"
+        )
+    }
+
+    func testNowPlayingDefaultFalseIsByteIdentical() {
+        // Callers that don't track playback pass the default; the label must be
+        // byte-for-byte identical to a row with no Now Playing prefix.
+        let withDefault = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            isPlayed: false,
+            pubDate: date
+        )
+        let explicitFalse = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            isPlayed: false,
+            pubDate: date,
+            isNowPlaying: false
+        )
+        XCTAssertEqual(withDefault, "The Big Rewrite, NosillaCast, \(dateText!)")
+        XCTAssertEqual(explicitFalse, withDefault)
+    }
+
     func testDownloadBadgeDownloaded() {
         XCTAssertEqual(
             EpisodeRowLabel.downloadBadge(.downloaded),
