@@ -32,6 +32,10 @@ struct InboxScreen: View {
     // so the UX is identical.
     @State private var pendingUnfollow: Podcast?
     @AccessibilityFocusState private var focusEmpty: Bool
+    // Focus target for the row that should take VoiceOver focus after the rotor
+    // "Mark as played" removes the focused row from the inbox (#579). Mirrors
+    // the Queue's neighbor-focus wiring.
+    @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     // Tracked by SwiftUI, so toggling VoiceOver while the Inbox is on screen
     // re-renders the rows and attaches/removes the swipe actions immediately —
     // no relaunch. (Reading UIAccessibility.isVoiceOverRunning in body would
@@ -68,6 +72,9 @@ struct InboxScreen: View {
                     // and re-renders these rows — no relaunch needed.
                     ForEach(inbox) { episode in
                         let row = EpisodeRow(episode: episode, actions: actions(for: episode), includesPodcastName: true)
+                            // Lets the rotor mark-played runner hand VoiceOver
+                            // focus to this row when its neighbor vanishes (#579).
+                            .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
                         if voiceOverEnabled {
                             row
                         } else {
@@ -244,7 +251,25 @@ struct InboxScreen: View {
             // Rotor "Unfollow this podcast" (#572): opens the SAME destructive
             // confirmation the trailing swipe uses — activation never unfollows
             // directly.
-            onUnfollow: { pendingUnfollow = episode.podcast }
+            onUnfollow: { pendingUnfollow = episode.podcast },
+            // Rotor "Mark as played" removes this row from the inbox (#579).
+            // The builder invokes this BEFORE the played flip, so the neighbor
+            // is captured while the row is still in the list; focus moves after
+            // the list has re-rendered — to the neighbor, or the empty state
+            // when this was the last row (mirrors clearInbox / unfollow).
+            onMarkPlayed: { nowPlayed in
+                guard nowPlayed else { return }
+                let neighbor = neighborID(
+                    of: episode, in: InboxRepository(context: context).inboxEpisodes()
+                )
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if let neighbor {
+                        focusedEpisode = neighbor
+                    } else {
+                        focusEmpty = true
+                    }
+                }
+            }
         )
     }
 

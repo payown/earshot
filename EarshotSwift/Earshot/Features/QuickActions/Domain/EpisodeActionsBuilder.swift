@@ -23,6 +23,14 @@ typealias EpisodeActionItem = QuickActionItem
 /// detached episodes — zero store writes, #517 contract) pass nil and the
 /// `.unfollow` action is simply omitted from their rotor. Surfaces that pass a
 /// runner must open a confirmation dialog, never unfollow directly.
+///
+/// `onMarkPlayed` is optional (#579): surfaces where marking played removes the
+/// row from the visible list (Inbox always; a podcast's episode list under the
+/// Unheard filter) pass a runner to keep VoiceOver focus oriented — it's invoked
+/// with the NEW played value BEFORE the state flips, so the surface can still
+/// find the row's neighbor in its visible list and move focus to it once the
+/// list re-renders. nil (the default) means no focus management, which is right
+/// for surfaces where the row stays put (Downloads, the search preview).
 @MainActor
 func buildEpisodeActions(
     episode: Episode,
@@ -33,7 +41,8 @@ func buildEpisodeActions(
     onShowNotes: @escaping () -> Void,
     onShare: @escaping () -> Void,
     onBookmarks: @escaping () -> Void,
-    onUnfollow: (() -> Void)? = nil
+    onUnfollow: (() -> Void)? = nil,
+    onMarkPlayed: ((Bool) -> Void)? = nil
 ) -> [QuickActionItem] {
     order.compactMap { action -> QuickActionItem? in
         switch action {
@@ -76,11 +85,19 @@ func buildEpisodeActions(
                 // marking unplayed leaves any dismissal sticky so a triaged
                 // episode never jumps back into the inbox (#546).
                 let nowPlayed = !played
+                // Invoked before the flip so the surface can still find this
+                // row's neighbor in its visible list (#579).
+                onMarkPlayed?(nowPlayed)
                 episode.isPlayed = nowPlayed
                 episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
                     nowPlayed: nowPlayed, wasDismissed: episode.inboxDismissed
                 )
                 saveQuickAction(context, "played state")
+                // The rotor path's only announcement (#579). The sighted swipe
+                // announces on its own path (InboxScreen.markPlayed) and never
+                // runs this runner, so exactly one announcement fires per
+                // activation. Wording matches that swipe path.
+                Announcer.announce(nowPlayed ? "Marked as played" : "Marked as unplayed")
             }
         case .viewBookmarks:
             return QuickActionItem(label: "Bookmarks", isDestructive: false) {

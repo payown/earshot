@@ -204,6 +204,72 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.first?.label, "Play now")
     }
 
+    // MARK: #579 — onMarkPlayed focus runner on the .markPlayed action
+
+    func testMarkPlayedRunnerReceivesNewValueBeforeFlip() {
+        // Acceptance criterion: #579 — the runner fires with the NEW played
+        // value BEFORE episode.isPlayed flips, so the surface can still find
+        // this row's neighbor in its visible list and move VoiceOver focus.
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx, played: false)
+        var receivedNewValue: Bool?
+        var isPlayedWhenSpyFired: Bool?
+        let items = buildEpisodeActions(
+            episode: episode, order: [.markPlayed], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {},
+            onMarkPlayed: { newValue in
+                receivedNewValue = newValue
+                isPlayedWhenSpyFired = episode.isPlayed
+            }
+        )
+        XCTAssertEqual(items.map(\.label), ["Mark as played"])
+        items.first?.run()
+        XCTAssertEqual(receivedNewValue, true, "spy receives the NEW played value")
+        XCTAssertEqual(isPlayedWhenSpyFired, false, "spy fires BEFORE the state flips")
+        XCTAssertTrue(episode.isPlayed, "state still flips after the spy returns")
+    }
+
+    func testMarkPlayedRunnerFiresOnUnplayDirectionToo() {
+        // Acceptance criterion: #579 — played→unplayed fires the runner as
+        // well, delivering the new value (false) before the flip.
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx, played: true)
+        var receivedNewValue: Bool?
+        var isPlayedWhenSpyFired: Bool?
+        let items = buildEpisodeActions(
+            episode: episode, order: [.markPlayed], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {},
+            onMarkPlayed: { newValue in
+                receivedNewValue = newValue
+                isPlayedWhenSpyFired = episode.isPlayed
+            }
+        )
+        XCTAssertEqual(items.map(\.label), ["Mark as unplayed"])
+        items.first?.run()
+        XCTAssertEqual(receivedNewValue, false, "spy receives the NEW played value")
+        XCTAssertEqual(isPlayedWhenSpyFired, true, "spy fires BEFORE the state flips")
+        XCTAssertFalse(episode.isPlayed, "state still flips after the spy returns")
+    }
+
+    func testMarkPlayedNilRunnerStillFlipsAndSaves() {
+        // Regression guard: #579 — surfaces that pass no onMarkPlayed (the
+        // default) keep the pre-#579 behavior: activation flips isPlayed and
+        // persists the change.
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx, played: false)
+        let items = buildEpisodeActions(
+            episode: episode, order: [.markPlayed], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}
+        )
+        items.first?.run()
+        XCTAssertTrue(episode.isPlayed, "flip still happens with no runner")
+        XCTAssertTrue(episode.inboxDismissed, "marking played dismisses from inbox (#546)")
+        XCTAssertFalse(ctx.hasChanges, "runner saved the flip (saveQuickAction ran)")
+    }
+
     func testPodcastToggleLabelsReflectState() {
         let ctx = TestStore.freshContext()
         let p = Podcast(feedURL: "https://x/a.xml", title: "Show", autoQueue: true)
