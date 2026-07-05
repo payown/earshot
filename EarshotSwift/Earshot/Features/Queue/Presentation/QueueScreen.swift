@@ -214,7 +214,15 @@ struct QueueScreen: View {
                 player: player,
                 context: context,
                 onShowNotes: { showNotesEpisode = episode },
-                onFocus: { focusedEpisode = $0 }
+                onFocus: { focusedEpisode = $0 },
+                // The queue AS DISPLAYED (#457): with a search active, the
+                // post-remove focus neighbor must be the adjacent VISIBLE row —
+                // a hidden row's id matches no rendered element, so focus would
+                // be dropped. With no search the filter passes the full queue
+                // through unchanged, preserving the original behavior.
+                visibleQueue: {
+                    EpisodeSearchFilter.filter(repo.queue(), query: searchText)
+                }
             )
         )
     }

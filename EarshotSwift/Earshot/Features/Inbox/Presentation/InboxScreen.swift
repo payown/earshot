@@ -257,7 +257,15 @@ struct InboxScreen: View {
         guard removed else { return }
         Announcer.announce("Unfollowed \(title)")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if InboxRepository(context: context).inboxEpisodes().isEmpty {
+            // Checked against the list AS DISPLAYED (#457): with a search
+            // active, unfollowing can empty the VISIBLE list (every match was
+            // the unfollowed show) while the inbox itself still has episodes.
+            // The no-match state then shows, and it's bound to `focusEmpty`, so
+            // this filtered check is what actually parks VoiceOver on it. With
+            // no search the filter passes the inbox through unchanged.
+            if EpisodeSearchFilter.filter(
+                InboxRepository(context: context).inboxEpisodes(), query: searchText
+            ).isEmpty {
                 focusEmpty = true
             }
         }

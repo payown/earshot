@@ -19,6 +19,13 @@ enum QueueMoveMode {
 /// neighbor after removal).
 ///
 /// `moveMode` tailors the move actions to the display mode (see ``QueueMoveMode``).
+///
+/// `visibleQueue` supplies the queue AS DISPLAYED for post-remove neighbor focus
+/// (#457/#579): when a search narrows the list, the neighbor must be the adjacent
+/// VISIBLE row — an id the filter is hiding matches no rendered row, so VoiceOver
+/// focus would be dropped instead of moved. nil (the default) means the full
+/// queue is displayed, which preserves the original behavior. Evaluated at action
+/// fire time, before the removal, so it always reflects the current filter.
 @MainActor
 func buildQueueActions(
     episode: Episode,
@@ -27,7 +34,8 @@ func buildQueueActions(
     player: PlayerService,
     context: ModelContext,
     onShowNotes: @escaping () -> Void,
-    onFocus: @escaping (PersistentIdentifier?) -> Void
+    onFocus: @escaping (PersistentIdentifier?) -> Void,
+    visibleQueue: (() -> [Episode])? = nil
 ) -> [QuickActionItem] {
     let repo = QueueRepository(context: context)
     let id = episode.persistentModelID
@@ -49,7 +57,7 @@ func buildQueueActions(
             return QuickActionItem(label: "Play now", isDestructive: false) { player.play(episode) }
         case .removeFromQueue:
             return QuickActionItem(label: "Remove from queue", isDestructive: true) {
-                let neighbor = neighborID(of: episode, in: repo.queue())
+                let neighbor = neighborID(of: episode, in: visibleQueue?() ?? repo.queue())
                 repo.cancelFromQueue(episode)
                 Announcer.announce("Removed \(episode.title) from the queue")
                 onFocus(neighbor)
