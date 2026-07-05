@@ -346,7 +346,7 @@ final class PlayerService {
             item = preparedItem
         } else {
             guard let url = PlaybackLogic.resolvePlaybackURL(
-                downloadPath: episode.downloadPath,
+                downloadPath: episode.localAudioURL?.path,
                 audioURL: episode.audioURL
             ) else {
                 AppLog.player.error("Cannot play episode, no usable source: \(episode.audioURL, privacy: .public)")
@@ -434,7 +434,7 @@ final class PlayerService {
             return
         }
         guard let url = PlaybackLogic.resolvePlaybackURL(
-            downloadPath: episode.downloadPath,
+            downloadPath: episode.localAudioURL?.path,
             audioURL: episode.audioURL
         ) else {
             AppLog.player.error("Cannot load episode, no usable source: \(episode.audioURL, privacy: .public)")
@@ -826,8 +826,8 @@ final class PlayerService {
     /// downloaded). Drives whether "Export audio file" shares immediately or has
     /// to download first.
     var currentEpisodeIsDownloaded: Bool {
-        guard let path = currentEpisode?.downloadPath, !path.isEmpty else { return false }
-        return FileManager.default.fileExists(atPath: path)
+        guard let url = currentEpisode?.localAudioURL else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
     }
 
     /// Exports the loaded episode's LOCAL audio file for sharing (#371, #401).
@@ -847,13 +847,11 @@ final class PlayerService {
             await downloads.download(episode)
         }
 
-        guard let path = episode.downloadPath, !path.isEmpty,
-              FileManager.default.fileExists(atPath: path) else {
+        guard let localURL = episode.localAudioURL,
+              FileManager.default.fileExists(atPath: localURL.path) else {
             AppLog.player.error("Export failed: no local file for \(episode.title, privacy: .public)")
             return nil
         }
-
-        let localURL = URL(fileURLWithPath: path)
         let fileName = EpisodeExportLogic.exportFileName(
             podcastTitle: episode.podcast?.title,
             episodeTitle: episode.title,
@@ -900,7 +898,7 @@ final class PlayerService {
         let guid = episode.guid
         let chapterURL = episode.chapterURL
         let audioURL = episode.audioURL
-        let downloadPath = episode.downloadPath
+        let downloadPath = episode.localAudioURL?.path
         let descriptionHTML = episode.episodeDescription
         chapterLoadEpisodeGUID = guid
         Task { @MainActor [weak self] in
@@ -1450,7 +1448,7 @@ final class PlayerService {
         // Already buffering the right episode — nothing to do.
         if preloadedEpisode?.persistentModelID == next.persistentModelID { return }
         guard let url = PlaybackLogic.resolvePlaybackURL(
-            downloadPath: next.downloadPath,
+            downloadPath: next.localAudioURL?.path,
             audioURL: next.audioURL
         ) else {
             clearPreload()

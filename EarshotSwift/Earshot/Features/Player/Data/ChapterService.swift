@@ -25,9 +25,11 @@ struct ChapterService {
 
     /// Fetches chapters for an episode, returning the first non-empty source.
     ///
-    /// - Parameter downloadPath: The local audio file path when the episode is
-    ///   downloaded. When the file exists, embedded chapters are read from disk
-    ///   (faster and more reliable than the redirect-tracked remote URL).
+    /// - Parameter downloadPath: The RESOLVED local audio file path when the
+    ///   episode is downloaded (pass `episode.localAudioURL?.path`, never the
+    ///   stored `downloadPath`, #575). When the file exists, embedded chapters
+    ///   are read from disk (faster and more reliable than the redirect-tracked
+    ///   remote URL).
     func chapters(
         chapterURL: String?,
         audioURL: String,

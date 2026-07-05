@@ -153,14 +153,68 @@ final class DownloadManager {
         AppLog.networking.info("Reconciled \(orphaned.count) stuck download(s) to failed")
     }
 
-    /// Removes a downloaded file and resets the episode's download state.
+    /// Removes a downloaded file and resets the episode's download state. The
+    /// file is deleted via the RESOLVED URL (`Episode.localAudioURL`), so a
+    /// legacy absolute `downloadPath` from before an app update still deletes
+    /// the real file instead of a dead path (#575).
     func removeDownload(_ episode: Episode) {
-        if let path = episode.downloadPath, !path.isEmpty {
-            try? FileManager.default.removeItem(atPath: path)
+        if let url = episode.localAudioURL {
+            try? FileManager.default.removeItem(at: url)
         }
         episode.downloadPath = nil
         episode.downloadStatus = .none
         save()
+    }
+
+    /// Heals `downloadPath` values written by pre-#575 builds, which stored
+    /// ABSOLUTE container paths. iOS relocates the app container on every app
+    /// update, so every such path goes stale: playback silently fell back to
+    /// streaming and Remove deleted a dead path while the real file survived.
+    ///
+    /// For each episode marked `.downloaded`: rewrite a legacy absolute value
+    /// to just the file name; if the resolved file no longer exists on disk,
+    /// reset the episode to not-downloaded so the UI offers a re-download
+    /// instead of listing an unplayable file. Idempotent (healed rows are
+    /// skipped next launch) and cheap (one fetch; writes only rows that need
+    /// it). Never throws outward — unverifiable rows are left alone. Call once
+    /// at launch after ``configure(context:)``, alongside
+    /// ``reconcileStuckDownloads()``.
+    func reconcileDownloadPaths() {
+        guard let context else { return }
+        let all = (try? context.fetch(FetchDescriptor<Episode>())) ?? []
+        let downloaded = all.filter { $0.downloadStatus == .downloaded }
+        guard !downloaded.isEmpty else { return }
+
+        var rewritten = 0
+        var reset = 0
+        for episode in downloaded {
+            guard let name = DownloadPaths.storedFileName(episode.downloadPath) else {
+                // Marked downloaded with no usable path: inconsistent row; make
+                // it re-downloadable.
+                episode.downloadPath = nil
+                episode.downloadStatus = .none
+                reset += 1
+                continue
+            }
+            guard let resolved = DownloadPaths.resolveLocalURL(storedValue: name) else {
+                // Downloads directory unavailable right now — don't clear state
+                // we can't verify; try again next launch.
+                continue
+            }
+            if FileManager.default.fileExists(atPath: resolved.path) {
+                if episode.downloadPath != name {
+                    episode.downloadPath = name
+                    rewritten += 1
+                }
+            } else {
+                episode.downloadPath = nil
+                episode.downloadStatus = .none
+                reset += 1
+            }
+        }
+        guard rewritten > 0 || reset > 0 else { return }
+        save()
+        AppLog.networking.info("Reconciled download paths: \(rewritten) legacy path(s) rewritten, \(reset) missing file(s) reset")
     }
 
     // MARK: Terminal events (delegate → main actor → SwiftData)
@@ -168,7 +222,10 @@ final class DownloadManager {
     private static func complete(guid: String, fileURL: URL) {
         guard let context = container?.mainContext,
               let episode = episode(forGUID: guid, in: context) else { return }
-        episode.downloadPath = fileURL.path
+        // Store only the file NAME: iOS relocates the app container on every
+        // app update, so an absolute path goes stale (#575). Reads resolve the
+        // name against the current container via `Episode.localAudioURL`.
+        episode.downloadPath = fileURL.lastPathComponent
         episode.downloadStatus = .downloaded
         try? context.save()
         Announcer.announce("Downloaded \(episode.title)")

@@ -20,7 +20,12 @@ final class Episode {
     /// played/unplayed read used by the episode list and Quick Actions.
     var status: EpisodeStatus
     var downloadStatus: DownloadStatus
-    /// Local file path once downloaded; when set, playback uses the file.
+    /// Downloaded audio file NAME inside Documents/Downloads; when set,
+    /// playback uses the file. Stored as a bare name — never an absolute path —
+    /// because iOS relocates the app container on every update (#575). Legacy
+    /// rows may still hold an absolute path until launch reconciliation
+    /// rewrites them. Never do I/O with this value directly; resolve it via
+    /// `Episode.localAudioURL` (Downloads data layer).
     var downloadPath: String?
     var positionSeconds: Int
     var playedAt: Date?
