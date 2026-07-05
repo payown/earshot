@@ -90,6 +90,21 @@ enum SettingsKey {
     static func podcastFilter(feedURL: String) -> String {
         podcastFilterPrefix + feedURL
     }
+
+    // Prefix for the per-podcast inbox episode limit. The full key is
+    // `podcast_inbox_cap_<feedURL>`, built by ``podcastInboxCap(feedURL:)``.
+    // Keyed by the podcast's unique feed URL — same pattern as the filter above
+    // (#489) — so the user's saved cap survives unsubscribe → re-subscribe
+    // (including OPML re-import), which otherwise creates a fresh `Podcast`
+    // with `inboxMaxEpisodes = nil` and silently drops the limit (#548).
+    // `Podcast.inboxMaxEpisodes` stays the live source of truth for all
+    // existing flows; this keyed copy exists only to restore it on re-add.
+    static let podcastInboxCapPrefix = "podcast_inbox_cap_"
+
+    /// The full per-podcast inbox-cap key for a given feed URL (#548).
+    static func podcastInboxCap(feedURL: String) -> String {
+        podcastInboxCapPrefix + feedURL
+    }
 }
 
 /// Documented defaults for settings not yet written by the user.
@@ -319,6 +334,26 @@ final class AppSettingsStore {
 
     func setEpisodeListFilter(_ filter: EpisodeListFilter, forFeedURL feedURL: String) {
         setRawValue(filter.rawValue, for: SettingsKey.podcastFilter(feedURL: feedURL))
+    }
+
+    /// The saved per-podcast inbox episode limit for this feed URL, or nil when
+    /// the user never set one, explicitly chose "No limit" (stored as the
+    /// `"null"` sentinel), or the stored value doesn't parse to a positive Int
+    /// (bad values are ignored defensively) (#548).
+    func podcastInboxCap(forFeedURL feedURL: String) -> Int? {
+        guard let cap = optionalInt(SettingsKey.podcastInboxCap(feedURL: feedURL)),
+              cap > 0
+        else { return nil }
+        return cap
+    }
+
+    /// Persists the per-podcast inbox limit outside the model, keyed by feed
+    /// URL, so it can be restored onto the fresh `Podcast` a re-subscribe
+    /// creates (#548). `nil` (an explicit "No limit") stores the `"null"`
+    /// sentinel rather than deleting the row, so choosing "No limit" can't be
+    /// shadowed by an older saved cap on a future re-subscribe.
+    func setPodcastInboxCap(_ cap: Int?, forFeedURL feedURL: String) {
+        setOptionalInt(cap, for: SettingsKey.podcastInboxCap(feedURL: feedURL))
     }
 
     private func save() {
