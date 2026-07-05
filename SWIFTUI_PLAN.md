@@ -129,6 +129,30 @@ The SwiftUI side is built and waiting.
 
 ## Audio Decisions
 
+- **Decision (#549 — garbled/pitch-shifted audio burst before export):** No
+  `AVPlayerItem` ever had an explicit `audioTimePitchAlgorithm`, so the framework
+  default (`.lowQualityZeroLatency`-class variable-rate processing, supported
+  range 0.5×–2.0×) served an engine that plays 0.5×–5.0× plus a 4× fast-forward
+  scan; on render-pipeline reconfiguration it can flush a buffered chunk at the
+  wrong rate/pitch — the tester-reported burst in the stop → menu → export
+  sequence. **Fix:** `PlayerService.makePlayerItem(url:)` is now the sole
+  construction point for every player item (shared `play()` path, `load()`
+  restore, gapless preload) and sets `audioTimePitchAlgorithm = .spectral`.
+  **Algorithm choice:** `.spectral` over the issue's proposed `.timeDomain` —
+  both support 1/32×–32×, but time-domain overlap-add gets choppy on speech
+  above ~2–3×, under this app's 5× ceiling; spectral is pitch-preserving across
+  the whole range and its single-stream CPU cost is negligible. Any future
+  `AVPlayerItem` creation must go through the helper. **Sequencing fix (same
+  issue):** the shared `play()` path called `replaceCurrentItem(with:)` while
+  the outgoing episode could still be playing (`rate != 0`), letting the new
+  item audibly render from 0:00 at the inherited rate before the resume seek
+  landed; `player.pause()` now precedes the swap (no-op for gapless advance —
+  the finished item already left the player paused). Export path audit came back
+  clean: export never plays audio, DownloadManager never touches the
+  player/session, no `setActive(false)` exists, and stall recovery is gated on
+  `intendsToPlay`. **File:** `PlayerService.swift` only. Ears-only device
+  verification pending.
+
 - **Decision (#362 — tab switching blocked during playback):** The periodic time
   observer fires every second and previously called `persistCurrentPosition()` →
   synchronous main-actor SwiftData `context.save()` on **every** tick, plus a

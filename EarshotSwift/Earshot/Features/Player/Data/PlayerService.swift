@@ -334,6 +334,22 @@ final class PlayerService {
         Announcer.announce("Streaming \(title)")
     }
 
+    /// Sole construction point for every `AVPlayerItem` the engine plays (#549).
+    /// Sets an explicit time-pitch algorithm because the framework default
+    /// (`.lowQualityZeroLatency`-class variable-rate processing) only supports
+    /// 0.5×–2.0× — this engine plays 0.5×–5.0× plus a 4× fast-forward scan — and
+    /// it can render a flushed buffer chunk garbled/pitch-shifted when the render
+    /// pipeline is reconfigured (the tester-reported burst before export).
+    /// `.spectral` is pitch-preserving across the whole supported rate range
+    /// (1/32×–32×), which `.timeDomain` is not: overlap-add speech gets choppy
+    /// above ~2–3×, well under this app's 5× ceiling. Its extra CPU cost for a
+    /// single stream is negligible on any supported device.
+    private func makePlayerItem(url: URL) -> AVPlayerItem {
+        let item = AVPlayerItem(url: url)
+        item.audioTimePitchAlgorithm = .spectral
+        return item
+    }
+
     /// Shared play path. `preparedItem`, when supplied, is a pre-buffered
     /// `AVPlayerItem` from the gapless preload, used for near-seamless advance.
     /// `transient` is true only for a stream-only Search preview (#517): the
@@ -352,7 +368,7 @@ final class PlayerService {
                 AppLog.player.error("Cannot play episode, no usable source: \(episode.audioURL, privacy: .public)")
                 return
             }
-            item = AVPlayerItem(url: url)
+            item = makePlayerItem(url: url)
         }
 
         // A new episode supersedes any in-flight sleep-timer fade (P1-4).
@@ -398,6 +414,13 @@ final class PlayerService {
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
 
+        // Halt the outgoing item's render before the swap (#549). Without this,
+        // switching episodes mid-playback replaces the item while `player.rate`
+        // is still non-zero, so the NEW item can audibly render from 0:00 at the
+        // inherited rate before the resume seek below lands. `play()` at the end
+        // of this method restarts audio, so this is a no-op for gapless advance
+        // (the finished item already left the player paused).
+        player.pause()
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
 
@@ -455,7 +478,7 @@ final class PlayerService {
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
 
-        let item = AVPlayerItem(url: url)
+        let item = makePlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
 
@@ -1454,7 +1477,7 @@ final class PlayerService {
             clearPreload()
             return
         }
-        preloadedItem = AVPlayerItem(url: url)
+        preloadedItem = makePlayerItem(url: url)
         preloadedEpisode = next
     }
 
