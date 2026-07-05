@@ -11,6 +11,7 @@ import SwiftData
 struct QueueScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
+    @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
 
@@ -213,6 +214,7 @@ struct QueueScreen: View {
                 order: quickActions.queueActions,
                 moveMode: moveMode,
                 player: player,
+                downloads: downloads,
                 context: context,
                 onShowNotes: { showNotesEpisode = episode },
                 onFocus: { focusedEpisode = $0 },

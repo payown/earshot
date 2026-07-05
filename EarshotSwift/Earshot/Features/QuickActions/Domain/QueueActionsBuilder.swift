@@ -32,6 +32,7 @@ func buildQueueActions(
     order: [QueueItemAction],
     moveMode: QueueMoveMode,
     player: PlayerService,
+    downloads: DownloadManager,
     context: ModelContext,
     onShowNotes: @escaping () -> Void,
     onFocus: @escaping (PersistentIdentifier?) -> Void,
@@ -67,6 +68,20 @@ func buildQueueActions(
             }
         case .openShowNotes:
             return QuickActionItem(label: "Open show notes", isDestructive: false) { onShowNotes() }
+        case .download:
+            // Mirrors EpisodeActionsBuilder's download closure: dynamic label and
+            // destructive flip based on the current download status.
+            let downloaded = episode.downloadStatus == .downloaded
+            return QuickActionItem(
+                label: downloaded ? "Remove download" : "Download",
+                isDestructive: downloaded
+            ) {
+                if downloaded {
+                    downloads.removeDownload(episode)
+                } else {
+                    Task { await downloads.download(episode) }
+                }
+            }
         case .moveToTop:
             guard moveMode == .flat else { return nil }
             return QuickActionItem(label: "Move to top", isDestructive: false,
