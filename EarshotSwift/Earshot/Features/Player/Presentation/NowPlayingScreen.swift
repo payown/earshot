@@ -157,28 +157,9 @@ struct NowPlayingScreen: View {
             // plus the three episode actions (#371) so VoiceOver users reach
             // Mark as played, Export audio file, and Stop after this episode from
             // the artwork rotor — the same set the visible overflow menu shows.
-            .accessibilityActions {
-                if player.fastForwardRotorAvailable {
-                    if player.isFastForwarding {
-                        Button("Stop Fast Forward") { player.endFastForward() }
-                    } else {
-                        Button("Start Fast Forward") { player.beginFastForward() }
-                    }
-                }
-                Button("Mark as played") { player.markCurrentPlayedAndAdvance() }
-                Button(exportActionLabel) { startExport() }
-                Button(stopAfterActionLabel) { player.toggleStopAfterEpisode() }
-                if player.nowPlayingEpisode != nil {
-                    Button("Bookmarks") { showingBookmarks = true }
-                }
-                // Mirror the visible prev/next chapter controls into the artwork
-                // rotor so VoiceOver users reach them the same way they reach the
-                // episode actions (#508). Only when the episode has chapters.
-                if player.chapterCount > 0 {
-                    Button("Previous chapter") { player.previousChapter() }
-                    Button("Next chapter") { player.nextChapter() }
-                }
-            }
+            // Routed through the shared helper so the rotor announces the
+            // designed order despite the OS's reversed emission (#572, #577).
+            .rotorActions(artworkRotorActions)
 
         // Only attach a value node while actually scanning. An empty-string value
         // registers a node VoiceOver reads as a pause (the same rule applied in
@@ -188,6 +169,51 @@ struct NowPlayingScreen: View {
         } else {
             base
         }
+    }
+
+    /// The artwork's rotor actions in DESIGNED announce order: fast-forward
+    /// scan first (when Direct Touch applies), then the three episode actions
+    /// (#371), Bookmarks, and prev/next chapter (#508) last. Built as an array
+    /// so `rotorActions(_:)` can compensate the OS's reversed emission (#577).
+    private var artworkRotorActions: [QuickActionItem] {
+        var actions: [QuickActionItem] = []
+        if player.fastForwardRotorAvailable {
+            if player.isFastForwarding {
+                actions.append(QuickActionItem(label: "Stop Fast Forward", isDestructive: false) {
+                    player.endFastForward()
+                })
+            } else {
+                actions.append(QuickActionItem(label: "Start Fast Forward", isDestructive: false) {
+                    player.beginFastForward()
+                })
+            }
+        }
+        actions.append(QuickActionItem(label: "Mark as played", isDestructive: false) {
+            player.markCurrentPlayedAndAdvance()
+        })
+        actions.append(QuickActionItem(label: exportActionLabel, isDestructive: false) {
+            startExport()
+        })
+        actions.append(QuickActionItem(label: stopAfterActionLabel, isDestructive: false) {
+            player.toggleStopAfterEpisode()
+        })
+        if player.nowPlayingEpisode != nil {
+            actions.append(QuickActionItem(label: "Bookmarks", isDestructive: false) {
+                showingBookmarks = true
+            })
+        }
+        // Mirror the visible prev/next chapter controls into the artwork rotor
+        // so VoiceOver users reach them the same way they reach the episode
+        // actions (#508). Only when the episode has chapters.
+        if player.chapterCount > 0 {
+            actions.append(QuickActionItem(label: "Previous chapter", isDestructive: false) {
+                player.previousChapter()
+            })
+            actions.append(QuickActionItem(label: "Next chapter", isDestructive: false) {
+                player.nextChapter()
+            })
+        }
+        return actions
     }
 
     // MARK: Title

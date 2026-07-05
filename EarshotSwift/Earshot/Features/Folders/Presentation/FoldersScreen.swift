@@ -35,20 +35,23 @@ struct FoldersScreen: View {
                         .accessibilityLabel(rowLabel(for: folder, index: index, count: folders.count))
                         .accessibilityHint("Use the actions rotor to move this folder without dragging.")
                         .accessibilityFocused($focusedFolderID, equals: folder.persistentModelID)
-                        .accessibilityActions {
-                            ForEach(
-                                QuickActionMoveLogic.targets(index: index, count: folders.count),
-                                id: \.label
-                            ) { target in
-                                Button(target.label) {
-                                    move(IndexSet(integer: index), target.destinationOffset)
-                                    Announcer.announce(
-                                        "Moved \(folder.name) to position \(target.resultingIndex + 1) of \(folders.count)"
-                                    )
-                                    focusedFolderID = folder.persistentModelID
+                        // Routed through the shared helper so the rotor announces
+                        // "Move to top" first — the same order the compensated
+                        // Queue rows use — despite the OS's reversed emission
+                        // (#572, #577). `QuickActionMoveLogic.targets` already
+                        // returns the designed order.
+                        .rotorActions(
+                            QuickActionMoveLogic.targets(index: index, count: folders.count)
+                                .map { target in
+                                    QuickActionItem(label: target.label, isDestructive: false) {
+                                        move(IndexSet(integer: index), target.destinationOffset)
+                                        Announcer.announce(
+                                            "Moved \(folder.name) to position \(target.resultingIndex + 1) of \(folders.count)"
+                                        )
+                                        focusedFolderID = folder.persistentModelID
+                                    }
                                 }
-                            }
-                        }
+                        )
                     }
                     .onMove(perform: move)
                     .onDelete(perform: delete)

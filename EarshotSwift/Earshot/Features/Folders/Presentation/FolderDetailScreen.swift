@@ -15,6 +15,13 @@ struct FolderDetailScreen: View {
     @State private var ageLimitText = ""
     @State private var showingDelete = false
 
+    // Tracked by SwiftUI, so toggling VoiceOver while this screen is open
+    // re-renders the rows and attaches/removes the sighted-only remove swipe
+    // immediately. Mirrors the Queue's SightedRowActions / Inbox gate (#573):
+    // iOS mirrors swipe actions into the VoiceOver rotor, which duplicated the
+    // row's custom "Remove from folder" action (#577).
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+
     private var members: [Podcast] {
         FolderRepository(context: context).podcasts(in: folder)
     }
@@ -133,8 +140,9 @@ struct FolderDetailScreen: View {
         }
     }
 
+    @ViewBuilder
     private func row(for podcast: Podcast) -> some View {
-        HStack(spacing: Spacing.md) {
+        let base = HStack(spacing: Spacing.md) {
             PodcastArtwork(urlString: podcast.artworkURL)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(podcast.title).font(.headline)
@@ -148,14 +156,26 @@ struct FolderDetailScreen: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(rowLabel(for: podcast))
-        .accessibilityActions {
-            Button("Remove from folder") { remove(podcast) }
-        }
-        .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                remove(podcast)
-            } label: {
-                Label("Remove", systemImage: "folder.badge.minus")
+        // Routed through the shared helper (#572, #577) so this row's rotor is
+        // owned by the one custom action, like every other rotor in the app.
+        .rotorActions([
+            QuickActionItem(label: "Remove from folder", isDestructive: true) { remove(podcast) },
+        ])
+
+        // The swipe is a sighted-only affordance, attached only when VoiceOver
+        // is off: iOS mirrors swipe actions into the VoiceOver rotor, which
+        // announced a near-identical "Remove" alongside the custom "Remove from
+        // folder" action above (#577). Toggling VoiceOver mid-session updates
+        // `voiceOverEnabled` and re-renders — no relaunch needed.
+        if voiceOverEnabled {
+            base
+        } else {
+            base.swipeActions(edge: .trailing) {
+                Button(role: .destructive) {
+                    remove(podcast)
+                } label: {
+                    Label("Remove", systemImage: "folder.badge.minus")
+                }
             }
         }
     }

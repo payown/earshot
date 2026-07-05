@@ -95,9 +95,9 @@ struct QueueScreen: View {
     }
 
     /// A single heading element per group. It carries the `.isHeader` trait and
-    /// is announced as "[Podcast], N episodes". The four group-level actions
-    /// (Play Group, Sort Newest First, Sort Oldest First, Shuffle Group) live in
-    /// the VoiceOver Actions rotor on this one element — no second focusable
+    /// is announced as "[Podcast], N episodes". The six group-level actions
+    /// (Play Group, Move Group Up/Down, Sort Newest/Oldest First, Shuffle Group)
+    /// live in the VoiceOver Actions rotor on this one element — no second focusable
     /// button — so reordering and playback never depend on a drag gesture.
     /// The explicit `.accessibilityLabel` overrides the child `Text`, so only
     /// one heading node exists (the SwiftUI analogue of the explicit-label +
@@ -112,43 +112,53 @@ struct QueueScreen: View {
             .accessibilityLabel("\(group.podcast.title), \(countPhrase)")
             .accessibilityAddTraits(.isHeader)
             .accessibilityFocused($focusedGroup, equals: podcastID)
-            .accessibilityActions {
-                // Play Group starts playback. The sort/shuffle and move-group
-                // actions only reorder in place (their @discardableResult Episode?,
-                // where any, is ignored) — they never start audio.
-                Button("Play Group") {
-                    if let episode = repo.playGroup(group.podcast) {
-                        player.play(episode)
-                        Announcer.announce("Playing \(group.podcast.title)")
-                    }
+            // Routed through the shared helper so the rotor announces Play
+            // Group first and Shuffle Group last — the designed order — despite
+            // the OS's reversed emission (#572, #577).
+            .rotorActions(groupHeaderActions(group, podcastID: podcastID))
+    }
+
+    /// The group header's rotor actions in DESIGNED announce order. Play Group
+    /// starts playback; the move and sort/shuffle actions only reorder in place
+    /// (their @discardableResult Episode?, where any, is ignored) — they never
+    /// start audio.
+    private func groupHeaderActions(
+        _ group: QueueGroup, podcastID: PersistentIdentifier
+    ) -> [QuickActionItem] {
+        [
+            QuickActionItem(label: "Play Group", isDestructive: false) {
+                if let episode = repo.playGroup(group.podcast) {
+                    player.play(episode)
+                    Announcer.announce("Playing \(group.podcast.title)")
                 }
-                Button("Move Group Up") {
-                    // Announce + refocus only on a real move; an edge no-op
-                    // (group already first / last) must stay silent.
-                    if repo.moveGroupUp(group.podcast) {
-                        Announcer.announce("Moved \(group.podcast.title) up")
-                        focusedGroup = podcastID
-                    }
+            },
+            QuickActionItem(label: "Move Group Up", isDestructive: false) {
+                // Announce + refocus only on a real move; an edge no-op
+                // (group already first / last) must stay silent.
+                if repo.moveGroupUp(group.podcast) {
+                    Announcer.announce("Moved \(group.podcast.title) up")
+                    focusedGroup = podcastID
                 }
-                Button("Move Group Down") {
-                    if repo.moveGroupDown(group.podcast) {
-                        Announcer.announce("Moved \(group.podcast.title) down")
-                        focusedGroup = podcastID
-                    }
+            },
+            QuickActionItem(label: "Move Group Down", isDestructive: false) {
+                if repo.moveGroupDown(group.podcast) {
+                    Announcer.announce("Moved \(group.podcast.title) down")
+                    focusedGroup = podcastID
                 }
-                Button("Sort Newest First") {
-                    repo.playNewestFirst(group.podcast)
-                    Announcer.announce("Sorted newest first")
-                }
-                Button("Sort Oldest First") {
-                    repo.playOldestFirst(group.podcast)
-                    Announcer.announce("Sorted oldest first")
-                }
-                Button("Shuffle Group") {
-                    repo.shuffleGroup(group.podcast)
-                    Announcer.announce("Shuffled")
-                }
-            }
+            },
+            QuickActionItem(label: "Sort Newest First", isDestructive: false) {
+                repo.playNewestFirst(group.podcast)
+                Announcer.announce("Sorted newest first")
+            },
+            QuickActionItem(label: "Sort Oldest First", isDestructive: false) {
+                repo.playOldestFirst(group.podcast)
+                Announcer.announce("Sorted oldest first")
+            },
+            QuickActionItem(label: "Shuffle Group", isDestructive: false) {
+                repo.shuffleGroup(group.podcast)
+                Announcer.announce("Shuffled")
+            },
+        ]
     }
 
     // MARK: Row
