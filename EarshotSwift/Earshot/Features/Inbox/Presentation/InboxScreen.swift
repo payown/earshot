@@ -31,6 +31,9 @@ struct InboxScreen: View {
     // Mirrors the Library unfollow flow (`SubscriptionsView.pendingUnsubscribe`)
     // so the UX is identical.
     @State private var pendingUnfollow: Podcast?
+    // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
+    // @Query-backed inbox is filtered in memory, never re-fetched.
+    @State private var searchText = ""
     @AccessibilityFocusState private var focusEmpty: Bool
     // Focus target for the row that should take VoiceOver focus after the rotor
     // "Mark as played" removes the focused row from the inbox (#579). Mirrors
@@ -47,6 +50,9 @@ struct InboxScreen: View {
         // count, and Clear dialog all read a single value instead of re-running
         // the filter (formerly a re-fetch) several times per render.
         let inbox = InboxRepository(context: context).inbox(from: inboxCandidates)
+        // What the list actually shows: the inbox narrowed by the search field
+        // (#457). With no search active this IS `inbox` (same array, no copy).
+        let visible = EpisodeSearchFilter.filter(inbox, query: searchText)
         return Group {
             if inbox.isEmpty {
                 ContentUnavailableView(
@@ -56,6 +62,13 @@ struct InboxScreen: View {
                 )
                 .accessibilityElement(children: .combine)
                 .accessibilityFocused($focusEmpty)
+            } else if visible.isEmpty {
+                // Search matched nothing. Bound to the same focus target as the
+                // true empty state, so the rotor mark-played / unfollow flows
+                // that park VoiceOver on "the empty state" land here when a
+                // search is active.
+                NoSearchMatchesView(query: searchText)
+                    .accessibilityFocused($focusEmpty)
             } else {
                 List {
                     // The rotor is owned EXCLUSIVELY by the row's configurable
@@ -70,7 +83,7 @@ struct InboxScreen: View {
                     // mirror was made redundant by the `.unfollow` Quick Action.
                     // Toggling VoiceOver mid-session updates `voiceOverEnabled`
                     // and re-renders these rows — no relaunch needed.
-                    ForEach(inbox) { episode in
+                    ForEach(visible) { episode in
                         let row = EpisodeRow(episode: episode, actions: actions(for: episode), includesPodcastName: true)
                             // Lets the rotor mark-played runner hand VoiceOver
                             // focus to this row when its neighbor vanishes (#579).
@@ -144,7 +157,19 @@ struct InboxScreen: View {
         // (e.g. for back-button context) without duplicating the principal.
         .navigationTitle("Inbox")
         .navigationBarTitleDisplayMode(.inline)
+        // In-place search filter (#457, Part A). The system `.searchable` field
+        // is the standard accessible search affordance (labeled, focusable,
+        // clearable). The result count is announced on SUBMIT only — never per
+        // keystroke, never while the field is empty — so typing stays quiet and
+        // the user asks for the tally when they want it (the list itself
+        // updates live as they type).
+        .searchable(text: $searchText, prompt: "Search inbox")
+        .onSubmit(of: .search) { announceMatches(count: visible.count) }
         .toolbar {
+            // Deliberately `inbox.count`, not `visible.count`: the title states
+            // the TOTAL inbox size even while a search narrows the list (#457).
+            // The title is the inbox's identity, not the filter's result count —
+            // the match tally is announced from the search field on submit.
             ToolbarItem(placement: .principal) {
                 Text(InboxLogic.inboxTitle(count: inbox.count))
                     .font(.headline)
@@ -232,7 +257,15 @@ struct InboxScreen: View {
         guard removed else { return }
         Announcer.announce("Unfollowed \(title)")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if InboxRepository(context: context).inboxEpisodes().isEmpty {
+            // Checked against the list AS DISPLAYED (#457): with a search
+            // active, unfollowing can empty the VISIBLE list (every match was
+            // the unfollowed show) while the inbox itself still has episodes.
+            // The no-match state then shows, and it's bound to `focusEmpty`, so
+            // this filtered check is what actually parks VoiceOver on it. With
+            // no search the filter passes the inbox through unchanged.
+            if EpisodeSearchFilter.filter(
+                InboxRepository(context: context).inboxEpisodes(), query: searchText
+            ).isEmpty {
                 focusEmpty = true
             }
         }
@@ -259,8 +292,17 @@ struct InboxScreen: View {
             // when this was the last row (mirrors clearInbox / unfollow).
             onMarkPlayed: { nowPlayed in
                 guard nowPlayed else { return }
+                // Neighbors come from the list as DISPLAYED: when a search is
+                // active the inbox is narrowed by the filter, so the neighbor
+                // must be the adjacent VISIBLE row, not an inbox row the filter
+                // is hiding (#457). With no search active the filter returns
+                // the array unchanged, preserving the original #579 behavior.
                 let neighbor = neighborID(
-                    of: episode, in: InboxRepository(context: context).inboxEpisodes()
+                    of: episode,
+                    in: EpisodeSearchFilter.filter(
+                        InboxRepository(context: context).inboxEpisodes(),
+                        query: searchText
+                    )
                 )
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     if let neighbor {
@@ -271,6 +313,14 @@ struct InboxScreen: View {
                 }
             }
         )
+    }
+
+    /// Announces the search's match count on submit (#457). Guarded so an empty
+    /// or whitespace-only field never announces; Announcer itself is a no-op
+    /// with VoiceOver off.
+    private func announceMatches(count: Int) {
+        guard EpisodeSearchFilter.isActive(searchText) else { return }
+        Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: count))
     }
 
     private func shareItems(for episode: Episode) -> [Any] {

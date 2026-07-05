@@ -270,6 +270,100 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertFalse(ctx.hasChanges, "runner saved the flip (saveQuickAction ran)")
     }
 
+    // MARK: #457 — search-aware neighbor focus for Remove from queue
+
+    /// Three distinct queued episodes (unique guids + feed URLs so the shared
+    /// summary cache and Podcast.feedURL uniqueness never collide).
+    private func makeQueuedTrio(_ ctx: ModelContext) -> [Episode] {
+        let repo = QueueRepository(context: ctx)
+        return (1...3).map { i in
+            let p = Podcast(feedURL: "https://x/q\(i).xml", title: "Show \(i)")
+            ctx.insert(p)
+            let e = Episode(guid: "q\(i)", title: "Queued \(i)", audioURL: "https://x/q\(i).mp3")
+            e.podcast = p
+            ctx.insert(e)
+            repo.add(e)
+            return e
+        }
+    }
+
+    private func removeAction(
+        for episode: Episode,
+        ctx: ModelContext,
+        visibleQueue: (() -> [Episode])? = nil,
+        onFocus: @escaping (PersistentIdentifier?) -> Void
+    ) -> QuickActionItem? {
+        buildQueueActions(
+            episode: episode,
+            order: [.removeFromQueue],
+            moveMode: .flat,
+            player: PlayerService(),
+            context: ctx,
+            onShowNotes: {},
+            onFocus: onFocus,
+            visibleQueue: visibleQueue
+        ).first
+    }
+
+    func testRemoveFromQueueNilProviderFocusesFullQueueNeighbor() {
+        // Acceptance criterion: #457 — with no visibleQueue provider (the
+        // default), removal focuses the neighbor in the FULL queue, exactly
+        // the pre-#457 behavior.
+        let ctx = TestStore.freshContext()
+        let eps = makeQueuedTrio(ctx)
+        var focused: PersistentIdentifier?
+        removeAction(for: eps[0], ctx: ctx) { focused = $0 }?.run()
+        XCTAssertEqual(focused, eps[1].persistentModelID,
+                       "full-queue neighbor (the next row) takes focus")
+        XCTAssertEqual(QueueRepository(context: ctx).queue().map(\.guid), ["q2", "q3"],
+                       "the episode actually left the queue")
+    }
+
+    func testRemoveFromQueueVisibleQueueFocusesNeighborWithinSubset() {
+        // Acceptance criterion: #457 — when a search narrows the list, the
+        // focused neighbor is the adjacent VISIBLE row, not a filtered-out
+        // full-queue neighbor whose id matches no rendered row.
+        let ctx = TestStore.freshContext()
+        let eps = makeQueuedTrio(ctx)
+        var focused: PersistentIdentifier?
+        // Search shows q1 and q3; q2 is hidden by the filter.
+        removeAction(for: eps[0], ctx: ctx, visibleQueue: { [eps[0], eps[2]] }) {
+            focused = $0
+        }?.run()
+        XCTAssertEqual(focused, eps[2].persistentModelID,
+                       "focus lands on the next VISIBLE row (q3), not hidden q2")
+        XCTAssertNotEqual(focused, eps[1].persistentModelID)
+    }
+
+    func testRemoveFromQueueLastVisibleRowFallsBackToPreviousVisible() {
+        // Acceptance criterion: #457 — removing the last visible row focuses
+        // the previous visible row.
+        let ctx = TestStore.freshContext()
+        let eps = makeQueuedTrio(ctx)
+        var focused: PersistentIdentifier?
+        removeAction(for: eps[2], ctx: ctx, visibleQueue: { [eps[0], eps[2]] }) {
+            focused = $0
+        }?.run()
+        XCTAssertEqual(focused, eps[0].persistentModelID,
+                       "no next visible row, so the previous visible row takes focus")
+    }
+
+    func testRemoveFromQueueSoleVisibleRowFocusesNil() {
+        // Acceptance criterion: #457 — removing the only matching row leaves
+        // nothing to focus; the callback still fires with nil so the caller
+        // can clear its focus state.
+        let ctx = TestStore.freshContext()
+        let eps = makeQueuedTrio(ctx)
+        var focusFired = false
+        var focused: PersistentIdentifier?
+        removeAction(for: eps[1], ctx: ctx, visibleQueue: { [eps[1]] }) {
+            focusFired = true
+            focused = $0
+        }?.run()
+        XCTAssertTrue(focusFired, "onFocus still fires so the caller can reset")
+        XCTAssertNil(focused)
+    }
+
     func testPodcastToggleLabelsReflectState() {
         let ctx = TestStore.freshContext()
         let p = Podcast(feedURL: "https://x/a.xml", title: "Show", autoQueue: true)

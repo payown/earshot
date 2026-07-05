@@ -351,6 +351,24 @@ ship; OPML export/import is the supported way to carry a library over.
 
 ## UI Decisions
 
+- **Per-screen search is one shared filter, presentation-only (#457 Part A).**
+  Inbox, Queue, and Downloads each get an in-place `.searchable` field backed by
+  `EpisodeSearchFilter` (`Core/UI/`), a pure enum: case- and diacritic-insensitive
+  `localizedStandardContains` over episode title → podcast title → the episode's
+  cached brief summary (via `EpisodeSummaryCache`, so description matching costs
+  an NSCache lookup and never regresses large-list scrolling; tradeoff is the
+  ~140-char summary cap). No repository/query changes — screens filter the
+  arrays they already loaded. Shared `NoSearchMatchesView` (one combined VO
+  element) replaces the list when nothing matches. Result counts announce on
+  SUBMIT only, never per keystroke, never while the field is empty. Inbox title
+  count stays TOTAL while filtering; Inbox #579 neighbor-focus computes against
+  the FILTERED list. Queue: flat rows keep their true "position X of Y"; drag
+  reorder + EditButton suspend while a search is active (move indices against a
+  partial list would be wrong — rotor moves still work); grouped mode filters
+  within groups and hides emptied groups, header counts = visible rows.
+  Downloads searches both sections (Recently Expired matches on the same
+  fields). Part B ("Search Everywhere") intentionally not started.
+
 - **Episode-list sort control is a pure enum (#459), episode lists only.** A
   single `EpisodeSortOrder` (Alphabetical / Latest first / Latest last, in
   `Features/Subscriptions/Domain/`) with `sorted(_ episodes:)` orders a podcast's
