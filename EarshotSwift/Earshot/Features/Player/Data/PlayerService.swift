@@ -5,6 +5,18 @@ import Observation
 import SwiftData
 import UIKit
 
+extension Notification.Name {
+    /// Posted on the main actor immediately BEFORE persisted episodes are
+    /// deleted out from under the player (#574). Two posters:
+    /// `SubscriptionRepository.unsubscribe` includes the doomed podcast's
+    /// `PersistentIdentifier` under ``PlayerService/willDeletePodcastIDKey``;
+    /// the Settings factory reset posts with no userInfo, meaning "everything".
+    /// ``PlayerService`` observes with `queue: nil`, so the handler runs
+    /// SYNCHRONOUSLY on the posting (main) thread and the player has fully
+    /// let go of its episode before the caller's `context.delete` executes.
+    static let earshotWillDeleteEpisodes = Notification.Name("earshotWillDeleteEpisodes")
+}
+
 /// AVPlayer-based playback engine for Earshot.
 ///
 /// Owns the single `AVPlayer`, drives the Now Playing bar, persists listening
@@ -78,6 +90,12 @@ final class PlayerService {
     @ObservationIgnored private var didFinishObserver: NSObjectProtocol?
     @ObservationIgnored private var interruptionObserver: NSObjectProtocol?
     @ObservationIgnored private var routeChangeObserver: NSObjectProtocol?
+    /// Observer for `.earshotWillDeleteEpisodes` (#574): the pre-delete hook
+    /// that lets the player release a doomed episode before it is deleted.
+    @ObservationIgnored private var deletionObserver: NSObjectProtocol?
+    /// One-shot flag for the deleted-instance guard log (#574) so a tick storm
+    /// against a deleted episode doesn't spam the log. Reset on episode load.
+    @ObservationIgnored private var didLogDeletedEpisodeGuard = false
     @ObservationIgnored private var remoteCommandsConfigured = false
     /// True when playback was paused by a system interruption that may resume.
     @ObservationIgnored private var pausedByInterruption = false
@@ -375,6 +393,7 @@ final class PlayerService {
 
         currentEpisode = episode
         currentEpisodeIsTransient = transient
+        didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
@@ -431,6 +450,7 @@ final class PlayerService {
 
         currentEpisode = episode
         currentEpisodeIsTransient = false
+        didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
@@ -479,6 +499,79 @@ final class PlayerService {
         persistCurrentPosition()
         flushListeningSession()
         updateNowPlayingInfo()
+    }
+
+    /// userInfo key for `.earshotWillDeleteEpisodes`: the `PersistentIdentifier`
+    /// of the podcast whose episodes are about to be deleted. Absent means all
+    /// local data is being wiped (factory reset).
+    static let willDeletePodcastIDKey = "podcastID"
+
+    /// Stops playback and detaches the player from its episode entirely (#574).
+    /// Runs (via `.earshotWillDeleteEpisodes`) BEFORE the loaded episode's model
+    /// objects are deleted — unfollowing the playing show, factory reset — so no
+    /// later tick, position persist, session flush, or now-playing update can
+    /// touch a deleted SwiftData instance. Safe to call when nothing is loaded:
+    /// every step below no-ops on nil/idle state.
+    func stopAndUnload() {
+        // Persist + flush FIRST, while the episode instance is still valid —
+        // the same durability anchors pause() uses. (In the unsubscribe flow
+        // the flushed session is removed moments later by
+        // `StatsRepository.removeSessions`; harmless.) After the clears below,
+        // nothing episode-referencing is ever written again.
+        persistCurrentPosition()
+        flushListeningSession()
+
+        // Supersede any in-flight sleep-timer fade and clear the timer itself:
+        // its episode (or the whole library) is going away, and PRD 5.5 clears
+        // the timer whenever playback of the timed episode ends. Silent — the
+        // deletion flows already announce their own outcome.
+        cancelFadeIfNeeded()
+        if sleepTimer.isActive { sleepTimer.cancel() }
+
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        // The per-item buffer KVO tokens would otherwise dangle on the
+        // discarded item (mirrors observeCurrentItem's teardown). The
+        // player-level timeControlStatus observation stays — it outlives items.
+        bufferEmptyObservation?.invalidate()
+        bufferEmptyObservation = nil
+        likelyToKeepUpObservation?.invalidate()
+        likelyToKeepUpObservation = nil
+
+        isPlaying = false
+        intendsToPlay = false
+        pausedByInterruption = false
+        isFastForwarding = false
+        rateBeforeFastForward = nil
+        stopAfterCurrentEpisode = false
+
+        // Drop every episode-derived reference and observable surface.
+        currentEpisode = nil
+        currentEpisodeIsTransient = false
+        currentTitle = nil
+        currentArtist = nil
+        durationSeconds = 0
+        currentPositionSeconds = 0
+        currentChapters = []
+        resetChapterObservables()
+        lastAutoSkipFromChapterIndex = nil
+        // Invalidates any in-flight async chapter load: its apply guard
+        // requires this guid to still match, so the stale result is dropped.
+        chapterLoadEpisodeGUID = nil
+        clearPreload()
+
+        lastTickPosition = nil
+        accumulatedListenSeconds = 0
+        lastPersistedSecond = nil
+        lastNowPlayingSyncSecond = nil
+        lastArtworkURL = nil
+        didLogDeletedEpisodeGuard = false
+
+        // Nothing is loaded any more: clear the lock screen / Control Center
+        // entirely rather than leaving a stale title behind. The AVAudioSession
+        // is left exactly as the existing stop paths leave it (never
+        // deactivated here), so route/interruption behavior is unchanged.
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
     /// Skips forward by the user-configured interval (default 30s).
@@ -1054,19 +1147,38 @@ final class PlayerService {
         guard currentSeconds.isFinite else { return }
         currentPositionSeconds = currentSeconds
 
+        // Belt-and-braces (#574): the loaded episode can be deleted out from
+        // under the player (unfollow-while-playing, factory reset).
+        // `stopAndUnload()` — driven by `.earshotWillDeleteEpisodes` — is the
+        // primary defense; if a tick still lands on a deleted instance, never
+        // read or write the model again. SwiftData traps on deleted-instance
+        // mutation (or resurrects a zombie row). `isDeleted` itself is a
+        // `PersistentModel` flag, safe to read on a deleted instance.
+        let episodeWasDeleted = currentEpisode?.isDeleted == true
+        if episodeWasDeleted { logDeletedEpisodeGuardOnce("periodic tick") }
+
         // Keep duration fresh once the item reports it.
         if durationSeconds <= 0,
            let itemDuration = player.currentItem?.duration.seconds,
            itemDuration.isFinite, itemDuration > 0 {
             durationSeconds = itemDuration
-            currentEpisode?.durationSeconds = Int(itemDuration)
+            if !episodeWasDeleted {
+                currentEpisode?.durationSeconds = Int(itemDuration)
+            }
         }
 
         persistPositionThrottled(currentSecond: Int(currentSeconds))
         recordListeningTick()
         updateNowPlayingElapsedThrottled(currentSecond: Int(currentSeconds))
-        evaluateChapterAutoSkip()
+        // Chapter auto-skip reads the episode's guid; skip it on a deleted
+        // instance. The chapter TITLE refresh below is model-free (positions
+        // against the in-memory chapter list) and stays live.
+        if !episodeWasDeleted {
+            evaluateChapterAutoSkip()
+        }
         updateCurrentChapter()
+
+        guard !episodeWasDeleted else { return }
 
         // Mark played once we cross the threshold.
         let duration = currentEpisode?.durationSeconds ?? (durationSeconds > 0 ? Int(durationSeconds) : nil)
@@ -1076,6 +1188,16 @@ final class PlayerService {
         }
     }
 
+    /// Logs the deleted-instance guard once per loaded episode (#574) so the
+    /// per-second tick can't spam. Reset when a new episode loads or unloads.
+    private func logDeletedEpisodeGuardOnce(_ sink: String) {
+        guard !didLogDeletedEpisodeGuard else { return }
+        didLogDeletedEpisodeGuard = true
+        AppLog.player.debug(
+            "Skipped \(sink, privacy: .public): the loaded episode was deleted from the store (#574)"
+        )
+    }
+
     /// Eagerly writes the current position to disk (used by pause, seek, episode
     /// switch — the durability anchors). Resets the per-tick throttle so the next
     /// tick doesn't redundantly re-save the same second.
@@ -1083,6 +1205,11 @@ final class PlayerService {
         // A transient Search-preview stream is never persisted (#517).
         guard !currentEpisodeIsTransient else { return }
         guard let episode = currentEpisode, currentPositionSeconds.isFinite else { return }
+        // Never write to a deleted instance (#574) — SwiftData traps.
+        guard !episode.isDeleted else {
+            logDeletedEpisodeGuardOnce("position persist")
+            return
+        }
         let second = Int(max(0, currentPositionSeconds))
         episode.positionSeconds = second
         lastPersistedSecond = second
@@ -1098,6 +1225,11 @@ final class PlayerService {
         // A transient Search-preview stream is never persisted (#517).
         guard !currentEpisodeIsTransient else { return }
         guard let episode = currentEpisode else { return }
+        // Never write to a deleted instance (#574) — SwiftData traps.
+        guard !episode.isDeleted else {
+            logDeletedEpisodeGuardOnce("throttled position persist")
+            return
+        }
         guard PlaybackLogic.shouldPersistTick(
             currentSecond: currentSecond,
             lastPersistedSecond: lastPersistedSecond
@@ -1140,6 +1272,13 @@ final class PlayerService {
             accumulatedListenSeconds = 0
             return
         }
+        // Never insert a ListeningSession referencing a deleted instance
+        // (#574) — the insert would resurrect a zombie row or trap on save.
+        guard !episode.isDeleted else {
+            logDeletedEpisodeGuardOnce("listening-session flush")
+            accumulatedListenSeconds = 0
+            return
+        }
         let seconds = Int(accumulatedListenSeconds)
         accumulatedListenSeconds = 0
         guard seconds >= minSeconds else { return }
@@ -1167,6 +1306,11 @@ final class PlayerService {
         // (#517); it has no store row to update.
         guard !currentEpisodeIsTransient else { return }
         guard let episode = currentEpisode else { return }
+        // Never write to a deleted instance (#574) — SwiftData traps.
+        guard !episode.isDeleted else {
+            logDeletedEpisodeGuardOnce("mark played")
+            return
+        }
         episode.isPlayed = true
         episode.positionSeconds = 0
         saveContext()
@@ -1339,6 +1483,43 @@ final class PlayerService {
         ) { [weak self] note in
             Task { @MainActor in self?.handleRouteChange(note) }
         }
+        // Pre-delete hook (#574). `queue: nil` runs the block SYNCHRONOUSLY on
+        // the posting thread; both posters (SubscriptionRepository.unsubscribe,
+        // SettingsReset.deleteAllLocalData) are @MainActor-isolated, so this is
+        // always the main thread and the player is fully unloaded before the
+        // poster's `context.delete` runs.
+        deletionObserver = NotificationCenter.default.addObserver(
+            forName: .earshotWillDeleteEpisodes,
+            object: nil,
+            queue: nil
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                self?.handleWillDeleteEpisodes(note)
+            }
+        }
+    }
+
+    /// Reacts to `.earshotWillDeleteEpisodes` (#574). With a podcast ID in
+    /// userInfo (unsubscribe): if the CURRENT episode belongs to that podcast,
+    /// stop and unload; if only the gapless PRELOAD does, just drop the preload
+    /// and leave unrelated playback running. With no podcast ID (factory
+    /// reset): stop unconditionally when anything is loaded.
+    private func handleWillDeleteEpisodes(_ note: Notification) {
+        if let doomedPodcastID = note.userInfo?[Self.willDeletePodcastIDKey] as? PersistentIdentifier {
+            let currentMatches = currentEpisode?.podcast?.persistentModelID == doomedPodcastID
+            let preloadMatches = preloadedEpisode?.podcast?.persistentModelID == doomedPodcastID
+            guard currentMatches || preloadMatches else { return }
+            guard currentMatches else {
+                AppLog.player.info("Dropping gapless preload: its podcast is being unfollowed (#574)")
+                clearPreload()
+                return
+            }
+            AppLog.player.info("Stopping playback: the playing podcast is being unfollowed (#574)")
+        } else {
+            guard currentEpisode != nil || preloadedEpisode != nil else { return }
+            AppLog.player.info("Stopping playback: all local data is being deleted (#574)")
+        }
+        stopAndUnload()
     }
 
     private func handleInterruption(_ note: Notification) {

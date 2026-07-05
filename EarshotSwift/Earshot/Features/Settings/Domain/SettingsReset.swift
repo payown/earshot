@@ -5,6 +5,13 @@ import SwiftData
 enum SettingsReset {
     @MainActor
     static func deleteAllLocalData(context: ModelContext) {
+        // Stop and unload the player BEFORE deleting: it may hold the episode
+        // being wiped, and its periodic position persist / session flush would
+        // write to a deleted instance within seconds (#574). No userInfo means
+        // "everything is going away"; PlayerService observes synchronously
+        // (`queue: nil`, both sides @MainActor), so the unload completes
+        // before the first delete below.
+        NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
         deleteAll(Podcast.self, context)        // cascades episodes, queue items, bookmarks, etc.
         deleteAll(Episode.self, context)
         deleteAll(QueueItem.self, context)

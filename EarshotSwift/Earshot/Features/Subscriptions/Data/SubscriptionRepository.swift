@@ -174,6 +174,20 @@ final class SubscriptionRepository {
     @discardableResult
     func unsubscribe(_ podcast: Podcast) -> Bool {
         let title = podcast.title
+        // If the player currently holds an episode of this podcast (loaded or
+        // gapless-preloaded), it must let go BEFORE the cascade delete below —
+        // otherwise the periodic position persist / listening-session flush
+        // writes to a deleted instance within seconds and SwiftData traps
+        // (#574). Posted synchronously (both sides are @MainActor, and
+        // PlayerService observes with `queue: nil`), so the unload completes
+        // before `context.delete` runs. A notification keeps this repository
+        // free of a player dependency and covers every unsubscribe surface
+        // through this single choke point.
+        NotificationCenter.default.post(
+            name: .earshotWillDeleteEpisodes,
+            object: nil,
+            userInfo: [PlayerService.willDeletePodcastIDKey: podcast.persistentModelID]
+        )
         FolderRepository(context: context).removeFromAllFolders(podcast)
         StatsRepository(context: context).removeSessions(for: podcast)
         context.delete(podcast)
