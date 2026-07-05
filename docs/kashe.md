@@ -375,6 +375,12 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   with VoiceOver announcing the match count; she surfaces an episode a client
   mentioned weeks earlier from deep in her queue with three letters instead
   of flicking through the backlog (Chapter 42)
+- Sunday night is Kashe's planning night: she works through the whole week's
+  inbox at once, deciding what goes to the queue, coffee gone cold by the end.
+  She'd been doing it one episode at a time, tap-queue repeated fifteen or
+  twenty times some weeks. This build lets her check off a batch of episodes
+  in the Inbox (a Select mode with checkboxes) and send all of them to the
+  queue in one move, in the order they already sit in the Inbox (Chapter 43)
 
 ## What you can generate
 
@@ -1403,6 +1409,34 @@ She had a rule about update nights she'd never said out loud: re-download the dr
 This build retires the rule. Downloads hold through an update, and this one goes back and heals the ones that had already gone hollow. She updated, re-downloaded nothing, and drove out past signal with the shows just there.
 
 Then she found the search. Pull down on the Queue and ask. A client had mentioned an episode weeks back and it was in there somewhere, buried in a list she runs deep. Three letters and it surfaced, and VoiceOver said how many matched. She's spent years flicking through her own backlog like it was somebody else's filing. Now the list answers.
+
+---
+
+### Chapter 43 — Build 146
+
+*Kashe's Sunday inbox pass used to mean one episode at a time; this build lets her check a batch and send it to the queue in one step.*
+
+**What to test:**
+
+In the Inbox, tap Select in the toolbar. Every row switches to a checkbox, and VoiceOver says "selected" or "unselected" as you check each one, no extra announcement needed.
+
+Check a few episodes. The Add to Queue button in the toolbar stays grayed out until at least one is checked, then announces how many you've picked.
+
+Tap Add to Queue. Every checked episode queues in one move, in the same order they already sit in your Inbox.
+
+Clear inbox is unchanged. It still works on its own, outside Select mode.
+
+Sunday night is Kashe's planning night. She sits with coffee gone cold and works through the whole week's inbox, one episode at a time. Tap. Queue. Tap. Queue. Fifteen, twenty times some weeks, whatever piled up while she was too busy with clients to keep pace.
+
+She never minded it exactly. It was just time spent, like folding laundry. You do it because it needs doing.
+
+Tonight there's a Select button that wasn't there before. She taps it. The rows go quiet, and something new sits next to each one, a little box. She checks the first, the second, VoiceOver saying "selected" plain and fast, no fuss. She works down the list, picking the ones she wants for the week, skipping a couple she's not ready for.
+
+At the bottom there's a button now too. Add to Queue. She leaves it alone at first, waiting to see if it does something odd. It tells her how many she's picked before she even taps it.
+
+One tap. All of it lands in the queue, same order she checked it in.
+
+She sits there a second, coffee still cold, wondering what she's supposed to do with the rest of her Sunday.
 
 ---
 
