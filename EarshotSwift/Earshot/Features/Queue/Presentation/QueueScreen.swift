@@ -17,11 +17,19 @@ struct QueueScreen: View {
     @Query(sort: \QueueItem.position) private var items: [QueueItem]
 
     @State private var showNotesEpisode: Episode?
+    // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
+    // queue itself is never touched — rows are hidden from display only.
+    @State private var searchText = ""
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusedGroup: PersistentIdentifier?
 
     private var repo: QueueRepository { QueueRepository(context: context) }
     private var episodes: [Episode] { items.compactMap(\.episode) }
+
+    /// Whether the search field holds a real (non-whitespace) query. Gates the
+    /// no-match state and disables drag reorder / Edit while filtering, since
+    /// move indices against a partial list would be wrong (#457).
+    private var searchActive: Bool { EpisodeSearchFilter.isActive(searchText) }
 
     /// Drives the grouped-vs-flat display from the persisted
     /// ``SettingsKey/groupQueueEpisodes`` setting, so the choice survives
@@ -48,6 +56,12 @@ struct QueueScreen: View {
             // options was announced before the heading (#490).
             .navigationTitle("Queue")
             .navigationBarTitleDisplayMode(.inline)
+            // In-place search filter (#457, Part A). Standard accessible
+            // `.searchable` field; the match count is announced on SUBMIT only —
+            // never per keystroke, never while the field is empty — while the
+            // list itself narrows live as the user types.
+            .searchable(text: $searchText, prompt: "Search queue")
+            .onSubmit(of: .search) { announceMatches() }
             .toolbar { toolbar }
             .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
     }
@@ -60,6 +74,11 @@ struct QueueScreen: View {
                 systemImage: "list.bullet",
                 description: Text("Episodes you add to the queue appear here.")
             )
+        } else if searchActive && EpisodeSearchFilter.filter(episodes, query: searchText).isEmpty {
+            // A search is active and nothing in the queue matches — covers both
+            // flat and grouped modes (a group survives filtering only if one of
+            // its episodes matches, so no-match overall means no groups either).
+            NoSearchMatchesView(query: searchText)
         } else if settings.groupQueueEpisodes {
             groupedList
         } else {
@@ -70,19 +89,38 @@ struct QueueScreen: View {
     // MARK: Flat
 
     private var flatList: some View {
-        List {
-            ForEach(Array(episodes.enumerated()), id: \.element.persistentModelID) { index, episode in
+        // Filter WITHOUT re-numbering: `index` stays each row's position in the
+        // full queue, so a filtered row still speaks its true "position X of Y"
+        // (#457) — X is where the episode actually sits, Y the whole queue.
+        // With no search active this passes every row through unchanged.
+        let indexed = Array(episodes.enumerated()).filter {
+            EpisodeSearchFilter.matches($0.element, query: searchText)
+        }
+        return List {
+            ForEach(indexed, id: \.element.persistentModelID) { index, episode in
                 row(episode, position: index + 1, total: episodes.count, moveMode: .flat)
             }
-            .onMove(perform: handleMove)
+            // Drag reorder is suspended while a search narrows the list: move
+            // destination indices refer to the visible subset, not real queue
+            // positions, so a drop would land in the wrong place. The rotor
+            // move actions (which address the real queue) keep working.
+            .onMove(perform: searchActive ? nil : handleMove)
         }
     }
 
     // MARK: Grouped
 
     private var groupedList: some View {
-        List {
-            ForEach(repo.groupedQueue()) { group in
+        // Filter within each group and hide groups the search empties (#457).
+        // The header's "N episodes" count then reflects the visible rows, which
+        // is what a VoiceOver user is about to traverse.
+        let groups: [QueueGroup] = repo.groupedQueue().compactMap { group in
+            let matching = EpisodeSearchFilter.filter(group.episodes, query: searchText)
+            guard !matching.isEmpty else { return nil }
+            return QueueGroup(podcast: group.podcast, episodes: matching)
+        }
+        return List {
+            ForEach(groups) { group in
                 Section {
                     ForEach(group.episodes) { episode in
                         row(episode, position: nil, total: nil, moveMode: .grouped)
@@ -193,7 +231,10 @@ struct QueueScreen: View {
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
         }
-        if !episodes.isEmpty && !settings.groupQueueEpisodes {
+        // Edit (drag reorder) is hidden while a search is active, matching the
+        // suspended `.onMove` — reordering a partial view of the queue would
+        // move rows to the wrong real positions (#457).
+        if !episodes.isEmpty && !settings.groupQueueEpisodes && !searchActive {
             ToolbarItem(placement: .topBarLeading) { EditButton() }
         }
         ToolbarItem(placement: .topBarTrailing) {
@@ -222,6 +263,17 @@ struct QueueScreen: View {
         let episode = episodes[source]
         repo.move(episode, toIndex: to > source ? to - 1 : to)
         focusedEpisode = episode.persistentModelID
+    }
+
+    // MARK: Search
+
+    /// Announces the search's match count on submit (#457). Guarded so an empty
+    /// or whitespace-only field never announces; Announcer itself is a no-op
+    /// with VoiceOver off.
+    private func announceMatches() {
+        guard searchActive else { return }
+        let count = EpisodeSearchFilter.filter(episodes, query: searchText).count
+        Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: count))
     }
 
 }

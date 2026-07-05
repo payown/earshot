@@ -20,6 +20,9 @@ struct DownloadsScreen: View {
     // activation never unfollows directly. Same pattern and wording as
     // InboxScreen / SubscriptionsView.
     @State private var pendingUnfollow: Podcast?
+    // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
+    // downloaded set and the expiration records are filtered in memory only.
+    @State private var searchText = ""
 
     private var downloaded: [Episode] {
         allEpisodes
@@ -32,25 +35,41 @@ struct DownloadsScreen: View {
     }
 
     var body: some View {
-        Group {
-            if downloaded.isEmpty && expiredEntries.isEmpty {
+        // Compute each source once per body, then narrow both by the search
+        // (#457). The Recently Expired section is searched too — an expired
+        // episode matches on the same fields as a downloaded one — so a search
+        // never silently hides a restorable episode the user is looking for.
+        // With no search active the filters pass everything through unchanged.
+        let allDownloaded = downloaded
+        let allExpired = expiredEntries
+        let visibleDownloaded = EpisodeSearchFilter.filter(allDownloaded, query: searchText)
+        let visibleExpired = EpisodeSearchFilter.isActive(searchText)
+            ? allExpired.filter { entry in
+                entry.episode.map { EpisodeSearchFilter.matches($0, query: searchText) } ?? false
+            }
+            : allExpired
+        return Group {
+            if allDownloaded.isEmpty && allExpired.isEmpty {
                 ContentUnavailableView(
                     "No downloads",
                     systemImage: "arrow.down.circle",
                     description: Text("Episodes you download appear here.")
                 )
+            } else if visibleDownloaded.isEmpty && visibleExpired.isEmpty {
+                // A search is active (there IS content, it just doesn't match).
+                NoSearchMatchesView(query: searchText)
             } else {
                 List {
-                    if !downloaded.isEmpty {
+                    if !visibleDownloaded.isEmpty {
                         Section(header: Text("Downloaded").accessibilityAddTraits(.isHeader)) {
-                            ForEach(downloaded) { episode in
+                            ForEach(visibleDownloaded) { episode in
                                 EpisodeRow(episode: episode, actions: actions(for: episode), includesPodcastName: true)
                             }
                         }
                     }
-                    if !expiredEntries.isEmpty {
+                    if !visibleExpired.isEmpty {
                         Section(header: Text("Recently Expired").accessibilityAddTraits(.isHeader)) {
-                            ForEach(expiredEntries) { entry in
+                            ForEach(visibleExpired) { entry in
                                 if let episode = entry.episode {
                                     expiredRow(episode, expiredAt: entry.expiredAt)
                                 }
@@ -62,6 +81,14 @@ struct DownloadsScreen: View {
         }
         .navigationTitle("Downloads")
         .navigationBarTitleDisplayMode(.inline)
+        // In-place search filter (#457, Part A). Standard accessible
+        // `.searchable` field; the match count is announced on SUBMIT only —
+        // never per keystroke, never while the field is empty — while the list
+        // narrows live as the user types. The count spans both sections.
+        .searchable(text: $searchText, prompt: "Search downloads")
+        .onSubmit(of: .search) {
+            announceMatches(count: visibleDownloaded.count + visibleExpired.count)
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Text("Downloads")
@@ -160,6 +187,14 @@ struct DownloadsScreen: View {
         pendingUnfollow = nil
         guard removed else { return }
         Announcer.announce("Unfollowed \(title)")
+    }
+
+    /// Announces the search's match count on submit (#457). Guarded so an empty
+    /// or whitespace-only field never announces; Announcer itself is a no-op
+    /// with VoiceOver off.
+    private func announceMatches(count: Int) {
+        guard EpisodeSearchFilter.isActive(searchText) else { return }
+        Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: count))
     }
 
     private func shareItems(for episode: Episode) -> [Any] {
