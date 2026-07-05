@@ -21,6 +21,13 @@ struct EpisodeListView: View {
     // gone. Wording matches InboxScreen / SubscriptionsView.
     @State private var pendingUnfollow: Podcast?
 
+    // Focus targets for the rotor "Mark as played" under the Unheard filter,
+    // where the marked row leaves the visible list (#579): the neighbor row, or
+    // the empty-filter state when the last unheard episode was just marked.
+    // Mirrors the Inbox's neighbor-focus wiring.
+    @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
+    @AccessibilityFocusState private var focusEmptyFilter: Bool
+
     /// Played/unheard filter for this podcast's list. Loaded per podcast on
     /// appear (default ``EpisodeListFilter/unheard``) and persisted on change
     /// under the `podcast_filter_<feedURL>` AppSetting key (#489).
@@ -120,9 +127,32 @@ struct EpisodeListView: View {
                                 // Rotor "Unfollow this podcast" (#572): opens the
                                 // destructive confirmation below — activation
                                 // never unfollows directly.
-                                onUnfollow: { pendingUnfollow = podcast }
+                                onUnfollow: { pendingUnfollow = podcast },
+                                // Under the Unheard filter, rotor "Mark as
+                                // played" removes this row (#579). The builder
+                                // invokes this BEFORE the played flip, so the
+                                // neighbor is captured while the row is still
+                                // visible; focus moves after the list has
+                                // re-rendered — to the neighbor, or the
+                                // empty-filter state when this was the last
+                                // unheard episode. Under All the row stays put,
+                                // so no focus management is needed.
+                                onMarkPlayed: { nowPlayed in
+                                    guard filter == .unheard, nowPlayed else { return }
+                                    let neighbor = neighborID(of: episode, in: filteredSortedEpisodes)
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                        if let neighbor {
+                                            focusedEpisode = neighbor
+                                        } else {
+                                            focusEmptyFilter = true
+                                        }
+                                    }
+                                }
                             )
                         )
+                        // Lets the rotor mark-played runner hand VoiceOver focus
+                        // to this row when its neighbor vanishes (#579).
+                        .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
                     }
                 } header: {
                     Text(filter == .unheard
@@ -258,6 +288,11 @@ struct EpisodeListView: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("No unheard episodes")
                 .font(.headline)
+                // Focus lands here when the rotor mark-played removes the last
+                // unheard row (#579), so VoiceOver isn't orphaned on a vanished
+                // element. The heading, not the container: focusing the VStack
+                // would make VoiceOver group-summarize all three children.
+                .accessibilityFocused($focusEmptyFilter)
             Text("You've played everything here. Switch to All to see every episode.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

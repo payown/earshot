@@ -15,6 +15,9 @@ struct NowPlayingScreen: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(SettingsStore.self) private var settings
     @Environment(\.dismiss) private var dismiss
+    // Drives the artwork's smaller footprint at accessibility Dynamic Type
+    // sizes so the transport and scrubber stay above the fold (#579).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var showingControls = false
     @State private var showingNotes = false
@@ -139,7 +142,13 @@ struct NowPlayingScreen: View {
     /// press-and-hold is always available.
     @ViewBuilder
     private var artworkBlock: some View {
-        let base = PodcastArtwork(urlString: artworkURLString, size: 280, cornerRadius: 16)
+        // At accessibility Dynamic Type sizes the surrounding text rows grow
+        // several fold, and the full 280pt square pushes the transport and
+        // scrubber below the fold on smaller devices (#579). Shrink only the
+        // visual: the label, rotor actions, and the press-and-hold scan pad
+        // behave identically at both sizes.
+        let side: CGFloat = dynamicTypeSize.isAccessibilitySize ? 140 : 280
+        let base = PodcastArtwork(urlString: artworkURLString, size: side, cornerRadius: 16)
             // A zero-distance long press fires `pressing:` on touch-down and again
             // on release, giving us begin/end without a separate drag gesture.
             .onLongPressGesture(minimumDuration: 0.3, pressing: { isPressing in
@@ -597,6 +606,10 @@ struct NowPlayingScreen: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
+            // Guarantee a 44pt-plus tap target at default Dynamic Type; the
+            // vertical padding alone leaves the row short of the minimum.
+            // Mirrors the Transcript row below (#579).
+            .frame(minHeight: Spacing.minTouchTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
