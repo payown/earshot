@@ -10,6 +10,7 @@ import SwiftData
 struct PodcastSettingsView: View {
     @Bindable var podcast: Podcast
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
 
     /// Bumped each time the notification toggle is switched ON. A `.task(id:)`
     /// keyed on this token owns the async `requestAuthorization()` call so it
@@ -252,10 +253,25 @@ struct PodcastSettingsView: View {
     }
 
     /// Maps between `Optional<Int>` on the model (inboxMaxEpisodes) and the Picker.
+    ///
+    /// The setter ALSO writes the value through to the feed-URL-keyed AppSetting
+    /// (`podcast_inbox_cap_<feedURL>`) so the cap survives unsubscribe →
+    /// re-subscribe, where a fresh `Podcast` is created with a nil cap (#548).
+    /// The model field stays the live source of truth for every existing flow.
+    ///
+    /// This write-through is also the lazy backfill for existing subscribers who
+    /// set a cap before the keyed setting existed: their current `Podcast` rows
+    /// still hold the cap (which is all any live path reads), and the keyed copy
+    /// only matters on a future re-subscribe — so persisting it on their next
+    /// edit is sufficient and no launch migration is needed.
     private var inboxMaxBinding: Binding<Int?> {
         Binding(
             get: { podcast.inboxMaxEpisodes },
-            set: { podcast.inboxMaxEpisodes = $0 }
+            set: { newValue in
+                podcast.inboxMaxEpisodes = newValue
+                AppSettingsStore(context: modelContext)
+                    .setPodcastInboxCap(newValue, forFeedURL: podcast.feedURL)
+            }
         )
     }
 

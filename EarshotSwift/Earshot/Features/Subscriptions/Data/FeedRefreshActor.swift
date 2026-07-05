@@ -269,6 +269,16 @@ actor FeedRefreshActor {
         )
         modelContext.insert(podcast)
 
+        // Restore the user's saved per-podcast inbox cap (if any) onto the fresh
+        // Podcast BEFORE inbox seeding, so re-adding a previously-removed podcast
+        // seeds min(global seed, saved cap) instead of silently dropping the
+        // limit (#548). The cap is keyed by feed URL in the AppSetting store
+        // (same pattern as the #489 per-podcast filter), which survives the
+        // unsubscribe that deleted the old Podcast row.
+        if let savedCap = storedInboxCap(forFeedURL: trimmed) {
+            podcast.inboxMaxEpisodes = savedCap
+        }
+
         let now = Date.now
         var insertedEpisodes: [Episode] = []
         for item in parsed.episodes {
@@ -295,6 +305,24 @@ actor FeedRefreshActor {
         AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsed.episodes.count) episodes, seeded \(min(inboxSeedCount < 0 ? insertedEpisodes.count : inboxSeedCount, insertedEpisodes.count)) into inbox")
 
         return SubscribeOutcome(podcast: podcast, episodes: insertedEpisodes, alreadySubscribed: false)
+    }
+
+    /// The user's saved per-podcast inbox cap for this feed URL, read from the
+    /// `podcast_inbox_cap_<feedURL>` AppSetting row on this background context
+    /// (`AppSettingsStore` is @MainActor and can't be used here — same reason
+    /// ``currentlyPlayingQueueItemID()`` fetches `AppSetting` directly).
+    /// Returns nil when unset, stored as the `"null"` sentinel (an explicit
+    /// "No limit"), or not a positive integer — bad stored values are ignored
+    /// defensively, never trusted (#548).
+    private func storedInboxCap(forFeedURL feedURL: String) -> Int? {
+        let key = SettingsKey.podcastInboxCap(feedURL: feedURL)
+        var descriptor = FetchDescriptor<AppSetting>(predicate: #Predicate { $0.key == key })
+        descriptor.fetchLimit = 1
+        guard let raw = (try? modelContext.fetch(descriptor))?.first?.value,
+              raw != "null",
+              let cap = Int(raw), cap > 0
+        else { return nil }
+        return cap
     }
 
     /// Un-dismisses the newest N non-future episodes from a just-subscribed
