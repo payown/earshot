@@ -205,26 +205,22 @@ struct SubscriptionsView: View {
         return parts.joined(separator: ", ")
     }
 
+    /// `.onDelete` backs both sighted swipe-to-delete and the system "Delete"
+    /// action VoiceOver puts in the rotor. Deleting a podcast destroys all its
+    /// episodes, so nothing may delete here directly — this routes through the
+    /// same `pendingUnsubscribe` confirmation dialog and centralized
+    /// `SubscriptionRepository.unsubscribe` path (which posts the #574
+    /// pre-delete player notification) as every other unfollow surface (#578).
+    ///
+    /// Swipe and the rotor action always pass a single offset (this list has no
+    /// multi-select edit mode), so only the first offset is confirmed; any
+    /// hypothetical extra offsets are ignored rather than silently deleted.
     private func delete(_ offsets: IndexSet) {
         // Offsets index into the rendered (sorted) list, so resolve against the
         // same array the ForEach uses — not the raw @Query order.
         let visible = sortedPodcasts
-        let repo = FolderRepository(context: context)
-        let stats = StatsRepository(context: context)
-        for index in offsets {
-            let podcast = visible[index]
-            repo.removeFromAllFolders(podcast)
-            // Same no-cascade cleanup as the centralized unsubscribe path: drop the
-            // podcast's listening sessions before deleting it so they don't dangle
-            // and corrupt stats as "Unknown Podcast" (#377).
-            stats.removeSessions(for: podcast)
-            context.delete(podcast)
-        }
-        do {
-            try context.save()
-        } catch {
-            AppLog.subscriptions.error("Failed to delete podcast: \(error.localizedDescription, privacy: .public)")
-        }
+        guard let index = offsets.first, visible.indices.contains(index) else { return }
+        pendingUnsubscribe = visible[index]
     }
 
     private func refreshAll() async {

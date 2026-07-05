@@ -10,6 +10,7 @@ struct FoldersScreen: View {
 
     @State private var showingCreate = false
     @State private var newName = ""
+    @State private var pendingDelete: PodcastFolder?
     @AccessibilityFocusState private var focusedFolderID: PersistentIdentifier?
 
     var body: some View {
@@ -79,6 +80,22 @@ struct FoldersScreen: View {
         } message: {
             Text("Enter a name for the new folder.")
         }
+        // Same wording as FolderDetailScreen's confirmed delete, so both folder
+        // delete paths read identically (#578).
+        .confirmationDialog(
+            "Delete folder \(pendingDelete?.name ?? "this folder")?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { folder in
+            Button("Delete folder", role: .destructive) { confirmDelete(folder) }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: { _ in
+            Text("This removes the folder. Your podcasts and their episodes are kept.")
+        }
     }
 
     private func row(for folder: PodcastFolder) -> some View {
@@ -126,12 +143,22 @@ struct FoldersScreen: View {
         FolderRepository(context: context).reorderFolders(reordered)
     }
 
+    /// `.onDelete` backs swipe-to-delete, Edit-mode minus buttons, and the
+    /// system "Delete" action in the VoiceOver rotor. All of them route through
+    /// the confirmation dialog instead of deleting directly, matching
+    /// FolderDetailScreen's confirmed delete (#578). Each activation passes a
+    /// single offset (no multi-select delete in this list), so only the first
+    /// offset is confirmed; any hypothetical extras are ignored, not deleted.
     private func delete(_ offsets: IndexSet) {
-        let repo = FolderRepository(context: context)
-        for index in offsets {
-            let folder = folders[index]
-            Announcer.announce("Deleted folder \(folder.name)")
-            repo.delete(folder)
-        }
+        guard let index = offsets.first, folders.indices.contains(index) else { return }
+        pendingDelete = folders[index]
+    }
+
+    /// Runs after the user confirms in the dialog. Keeps the pre-#578
+    /// post-delete announcement so VoiceOver feedback is unchanged.
+    private func confirmDelete(_ folder: PodcastFolder) {
+        let name = folder.name
+        FolderRepository(context: context).delete(folder)
+        Announcer.announce("Deleted folder \(name)")
     }
 }
