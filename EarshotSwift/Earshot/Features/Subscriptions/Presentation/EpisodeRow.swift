@@ -11,6 +11,11 @@ struct EpisodeRow: View {
     // #Preview or detached host must supply `.environment(SettingsStore())` or
     // this row traps at runtime (#452 gate note).
     @Environment(SettingsStore.self) private var settings
+    // The now-playing identity is observed, so the row re-renders when the loaded
+    // episode changes and this row's badge/label update (Item 2). Same runtime
+    // requirement as SettingsStore above: every call site renders under the app
+    // root that injects PlayerService.
+    @Environment(PlayerService.self) private var player
     let episode: Episode
     let actions: [EpisodeActionItem]
     /// Whether the row names its podcast, visually and in the VoiceOver label.
@@ -48,6 +53,18 @@ struct EpisodeRow: View {
                         .multilineTextAlignment(.leading)
                 }
                 HStack(spacing: 8) {
+                    // Now-playing indicator (Item 2): icon + text, accent-tinted,
+                    // never colour alone. Leads the badge row so it reads first
+                    // visually, matching the "Now Playing" prefix VoiceOver speaks.
+                    // Hidden from VoiceOver here — the row is one element and the
+                    // spoken state rides in this row's single accessibilityLabel.
+                    if isNowPlaying {
+                        Label("Now Playing", systemImage: "waveform")
+                            .labelStyle(.titleAndIcon)
+                            .font(.caption)
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityHidden(true)
+                    }
                     // Season/episode badge ("S2 · E14"), when the user has opted in
                     // (off by default, #452) and the feed provides numbers. The row
                     // is one accessibility element with an explicit label below, so
@@ -117,6 +134,13 @@ struct EpisodeRow: View {
         .quickActionsRotor(actions)
     }
 
+    /// True when this row's episode is the one loaded in the player. Compared by
+    /// persistent identity against the observed ``PlayerService/nowPlayingEpisodeID``
+    /// so the row re-renders as the loaded episode changes (Item 2).
+    private var isNowPlaying: Bool {
+        player.nowPlayingEpisodeID == episode.persistentModelID
+    }
+
     private var accessibilityLabel: String {
         EpisodeRowLabel.label(
             episodeTitle: episode.title,
@@ -130,7 +154,9 @@ struct EpisodeRow: View {
             // Fold the downloaded / streaming state into the same single row label
             // so VoiceOver announces it as part of this one element, not a new
             // stop (#513).
-            downloadState: episode.downloadStatus
+            downloadState: episode.downloadStatus,
+            // "Now Playing" leads the spoken label (Item 2).
+            isNowPlaying: isNowPlaying
         )
     }
 

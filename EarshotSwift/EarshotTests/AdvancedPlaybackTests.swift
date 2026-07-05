@@ -318,6 +318,77 @@ final class AdvancedPlaybackTests: XCTestCase {
         XCTAssertEqual(after.queue, before.queue, "Completion must not insert a QueueItem")
     }
 
+    // MARK: Now-playing identity mirror (Item 2)
+
+    func test_play_setsNowPlayingEpisodeID() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        XCTAssertNil(player.nowPlayingEpisodeID, "precondition: nothing loaded")
+
+        let episode = makeEpisode(ctx)
+        player.play(episode)
+
+        XCTAssertEqual(player.nowPlayingEpisodeID, episode.persistentModelID,
+                       "play mirrors the loaded episode's identity")
+    }
+
+    func test_load_setsNowPlayingEpisodeID() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        let episode = makeEpisode(ctx)
+        player.load(episode)
+
+        XCTAssertEqual(player.nowPlayingEpisodeID, episode.persistentModelID,
+                       "load (paused restore) mirrors the loaded episode's identity")
+    }
+
+    func test_switchingEpisodes_updatesNowPlayingEpisodeID() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let first = makeEpisode(ctx, guid: "e1")
+        let second = makeEpisode(ctx, guid: "e2")
+
+        player.play(first)
+        XCTAssertEqual(player.nowPlayingEpisodeID, first.persistentModelID)
+
+        player.play(second)
+        XCTAssertEqual(player.nowPlayingEpisodeID, second.persistentModelID,
+                       "the mirror follows the newly loaded episode")
+    }
+
+    func test_stopAndUnload_clearsNowPlayingEpisodeID() {
+        // stopAndUnload backs the #574 pre-delete release path; clearing the
+        // mirror here means no row shows "Now Playing" for a released episode.
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.play(makeEpisode(ctx))
+
+        player.stopAndUnload()
+
+        XCTAssertNil(player.nowPlayingEpisodeID, "stopAndUnload clears the now-playing mirror")
+    }
+
+    func test_markCurrentPlayedAndAdvance_nothingQueued_clearsNowPlayingEpisodeID() {
+        // The "advance with nothing queued" clear path (PlayerService line ~852)
+        // routes through setCurrentEpisode(nil), so the mirror clears too.
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episode = makeEpisode(ctx)
+        player.play(episode)
+        XCTAssertEqual(player.nowPlayingEpisodeID, episode.persistentModelID)
+
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertNil(player.nowPlayingEpisodeID,
+                     "advancing with an empty queue clears the now-playing mirror")
+    }
+
     // MARK: Open full player on play (#562)
 
     /// Acceptance criterion: with the openPlayerOnPlay setting ON (the default),

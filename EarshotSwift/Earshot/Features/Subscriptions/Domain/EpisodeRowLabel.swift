@@ -16,9 +16,14 @@ enum EpisodeRowLabel {
         episodeNumber: Int? = nil,
         isPlayed: Bool,
         pubDate: Date?,
-        downloadState: DownloadStatus? = nil
+        downloadState: DownloadStatus? = nil,
+        isNowPlaying: Bool = false
     ) -> String {
-        var parts = [episodeTitle]
+        // "Now Playing" leads the label so VoiceOver announces the current
+        // episode's state before its title ("Now Playing, [title], …"). One state
+        // regardless of playing or paused (Item 2). Callers that don't track
+        // playback pass the default false and the prefix is omitted.
+        var parts = isNowPlaying ? ["Now Playing", episodeTitle] : [episodeTitle]
         if let podcastName, !podcastName.isEmpty {
             parts.append(podcastName)
         }

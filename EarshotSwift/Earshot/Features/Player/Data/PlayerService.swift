@@ -64,6 +64,13 @@ final class PlayerService {
     /// auto-advance and resume use `play(_:)` directly and never raise the player.
     var pendingFullPlayerPresentation = false
 
+    /// Identity of the loaded episode, mirrored from ``currentEpisode`` at every
+    /// assignment via ``setCurrentEpisode(_:)``. Unlike ``currentEpisode`` (which
+    /// is `@ObservationIgnored`, so views never re-render off it), this is an
+    /// observed surface: list rows read it to show a "Now Playing" badge and
+    /// re-render when the loaded episode changes. `nil` when nothing is loaded.
+    private(set) var nowPlayingEpisodeID: PersistentIdentifier?
+
     /// The sleep timer. Observed so the UI shows the live countdown; the player
     /// pauses when it fires.
     let sleepTimer = SleepTimerController()
@@ -280,6 +287,16 @@ final class PlayerService {
     /// act on the current item — e.g. bookmarking the current position.
     var nowPlayingEpisode: Episode? { currentEpisode }
 
+    /// Sole writer of ``currentEpisode``. Sets the (`@ObservationIgnored`) episode
+    /// and mirrors its identity into the observed ``nowPlayingEpisodeID`` so the
+    /// two can never drift. Every assignment — loads and every clear path,
+    /// including the #574 pre-delete release — routes through here; a mirror left
+    /// stale would show "Now Playing" on a cleared or deleted episode's row.
+    private func setCurrentEpisode(_ episode: Episode?) {
+        currentEpisode = episode
+        nowPlayingEpisodeID = episode?.persistentModelID
+    }
+
     /// True once a finite, positive duration is known for the loaded item. The
     /// scrubber binds its range and enabled state to this so it never receives a
     /// degenerate `0...0` range before the item reports its duration (#367).
@@ -407,7 +424,7 @@ final class PlayerService {
             Announcer.announce("Stop after this episode cancelled")
         }
 
-        currentEpisode = episode
+        setCurrentEpisode(episode)
         currentEpisodeIsTransient = transient
         didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
@@ -471,7 +488,7 @@ final class PlayerService {
         isFastForwarding = false
         rateBeforeFastForward = nil
 
-        currentEpisode = episode
+        setCurrentEpisode(episode)
         currentEpisodeIsTransient = false
         didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
@@ -569,7 +586,7 @@ final class PlayerService {
         stopAfterCurrentEpisode = false
 
         // Drop every episode-derived reference and observable surface.
-        currentEpisode = nil
+        setCurrentEpisode(nil)
         currentEpisodeIsTransient = false
         currentTitle = nil
         currentArtist = nil
@@ -832,7 +849,7 @@ final class PlayerService {
             // Nothing queued after this one: stop cleanly with the bar cleared.
             pause()
             isPlaying = false
-            currentEpisode = nil
+            setCurrentEpisode(nil)
             updateNowPlayingInfo()
             return
         }
@@ -1405,7 +1422,7 @@ final class PlayerService {
             saveContext()
             isPlaying = false
             intendsToPlay = false
-            currentEpisode = nil
+            setCurrentEpisode(nil)
             updateNowPlayingInfo()
             Announcer.announce("Sleep timer ended. Playback stopped.")
             return
@@ -1422,7 +1439,7 @@ final class PlayerService {
             saveContext()
             isPlaying = false
             intendsToPlay = false
-            currentEpisode = nil
+            setCurrentEpisode(nil)
             updateNowPlayingInfo()
             Announcer.announce("Stopped after this episode")
             return
@@ -1441,7 +1458,7 @@ final class PlayerService {
         guard let nextEpisode else {
             isPlaying = false
             intendsToPlay = false
-            currentEpisode = nil
+            setCurrentEpisode(nil)
             updateNowPlayingInfo()
             return
         }
