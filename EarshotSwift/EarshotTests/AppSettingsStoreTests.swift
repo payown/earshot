@@ -158,39 +158,4 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(raw.bool(SettingsKey.chapterNavButtonsVisible, default: true), false)
     }
 
-    // MARK: Migration status (#429)
-
-    func testMigrationStatusDefaultsToNotAttempted() throws {
-        let store = try makeStore()
-        XCTAssertEqual(store.migrationStatus(), .notAttempted)
-    }
-
-    func testMigrationStatusFallsBackWhenUnparseable() throws {
-        let store = try makeStore()
-        // A stale / unknown raw value must read as the safe default, never crash.
-        store.setRawValue("garbage", for: SettingsKey.migrationStatus)
-        XCTAssertEqual(store.migrationStatus(), .notAttempted)
-    }
-
-    func testMigrationStatusRoundTrips() throws {
-        let store = try makeStore()
-        store.setMigrationStatus(.succeeded)
-        XCTAssertEqual(store.migrationStatus(), .succeeded)
-        store.setMigrationStatus(.failed)
-        XCTAssertEqual(store.migrationStatus(), .failed)
-    }
-
-    func testMigrationLastAttemptDateNilWhenUnset() throws {
-        let store = try makeStore()
-        XCTAssertNil(store.migrationLastAttemptDate())
-    }
-
-    func testMigrationLastAttemptDateRoundTrips() throws {
-        let store = try makeStore()
-        let when = Date(timeIntervalSince1970: 1_700_500_000)
-        store.setMigrationLastAttemptDate(when)
-        let read = store.migrationLastAttemptDate()
-        XCTAssertNotNil(read)
-        XCTAssertEqual(read!.timeIntervalSince1970, when.timeIntervalSince1970, accuracy: 0.001)
-    }
 }

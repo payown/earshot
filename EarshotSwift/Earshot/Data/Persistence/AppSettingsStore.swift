@@ -57,29 +57,22 @@ enum SettingsKey {
     // (default 3). 0 = seed none (the whole backlog is pre-dismissed);
     // ``SettingsDefault/inboxDefaultCountAll`` (-1) = seed the entire backlog.
     static let inboxDefaultCount = "inbox_default_count"
-    // Flutter→SwiftUI one-time subscription import.
+    // flutter_migration_complete / flutter_migration_attempts /
+    // flutter_episode_state_restored: retained for data compatibility only. The
+    // Flutter→SwiftUI import feature was removed (#580); OPML is the only
+    // re-import path. Existing stores may still carry these rows, so the key
+    // names are kept but nothing reads or writes them.
     static let flutterMigrationComplete = "flutter_migration_complete"
-    // Count of launches where the import attempted but the Flutter database
-    // yielded no subscriptions. Bounds retries so a transient first-launch miss
-    // recovers while a genuinely empty install stops looping (#426).
     static let flutterMigrationAttempts = "flutter_migration_attempts"
-    // Whether the post-import per-episode state overlay (played / inbox /
-    // position) and queue-order restore completed without error. Set only on
-    // success, so a migration that imported show shells but failed (or never
-    // reached) the overlay can self-heal a state-only re-restore on a later
-    // launch instead of stranding the user with shows but no history (#426).
     static let flutterEpisodeStateRestored = "flutter_episode_state_restored"
     // Timestamp (epoch seconds) of the last completed feed refresh. Used by
     // FeedRefreshPolicy to throttle background refreshes (#381).
     static let lastFeedRefresh = "last_feed_refresh"
-    // Outcome of the most recent Flutter→SwiftUI import attempt (notAttempted /
-    // succeeded / failed). Surfaced in Settings → Data so the user can see
-    // whether their older data came across, and re-run the import on demand
-    // (#429). Stored as the ``MigrationStatus`` raw value.
+    // migration_status / migration_last_attempt_date: retained for data
+    // compatibility only. They recorded the outcome and timestamp of the removed
+    // Flutter→SwiftUI import (#580); existing stores may still carry the rows,
+    // so the key names are kept but nothing reads or writes them.
     static let migrationStatus = "migration_status"
-    // Timestamp (epoch seconds) of the most recent import attempt, set on every
-    // run (automatic launch import or manual re-import). nil until the first
-    // attempt (#429).
     static let migrationLastAttemptDate = "migration_last_attempt_date"
     // Appearance (#461): manual theme override, accent color, and layout
     // density. SwiftUI-only preferences, stored as the ``ThemeOverride`` /
@@ -97,20 +90,6 @@ enum SettingsKey {
     static func podcastFilter(feedURL: String) -> String {
         podcastFilterPrefix + feedURL
     }
-}
-
-/// Outcome of the most recent Flutter→SwiftUI data import (#429). Persisted as a
-/// String raw value under ``SettingsKey/migrationStatus`` so Settings → Data can
-/// show the user whether their older data came across. Defaults to
-/// ``notAttempted`` when unset or unparseable.
-enum MigrationStatus: String {
-    /// No import has run yet on this install.
-    case notAttempted = "not_attempted"
-    /// The last import completed: shells imported and the state/queue overlay
-    /// finished without throwing.
-    case succeeded
-    /// The last import errored — either an import failure or the overlay threw.
-    case failed
 }
 
 /// Documented defaults for settings not yet written by the user.
@@ -242,29 +221,6 @@ final class AppSettingsStore {
 
     func setDate(_ value: Date, for key: String) {
         setRawValue(String(value.timeIntervalSince1970), for: key)
-    }
-
-    /// The outcome of the most recent import attempt, defaulting to
-    /// ``MigrationStatus/notAttempted`` when unset or unparseable (#429).
-    func migrationStatus() -> MigrationStatus {
-        guard let raw = rawValue(SettingsKey.migrationStatus),
-              let status = MigrationStatus(rawValue: raw)
-        else { return .notAttempted }
-        return status
-    }
-
-    func setMigrationStatus(_ status: MigrationStatus) {
-        setRawValue(status.rawValue, for: SettingsKey.migrationStatus)
-    }
-
-    /// The timestamp of the most recent import attempt, or nil before any run
-    /// (#429).
-    func migrationLastAttemptDate() -> Date? {
-        date(SettingsKey.migrationLastAttemptDate)
-    }
-
-    func setMigrationLastAttemptDate(_ value: Date) {
-        setDate(value, for: SettingsKey.migrationLastAttemptDate)
     }
 
     /// The number of most-recent episodes to seed into the inbox per podcast on

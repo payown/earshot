@@ -6,9 +6,9 @@ import os
 /// Proves the whole-library refresh writes happen on ``FeedRefreshActor``'s own
 /// background context (not the caller's main context) while still producing the
 /// same inserted/deduped episodes — the threading fix for VoiceOver sluggishness
-/// during a large refresh (#382). Mirrors `SubscriptionImporterTests`: drive the
-/// `@ModelActor` directly via its container, then assert by reading the store
-/// through a *fresh, independent* `ModelContext`.
+/// during a large refresh (#382). Drives the `@ModelActor` directly via its
+/// container, then asserts by reading the store through a *fresh, independent*
+/// `ModelContext`.
 @MainActor
 final class FeedRefreshActorTests: XCTestCase {
 
