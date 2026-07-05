@@ -7,8 +7,8 @@ import Foundation
 /// content and to deep-link / act on it from the notification's actions. Uses
 /// the models' natural keys (feed URL, episode guid) rather than
 /// `PersistentIdentifier`, mirroring the rest of the app (e.g.
-/// `lastPlayingEpisodeID` stores `episode.guid`) so the references resolve
-/// reliably across launches:
+/// `lastPlayingEpisodeID` stores the `"feedURL|guid"` composite, #576) so the
+/// references resolve reliably across launches:
 ///   - `podcastFeedURL`: the unique feed URL, for the deep link to the show.
 ///   - `episodeGUID`: guid of the single newest new episode, used by the
 ///     "Add to queue" / "Play now" actions.

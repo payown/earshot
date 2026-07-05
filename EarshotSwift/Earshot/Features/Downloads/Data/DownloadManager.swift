@@ -15,13 +15,20 @@ import SwiftData
 /// and its delegate are shared statics used by every `DownloadManager` instance
 /// (the app's and the transient one ``BackgroundFeedRefresher`` creates for
 /// auto-download). Terminal events are resolved against the app's shared
-/// container by episode guid, decoupled from whichever instance started the
-/// download.
+/// container by the composite ``DownloadTaskKey`` (`"feedURL|guid"`, #576 —
+/// guids alone repeat across podcasts), decoupled from whichever instance
+/// started the download.
 @MainActor
 @Observable
 final class DownloadManager {
     /// True when the current path is Wi-Fi (or wired). Drives the gate.
     private(set) var isOnWifi = true
+
+    /// False until `NWPathMonitor` delivers its first path report. Used so the
+    /// first report also kicks `.pending` downloads at launch (#576) —
+    /// `isOnWifi` optimistically defaults to true, so a launch already on Wi-Fi
+    /// would otherwise never see a "became Wi-Fi" transition.
+    @ObservationIgnored private var hasReceivedNetworkPath = false
 
     @ObservationIgnored private var context: ModelContext?
     @ObservationIgnored private var settings: AppSettingsStore?
@@ -59,11 +66,11 @@ final class DownloadManager {
     /// while the app was suspended. Call once at launch (not under tests).
     static func activate(container: ModelContainer) {
         self.container = container
-        delegate.onFinished = { guid, fileURL in
-            Task { @MainActor in complete(guid: guid, fileURL: fileURL) }
+        delegate.onFinished = { taskKey, fileURL in
+            Task { @MainActor in complete(taskKey: taskKey, fileURL: fileURL) }
         }
-        delegate.onFailed = { guid in
-            Task { @MainActor in fail(guid: guid) }
+        delegate.onFailed = { taskKey in
+            Task { @MainActor in fail(taskKey: taskKey) }
         }
         delegate.onEventsFinished = {
             Task { @MainActor in
@@ -81,7 +88,21 @@ final class DownloadManager {
         monitor.pathUpdateHandler = { [weak self] path in
             let onWifi = path.status == .satisfied
                 && (path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet))
-            Task { @MainActor in self?.isOnWifi = onWifi }
+            Task { @MainActor in
+                guard let self else { return }
+                // Episodes parked at `.pending` by the Wi-Fi gate previously had
+                // no reader and never started (#576). Kick them on the Wi-Fi
+                // transition, and once on the FIRST path report so launch
+                // reconciliation covers pending rows left over from a prior run
+                // (start now or keep waiting, per current connectivity).
+                let becameWifi = onWifi && !self.isOnWifi
+                let firstPath = !self.hasReceivedNetworkPath
+                self.hasReceivedNetworkPath = true
+                self.isOnWifi = onWifi
+                if becameWifi || firstPath {
+                    await self.startPendingDownloads()
+                }
+            }
         }
         monitor.start(queue: DispatchQueue(label: "media.payown.earshot.swift.network"))
     }
@@ -122,10 +143,66 @@ final class DownloadManager {
 
         let task = Self.session.downloadTask(with: url)
         // taskDescription (unlike taskIdentifier) survives an app relaunch, so a
-        // completion delivered after the app was killed still resolves the episode.
-        task.taskDescription = episode.guid
+        // completion delivered after the app was killed still resolves the
+        // episode. The composite "feedURL|guid" key (#576) disambiguates guids
+        // that repeat across podcasts.
+        task.taskDescription = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
         task.resume()
         AppLog.networking.info("Download started (background): \(episode.title, privacy: .public)")
+    }
+
+    /// Downloads `episode` and suspends until the transfer reaches a TERMINAL
+    /// state — unlike ``download(_:)``, which returns as soon as the task is
+    /// enqueued (#544). Returns true when the episode ends up downloaded.
+    ///
+    /// Returns false without waiting when the download is gated on Wi-Fi
+    /// (`.pending`) or failed to start (no terminal event will ever arrive for
+    /// those), and after `timeout` seconds without a terminal event — the
+    /// background task itself is left running and can still finish normally
+    /// later. Safe to call concurrently for the same episode: each caller parks
+    /// its own continuation and every continuation is resumed exactly once,
+    /// either by the terminal event or by its own timeout (removal from
+    /// ``downloadWaiters`` before resuming is the single ownership point, and
+    /// all access is main-actor-serialized).
+    func downloadAndWait(_ episode: Episode, timeout: TimeInterval = 120) async -> Bool {
+        if episode.downloadStatus == .downloaded { return true }
+        await download(episode)
+        switch episode.downloadStatus {
+        case .downloaded:
+            return true
+        case .downloading:
+            break
+        case .none, .pending, .failed:
+            return false
+        }
+        let key = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        // No suspension between download(_:) returning and the waiter being
+        // parked (this closure runs synchronously on the main actor), so the
+        // terminal event can't slip past unobserved.
+        return await withCheckedContinuation { continuation in
+            let id = Self.addWaiter(continuation, for: key)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                // No-op when the terminal event already resolved this waiter.
+                Self.timeOutWaiter(id: id, for: key)
+            }
+        }
+    }
+
+    /// Starts every episode parked at `.pending` (Wi-Fi-gated, #576) through the
+    /// normal ``download(_:)`` path. Called when the network becomes Wi-Fi and
+    /// once on the first path report after launch. `download(_:)` re-checks the
+    /// gate itself, so if connectivity no longer qualifies the episodes simply
+    /// stay `.pending`.
+    private func startPendingDownloads() async {
+        guard let context, downloadsAllowed else { return }
+        let all = (try? context.fetch(FetchDescriptor<Episode>())) ?? []
+        let pending = all.filter { $0.downloadStatus == .pending }
+        guard !pending.isEmpty else { return }
+        AppLog.networking.info("Starting \(pending.count) Wi-Fi-gated download(s)")
+        for episode in pending {
+            await download(episode)
+        }
     }
 
     /// Resets episodes stuck at `.downloading` with no live background task (the
@@ -138,16 +215,18 @@ final class DownloadManager {
         let markedDownloading = all.filter { $0.downloadStatus == .downloading }
         guard !markedDownloading.isEmpty else { return }
 
-        let liveGUIDs = await Self.liveTaskGUIDs()
-        let orphaned = Set(
-            DownloadReconciliation.orphanedGUIDs(
-                markedDownloading: markedDownloading.map(\.guid),
-                liveTaskGUIDs: liveGUIDs
-            )
+        let liveKeys = await Self.liveTaskKeys()
+        let identities = markedDownloading.map { episode in
+            (composite: DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
+             bare: episode.guid)
+        }
+        let orphaned = DownloadReconciliation.orphanedIndices(
+            markedDownloading: identities,
+            liveTaskKeys: liveKeys
         )
         guard !orphaned.isEmpty else { return }
-        for episode in markedDownloading where orphaned.contains(episode.guid) {
-            episode.downloadStatus = .failed
+        for index in orphaned {
+            markedDownloading[index].downloadStatus = .failed
         }
         save()
         AppLog.networking.info("Reconciled \(orphaned.count) stuck download(s) to failed")
@@ -219,37 +298,39 @@ final class DownloadManager {
 
     // MARK: Terminal events (delegate → main actor → SwiftData)
 
-    private static func complete(guid: String, fileURL: URL) {
+    private static func complete(taskKey: String, fileURL: URL) {
+        // Wake downloadAndWait callers first, unconditionally, so a failed
+        // episode lookup can't leave a continuation parked until its timeout.
+        // Resumption only SCHEDULES the waiter — it runs after this function
+        // returns, so it observes the persisted state below.
+        resolveWaiters(for: taskKey, success: true)
         guard let context = container?.mainContext,
-              let episode = episode(forGUID: guid, in: context) else { return }
+              let episode = DownloadTaskKey.episode(matching: taskKey, in: context) else { return }
         // Store only the file NAME: iOS relocates the app container on every
         // app update, so an absolute path goes stale (#575). Reads resolve the
         // name against the current container via `Episode.localAudioURL`.
         episode.downloadPath = fileURL.lastPathComponent
         episode.downloadStatus = .downloaded
-        try? context.save()
+        save(context, action: "complete")
         Announcer.announce("Downloaded \(episode.title)")
         AppLog.networking.info("Download finished: \(episode.title, privacy: .public)")
     }
 
-    private static func fail(guid: String) {
+    private static func fail(taskKey: String) {
+        resolveWaiters(for: taskKey, success: false)
         guard let context = container?.mainContext,
-              let episode = episode(forGUID: guid, in: context) else { return }
+              let episode = DownloadTaskKey.episode(matching: taskKey, in: context) else { return }
         // Don't clobber a state that already moved on (e.g. the user removed it).
         guard episode.downloadStatus == .downloading else { return }
         episode.downloadStatus = .failed
-        try? context.save()
+        save(context, action: "fail")
         AppLog.networking.error("Download failed: \(episode.title, privacy: .public)")
     }
 
-    private static func episode(forGUID guid: String, in context: ModelContext) -> Episode? {
-        var descriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == guid })
-        descriptor.fetchLimit = 1
-        return (try? context.fetch(descriptor))?.first
-    }
-
-    /// The guids of tasks the background session still has in flight.
-    private static func liveTaskGUIDs() async -> Set<String> {
+    /// The task keys (composite `"feedURL|guid"`, or bare guids from tasks
+    /// enqueued by a pre-#576 build) of tasks the background session still has
+    /// in flight.
+    private static func liveTaskKeys() async -> Set<String> {
         await withCheckedContinuation { continuation in
             session.getAllTasks { tasks in
                 continuation.resume(returning: Set(tasks.compactMap { $0.taskDescription }))
@@ -257,14 +338,62 @@ final class DownloadManager {
         }
     }
 
+    // MARK: downloadAndWait continuations (#576)
+
+    /// Continuations parked by ``downloadAndWait(_:timeout:)``, keyed by the
+    /// composite task key. Each entry is resumed EXACTLY once: removal from
+    /// this dictionary before resuming is the single ownership point, and every
+    /// access is main-actor-isolated, so the terminal event and the timeout
+    /// task can't double-resume. Every waiter is paired with a timeout task, so
+    /// none can leak if a terminal event never arrives.
+    @ObservationIgnored private static var downloadWaiters:
+        [String: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)]] = [:]
+
+    private static func addWaiter(
+        _ continuation: CheckedContinuation<Bool, Never>, for key: String
+    ) -> UUID {
+        let id = UUID()
+        downloadWaiters[key, default: []].append((id: id, continuation: continuation))
+        return id
+    }
+
+    /// Resumes and removes every waiter parked for `key`. Called on the
+    /// terminal complete/fail event. No-op when nothing is waiting.
+    private static func resolveWaiters(for key: String, success: Bool) {
+        guard let parked = downloadWaiters.removeValue(forKey: key) else { return }
+        for waiter in parked {
+            waiter.continuation.resume(returning: success)
+        }
+    }
+
+    /// Resumes exactly the ONE waiter identified by `id` with false. Called by
+    /// that waiter's timeout task; no-op when the terminal event already
+    /// resolved it. Other callers waiting on the same key keep waiting.
+    private static func timeOutWaiter(id: UUID, for key: String) {
+        guard var parked = downloadWaiters[key],
+              let index = parked.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = parked.remove(at: index)
+        downloadWaiters[key] = parked.isEmpty ? nil : parked
+        AppLog.networking.error("downloadAndWait timed out for task key")
+        waiter.continuation.resume(returning: false)
+    }
+
     // MARK: Internals
 
-    private func save() {
-        guard let context, context.hasChanges else { return }
+    /// The one save path for download state (#576): logs failures instead of
+    /// discarding them. Static so the delegate-driven terminal events (which
+    /// run without an instance) share it with instance methods via ``save()``.
+    private static func save(_ context: ModelContext, action: String) {
+        guard context.hasChanges else { return }
         do {
             try context.save()
         } catch {
-            AppLog.networking.error("Download state save failed: \(error.localizedDescription, privacy: .public)")
+            AppLog.networking.error("Download \(action, privacy: .public) save failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    private func save() {
+        guard let context else { return }
+        Self.save(context, action: "state")
     }
 }
