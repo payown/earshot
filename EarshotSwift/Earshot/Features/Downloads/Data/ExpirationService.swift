@@ -60,8 +60,10 @@ final class ExpirationService {
     }
 
     private func deleteDownloadedFile(_ episode: Episode) {
-        if let path = episode.downloadPath, !path.isEmpty {
-            try? FileManager.default.removeItem(atPath: path)
+        // Delete via the RESOLVED URL so a legacy absolute downloadPath from
+        // before an app update still removes the real file (#575).
+        if let url = episode.localAudioURL {
+            try? FileManager.default.removeItem(at: url)
         }
         episode.downloadPath = nil
         episode.downloadStatus = .none

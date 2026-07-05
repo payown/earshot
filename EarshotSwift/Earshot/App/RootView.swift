@@ -223,6 +223,10 @@ struct RootView: View {
             // Reset downloads left stuck at .downloading by a kill mid-transfer,
             // so they don't hang forever; in-flight background tasks are kept (#544).
             await downloads.reconcileStuckDownloads()
+            // Rewrite legacy absolute download paths to bare file names and reset
+            // episodes whose file is gone, BEFORE anything resolves a local file
+            // this launch (#575). iOS moves the app container on every update.
+            downloads.reconcileDownloadPaths()
             settings.configure(context: modelContext)
             // Seed the launch tab from the now-loaded preference exactly once, so
             // the saved Launch screen choice is honored on cold launch (#492).

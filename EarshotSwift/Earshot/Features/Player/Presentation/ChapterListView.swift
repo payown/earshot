@@ -130,7 +130,7 @@ struct ChapterListView: View {
         let found = await ChapterService().chapters(
             chapterURL: episode.chapterURL,
             audioURL: episode.audioURL,
-            downloadPath: episode.downloadPath,
+            downloadPath: episode.localAudioURL?.path,
             descriptionHTML: episode.episodeDescription
         )
         chapters = found

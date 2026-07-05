@@ -17,7 +17,10 @@ enum PlaybackLogic {
     /// gracefully instead of crashing.
     ///
     /// - Parameters:
-    ///   - downloadPath: The local file path, if the episode was downloaded.
+    ///   - downloadPath: The RESOLVED local file path, if the episode was
+    ///     downloaded. Callers pass `episode.localAudioURL?.path` — never the
+    ///     stored `Episode.downloadPath`, which is just a file name (and, on
+    ///     legacy rows, a stale absolute path from a previous container, #575).
     ///   - audioURL: The remote stream URL string from the feed.
     ///   - fileExists: Injectable existence check (defaults to `FileManager`),
     ///     so tests don't need real files on disk.
