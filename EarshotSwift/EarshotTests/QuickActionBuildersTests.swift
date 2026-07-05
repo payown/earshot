@@ -364,6 +364,115 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertNil(focused)
     }
 
+    // MARK: #562 — Queue "Play now" honors open-player-on-play (Item 1)
+
+    /// A player configured against `ctx` with `openPlayerOnPlay` set to `on`.
+    private func makeConfiguredPlayer(_ ctx: ModelContext, openPlayerOnPlay on: Bool) -> PlayerService {
+        let store = AppSettingsStore(context: ctx)
+        store.setBool(on, for: SettingsKey.openPlayerOnPlay)
+        let player = PlayerService()
+        player.configure(context: ctx)
+        return player
+    }
+
+    func testQueuePlayNowSettingOnRaisesFullPlayer() {
+        // Acceptance criterion: Item 1 — the Queue rotor's "Play now" must route
+        // through playFromEpisodeList so it honors #562, matching Inbox. Before
+        // the fix it called player.play directly and never raised the player.
+        let ctx = TestStore.freshContext()
+        let player = makeConfiguredPlayer(ctx, openPlayerOnPlay: true)
+        let episode = makeEpisode(ctx)
+        let items = buildQueueActions(
+            episode: episode, order: [.playNow], moveMode: .flat,
+            player: player, context: ctx, onShowNotes: {}, onFocus: { _ in }
+        )
+        XCTAssertEqual(items.map(\.label), ["Play now"])
+        XCTAssertFalse(player.pendingFullPlayerPresentation, "precondition: flag starts clear")
+        items.first?.run()
+        XCTAssertTrue(player.pendingFullPlayerPresentation,
+                      "Queue Play now with setting ON must raise the full player")
+    }
+
+    func testQueuePlayNowSettingOffDoesNotRaiseFullPlayer() {
+        // Acceptance criterion: Item 1 — with #562 OFF, the Queue rotor's
+        // "Play now" plays in the background and never raises the player.
+        let ctx = TestStore.freshContext()
+        let player = makeConfiguredPlayer(ctx, openPlayerOnPlay: false)
+        let episode = makeEpisode(ctx)
+        let items = buildQueueActions(
+            episode: episode, order: [.playNow], moveMode: .flat,
+            player: player, context: ctx, onShowNotes: {}, onFocus: { _ in }
+        )
+        items.first?.run()
+        XCTAssertFalse(player.pendingFullPlayerPresentation,
+                       "Queue Play now with setting OFF must not raise the full player")
+    }
+
+    /// A podcast with `count` episodes already added to the queue, for exercising
+    /// the group/binge play sequences.
+    private func makeQueuedGroup(_ ctx: ModelContext, count: Int = 2) -> Podcast {
+        let repo = QueueRepository(context: ctx)
+        let p = Podcast(feedURL: "https://x/group.xml", title: "Group Show")
+        ctx.insert(p)
+        for i in 1...count {
+            let e = Episode(guid: "grp\(i)", title: "Group Ep \(i)", audioURL: "https://x/grp\(i).mp3")
+            e.podcast = p
+            e.pubDate = Date(timeIntervalSince1970: TimeInterval(i))
+            ctx.insert(e)
+            repo.add(e)
+        }
+        return p
+    }
+
+    // These two view closures (QueueScreen "Play Group", EpisodeListView "Play
+    // oldest first") aren't directly reachable from a unit test, so each test
+    // replays the exact two-line sequence the button runs — repo returns the
+    // episode to start, player.playFromEpisodeList starts it — and asserts #562
+    // is honored. On-device verification is the real gate that the call sites
+    // actually use playFromEpisodeList and not player.play.
+
+    func testPlayGroupSequenceHonorsOpenPlayerSetting() {
+        let ctxOn = TestStore.freshContext()
+        let playerOn = makeConfiguredPlayer(ctxOn, openPlayerOnPlay: true)
+        let repoOn = QueueRepository(context: ctxOn)
+        let groupOn = makeQueuedGroup(ctxOn)
+        let firstOn = try? XCTUnwrap(repoOn.playGroup(groupOn))
+        playerOn.playFromEpisodeList(firstOn!)
+        XCTAssertTrue(playerOn.pendingFullPlayerPresentation,
+                      "Play Group with setting ON must raise the full player")
+
+        let ctxOff = TestStore.freshContext()
+        let playerOff = makeConfiguredPlayer(ctxOff, openPlayerOnPlay: false)
+        let repoOff = QueueRepository(context: ctxOff)
+        let groupOff = makeQueuedGroup(ctxOff)
+        let firstOff = try? XCTUnwrap(repoOff.playGroup(groupOff))
+        playerOff.playFromEpisodeList(firstOff!)
+        XCTAssertFalse(playerOff.pendingFullPlayerPresentation,
+                       "Play Group with setting OFF must not raise the full player")
+    }
+
+    func testPlayOldestFirstSequenceHonorsOpenPlayerSetting() {
+        let ctxOn = TestStore.freshContext()
+        let playerOn = makeConfiguredPlayer(ctxOn, openPlayerOnPlay: true)
+        let repoOn = QueueRepository(context: ctxOn)
+        let podOn = makeQueuedGroup(ctxOn)
+        let episodesOn = QueueRepository(context: ctxOn).queue()
+        let firstOn = try? XCTUnwrap(repoOn.bingeOldestFirst(podOn, episodes: episodesOn))
+        playerOn.playFromEpisodeList(firstOn!)
+        XCTAssertTrue(playerOn.pendingFullPlayerPresentation,
+                      "Play oldest first with setting ON must raise the full player")
+
+        let ctxOff = TestStore.freshContext()
+        let playerOff = makeConfiguredPlayer(ctxOff, openPlayerOnPlay: false)
+        let repoOff = QueueRepository(context: ctxOff)
+        let podOff = makeQueuedGroup(ctxOff)
+        let episodesOff = QueueRepository(context: ctxOff).queue()
+        let firstOff = try? XCTUnwrap(repoOff.bingeOldestFirst(podOff, episodes: episodesOff))
+        playerOff.playFromEpisodeList(firstOff!)
+        XCTAssertFalse(playerOff.pendingFullPlayerPresentation,
+                       "Play oldest first with setting OFF must not raise the full player")
+    }
+
     func testPodcastToggleLabelsReflectState() {
         let ctx = TestStore.freshContext()
         let p = Podcast(feedURL: "https://x/a.xml", title: "Show", autoQueue: true)

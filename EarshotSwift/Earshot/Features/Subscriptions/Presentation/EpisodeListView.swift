@@ -251,7 +251,8 @@ struct EpisodeListView: View {
         guard !episodes.isEmpty else { return }
         let repo = QueueRepository(context: context)
         guard let first = repo.bingeOldestFirst(podcast, episodes: episodes) else { return }
-        player.play(first)
+        // playFromEpisodeList so the binge honors the #562 open-player setting (Item 1).
+        player.playFromEpisodeList(first)
         let noun = episodes.count == 1 ? "episode" : "episodes"
         Announcer.announce("Playing \(podcast.title) oldest first, \(episodes.count) \(noun)")
     }

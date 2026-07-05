@@ -54,7 +54,10 @@ func buildQueueActions(
     return order.compactMap { action -> QuickActionItem? in
         switch action {
         case .playNow:
-            return QuickActionItem(label: "Play now", isDestructive: false) { player.play(episode) }
+            // Route through playFromEpisodeList so Queue "Play now" honors the
+            // #562 open-player-on-play setting, matching Inbox (Item 1). The plain
+            // player.play never raised the full player, so Queue silently opted out.
+            return QuickActionItem(label: "Play now", isDestructive: false) { player.playFromEpisodeList(episode) }
         case .removeFromQueue:
             return QuickActionItem(label: "Remove from queue", isDestructive: true) {
                 let neighbor = neighborID(of: episode, in: visibleQueue?() ?? repo.queue())

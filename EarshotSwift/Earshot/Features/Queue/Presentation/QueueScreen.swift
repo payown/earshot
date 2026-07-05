@@ -166,7 +166,8 @@ struct QueueScreen: View {
         [
             QuickActionItem(label: "Play Group", isDestructive: false) {
                 if let episode = repo.playGroup(group.podcast) {
-                    player.play(episode)
+                    // playFromEpisodeList so Play Group honors #562 (Item 1).
+                    player.playFromEpisodeList(episode)
                     Announcer.announce("Playing \(group.podcast.title)")
                 }
             },
