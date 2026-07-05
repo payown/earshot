@@ -44,7 +44,7 @@ Phase 2 = immediate fixes, the Flutter→SwiftUI migration, and audio DSP (#352)
 | Fix A — app icon on device | — | [x] | No-op. Icon config verified correct (1024² source, Contents.json, `ASSETCATALOG_COMPILER_APPICON_NAME`). Confirmed working on device by Michael; no code change. |
 | Fix B — tab order + Library rename | #353 | [x] | Reordered to Inbox/Queue/Library/Downloads/Settings; `books.vertical` icon; renamed Podcasts→Library in tab label, `SubscriptionsView` title, refresh announcement, and reset category label. Search results "Podcasts" header left as-is (result category, not tab). 189 tests green. Commit c363675. Awaiting device verification. |
 | Fix C — artwork not loading on device | — | [x] | Skipped. Artwork confirmed working on device by Michael. (Investigation noted a latent gap: RSSParser reads `itunes:image` only, not the standard `<image><url>` channel-art fallback — file an issue if any feed surfaces it later.) |
-| Migration — Flutter→SwiftUI subscription import | #354 | [~] | SwiftUI signing-independent layer DONE: `MigrationGate` (gate + 3-reminder cap), `FlutterMigrationService` (reads `SELECT rss_url FROM podcasts` from `earshot_export.db` via `import SQLite3`, no-ops if absent), beta-gated `MigrationPromptView` wired into RootView, dedicated **Beta** build config (`IS_BETA_BUILD` in Debug+Beta, not Release). 10 new tests (real temp SQLite DB + mocked feed). Release build confirmed to exclude the sheet. mobile-accessibility reviewed (iOS-001 announcement lifecycle + 5 more fixed). **Deferred:** App Group entitlement (`Earshot.entitlements`) — needs the group registered to team 72PH974742 and matched on the Flutter app; can't be verified in CI. Until it lands, the container URL is nil and migration no-ops. See Flutter-side tasks below. |
+| Migration — Flutter→SwiftUI subscription import | #354 | [x] | REMOVED (#580). The migration was abandoned 2026-06-25; OPML is the only re-import path. `FlutterMigrationService`, `MigrationGate`, the importers, the Data Import UI, the RootView launch wiring (including the per-launch SQLite diagnostics), and the Settings → Data "Import older data" surface were all deleted. The `flutter_migration_*` / `migration_*` setting keys are retained as unread constants for data compatibility only. |
 | Audio DSP | #352 | [~] | DONE pending device verify. `AudioEnhancementLogic` (pure mode/channel mapping, tested both ways). `configureSession` now conditional on `voiceEnhanceEnabled` (was hardcoded `.spokenAudio`); `applyAudioEnhancement()` sets mode + `setPreferredOutputNumberOfChannels` (1 mono / 2 stereo); all `AVAudioSession` calls in do/catch + `AppLog.player` (no silent `try?`). Public `effectiveRate` + `reapplyRate()`. RootView `.onChange` re-applies global speed + voice-enhance mid-playback (observation-based, not NotificationCenter). Per-podcast `speedOverride` has no setter UI yet (deferred F7) — `reapplyRate()` ready for it. Mono is audible only on device. |
 | BUG — tab switching blocked during playback | #362 | [x] | Per-second synchronous main-actor SwiftData `context.save()` from the 1s time observer starved the run loop, freezing TabView selection while audio played (severe VoiceOver nav regression). Fixed by throttling the per-tick position write to a 5s cadence via pure `PlaybackLogic.shouldPersistTick`; eager saves on pause/seek/episode-switch/30s-flush keep durability. All gates passed (security, testing, swift6, changelog; a11y N/A — no view changed). 210 tests green (was 204). Branch `fix/issue-362-tab-switching-playback`. Awaiting device verification. |
 
@@ -54,27 +54,12 @@ Phase 2 = immediate fixes, the Flutter→SwiftUI migration, and audio DSP (#352)
 non-zero `positionSeconds` over the just-zeroed value. Pre-existing, cosmetic
 (episode is already played; end-of-item resets to 0 anyway), out of scope for #362.
 
-### Migration — Flutter-side tasks (document-only; NOT done, no Flutter files touched)
+### Migration — Flutter-side tasks (OBSOLETE — feature removed, #580)
 
-These must ship in a Flutter release before migration can be tested end-to-end.
-The SwiftUI side is built and waiting.
-
-1. **Add the App Group to the Flutter app.** Add `group.media.payown.earshot` to the
-   Flutter iOS entitlements (`ios/Runner/Runner.entitlements`) under
-   `com.apple.security.application-groups`. Register the group in the Apple
-   Developer portal for team 72PH974742. Re-sign and re-distribute.
-2. **Add the matching App Group to the SwiftUI app** (the deferred entitlement):
-   create `EarshotSwift/Earshot/App/Earshot.entitlements` with the same group and
-   reference it from `project.yml` (`entitlements:` on the Earshot target), then
-   `xcodegen generate`.
-3. **Flutter writes the export DB on launch.** On launch, the Flutter app copies
-   (or hard-links) `<sandbox>/Documents/earshot.db` to
-   `group.media.payown.earshot/earshot_export.db` in the shared container. The
-   SwiftUI reader expects the drift `podcasts` table with the `rss_url` column
-   (drift v16 schema — confirmed against `lib/data/db/tables/podcasts.dart` +
-   generated SQL).
-4. Until 1–3 ship, OPML import (Settings) is the manual fallback, surfaced in the
-   prompt's "Export my subscriptions as OPML" instructions.
+The Flutter→SwiftUI migration was abandoned 2026-06-25 and its remaining dead
+code (launch wiring, migration service, importers, Settings surface) was deleted
+under #580. None of the App Group / export-DB tasks that used to live here will
+ship; OPML export/import is the supported way to carry a library over.
 
 ## Decisions Log
 

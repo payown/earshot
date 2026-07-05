@@ -8,8 +8,7 @@ import SwiftData
 /// the synchronous `XMLParser.parse()` for each one, diffing against existing
 /// episodes by guid, inserting/updating, and saving — happens here instead, so
 /// VoiceOver keeps the main thread it needs to walk the a11y tree and speak.
-/// Importing/refreshing 100+ feeds on the main actor is exactly what starved it
-/// (the same lesson `SubscriptionImporter` documents for the migration import).
+/// Importing/refreshing 100+ feeds on the main actor is exactly what starved it.
 ///
 /// `@Model` objects never cross the actor boundary: callers pass feed URLs and
 /// the actor returns value types only (``RefreshOutcome`` / ``RefreshProgress``
