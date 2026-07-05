@@ -89,6 +89,62 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QueueItem>()), 1)
     }
 
+    // MARK: batch add (Inbox multi-select, #595)
+
+    func testBatchAddAppendsInGivenOrderAndSetsStatusInQueue() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let a = makeEpisode(ctx, "a", podcast: p)
+        let b = makeEpisode(ctx, "b", podcast: p)
+        let c = makeEpisode(ctx, "c", podcast: p)
+        let repo = QueueRepository(context: ctx)
+
+        repo.add([b, c, a]) // order handed in, not insertion/pubDate order
+
+        XCTAssertEqual(titles(repo), ["Ep b", "Ep c", "Ep a"])
+        XCTAssertEqual([a, b, c].map(\.status), [.inQueue, .inQueue, .inQueue])
+    }
+
+    func testBatchAddAppendsAfterExistingQueueContents() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let a = makeEpisode(ctx, "a", podcast: p)
+        let repo = QueueRepository(context: ctx)
+        repo.add(a)
+        let b = makeEpisode(ctx, "b", podcast: p)
+        let c = makeEpisode(ctx, "c", podcast: p)
+
+        repo.add([b, c])
+
+        XCTAssertEqual(titles(repo), ["Ep a", "Ep b", "Ep c"])
+    }
+
+    func testBatchAddSkipsAlreadyQueuedEpisodesWithoutDuplicating() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let a = makeEpisode(ctx, "a", podcast: p)
+        let b = makeEpisode(ctx, "b", podcast: p)
+        let repo = QueueRepository(context: ctx)
+        repo.add(a) // already queued
+
+        repo.add([a, b])
+
+        XCTAssertEqual(titles(repo), ["Ep a", "Ep b"])
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QueueItem>()), 2)
+    }
+
+    func testBatchAddOnEmptyArrayMakesNoChange() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let a = makeEpisode(ctx, "a", podcast: p)
+        let repo = QueueRepository(context: ctx)
+        repo.add(a)
+
+        repo.add([])
+
+        XCTAssertEqual(titles(repo), ["Ep a"])
+    }
+
     func testQueuePositionsCompactToZeroBasedRange() {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx, "A")

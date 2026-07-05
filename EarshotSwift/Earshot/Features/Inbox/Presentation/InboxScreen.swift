@@ -25,6 +25,17 @@ struct InboxScreen: View {
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var confirmingClear = false
+    // Inbox multi-select (#595): entering selection mode swaps every row's
+    // swipe/rotor actions for a checkbox and replaces the toolbar's Clear
+    // inbox button with a bulk Add to Queue action. Selection is keyed on
+    // persistent identity, not `Episode` itself, so it survives the
+    // `@Query`-driven row rebuilds that happen as the inbox changes underneath.
+    @State private var isSelecting = false
+    @State private var selectedEpisodeIDs: Set<PersistentIdentifier> = []
+    // Takes VoiceOver focus back to the toolbar's Select button after a bulk
+    // add completes and selection mode exits, mirroring the neighbor-focus
+    // wiring used elsewhere in this screen (`focusEmpty`, `focusedEpisode`).
+    @AccessibilityFocusState private var focusSelectButton: Bool
     // The podcast a pending "Unfollow this podcast" targets — reached from the
     // trailing swipe (sighted, #500) or the row's `.unfollow` Quick Action in the
     // VoiceOver rotor (#572). Non-nil drives the destructive confirmation dialog.
@@ -84,11 +95,11 @@ struct InboxScreen: View {
                     // Toggling VoiceOver mid-session updates `voiceOverEnabled`
                     // and re-renders these rows — no relaunch needed.
                     ForEach(visible) { episode in
-                        let row = EpisodeRow(episode: episode, actions: actions(for: episode), includesPodcastName: true)
+                        let row = episodeRow(for: episode)
                             // Lets the rotor mark-played runner hand VoiceOver
                             // focus to this row when its neighbor vanishes (#579).
                             .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
-                        if voiceOverEnabled {
+                        if voiceOverEnabled || isSelecting {
                             row
                         } else {
                             row
@@ -176,7 +187,41 @@ struct InboxScreen: View {
                     .accessibilityLabel(InboxLogic.inboxTitleAccessibilityLabel(count: inbox.count))
                     .accessibilityAddTraits(.isHeader)
             }
+            // Select / Cancel toggles selection mode (#595). Only offered when
+            // there's something to select; hidden while the inbox is empty just
+            // like Clear inbox.
             if !inbox.isEmpty {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        if isSelecting {
+                            exitSelectionMode()
+                        } else {
+                            isSelecting = true
+                        }
+                    } label: {
+                        Text(isSelecting ? "Cancel" : "Select")
+                    }
+                    .accessibilityFocused($focusSelectButton)
+                }
+            }
+            if isSelecting {
+                // Bulk action lives in the toolbar only (no rotor action): this
+                // is a screen-level action over the whole selection, not a
+                // per-row one, so there's no natural row to hang a rotor action
+                // off of. Disabled (not hidden) when nothing is checked yet, so
+                // VoiceOver users can find it and learn why it's inactive.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        addSelectedToQueue(visible: visible)
+                    } label: {
+                        Label("Add to Queue", systemImage: "text.badge.plus")
+                    }
+                    .disabled(selectedEpisodeIDs.isEmpty)
+                    .accessibilityValueIfPresent(
+                        selectedEpisodeIDs.isEmpty ? "" : "\(selectedEpisodeIDs.count) selected"
+                    )
+                }
+            } else if !inbox.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         confirmingClear = true
@@ -218,6 +263,65 @@ struct InboxScreen: View {
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
+    }
+
+    /// Builds one row, switching it into checkbox mode while selecting (#595).
+    /// Broken out of the `ForEach` body so the type checker isn't asked to
+    /// resolve the conditional `selection:` argument inline alongside the
+    /// modifier chain.
+    private func episodeRow(for episode: Episode) -> EpisodeRow {
+        let selectionState: EpisodeRow.SelectionState? = isSelecting
+            ? .init(
+                isSelected: selectedEpisodeIDs.contains(episode.persistentModelID),
+                toggle: { toggleSelection(episode) }
+            )
+            : nil
+        return EpisodeRow(
+            episode: episode,
+            actions: actions(for: episode),
+            includesPodcastName: true,
+            selection: selectionState
+        )
+    }
+
+    private func toggleSelection(_ episode: Episode) {
+        let id = episode.persistentModelID
+        if selectedEpisodeIDs.contains(id) {
+            selectedEpisodeIDs.remove(id)
+        } else {
+            selectedEpisodeIDs.insert(id)
+        }
+    }
+
+    private func exitSelectionMode() {
+        isSelecting = false
+        selectedEpisodeIDs.removeAll()
+    }
+
+    /// Adds every checked episode to the end of the queue, in Inbox order
+    /// (filtering `visible` rather than tracking tap order), then exits
+    /// selection mode. The added episodes flip to `.inQueue` and drop out of
+    /// the Inbox on their own (same as the single-row "Add to end of queue"
+    /// Quick Action), so no separate row-removal/focus bookkeeping is needed
+    /// beyond returning focus to the Select button.
+    private func addSelectedToQueue(visible: [Episode]) {
+        let toAdd = visible.filter { selectedEpisodeIDs.contains($0.persistentModelID) }
+        guard !toAdd.isEmpty else { return }
+        QueueRepository(context: context).add(toAdd)
+        Announcer.announce("Added \(toAdd.count) to queue", assertive: true)
+        exitSelectionMode()
+        // Selecting-and-adding everything left in the Inbox is a likely bulk
+        // path, and it empties the inbox: the Select button's ToolbarItem is
+        // only rendered `if !inbox.isEmpty`, so unconditionally refocusing it
+        // would strand VoiceOver on a vanished element. Mirrors the
+        // emptiness check clearInbox/markPlayed/unfollow already do.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if InboxRepository(context: context).inboxEpisodes().isEmpty {
+                focusEmpty = true
+            } else {
+                focusSelectButton = true
+            }
+        }
     }
 
     private func clearInbox() {
@@ -328,5 +432,20 @@ struct InboxScreen: View {
             return [episode.title, url]
         }
         return [episode.title]
+    }
+}
+
+private extension View {
+    /// Applies `.accessibilityValue` only when there's something to say. An empty
+    /// value string makes VoiceOver speak a stray pause (dead air), so callers
+    /// with no value to communicate must omit the modifier entirely rather than
+    /// set "".
+    @ViewBuilder
+    func accessibilityValueIfPresent(_ value: String) -> some View {
+        if value.isEmpty {
+            self
+        } else {
+            accessibilityValue(value)
+        }
     }
 }

@@ -71,6 +71,18 @@ final class QueueRepository {
         compact(items)
     }
 
+    /// Appends `episodes` to the end in the given order, in a single fetch +
+    /// compact rather than one per episode (backs Inbox multi-select bulk add,
+    /// #595). Idempotent per-episode: any already queued is left untouched,
+    /// same as adding one at a time.
+    func add(_ episodes: [Episode]) {
+        var items = orderedItems()
+        for episode in episodes where episode.queueItem == nil {
+            items.append(enqueue(episode))
+        }
+        compact(items)
+    }
+
     /// Inserts `episode` so it plays immediately after `current`. If `current`
     /// is in the queue, inserts right after it; otherwise inserts at the front,
     /// so auto-advance still picks it next. Moves an already-queued episode.
