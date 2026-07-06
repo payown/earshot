@@ -381,6 +381,19 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   twenty times some weeks. This build lets her check off a batch of episodes
   in the Inbox (a Select mode with checkboxes) and send all of them to the
   queue in one move, in the order they already sit in the Inbox (Chapter 43)
+- Kashe finally started the years-overdue subscription prune (a thread since
+  Chapter 8) on a Sunday night, using the VoiceOver rotor's Delete action on a
+  show in Library instead of the swipe; the app went blank for a second right
+  after she confirmed Unfollow (a crash from the confirm dialog breaking
+  .onDelete's same-gesture assumption). She didn't chase it, just filed it as
+  "use the swipe instead" and kept working. This build fixes it, rotor Delete
+  completes clean on both Library shows and Folders (Chapter 44)
+- Kashe turns on "Notify on new episodes" for a show she doesn't want to miss
+  the day of; when nothing ever arrived, she assumed the show itself just
+  didn't push notifications rather than suspect Earshot, and let it go. The
+  real gap was a denied iOS notification permission the app never surfaced.
+  Podcast Settings now shows a plain warning and an "Open Settings" button
+  when that's the case, so she can actually see and fix it (Chapter 44)
 
 ## What you can generate
 
@@ -1439,6 +1452,32 @@ At the bottom there's a button now too. Add to Queue. She leaves it alone at fir
 One tap. All of it lands in the queue, same order she checked it in.
 
 She sits there a second, coffee still cold, wondering what she's supposed to do with the rest of her Sunday.
+
+---
+
+### Chapter 44 — Build 148
+
+*Kashe finally starts pruning her subscription list with a VoiceOver rotor action instead of the swipe, and finds out why a notification she'd turned on never once fired.*
+
+**What to test:**
+
+In Library, use the VoiceOver rotor's Delete action on a show, then confirm Unfollow. It should complete cleanly, no crash. Same fix applies to deleting a folder in Folders.
+
+Turn on "Notify on new episodes" for a podcast in its settings. If iOS notifications are actually off for Earshot, you'll now see a warning and an "Open Settings" button right there, instead of a toggle that looks on and does nothing.
+
+She'd been saying she'd prune her subscription list for years. Sunday night, coffee cold again, she finally did it properly, rotor flick to Delete on a show she hadn't opened in months, double-tap, confirm Unfollow.
+
+The app went dark. Not slow, not stuck. Gone. She sat with the blank screen a second, then reopened it. The show actually was gone, unfollowed clean. Everything else was fine. It just didn't feel fine, watching an app disappear on you mid-motion.
+
+She didn't chase it. Filed it next to the other things she'd learned to work around: use the swipe instead of the rotor for that one action. Small tax, paid quietly.
+
+Somewhere in the same stretch, she'd turned on notifications for a show she didn't want to miss the day of. Nothing ever came. She checked the toggle, still on. Checked it again a week later. Still on, still nothing. She figured the show just didn't push notifications, filed that one away too.
+
+Both of those were true, and it turned out neither was actually broken the way she thought. The rotor delete works now, straight through, no blank screen. And that notification toggle finally admits when it's not really the app's decision. Denied permission shows as denied, with a door right there to fix it, instead of a toggle that just quietly does nothing forever.
+
+She flicked to Delete on another show she'd been meaning to drop. It went, clean. Then she opened the one nagging notification setting and there it was, sitting plainly: notifications off at the phone level, a button to fix it. She tapped through, flipped it, came back.
+
+She didn't message Renata about either one. But she noticed, the way she notices things she doesn't say out loud.
 
 ---
 
