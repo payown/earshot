@@ -68,6 +68,15 @@ struct NotificationService: Sendable {
 
     // MARK: Authorization
 
+    /// The current authorization status, without prompting. Used to detect and
+    /// surface a prior denial in the UI (#600): `requestAuthorization()`
+    /// intentionally never re-prompts once the user has decided, so a user who
+    /// denied the one-time system prompt gets no further feedback anywhere in
+    /// the app unless a caller explicitly checks this and tells them.
+    func currentAuthorizationStatus() async -> UNAuthorizationStatus {
+        await center.authorizationStatus()
+    }
+
     /// Requests `.alert, .sound, .badge` authorization, but only if the user has
     /// not yet decided. Returns whether notifications are authorized after the
     /// call. Idempotent: a `.denied`/`.authorized`/`.provisional` status is left

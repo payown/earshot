@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// Per-podcast settings sheet. Opened from a toolbar button on `EpisodeListView`.
 /// All controls bind directly to the `Podcast` SwiftData model — changes persist
@@ -17,6 +18,11 @@ struct PodcastSettingsView: View {
     /// runs with the view's lifetime rather than in an unowned `Task {}` that
     /// SwiftUI may tear down before it reaches the system prompt (#421).
     @State private var authRequestToken = 0
+    /// Whether iOS-level notification authorization is denied. Checked on
+    /// appear and again after any authorization request, so a prior denial
+    /// (the toggle would otherwise silently do nothing forever) is surfaced
+    /// with a path to fix it (#600).
+    @State private var isAuthorizationDenied = false
 
     /// Factory for the notification service, injectable so a test can supply a
     /// mock `NotificationScheduling` and assert the permission request fires.
@@ -143,17 +149,70 @@ struct PodcastSettingsView: View {
                 // though writing a SwiftData @Model property doesn't reliably
                 // fire `.onChange` (the model diffs old == new by the time
                 // SwiftUI compares) (#421). requestAuthorization() is idempotent:
-                // it never re-prompts once the user has decided (#72).
+                // it never re-prompts once the user has decided (#72). Re-check
+                // status afterward so a denial (or a grant) is reflected
+                // immediately, without waiting for the sheet to reopen (#600).
                 .task(id: authRequestToken) {
                     guard authRequestToken > 0 else { return }
                     await makeNotificationService().requestAuthorization()
+                    // Announce only on THIS path (a live toggle flip), not the
+                    // silent initial-appear check below — a user who just
+                    // switched notifications on and hit a standing denial needs
+                    // to hear that it didn't work, since nothing else here tells
+                    // them (#600).
+                    await refreshAuthorizationStatus(announceIfNewlyDenied: true)
                 }
+            // Only relevant once the user has actually asked for notifications
+            // on this show — a denial is moot noise while the toggle is off.
+            if podcast.notificationEnabled == true, isAuthorizationDenied {
+                // Icon carries the warning color, text stays at label contrast
+                // (never color alone) — matches the app's established
+                // icon-carries-color error pattern (AddFeedView, #462) rather
+                // than muting the whole row to secondary, which under-signals
+                // that this is a real, silent feature failure.
+                Label {
+                    Text("Notifications are turned off for Earshot. Enable them in Settings to get new episode alerts.")
+                } icon: {
+                    Image(systemName: "bell.slash")
+                        .foregroundStyle(.orange)
+                }
+                Button("Open Settings") { openSystemSettings() }
+                    .accessibilityHint("Opens the Settings app to Earshot's notification permissions")
+            }
         } header: {
             Text("Notifications")
                 .accessibilityAddTraits(.isHeader)
         } footer: {
             Text("Sends a notification when new episodes are detected during a background refresh.")
         }
+        // Checked once when the sheet appears, so a denial from a PRIOR session
+        // (or a grant made in Settings since the last time this sheet was open)
+        // shows up without needing to toggle anything (#600). Silent: this is
+        // not a live user action, so nothing to announce.
+        .task {
+            await refreshAuthorizationStatus()
+        }
+    }
+
+    /// Re-reads authorization status. `announceIfNewlyDenied` fires a VoiceOver
+    /// announcement only on the false→true transition, and only when the
+    /// caller is responding to a live toggle flip — never on the silent
+    /// initial-appear check, so reopening this sheet never re-announces
+    /// already-known state.
+    private func refreshAuthorizationStatus(announceIfNewlyDenied: Bool = false) async {
+        let wasDenied = isAuthorizationDenied
+        let status = await makeNotificationService().currentAuthorizationStatus()
+        isAuthorizationDenied = status == .denied
+        if announceIfNewlyDenied, isAuthorizationDenied, !wasDenied {
+            Announcer.announce(
+                "Notifications are off for Earshot in Settings. Enable them there to get alerts for this podcast."
+            )
+        }
+    }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     /// Binding for the "Notify on new episodes" toggle. The `set` performs the

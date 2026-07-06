@@ -187,6 +187,31 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(calls, 0, "Must not re-prompt once denied (idempotent)")
     }
 
+    // MARK: currentAuthorizationStatus (#600 — surfacing a prior denial)
+
+    func testCurrentAuthorizationStatusReadsWithoutPrompting() async {
+        let mock = MockNotificationCenter(status: .denied, grantResult: true)
+        let service = NotificationService(center: mock)
+        let status = await service.currentAuthorizationStatus()
+        XCTAssertEqual(status, .denied)
+        let calls = await mock.requestCallCount
+        XCTAssertEqual(calls, 0, "Reading status must never prompt")
+    }
+
+    func testCurrentAuthorizationStatusReflectsAuthorized() async {
+        let mock = MockNotificationCenter(status: .authorized, grantResult: true)
+        let service = NotificationService(center: mock)
+        let status = await service.currentAuthorizationStatus()
+        XCTAssertEqual(status, .authorized)
+    }
+
+    func testCurrentAuthorizationStatusReflectsNotDetermined() async {
+        let mock = MockNotificationCenter(status: .notDetermined, grantResult: true)
+        let service = NotificationService(center: mock)
+        let status = await service.currentAuthorizationStatus()
+        XCTAssertEqual(status, .notDetermined)
+    }
+
     func testRequestAuthorizationSwallowsErrors() async {
         let mock = MockNotificationCenter(status: .notDetermined, grantResult: true, throwOnRequest: true)
         let service = NotificationService(center: mock)
