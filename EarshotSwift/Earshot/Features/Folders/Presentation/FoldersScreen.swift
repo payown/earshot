@@ -12,6 +12,12 @@ struct FoldersScreen: View {
     @State private var newName = ""
     @State private var pendingDelete: PodcastFolder?
     @AccessibilityFocusState private var focusedFolderID: PersistentIdentifier?
+    // Gates the sighted-only swipe action below (#597): rather than lean on
+    // iOS mirroring `.swipeActions` into the rotor — unverified for a row that
+    // already carries a manual `.rotorActions` block — VoiceOver users get an
+    // explicit "Delete folder" rotor action instead, so deletion never depends
+    // on that mirroring behavior at all.
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
     var body: some View {
         Group {
@@ -26,36 +32,64 @@ struct FoldersScreen: View {
             } else {
                 List {
                     ForEach(Array(folders.enumerated()), id: \.element.persistentModelID) { index, folder in
-                        NavigationLink(value: folder) {
+                        let link = NavigationLink(value: folder) {
                             row(for: folder)
                         }
                         // The drag handle (`.onMove`) stays for sighted users; these
                         // rotor move actions are the non-drag alternative every other
                         // reorderable list in the app already offers (Queue, Quick
                         // Actions). Same vocabulary, same tested `QuickActionMoveLogic`.
-                        .accessibilityLabel(rowLabel(for: folder, index: index, count: folders.count))
-                        .accessibilityHint("Use the actions rotor to move this folder without dragging.")
-                        .accessibilityFocused($focusedFolderID, equals: folder.persistentModelID)
-                        // Routed through the shared helper so the rotor announces
-                        // "Move to top" first — the same order the compensated
-                        // Queue rows use — despite the OS's reversed emission
-                        // (#572, #577). `QuickActionMoveLogic.targets` already
-                        // returns the designed order.
-                        .rotorActions(
-                            QuickActionMoveLogic.targets(index: index, count: folders.count)
-                                .map { target in
-                                    QuickActionItem(label: target.label, isDestructive: false) {
-                                        move(IndexSet(integer: index), target.destinationOffset)
-                                        Announcer.announce(
-                                            "Moved \(folder.name) to position \(target.resultingIndex + 1) of \(folders.count)"
-                                        )
-                                        focusedFolderID = folder.persistentModelID
+                        // A "Delete folder" action is appended after the moves (#597):
+                        // deleting used to be the system rotor "Delete" action generated
+                        // by `.onDelete`, which crashed intermittently because that API
+                        // assumes the row is removed synchronously within the same
+                        // gesture's transaction — but the confirmation dialog (#578)
+                        // defers the real delete to a later, disconnected gesture. This
+                        // explicit custom action carries no such assumption, and — unlike
+                        // relying on iOS to mirror the sighted swipe action below into the
+                        // rotor — guarantees VoiceOver users always have a delete path,
+                        // regardless of mirroring behavior for a row that also declares
+                        // this manual `.rotorActions` block.
+                        let rowView = link
+                            .accessibilityLabel(rowLabel(for: folder, index: index, count: folders.count))
+                            .accessibilityHint("Use the actions rotor to move this folder without dragging.")
+                            .accessibilityFocused($focusedFolderID, equals: folder.persistentModelID)
+                            // Routed through the shared helper so the rotor announces
+                            // "Move to top" first — the same order the compensated
+                            // Queue rows use — despite the OS's reversed emission
+                            // (#572, #577). `QuickActionMoveLogic.targets` already
+                            // returns the designed order.
+                            .rotorActions(
+                                QuickActionMoveLogic.targets(index: index, count: folders.count)
+                                    .map { target in
+                                        QuickActionItem(label: target.label, isDestructive: false) {
+                                            move(IndexSet(integer: index), target.destinationOffset)
+                                            Announcer.announce(
+                                                "Moved \(folder.name) to position \(target.resultingIndex + 1) of \(folders.count)"
+                                            )
+                                            focusedFolderID = folder.persistentModelID
+                                        }
+                                    }
+                                    + [QuickActionItem(label: "Delete folder", isDestructive: true) {
+                                        pendingDelete = folder
+                                    }]
+                            )
+                        if voiceOverEnabled {
+                            rowView
+                        } else {
+                            // Sighted-only swipe (#597): VoiceOver users reach delete
+                            // through the explicit rotor action above instead.
+                            rowView
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        pendingDelete = folder
+                                    } label: {
+                                        Label("Delete folder", systemImage: "trash")
                                     }
                                 }
-                        )
+                        }
                     }
                     .onMove(perform: move)
-                    .onDelete(perform: delete)
                 }
             }
         }
@@ -141,17 +175,6 @@ struct FoldersScreen: View {
         var reordered = folders
         reordered.move(fromOffsets: offsets, toOffset: destination)
         FolderRepository(context: context).reorderFolders(reordered)
-    }
-
-    /// `.onDelete` backs swipe-to-delete, Edit-mode minus buttons, and the
-    /// system "Delete" action in the VoiceOver rotor. All of them route through
-    /// the confirmation dialog instead of deleting directly, matching
-    /// FolderDetailScreen's confirmed delete (#578). Each activation passes a
-    /// single offset (no multi-select delete in this list), so only the first
-    /// offset is confirmed; any hypothetical extras are ignored, not deleted.
-    private func delete(_ offsets: IndexSet) {
-        guard let index = offsets.first, folders.indices.contains(index) else { return }
-        pendingDelete = folders[index]
     }
 
     /// Runs after the user confirms in the dialog. Keeps the pre-#578
