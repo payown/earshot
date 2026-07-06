@@ -1416,6 +1416,8 @@ Then she found the search. Pull down on the Queue and ask. A client had mentione
 
 *Kashe's Sunday inbox pass used to mean one episode at a time; this build lets her check a batch and send it to the queue in one step.*
 
+*Re-shipped unchanged as Build 147, which also bumps MARKETING_VERSION to 1.0.0 — the version now targeted for eventual App Store release, by build 200 at the latest. No functional or story changes between 146 and 147.*
+
 **What to test:**
 
 In the Inbox, tap Select in the toolbar. Every row switches to a checkbox, and VoiceOver says "selected" or "unselected" as you check each one, no extra announcement needed.
