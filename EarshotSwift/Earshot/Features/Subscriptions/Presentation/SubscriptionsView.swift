@@ -11,7 +11,7 @@ struct SubscriptionsView: View {
     @State private var pendingUnsubscribe: Podcast?
     // Gates the sighted-only swipe action below, mirroring Inbox's identical
     // gate: VoiceOver users already reach unfollow through the row's
-    // "Unsubscribe" Quick Action in the rotor (`rotorActions(for:)` below), so
+    // "Unfollow" Quick Action in the rotor (`rotorActions(for:)` below), so
     // this only needs to add a second, sighted affordance — never both for the
     // same user (#597).
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled

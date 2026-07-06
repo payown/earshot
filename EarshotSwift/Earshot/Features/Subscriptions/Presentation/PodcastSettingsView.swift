@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import UserNotifications
 
 /// Per-podcast settings sheet. Opened from a toolbar button on `EpisodeListView`.
 /// All controls bind directly to the `Podcast` SwiftData model — changes persist
@@ -12,17 +13,22 @@ struct PodcastSettingsView: View {
     @Bindable var podcast: Podcast
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
 
-    /// Bumped each time the notification toggle is switched ON. A `.task(id:)`
-    /// keyed on this token owns the async `requestAuthorization()` call so it
-    /// runs with the view's lifetime rather than in an unowned `Task {}` that
-    /// SwiftUI may tear down before it reaches the system prompt (#421).
+    /// Bumped each time the notification toggle is switched ON — or the
+    /// "Enable Notifications" button below is tapped, which just bumps this
+    /// same token to reuse the identical request flow. A `.task(id:)` keyed on
+    /// this token owns the async `requestAuthorization()` call so it runs with
+    /// the view's lifetime rather than in an unowned `Task {}` that SwiftUI may
+    /// tear down before it reaches the system prompt (#421).
     @State private var authRequestToken = 0
-    /// Whether iOS-level notification authorization is denied. Checked on
-    /// appear and again after any authorization request, so a prior denial
-    /// (the toggle would otherwise silently do nothing forever) is surfaced
-    /// with a path to fix it (#600).
-    @State private var isAuthorizationDenied = false
+    /// iOS-level notification authorization, or `nil` before the first check
+    /// completes. Checked on appear, after any authorization request, and
+    /// whenever the app returns to active (e.g. after visiting Settings) —
+    /// distinguishing `.denied` from `.notDetermined` matters because they
+    /// need different remedies: Settings only has an entry for this app once
+    /// it has genuinely been denied, never for `.notDetermined` (#600, #602).
+    @State private var authorizationStatus: UNAuthorizationStatus?
 
     /// Factory for the notification service, injectable so a test can supply a
     /// mock `NotificationScheduling` and assert the permission request fires.
@@ -150,34 +156,59 @@ struct PodcastSettingsView: View {
                 // fire `.onChange` (the model diffs old == new by the time
                 // SwiftUI compares) (#421). requestAuthorization() is idempotent:
                 // it never re-prompts once the user has decided (#72). Re-check
-                // status afterward so a denial (or a grant) is reflected
-                // immediately, without waiting for the sheet to reopen (#600).
+                // status afterward so a denial/grant is reflected immediately,
+                // without waiting for the sheet to reopen (#600).
                 .task(id: authRequestToken) {
                     guard authRequestToken > 0 else { return }
                     await makeNotificationService().requestAuthorization()
-                    // Announce only on THIS path (a live toggle flip), not the
-                    // silent initial-appear check below — a user who just
-                    // switched notifications on and hit a standing denial needs
-                    // to hear that it didn't work, since nothing else here tells
-                    // them (#600).
-                    await refreshAuthorizationStatus(announceIfNewlyDenied: true)
+                    // Announce only on THIS path (a live toggle flip or a tap on
+                    // "Enable Notifications" below), not the silent appear/
+                    // scenePhase checks — a user who just asked for
+                    // notifications and hit a standing problem needs to hear
+                    // that it didn't work, since nothing else here tells them
+                    // (#600).
+                    await refreshAuthorizationStatus(announceIfStillProblematic: true)
                 }
             // Only relevant once the user has actually asked for notifications
-            // on this show — a denial is moot noise while the toggle is off.
-            if podcast.notificationEnabled == true, isAuthorizationDenied {
+            // on this show — a denied/undetermined status is moot noise while
+            // the toggle is off.
+            if podcast.notificationEnabled == true {
                 // Icon carries the warning color, text stays at label contrast
                 // (never color alone) — matches the app's established
-                // icon-carries-color error pattern (AddFeedView, #462) rather
-                // than muting the whole row to secondary, which under-signals
-                // that this is a real, silent feature failure.
-                Label {
-                    Text("Notifications are turned off for Earshot. Enable them in Settings to get new episode alerts.")
-                } icon: {
-                    Image(systemName: "bell.slash")
-                        .foregroundStyle(.orange)
+                // icon-carries-color error pattern (AddFeedView, #462).
+                switch authorizationStatus {
+                case .denied:
+                    // Settings has an entry for this app once it's genuinely
+                    // been asked and denied — "Open Settings" is the correct
+                    // remedy here.
+                    Label {
+                        Text("Notifications are turned off for Earshot. Enable them in Settings to get new episode alerts.")
+                    } icon: {
+                        Image(systemName: "bell.slash")
+                            .foregroundStyle(.orange)
+                    }
+                    Button("Open Settings") { openSystemSettings() }
+                        .accessibilityHint("Opens the Settings app to Earshot's notification permissions")
+                case .notDetermined:
+                    // No Settings entry exists yet for an app that's never been
+                    // asked (#602) — "Open Settings" would lead nowhere. The
+                    // remedy is to actually ask, which reuses the exact same
+                    // request flow as the toggle by bumping the same token.
+                    Label {
+                        Text("Notifications haven't been turned on for Earshot yet.")
+                    } icon: {
+                        // Plain `bell`, not `bell.badge` — the badge glyph reads
+                        // as "you have a pending notification" to a sighted
+                        // user scanning icons, the opposite of "not yet
+                        // enabled." VoiceOver only speaks the Text either way.
+                        Image(systemName: "bell")
+                            .foregroundStyle(.orange)
+                    }
+                    Button("Enable Notifications") { authRequestToken += 1 }
+                        .accessibilityHint("Asks iOS for permission to send notifications")
+                default:
+                    EmptyView()
                 }
-                Button("Open Settings") { openSystemSettings() }
-                    .accessibilityHint("Opens the Settings app to Earshot's notification permissions")
             }
         } header: {
             Text("Notifications")
@@ -185,28 +216,39 @@ struct PodcastSettingsView: View {
         } footer: {
             Text("Sends a notification when new episodes are detected during a background refresh.")
         }
-        // Checked once when the sheet appears, so a denial from a PRIOR session
-        // (or a grant made in Settings since the last time this sheet was open)
-        // shows up without needing to toggle anything (#600). Silent: this is
-        // not a live user action, so nothing to announce.
+        // Checked once when the sheet appears, so a standing problem from a
+        // PRIOR session shows up without needing to toggle anything (#600),
+        // and again whenever the app returns to active — e.g. after visiting
+        // Settings and back, so the sheet doesn't need to be closed/reopened
+        // to reflect a change made there (#602). Both silent: neither is a
+        // live user action in this view, so nothing to announce.
         .task {
             await refreshAuthorizationStatus()
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await refreshAuthorizationStatus() }
+        }
     }
 
-    /// Re-reads authorization status. `announceIfNewlyDenied` fires a VoiceOver
-    /// announcement only on the false→true transition, and only when the
-    /// caller is responding to a live toggle flip — never on the silent
-    /// initial-appear check, so reopening this sheet never re-announces
-    /// already-known state.
-    private func refreshAuthorizationStatus(announceIfNewlyDenied: Bool = false) async {
-        let wasDenied = isAuthorizationDenied
+    /// Re-reads authorization status. `announceIfStillProblematic` fires a
+    /// VoiceOver announcement when the status is anything other than granted
+    /// after a live request — and only when the caller is responding to that
+    /// live toggle-flip/button-tap, never on the silent appear/scenePhase
+    /// checks, so those never re-announce already-known state.
+    private func refreshAuthorizationStatus(announceIfStillProblematic: Bool = false) async {
         let status = await makeNotificationService().currentAuthorizationStatus()
-        isAuthorizationDenied = status == .denied
-        if announceIfNewlyDenied, isAuthorizationDenied, !wasDenied {
+        authorizationStatus = status
+        guard announceIfStillProblematic else { return }
+        switch status {
+        case .denied:
             Announcer.announce(
                 "Notifications are off for Earshot in Settings. Enable them there to get alerts for this podcast."
             )
+        case .notDetermined:
+            Announcer.announce("Notifications are still not enabled for Earshot.")
+        default:
+            break
         }
     }
 
