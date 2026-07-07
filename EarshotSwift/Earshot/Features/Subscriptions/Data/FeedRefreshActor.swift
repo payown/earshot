@@ -396,6 +396,13 @@ actor FeedRefreshActor {
         var newestNewGUID: String?
         var newestNewPub = Date.distantPast
 
+        // Lookup by guid for the republish pass below (#397), built once instead
+        // of a per-item linear scan.
+        let existingByGUID = Dictionary(
+            podcast.episodes.map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
+        )
+        resurfaceRepublished(parsed.episodes, existingByGUID: existingByGUID, now: now)
+
         for item in parsed.episodes where !existingGUIDs.contains(item.guid) {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
@@ -443,6 +450,32 @@ actor FeedRefreshActor {
         }
 
         return RefreshOutcome(added: added, wasBackfill: false, newestNewEpisodeGUID: newestNewGUID)
+    }
+
+    /// Re-surfaces an existing episode to the inbox when its podcast republishes
+    /// the same guid with a bumped `pubDate` (#397). Previously any item whose
+    /// guid already existed was skipped entirely, so a republished episode never
+    /// reappeared even though the feed now advertises it as newer.
+    ///
+    /// Scope is intentionally narrow: only unplayed, not-queued episodes are
+    /// touched, and only `added`/`newestNewEpisodeGUID`/notifications are left
+    /// alone — a republish is not a "new episode" for notification purposes.
+    /// Future-dated pub dates are ignored, mirroring the #296 guard used
+    /// elsewhere in this function.
+    private func resurfaceRepublished(
+        _ items: [ParsedEpisode], existingByGUID: [String: Episode], now: Date
+    ) {
+        for item in items {
+            guard let existing = existingByGUID[item.guid] else { continue }
+            guard let newPub = item.pubDate, newPub <= now else { continue }
+            let storedPub = existing.pubDate ?? .distantPast
+            guard newPub > storedPub else { continue }
+            guard existing.status != .played, existing.queueItem == nil else { continue }
+
+            existing.pubDate = newPub
+            existing.status = .newEpisode
+            existing.inboxDismissed = false
+        }
     }
 
     /// Appends episodes to the end of the queue on the background context. Mirrors
