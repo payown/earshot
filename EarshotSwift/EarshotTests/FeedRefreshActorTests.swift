@@ -228,6 +228,131 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(podcast.lastSeenPubDate, d1, "Mark is newest NON-future date, not the future one")
     }
 
+    // MARK: republished same-guid episodes (#397)
+
+    /// A republished episode (same guid, newer pubDate) that is unplayed and not
+    /// queued is re-surfaced: status flips back to `.newEpisode`, `inboxDismissed`
+    /// clears, and the stored `pubDate` advances to the new value.
+    func testActorRefreshResurfacesRepublishedUnplayedEpisode() async throws {
+        let container = cleanContainer()
+        do {
+            let seedCtx = ModelContext(container)
+            let podcast = Podcast(feedURL: "https://x/feed.xml", title: "Show", lastSeenPubDate: d2)
+            let a = Episode(guid: "a", title: "a", audioURL: "https://x/a.mp3", pubDate: d1)
+            a.podcast = podcast
+            a.status = .newEpisode
+            a.inboxDismissed = true // previously read/dismissed
+            seedCtx.insert(podcast)
+            seedCtx.insert(a)
+            try seedCtx.save()
+        }
+
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d3)])) // republished, newer pubDate
+        let outcome = try await actor.refreshOne(
+            feedURL: "https://x/feed.xml", feed: fetcher, autoQueueEnabled: false
+        )
+
+        let stored = try episodes(container)
+        let a = try XCTUnwrap(stored.first { $0.guid == "a" })
+        XCTAssertEqual(a.pubDate, d3, "pubDate advances to the republished value")
+        XCTAssertEqual(a.status, .newEpisode)
+        XCTAssertFalse(a.inboxDismissed, "Re-surfaced into the inbox")
+        XCTAssertEqual(outcome?.added, 0, "Republish is not counted as a new episode")
+        XCTAssertNil(outcome?.newestNewEpisodeGUID, "Republish never triggers the notification path")
+    }
+
+    /// A played episode is never re-surfaced by a republish, even with a newer
+    /// pubDate — its pubDate and status are left untouched.
+    func testActorRefreshDoesNotResurfacePlayedEpisode() async throws {
+        let container = cleanContainer()
+        do {
+            let seedCtx = ModelContext(container)
+            let podcast = Podcast(feedURL: "https://x/feed.xml", title: "Show", lastSeenPubDate: d2)
+            let a = Episode(guid: "a", title: "a", audioURL: "https://x/a.mp3", pubDate: d1)
+            a.podcast = podcast
+            a.status = .played
+            a.inboxDismissed = true
+            seedCtx.insert(podcast)
+            seedCtx.insert(a)
+            try seedCtx.save()
+        }
+
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d3)]))
+        _ = try await actor.refreshOne(feedURL: "https://x/feed.xml", feed: fetcher, autoQueueEnabled: false)
+
+        let stored = try episodes(container)
+        let a = try XCTUnwrap(stored.first { $0.guid == "a" })
+        XCTAssertEqual(a.pubDate, d1, "Played episode's pubDate is untouched")
+        XCTAssertEqual(a.status, .played, "Played status is untouched")
+        XCTAssertTrue(a.inboxDismissed, "Not re-surfaced")
+    }
+
+    /// A queued episode is never re-surfaced by a republish, even with a newer
+    /// pubDate and unplayed status.
+    func testActorRefreshDoesNotResurfaceQueuedEpisode() async throws {
+        let container = cleanContainer()
+        do {
+            let seedCtx = ModelContext(container)
+            let podcast = Podcast(feedURL: "https://x/feed.xml", title: "Show", lastSeenPubDate: d2)
+            let a = Episode(guid: "a", title: "a", audioURL: "https://x/a.mp3", pubDate: d1)
+            a.podcast = podcast
+            a.status = .inQueue
+            a.inboxDismissed = true
+            let queueItem = QueueItem(episode: a, position: 0)
+            seedCtx.insert(podcast)
+            seedCtx.insert(a)
+            seedCtx.insert(queueItem)
+            try seedCtx.save()
+        }
+
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d3)]))
+        _ = try await actor.refreshOne(feedURL: "https://x/feed.xml", feed: fetcher, autoQueueEnabled: false)
+
+        let stored = try episodes(container)
+        let a = try XCTUnwrap(stored.first { $0.guid == "a" })
+        XCTAssertEqual(a.pubDate, d1, "Queued episode's pubDate is untouched")
+        XCTAssertNotNil(a.queueItem, "Still queued")
+        XCTAssertTrue(a.inboxDismissed, "Not re-surfaced")
+    }
+
+    /// A same-guid item whose pubDate is NOT newer than the stored value (or is
+    /// future-dated) leaves the existing episode untouched.
+    func testActorRefreshIgnoresNonNewerOrFutureDatedRepublish() async throws {
+        let container = cleanContainer()
+        do {
+            let seedCtx = ModelContext(container)
+            let podcast = Podcast(feedURL: "https://x/feed.xml", title: "Show", lastSeenPubDate: d2)
+            let a = Episode(guid: "a", title: "a", audioURL: "https://x/a.mp3", pubDate: d2)
+            a.podcast = podcast
+            a.status = .newEpisode
+            a.inboxDismissed = true
+            seedCtx.insert(podcast)
+            seedCtx.insert(a)
+            try seedCtx.save()
+        }
+
+        let actor = FeedRefreshActor(modelContainer: container)
+        let future = Date(timeIntervalSinceNow: 60 * 60 * 24 * 30) // 30 days ahead
+        // Same guid with an OLDER pubDate (d1 < d2) — not newer, so no change.
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1)]))
+        _ = try await actor.refreshOne(feedURL: "https://x/feed.xml", feed: fetcher, autoQueueEnabled: false)
+        var stored = try episodes(container)
+        var a = try XCTUnwrap(stored.first { $0.guid == "a" })
+        XCTAssertEqual(a.pubDate, d2, "Older pubDate does not overwrite the stored value")
+        XCTAssertTrue(a.inboxDismissed, "Not re-surfaced")
+
+        // Same guid with a FUTURE pubDate — never re-surfaced (#296 guard).
+        let futureFetcher = FakeFeed(parsedFeed([parsedEpisode("a", future)]))
+        _ = try await actor.refreshOne(feedURL: "https://x/feed.xml", feed: futureFetcher, autoQueueEnabled: false)
+        stored = try episodes(container)
+        a = try XCTUnwrap(stored.first { $0.guid == "a" })
+        XCTAssertEqual(a.pubDate, d2, "Future-dated republish does not overwrite the stored value")
+        XCTAssertTrue(a.inboxDismissed, "Not re-surfaced")
+    }
+
     /// `refreshAll` walks every subscription and reports progress, persisting to
     /// the store readable from a fresh context.
     func testActorRefreshAllProcessesEveryFeedAndPersists() async throws {
