@@ -904,6 +904,54 @@ final class PlayerService {
         Announcer.announce("Now playing \(nextEpisode.title)")
     }
 
+    /// Removes `episode` from the queue (#619). If it's the episode currently
+    /// playing, stops it and advances to the next queued episode -- mirrors
+    /// ``markCurrentPlayedAndAdvance()``'s resolve-next-before-remove shape, but
+    /// does NOT mark the episode played: removing isn't the same as finishing,
+    /// and per #614 a removal must not affect the "Episodes completed" listening
+    /// stat. Removing any OTHER (not currently playing) episode is unaffected --
+    /// a plain queue mutation with no playback side effect, exactly as before.
+    ///
+    /// Takes `context` explicitly rather than reading the stored `self.context`
+    /// so this stays callable (and the plain-removal path stays correct) even
+    /// from a `PlayerService` that hasn't been `configure(context:)`-ed, matching
+    /// how `QuickActionBuildersTests` deliberately tests queue-action building in
+    /// isolation from full playback setup.
+    func removeFromQueue(_ episode: Episode, context: ModelContext) {
+        let repo = QueueRepository(context: context)
+
+        guard nowPlayingEpisodeID == episode.persistentModelID else {
+            repo.cancelFromQueue(episode)
+            return
+        }
+
+        // Resolve the next episode from the CURRENT queue, before removal --
+        // exactly as markCurrentPlayedAndAdvance() does, so nextAdvanceID still
+        // sees `episode` in the list when computing "the one after it."
+        let queued = repo.queue()
+        let nextID = nextAdvanceID(after: episode, in: queued)
+        let nextEpisode = queued.first { $0.persistentModelID == nextID }
+
+        flushListeningSession()
+        repo.cancelFromQueue(episode)
+
+        guard let nextEpisode else {
+            // Nothing queued after this one: stop cleanly with the bar cleared.
+            pause()
+            isPlaying = false
+            setCurrentEpisode(nil)
+            updateNowPlayingInfo()
+            return
+        }
+
+        let prepared = preloadedEpisode?.persistentModelID == nextEpisode.persistentModelID
+            ? preloadedItem : nil
+        preloadedItem = nil
+        preloadedEpisode = nil
+        play(nextEpisode, preparedItem: prepared)
+        Announcer.announce("Now playing \(nextEpisode.title)")
+    }
+
     /// True when the loaded episode's audio is available as a local file (already
     /// downloaded). Drives whether "Export audio file" shares immediately or has
     /// to download first.
