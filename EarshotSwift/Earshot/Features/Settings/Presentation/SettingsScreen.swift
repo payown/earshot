@@ -53,13 +53,6 @@ struct SettingsScreen: View {
                 .accessibilityHint("Listening stats and how long history is kept")
 
                 NavigationLink {
-                    AccessibilitySettingsView()
-                } label: {
-                    Label("Accessibility", systemImage: "accessibility")
-                }
-                .accessibilityHint("Direct-touch playback area")
-
-                NavigationLink {
                     PrivacySettingsView()
                 } label: {
                     Label("Privacy", systemImage: "hand.raised")

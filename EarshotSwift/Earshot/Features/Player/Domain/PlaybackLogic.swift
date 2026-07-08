@@ -261,4 +261,32 @@ enum PlaybackLogic {
         }
         return CompletionDecision(shouldMarkPlayed: false, resumePosition: safePosition)
     }
+
+    // MARK: Scrubber VoiceOver step (#610)
+
+    /// The scrubber's minimum VoiceOver flick step. Also the flat step used for
+    /// any episode at or under 30 minutes, matching the original Flutter scrubber.
+    static let minScrubberStepSeconds: Double = 30
+    /// The scrubber's maximum VoiceOver flick step, so even very long episodes
+    /// still land within a bounded jump per flick.
+    static let maxScrubberStepSeconds: Double = 300
+    /// Roughly how many flicks should be needed to cross an episode start-to-end.
+    private static let targetScrubberFlicks: Double = 60
+
+    /// The VoiceOver flick step for the episode progress scrubber, scaled to
+    /// `duration` so long episodes don't require 100+ flicks to traverse (#610).
+    /// Aims for about ``targetScrubberFlicks`` flicks end-to-end, clamped to
+    /// [``minScrubberStepSeconds``, ``maxScrubberStepSeconds``]. Episodes at or
+    /// under 30 minutes keep the original flat 30s step; longer episodes scale up
+    /// proportionally. Past the 5-hour breakeven point
+    /// (``maxScrubberStepSeconds`` × ``targetScrubberFlicks``) the step clamp wins
+    /// over the flick-count target: flicks needed can exceed ~60 for such rare,
+    /// very long content, but no single flick ever jumps more than 5 minutes --
+    /// an unbounded per-flick jump would be a worse regression than a few extra
+    /// flicks. Unknown/non-positive duration falls back to the flat step.
+    static func scrubberStepSeconds(duration: Double) -> Double {
+        guard duration > 0 else { return minScrubberStepSeconds }
+        let target = duration / targetScrubberFlicks
+        return min(max(target, minScrubberStepSeconds), maxScrubberStepSeconds)
+    }
 }

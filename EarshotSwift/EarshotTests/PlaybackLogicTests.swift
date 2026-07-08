@@ -409,4 +409,59 @@ final class PlaybackLogicTests: XCTestCase {
             setting: false, nextCandidate: Int?.none, playNextOverrides: [3]
         ))
     }
+
+    // MARK: Scrubber VoiceOver step (#610)
+
+    func testScrubberStepIsFlatThirtySecondsAtOrUnderThirtyMinutes() {
+        // Preserves Flutter-parity granularity for typical episode lengths.
+        XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: 60), 30)
+        XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: 600), 30)
+        XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: 1800), 30, accuracy: 0.001)
+    }
+
+    func testScrubberStepScalesUpForLongerEpisodes() {
+        // 1 hour: 3600s / 60 flicks = 60s/flick.
+        XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: 3600), 60, accuracy: 0.001)
+        // 2 hours: 7200s / 60 flicks = 120s/flick.
+        XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: 7200), 120, accuracy: 0.001)
+    }
+
+    func testScrubberStepClampsAtFiveMinutesForVeryLongEpisodes() {
+        // Well past the 5-hour breakeven point, the step must not keep growing.
+        XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: 36000), 300, accuracy: 0.001)
+        XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: 100_000), 300, accuracy: 0.001)
+    }
+
+    func testScrubberStepFallsBackToFlatStepForUnknownDuration() {
+        XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: 0), 30)
+        XCTAssertEqual(PlaybackLogic.scrubberStepSeconds(duration: -1), 30)
+    }
+
+    func testScrubberStepNeverExceedsSixtyFlicksWithinTheClampedRange() {
+        // Regression guard on the original bug: below the 5-hour breakeven point
+        // (maxScrubberStepSeconds * targetScrubberFlicks), the target formula alone
+        // governs and no episode should require more than roughly 60 flicks (plus
+        // rounding slack) to cross start-to-end.
+        for duration in [600.0, 1800.0, 3600.0, 7200.0, 14400.0] {
+            let step = PlaybackLogic.scrubberStepSeconds(duration: duration)
+            let flicksNeeded = duration / step
+            XCTAssertLessThanOrEqual(flicksNeeded, 61,
+                "\(duration)s episode needs \(flicksNeeded) flicks, expected <= ~60")
+        }
+    }
+
+    func testScrubberStepPerFlickNeverExceedsCapEvenForVeryLongEpisodes() {
+        // Beyond the 5-hour breakeven, the step clamp intentionally takes priority
+        // over the flick-count target: flick count can exceed 60 for such rare,
+        // very long content, but no single flick may ever jump more than
+        // maxScrubberStepSeconds -- an unbounded per-flick jump (which the raw
+        // duration/60 formula would produce) would be a worse regression than
+        // needing extra flicks to cross a multi-hour episode.
+        for duration in [36000.0, 100_000.0, 500_000.0] {
+            XCTAssertLessThanOrEqual(
+                PlaybackLogic.scrubberStepSeconds(duration: duration),
+                PlaybackLogic.maxScrubberStepSeconds
+            )
+        }
+    }
 }

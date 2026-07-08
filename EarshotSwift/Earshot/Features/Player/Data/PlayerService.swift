@@ -361,19 +361,22 @@ final class PlayerService {
         Announcer.announce("Streaming \(title)")
     }
 
-    /// Sole construction point for every `AVPlayerItem` the engine plays (#549).
+    /// Sole construction point for every `AVPlayerItem` the engine plays (#549, #605).
     /// Sets an explicit time-pitch algorithm because the framework default
     /// (`.lowQualityZeroLatency`-class variable-rate processing) only supports
     /// 0.5×–2.0× — this engine plays 0.5×–5.0× plus a 4× fast-forward scan — and
     /// it can render a flushed buffer chunk garbled/pitch-shifted when the render
-    /// pipeline is reconfigured (the tester-reported burst before export).
-    /// `.spectral` is pitch-preserving across the whole supported rate range
-    /// (1/32×–32×), which `.timeDomain` is not: overlap-add speech gets choppy
-    /// above ~2–3×, well under this app's 5× ceiling. Its extra CPU cost for a
-    /// single stream is negligible on any supported device.
+    /// pipeline is reconfigured (the tester-reported burst before export, #549).
+    /// `.timeDomain` (WSOLA) is Apple's recommended algorithm for spoken audio and
+    /// sounds noticeably cleaner than `.spectral` in the 1.25×–2× range where nearly
+    /// all podcast listening happens; `.spectral`'s phase-vocoder processing was
+    /// introducing watery/metallic artifacts at those everyday speeds (#605).
+    /// `.timeDomain` still supports the full 0.5×–5× range this app exposes, so it
+    /// does not reintroduce the #549 framework-default ceiling; it may just get
+    /// mildly choppier than `.spectral` at the rarely-used 4×–5× extreme.
     private func makePlayerItem(url: URL) -> AVPlayerItem {
         let item = AVPlayerItem(url: url)
-        item.audioTimePitchAlgorithm = .spectral
+        item.audioTimePitchAlgorithm = .timeDomain
         return item
     }
 
@@ -679,6 +682,11 @@ final class PlayerService {
     /// by the UI to display e.g. "1.5×".
     var effectiveRate: Double { currentEffectiveRate }
 
+    /// The AVPlayer's `defaultRate`, exposed only so tests can assert it never goes
+    /// stale relative to ``effectiveRate`` (#609). Not for UI use -- read
+    /// ``effectiveRate`` instead.
+    var debugDefaultRate: Double { Double(player.defaultRate) }
+
     /// Re-applies the effective rate to the player. Call when the global speed —
     /// or the current podcast's override — changes mid-playback.
     func reapplyRate() { applyRate() }
@@ -731,10 +739,29 @@ final class PlayerService {
         currentEpisode?.podcast?.speedOverride != nil
     }
 
+    /// True when a per-podcast speed override could be saved for the currently
+    /// loaded episode. False for a transient stream-only preview (#517), whose
+    /// detached episode has no `podcast` to attach an override to — those always
+    /// fall back to the global speed.
+    var canOverridePerPodcast: Bool {
+        currentEpisode?.podcast != nil
+    }
+
     private func applyRate() {
         // While a fast-forward scan is active, the scan rate wins; the prior rate
         // is restored by `endFastForward`.
         let rate = isFastForwarding ? ChapterSkipLogic.fastForwardRate : currentEffectiveRate
+        // Always keep `defaultRate` in sync with the effective rate, not just when
+        // paused (#609). `AVPlayer.play()` can reassert the rate from `defaultRate`
+        // when resuming from a paused state (iOS 16+) -- `play(_:preparedItem:...)`
+        // pauses right before swapping in the next episode's item, then calls this
+        // method followed immediately by `player.play()`. `isPlaying` stays `true`
+        // across an ordinary auto-advance, so without this line `defaultRate` would
+        // only ever be refreshed by an explicit pause/resume cycle and could go
+        // stale -- silently reasserting a previous podcast's rate on the very next
+        // `play()`, until some unrelated event (e.g. stall recovery) happened to
+        // reapply the correct rate again.
+        player.defaultRate = Float(rate)
         // Setting `rate` also starts playback; only apply when we intend to play.
         if isPlaying || player.timeControlStatus == .playing {
             player.rate = Float(rate)
@@ -746,20 +773,25 @@ final class PlayerService {
             lastNowPlayingSyncSecond = nil
         } else {
             player.rate = 0
-            // Stash the desired rate so the next play() uses it via defaultRate.
-            player.defaultRate = Float(rate)
         }
     }
 
     // MARK: Public — hold-to-fast-forward (4× scan, #373)
 
     /// True when the VoiceOver rotor "Start/Stop Fast Forward" action should be
-    /// offered. The sighted press-and-hold gesture on the artwork is always
-    /// available; the rotor action is gated on the Direct Touch setting because
-    /// that's where Flutter exposes it (a direct-touch playback affordance).
-    var fastForwardRotorAvailable: Bool {
-        settings?.bool(SettingsKey.directTouchEnabled, default: false) ?? false
-    }
+    /// offered. Always true (#610) -- previously gated on the "Direct-touch
+    /// playback area" setting (default off), which left VoiceOver users with no
+    /// way to reach the 4x scan at all unless they'd already found and enabled
+    /// that specific setting. That gate was unnecessary: the rotor action calls
+    /// `beginFastForward()`/`endFastForward()` directly and has no dependency on
+    /// the artwork's raw `.onLongPressGesture` (the actual source of the
+    /// touch-gesture-vs-VoiceOver conflict the setting was meant to address) --
+    /// the sighted press-and-hold gesture is itself always available, ungated, and
+    /// unaffected by this change. The setting had no other consumer, so it and its
+    /// Settings UI toggle were removed entirely (`SettingsKey.directTouchEnabled`
+    /// is retained only for data-compatibility, per the project's established
+    /// pattern for other removed settings).
+    var fastForwardRotorAvailable: Bool { true }
 
     /// Raises playback to the 4× scan rate, stashing the exact prior effective
     /// rate (including any per-podcast override) so release restores it. No-op
