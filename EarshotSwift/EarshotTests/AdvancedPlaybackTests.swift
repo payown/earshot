@@ -464,6 +464,37 @@ final class AdvancedPlaybackTests: XCTestCase {
         XCTAssertEqual(real.positionSeconds, 42, "Real play after preview must persist position")
     }
 
+    // MARK: playFromEpisodeList queues the episode (#612)
+
+    func test_playFromEpisodeList_notAlreadyQueued_addsToQueue() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episode = makeEpisode(ctx)
+        XCTAssertNil(episode.queueItem, "Precondition: episode starts un-queued")
+
+        player.playFromEpisodeList(episode)
+
+        XCTAssertNotNil(episode.queueItem, "Play now from a list must queue the episode")
+        XCTAssertEqual(episode.status, .inQueue)
+    }
+
+    func test_playFromEpisodeList_alreadyQueued_isNoOp() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episode = makeEpisode(ctx)
+        let repo = QueueRepository(context: ctx)
+        repo.add(episode)
+        let originalItem = episode.queueItem
+
+        player.playFromEpisodeList(episode)
+
+        XCTAssertEqual(episode.queueItem?.persistentModelID, originalItem?.persistentModelID,
+                       "Playing an already-queued episode must not create a duplicate QueueItem")
+        XCTAssertEqual(repo.queue().count, 1)
+    }
+
     // MARK: canOverridePerPodcast (#606)
 
     func test_canOverridePerPodcast_noEpisodeLoaded_isFalse() {
