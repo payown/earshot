@@ -849,18 +849,55 @@ final class PlayerService {
     /// The next episode to auto-advance to after `finished`, honoring the
     /// boundary settings — except an episode the user explicitly "Play next"-ed
     /// bypasses the group-end stop (#487). Returns nil to STOP.
+    ///
+    /// When the Queue screen is displaying episodes grouped by podcast
+    /// (``SettingsKey/groupQueueEpisodes``), "next" walks that SAME grouped
+    /// order (#627 follow-up) — not the raw, possibly interleaved queue order,
+    /// which the grouped display never shows the user in the first place.
+    /// `QueueLogic.group` is the exact transform the Queue screen itself uses to
+    /// render, reused here so the two can never drift apart.
+    ///
+    /// EXCEPT: an episode the user explicitly "Play Next"-ed is inserted
+    /// immediately after `finished` in the RAW queue (``QueueRepository/playNext(_:after:)``)
+    /// — that raw adjacency IS the Play Next guarantee. The grouped reorder
+    /// above would otherwise cluster it behind the rest of `finished`'s own
+    /// group, silently breaking Play Next across podcasts, so the raw
+    /// positional candidate wins immediately whenever it's a registered
+    /// override — checked before grouping is ever applied.
     private func nextAdvanceID(after finished: Episode, in queued: [Episode]) -> PersistentIdentifier? {
         let continueEpisode = settings?.bool(
             SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode
         ) ?? SettingsDefault.continueAfterEpisode
+        guard continueEpisode else { return nil }
+
+        let rawIDs = queued.map(\.persistentModelID)
+        let rawCandidate = PlaybackLogic.nextUpID(queue: rawIDs, after: finished.persistentModelID)
+        if let rawCandidate, playNextOverrides.contains(rawCandidate) {
+            return rawCandidate
+        }
+
         let groupSetting = settings?.bool(
             SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds
         ) ?? SettingsDefault.continueAfterGroupEnds
+        let groupedDisplay = settings?.bool(
+            SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes
+        ) ?? SettingsDefault.groupQueueEpisodes
+
+        let orderedPairs: [(id: PersistentIdentifier, groupKey: PersistentIdentifier?)]
+        if groupedDisplay {
+            let forGrouping = queued.map { (id: $0.persistentModelID, key: $0.podcast?.persistentModelID) }
+            orderedPairs = QueueLogic.group(forGrouping).flatMap { group in
+                group.ids.map { (id: $0, groupKey: group.key) }
+            }
+        } else {
+            orderedPairs = queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) }
+        }
+
         let candidate = PlaybackLogic.nextUpID(
-            queue: queued.map(\.persistentModelID), after: finished.persistentModelID
+            queue: orderedPairs.map(\.id), after: finished.persistentModelID
         )
         return PlaybackLogic.nextUpHonoringBoundaries(
-            queue: queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) },
+            queue: orderedPairs,
             after: finished.persistentModelID,
             currentGroupKey: finished.podcast?.persistentModelID,
             continueAfterEpisode: continueEpisode,
