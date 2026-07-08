@@ -913,7 +913,7 @@ Test baseline: **349 tests** (verified 2026-06-21, after #392 — 10 FeedbackCom
 | #370 | AirPlay route picker in player | earshot-audio | [x] Closed earlier. Merged via PR #402 (commit 3ea5998). Follow-up: AirPlayTests salvaged into separate PR (see Salvage note below). |
 | #380 | Auto-download N on subscribe + auto-queue on refresh | earshot-data | [x] Closed 2026-06-21. All gates PASS. |
 | #378 | Lock screen artwork (MPMediaItemArtwork) | earshot-audio | [x] Closed 2026-06-21. Commit 5505b85. |
-| #401 | Verify export audio shares local file (follow-up #363) | earshot-audio | [ ] |
+| #401 | Verify export audio shares local file (follow-up #363) | earshot-audio | [x] Closed. Confirmed export shares the local downloaded/cached file, not the feed URL; player-path concern addressed in #371 (PR #407), row-level export parity verified separately. Shipped. |
 
 ### P2 — Polish and parity
 | Issue | Title | Agent | Status |
@@ -928,10 +928,10 @@ Test baseline: **349 tests** (verified 2026-06-21, after #392 — 10 FeedbackCom
 ### P3 — Larger standalone features
 | Issue | Title | Agent | Status |
 |-------|-------|-------|--------|
-| #381 | Background feed refresh (BGTaskScheduler) | earshot-networking | [ ] |
-| #72 | Push notifications per podcast | earshot-data | [ ] |
-| #385 | Artwork disk cache | earshot-networking | [ ] |
-| #386 | Networking robustness: retry/backoff/timeouts | earshot-networking | [ ] |
+| #381 | Background feed refresh (BGTaskScheduler) | earshot-networking | [x] Closed. BGTaskScheduler registration + 15-min refresh-skip window; background-found episodes flow through the same auto-queue/auto-download path as manual refresh (#380). All gates PASS (security + swift6 reviews on file). Shipped, see CHANGELOG. |
+| #72 | Push notifications per podcast | earshot-data | [x] Closed. Per-podcast "Notify on new episodes" toggle; local (on-device only) notification with show name + new-episode count and Add to queue / Play now actions; VoiceOver-clean text, tap-to-focus. All gates PASS (security + swift6 reviews on file). Shipped, see CHANGELOG. |
+| #385 | Artwork disk cache | earshot-networking | [x] Closed. New `Core/Networking/ArtworkCache.swift` — disk-backed artwork cache shared by lock-screen/Control Center art; no longer re-downloads every cold launch. All gates PASS (security + swift6 reviews on file). Shipped, see CHANGELOG. |
+| #386 | Networking robustness: retry/backoff/timeouts | earshot-networking | [x] Closed. One shared `URLSessionConfiguration` with consistent timeouts + retry/backoff (1s then 2s) on transient errors (5xx, dropped connection, timeout); permanent errors (404, bad address) fail fast. Kept separate from the #385 artwork session by design. All gates PASS (security + swift6 reviews on file). Shipped, see CHANGELOG. |
 
 ### Excluded
 - #395 — DO NOT TOUCH. Protected per session instructions.
