@@ -368,6 +368,35 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertNil(focused)
     }
 
+    func testRemoveFromQueueCurrentEpisodeAdvancesPlayback() {
+        // #619: removing the CURRENTLY PLAYING row via the Queue quick action
+        // must stop it and advance to the next queued episode, not leave it
+        // playing untouched.
+        let ctx = TestStore.freshContext()
+        let eps = makeQueuedTrio(ctx)
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.play(eps[0])
+        XCTAssertEqual(player.nowPlayingEpisodeID, eps[0].persistentModelID, "Precondition")
+
+        let action = buildQueueActions(
+            episode: eps[0],
+            order: [.removeFromQueue],
+            moveMode: .flat,
+            player: player,
+            downloads: DownloadManager(),
+            context: ctx,
+            onShowNotes: {},
+            onFocus: { _ in }
+        ).first
+
+        action?.run()
+
+        XCTAssertNil(eps[0].queueItem, "The removed episode must leave the queue")
+        XCTAssertEqual(player.nowPlayingEpisodeID, eps[1].persistentModelID,
+                       "Removing the row that's currently playing must advance to the next queued episode")
+    }
+
     // MARK: #562 — Queue "Play now" honors open-player-on-play (Item 1)
 
     /// A player configured against `ctx` with `openPlayerOnPlay` set to `on`.
