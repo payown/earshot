@@ -4,7 +4,7 @@ This file provides essential project context to Claude Code at the start of ever
 
 ## Project identity
 
-**Earshot** is an accessibility-first podcast player built with Flutter, targeting iOS first then Android. It is open source (MIT), free, and a Payown Media LLC project with deep connection to BITS and the ACB community.
+**Earshot** is an accessibility-first podcast player built with Flutter, targeting iOS first then Android. It is open source (MIT) and a Payown Media LLC project with deep connection to BITS and the ACB community. Freemium: free up to 10 podcast subscriptions, paid tier unlocks unlimited (see rule 5).
 
 The full product requirements live in `docs/PRD.md`. Read it whenever you need product context. Phase plans live in `docs/phases/`.
 
@@ -21,7 +21,7 @@ The full product requirements live in `docs/PRD.md`. Read it whenever you need p
 2. **Accessibility is the highest priority.** Every UI element needs a proper semantic label, role, and state. Every PR that touches UI must include screen reader testing notes. Code that regresses accessibility is not merged.
 3. **Follow system settings.** Never override the user's theme, font size, motion, or contrast preferences. Earshot reads from the system, never imposes.
 4. **Minimum data collection.** Crash reports and analytics are opt-out and anonymized. Listening history is user-controlled. No third-party trackers, no advertising IDs.
-5. **Free and open.** No ads. No in-app donations. External donation link only (v1.1+). All code public on GitHub under MIT.
+5. **Freemium.** Free tier: up to 10 podcast subscriptions. Paid unlock (unlimited podcasts): $2.99/month, $20/year, or $49 one-time (lifetime), via App Store IAP/subscription. An in-app tip jar (App Store IAP) is available to both free and paid users regardless of tier. No ads, no third-party trackers, no ad-based monetization of any kind. All code public on GitHub under MIT. (Reversed 2026-07-07 from the original "free and open, no in-app donations" policy — see git history on this file for the prior wording if needed.)
 6. **GHCP prompts always in code blocks** when generating them.
 7. **Phase progression follows `.claude/rules/phase-progression.md`.** When a phase completes, verify the Definition of Done, capture learnings, and write the next phase's detailed doc before starting work on it.
 
