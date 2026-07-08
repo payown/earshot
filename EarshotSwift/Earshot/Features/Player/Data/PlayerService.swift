@@ -351,19 +351,22 @@ final class PlayerService {
         Announcer.announce("Streaming \(title)")
     }
 
-    /// Sole construction point for every `AVPlayerItem` the engine plays (#549).
+    /// Sole construction point for every `AVPlayerItem` the engine plays (#549, #605).
     /// Sets an explicit time-pitch algorithm because the framework default
     /// (`.lowQualityZeroLatency`-class variable-rate processing) only supports
     /// 0.5×–2.0× — this engine plays 0.5×–5.0× plus a 4× fast-forward scan — and
     /// it can render a flushed buffer chunk garbled/pitch-shifted when the render
-    /// pipeline is reconfigured (the tester-reported burst before export).
-    /// `.spectral` is pitch-preserving across the whole supported rate range
-    /// (1/32×–32×), which `.timeDomain` is not: overlap-add speech gets choppy
-    /// above ~2–3×, well under this app's 5× ceiling. Its extra CPU cost for a
-    /// single stream is negligible on any supported device.
+    /// pipeline is reconfigured (the tester-reported burst before export, #549).
+    /// `.timeDomain` (WSOLA) is Apple's recommended algorithm for spoken audio and
+    /// sounds noticeably cleaner than `.spectral` in the 1.25×–2× range where nearly
+    /// all podcast listening happens; `.spectral`'s phase-vocoder processing was
+    /// introducing watery/metallic artifacts at those everyday speeds (#605).
+    /// `.timeDomain` still supports the full 0.5×–5× range this app exposes, so it
+    /// does not reintroduce the #549 framework-default ceiling; it may just get
+    /// mildly choppier than `.spectral` at the rarely-used 4×–5× extreme.
     private func makePlayerItem(url: URL) -> AVPlayerItem {
         let item = AVPlayerItem(url: url)
-        item.audioTimePitchAlgorithm = .spectral
+        item.audioTimePitchAlgorithm = .timeDomain
         return item
     }
 
