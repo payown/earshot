@@ -457,7 +457,8 @@ final class PlayerService {
         // Resume position: honor saved progress unless past the threshold.
         let decision = PlaybackLogic.completionDecision(
             position: episode.positionSeconds,
-            duration: episode.durationSeconds
+            duration: episode.durationSeconds,
+            introSkipSeconds: episode.podcast?.introSkipSeconds
         )
         if decision.resumePosition > 0 {
             player.seek(to: CMTime(seconds: Double(decision.resumePosition), preferredTimescale: 1))
@@ -514,7 +515,8 @@ final class PlayerService {
 
         let decision = PlaybackLogic.completionDecision(
             position: episode.positionSeconds,
-            duration: episode.durationSeconds
+            duration: episode.durationSeconds,
+            introSkipSeconds: episode.podcast?.introSkipSeconds
         )
         let resume = decision.resumePosition
         if resume > 0 {

@@ -4,14 +4,15 @@ import SwiftData
 
 /// Store open + manual V1 migration (issues #355, #425).
 ///
-/// The current schema is ``EarshotSchemaV3`` and the normal open path runs the
-/// ``EarshotMigrationPlan`` (V2→V3 is a SwiftData-native lightweight stage, so it
-/// migrates rather than aborts). SwiftData still can't infer the original V1→V2
-/// jump (2 entities become 10, with new non-optional attributes), so a store
-/// still at the original V1 schema is handled here by a manual export/reimport:
-/// read it through ``EarshotSchemaV1``, snapshot it into plain values, replace
-/// the store file, and reinsert the data as current (V3) objects. This preserves
-/// the tester's subscriptions, episodes, and played state.
+/// The current schema is ``EarshotSchemaV4`` and the normal open path runs the
+/// ``EarshotMigrationPlan`` (V2→V3 and V3→V4 are SwiftData-native lightweight
+/// stages, so they migrate rather than abort). SwiftData still can't infer the
+/// original V1→V2 jump (2 entities become 10, with new non-optional attributes),
+/// so a store still at the original V1 schema is handled here by a manual
+/// export/reimport: read it through ``EarshotSchemaV1``, snapshot it into plain
+/// values, replace the store file, and reinsert the data as current (V4)
+/// objects. This preserves the tester's subscriptions, episodes, and played
+/// state.
 /// Why a terminal store-open failure happened, so ``ModelContainerFactory`` can
 /// react safely instead of blindly deleting the store (issue #529).
 ///
@@ -69,13 +70,13 @@ enum StoreMigration {
         var isPlayed: Bool
     }
 
-    /// Opens the store at `url` as the current schema (V3) using
-    /// ``EarshotMigrationPlan`` (so a V2 store is lightweight-migrated forward).
-    /// If that fails, the store is treated as an original (V1) store and migrated
-    /// manually via export/reimport. On the manual V1 path the original store is
-    /// backed up (``ModelContainerFactory/backupStoreFiles(at:)``) before it is
-    /// deleted, so a failed fresh-store rebuild can't lose the tester's only copy
-    /// of the data (#529).
+    /// Opens the store at `url` as the current schema (V4) using
+    /// ``EarshotMigrationPlan`` (so a V2 or V3 store is lightweight-migrated
+    /// forward). If that fails, the store is treated as an original (V1) store
+    /// and migrated manually via export/reimport. On the manual V1 path the
+    /// original store is backed up (``ModelContainerFactory/backupStoreFiles(at:)``)
+    /// before it is deleted, so a failed fresh-store rebuild can't lose the
+    /// tester's only copy of the data (#529).
     ///
     /// Throws ``StoreOpenError`` if the store can be opened as neither: a store
     /// written by a newer app is ``StoreOpenError/storeNewerThanApp`` (must not
@@ -83,9 +84,9 @@ enum StoreMigration {
     /// open error is captured (not swallowed) so the two cases can be told apart.
     @MainActor
     static func openOrMigrate(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV3.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV4.self)
 
-        // Fresh installs, already-V3 stores, and V2 stores (lightweight V2→V3)
+        // Fresh installs, already-V4 stores, and V2/V3 stores (lightweight)
         // all open through the migration plan. Capture the failure so a
         // newer-than-app store can be distinguished from real corruption below,
         // rather than silently falling through to the (destructive) V1 path.
@@ -134,7 +135,7 @@ enum StoreMigration {
             configurations: ModelConfiguration(schema: schema, url: url)
         )
         try write(snapshots, into: container.mainContext)
-        AppLog.data.info("Migrated \(snapshots.count) podcast(s) from V1 to V3")
+        AppLog.data.info("Migrated \(snapshots.count) podcast(s) from V1 to V4")
         return container
     }
 

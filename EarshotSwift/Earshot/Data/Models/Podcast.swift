@@ -23,6 +23,9 @@ final class Podcast {
     // Per-podcast playback overrides (nil = fall back to global)
     var speedOverride: Double?
     var trimSilenceOverride: Bool?
+    /// Seconds to skip at the start of every episode of this podcast (#456).
+    /// nil or 0 = no intro skip. Per-podcast only; there is no global default.
+    var introSkipSeconds: Int?
 
     // Queue / inbox limits
     var queueAgeLimitDays: Int?
@@ -55,6 +58,7 @@ final class Podcast {
         notificationEnabled: Bool? = nil,
         speedOverride: Double? = nil,
         trimSilenceOverride: Bool? = nil,
+        introSkipSeconds: Int? = nil,
         queueAgeLimitDays: Int? = nil,
         inboxMaxEpisodes: Int? = nil,
         inboxAgeLimitHours: Int? = nil,
@@ -76,6 +80,7 @@ final class Podcast {
         self.notificationEnabled = notificationEnabled
         self.speedOverride = speedOverride
         self.trimSilenceOverride = trimSilenceOverride
+        self.introSkipSeconds = introSkipSeconds
         self.queueAgeLimitDays = queueAgeLimitDays
         self.inboxMaxEpisodes = inboxMaxEpisodes
         self.inboxAgeLimitHours = inboxAgeLimitHours

@@ -54,6 +54,22 @@ struct PodcastSettingsView: View {
     /// Test-visible accessor for speed options. Only use in tests.
     static var speedOptionsForTesting: [(label: String, value: Double?)] { speedOptions }
 
+    /// Test-visible accessor for intro-skip options. Only use in tests.
+    static var introSkipOptionsForTesting: [(label: String, value: Int?)] { introSkipOptions }
+
+    // MARK: Intro skip options (#456)
+
+    private static let introSkipOptions: [(label: String, value: Int?)] = [
+        ("Off", nil),
+        ("5 seconds", 5),
+        ("10 seconds", 10),
+        ("15 seconds", 15),
+        ("30 seconds", 30),
+        ("45 seconds", 45),
+        ("1 minute", 60),
+        ("1.5 minutes", 90),
+    ]
+
     // MARK: Queue age limit options
 
     private static let queueAgeLimitOptions: [(label: String, value: Int?)] = [
@@ -119,6 +135,7 @@ struct PodcastSettingsView: View {
     private var playbackSection: some View {
         Section {
             speedPicker
+            introSkipPicker
         } header: {
             Text("Playback")
                 .accessibilityAddTraits(.isHeader)
@@ -287,6 +304,10 @@ struct PodcastSettingsView: View {
         }
     }
 
+    private var introSkipAdjustableOptions: [AdjustableOptionPicker<Int?>.Option] {
+        Self.introSkipOptions.map { .init(value: $0.value, title: $0.label, spoken: $0.label) }
+    }
+
     private var queueAgeAdjustableOptions: [AdjustableOptionPicker<Int?>.Option] {
         Self.queueAgeLimitOptions.map { .init(value: $0.value, title: $0.label, spoken: $0.label) }
     }
@@ -305,6 +326,15 @@ struct PodcastSettingsView: View {
             options: speedAdjustableOptions,
             selection: speedOverrideBinding,
             hint: "Playback speed for this podcast. Use global uses the app-wide setting. Flick up for faster."
+        )
+    }
+
+    private var introSkipPicker: some View {
+        AdjustableOptionPicker(
+            "Skip intro",
+            options: introSkipAdjustableOptions,
+            selection: introSkipBinding,
+            hint: "Automatically skips this much time at the start of every episode of this podcast"
         )
     }
 
@@ -342,6 +372,14 @@ struct PodcastSettingsView: View {
         Binding(
             get: { podcast.speedOverride },
             set: { podcast.speedOverride = $0 }
+        )
+    }
+
+    /// Maps between `Optional<Int>` on the model (introSkipSeconds) and the Picker.
+    private var introSkipBinding: Binding<Int?> {
+        Binding(
+            get: { podcast.introSkipSeconds },
+            set: { podcast.introSkipSeconds = $0 }
         )
     }
 
