@@ -669,6 +669,11 @@ final class PlayerService {
     /// by the UI to display e.g. "1.5×".
     var effectiveRate: Double { currentEffectiveRate }
 
+    /// The AVPlayer's `defaultRate`, exposed only so tests can assert it never goes
+    /// stale relative to ``effectiveRate`` (#609). Not for UI use -- read
+    /// ``effectiveRate`` instead.
+    var debugDefaultRate: Double { Double(player.defaultRate) }
+
     /// Re-applies the effective rate to the player. Call when the global speed —
     /// or the current podcast's override — changes mid-playback.
     func reapplyRate() { applyRate() }
@@ -733,6 +738,17 @@ final class PlayerService {
         // While a fast-forward scan is active, the scan rate wins; the prior rate
         // is restored by `endFastForward`.
         let rate = isFastForwarding ? ChapterSkipLogic.fastForwardRate : currentEffectiveRate
+        // Always keep `defaultRate` in sync with the effective rate, not just when
+        // paused (#609). `AVPlayer.play()` can reassert the rate from `defaultRate`
+        // when resuming from a paused state (iOS 16+) -- `play(_:preparedItem:...)`
+        // pauses right before swapping in the next episode's item, then calls this
+        // method followed immediately by `player.play()`. `isPlaying` stays `true`
+        // across an ordinary auto-advance, so without this line `defaultRate` would
+        // only ever be refreshed by an explicit pause/resume cycle and could go
+        // stale -- silently reasserting a previous podcast's rate on the very next
+        // `play()`, until some unrelated event (e.g. stall recovery) happened to
+        // reapply the correct rate again.
+        player.defaultRate = Float(rate)
         // Setting `rate` also starts playback; only apply when we intend to play.
         if isPlaying || player.timeControlStatus == .playing {
             player.rate = Float(rate)
@@ -744,8 +760,6 @@ final class PlayerService {
             lastNowPlayingSyncSecond = nil
         } else {
             player.rate = 0
-            // Stash the desired rate so the next play() uses it via defaultRate.
-            player.defaultRate = Float(rate)
         }
     }
 
