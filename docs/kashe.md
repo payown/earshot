@@ -402,6 +402,14 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   during an actual visit to Renata's, cuff on Renata's arm for a blood
   pressure reading; even with Renata right there she doesn't mention it, just
   packs up and lets the show run at 1.5 the rest of the route (Chapter 45)
+- Kashe uses Voice Enhance (a clarity boost for hard-to-parse voices) on her
+  small weekly show, the one she keeps quiet about; it used to silently reset
+  to normal stereo every time she switched audio routes (earbuds to Bluetooth
+  to the windowsill AirPlay speaker from Chapter 10), and she just re-enabled
+  it each time without reporting it. This build holds it through route
+  switches. That same show also has a twenty-second jingle intro every week
+  that she'd thumbed past by feel; a new per-podcast "Skip intro" setting
+  does it for her now (Chapter 46)
 
 ## What you can generate
 
@@ -1514,6 +1522,28 @@ She's got one earbud in at Renata's kitchen table, cuff wrapped around Renata's 
 Numbers come back fine. She pulls the earbud, nudges the speed up past 1.3 out of habit, bracing the way she braces for that floorboard. Nothing gives. The host just sounds like himself, dry, clear, at a speed she'd quietly decided wasn't hers to have.
 
 She could say something. Renata's right there, close enough to hand her the phone. Kashe doesn't. She packs up the cuff, says the numbers look good, and lets the interview run at 1.5 the rest of the route, finally sounding the way it should have all along.
+
+---
+
+### Chapter 46 — Build 150
+
+*Kashe's been quietly re-enabling Voice Enhance every time she switches audio routes; this build makes it stick, and gives her a way to skip a show's intro automatically.*
+
+**What to test:**
+
+Turn on Voice Enhance for a podcast, start an episode, then switch audio routes mid-play (plug in headphones, connect Bluetooth, or switch to AirPlay). It should stay enhanced instead of quietly reverting to normal stereo.
+
+In Podcast Settings > Playback, set "Skip intro" for a show (Off up to 1.5 minutes). Play a new episode of that show and confirm it skips ahead automatically. Resume an episode you'd already started and confirm it does NOT skip again.
+
+After updating, confirm your subscriptions, inbox, queue, and resume points are all still there.
+
+Kashe had Voice Enhance on for the small weekly show, the one she keeps quiet about. In the driveway it sounded fine. The second she pulled out and the car grabbed the phone over Bluetooth, the host went thin and flat, like someone had reached in and turned a dial back to default. She figured that was just how it sounded through the car speakers and let it go.
+
+It kept happening. Earbuds to Bluetooth, Bluetooth to the windowsill speaker at night. Every switch, the same reset. She never mentioned it to Renata. She just turned Voice Enhance back on each time, one more tap in a day already full of them.
+
+This build holds it through the switch. Plug in, connect, cast to the speaker, and it stays exactly how she left it.
+
+That same show still opens with twenty seconds of the same jingle every week, and she still thumbs past it by feel before the talking starts. Podcast Settings has a dial for that now too. She sets it once. The jingle just isn't there anymore, and neither is the reach for the skip button.
 
 ---
 
