@@ -131,3 +131,17 @@ func neighborID(of episode: Episode, in list: [Episode]) -> PersistentIdentifier
     if idx > 0 { return list[idx - 1].persistentModelID }
     return nil
 }
+
+/// The queue order the Queue screen is ACTUALLY rendering right now, matching
+/// `moveMode` exactly — flat, or grouped by podcast with groups flattened in
+/// display order. Feeds ``neighborID(of:in:)`` so VoiceOver focus after a
+/// removal (#457) always lands on the row really adjacent on screen.
+///
+/// #629: before this existed, the flat queue was used unconditionally
+/// regardless of `moveMode`, so with grouping on, focus could jump to a row
+/// from a completely different podcast's section — the same "screen shows one
+/// order, code silently used another" class of bug as #627's auto-advance.
+@MainActor
+func displayedQueueOrder(moveMode: QueueMoveMode, flat: [Episode], grouped: [QueueGroup]) -> [Episode] {
+    moveMode == .grouped ? grouped.flatMap(\.episodes) : flat
+}
