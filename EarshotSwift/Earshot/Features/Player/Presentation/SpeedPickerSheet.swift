@@ -49,23 +49,40 @@ struct SpeedPickerSheet: View {
             }
             .task {
                 // Seed state from the live player once the environment is available.
+                // Defaults to "This podcast" whenever a real podcast is loaded (#606,
+                // Flutter parity: an in-player speed change is remembered per show
+                // unless the user explicitly widens scope to "All podcasts"). Assigned
+                // directly to the @State, NOT through `scopeBinding`, so this seed never
+                // announces a scope change the user didn't make.
                 stepperSpeed = player.effectiveRate
-                podcastScope = player.hasPodcastSpeedOverride
-            }
-            .onChange(of: podcastScope) { _, newScope in
-                let msg = newScope
-                    ? "Scope set to this podcast."
-                    : "Scope set to all podcasts."
-                Announcer.announce(msg)
+                podcastScope = player.canOverridePerPodcast
             }
         }
     }
 
     // MARK: Scope toggle
 
+    /// Wraps `podcastScope` so only a real user interaction with the segmented
+    /// control announces a scope change. `.task`'s seed above writes `podcastScope`
+    /// directly, bypassing this setter, so opening the sheet never speaks "Scope set
+    /// to..." on its own (#606) -- almost every podcast now seeds to `true`, so a
+    /// plain `onChange(of: podcastScope)` would fire on nearly every sheet open.
+    private var scopeBinding: Binding<Bool> {
+        Binding(
+            get: { podcastScope },
+            set: { newValue in
+                podcastScope = newValue
+                let msg = newValue
+                    ? "Scope set to this podcast."
+                    : "Scope set to all podcasts."
+                Announcer.announce(msg)
+            }
+        )
+    }
+
     private var scopeSection: some View {
         Section {
-            Picker("Apply speed to", selection: $podcastScope) {
+            Picker("Apply speed to", selection: scopeBinding) {
                 Text("This podcast").tag(true)
                 Text("All podcasts").tag(false)
             }

@@ -469,4 +469,34 @@ final class AdvancedPlaybackTests: XCTestCase {
 
         XCTAssertEqual(real.positionSeconds, 42, "Real play after preview must persist position")
     }
+
+    // MARK: canOverridePerPodcast (#606)
+
+    func test_canOverridePerPodcast_noEpisodeLoaded_isFalse() {
+        let player = makePlayer()
+        XCTAssertFalse(player.canOverridePerPodcast)
+    }
+
+    func test_canOverridePerPodcast_episodeWithPodcast_isTrue() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.load(makeEpisode(ctx))
+
+        XCTAssertTrue(player.canOverridePerPodcast,
+                      "A normally-loaded episode always has a podcast, so scope can default to per-show")
+    }
+
+    func test_canOverridePerPodcast_streamPreview_isFalse() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        player.playPreview(
+            guid: "preview", title: "Preview", audioURL: "https://x/p.mp3", showTitle: "Show"
+        )
+
+        XCTAssertFalse(player.canOverridePerPodcast,
+                       "A detached stream preview has no podcast, so it must fall back to global speed")
+    }
 }

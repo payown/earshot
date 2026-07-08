@@ -721,6 +721,14 @@ final class PlayerService {
         currentEpisode?.podcast?.speedOverride != nil
     }
 
+    /// True when a per-podcast speed override could be saved for the currently
+    /// loaded episode. False for a transient stream-only preview (#517), whose
+    /// detached episode has no `podcast` to attach an override to — those always
+    /// fall back to the global speed.
+    var canOverridePerPodcast: Bool {
+        currentEpisode?.podcast != nil
+    }
+
     private func applyRate() {
         // While a fast-forward scan is active, the scan rate wins; the prior rate
         // is restored by `endFastForward`.
