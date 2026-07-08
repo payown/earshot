@@ -474,9 +474,10 @@ struct NowPlayingScreen: View {
 
     /// Quick in-player speed adjust from the badge: VoiceOver flick up/down steps
     /// through the curated menu speeds (``PlaybackLogic/speedMenuValues``),
-    /// applied at the active scope — the per-podcast override when one is set,
-    /// otherwise the global speed. Mirrors ``AdjustableOptionPicker`` stepping:
-    /// clamped at both ends, no write (and so no value change) at a boundary.
+    /// saved as a per-podcast override whenever a real podcast is loaded — otherwise
+    /// (a transient stream preview, #517) it falls back to the global speed (#606,
+    /// Flutter parity). Mirrors ``AdjustableOptionPicker`` stepping: clamped at both
+    /// ends, no write (and so no value change) at a boundary.
     private func adjustBadgeSpeed(_ direction: AccessibilityAdjustmentDirection) {
         let speeds = PlaybackLogic.speedMenuValues
         // Step from the latched value when a previous flick hasn't converged yet,
@@ -499,7 +500,7 @@ struct NowPlayingScreen: View {
         // announce: false — the badge is adjustable, so VoiceOver re-reads its
         // accessibilityValue (the new speed) automatically; an announce here
         // would speak it twice.
-        if player.hasPodcastSpeedOverride {
+        if player.canOverridePerPodcast {
             player.setPodcastSpeedOverride(speed, announce: false)
         } else {
             player.setGlobalSpeed(speed, announce: false)

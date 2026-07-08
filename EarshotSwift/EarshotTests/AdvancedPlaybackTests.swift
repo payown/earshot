@@ -469,4 +469,80 @@ final class AdvancedPlaybackTests: XCTestCase {
 
         XCTAssertEqual(real.positionSeconds, 42, "Real play after preview must persist position")
     }
+
+    // MARK: canOverridePerPodcast (#606)
+
+    func test_canOverridePerPodcast_noEpisodeLoaded_isFalse() {
+        let player = makePlayer()
+        XCTAssertFalse(player.canOverridePerPodcast)
+    }
+
+    func test_canOverridePerPodcast_episodeWithPodcast_isTrue() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.load(makeEpisode(ctx))
+
+        XCTAssertTrue(player.canOverridePerPodcast,
+                      "A normally-loaded episode always has a podcast, so scope can default to per-show")
+    }
+
+    func test_canOverridePerPodcast_streamPreview_isFalse() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        player.playPreview(
+            guid: "preview", title: "Preview", audioURL: "https://x/p.mp3", showTitle: "Show"
+        )
+
+        XCTAssertFalse(player.canOverridePerPodcast,
+                       "A detached stream preview has no podcast, so it must fall back to global speed")
+    }
+
+    // MARK: defaultRate stays in sync across auto-advance (#609)
+
+    func test_applyRate_defaultRateNeverStaleAcrossConsecutivePlays() {
+        let ctx = TestStore.freshContext()
+        let settings = AppSettingsStore(context: ctx)
+        settings.setDouble(1.5, for: SettingsKey.globalSpeed)
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        let podcastA = Podcast(feedURL: "https://x/a", title: "Show A")
+        podcastA.speedOverride = 1.0
+        ctx.insert(podcastA)
+        let episodeA = Episode(guid: "a1", title: "A1", audioURL: "https://x/a1.mp3")
+        episodeA.podcast = podcastA
+        ctx.insert(episodeA)
+
+        let podcastB = Podcast(feedURL: "https://x/b", title: "Show B")
+        // No override -- falls back to the 1.5x global default.
+        ctx.insert(podcastB)
+        let episodeB = Episode(guid: "b1", title: "B1", audioURL: "https://x/b1.mp3")
+        episodeB.podcast = podcastB
+        ctx.insert(episodeB)
+        try? ctx.save()
+
+        // Play A: effective rate 1.0, defaultRate must match immediately.
+        player.play(episodeA)
+        XCTAssertEqual(player.effectiveRate, 1.0)
+        XCTAssertEqual(player.debugDefaultRate, 1.0, accuracy: 0.001,
+                       "defaultRate must match the effective rate right after play()")
+
+        // Simulate auto-advance to B exactly as handlePlaybackEnded() does: play()
+        // is called directly with no intervening pause, so isPlaying stays true the
+        // whole time. Before the #609 fix, applyRate() never touched defaultRate in
+        // that branch, so it stayed stuck at A's 1.0 here.
+        player.play(episodeB)
+        XCTAssertEqual(player.effectiveRate, 1.5)
+        XCTAssertEqual(player.debugDefaultRate, 1.5, accuracy: 0.001,
+                       "defaultRate must track B's global rate, not stay stuck at A's override")
+
+        // And back to A again -- defaultRate must not remain stuck at B's rate.
+        player.play(episodeA)
+        XCTAssertEqual(player.effectiveRate, 1.0)
+        XCTAssertEqual(player.debugDefaultRate, 1.0, accuracy: 0.001,
+                       "defaultRate must track A's override again, not stay stuck at B's global rate")
+    }
 }
