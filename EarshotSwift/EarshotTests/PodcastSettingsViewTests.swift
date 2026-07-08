@@ -39,6 +39,40 @@ final class PodcastSettingsViewTests: XCTestCase {
         XCTAssertNil(p.speedOverride, "Clearing speed override returns to global setting")
     }
 
+    // MARK: Intro skip (#456)
+
+    func testIntroSkipSecondsDefaultsToNil() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        XCTAssertNil(p.introSkipSeconds, "Intro skip should default to nil (off) by default")
+    }
+
+    func testIntroSkipSecondsCanBeSet() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        p.introSkipSeconds = 30
+        XCTAssertEqual(p.introSkipSeconds, 30)
+    }
+
+    func testIntroSkipSecondsCanBeCleared() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        p.introSkipSeconds = 45
+        p.introSkipSeconds = nil
+        XCTAssertNil(p.introSkipSeconds, "Clearing intro skip turns it off")
+    }
+
+    func testIntroSkipOptionsIncludeNilForOff() {
+        let offOption = PodcastSettingsView.introSkipOptionsForTesting.first { $0.value == nil }
+        XCTAssertNotNil(offOption, "Intro skip options must include a nil (Off) option")
+        XCTAssertEqual(offOption?.label, "Off")
+    }
+
+    func testIntroSkipOptionsIncludeThirtySeconds() {
+        let thirty = PodcastSettingsView.introSkipOptionsForTesting.first { $0.value == 30 }
+        XCTAssertNotNil(thirty, "Intro skip options must include 30 seconds")
+    }
+
     // MARK: Auto-queue
 
     func testAutoQueueDefaultsToFalse() {
@@ -155,6 +189,7 @@ final class PodcastSettingsViewTests: XCTestCase {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx)
         p.speedOverride = 1.25
+        p.introSkipSeconds = 15
         p.autoQueue = true
         p.queueAgeLimitDays = 3
         p.inboxMaxEpisodes = 10
@@ -162,6 +197,7 @@ final class PodcastSettingsViewTests: XCTestCase {
         p.notificationEnabled = true
 
         XCTAssertEqual(p.speedOverride, 1.25)
+        XCTAssertEqual(p.introSkipSeconds, 15)
         XCTAssertTrue(p.autoQueue)
         XCTAssertEqual(p.queueAgeLimitDays, 3)
         XCTAssertEqual(p.inboxMaxEpisodes, 10)

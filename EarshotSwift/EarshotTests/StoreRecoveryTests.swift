@@ -27,7 +27,7 @@ final class StoreRecoveryTests: XCTestCase {
         FileManager.default.fileExists(atPath: storeURL.path)
     }
 
-    /// Writes a store at a schema NEWER than the app's current V3 (an extra
+    /// Writes a store at a schema NEWER than the app's current V4 (an extra
     /// entity), simulating a device whose data came from a later build.
     private func seedNewerStore() throws {
         try autoreleasepool {
@@ -124,7 +124,7 @@ final class StoreRecoveryTests: XCTestCase {
 // MARK: - Future-schema fixture
 
 /// A model that exists only in the "future" fixture schema, giving the store an
-/// entity the app's V3 schema doesn't know — enough to make opening as V3 fail
+/// entity the app's V4 schema doesn't know — enough to make opening as V4 fail
 /// with an incompatible-version error.
 @Model
 final class FutureOnlyEntity {
@@ -132,10 +132,10 @@ final class FutureOnlyEntity {
     init(value: Int = 0) { self.value = value }
 }
 
-/// A schema newer than ``EarshotSchemaV3``: all of V3 plus one extra entity.
+/// A schema newer than ``EarshotSchemaV4``: all of V4 plus one extra entity.
 enum SchemaVFutureFixture: VersionedSchema {
     static var versionIdentifier = Schema.Version(99, 0, 0)
     static var models: [any PersistentModel.Type] {
-        EarshotSchemaV3.models + [FutureOnlyEntity.self]
+        EarshotSchemaV4.models + [FutureOnlyEntity.self]
     }
 }

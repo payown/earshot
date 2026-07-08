@@ -250,16 +250,33 @@ enum PlaybackLogic {
     /// - At or above the threshold (>= 95%): mark played and resume from 0.
     /// - Unknown / non-positive duration: never auto-mark; resume from
     ///   `position` so saved progress is honored.
-    static func completionDecision(position: Int, duration: Int?) -> CompletionDecision {
+    /// - `introSkipSeconds` (#456): applied only on a genuinely fresh start
+    ///   (`position == 0`) — resuming existing progress is never pushed forward
+    ///   again. Clamped so it can never seek past a known duration.
+    ///   `shouldMarkPlayed` is always evaluated from REAL listening progress
+    ///   (`position`, before any skip is applied) — a large configured skip on a
+    ///   short episode must never be misread as "the listener finished it."
+    static func completionDecision(
+        position: Int,
+        duration: Int?,
+        introSkipSeconds: Int? = nil
+    ) -> CompletionDecision {
         let safePosition = max(0, position)
-        guard let duration, duration > 0 else {
-            return CompletionDecision(shouldMarkPlayed: false, resumePosition: safePosition)
+        if let duration, duration > 0 {
+            let fraction = Double(safePosition) / Double(duration)
+            if fraction >= playedThreshold {
+                return CompletionDecision(shouldMarkPlayed: true, resumePosition: 0)
+            }
         }
-        let fraction = Double(safePosition) / Double(duration)
-        if fraction >= playedThreshold {
-            return CompletionDecision(shouldMarkPlayed: true, resumePosition: 0)
+        var startPosition = safePosition
+        if safePosition == 0, let skip = introSkipSeconds, skip > 0 {
+            if let duration, duration > 0 {
+                startPosition = min(skip, duration - 1)
+            } else {
+                startPosition = skip
+            }
         }
-        return CompletionDecision(shouldMarkPlayed: false, resumePosition: safePosition)
+        return CompletionDecision(shouldMarkPlayed: false, resumePosition: startPosition)
     }
 
     // MARK: Scrubber VoiceOver step (#610)
