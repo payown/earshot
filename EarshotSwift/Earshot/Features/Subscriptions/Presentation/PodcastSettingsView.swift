@@ -334,7 +334,7 @@ struct PodcastSettingsView: View {
             "Skip intro",
             options: introSkipAdjustableOptions,
             selection: introSkipBinding,
-            hint: "Automatically skips this much time at the start of every episode of this podcast"
+            hint: "Automatically skips this much time the first time you play a new episode of this podcast. Resuming an episode you already started never skips again."
         )
     }
 

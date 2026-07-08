@@ -23,7 +23,8 @@ final class Podcast {
     // Per-podcast playback overrides (nil = fall back to global)
     var speedOverride: Double?
     var trimSilenceOverride: Bool?
-    /// Seconds to skip at the start of every episode of this podcast (#456).
+    /// Seconds to skip on a genuinely fresh start of an episode of this podcast
+    /// (#456) — resuming an episode already in progress never re-applies it.
     /// nil or 0 = no intro skip. Per-podcast only; there is no global default.
     var introSkipSeconds: Int?
 

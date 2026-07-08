@@ -249,13 +249,27 @@ enum PlaybackLogic {
     /// - Below the threshold: resume from `position`.
     /// - At or above the threshold (>= 95%): mark played and resume from 0.
     /// - Unknown / non-positive duration: never auto-mark; resume from
-    ///   `position` so saved progress is honored.
+    ///   `position` so saved progress is honored — UNLESS `introSkipSeconds`
+    ///   applies (a genuinely fresh start), in which case resume from the skip
+    ///   amount instead (see below; there's no duration to clamp against).
     /// - `introSkipSeconds` (#456): applied only on a genuinely fresh start
     ///   (`position == 0`) — resuming existing progress is never pushed forward
-    ///   again. Clamped so it can never seek past a known duration.
+    ///   again. Clamped to stay comfortably BELOW the played threshold (not just
+    ///   below the raw duration) — see the note below on why.
     ///   `shouldMarkPlayed` is always evaluated from REAL listening progress
     ///   (`position`, before any skip is applied) — a large configured skip on a
     ///   short episode must never be misread as "the listener finished it."
+    ///
+    /// Why the clamp targets the played threshold, not just the duration:
+    /// `PlayerService`'s periodic tick recomputes this decision every second
+    /// using the LIVE current position, with no knowledge of `introSkipSeconds`
+    /// (nor should it — the tick has no reason to know why the position is where
+    /// it is). If the skip only avoided exceeding the raw duration, a large skip
+    /// on a short episode could land so close to the threshold that the very
+    /// next tick — often within about a second of real playback — crosses it and
+    /// marks the episode played, despite the listener having heard almost
+    /// nothing. Clamping below the threshold with a small margin guarantees at
+    /// least a couple of seconds of genuine listening are required first.
     static func completionDecision(
         position: Int,
         duration: Int?,
@@ -271,7 +285,8 @@ enum PlaybackLogic {
         var startPosition = safePosition
         if safePosition == 0, let skip = introSkipSeconds, skip > 0 {
             if let duration, duration > 0 {
-                startPosition = min(skip, duration - 1)
+                let maxStart = max(0, Int(Double(duration) * playedThreshold) - 1)
+                startPosition = min(skip, maxStart)
             } else {
                 startPosition = skip
             }

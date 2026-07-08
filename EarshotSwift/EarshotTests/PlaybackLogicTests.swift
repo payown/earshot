@@ -134,13 +134,44 @@ final class PlaybackLogicTests: XCTestCase {
     }
 
     func testIntroSkip_clampNearDuration_doesNotFalselyMarkPlayed() {
-        // The clamped skip lands at 29/30 = ~97%, past the 95% played threshold.
-        // That must NOT be read as "the listener finished it" — they haven't
-        // heard a second of it yet. shouldMarkPlayed reflects real listening
-        // progress (position 0), not the skip-adjusted starting point.
+        // shouldMarkPlayed reflects real listening progress (position 0), not
+        // the skip-adjusted starting point — must never be true on a fresh start.
         let decision = PlaybackLogic.completionDecision(position: 0, duration: 30, introSkipSeconds: 999)
         XCTAssertFalse(decision.shouldMarkPlayed, "A fresh start must never be auto-marked played")
-        XCTAssertEqual(decision.resumePosition, 29, "The intro skip must still apply, clamped just short of the end")
+        XCTAssertLessThan(decision.resumePosition, 30, "The intro skip must still apply")
+    }
+
+    /// Regression for a follow-up caught in review of #456: PlayerService's
+    /// periodic tick recomputes completionDecision every second using the LIVE
+    /// current position, with no knowledge of introSkipSeconds (nor should it —
+    /// the tick handler doesn't know why the position is where it is). If the
+    /// intro-skip clamp only avoided exceeding the raw duration (`duration - 1`),
+    /// a large skip on a short episode could land the start position so close to
+    /// the 95% played threshold that the very NEXT tick — within about a second
+    /// of real playback, sometimes with essentially none — crosses it and marks
+    /// the episode played, despite the listener having heard almost nothing. The
+    /// clamp must leave enough real margin that at least a couple of seconds of
+    /// genuine listening are required before a tick checking the resulting
+    /// position (with no intro-skip knowledge, exactly as the real tick call
+    /// site does) can cross the threshold.
+    func testIntroSkip_clampStaysComfortablyBelowPlayedThreshold() {
+        let decision = PlaybackLogic.completionDecision(position: 0, duration: 30, introSkipSeconds: 999)
+
+        // Simulate the very next tick landing at EXACTLY the skip-adjusted
+        // position (zero additional real listening) -- exactly what
+        // PlayerService.handleTick computes, with no introSkipSeconds argument.
+        let immediateTick = PlaybackLogic.completionDecision(position: decision.resumePosition, duration: 30)
+        XCTAssertFalse(
+            immediateTick.shouldMarkPlayed,
+            "The skip's landing position alone must not be one tick away from played"
+        )
+
+        // One more real second of listening still must not cross the threshold.
+        let oneSecondLater = PlaybackLogic.completionDecision(position: decision.resumePosition + 1, duration: 30)
+        XCTAssertFalse(
+            oneSecondLater.shouldMarkPlayed,
+            "A single additional real second must not be enough to cross the threshold"
+        )
     }
 
     func testIntroSkip_unknownDuration_appliesAsIs() {
