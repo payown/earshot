@@ -136,10 +136,11 @@ struct NowPlayingScreen: View {
 
     /// The episode artwork doubles as a press-and-hold fast-forward "scan" pad:
     /// holding raises playback to 4× while held and restores the prior rate on
-    /// release (Flutter parity). For VoiceOver users the same behavior is a custom
-    /// rotor action, but only when Direct Touch is enabled — without it the
-    /// sustained press conflicts with VoiceOver's own gestures. The sighted
-    /// press-and-hold is always available.
+    /// release (Flutter parity). For VoiceOver users the same behavior is always
+    /// available as a custom rotor action (#610) -- a separate trigger path from
+    /// the raw press-and-hold gesture below, so it carries none of that gesture's
+    /// VoiceOver-touch-conflict risk. The sighted press-and-hold is itself always
+    /// available too.
     @ViewBuilder
     private var artworkBlock: some View {
         // At accessibility Dynamic Type sizes the surrounding text rows grow
@@ -162,12 +163,12 @@ struct NowPlayingScreen: View {
             // the label, value, and rotor action below reliably attach to it.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Episode artwork")
-            // Offer the scan as a rotor action only where Direct Touch applies,
-            // plus the three episode actions (#371) so VoiceOver users reach
-            // Mark as played, Export audio file, and Stop after this episode from
-            // the artwork rotor — the same set the visible overflow menu shows.
-            // Routed through the shared helper so the rotor announces the
-            // designed order despite the OS's reversed emission (#572, #577).
+            // Offer the scan rotor action (#610), plus the three episode actions
+            // (#371) so VoiceOver users reach Mark as played, Export audio file,
+            // and Stop after this episode from the artwork rotor — the same set
+            // the visible overflow menu shows. Routed through the shared helper so
+            // the rotor announces the designed order despite the OS's reversed
+            // emission (#572, #577).
             .rotorActions(artworkRotorActions)
 
         // Only attach a value node while actually scanning. An empty-string value
@@ -181,9 +182,9 @@ struct NowPlayingScreen: View {
     }
 
     /// The artwork's rotor actions in DESIGNED announce order: fast-forward
-    /// scan first (when Direct Touch applies), then the three episode actions
-    /// (#371), Bookmarks, and prev/next chapter (#508) last. Built as an array
-    /// so `rotorActions(_:)` can compensate the OS's reversed emission (#577).
+    /// scan first, then the three episode actions (#371), Bookmarks, and
+    /// prev/next chapter (#508) last. Built as an array so `rotorActions(_:)`
+    /// can compensate the OS's reversed emission (#577).
     private var artworkRotorActions: [QuickActionItem] {
         var actions: [QuickActionItem] = []
         if player.fastForwardRotorAvailable {
@@ -778,11 +779,14 @@ private struct ScrubberView: View {
     // converges (cleared in `.onChange`).
     @State private var adjustTarget: Double?
 
-    /// VoiceOver adjust step. Matches the 30s used by the Flutter scrubber.
-    private let stepSeconds: Double = 30
-
     private var duration: Double { player.durationSeconds }
     private var hasDuration: Bool { player.hasKnownDuration }
+
+    /// VoiceOver adjust step, scaled to episode duration (#610). Matches the flat
+    /// 30s used by the Flutter scrubber for anything at or under 30 minutes;
+    /// longer episodes take fewer, larger steps so a multi-hour episode doesn't
+    /// need 100+ flicks to cross.
+    private var stepSeconds: Double { PlaybackLogic.scrubberStepSeconds(duration: duration) }
 
     /// The position to render: the drag value mid-gesture, otherwise a pending
     /// VoiceOver-adjust target if one hasn't converged yet, otherwise the live

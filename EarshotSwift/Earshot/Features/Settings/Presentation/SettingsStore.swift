@@ -48,9 +48,6 @@ final class SettingsStore {
     // Onboarding
     var onboardingComplete: Bool = SettingsDefault.onboardingComplete { didSet { persist { $0.setBool(onboardingComplete, for: SettingsKey.onboardingComplete) } } }
 
-    // Accessibility
-    var directTouchEnabled: Bool = SettingsDefault.directTouchEnabled { didSet { persist { $0.setBool(directTouchEnabled, for: SettingsKey.directTouchEnabled) } } }
-
     @ObservationIgnored private var store: AppSettingsStore?
     /// Whether ``configure(context:)`` has loaded persisted values. Readable so
     /// RootView can serve the persisted appearance synchronously on the first
@@ -83,7 +80,6 @@ final class SettingsStore {
         wifiOnlyDownloads = store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads)
         autoDownloadCount = store.int(SettingsKey.autoDownloadCount, default: SettingsDefault.autoDownloadCount)
         historyRetentionDays = store.int(SettingsKey.historyRetentionDays, default: SettingsDefault.historyRetentionDays)
-        directTouchEnabled = store.bool(SettingsKey.directTouchEnabled, default: SettingsDefault.directTouchEnabled)
         statsStreaksEnabled = store.bool(SettingsKey.statsStreaksEnabled, default: SettingsDefault.statsStreaksEnabled)
         onboardingComplete = store.bool(SettingsKey.onboardingComplete, default: SettingsDefault.onboardingComplete)
         loaded = true

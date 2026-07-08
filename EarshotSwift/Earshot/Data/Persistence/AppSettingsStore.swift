@@ -22,6 +22,11 @@ enum SettingsKey {
     static let globalSpeed = "global_speed"
     static let skipForwardSeconds = "skip_forward_seconds"
     static let skipBackSeconds = "skip_back_seconds"
+    // direct_touch_enabled: retained for data compatibility only. Its one
+    // consumer, PlayerService.fastForwardRotorAvailable, no longer gates on it
+    // (#610 -- the fast-forward rotor action is now always available regardless).
+    // The SettingsStore property and "Direct-touch playback area" Settings UI
+    // toggle have been removed.
     static let directTouchEnabled = "direct_touch_enabled"
     // Whether the Previous/Next chapter buttons flanking the chapter name in the
     // player are shown. Default true (#515). Turning it off hides only the two
@@ -118,7 +123,7 @@ enum SettingsDefault {
     static let skipForwardSeconds = 30
     static let skipBackSeconds = 15
     static let wifiOnlyDownloads = true
-    static let directTouchEnabled = false
+    static let directTouchEnabled = false  // retained; not read by SettingsStore (#610)
     /// Chapter navigation buttons shown by default; users who prefer the artwork
     /// VoiceOver rotor can turn them off (#515).
     static let chapterNavButtonsVisible = true

@@ -12,16 +12,13 @@ import AVFoundation
 @MainActor
 final class AdvancedPlaybackTests: XCTestCase {
 
-    private func makeContext(directTouch: Bool = false) -> ModelContext {
-        let ctx = TestStore.freshContext()
-        let store = AppSettingsStore(context: ctx)
-        store.setBool(directTouch, for: SettingsKey.directTouchEnabled)
-        return ctx
+    private func makeContext() -> ModelContext {
+        TestStore.freshContext()
     }
 
-    private func makePlayer(directTouch: Bool = false) -> PlayerService {
+    private func makePlayer() -> PlayerService {
         let player = PlayerService()
-        player.configure(context: makeContext(directTouch: directTouch))
+        player.configure(context: makeContext())
         return player
     }
 
@@ -45,8 +42,6 @@ final class AdvancedPlaybackTests: XCTestCase {
 
     func test_beginAndEndFastForward_togglesState() {
         let ctx = TestStore.freshContext()
-        let store = AppSettingsStore(context: ctx)
-        store.setBool(false, for: SettingsKey.directTouchEnabled)
         let player = PlayerService()
         player.configure(context: ctx)
         let episode = makeEpisode(ctx)
@@ -78,12 +73,11 @@ final class AdvancedPlaybackTests: XCTestCase {
         XCTAssertFalse(player.isFastForwarding)
     }
 
-    func test_fastForwardRotorAvailable_followsDirectTouchSetting() {
-        let off = makePlayer(directTouch: false)
-        XCTAssertFalse(off.fastForwardRotorAvailable)
-
-        let on = makePlayer(directTouch: true)
-        XCTAssertTrue(on.fastForwardRotorAvailable)
+    /// #610: the fast-forward rotor action is no longer gated behind any setting
+    /// -- it must always be available so VoiceOver users can reach the 4x scan
+    /// without first finding and enabling an unrelated toggle.
+    func test_fastForwardRotorAvailable_isAlwaysTrue() {
+        XCTAssertTrue(makePlayer().fastForwardRotorAvailable)
     }
 
     func test_switchingEpisode_clearsActiveFastForward() {

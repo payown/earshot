@@ -769,12 +769,19 @@ final class PlayerService {
     // MARK: Public — hold-to-fast-forward (4× scan, #373)
 
     /// True when the VoiceOver rotor "Start/Stop Fast Forward" action should be
-    /// offered. The sighted press-and-hold gesture on the artwork is always
-    /// available; the rotor action is gated on the Direct Touch setting because
-    /// that's where Flutter exposes it (a direct-touch playback affordance).
-    var fastForwardRotorAvailable: Bool {
-        settings?.bool(SettingsKey.directTouchEnabled, default: false) ?? false
-    }
+    /// offered. Always true (#610) -- previously gated on the "Direct-touch
+    /// playback area" setting (default off), which left VoiceOver users with no
+    /// way to reach the 4x scan at all unless they'd already found and enabled
+    /// that specific setting. That gate was unnecessary: the rotor action calls
+    /// `beginFastForward()`/`endFastForward()` directly and has no dependency on
+    /// the artwork's raw `.onLongPressGesture` (the actual source of the
+    /// touch-gesture-vs-VoiceOver conflict the setting was meant to address) --
+    /// the sighted press-and-hold gesture is itself always available, ungated, and
+    /// unaffected by this change. The setting had no other consumer, so it and its
+    /// Settings UI toggle were removed entirely (`SettingsKey.directTouchEnabled`
+    /// is retained only for data-compatibility, per the project's established
+    /// pattern for other removed settings).
+    var fastForwardRotorAvailable: Bool { true }
 
     /// Raises playback to the 4× scan rate, stashing the exact prior effective
     /// rate (including any per-podcast override) so release restores it. No-op
