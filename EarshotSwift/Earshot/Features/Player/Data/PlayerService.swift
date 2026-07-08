@@ -934,8 +934,16 @@ final class PlayerService {
         let nextID = nextAdvanceID(after: episode, in: queued)
         let nextEpisode = queued.first { $0.persistentModelID == nextID }
 
+        // Remove the canonical instance from `queued` (already fetched above),
+        // not the caller's `episode` reference directly: QueueRepository.remove
+        // silently no-ops if `.queueItem` isn't resolved on the instance it's
+        // given, which would leave the episode stuck in the queue while playback
+        // still advances/clears below. `queued` is free here regardless (needed
+        // for nextID above), so this costs nothing extra.
+        let episodeToRemove = queued.first { $0.persistentModelID == episode.persistentModelID } ?? episode
+
         flushListeningSession()
-        repo.cancelFromQueue(episode)
+        repo.cancelFromQueue(episodeToRemove)
 
         guard let nextEpisode else {
             // Nothing queued after this one: stop cleanly with the bar cleared.
