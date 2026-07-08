@@ -676,4 +676,118 @@ final class AdvancedPlaybackTests: XCTestCase {
                        "Removing a DIFFERENT episode must not touch what's currently playing")
         XCTAssertTrue(player.isPlaying, "Playback must be undisturbed")
     }
+
+    // MARK: Advance respects the grouped-display order (#627 follow-up)
+
+    /// Two shows interleaved in the REAL queue order -- exactly what "Group by
+    /// podcast" hides on screen by visually clustering same-show episodes
+    /// together without touching the underlying order (`QueueLogic.group`'s own
+    /// doc comment: "even when the flat queue interleaves keys"). Playing X2
+    /// (not X1) and turning grouping on, then finishing X2, must advance to X3
+    /// -- the next episode in the GROUPED order actually shown on screen -- not
+    /// Y2, which is what the raw interleaved order would give.
+    private func makeInterleavedShowsQueue(_ ctx: ModelContext) -> (x1: Episode, x2: Episode, x3: Episode, y1: Episode, y2: Episode) {
+        let showX = Podcast(feedURL: "https://x/feed", title: "Show X")
+        ctx.insert(showX)
+        let showY = Podcast(feedURL: "https://y/feed", title: "Show Y")
+        ctx.insert(showY)
+
+        let x1 = Episode(guid: "x1", title: "X1", audioURL: "https://x/1.mp3")
+        x1.podcast = showX
+        ctx.insert(x1)
+        let y1 = Episode(guid: "y1", title: "Y1", audioURL: "https://y/1.mp3")
+        y1.podcast = showY
+        ctx.insert(y1)
+        let x2 = Episode(guid: "x2", title: "X2", audioURL: "https://x/2.mp3")
+        x2.podcast = showX
+        ctx.insert(x2)
+        let y2 = Episode(guid: "y2", title: "Y2", audioURL: "https://y/2.mp3")
+        y2.podcast = showY
+        ctx.insert(y2)
+        let x3 = Episode(guid: "x3", title: "X3", audioURL: "https://x/3.mp3")
+        x3.podcast = showX
+        ctx.insert(x3)
+        try? ctx.save()
+
+        let repo = QueueRepository(context: ctx)
+        // Real (flat) order: X1, Y1, X2, Y2, X3 -- interleaved.
+        repo.add(x1)
+        repo.add(y1)
+        repo.add(x2)
+        repo.add(y2)
+        repo.add(x3)
+
+        return (x1, x2, x3, y1, y2)
+    }
+
+    func test_markCurrentPlayedAndAdvance_groupedDisplayOn_followsGroupedOrderNotRawInterleavedOrder() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episodes = makeInterleavedShowsQueue(ctx)
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.groupQueueEpisodes)
+
+        player.play(episodes.x2)
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertEqual(
+            player.nowPlayingEpisodeID, episodes.x3.persistentModelID,
+            "With grouped display on, advance must follow the grouped (same-show) order shown on "
+                + "screen, not the raw interleaved queue order"
+        )
+    }
+
+    func test_markCurrentPlayedAndAdvance_groupedDisplayOff_followsRawInterleavedOrder() {
+        // Control: grouping off (the default) must preserve #627's original fix
+        // -- the true flat queue order, unaffected by which show anything belongs to.
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episodes = makeInterleavedShowsQueue(ctx)
+
+        player.play(episodes.x2)
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertEqual(
+            player.nowPlayingEpisodeID, episodes.y2.persistentModelID,
+            "With grouped display off, advance must follow the true flat queue order (#627)"
+        )
+    }
+
+    /// Caught in security review of the grouped-display fix above: "Play Next"
+    /// (#487) guarantees an episode plays immediately after `current` by
+    /// inserting it right after `current` in the RAW queue. With grouping on,
+    /// naively reordering by group before resolving "next" can cluster that
+    /// freshly play-next-ed episode behind the REST of the current group,
+    /// silently breaking the Play Next promise across podcasts. The override
+    /// must win regardless of the grouped-display setting.
+    func test_markCurrentPlayedAndAdvance_groupedDisplayOn_playNextOverrideStillWinsAcrossGroups() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episodes = makeInterleavedShowsQueue(ctx)
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.groupQueueEpisodes)
+
+        // Play-Next a brand new Show Y episode right after X2 -- raw queue
+        // becomes X1, Y1, X2, Y3(new), X3, Y2. Grouped order would otherwise
+        // cluster X2's remaining show (X3) ahead of Y3.
+        let showY = episodes.y1.podcast!
+        let y3 = Episode(guid: "y3", title: "Y3", audioURL: "https://y/3.mp3")
+        y3.podcast = showY
+        ctx.insert(y3)
+        try? ctx.save()
+
+        let repo = QueueRepository(context: ctx)
+        player.play(episodes.x2)
+        repo.playNext(y3, after: episodes.x2)
+        player.registerPlayNext(y3)
+
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertEqual(
+            player.nowPlayingEpisodeID, y3.persistentModelID,
+            "Play Next must still play immediately after the current episode, even when grouped "
+                + "display would otherwise advance within the current show's group first"
+        )
+    }
 }
