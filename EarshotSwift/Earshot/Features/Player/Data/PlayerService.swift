@@ -272,10 +272,20 @@ final class PlayerService {
 
     /// Plays `episode` from a user tap on an episode row (the "Play now" default
     /// Quick Action). Same as ``play(_:)`` but also raises the full player when the
-    /// `openPlayerOnPlay` setting is on (#562). Kept distinct from ``play(_:)`` so
-    /// only this deliberate, user-initiated path can present the player — queue
-    /// auto-advance, resume, and jump-to-bookmark never do.
+    /// `openPlayerOnPlay` setting is on (#562), and queues the episode first if it
+    /// isn't already (#612) -- an episode started this way from the Inbox or a
+    /// podcast's episode list previously kept `status == .newEpisode` for its
+    /// entire playback, so it stayed visibly "in the Inbox" (untriaged) the whole
+    /// time despite already playing. `QueueRepository.add(_:)` is idempotent (a
+    /// no-op when already queued, e.g. Library binge already queued every episode,
+    /// or the episode was played from the Queue screen itself), so this is safe
+    /// for every caller. Kept distinct from ``play(_:)`` so only this deliberate,
+    /// user-initiated path queues and can present the player — queue auto-advance,
+    /// resume, and jump-to-bookmark never do either.
     func playFromEpisodeList(_ episode: Episode) {
+        if let context {
+            QueueRepository(context: context).add(episode)
+        }
         play(episode, preparedItem: nil)
         if settings?.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
             ?? SettingsDefault.openPlayerOnPlay {
