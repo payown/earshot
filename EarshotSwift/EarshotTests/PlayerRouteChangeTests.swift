@@ -28,9 +28,15 @@ final class PlayerRouteChangeTests: XCTestCase {
         let player = PlayerService()
         player.configure(context: ctx)
         player.load(episode)
+        // `load()` never touches AVAudioSession (only `play()`/`resume()` do), so
+        // asserting `.mode` right after `load()` would rest on whatever the
+        // process's session happened to carry over from an earlier test — a real
+        // flakiness bug. Explicitly apply the (currently disabled) setting so the
+        // precondition is deterministic.
+        player.applyAudioEnhancement()
         XCTAssertEqual(
             AVAudioSession.sharedInstance().mode, .default,
-            "precondition: voice enhance is off at load time"
+            "precondition: voice enhance is off"
         )
 
         AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.voiceEnhanceEnabled)
@@ -54,6 +60,36 @@ final class PlayerRouteChangeTests: XCTestCase {
             AVAudioSession.sharedInstance().mode, .spokenAudio,
             "A route change must reapply the current voice-enhance setting, " +
             "not leave the session on whatever mode it had before the route changed"
+        )
+    }
+
+    /// `.oldDeviceUnavailable` (headphones/Bluetooth unplugged) must both pause
+    /// (so audio doesn't blast aloud on the speaker) AND still reapply the
+    /// current voice-enhance setting — the pause must never be skipped just
+    /// because enhancement reapplication also happens on this reason.
+    func test_routeChange_oldDeviceUnavailable_pausesAndStillReappliesEnhancement() async throws {
+        let ctx = TestStore.freshContext()
+        let episode = makePodcastWithEpisode(ctx)
+        let player = PlayerService()
+        player.configure(context: ctx)
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.voiceEnhanceEnabled)
+        player.play(episode)
+        XCTAssertTrue(player.isPlaying, "precondition: playing")
+
+        NotificationCenter.default.post(
+            name: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance(),
+            userInfo: [
+                AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue,
+            ]
+        )
+
+        try await pollUntil(timeout: 2) { !player.isPlaying }
+
+        XCTAssertFalse(player.isPlaying, "Unplugging must still pause playback")
+        XCTAssertEqual(
+            AVAudioSession.sharedInstance().mode, .spokenAudio,
+            "Unplugging must still reapply the current voice-enhance setting"
         )
     }
 

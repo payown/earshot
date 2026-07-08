@@ -1693,14 +1693,16 @@ final class PlayerService {
         guard let info = note.userInfo,
               let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+        // Headphones / Bluetooth unplugged: pause FIRST so audio doesn't blast
+        // aloud on the speaker. This must not be delayed by the synchronous
+        // AVAudioSession work below.
+        if reason == .oldDeviceUnavailable, isPlaying {
+            pause()
+        }
         // Any route change can reset the session's preferred output channel
         // count / mode (#374), so reapply the current voice-enhance setting
         // regardless of reason.
         applyAudioEnhancement()
-        // Headphones / Bluetooth unplugged: pause so audio doesn't blast aloud.
-        if reason == .oldDeviceUnavailable, isPlaying {
-            pause()
-        }
     }
 
     // MARK: Private — streaming stall recovery (#522)
