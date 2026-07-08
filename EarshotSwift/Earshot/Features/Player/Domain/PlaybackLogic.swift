@@ -111,11 +111,20 @@ enum PlaybackLogic {
         let resumePosition: Int
     }
 
-    /// The id of the episode to play next after `current` finishes: the first
-    /// queue entry that is not the one that just played. `nil` when the queue is
-    /// empty or holds only the current episode. Drives gapless advance.
+    /// The id of the episode to play next after `current` finishes: the queue
+    /// entry positionally AFTER `current`'s own place in the queue (#627) --
+    /// NOT simply the first entry that isn't `current`. Playing an episode that
+    /// isn't at the head (leaving earlier, untouched items in place) must
+    /// continue from where the listener actually was, not jump back to the
+    /// queue's head. Falls back to the head when `current` has no position to
+    /// reference (nil, or not found in the queue at all). `nil` when the queue
+    /// is empty or `current` is the last item. Drives gapless advance.
     static func nextUpID<ID: Equatable>(queue: [ID], after current: ID?) -> ID? {
-        queue.first { $0 != current }
+        guard let current, let idx = queue.firstIndex(of: current) else {
+            return queue.first
+        }
+        let nextIndex = queue.index(after: idx)
+        return nextIndex < queue.endIndex ? queue[nextIndex] : nil
     }
 
     /// The id of the episode to play next after `current` finishes, honoring the
@@ -128,8 +137,8 @@ enum PlaybackLogic {
     ///    group setting moot while off).
     /// 2. else `continueAfterGroupEnds` off and the next queue item is a different
     ///    group (podcast) than `currentGroupKey` -> stop at the group boundary.
-    /// 3. else advance to the first queue entry whose id is not `current` (today's
-    ///    behavior; both-on is the default), or `nil` if no such item exists.
+    /// 3. else advance to the queue entry positionally after `current` (#627;
+    ///    both-on is the default), or `nil` if no such item exists.
     ///
     /// This is intentionally independent of the runtime `stopAfterCurrentEpisode`
     /// one-off action: it neither takes nor consults that flag.
@@ -142,6 +151,10 @@ enum PlaybackLogic {
     ///   - continueAfterEpisode: When false, stop at every episode boundary.
     ///   - continueAfterGroupEnds: When false, stop when the next item is a
     ///     different group than the current one.
+    ///
+    /// "Next" is resolved the same way as ``nextUpID(queue:after:)`` (#627): the
+    /// entry positionally AFTER `current`'s own place in the queue, not simply
+    /// the first entry that isn't `current`.
     /// The effective "continue after group ends" flag for one advance. An
     /// episode the user explicitly chose to "Play next" outranks the passive
     /// "stop after group ends" preference: when that episode is the immediate
@@ -166,7 +179,14 @@ enum PlaybackLogic {
         continueAfterGroupEnds: Bool
     ) -> ID? {
         guard continueAfterEpisode else { return nil }
-        guard let next = queue.first(where: { $0.id != current }) else { return nil }
+        let next: (id: ID, groupKey: Key)?
+        if let current, let idx = queue.firstIndex(where: { $0.id == current }) {
+            let nextIndex = queue.index(after: idx)
+            next = nextIndex < queue.endIndex ? queue[nextIndex] : nil
+        } else {
+            next = queue.first
+        }
+        guard let next else { return nil }
         if !continueAfterGroupEnds, let cur = currentGroupKey, next.groupKey != cur {
             return nil
         }

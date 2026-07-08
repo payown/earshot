@@ -264,9 +264,18 @@ final class PlaybackLogicTests: XCTestCase {
         XCTAssertEqual(PlaybackLogic.nextUpID(queue: [1, 2, 3], after: 1), 2)
     }
 
-    func testNextUpSkipsTheCurrentEpisodeWhereverItSits() {
-        // The finished episode may still be in the list when we look ahead.
-        XCTAssertEqual(PlaybackLogic.nextUpID(queue: [2, 1, 3], after: 1), 2)
+    func testNextUpIsThePositionalSuccessorWhenCurrentSitsMidQueue() {
+        // #627: the finished episode (1) sits at index 1, not the head -- "next"
+        // must be the item positionally AFTER it (3), not the queue's head (2).
+        // Playing an episode that isn't at the top (leaving earlier items
+        // untouched) must continue from where the listener actually was.
+        XCTAssertEqual(PlaybackLogic.nextUpID(queue: [2, 1, 3], after: 1), 3)
+    }
+
+    func testNextUpFallsBackToHeadWhenCurrentNotInQueueAtAll() {
+        // No position to reference -- fall back to the head, same as auto-advance
+        // for content that was never queued in the first place.
+        XCTAssertEqual(PlaybackLogic.nextUpID(queue: [2, 3], after: 99), 2)
     }
 
     func testNextUpIsHeadWhenNothingPlaying() {
@@ -391,16 +400,31 @@ final class PlaybackLogicTests: XCTestCase {
     }
 
     func testBoundaryGroupOffAdvancesWhenCurrentSitsMidQueue() {
-        // The finished episode (id 1) is not at the head; "next" is the first item
-        // whose id differs from current (id 2, same group "A"), not queue.first.
-        // Group-off must still advance because that next item shares the group.
+        // #627: the finished episode (id 1) is not at the head -- "next" is the
+        // item positionally AFTER it in the queue (id 3, group "B"), not the
+        // queue's head (id 2). Group-off must still advance since this is the
+        // real next item, regardless of what group it belongs to.
         XCTAssertEqual(PlaybackLogic.nextUpHonoringBoundaries(
             queue: [(id: 2, groupKey: "A"), (id: 1, groupKey: "A"), (id: 3, groupKey: "B")],
             after: 1,
             currentGroupKey: "A",
             continueAfterEpisode: true,
+            continueAfterGroupEnds: true
+        ), 3)
+    }
+
+    func testBoundaryGroupOffStopsAtDifferentGroupWhenCurrentSitsMidQueue() {
+        // Same layout, but group-continuation off: the positional successor (id
+        // 3) is a different group ("B") than the finished episode's group ("A"),
+        // so this must stop at the boundary -- not silently advance to the head
+        // (id 2, same group) the way the old "first that isn't current" logic did.
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(
+            queue: [(id: 2, groupKey: "A"), (id: 1, groupKey: "A"), (id: 3, groupKey: "B")],
+            after: 1,
+            currentGroupKey: "A",
+            continueAfterEpisode: true,
             continueAfterGroupEnds: false
-        ), 2)
+        ))
     }
 
     func testBoundaryGroupOffWithNonNilCurrentButUnknownGroupAdvances() {
