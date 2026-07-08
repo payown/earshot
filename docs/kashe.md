@@ -395,6 +395,14 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   Podcast Settings now shows a plain warning and an "Open Settings" button
   when that's the case, so she can actually see and fix it (Chapter 44)
 
+- Kashe had quietly been keeping her long interview show at 1.3 instead of the
+  1.5 she actually wanted, because past that the host's voice took on a thin,
+  underwater quality; she figured that was just how the recording was, not
+  the app deciding what "fast" was allowed to sound like. She notices it fixed
+  during an actual visit to Renata's, cuff on Renata's arm for a blood
+  pressure reading; even with Renata right there she doesn't mention it, just
+  packs up and lets the show run at 1.5 the rest of the route (Chapter 45)
+
 ## What you can generate
 
 - The next chapter of the story (tied to a specific build's changes)
@@ -1478,6 +1486,34 @@ Both of those were true, and it turned out neither was actually broken the way s
 She flicked to Delete on another show she'd been meaning to drop. It went, clean. Then she opened the one nagging notification setting and there it was, sitting plainly: notifications off at the phone level, a button to fix it. She tapped through, flipped it, came back.
 
 She didn't message Renata about either one. But she noticed, the way she notices things she doesn't say out loud.
+
+---
+
+### Chapter 45 — Build 149
+
+*Kashe's been fidgeting with playback speed since Chapter 30; this build fixes what sped-up audio actually sounds like, tightens per-podcast speed and auto-advance, and cleans up how playing from the Inbox handles the Queue.*
+
+**What to test:**
+
+Play any episode at 1.25x-2x. Voices should sound clean, not watery or metallic. Full 0.5x-5x range still works.
+
+Change speed while playing a podcast for the first time. It should now apply to that show only, not every show, by default.
+
+Switch between two podcasts with different speeds, locking your phone right as one auto-advances to the next. The new episode should start at its own correct speed immediately, not the previous show's.
+
+With VoiceOver, flick the scrubber on a long episode. The step should scale with episode length, not always 30 seconds. The 4x fast-forward scan gesture should also just work, no hidden setting needed.
+
+Play an episode straight from the Inbox. It should land in your Queue too, and stop counting as an untriaged inbox item while it plays.
+
+Remove an episode from the Queue. It should not come back in your Inbox, and should not be marked played in your history.
+
+Kashe keeps her long interview show at 1.3, not the 1.5 she's actually wanted since Chapter 30. Past 1.3 the host's voice goes thin, a wet, underwater wobble, like the tape itself got damp. She noticed it the first week and filed it under things that are just how a show sounds, the same drawer where she keeps a client's shaking hands or a floorboard that's always creaked. Not everything gets fixed. Some things you work around and stop mentioning, even to yourself.
+
+She's got one earbud in at Renata's kitchen table, cuff wrapped around Renata's arm, waiting on the reading, half listening to the host ask his guest about a book neither of them will remember by Friday. Renata talks with her whole body even sitting still, and Kashe reads a blood pressure number off the rhythm of the machine before it even prints.
+
+Numbers come back fine. She pulls the earbud, nudges the speed up past 1.3 out of habit, bracing the way she braces for that floorboard. Nothing gives. The host just sounds like himself, dry, clear, at a speed she'd quietly decided wasn't hers to have.
+
+She could say something. Renata's right there, close enough to hand her the phone. Kashe doesn't. She packs up the cuff, says the numbers look good, and lets the interview run at 1.5 the rest of the route, finally sounding the way it should have all along.
 
 ---
 
