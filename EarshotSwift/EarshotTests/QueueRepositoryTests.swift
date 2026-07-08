@@ -212,6 +212,25 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertNil(a.queueItem)
     }
 
+    /// #614: removal must dismiss the episode from the inbox durably so it
+    /// doesn't resurface as "new" -- but without marking it played, so the
+    /// "Episodes completed" listening stat (driven by `isPlayed`/`playedAt`)
+    /// isn't inflated for an episode the user may not have actually finished.
+    func testCancelFromQueueDismissesFromInboxWithoutMarkingPlayed() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "A")
+        let a = makeEpisode(ctx, "a", podcast: p)
+        let repo = QueueRepository(context: ctx)
+        repo.add(a)
+        XCTAssertFalse(a.inboxDismissed, "Precondition: queuing never sets inboxDismissed")
+
+        repo.cancelFromQueue(a)
+
+        XCTAssertTrue(a.inboxDismissed, "Removal must not let the episode resurface in the inbox")
+        XCTAssertFalse(a.isPlayed, "Removal must not be recorded as a completed listen")
+        XCTAssertNil(a.playedAt, "Episodes-completed stat must not count this episode")
+    }
+
     func testMarkPlayedAndRemoveSetsPlayedAndPreservesPosition() {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx, "A")

@@ -109,10 +109,20 @@ final class QueueRepository {
 
     // MARK: Removing
 
-    /// User-initiated removal: reverts the episode to `newEpisode` so it
-    /// reappears in the inbox.
+    /// User-initiated removal: reverts the episode to `newEpisode` but dismisses
+    /// it from the inbox durably (#614), matching the pattern already used by
+    /// ``InboxRepository/clearInbox()`` and the per-podcast age/count auto-dismiss
+    /// -- removing from the queue is a deliberate choice not to listen to it right
+    /// now, not a request to see it resurface as "new" again. Deliberately does
+    /// NOT mark the episode played: `isPlayed`/`playedAt` (and therefore the
+    /// "Episodes completed" listening stat) stay untouched, since the user may
+    /// not have listened to any of it. Use ``markPlayedAndRemove(_:)`` instead
+    /// when the episode genuinely finished playing.
     func cancelFromQueue(_ episode: Episode) {
-        remove(episode) { $0.status = .newEpisode }
+        remove(episode) {
+            $0.status = .newEpisode
+            $0.inboxDismissed = true
+        }
     }
 
     /// Completion-driven removal: marks the episode played atomically.
