@@ -62,8 +62,13 @@ func buildQueueActions(
         case .removeFromQueue:
             return QuickActionItem(label: "Remove from queue", isDestructive: true) {
                 let neighbor = neighborID(of: episode, in: visibleQueue?() ?? repo.queue())
-                repo.cancelFromQueue(episode)
+                // Announce the removal BEFORE calling into PlayerService (#619):
+                // if `episode` is the one currently playing, removeFromQueue may
+                // itself announce "Now playing <next>" -- that must come SECOND,
+                // matching the order a listener expects ("removed X" then "now
+                // playing Y"), not before it.
                 Announcer.announce("Removed \(episode.title) from the queue")
+                player.removeFromQueue(episode, context: context)
                 onFocus(neighbor)
             }
         case .openShowNotes:
