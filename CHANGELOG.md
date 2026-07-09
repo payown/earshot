@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed), and the import sheet tells you how it went when it finishes. A clean
   install with nothing to bring over is treated as up to date, not a failure.
   (closes #429)
+- Behind the scenes: laid the groundwork for an upcoming paid tier, Earshot Plus (monthly, yearly, or one-time lifetime unlock). This is engineering foundation only, nothing to see or buy yet. No paywall, no purchase button, no change to how the app works today. (closes #631)
 
 ### Changed
 - New episode notifications: when a new episode is found while Earshot is open, the notification no longer interrupts you with a banner and sound. It goes quietly to Notification Center so it doesn't talk over what you're doing or pull screen reader focus away. (closes #421)
