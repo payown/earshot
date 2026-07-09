@@ -2173,3 +2173,88 @@ inbox-dismissal parity test against the existing single-episode path.
 Feature suggestions identified: none this review.
 
 Overall: PASS. No fixes needed, no commit required from this gate.
+
+## Swift 6 Review — Issue #640
+
+earshot-swift6 review complete. Issue #640 (Select All / Mark All as Played
+in episode list). Branch `feat/issue-640-mark-all-played`, HEAD `2787421` at
+review time.
+
+Concurrency mode: project.yml has `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (Swift 6 migration not yet flipped on for
+this target). Reviewed under the project's real committed settings and under
+a forced `SWIFT_STRICT_CONCURRENCY=complete` override to surface anything the
+eventual migration would catch.
+
+Checklist:
+- [x] Sendable conformance: PASS — `EpisodeRepository` is a plain
+  `@MainActor final class` (not `Sendable`, correctly so — its stored
+  `ModelContext` and `onSave` closure aren't `Sendable` either, but every
+  access is actor-isolated so that's fine). Never instantiated or referenced
+  from off the main actor.
+- [x] Actor isolation: PASS — `markAllPlayed(in:)` mutates every unplayed
+  `Episode` `@Model` in memory in a single synchronous loop, then calls
+  `context.save()` exactly once, all on the main actor. `EpisodeListView`'s
+  new toolbar button, rotor action (`markAllPlayedAccessibilityAction`), and
+  `confirmationDialog` closures are all synchronous SwiftUI view-body code —
+  no `Task`, no `await`, nothing crosses an isolation boundary.
+- [x] @Model/SwiftData actor boundary: PASS — `Podcast`/`Episode` `@Model`
+  objects are read and mutated only within `EpisodeRepository`'s
+  `@MainActor`-isolated method; none is passed to a background actor,
+  `Task.detached`, or any non-main-actor context.
+- [x] `onSave` closure isolation: verified. It's declared
+  `private let onSave: (() -> Void)?` with no `@Sendable`, deliberately
+  mirroring `SubscriptionRepository.onMerge` (same signature, same
+  `@MainActor` host class). Since `EpisodeRepository` itself is
+  `@MainActor`-isolated and `onSave` is invoked only from `save()` inside
+  that same isolation domain — never handed to a background actor or a
+  `@Sendable`-requiring API — the closure never needs to cross an isolation
+  boundary, so no `@Sendable` annotation is required. This is unlike
+  `SubscriptionRepository`'s separate `onProgress` parameter (`@MainActor
+  @Sendable`), which exists specifically because *that* closure is invoked
+  from a background actor's loop; `onSave` has no equivalent because
+  `markAllPlayed` never leaves the main actor. Confirmed by the passing
+  strict-concurrency build below (no diagnostic on this parameter).
+- N/A AVAudioSession main actor: no audio session code in this diff.
+- N/A Combine publishers: none in this diff.
+- [x] nonisolated functions: N/A — no pure/computation-only function in this
+  diff would benefit from `nonisolated`; `MarkAllPlayedAnnouncement.text
+  (count:)` is already a `static func` on a plain non-actor `enum`, not a
+  method needing isolation opt-out.
+- [x] Structured concurrency: PASS — no `Task`, `Task.detached`, or task
+  groups introduced by this diff. `markAllPlayed()` runs synchronously; the
+  1200-episode batching test (`EpisodeRepositoryTests`) confirms this is a
+  bounded in-memory loop plus one SQLite write, not something that needs
+  structured concurrency.
+- [x] Global state: PASS — none introduced.
+- [x] Swift 6 build clean: PASS. Confirmed no new instance of the project's
+  documented pre-existing baseline issues (`QueueScreen.swift:100` compiler
+  crash under forced strict-complete, `KeyPath`-not-`Sendable` warnings in
+  `QueueRepository.swift`/`QuickActionRepository.swift`, and the
+  `DownloadManager.swift:122` non-Sendable-`Episode` warning under the
+  project's real minimal setting) — all four appear identically whether or
+  not this diff's files are compiled, and none references
+  `EpisodeRepository.swift`, `EpisodeListView.swift`, or either new test
+  file.
+
+Build/test verification:
+- `xcodebuild build` with the project's real settings (`SWIFT_VERSION 5.0`,
+  `SWIFT_STRICT_CONCURRENCY minimal`) — BUILD SUCCEEDED, only the
+  pre-existing `DownloadManager.swift:122` warning (unrelated file, present
+  on `swift` baseline too).
+- `xcodebuild build` forced to `SWIFT_STRICT_CONCURRENCY=complete` — BUILD
+  FAILED only on the pre-existing `QueueScreen.swift:100` compiler crash and
+  the `KeyPath`-not-`Sendable` warnings in `QueueRepository.swift` /
+  `QuickActionRepository.swift` (all three previously documented as baseline
+  in the #639 Swift 6 review). Zero errors or warnings in
+  `EpisodeRepository.swift` or `EpisodeListView.swift` — confirmed by
+  grepping the full build log for both filenames: only their `SwiftCompile`
+  invocation lines appear, no `error:`/`warning:` lines.
+- `xcodebuild test -only-testing:EarshotTests/EpisodeRepositoryTests
+  -only-testing:EarshotTests/MarkAllPlayedAnnouncementTests` on iPhone 17
+  simulator — TEST SUCCEEDED, 9/9 passed.
+
+New agents created: none.
+
+Overall: PASS. No fixes needed, no commit required beyond this
+SWIFTUI_PLAN.md log entry.
