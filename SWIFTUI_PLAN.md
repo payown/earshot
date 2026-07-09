@@ -719,6 +719,28 @@ ship; OPML export/import is the supported way to carry a library over.
   always-present value. Position/count formatting is unit-tested
   (`SearchResultPositionTests`).
 
+- **Mark All as Played wired into `EpisodeListView` (#640).** Two entry points
+  drive one shared `@State` confirmation gate so they can never diverge: a
+  `topBarTrailing` toolbar button (`checklist.checked`, disabled — not
+  hidden — when `unplayedCount == 0`, mirroring InboxScreen's "Add to Queue"
+  disabled-not-hidden pattern) and a screen-level
+  `.accessibilityAction(named: "Mark all as played")` on the `List`, the first
+  non-per-row rotor action in the codebase (every prior one hangs off an
+  episode row). Since a rotor action can't visually gray itself out, it's
+  conditionally attached at all via a small `@ViewBuilder` View extension
+  (`markAllPlayedAccessibilityAction(enabled:action:)`) rather than left as a
+  silent no-op. `unplayedCount` is derived from the view's existing
+  `sortedEpisodes` (unfiltered, sorted) rather than the filtered/visible set,
+  since `EpisodeRepository.markAllPlayed` acts on the whole podcast regardless
+  of which filter (Unheard/All) is showing. Confirmation is a destructive
+  `confirmationDialog` matching the Clear-inbox/Unfollow precedent exactly
+  (plain-text buttons, no icons — the system dialog doesn't render them).
+  Completion is announced assertively via a new pure `MarkAllPlayedAnnouncement`
+  helper (comma-grouped counts, correct singular/plural), unit-tested in
+  `MarkAllPlayedAnnouncementTests` mirroring `EpisodeListFilter.announcement(count:)`'s
+  pattern of keeping VoiceOver wording pure and file-scoped rather than inline
+  in the view.
+
 ## Networking Decisions
 
 - **#381 Background feed refresh + 15-min skip window.** Registered a
@@ -2113,3 +2135,223 @@ Overall: PASS.
 Commit: 3 new tests + this SWIFTUI_PLAN.md update committed to
 `fix/issue-639-auto-download`. Branch not merged / not closed — Michael
 verifies on device first, per workflow.
+
+## Security Review — Issue #640
+
+earshot-security review complete. Issue #640 (Select All / Mark All as
+Played in episode list). Branch `feat/issue-640-mark-all-played`, HEAD
+`7410304` at review time.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found. Every `!` in the diff is `!=` or
+  boolean negation (`!$0.isPlayed`, `!unplayed.isEmpty`, `!episodes.isEmpty`,
+  etc.).
+- [x] Silent try?: PASS — none found.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no `Task {}`, `NotificationCenter.addObserver`,
+  `Combine.sink`, or `Timer` closures introduced. The `DispatchQueue.main
+  .asyncAfter` closure in `EpisodeListView.onMarkPlayed` only touches
+  `@State`/`@AccessibilityFocusState` on a `View` struct, no reference-type
+  `self` capture.
+- [x] @MainActor: PASS — `EpisodeRepository` is `@MainActor final class`.
+  `markAllPlayed(in:)` mutates every unplayed episode in memory in one loop
+  and calls `context.save()` exactly once, verified by the `onSave` test hook
+  against a 1200-episode fixture (`saveCount == 1`). No cross-actor SwiftData
+  access, no isolation violations. At 1000+ episodes this is a bounded
+  synchronous property-set loop plus one SQLite write; not a main-thread
+  blocking concern worth moving off-actor, and doing so would just
+  reintroduce cross-actor `@Model` risk.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration files changed.
+- [ ] Entitlements: N/A — none changed.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new `Error` type needed; the only new `catch`
+  (`EpisodeRepository.save()`) wraps SwiftData's built-in `context.save()`
+  throw, matching existing repository conventions (e.g. `SubscriptionRepository`).
+- [x] AppLog coverage: PASS — `EpisodeRepository.save()`'s catch logs via
+  `AppLog.data.error(...)`; no empty catch blocks introduced.
+
+Also verified: all four `project.pbxproj` sections (PBXBuildFile,
+PBXFileReference, group children, PBXSourcesBuildPhase) correctly wired for
+the three new files. Ran `EpisodeRepositoryTests` +
+`MarkAllPlayedAnnouncementTests` on iPhone 17 simulator — 9/9 pass, including
+the 1200-unplayed/300-already-played batching assertion and the
+inbox-dismissal parity test against the existing single-episode path.
+
+Feature suggestions identified: none this review.
+
+Overall: PASS. No fixes needed, no commit required from this gate.
+
+## Swift 6 Review — Issue #640
+
+earshot-swift6 review complete. Issue #640 (Select All / Mark All as Played
+in episode list). Branch `feat/issue-640-mark-all-played`, HEAD `2787421` at
+review time.
+
+Concurrency mode: project.yml has `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (Swift 6 migration not yet flipped on for
+this target). Reviewed under the project's real committed settings and under
+a forced `SWIFT_STRICT_CONCURRENCY=complete` override to surface anything the
+eventual migration would catch.
+
+Checklist:
+- [x] Sendable conformance: PASS — `EpisodeRepository` is a plain
+  `@MainActor final class` (not `Sendable`, correctly so — its stored
+  `ModelContext` and `onSave` closure aren't `Sendable` either, but every
+  access is actor-isolated so that's fine). Never instantiated or referenced
+  from off the main actor.
+- [x] Actor isolation: PASS — `markAllPlayed(in:)` mutates every unplayed
+  `Episode` `@Model` in memory in a single synchronous loop, then calls
+  `context.save()` exactly once, all on the main actor. `EpisodeListView`'s
+  new toolbar button, rotor action (`markAllPlayedAccessibilityAction`), and
+  `confirmationDialog` closures are all synchronous SwiftUI view-body code —
+  no `Task`, no `await`, nothing crosses an isolation boundary.
+- [x] @Model/SwiftData actor boundary: PASS — `Podcast`/`Episode` `@Model`
+  objects are read and mutated only within `EpisodeRepository`'s
+  `@MainActor`-isolated method; none is passed to a background actor,
+  `Task.detached`, or any non-main-actor context.
+- [x] `onSave` closure isolation: verified. It's declared
+  `private let onSave: (() -> Void)?` with no `@Sendable`, deliberately
+  mirroring `SubscriptionRepository.onMerge` (same signature, same
+  `@MainActor` host class). Since `EpisodeRepository` itself is
+  `@MainActor`-isolated and `onSave` is invoked only from `save()` inside
+  that same isolation domain — never handed to a background actor or a
+  `@Sendable`-requiring API — the closure never needs to cross an isolation
+  boundary, so no `@Sendable` annotation is required. This is unlike
+  `SubscriptionRepository`'s separate `onProgress` parameter (`@MainActor
+  @Sendable`), which exists specifically because *that* closure is invoked
+  from a background actor's loop; `onSave` has no equivalent because
+  `markAllPlayed` never leaves the main actor. Confirmed by the passing
+  strict-concurrency build below (no diagnostic on this parameter).
+- N/A AVAudioSession main actor: no audio session code in this diff.
+- N/A Combine publishers: none in this diff.
+- [x] nonisolated functions: N/A — no pure/computation-only function in this
+  diff would benefit from `nonisolated`; `MarkAllPlayedAnnouncement.text
+  (count:)` is already a `static func` on a plain non-actor `enum`, not a
+  method needing isolation opt-out.
+- [x] Structured concurrency: PASS — no `Task`, `Task.detached`, or task
+  groups introduced by this diff. `markAllPlayed()` runs synchronously; the
+  1200-episode batching test (`EpisodeRepositoryTests`) confirms this is a
+  bounded in-memory loop plus one SQLite write, not something that needs
+  structured concurrency.
+- [x] Global state: PASS — none introduced.
+- [x] Swift 6 build clean: PASS. Confirmed no new instance of the project's
+  documented pre-existing baseline issues (`QueueScreen.swift:100` compiler
+  crash under forced strict-complete, `KeyPath`-not-`Sendable` warnings in
+  `QueueRepository.swift`/`QuickActionRepository.swift`, and the
+  `DownloadManager.swift:122` non-Sendable-`Episode` warning under the
+  project's real minimal setting) — all four appear identically whether or
+  not this diff's files are compiled, and none references
+  `EpisodeRepository.swift`, `EpisodeListView.swift`, or either new test
+  file.
+
+Build/test verification:
+- `xcodebuild build` with the project's real settings (`SWIFT_VERSION 5.0`,
+  `SWIFT_STRICT_CONCURRENCY minimal`) — BUILD SUCCEEDED, only the
+  pre-existing `DownloadManager.swift:122` warning (unrelated file, present
+  on `swift` baseline too).
+- `xcodebuild build` forced to `SWIFT_STRICT_CONCURRENCY=complete` — BUILD
+  FAILED only on the pre-existing `QueueScreen.swift:100` compiler crash and
+  the `KeyPath`-not-`Sendable` warnings in `QueueRepository.swift` /
+  `QuickActionRepository.swift` (all three previously documented as baseline
+  in the #639 Swift 6 review). Zero errors or warnings in
+  `EpisodeRepository.swift` or `EpisodeListView.swift` — confirmed by
+  grepping the full build log for both filenames: only their `SwiftCompile`
+  invocation lines appear, no `error:`/`warning:` lines.
+- `xcodebuild test -only-testing:EarshotTests/EpisodeRepositoryTests
+  -only-testing:EarshotTests/MarkAllPlayedAnnouncementTests` on iPhone 17
+  simulator — TEST SUCCEEDED, 9/9 passed.
+
+New agents created: none.
+
+Overall: PASS. No fixes needed, no commit required beyond this
+SWIFTUI_PLAN.md log entry.
+
+---
+
+### earshot-testing gate: Issue #640 (Select All / Mark All as Played in episode list)
+
+Reviewed existing coverage against the issue's 4 acceptance criteria:
+
+1. **Confirmation step before bulk-marking** — `EpisodeListView`'s
+   `confirmationDialog` wiring matches the existing Unfollow/Clear-inbox
+   precedent exactly (destructive-role button + plain-text Cancel, no icons);
+   grepping `EarshotTests/` for `confirmationDialog` returns zero matches
+   anywhere in the app, so there is no existing UI-interaction test
+   infrastructure for this pattern to match — not inventing one here either,
+   per the gate's own guidance. What WAS a real gap: the confirmation
+   title/message pluralization and comma-grouping
+   (`markAllPlayedConfirmationTitle`/`Message`) were private computed
+   properties on the view with zero coverage, unlike the already-extracted,
+   already-tested `MarkAllPlayedAnnouncement.text(count:)`. Fixed by
+   extracting them into a new pure `MarkAllPlayedConfirmationCopy` enum
+   (mirroring the exact pattern the domain agent already established for the
+   announcement) and adding 6 tests
+   (`MarkAllPlayedConfirmationCopyTests` in
+   `MarkAllPlayedAnnouncementTests.swift`): singular/plural and
+   comma-grouping for both `title(unplayedCount:)` and
+   `message(unplayedCount:podcastTitle:)`. `requestMarkAllPlayed()` itself
+   (opens the dialog) and the `.disabled(unplayedCount == 0)` toolbar state
+   remain untested view-level wiring, same bar as every other toolbar action
+   in this file (e.g. `showingPodcastSettings`).
+2. **Batched write** — confirmed real, not vacuous. Read
+   `EpisodeRepositoryTests.testMarkAllPlayedBatchesSaveExactlyOnceForLargeList`:
+   fixture is 1200 unplayed + 300 already-played episodes, asserts
+   `saveCount == 1` via the `onSave` hook (fired only after a real
+   `context.save()`, mirroring `SubscriptionRepository.onMerge`), asserts the
+   return value equals exactly the unplayed count, and asserts already-played
+   episodes' `playedAt` is untouched (guards against overwriting to `.now`).
+   Two no-op tests confirm `saveCount == 0` when nothing changes (empty
+   podcast, fully-played podcast) so a no-op never dirties the context. A
+   fourth test confirms inbox-dismissal parity with the single-episode
+   `InboxRepository.markPlayed` path.
+3. **VoiceOver announcement wording** — confirmed real.
+   `MarkAllPlayedAnnouncementTests` covers singular (1), plural (2), the
+   unreachable-in-production zero case, and comma-grouping at both 1,204 and
+   1,000,000.
+4. **Performant on 1000+ episodes** — same batching test as #2; 1200-episode
+   fixture is the direct evidence.
+
+Added 6 tests (`MarkAllPlayedConfirmationCopyTests`) plus the
+`MarkAllPlayedConfirmationCopy` enum extraction in
+`EpisodeListView.swift` to close the title/message coverage gap identified
+above. The 9 tests the domain agents already wrote (4
+`EpisodeRepositoryTests` + 5 `MarkAllPlayedAnnouncementTests`) needed no
+changes.
+
+Full suite run clean from this worktree (`xcodebuild test -scheme Earshot
+-destination 'platform=iOS Simulator,name=iPhone 17'`):
+
+```
+Executed 1159 tests, with 1 test skipped and 0 failures (0 unexpected)
+Test Suite 'All tests' passed
+```
+
+The 1 skip is the pre-existing env-gated `ScaleDiagnosticTests` (`RUN_SCALE_DIAG=1`
+required), unrelated to this branch. All three new/changed test suites
+(`EpisodeRepositoryTests` 4/4, `MarkAllPlayedAnnouncementTests` 5/5,
+`MarkAllPlayedConfirmationCopyTests` 6/6) passed individually in the same run.
+
+Previous test count (authoritative, full-suite; `swift`-branch tip before
+this branch started, per the #654 earshot-testing gate above): 1144
+New test count (confirmed passing, full-suite): 1159
+Reconciliation: 1144 + 9 (domain agents' original tests) + 6 (this gate's
+`MarkAllPlayedConfirmationCopyTests`) = 1159. Exact match, no discrepancy.
+Count increased: yes
+
+Release build: `xcodebuild build -configuration Release -destination
+'generic/platform=iOS Simulator'` → **BUILD SUCCEEDED**, no errors or
+warnings in any changed file. N/A per earshot-security/earshot-swift6 (no
+migration files touched by this issue) but run anyway as standard practice —
+confirms no Release-only compile break from the `EpisodeRepository`/
+`EpisodeListView` changes or the `MarkAllPlayedConfirmationCopy` extraction.
+
+PRD acceptance criteria covered: all 4 (confirmation step, VoiceOver
+rotor/toolbar entry point, batched write, completion announcement) — see
+coverage assessment above.
+
+Regressions found: none — full suite is 1159/1159 (1 unrelated pre-existing
+env-gated skip), exceeding the prior gate's count by exactly the expected
+delta.
+
+Overall: PASS. Committed the `MarkAllPlayedConfirmationCopy` extraction and
+its 6 tests to this branch (`feat/issue-640-mark-all-played`).
