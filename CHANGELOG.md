@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed), and the import sheet tells you how it went when it finishes. A clean
   install with nothing to bring over is treated as up to date, not a failure.
   (closes #429)
+- Behind the scenes: laid the groundwork for an upcoming paid tier, Earshot Plus (monthly, yearly, or one-time lifetime unlock). This is engineering foundation only, nothing to see or buy yet. No paywall, no purchase button, no change to how the app works today. (closes #631)
 - Podcast episode list: a "Mark all as played" toolbar button marks every unplayed episode in that show as played in one step, and dismisses newly-played episodes from your inbox the same way marking a single episode played does. It's disabled with an explanatory hint when there's nothing unplayed left. A confirmation dialog always asks first, naming the podcast and the episode count, and makes clear it can't be undone. (closes #640)
 
 ### Changed
