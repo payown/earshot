@@ -2258,3 +2258,93 @@ New agents created: none.
 
 Overall: PASS. No fixes needed, no commit required beyond this
 SWIFTUI_PLAN.md log entry.
+
+---
+
+### earshot-testing gate: Issue #640 (Select All / Mark All as Played in episode list)
+
+Reviewed existing coverage against the issue's 4 acceptance criteria:
+
+1. **Confirmation step before bulk-marking** — `EpisodeListView`'s
+   `confirmationDialog` wiring matches the existing Unfollow/Clear-inbox
+   precedent exactly (destructive-role button + plain-text Cancel, no icons);
+   grepping `EarshotTests/` for `confirmationDialog` returns zero matches
+   anywhere in the app, so there is no existing UI-interaction test
+   infrastructure for this pattern to match — not inventing one here either,
+   per the gate's own guidance. What WAS a real gap: the confirmation
+   title/message pluralization and comma-grouping
+   (`markAllPlayedConfirmationTitle`/`Message`) were private computed
+   properties on the view with zero coverage, unlike the already-extracted,
+   already-tested `MarkAllPlayedAnnouncement.text(count:)`. Fixed by
+   extracting them into a new pure `MarkAllPlayedConfirmationCopy` enum
+   (mirroring the exact pattern the domain agent already established for the
+   announcement) and adding 6 tests
+   (`MarkAllPlayedConfirmationCopyTests` in
+   `MarkAllPlayedAnnouncementTests.swift`): singular/plural and
+   comma-grouping for both `title(unplayedCount:)` and
+   `message(unplayedCount:podcastTitle:)`. `requestMarkAllPlayed()` itself
+   (opens the dialog) and the `.disabled(unplayedCount == 0)` toolbar state
+   remain untested view-level wiring, same bar as every other toolbar action
+   in this file (e.g. `showingPodcastSettings`).
+2. **Batched write** — confirmed real, not vacuous. Read
+   `EpisodeRepositoryTests.testMarkAllPlayedBatchesSaveExactlyOnceForLargeList`:
+   fixture is 1200 unplayed + 300 already-played episodes, asserts
+   `saveCount == 1` via the `onSave` hook (fired only after a real
+   `context.save()`, mirroring `SubscriptionRepository.onMerge`), asserts the
+   return value equals exactly the unplayed count, and asserts already-played
+   episodes' `playedAt` is untouched (guards against overwriting to `.now`).
+   Two no-op tests confirm `saveCount == 0` when nothing changes (empty
+   podcast, fully-played podcast) so a no-op never dirties the context. A
+   fourth test confirms inbox-dismissal parity with the single-episode
+   `InboxRepository.markPlayed` path.
+3. **VoiceOver announcement wording** — confirmed real.
+   `MarkAllPlayedAnnouncementTests` covers singular (1), plural (2), the
+   unreachable-in-production zero case, and comma-grouping at both 1,204 and
+   1,000,000.
+4. **Performant on 1000+ episodes** — same batching test as #2; 1200-episode
+   fixture is the direct evidence.
+
+Added 6 tests (`MarkAllPlayedConfirmationCopyTests`) plus the
+`MarkAllPlayedConfirmationCopy` enum extraction in
+`EpisodeListView.swift` to close the title/message coverage gap identified
+above. The 9 tests the domain agents already wrote (4
+`EpisodeRepositoryTests` + 5 `MarkAllPlayedAnnouncementTests`) needed no
+changes.
+
+Full suite run clean from this worktree (`xcodebuild test -scheme Earshot
+-destination 'platform=iOS Simulator,name=iPhone 17'`):
+
+```
+Executed 1159 tests, with 1 test skipped and 0 failures (0 unexpected)
+Test Suite 'All tests' passed
+```
+
+The 1 skip is the pre-existing env-gated `ScaleDiagnosticTests` (`RUN_SCALE_DIAG=1`
+required), unrelated to this branch. All three new/changed test suites
+(`EpisodeRepositoryTests` 4/4, `MarkAllPlayedAnnouncementTests` 5/5,
+`MarkAllPlayedConfirmationCopyTests` 6/6) passed individually in the same run.
+
+Previous test count (authoritative, full-suite; `swift`-branch tip before
+this branch started, per the #654 earshot-testing gate above): 1144
+New test count (confirmed passing, full-suite): 1159
+Reconciliation: 1144 + 9 (domain agents' original tests) + 6 (this gate's
+`MarkAllPlayedConfirmationCopyTests`) = 1159. Exact match, no discrepancy.
+Count increased: yes
+
+Release build: `xcodebuild build -configuration Release -destination
+'generic/platform=iOS Simulator'` → **BUILD SUCCEEDED**, no errors or
+warnings in any changed file. N/A per earshot-security/earshot-swift6 (no
+migration files touched by this issue) but run anyway as standard practice —
+confirms no Release-only compile break from the `EpisodeRepository`/
+`EpisodeListView` changes or the `MarkAllPlayedConfirmationCopy` extraction.
+
+PRD acceptance criteria covered: all 4 (confirmation step, VoiceOver
+rotor/toolbar entry point, batched write, completion announcement) — see
+coverage assessment above.
+
+Regressions found: none — full suite is 1159/1159 (1 unrelated pre-existing
+env-gated skip), exceeding the prior gate's count by exactly the expected
+delta.
+
+Overall: PASS. Committed the `MarkAllPlayedConfirmationCopy` extraction and
+its 6 tests to this branch (`feat/issue-640-mark-all-played`).

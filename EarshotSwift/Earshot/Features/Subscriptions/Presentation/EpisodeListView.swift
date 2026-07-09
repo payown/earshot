@@ -294,15 +294,13 @@ struct EpisodeListView: View {
     /// Title for the "Mark all as played" confirmation, e.g. "Mark all 1,204
     /// episodes as played?" / "Mark all 1 episode as played?".
     private var markAllPlayedConfirmationTitle: String {
-        let noun = unplayedCount == 1 ? "episode" : "episodes"
-        return "Mark all \(unplayedCount.formatted()) \(noun) as played?"
+        MarkAllPlayedConfirmationCopy.title(unplayedCount: unplayedCount)
     }
 
     /// Body copy for the "Mark all as played" confirmation, naming the show
     /// and stating the action can't be undone.
     private var markAllPlayedConfirmationMessage: String {
-        let noun = unplayedCount == 1 ? "episode" : "episodes"
-        return "This marks all \(unplayedCount.formatted()) unplayed \(noun) in \(podcast.title) as played. This can't be undone."
+        MarkAllPlayedConfirmationCopy.message(unplayedCount: unplayedCount, podcastTitle: podcast.title)
     }
 
     /// Runs the batched repository call (#640) and announces the result.
@@ -434,6 +432,22 @@ enum MarkAllPlayedAnnouncement {
     static func text(count: Int) -> String {
         let noun = count == 1 ? "episode" : "episodes"
         return "Marked \(count.formatted()) \(noun) as played"
+    }
+}
+
+/// Pure "Mark all as played" confirmation dialog copy (#640). Extracted
+/// alongside ``MarkAllPlayedAnnouncement`` so the singular/plural,
+/// comma-grouping, and podcast-title interpolation are unit-testable without
+/// standing up the view.
+enum MarkAllPlayedConfirmationCopy {
+    static func title(unplayedCount: Int) -> String {
+        let noun = unplayedCount == 1 ? "episode" : "episodes"
+        return "Mark all \(unplayedCount.formatted()) \(noun) as played?"
+    }
+
+    static func message(unplayedCount: Int, podcastTitle: String) -> String {
+        let noun = unplayedCount == 1 ? "episode" : "episodes"
+        return "This marks all \(unplayedCount.formatted()) unplayed \(noun) in \(podcastTitle) as played. This can't be undone."
     }
 }
 
