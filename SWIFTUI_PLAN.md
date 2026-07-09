@@ -712,6 +712,28 @@ ship; OPML export/import is the supported way to carry a library over.
   always-present value. Position/count formatting is unit-tested
   (`SearchResultPositionTests`).
 
+- **Mark All as Played wired into `EpisodeListView` (#640).** Two entry points
+  drive one shared `@State` confirmation gate so they can never diverge: a
+  `topBarTrailing` toolbar button (`checklist.checked`, disabled — not
+  hidden — when `unplayedCount == 0`, mirroring InboxScreen's "Add to Queue"
+  disabled-not-hidden pattern) and a screen-level
+  `.accessibilityAction(named: "Mark all as played")` on the `List`, the first
+  non-per-row rotor action in the codebase (every prior one hangs off an
+  episode row). Since a rotor action can't visually gray itself out, it's
+  conditionally attached at all via a small `@ViewBuilder` View extension
+  (`markAllPlayedAccessibilityAction(enabled:action:)`) rather than left as a
+  silent no-op. `unplayedCount` is derived from the view's existing
+  `sortedEpisodes` (unfiltered, sorted) rather than the filtered/visible set,
+  since `EpisodeRepository.markAllPlayed` acts on the whole podcast regardless
+  of which filter (Unheard/All) is showing. Confirmation is a destructive
+  `confirmationDialog` matching the Clear-inbox/Unfollow precedent exactly
+  (plain-text buttons, no icons — the system dialog doesn't render them).
+  Completion is announced assertively via a new pure `MarkAllPlayedAnnouncement`
+  helper (comma-grouped counts, correct singular/plural), unit-tested in
+  `MarkAllPlayedAnnouncementTests` mirroring `EpisodeListFilter.announcement(count:)`'s
+  pattern of keeping VoiceOver wording pure and file-scoped rather than inline
+  in the view.
+
 ## Networking Decisions
 
 - **#381 Background feed refresh + 15-min skip window.** Registered a
