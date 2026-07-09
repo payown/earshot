@@ -790,4 +790,47 @@ final class AdvancedPlaybackTests: XCTestCase {
                 + "display would otherwise advance within the current show's group first"
         )
     }
+
+    // MARK: persistCurrentPosition never clobbers an already-played episode (#653)
+
+    /// Mirrors the ``PlaybackLogicTests`` coverage of `shouldPersistTick`'s
+    /// `isPlayed` guard, but against the eager anchor `pause()` uses
+    /// (`persistCurrentPosition()`). If the episode was marked played (position
+    /// zeroed) while a stale `currentPositionSeconds` was still in flight —
+    /// exactly the window between the 95%-played tick and the item actually
+    /// finishing — a later `pause()` must not overwrite the zeroed position.
+    func test_pause_afterEpisodeMarkedPlayed_doesNotOverwriteZeroedPosition() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episode = makeEpisode(ctx)
+
+        player.load(episode)
+        player.currentPositionSeconds = 597 // stale in-flight position near the end
+        episode.isPlayed = true
+        episode.positionSeconds = 0 // simulates markCurrentEpisodePlayed() having already run
+
+        player.pause()
+
+        XCTAssertEqual(
+            episode.positionSeconds, 0,
+            "pause()'s eager persist must not resurrect a stale position on an already-played episode"
+        )
+    }
+
+    /// Sanity check for the guard above: an episode that is NOT played still
+    /// gets its position persisted normally on pause.
+    func test_pause_beforeEpisodeMarkedPlayed_stillPersistsPosition() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episode = makeEpisode(ctx)
+
+        player.load(episode)
+        player.currentPositionSeconds = 123
+
+        player.pause()
+
+        XCTAssertEqual(episode.positionSeconds, 123, "Normal pause persistence is unaffected by the guard")
+    }
 }
