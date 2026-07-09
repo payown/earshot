@@ -53,6 +53,30 @@ The user need or bug this addresses.
 How a reviewer can verify this.
 ```
 
+## Swift CI (branch: `swift`)
+
+The native SwiftUI/SwiftData rewrite lives on the `swift` branch and is not
+covered by `flutter test`/`flutter analyze` above. `.github/workflows/swift-ci.yml`
+runs the full `EarshotTests` suite (`xcodebuild test`) on every push and PR
+into `swift` — no path filters, so it always runs and is safe to mark
+"Required" in branch protection. See issue #656 and
+`.claude/rules/database-migrations.md` (the SwiftData migration section) for
+why this exists: a failing schema migration must be caught by CI, not found
+by a TestFlight tester.
+
+Before opening a PR into `swift`:
+
+1. All Swift tests pass locally (see `.claude/rules/database-migrations.md`
+   for the exact `xcodebuild test` invocation and simulator pinning notes).
+2. Any schema bump has its matching migration test (required gate, not
+   optional — see `database-migrations.md`).
+3. `mobile-accessibility` run on any UI change.
+4. CHANGELOG.md updated for user-visible changes.
+
+**Follow-up still needed (not doable from a code PR):** branch protection on
+`swift` must be configured in repo settings to require the "Build and test
+(EarshotTests)" check from the "Swift CI" workflow before merge.
+
 ## Code review
 
 - Accessibility regressions block merge, no exceptions.

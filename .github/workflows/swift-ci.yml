@@ -1,0 +1,79 @@
+name: Swift CI
+
+# Runs the native SwiftUI/SwiftData test suite (EarshotTests) so PRs into the
+# `swift` branch are gated on it actually passing, not on a human/agent
+# remembering to run `xcodebuild test` locally. See issue #656.
+#
+# No path filters: PRs into `swift` are effectively always SwiftUI-app work,
+# and an unfiltered trigger keeps this safe to mark "Required" in branch
+# protection (a path-filtered required check that never fires on a given PR
+# leaves that PR permanently pending).
+
+on:
+  pull_request:
+    branches: [swift]
+  push:
+    branches: [swift]
+
+concurrency:
+  group: swift-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test (EarshotTests)
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # macos-15 runner default Xcode is 16.4, which predates the iPhone 17
+      # simulator device. Pin to the newest stable Xcode on the image
+      # (currently 26.x) so `-destination 'platform=iOS Simulator,name=iPhone 17'`
+      # resolves. Uses actions/runner-images' documented "Installed Versions"
+      # list, not a hardcoded patch version, so this survives routine image
+      # updates.
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show Xcode and simulator versions
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | grep -i "iPhone 17" || {
+            echo "::error::No iPhone 17 simulator found on this runner image."
+            exit 1
+          }
+
+      # The Earshot.xcodeproj is committed to the repo (see EarshotSwift/README.md);
+      # local devs regenerate it from project.yml with `xcodegen generate` only
+      # when project.yml itself changes, then commit the result. CI builds the
+      # committed project directly and does not run xcodegen.
+      #
+      # CODE_SIGNING_ALLOWED=NO / CODE_SIGNING_REQUIRED=NO: the project's
+      # Automatic signing style references a real DEVELOPMENT_TEAM, but
+      # simulator test runs need no signing identity and the CI runner has no
+      # Apple Developer credentials.
+      - name: Run EarshotTests
+        working-directory: EarshotSwift
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Earshot.xcodeproj \
+            -scheme Earshot \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Upload xcresult on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-test-results
+          path: ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+          retention-days: 14
+          if-no-files-found: ignore
