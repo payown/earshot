@@ -2128,3 +2128,48 @@ Overall: PASS.
 Commit: 3 new tests + this SWIFTUI_PLAN.md update committed to
 `fix/issue-639-auto-download`. Branch not merged / not closed — Michael
 verifies on device first, per workflow.
+
+## Security Review — Issue #640
+
+earshot-security review complete. Issue #640 (Select All / Mark All as
+Played in episode list). Branch `feat/issue-640-mark-all-played`, HEAD
+`7410304` at review time.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found. Every `!` in the diff is `!=` or
+  boolean negation (`!$0.isPlayed`, `!unplayed.isEmpty`, `!episodes.isEmpty`,
+  etc.).
+- [x] Silent try?: PASS — none found.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no `Task {}`, `NotificationCenter.addObserver`,
+  `Combine.sink`, or `Timer` closures introduced. The `DispatchQueue.main
+  .asyncAfter` closure in `EpisodeListView.onMarkPlayed` only touches
+  `@State`/`@AccessibilityFocusState` on a `View` struct, no reference-type
+  `self` capture.
+- [x] @MainActor: PASS — `EpisodeRepository` is `@MainActor final class`.
+  `markAllPlayed(in:)` mutates every unplayed episode in memory in one loop
+  and calls `context.save()` exactly once, verified by the `onSave` test hook
+  against a 1200-episode fixture (`saveCount == 1`). No cross-actor SwiftData
+  access, no isolation violations. At 1000+ episodes this is a bounded
+  synchronous property-set loop plus one SQLite write; not a main-thread
+  blocking concern worth moving off-actor, and doing so would just
+  reintroduce cross-actor `@Model` risk.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration files changed.
+- [ ] Entitlements: N/A — none changed.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new `Error` type needed; the only new `catch`
+  (`EpisodeRepository.save()`) wraps SwiftData's built-in `context.save()`
+  throw, matching existing repository conventions (e.g. `SubscriptionRepository`).
+- [x] AppLog coverage: PASS — `EpisodeRepository.save()`'s catch logs via
+  `AppLog.data.error(...)`; no empty catch blocks introduced.
+
+Also verified: all four `project.pbxproj` sections (PBXBuildFile,
+PBXFileReference, group children, PBXSourcesBuildPhase) correctly wired for
+the three new files. Ran `EpisodeRepositoryTests` +
+`MarkAllPlayedAnnouncementTests` on iPhone 17 simulator — 9/9 pass, including
+the 1200-unplayed/300-already-played batching assertion and the
+inbox-dismissal parity test against the existing single-episode path.
+
+Feature suggestions identified: none this review.
+
+Overall: PASS. No fixes needed, no commit required from this gate.
