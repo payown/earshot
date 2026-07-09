@@ -49,11 +49,16 @@ Phase 2 = immediate fixes, the Flutter→SwiftUI migration, and audio DSP (#352)
 | BUG — tab switching blocked during playback | #362 | [x] | Per-second synchronous main-actor SwiftData `context.save()` from the 1s time observer starved the run loop, freezing TabView selection while audio played (severe VoiceOver nav regression). Fixed by throttling the per-tick position write to a 5s cadence via pure `PlaybackLogic.shouldPersistTick`; eager saves on pause/seek/episode-switch/30s-flush keep durability. All gates passed (security, testing, swift6, changelog; a11y N/A — no view changed). 210 tests green (was 204). Branch `fix/issue-362-tab-switching-playback`. Awaiting device verification. |
 | BUG — auto-download of newest episodes doesn't work | #639 | [x] | Two compounding bugs, both fixed. (1) `SubscriptionRepository.refresh(_:)`/`refreshAll(...)` never triggered auto-download for newly-discovered episodes on already-subscribed podcasts — only subscribe-time and OPML-import had it wired (an unfinished F8 follow-up, never completed). `RefreshOutcome` now carries `newEpisodeIDs: [PersistentIdentifier]` (resolved only AFTER `context.save()`, mirroring `subscribeAll`'s pending-ID pattern in `FeedRefreshActor`, since a pre-save read would silently reintroduce the bug); backfill passes correctly report zero new-episode IDs. `refresh`/`refreshAll` now call the existing `autoDownloadRecent(episodeIDsPerPodcast:)`. (2) The app's one real, shared `DownloadManager` was never threaded into ANY UI call site that constructs `SubscriptionRepository`/`OPMLImportService` (`AddFeedView`, `SubscriptionsView`, `SearchView`, `PodcastPreviewView`, `EpisodeListView`, OPML import) — all relied on the `downloader: nil` default, so even the working subscribe-time auto-download never fired from real usage. Now wired via `@Environment(DownloadManager.self)` at every call site. **Implemented by:** earshot-data. **Gates:** earshot-security PASS, earshot-swift6 PASS (one pre-existing unrelated strict-concurrency warning noted, not introduced here), earshot-accessibility PASS (no VoiceOver/announcement/focus surface change — download start stays silent, matching the pre-existing subscribe-time behavior), earshot-testing PASS (+9 tests total: 6 from earshot-data, 3 from the gate covering the `autoDownloadCount == 0` off-switch and partial-refreshAll cases). **1141 → 1144 tests**, Release build clean. **PR #654** squash-merged into `swift` (`09e7767`). Reported by TestFlight tester Greg Wocher on 1.0.0 (150). Not yet deployed to TestFlight (requires separate approval). |
 
-**Non-blocking follow-up (from #362 security gate, NOT done — file if it surfaces):**
-`PlayerService.persistPositionThrottled` (and the prior per-second save) lacks an
-`isPlayed` guard, so a tick after the 95% played threshold could rewrite a stale
-non-zero `positionSeconds` over the just-zeroed value. Pre-existing, cosmetic
-(episode is already played; end-of-item resets to 0 anyway), out of scope for #362.
+**Follow-up from #362 security gate — FIXED by #653:** `PlayerService.persistPositionThrottled`
+(and the prior per-second save) lacked an `isPlayed` guard, so a tick after the
+95% played threshold could rewrite a stale non-zero `positionSeconds` over the
+just-zeroed value. Flagged as pre-existing/cosmetic/out-of-scope during #362 but
+never filed until the App Store 1.0 launch-readiness audit surfaced it as #653.
+Fixed: `PlaybackLogic.shouldPersistTick` gained an `isPlayed` parameter (returns
+`false` unconditionally when true), wired at the `persistPositionThrottled` call
+site via `episode.isPlayed`; `persistCurrentPosition()` (the eager pause/seek/
+episode-switch anchor) got the same inline guard since `pause()` can land in the
+identical race window. 4 new `PlaybackLogicTests` + 2 new `AdvancedPlaybackTests`.
 
 ### Migration — Flutter-side tasks (OBSOLETE — feature removed, #580)
 

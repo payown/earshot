@@ -209,17 +209,32 @@ enum PlaybackLogic {
     /// write, or whenever the position jumped backwards (a seek/skip-back --
     /// want that reflected promptly). Pure so the cadence is unit-testable.
     ///
+    /// Always false once `isPlayed` is true (issue #653). The 95%-played
+    /// completion check and the throttled tick both run every second from the
+    /// same periodic handler, in that fixed order: the tick that crosses the
+    /// threshold marks the episode played and zeros its position, but nothing
+    /// resets `lastPersistedSecond` when that happens. On the VERY NEXT tick,
+    /// `currentSecond` has kept climbing past `lastPersistedSecond` (playback
+    /// hasn't actually stopped/advanced yet), so the interval-elapsed check
+    /// above would return true again and clobber the just-zeroed position with
+    /// a stale non-zero value. Once an episode is played, no throttled tick has
+    /// anything useful left to persist for it.
+    ///
     /// - Parameters:
     ///   - currentSecond: The integer playback second for this tick.
     ///   - lastPersistedSecond: The second at which we last wrote, or `nil` if we
     ///     have not written for the current episode yet.
     ///   - interval: The minimum gap between writes (defaults to
     ///     ``positionPersistInterval``).
+    ///   - isPlayed: Whether the episode this tick belongs to is already marked
+    ///     played. Defaults to `false` so existing call sites are unaffected.
     static func shouldPersistTick(
         currentSecond: Int,
         lastPersistedSecond: Int?,
-        interval: Int = positionPersistInterval
+        interval: Int = positionPersistInterval,
+        isPlayed: Bool = false
     ) -> Bool {
+        guard !isPlayed else { return false }
         guard let last = lastPersistedSecond else { return true }
         if currentSecond < last { return true }
         return currentSecond - last >= interval

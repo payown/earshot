@@ -1393,6 +1393,14 @@ final class PlayerService {
             logDeletedEpisodeGuardOnce("position persist")
             return
         }
+        // Same race as the throttled tick (issue #653): `markCurrentEpisodePlayed()`
+        // zeros the position but doesn't reset `lastPersistedSecond`, and this
+        // eager path shares the same durability contract. `pause()` in particular
+        // can land in the narrow window after the 95%-played threshold trips but
+        // before the item actually finishes/advances — without this guard it
+        // would overwrite the just-zeroed position with the in-flight
+        // `currentPositionSeconds`. Once played, there's nothing left to persist.
+        guard !episode.isPlayed else { return }
         let second = Int(max(0, currentPositionSeconds))
         episode.positionSeconds = second
         lastPersistedSecond = second
@@ -1415,7 +1423,8 @@ final class PlayerService {
         }
         guard PlaybackLogic.shouldPersistTick(
             currentSecond: currentSecond,
-            lastPersistedSecond: lastPersistedSecond
+            lastPersistedSecond: lastPersistedSecond,
+            isPlayed: episode.isPlayed
         ) else { return }
         episode.positionSeconds = max(0, currentSecond)
         lastPersistedSecond = currentSecond
