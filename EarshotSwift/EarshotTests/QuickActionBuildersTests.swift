@@ -397,6 +397,99 @@ final class QuickActionBuildersTests: XCTestCase {
                        "Removing the row that's currently playing must advance to the next queued episode")
     }
 
+    // MARK: displayedQueueOrder — grouped-display neighbor focus (#629)
+
+    /// Two shows interleaved in the raw queue order: X1, Y1, X2, X3, Y2. Grouped
+    /// order (matching what the grouped Queue screen renders) is X1, X2, X3, Y1, Y2.
+    private func makeInterleavedShowsQueue(_ ctx: ModelContext) -> (x1: Episode, x2: Episode, x3: Episode, y1: Episode, y2: Episode) {
+        let showX = Podcast(feedURL: "https://x/feed", title: "Show X")
+        ctx.insert(showX)
+        let showY = Podcast(feedURL: "https://y/feed", title: "Show Y")
+        ctx.insert(showY)
+
+        let x1 = Episode(guid: "x1", title: "X1", audioURL: "https://x/1.mp3")
+        x1.podcast = showX
+        ctx.insert(x1)
+        let y1 = Episode(guid: "y1", title: "Y1", audioURL: "https://y/1.mp3")
+        y1.podcast = showY
+        ctx.insert(y1)
+        let x2 = Episode(guid: "x2", title: "X2", audioURL: "https://x/2.mp3")
+        x2.podcast = showX
+        ctx.insert(x2)
+        let x3 = Episode(guid: "x3", title: "X3", audioURL: "https://x/3.mp3")
+        x3.podcast = showX
+        ctx.insert(x3)
+        let y2 = Episode(guid: "y2", title: "Y2", audioURL: "https://y/2.mp3")
+        y2.podcast = showY
+        ctx.insert(y2)
+
+        let repo = QueueRepository(context: ctx)
+        repo.add(x1)
+        repo.add(y1)
+        repo.add(x2)
+        repo.add(x3)
+        repo.add(y2)
+
+        return (x1, x2, x3, y1, y2)
+    }
+
+    func testDisplayedQueueOrder_flatMode_returnsRawQueueOrder() {
+        let ctx = TestStore.freshContext()
+        _ = makeInterleavedShowsQueue(ctx)
+        let repo = QueueRepository(context: ctx)
+
+        let order = displayedQueueOrder(moveMode: .flat, flat: repo.queue(), grouped: repo.groupedQueue())
+
+        XCTAssertEqual(
+            order.map(\.guid), ["x1", "y1", "x2", "x3", "y2"],
+            "Flat mode must use the raw interleaved queue order, unchanged"
+        )
+    }
+
+    func testDisplayedQueueOrder_groupedMode_returnsGroupedFlattenedOrder() {
+        let ctx = TestStore.freshContext()
+        _ = makeInterleavedShowsQueue(ctx)
+        let repo = QueueRepository(context: ctx)
+
+        let order = displayedQueueOrder(moveMode: .grouped, flat: repo.queue(), grouped: repo.groupedQueue())
+
+        XCTAssertEqual(
+            order.map(\.guid), ["x1", "x2", "x3", "y1", "y2"],
+            "Grouped mode must match the grouped-by-podcast order the screen actually renders"
+        )
+    }
+
+    /// End-to-end regression for #629: with grouped display, removing X1 (whose
+    /// screen-adjacent row is X2, in Show X's own section) must focus X2 -- not
+    /// Y1, which is only "next" in the raw interleaved order the user never sees.
+    func testRemoveFromQueue_groupedDisplay_focusesScreenAdjacentNeighborNotRawNeighbor() {
+        let ctx = TestStore.freshContext()
+        let episodes = makeInterleavedShowsQueue(ctx)
+        let repo = QueueRepository(context: ctx)
+        var focused: PersistentIdentifier?
+
+        let action = buildQueueActions(
+            episode: episodes.x1,
+            order: [.removeFromQueue],
+            moveMode: .grouped,
+            player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx,
+            onShowNotes: {},
+            onFocus: { focused = $0 },
+            visibleQueue: {
+                displayedQueueOrder(moveMode: .grouped, flat: repo.queue(), grouped: repo.groupedQueue())
+            }
+        ).first
+
+        action?.run()
+
+        XCTAssertEqual(
+            focused, episodes.x2.persistentModelID,
+            "Focus must land on X2 (screen-adjacent, same group), not Y1 (raw-order neighbor from a different group)"
+        )
+    }
+
     // MARK: #562 — Queue "Play now" honors open-player-on-play (Item 1)
 
     /// A player configured against `ctx` with `openPlayerOnPlay` set to `on`.

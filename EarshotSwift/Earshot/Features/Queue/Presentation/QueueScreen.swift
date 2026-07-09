@@ -218,13 +218,18 @@ struct QueueScreen: View {
                 context: context,
                 onShowNotes: { showNotesEpisode = episode },
                 onFocus: { focusedEpisode = $0 },
-                // The queue AS DISPLAYED (#457): with a search active, the
+                // The queue AS DISPLAYED (#457, #629): with a search active, the
                 // post-remove focus neighbor must be the adjacent VISIBLE row —
                 // a hidden row's id matches no rendered element, so focus would
                 // be dropped. With no search the filter passes the full queue
-                // through unchanged, preserving the original behavior.
+                // through unchanged, preserving the original behavior. And with
+                // grouping on, "adjacent" means adjacent in the GROUPED order
+                // actually rendered (#629), not the raw flat queue order.
                 visibleQueue: {
-                    EpisodeSearchFilter.filter(repo.queue(), query: searchText)
+                    let ordered = displayedQueueOrder(
+                        moveMode: moveMode, flat: repo.queue(), grouped: repo.groupedQueue()
+                    )
+                    return EpisodeSearchFilter.filter(ordered, query: searchText)
                 }
             )
         )
