@@ -2592,3 +2592,80 @@ delta.
 
 Overall: PASS. Committed the `MarkAllPlayedConfirmationCopy` extraction and
 its 6 tests to this branch (`feat/issue-640-mark-all-played`).
+
+## Security Review — Issue #634
+
+earshot-security review complete. Issue #634 (Earshot Plus: on-device
+StoreKit 2 receipt validation). Branch `feat/issue-634-receipt-validation`,
+commit `3fa62af` on top of `swift` tip `b01974f`, reviewed in worktree
+`earshot-wt-634`.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found in any changed file. Every `!` match
+  is boolean negation (`!isRunningTests`, `!store.isEntitled`), not a
+  force-unwrap.
+- [x] Silent try?: PASS — none in the 5 new production Monetization files.
+  The 2 `try?` in `AppSettingsStore.swift` are pre-existing (this diff only
+  appended 9 lines of new `SettingsKey` constants), out of scope. The 2
+  `try?` in `EntitlementStoreTests.swift` match the existing
+  `ScaleDiagnosticTests.swift` test-only pattern against a fresh in-memory
+  context.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — `EntitlementStore.startObservingTransactionUpdates()`
+  uses `Task { [weak self] in ... guard let self else { return } ... }`, and
+  captures a local `source` (not `self`) for the `AsyncStream`.
+- [x] @MainActor: PASS — `EntitlementStore` is `@MainActor @Observable`;
+  `isEntitled`/`settings` mutation is fully main-actor-serialized, including
+  across the `resync()` await gap. `startObservingTransactionUpdates()`
+  double-call safety verified by `testCallingStartObservingTwiceDoesNotCrashOrDoubleStart`.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration/schema files changed
+  (entitlement state is 2 plain `AppSetting` rows, no `@Model`/schema bump).
+- [ ] Entitlements: N/A — `Earshot.entitlements`/App Group settings untouched;
+  `project.pbxproj` diff is the expected xcodegen wiring for 8 new files.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — deny states are `nil` returns + `AppLog.monetization`
+  logging (the module's explicit "ambiguous -> deny, never throw" design), no
+  typed `Error` needed.
+- [x] AppLog coverage: PASS — both deny branches in
+  `EntitlementFactMapper.fact(from:)` log via `AppLog.monetization.error`
+  before returning nil.
+
+Core receipt-validation correctness, verified directly against source:
+1. Verified-only gate: `EntitlementFactMapper.fact(from:)` has no branch
+   producing a fact from `.unverified` — confirmed by
+   `EntitlementFactMapperTests`.
+2. No product-ID bypass: the only ID→product path is
+   `EarshotPlusProduct(rawValue:)`; unrecognized IDs deny and log.
+   `EntitlementEngine.grantsEntitlement` re-checks
+   `earshotPlusProducts.contains(fact.product)` as a second gate, so tip-jar
+   facts are denied even if one reached the engine.
+3. Revocation/expiration: both checked independently
+   (`revocationDate == nil` AND `expirationDate` not `<= now`); boundary case
+   (expiration exactly now) denies, not grants
+   (`testExpirationExactlyNowDoesNotGrantEntitlement`).
+4. `transaction.finish()` scoped correctly: only called after the mapper
+   produces a fact AND it's one of the 3 Plus products (non-tip, verified,
+   recognized). Unfinished tip/unverified/unrecognized transactions can't
+   cause duplicate-entitlement or resource exhaustion because
+   `EntitlementEngine` denies non-qualifying facts on every redelivery and
+   `resync()` is an idempotent full recomputation each call.
+5. No test-only backdoors: no `#if DEBUG` entitlement grants, no
+   hardcoded-ID special-casing in `StoreKitEntitlementSource`;
+   `FakeEntitlementTransactionSource` lives only in the test target, behind
+   the `EntitlementTransactionSource` protocol, never reachable from
+   `EarshotApp.swift` (which constructs the real `StoreKitEntitlementSource`).
+
+No server-side/third-party receipt validation anywhere: confirmed —
+`StoreKitEntitlementSource` is the only file importing `StoreKit`, calling
+only local on-device `Transaction.currentEntitlements`/`Transaction.updates`.
+No network calls, no backend endpoint, no third-party SDK in the diff.
+
+Test suite: ran the full pinned-simulator suite
+(`platform=iOS Simulator,id=C7CE2A99-3D54-42BB-8D59-97F7F5A00362`) as a
+confirmation pass. Result: 1211 executed, 1 skipped, 0 failures — matches the
+domain agent's stated baseline exactly. No fixes were needed, so no
+additional commit was made on this branch.
+
+Feature suggestions identified: none this review.
+
+Overall: PASS.
