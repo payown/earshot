@@ -228,15 +228,6 @@ struct EpisodeListView: View {
                 .accessibilityHint("Opens settings for this podcast")
             }
         }
-        // Screen-level VoiceOver rotor equivalent of the toolbar button
-        // (#640) — this is a whole-podcast bulk action, not a per-row one, so
-        // there's no natural row to hang it off of (mirrors InboxScreen's
-        // "Add to Queue" rotor-free precedent). Only attached at all when
-        // there's something to mark, since a rotor action can't visually gray
-        // itself out the way the toolbar button can.
-        .markAllPlayedAccessibilityAction(enabled: unplayedCount > 0) {
-            requestMarkAllPlayed()
-        }
         .sheet(isPresented: $showingPodcastSettings) {
             PodcastSettingsView(podcast: podcast)
         }
@@ -355,6 +346,25 @@ struct EpisodeListView: View {
                 .font(.headline)
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
+                // Screen-level VoiceOver rotor equivalent of the toolbar button
+                // (#640) — this is a whole-podcast bulk action, not a per-row
+                // one, so there's no natural row to hang it off of. Attached
+                // here (the header title Text), not to the enclosing `List`:
+                // every other `.accessibilityAction(named:)` in this codebase
+                // (NowPlayingScreen transport buttons, ChapterListView rows,
+                // SearchView result rows) hangs off a real accessible leaf
+                // element. A `List` doesn't collapse into one — VoiceOver
+                // lands on its rows/sections, never on the List itself — so an
+                // action attached to the List directly is unreachable from the
+                // rotor. The title is the first element on this screen in every
+                // state (including the empty-list and loading states), so it's
+                // always reachable when there's something to mark. Only
+                // attached when there's something to mark, since a rotor
+                // action can't visually gray itself out the way the toolbar
+                // button can.
+                .markAllPlayedAccessibilityAction(enabled: unplayedCount > 0) {
+                    requestMarkAllPlayed()
+                }
             if let author = podcast.author, !author.isEmpty {
                 Text(author)
                     .font(.subheadline)
