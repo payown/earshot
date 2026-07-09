@@ -2106,3 +2106,77 @@ Overall: PASS.
 Commit: 3 new tests + this SWIFTUI_PLAN.md update committed to
 `fix/issue-639-auto-download`. Branch not merged / not closed — Michael
 verifies on device first, per workflow.
+
+## Swift 6 Review — Issue #631
+
+earshot-swift6 review complete. Issue #631 (Earshot Plus: StoreKit 2 product
+configuration). Worktree `earshot-worktrees/issue-631`, branch
+`feat/issue-631-storekit-config`, commit `6b5ee91`. Required because the new
+code uses `async`/`await` (StoreKit 2's `Product.products(for:)`).
+
+Concurrency mode: project.yml has `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (Swift 6 not yet flipped on for this
+target — tracked by #390). Reviewed under the project's real settings and
+under a forced `SWIFT_STRICT_CONCURRENCY=complete` override to surface
+anything the eventual migration would catch.
+
+Checklist:
+- [x] Sendable conformance: PASS — `EarshotPlusProduct` (`String,
+  CaseIterable, Sendable`), its nested `Kind` enum (`Sendable, Equatable`),
+  and `ProductCatalogService.CatalogError` (`Error, Sendable, Equatable`,
+  wraps `Set<EarshotPlusProduct>`) are all correctly Sendable.
+  `ProductCatalogService` is a stateless `Sendable` struct with no stored
+  properties.
+- [x] Actor isolation: PASS — `ProductCatalogService.fetch(_:)` and its
+  `fetchAll()`/`fetchEarshotPlusProducts()`/`fetchTipProducts()` callers are
+  free functions, capture no mutable state, and correctly carry no
+  `@MainActor` isolation (pure StoreKit fetch, touches no UI/observable
+  state). No isolation is missing anywhere in the diff.
+- N/A @Model/SwiftData actor boundary: no SwiftData types in this diff.
+- N/A AVAudioSession main actor: no AVAudioSession usage in this diff.
+- N/A Combine publishers: none in this diff.
+- [x] nonisolated functions: N/A — nothing here is actor-isolated to begin
+  with, so there's no unnecessary-hop pattern to fix or add.
+- [x] Structured concurrency: PASS — plain `async`/`await` on
+  `Product.products(for:)`; no `Task.detached`, no unstructured task
+  spawning.
+- [x] Global state: PASS — the one new global, `AppLog.monetization`
+  (`Logger+Earshot.swift`), is a `static let os.Logger` (Sendable,
+  immutable), consistent with every other category in that file.
+- [x] Swift 6 build clean (for the new files): PASS — zero errors/warnings
+  in `EarshotPlusProduct.swift`, `ProductCatalogService.swift`,
+  `EarshotPlusProductTests.swift`, `ProductCatalogServiceTests.swift` under
+  both normal Debug settings and `SWIFT_STRICT_CONCURRENCY=complete`.
+
+Build detail:
+- Normal build (`xcodebuild build`, default settings, iPhone 17 sim):
+  **BUILD SUCCEEDED**, only pre-existing warnings in files this issue never
+  touched (`OPMLImportService.swift`, `ChapterParser.swift`,
+  `DownloadManager.swift`).
+- `SWIFT_STRICT_CONCURRENCY=complete` override: surfaced pre-existing debt
+  (KeyPath-Sendable warnings in `QueueRepository.swift` /
+  `QuickActionRepository.swift` / `AppSettingsStore` macro expansion, a
+  main-actor mutation warning in `AppearanceSettings.swift`, and an unrelated
+  compiler crash — "failed to produce diagnostic for expression" — in
+  `QueueScreen.swift:100`). Confirmed via `git show --stat HEAD` that none of
+  those files are touched by this commit; this is pre-existing migration
+  debt (#390), not new debt from #631. Nothing in the diff's own files
+  produced any warning under this override.
+- Ran the two new test files directly: `EarshotPlusProductTests` (pure
+  logic, no StoreKit I/O) — all 9 pass. `ProductCatalogServiceTests`
+  (StoreKitTest `SKTestSession`) — compiles and runs with no actor-isolation
+  or Sendable violations, but 7/9 fail at runtime with
+  `CatalogError.productsNotFound` (StoreKit isn't resolving products from
+  the loaded `SKTestSession` in this `xcodebuild test` invocation). This is a
+  **functional test issue, not a concurrency issue** — no data races, no
+  isolation violations, no crashes; async/await plumbing and error
+  propagation both behave exactly as designed. Flagged on the issue for
+  earshot-testing to resolve; out of scope for this gate.
+
+New agents created: none.
+
+Overall: PASS.
+
+No fix commit needed — the diff introduced no concurrency debt. Review
+posted as a GitHub comment on #631; issue not closed (planning agent closes
+after all gates pass).
