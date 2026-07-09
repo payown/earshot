@@ -7,6 +7,8 @@ options:
 configs:
   Debug: debug
   Release: release
+fileGroups:
+  - Earshot/Testing
 settings:
   base:
     MARKETING_VERSION: "1.0.0"
@@ -19,6 +21,8 @@ targets:
     platform: iOS
     sources:
       - path: Earshot
+        excludes:
+          - "Testing/**"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot
@@ -38,6 +42,7 @@ targets:
       - path: EarshotTests
     dependencies:
       - target: Earshot
+      - sdk: StoreKitTest.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.tests
@@ -54,5 +59,7 @@ schemes:
       targets:
         - EarshotTests
       gatherCoverageData: true
+      storeKitConfiguration: Earshot/Testing/Configuration.storekit
     run:
       config: Debug
+      storeKitConfiguration: Earshot/Testing/Configuration.storekit
