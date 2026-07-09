@@ -12,6 +12,10 @@ struct EarshotApp: App {
     @State private var downloads = DownloadManager()
     @State private var settings = SettingsStore()
     @State private var tips = TipsStore()
+    /// On-device Earshot Plus entitlement state (#634). Configured with the
+    /// live model container below and its `Transaction.updates` listener
+    /// started once at launch, alongside the other one-time launch tasks.
+    @State private var entitlements = EntitlementStore()
     /// Shared bulk-OPML-import progress. One instance for the whole app so every
     /// import entry point (share-sheet / "Open in", Settings picker) and the
     /// progress screen in RootView observe the same state.
@@ -70,6 +74,7 @@ struct EarshotApp: App {
                     .environment(tips)
                     .environment(importProgress)
                     .environment(notificationRouter)
+                    .environment(entitlements)
                     .task {
                         // Wire the notification delegate and register the
                         // "new episodes" category (actions) once, at launch (#72).
@@ -83,6 +88,19 @@ struct EarshotApp: App {
                         // subscriptions yet.
                         guard !isRunningTests else { return }
                         await BackgroundFeedRefresher.runRefresh(container: container)
+                    }
+                    .task {
+                        // Earshot Plus entitlement (#634): load the persisted
+                        // flag, start the long-running Transaction.updates
+                        // listener once, then force a fresh StoreKit sync so a
+                        // purchase/revocation made since the last launch is
+                        // picked up immediately rather than waiting for the
+                        // next update event. Skipped under XCTest — see
+                        // isRunningTests above.
+                        guard !isRunningTests else { return }
+                        entitlements.configure(context: container.mainContext)
+                        entitlements.startObservingTransactionUpdates()
+                        await entitlements.resync()
                     }
             }
         }

@@ -110,6 +110,15 @@ enum SettingsKey {
     static func podcastInboxCap(feedURL: String) -> String {
         podcastInboxCapPrefix + feedURL
     }
+
+    // Persisted Earshot Plus entitlement state (#634). Recomputed from
+    // StoreKit `Transaction.currentEntitlements` at launch, after every
+    // `Transaction.updates` event, and after Restore Purchases (#633) — see
+    // ``EntitlementStore``. `earshotPlusEntitled` is the flag a future paywall
+    // gate (#635) reads synchronously; `earshotPlusEntitlementLastSynced`
+    // records when that flag was last recomputed, for diagnostics only.
+    static let earshotPlusEntitled = "earshot_plus_entitled"
+    static let earshotPlusEntitlementLastSynced = "earshot_plus_entitlement_last_synced"
 }
 
 /// Documented defaults for settings not yet written by the user.

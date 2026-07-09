@@ -1451,6 +1451,73 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 
 ## Data Decisions
 
+### Issue #634 — On-device StoreKit 2 receipt validation (Earshot Plus entitlement)
+- **No new SwiftData model, no schema bump.** Entitlement state is two
+  `AppSetting` key/value rows (`earshot_plus_entitled`,
+  `earshot_plus_entitlement_last_synced`), following the exact pattern
+  `TipsStore` already uses for "small piece of app state that should survive
+  relaunch." A dedicated `@Model` would have forced an `EarshotSchemaV5` bump
+  and a migration test purely to persist one bool + one date — not justified.
+- **Three-layer split, StoreKit isolated to one file.** `EntitlementFact`
+  (Domain) is a plain Sendable struct with no StoreKit import.
+  `EntitlementEngine` (Domain) is a pure, synchronous
+  `[EntitlementFact] -> Bool` decision function. `RawTransactionResult` +
+  `EntitlementFactMapper` (Domain) do the verify/reject mapping
+  (`VerificationResult`-shaped but StoreKit-free) so that logic is unit
+  testable with plain fixtures. `StoreKitEntitlementSource` (Data) is the
+  *only* type that imports `StoreKit` and touches
+  `Transaction.currentEntitlements` / `Transaction.updates` directly — it
+  reduces each real `VerificationResult<Transaction>` to a
+  `RawTransactionResult` and hands it to the pure mapper. `EntitlementStore`
+  (Data) wires persistence + an `EntitlementTransactionSource` together and
+  owns the listener lifecycle. This was worth the extra file because the
+  issue explicitly required the verify/reject and grant/deny logic to be
+  testable without a real or `SKTestSession`-simulated StoreKit environment
+  — `EntitlementFactMapperTests` and `EntitlementEngineTests` need zero
+  StoreKit setup as a result.
+- **`Transaction.updates` recomputes from scratch, not incrementally.**
+  `EntitlementTransactionSource.updateSignals()` carries no payload — a
+  signal just means "call `currentFacts()` again." Simpler and more robust
+  than trying to apply one transaction update as a delta against unknown
+  prior state, and it's the same code path Restore Purchases (#633) needs
+  anyway (`EntitlementStore.resync()`).
+- **`transaction.finish()` scoped to the three Plus products only.** The
+  `Transaction.updates` listener finishes verified transactions for
+  `EarshotPlusProduct.earshotPlusProducts` (entitlement granted = content
+  delivered), but deliberately leaves tip jar consumable transactions
+  unfinished — finishing a consumable is part of granting its content, which
+  is #636's job, not entitlement tracking's.
+  Unverified/unrecognized-product transactions are also left unfinished.
+- **Ambiguous-state resolutions (all denied, per Michael's explicit rule):**
+  unverified `VerificationResult` (unwrapped, logged via `AppLog.monetization`,
+  no fact produced); a verified transaction whose `productID` doesn't match
+  any `EarshotPlusProduct` case (unrecognized/retired ID — logged, no fact);
+  a fact whose `revocationDate` is set, regardless of any other field; a
+  subscription fact whose `expirationDate` is at or before `now` (defensive —
+  `Transaction.currentEntitlements` is documented to already exclude expired
+  subscriptions, but the engine doesn't trust that alone). None of these has
+  a "grant" branch anywhere in `EntitlementEngine` or `EntitlementFactMapper`.
+- **Listener lifecycle.** `EntitlementStore.startObservingTransactionUpdates()`
+  is called once from `EarshotApp`'s launch `.task` (same place
+  `BackgroundFeedRefresher`/`NotificationService` are wired), guarded by the
+  existing `isRunningTests` check. It's a `Task { [weak self] in ... }`
+  stored on the store and is idempotent (a second call is a no-op) so the
+  call site doesn't need to track whether it already started — matches the
+  existing `Task { [weak self] in ... }` pattern already used in
+  `PlayerService`.
+- **Public API for #633/#635 to build on:** `EntitlementStore.isEntitled`
+  (sync, reflects last-persisted state, no StoreKit round trip),
+  `EntitlementStore.configure(context:)` (load persisted state, call once at
+  launch before reading `isEntitled`), `EntitlementStore.resync() async ->
+  Bool` (forces a fresh StoreKit read + persist; #633's Restore Purchases
+  should call this after `AppStore.sync()`), and
+  `EntitlementStore.lastSyncedAt` (diagnostics).
+- **No user data deleted on revocation.** `EntitlementStore` only ever writes
+  its own two `AppSetting` rows; a regression test
+  (`testResyncDoesNotDeleteAnyUserDataOnRevocation`) asserts a `Podcast`
+  survives a revoke-then-resync round trip. Cap enforcement / lapse behavior
+  is #635's scope, not this issue's.
+
 ### Issue #425 — Freeze V2, add V3 + drift detection (launch-crash hardening)
 - **Frozen-schema architecture.** `EarshotSchemaV2` is now a verbatim frozen
   snapshot (nested `@Model` types) of the 10-entity graph as it shipped at #337
