@@ -2669,3 +2669,135 @@ additional commit was made on this branch.
 Feature suggestions identified: none this review.
 
 Overall: PASS.
+
+## Swift 6 Review — Issue #634 (earshot-swift6)
+
+earshot-swift6 review complete. Issue #634 (Earshot Plus: on-device StoreKit 2
+receipt validation). Worktree `earshot-wt-634`, branch
+`feat/issue-634-receipt-validation`, commit `c88ceae`. Required because the
+diff introduces an async `Transaction.updates` listener task and
+actor-isolated entitlement state.
+
+Concurrency mode: project.yml has `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (Swift 6 not yet flipped on for this
+target — tracked by #390). Reviewed under the project's real committed
+settings and under a forced `SWIFT_STRICT_CONCURRENCY=complete` override to
+surface anything the eventual migration would catch.
+
+Checklist:
+- [x] Sendable conformance: PASS. `EntitlementFact` (`Sendable, Equatable`,
+  all-value-type stored properties: `EarshotPlusProduct` (itself `String,
+  CaseIterable, Sendable`), two `Date?`), `RawTransactionResult` (`Sendable,
+  Equatable` enum, associated values all value types), `EntitlementEngine`
+  and `EntitlementFactMapper` (stateless case-less enums, trivially
+  Sendable) are all correctly usable off the main actor / in plain unit
+  tests with no StoreKit involved. `EntitlementTransactionSource` is
+  declared `Sendable`; `StoreKitEntitlementSource` (a `struct` with zero
+  stored properties) satisfies it for real, not via `@unchecked`.
+- [x] Actor isolation: PASS. `EntitlementStore` is `@MainActor @Observable
+  final class` with no escape hatches (no `nonisolated`, no
+  `nonisolated(unsafe)`, no `@unchecked Sendable` in production code). Every
+  stored property (`isEntitled`, `lastSyncedAt`, `settings`, `source`,
+  `listenerTask`) is mutated only from methods on this MainActor-isolated
+  type. `resync()`'s suspension point (`await source.currentFacts()`)
+  resumes back on the main actor automatically because the enclosing method
+  is MainActor-isolated — `apply(entitled:)` runs on the main actor both
+  before and after the await, confirmed by zero diagnostics under forced
+  `SWIFT_STRICT_CONCURRENCY=complete`.
+- [x] `listenerTask` double-start guard: PASS, race-free. `guard
+  listenerTask == nil else { return }` and the subsequent `listenerTask =
+  Task { ... }` assignment are both synchronous, with no `await` between
+  them, inside a synchronous (non-`async`) MainActor method. Actor-isolated
+  synchronous code cannot be preempted mid-execution by a second call to the
+  same method — two calls from `EarshotApp.swift`'s `.task` (even a
+  hypothetical re-run) execute this method to completion one at a time on
+  the main actor, so there is no reentrancy window. Covered by
+  `testCallingStartObservingTwiceDoesNotCrashOrDoubleStart`.
+- [x] `EntitlementTransactionSource: Sendable` / `StoreKitEntitlementSource`
+  Sendability: PASS (see above). `updateSignals()`'s `AsyncStream<Void>`
+  construction is correct: the build closure runs synchronously inside
+  `AsyncStream.init`, so the internal `Task { for await result in
+  Transaction.updates { ... } }` is created with the *static* isolation of
+  `updateSignals()` itself (a plain nonisolated struct method) — not the
+  caller's actor — so this listener loop correctly runs off the main actor,
+  appropriate for a pure StoreKit-listening/processing loop that touches no
+  UI state. `continuation.yield(())` and `continuation.onTermination = { _
+  in task.cancel() }` are both safe: `AsyncStream.Continuation` is designed
+  to be called from any concurrent context, and `task.cancel()` is captured
+  by value (`Task` is `Sendable`). Cancellation propagates correctly:
+  `EntitlementStore.stopObservingTransactionUpdates()` cancels
+  `listenerTask`, which cancels its `for await` loop over
+  `source.updateSignals()`, whose consumer-side cancellation tears down the
+  `AsyncStream` and fires `onTermination`, cancelling the inner
+  `Transaction.updates` task.
+- [x] `[weak self]` capture in the listener `Task`: PASS. Inside
+  `startObservingTransactionUpdates()`'s `Task { [weak self] in for await _
+  in source.updateSignals() { guard let self else { return }; await
+  self.resync() } }`, the `Task{}` itself inherits `@MainActor` isolation
+  from its enclosing (MainActor) method, so every loop iteration resumes on
+  the main actor. `guard let self else { return }` synchronously produces a
+  strongly-retained local binding on the main actor before the `await
+  self.resync()` call, so there is no window where a weakly-captured,
+  possibly-deallocated `self` is read racily — the strong reference is held
+  for the full synchronous span leading into the isolated `resync()` call.
+- [x] `Transaction`/`VerificationResult` Sendability: PASS. Confirmed
+  empirically, not just by assumption — the forced
+  `SWIFT_STRICT_CONCURRENCY=complete` build produced zero diagnostics
+  anywhere in `EntitlementTransactionSource.swift`, meaning the compiler
+  accepted `VerificationResult<Transaction>` crossing into
+  `Self.processUpdate(result)` (an `async` static function) and `Transaction`
+  crossing into `await transaction.finish()` under full strict checking, not
+  merely under today's `minimal` setting.
+- [x] `EntitlementFact`/`EntitlementEngine`/`EntitlementFactMapper`/
+  `RawTransactionResult` Sendable: PASS (see Sendable conformance above) —
+  all four are usable synchronously from any context, confirmed by
+  `EntitlementEngineTests` and `EntitlementFactMapperTests` calling them with
+  no actor annotation and no async required.
+- [x] Structured concurrency: PASS. No `Task.detached` anywhere in the diff.
+  Both `Task{}` usages (`EntitlementStore.startObservingTransactionUpdates()`
+  and `StoreKitEntitlementSource.updateSignals()`) are plain `Task{}`,
+  correctly long-running-but-cancellable via `stopObservingTransactionUpdates()`
+  / `AsyncStream.Continuation.onTermination`, not orphaned.
+- [x] Global state: PASS. None introduced; `EntitlementStore` is
+  instance-owned (`@State private var entitlements = EntitlementStore()` in
+  `EarshotApp.swift`), no new `static var`.
+- [x] Swift 6 build clean (for the new/changed files): PASS. Zero errors or
+  warnings anywhere in the six Monetization files or three test files under
+  both the project's real settings and forced
+  `SWIFT_STRICT_CONCURRENCY=complete`.
+
+Build detail:
+- Normal build (`xcodebuild build`, default settings, pinned iPhone 17 sim):
+  **BUILD SUCCEEDED**, zero warnings anywhere in the log (the one line
+  matching "warning:" is an unrelated `appintentsmetadataprocessor` Info
+  line, not a compiler diagnostic).
+- `SWIFT_STRICT_CONCURRENCY=complete` override: **BUILD FAILED**, but only on
+  the three previously-documented pre-existing baseline issues (identical to
+  the #639/#631/#640 gate reports): `QueueRepository.swift:345` `KeyPath`-not-
+  `Sendable` warning, `QueueScreen.swift:100` compiler-internal "failed to
+  produce diagnostic" crash, `QuickActionRepository.swift:64` `KeyPath`-not-
+  `Sendable` warning. Grepped the full log for "Monetization" and
+  "Entitlement" in both error and warning lines — zero matches. None of this
+  issue's files are touched by any of the three baseline diagnostics.
+
+Precision on the Swift-6-strict-concurrency-clean question (relevant to
+#390): this diff's own files are genuinely Swift-6-strict-concurrency-clean
+today, not merely "compiles fine under minimal mode" — verified by actually
+building them under `SWIFT_STRICT_CONCURRENCY=complete`, not by inspection
+alone. The *project* as a whole is still not strict-concurrency-clean (the
+three baseline diagnostics above, tracked by #390), but nothing in this
+issue adds to that debt.
+
+Test verification: no fixes were needed, so no additional commit. Ran the
+full pinned-simulator suite once as confirmation:
+`xcodebuild test -project Earshot.xcodeproj -scheme Earshot -destination
+'platform=iOS Simulator,id=C7CE2A99-3D54-42BB-8D59-97F7F5A00362'` — **1211
+executed, 1 skipped, 0 failures**, matching the stated baseline exactly,
+including all 24 new `EntitlementEngineTests`/`EntitlementFactMapperTests`/
+`EntitlementStoreTests` cases (the async
+`testStartObservingTransactionUpdatesResyncsOnEachSignal` listener-wiring
+test passed, not flaky).
+
+New agents created: none.
+
+Overall: PASS.
