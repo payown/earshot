@@ -27,7 +27,7 @@ actor FeedRefreshActor {
         let feedURL: String
         let podcastTitle: String
         let notificationEnabled: Bool
-        let outcome: RefreshOutcome
+        var outcome: RefreshOutcome
     }
 
     /// The result of subscribing on the background context. Carries only
@@ -69,6 +69,21 @@ actor FeedRefreshActor {
         var results: [RefreshProgress] = []
         var sinceLastSave = 0
 
+        // Rows whose `outcome.newEpisodeIDs` must be resolved AFTER a save —
+        // `persistentModelID` is temporary for a newly-inserted `Episode` until the
+        // context saves, mirroring the identical problem solved for
+        // `SubscribeOutcome`/`pendingIndexByResult` in `subscribeAll` below.
+        var pendingIndexByApply: [Int: ApplyOutcome] = [:]
+
+        func flushPending() {
+            saveIfNeeded()
+            for (index, applyOutcome) in pendingIndexByApply {
+                results[index].outcome = applyOutcome.result()
+            }
+            pendingIndexByApply.removeAll()
+            sinceLastSave = 0
+        }
+
         for (index, podcast) in podcasts.enumerated() {
             guard !isCancelled() else {
                 AppLog.subscriptions.info("refreshAll stopped early (cancelled) after \(index) of \(total)")
@@ -80,28 +95,29 @@ actor FeedRefreshActor {
                 // The fetch (network I/O) and the synchronous parse inside it both
                 // run on this background actor, never the main thread.
                 let parsed = try await feed.fetch(url)
-                let outcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
-                sinceLastSave += 1
-                if sinceLastSave >= Self.saveBatchSize {
-                    saveIfNeeded()
-                    sinceLastSave = 0
-                }
+                let applyOutcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
+                let resultIndex = results.count
                 results.append(
                     RefreshProgress(
                         feedURL: url,
                         podcastTitle: title,
                         notificationEnabled: podcast.notificationEnabled ?? false,
-                        outcome: outcome
+                        outcome: applyOutcome.refreshOutcome
                     )
                 )
+                pendingIndexByApply[resultIndex] = applyOutcome
+                sinceLastSave += 1
+                if sinceLastSave >= Self.saveBatchSize {
+                    flushPending()
+                }
             } catch {
                 AppLog.subscriptions.error("Refresh failed for \(title, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
             await onProgress(index + 1, total)
         }
 
-        // Flush the final partial batch.
-        saveIfNeeded()
+        // Flush the final partial batch and resolve its IDs.
+        flushPending()
         return results
     }
 
@@ -115,9 +131,12 @@ actor FeedRefreshActor {
         descriptor.fetchLimit = 1
         guard let podcast = (try? modelContext.fetch(descriptor))?.first else { return nil }
         let parsed = try await feed.fetch(feedURL)
-        let outcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
+        let applyOutcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
+        // Save BEFORE resolving `newEpisodeIDs` — persistentModelID is temporary
+        // for a newly-inserted Episode until the context saves (same reason
+        // `subscribe(feedURL:feed:inboxSeedCount:)` above saves before `result()`).
         saveIfNeeded()
-        return outcome
+        return applyOutcome.result()
     }
 
     /// Subscribes to `feedURL` on the background context: the fetch (network I/O)
@@ -358,14 +377,34 @@ actor FeedRefreshActor {
 
     // MARK: Per-podcast write (mirrors SubscriptionRepository.refresh)
 
+    /// The result of one `apply(_:to:autoQueueEnabled:)` pass, holding the live
+    /// `@Model` `Episode`s discovered as genuinely new (which stay inside the
+    /// actor) so the caller can read their permanent `persistentModelID`s AFTER a
+    /// save. `result()` projects to the `Sendable` ``RefreshOutcome`` and must be
+    /// called only after the context has saved — mirrors ``SubscribeOutcome`` /
+    /// ``SubscribeOutcome/result()`` above, which solves the identical
+    /// temporary-ID problem for a fresh subscribe (#639).
+    private struct ApplyOutcome {
+        let refreshOutcome: RefreshOutcome
+        let newEpisodes: [Episode]
+
+        func result() -> RefreshOutcome {
+            var outcome = refreshOutcome
+            outcome.newEpisodeIDs = newEpisodes.map(\.persistentModelID)
+            return outcome
+        }
+    }
+
     /// Diffs `parsed` against `podcast` and inserts new episodes, preserving the
     /// exact behavior of the former main-actor `refresh`: migrated-shell backfill,
     /// dedup-by-guid, future-date clamp on the high-water mark, inbox pre-dismiss
     /// vs surface, and auto-queue enrollment. Does NOT save — saving is batched by
-    /// the caller.
+    /// the caller. Returns an ``ApplyOutcome`` rather than a ``RefreshOutcome``
+    /// directly because the newly-inserted episodes' `persistentModelID`s are not
+    /// permanent until the caller saves.
     private func apply(
         _ parsed: ParsedFeed, to podcast: Podcast, autoQueueEnabled: Bool
-    ) -> RefreshOutcome {
+    ) -> ApplyOutcome {
         let now = Date.now
 
         // First refresh of a freshly-migrated shell (no episodes AND no mark):
@@ -381,7 +420,9 @@ actor FeedRefreshActor {
             podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsed.episodes, now: now) ?? now
             podcast.refreshedAt = now
             AppLog.subscriptions.info("Backfilled \(podcast.title, privacy: .public): \(parsed.episodes.count) episode(s)")
-            return .backfill
+            // Backfilled/pre-existing catalog episodes must NOT trigger
+            // auto-download, matching the existing `wasBackfill` notification gate.
+            return ApplyOutcome(refreshOutcome: .backfill, newEpisodes: [])
         }
 
         let existingGUIDs = Set(podcast.episodes.map(\.guid))
@@ -395,6 +436,7 @@ actor FeedRefreshActor {
         var autoQueued: [Episode] = []
         var newestNewGUID: String?
         var newestNewPub = Date.distantPast
+        var newEpisodes: [Episode] = []
 
         // Lookup by guid for the republish pass below (#397), built once instead
         // of a per-item linear scan.
@@ -424,6 +466,12 @@ actor FeedRefreshActor {
                 episode.inboxDismissed = !isNewEpisode
                 modelContext.insert(episode)
             }
+            if isNewEpisode {
+                // Auto-queue and auto-download are orthogonal: a genuinely-new
+                // episode is eligible for auto-download whether or not it was also
+                // auto-queued (#639).
+                newEpisodes.append(episode)
+            }
             added += 1
         }
 
@@ -449,7 +497,10 @@ actor FeedRefreshActor {
             AppLog.subscriptions.info("Refreshed \(podcast.title, privacy: .public): \(added) new episode(s)")
         }
 
-        return RefreshOutcome(added: added, wasBackfill: false, newestNewEpisodeGUID: newestNewGUID)
+        return ApplyOutcome(
+            refreshOutcome: RefreshOutcome(added: added, wasBackfill: false, newestNewEpisodeGUID: newestNewGUID),
+            newEpisodes: newEpisodes
+        )
     }
 
     /// Re-surfaces an existing episode to the inbox when its podcast republishes

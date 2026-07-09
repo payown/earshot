@@ -1845,3 +1845,263 @@ Hostile-feed safety (focus of this change):
 Feature suggestions identified: none this review.
 
 No fixes required; no commits made to the branch. Overall: PASS.
+
+## Security Review — Issue #639
+
+earshot-security review complete. Issue #639 (auto-download of newest
+episodes does not work). Branch `fix/issue-639-auto-download`, commit
+`7701597`.
+
+Checklist:
+- [x] Force-unwraps: PASS — none introduced.
+- [x] Silent try?: PASS — no new `try?` introduced; existing `modelContext.fetch`
+  `try?` usages in `FeedRefreshActor` are pre-existing, unrelated to this change.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new `Task {}`/`sink`/`Timer`/`NotificationCenter`
+  closures; only `@Environment(DownloadManager.self)` property injection and
+  parameter threading through existing (unmodified) closure bodies.
+- [x] @MainActor: PASS — `RefreshOutcome`/`ApplyOutcome`/`SubscribeOutcome`
+  stay `Sendable` value types crossing the `FeedRefreshActor` boundary; no
+  `@Model` object crosses. Verified the persistentModelID-post-save
+  restructuring is correct: `ApplyOutcome.newEpisodes` holds live `@Model`
+  episodes inside the actor, and `.result()` (which reads `persistentModelID`)
+  is called only after `saveIfNeeded()`/`flushPending()` in every path
+  (`refreshOne` and `refreshAll`'s batched `flushPending`).
+- [ ] IS_BETA_BUILD Release build: N/A — no migration files changed.
+- [ ] Entitlements: N/A — none changed.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new error types needed; existing `AppLog`
+  logging preserved on all touched catch paths.
+- [x] AppLog coverage: PASS — no empty catch blocks introduced.
+
+Targeted checks from the review brief:
+- Backfill exclusion: verified — the migrated-shell backfill branch returns
+  `ApplyOutcome(refreshOutcome: .backfill, newEpisodes: [])`, so
+  `newEpisodeIDs` is always empty on backfill, matching the `wasBackfill`
+  notification gate. Confirmed by `testBackfillRefreshOutcomeNewEpisodeIDsIsEmpty`
+  / `testBackfillRefreshDoesNotAutoDownload`.
+- No double-download / republish path: verified — `newEpisodes` is populated
+  only from the `!existingGUIDs.contains(item.guid)` loop (genuinely new
+  guids). `resurfaceRepublished()` operates on already-existing episodes and
+  never touches `newEpisodes`, so a republished-guid resurface never triggers
+  auto-download. Auto-queued episodes are intentionally also eligible for
+  auto-download (documented as orthogonal, confirmed by
+  `testRefreshAutoDownloadsNewEpisodeEvenWhenAutoQueued`) — a product
+  decision, not a bug; each podcast's downloads are capped independently at
+  `autoDownloadCount`.
+- `BackgroundFeedRefresher.swift` (BGTaskScheduler / cold-launch / foreground-
+  resume path) correctly needed no change — it already constructs its own
+  `SubscriptionRepository(downloader:)`, so it automatically benefits from
+  `refreshAll()` now calling `autoDownloadRecent`.
+
+Build/test verification: `xcodebuild test -scheme Earshot -destination
+'platform=iOS Simulator,name=iPhone 17' -only-testing:EarshotTests/SubscriptionRepositoryTests`
+— BUILD SUCCEEDED / TEST SUCCEEDED, 36/36 passed, 0 failures. All 6 new #639
+tests confirmed passing.
+
+Feature suggestions identified: none this review (scope intentionally kept
+narrow per the review brief; no new feature issues filed).
+
+No fixes required; no commits made to the branch. Overall: PASS.
+
+## Swift 6 Review — Issue #639
+
+earshot-swift6 review complete. Issue #639 (auto-download of newest episodes
+does not work). Branch `fix/issue-639-auto-download`, commit `7701597`.
+
+Concurrency mode: project.yml has `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (Swift 6 migration not yet flipped on for
+this target). Reviewed both under the project's real settings and under a
+forced `SWIFT_STRICT_CONCURRENCY=complete` override to surface anything the
+eventual migration would catch.
+
+Checklist:
+- [x] Sendable conformance: PASS — `ApplyOutcome` (new private struct in
+  `FeedRefreshActor.swift`) is deliberately NOT `Sendable` and never appears
+  in a method signature exposed outside the actor; `refreshAll`/`refreshOne`
+  always resolve it to the `Sendable` `RefreshOutcome`/`RefreshProgress`
+  before returning, mirroring the pre-existing `SubscribeOutcome` pattern in
+  the same file. `RefreshOutcome`'s new `newEpisodeIDs: [PersistentIdentifier]`
+  field is `Sendable` (`PersistentIdentifier` is a Sendable value type); no
+  non-Sendable field was introduced.
+- [x] Actor isolation: PASS — `saveIfNeeded()` runs entirely on the
+  `FeedRefreshActor`'s own isolated context; `ApplyOutcome.result()` (which
+  reads `persistentModelID`) is called only after a save in every path
+  (`refreshOne` saves then calls `.result()`; `refreshAll`'s `flushPending()`
+  saves then resolves every pending row). No `@Model` object crosses the
+  actor boundary.
+- [x] @Model/SwiftData actor boundary: PASS — same as above; `ApplyOutcome`
+  holds live `Episode` `@Model` objects but they never leave
+  `FeedRefreshActor`.
+- N/A AVAudioSession main actor: no audio session code in this diff.
+- N/A Combine publishers: none in this diff.
+- [x] nonisolated functions: N/A — no new `nonisolated` needed; the new code
+  is all actor-isolated (background actor) or `@MainActor`
+  (`SubscriptionRepository`), correctly.
+- [x] Structured concurrency: PASS — the new `pendingIndexByApply`/
+  `flushPending()` local function in `refreshAll` is a plain nested function
+  (not an escaping closure), inherits the enclosing actor's isolation, and
+  never escapes the call frame. `onProgress` (`@MainActor @Sendable`) is
+  still correctly `await`-called at the same relative point in the loop as
+  before the restructuring. No `Task.detached` anywhere in the diff.
+- [x] Global state: PASS — none introduced.
+- [~] Swift 6 build clean: PASS for this diff, with one pre-existing,
+  out-of-scope finding — see below.
+
+Targeted checks from the review brief:
+1. `ApplyOutcome` never crosses the actor boundary — confirmed by reading
+   every call site; it's a `private struct`, only ever consumed inside
+   `refreshAll`/`refreshOne`/`apply(...)`, all of which live on
+   `FeedRefreshActor`.
+2. `RefreshOutcome.newEpisodeIDs: [PersistentIdentifier]` — confirmed
+   `Sendable` holds; `PersistentIdentifier` is the same Sendable value type
+   already used by `SubscribeResult.episodeIDs`/`podcastID`.
+3. `pendingIndexByApply`/`flushPending()` — no capture/isolation issues;
+   `onProgress` await placement unchanged relative to the pre-restructuring
+   code.
+4. `autoDownloadRecent(episodeIDsPerPodcast:)` calling
+   `downloader.download(episode)` — **pre-existing, not introduced by this
+   diff**: under a forced `SWIFT_STRICT_CONCURRENCY=complete` build, the
+   `await downloader.download(episode)` call inside `autoDownloadRecent`
+   (and the identical call inside `subscribe()`) emits "sending 'episode'
+   risks causing data races" / "sending value of non-Sendable type 'any
+   EpisodeDownloading' risks causing data races" — confirmed present
+   identically on the `swift` base branch before this diff (same two
+   call-site locations, unmodified by this diff). Root cause: the
+   `EpisodeDownloading` protocol requirement isn't `@MainActor`-isolated
+   even though the only conformer (`DownloadManager`) is, so the compiler
+   can't statically prove the call stays on the main actor. This diff adds
+   two *new call sites to* `autoDownloadRecent` (from `refresh()` and
+   `refreshAll()`) but does not add a new textual `download(...)` call, so
+   it does not add a new instance of this diagnostic — confirmed by diffing
+   full warning output between a clean worktree build of `swift` and a clean
+   worktree build of this branch at the same forced strict-concurrency
+   setting: warning count and locations are unchanged. Under the project's
+   *actual* committed settings (`SWIFT_STRICT_CONCURRENCY: minimal`), this
+   surfaces as a single warning at the conformance site
+   (`DownloadManager.swift:122`, a file this diff does not touch), also
+   unchanged from baseline. Not fixed here per "no scope creep" — flagging as
+   a candidate for Layer 2 of the eventual Swift 6 migration (likely fix:
+   mark `EpisodeDownloading` `@MainActor`).
+5. New `@Environment(DownloadManager.self)` wiring in
+   `PodcastPreviewView`/`SearchView`/`DataSettingsView`/`AddFeedView`/
+   `AddPodcastView`/`EpisodeListView`/`SubscriptionsView`/`RootView`/
+   `OnboardingView` — all trivial reads of the existing
+   `@MainActor @Observable final class DownloadManager`, matching the
+   established pattern already used elsewhere in the app (registered via
+   `.environment(downloads)` in `EarshotApp.swift`, not touched by this
+   diff). No isolation warnings.
+
+Build/test verification:
+- `xcodebuild build` with the project's real settings (`SWIFT_VERSION 5.0`,
+  `SWIFT_STRICT_CONCURRENCY minimal`) — BUILD SUCCEEDED, one pre-existing
+  warning (`DownloadManager.swift:122`, unrelated file, present on `swift`
+  baseline too).
+- `xcodebuild build` forced to `SWIFT_STRICT_CONCURRENCY=complete` in three
+  configurations (in-place clean derived data, and two independent clean
+  worktree builds — one of `swift`, one of this branch at the same commit) —
+  confirmed the pre-existing `QueueScreen.swift:100` compiler crash
+  ("failed to produce diagnostic for expression") and the widespread
+  `KeyPath`-not-`Sendable` macro-expansion warnings are present identically
+  on both `swift` and this branch (unrelated files, not touched by this
+  diff — matches the known "Swift build noise" baseline). No new
+  concurrency diagnostics attributable to this diff in either configuration.
+- `xcodebuild test` (full suite, real settings) — **TEST SUCCEEDED**,
+  1141/1141 passed, 0 failed. All 7 auto-download-specific tests in
+  `SubscriptionRepositoryTests` pass:
+  `testBackfillRefreshDoesNotAutoDownload`,
+  `testRefreshAllAutoDownloadsNewEpisodesAcrossPodcasts`,
+  `testRefreshAutoDownloadsNewEpisodeEvenWhenAutoQueued`,
+  `testRefreshAutoDownloadsNewEpisodes`,
+  `testSubscribeAutoDownloadsNMostRecentEpisodes`,
+  `testSubscribeAutoDownloadsOnlyNMostRecentWhenFeedHasMore`,
+  `testSubscribeWithAutoDownloadCountZeroDoesNotDownload`.
+
+New agents created: none.
+
+No fixes required; no commits made to the branch. Overall: PASS.
+
+## Testing Review — Issue #639
+
+earshot-testing complete. Issue #639 (auto-download of newest episodes does
+not work). Branch `fix/issue-639-auto-download`.
+
+New tests written: 3, added to `SubscriptionRepositoryTests.swift` on top of
+earshot-data's 6:
+- `testRefreshWithAutoDownloadCountZeroDoesNotDownload` — the refresh-path
+  off-switch. `refresh(_:)` must still discover a genuinely new episode
+  (`newEpisodeIDs.count == 1`) but must not download it when
+  `autoDownloadCount == 0`, mirroring the existing subscribe-path coverage
+  (`testSubscribeWithAutoDownloadCountZeroDoesNotDownload`), which had no
+  equivalent on the refresh side.
+- `testRefreshAllWithAutoDownloadCountZeroDoesNotDownload` — same off-switch
+  on the whole-library `refreshAll()` path.
+- `testRefreshAllOnlyDownloadsForPodcastsWithGenuinelyNewEpisodes` — a true
+  partial case across two podcasts refreshed in the same `refreshAll()` pass:
+  one podcast's feed is unchanged, the other gains a genuinely new episode.
+  Asserts the download fires only for the changed podcast's new episode, not
+  for the unchanged podcast's existing episode and not a second time. The
+  existing `testRefreshAllAutoDownloadsNewEpisodesAcrossPodcasts` covered two
+  podcasts *both* gaining the same new episode (via the shared `FakeFeedFetcher`,
+  which returns one feed for every URL) but never the case where only some
+  podcasts change — the actual real-world shape of a library refresh. Added a
+  new `PerURLFeedFetcher` test double (lock-protected dictionary keyed by feed
+  URL) to make this constructible, since `FakeFeedFetcher` can't diverge per
+  podcast.
+
+Coverage assessment: earshot-data's 6 tests covered the happy path (refresh
+and refreshAll trigger download), the auto-queue/auto-download orthogonality,
+and the backfill exclusion (both the download behavior and the
+`RefreshOutcome.newEpisodeIDs` field it depends on). The gap was the
+`autoDownloadCount == 0` off-switch and true multi-podcast partial refresh —
+both now closed. `BackgroundFeedRefresher` (BGTaskScheduler/cold-launch path)
+needed no new test per earshot-security's review: it constructs its own
+`SubscriptionRepository(downloader:)` and calls `refreshAll()` unchanged, so
+it's exercised transitively by the `SubscriptionRepository`-level tests above;
+no BGTaskScheduler-specific behavior was touched by this fix.
+
+Test count reconciliation: earshot-data/earshot-security reported a
+pre-fix baseline of 1134; earshot-swift6 independently ran the full suite on
+this branch (post-fix, pre-my-3-tests) and got **1141/1141 passed**. A clean
+full-suite run performed here, after adding the 3 tests above, gives
+**Executed 1144 tests, with 1 test skipped and 0 failures** — exactly
+1141 + 3, confirming swift6's 1141 is the correct count and reconciling this
+gate's baseline against it (the 1134 figure predates commits already on
+`swift` that this branch branched from and was undercounted by 7; not a
+regression, not investigated further since two independent full-suite runs
+now agree exactly). The 1 skip is the pre-existing env-gated
+`ScaleDiagnosticTests.test_libraryScaleProfile` (`RUN_SCALE_DIAG=1` required),
+unrelated to this branch.
+
+Previous test count (authoritative, full-suite): 1141
+New test count (confirmed passing, full-suite): 1144
+Count increased: yes
+
+Release build (IS_BETA_BUILD absent): PASS — `xcodebuild -configuration
+Release -destination 'generic/platform=iOS' build` → BUILD SUCCEEDED. N/A
+per earshot-security (no migration files touched) but run anyway since this
+branch changed constructor signatures across several views; confirms no
+Release-only compile break.
+
+PRD acceptance criteria covered: #639's fix has two parts, both now covered —
+(1) `refresh()`/`refreshAll()` trigger auto-download for genuinely-new
+episodes on an already-subscribed podcast (earshot-data's
+`testRefreshAutoDownloadsNewEpisodes`,
+`testRefreshAllAutoDownloadsNewEpisodesAcrossPodcasts`, plus this gate's
+partial-refresh and off-switch tests); (2) the shared `DownloadManager` is
+wired into every real call site that constructs `SubscriptionRepository`/
+`OPMLImportService` (verified by reading the diff — `AddFeedView`,
+`SubscriptionsView`, `SearchView`, `PodcastPreviewView`, `EpisodeListView`,
+`DataSettingsView`, `OnboardingView`, `RootView`, `OPMLImportService`,
+`OPMLFileImporter` — no test needed beyond the constructor-injection unit
+tests already in place, since this is wiring, not logic).
+
+Regressions found: none — full suite is 1144/1144 (1 unrelated pre-existing
+env-gated skip), matching or exceeding every prior gate's count on this
+branch.
+
+Overall: PASS.
+
+Commit: 3 new tests + this SWIFTUI_PLAN.md update committed to
+`fix/issue-639-auto-download`. Branch not merged / not closed — Michael
+verifies on device first, per workflow.

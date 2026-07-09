@@ -308,7 +308,7 @@ struct EpisodeListView: View {
 
     private func refresh() async {
         do {
-            try await SubscriptionRepository(context: context).refresh(podcast)
+            try await SubscriptionRepository(context: context, downloader: downloads).refresh(podcast)
             Announcer.announce("\(podcast.title) refreshed")
         } catch {
             AppLog.subscriptions.error("Refresh failed: \(error.localizedDescription, privacy: .public)")

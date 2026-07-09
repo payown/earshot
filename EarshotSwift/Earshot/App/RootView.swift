@@ -293,7 +293,7 @@ struct RootView: View {
         let ext = url.pathExtension.lowercased()
         guard ext == "opml" || ext == "xml" else { return }
         Task {
-            await OPMLFileImporter.importFile(at: url, context: modelContext, progress: importProgress)
+            await OPMLFileImporter.importFile(at: url, context: modelContext, progress: importProgress, downloader: downloads)
         }
     }
 

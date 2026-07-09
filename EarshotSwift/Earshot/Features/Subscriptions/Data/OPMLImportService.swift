@@ -10,9 +10,13 @@ final class OPMLImportService {
     private let context: ModelContext
     private let subscriptions: SubscriptionRepository
 
-    init(context: ModelContext) {
+    /// `downloader` is threaded through to the underlying ``SubscriptionRepository``
+    /// so the end-of-import auto-download pass below (`autoDownloadRecent`) actually
+    /// has something to download with — previously every real call site left this
+    /// `nil`, so OPML import auto-download was a no-op in practice (#639).
+    init(context: ModelContext, downloader: EpisodeDownloading? = nil) {
         self.context = context
-        self.subscriptions = SubscriptionRepository(context: context)
+        self.subscriptions = SubscriptionRepository(context: context, downloader: downloader)
     }
 
     /// Test seam: inject a pre-built ``SubscriptionRepository`` (e.g. one with an

@@ -14,11 +14,32 @@ private final class FakeFeedFetcher: FeedFetching, @unchecked Sendable {
     func fetch(_ urlString: String) async throws -> ParsedFeed { feed }
 }
 
+/// Returns a distinct, independently-mutable feed per URL (keyed by the exact
+/// `feedURL` string), unlike ``FakeFeedFetcher`` which returns the same feed for
+/// every URL. Needed to construct multi-podcast `refreshAll()` scenarios where
+/// only some podcasts discover a genuinely new episode in a given pass (#639).
+/// Locked because `FeedRefreshActor` reads it off the main actor.
+private final class PerURLFeedFetcher: FeedFetching, @unchecked Sendable {
+    private let lock = OSAllocatedUnfairLock(initialState: [String: ParsedFeed]())
+    func setFeed(_ feed: ParsedFeed, for url: String) {
+        lock.withLock { $0[url] = feed }
+    }
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        guard let feed = lock.withLock({ $0[urlString] }) else {
+            throw NSError(domain: "PerURLFeedFetcher", code: 1, userInfo: [NSLocalizedDescriptionKey: "No feed registered for \(urlString)"])
+        }
+        return feed
+    }
+}
+
 /// Records which episodes were passed to ``download(_:)`` without touching
 /// the network or filesystem.
 private final class FakeDownloader: EpisodeDownloading {
     private(set) var downloaded: [Episode] = []
     func download(_ episode: Episode) async { downloaded.append(episode) }
+    /// Clears recorded calls so a test can isolate the auto-download trigger it's
+    /// asserting (e.g. refresh) from an earlier one (e.g. the initial subscribe).
+    func reset() { downloaded.removeAll() }
 }
 
 /// Returns the same feed for every URL but counts how many times ``fetch(_:)``
@@ -247,6 +268,205 @@ final class SubscriptionRepositoryTests: XCTestCase {
         // Should complete without error; no downloads fired.
         let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
         XCTAssertEqual(podcast.episodes.count, 2)
+    }
+
+    // MARK: Auto-download on refresh (#639)
+
+    /// Bug 1 (#639): an ORDINARY refresh of an already-subscribed podcast (pull-to-
+    /// refresh, cold-launch throttled refresh, foreground-resume, BGTaskScheduler
+    /// background refresh) must trigger auto-download for genuinely new episodes,
+    /// not just the one-time first-subscribe path. Before the fix, `refresh(_:)`
+    /// never called any download trigger at all.
+    func testRefreshAutoDownloadsNewEpisodes() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(3, for: SettingsKey.autoDownloadCount)
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        // Subscribe itself already auto-downloads "a" -- clear it so the assertion
+        // below isolates the refresh-path trigger, which is what #639 is about.
+        fakeDownloader.reset()
+
+        // A genuinely new episode "b" appears on the next refresh.
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        _ = try await repo.refresh(podcast)
+
+        XCTAssertEqual(
+            fakeDownloader.downloaded.map(\.guid), ["b"],
+            "refresh(_:) must trigger auto-download for genuinely new episodes, not just subscribe(_:)"
+        )
+    }
+
+    /// Auto-queue and auto-download are orthogonal (#639): a new episode routed
+    /// into the queue instead of the inbox is still eligible for auto-download.
+    func testRefreshAutoDownloadsNewEpisodeEvenWhenAutoQueued() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(3, for: SettingsKey.autoDownloadCount)
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let fakeDownloader = FakeDownloader()
+        let queueRepo = QueueRepository(context: ctx)
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader, queue: queueRepo)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        podcast.autoQueue = true
+        try ctx.save()
+        fakeDownloader.reset()
+
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        _ = try await repo.refresh(podcast)
+
+        let b = try XCTUnwrap(podcast.episodes.first { $0.guid == "b" })
+        XCTAssertEqual(b.status, .inQueue, "b is auto-queued")
+        XCTAssertEqual(
+            fakeDownloader.downloaded.map(\.guid), ["b"],
+            "Auto-queued episodes are still eligible for auto-download"
+        )
+    }
+
+    /// A backfill refresh (migrated shell) must NOT auto-download -- its inserted
+    /// episodes are pre-existing catalog, matching the existing `wasBackfill`
+    /// notification gate (#72 / #639).
+    func testBackfillRefreshDoesNotAutoDownload() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(3, for: SettingsKey.autoDownloadCount)
+        let shell = Podcast(feedURL: "https://x/feed.xml", title: "Shell")
+        ctx.insert(shell)
+        try ctx.save()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader)
+
+        _ = try await repo.refresh(shell)
+
+        XCTAssertTrue(fakeDownloader.downloaded.isEmpty, "Backfilled catalog episodes must not auto-download")
+    }
+
+    /// Bug 1 also applies to the whole-library refresh path: `refreshAll()` must
+    /// auto-download genuinely-new episodes discovered per podcast, matching
+    /// `refresh(_:)`'s single-podcast behavior.
+    func testRefreshAllAutoDownloadsNewEpisodesAcrossPodcasts() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(1, for: SettingsKey.autoDownloadCount)
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader)
+        _ = try await repo.subscribe(feedURL: "https://x/one.xml")
+        _ = try await repo.subscribe(feedURL: "https://x/two.xml")
+        fakeDownloader.reset()
+
+        // Both podcasts share the same fetcher (FakeFeedFetcher ignores the URL),
+        // so each discovers "b" as a genuinely new episode.
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        _ = await repo.refreshAll()
+
+        XCTAssertEqual(fakeDownloader.downloaded.count, 2, "One new-episode download per podcast")
+        XCTAssertTrue(fakeDownloader.downloaded.allSatisfy { $0.guid == "b" })
+    }
+
+    /// `autoDownloadCount == 0` means auto-download is off. This must hold on the
+    /// refresh path exactly as it already does on subscribe
+    /// (`testSubscribeWithAutoDownloadCountZeroDoesNotDownload`) -- `refresh(_:)`
+    /// still discovers "b" as genuinely new (and it still surfaces in the inbox),
+    /// it just must not be downloaded.
+    func testRefreshWithAutoDownloadCountZeroDoesNotDownload() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(0, for: SettingsKey.autoDownloadCount)
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        fakeDownloader.reset()
+
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        let outcome = try await repo.refresh(podcast)
+
+        XCTAssertEqual(outcome.newEpisodeIDs.count, 1, "b is still discovered as genuinely new")
+        XCTAssertTrue(fakeDownloader.downloaded.isEmpty, "autoDownloadCount == 0 must suppress refresh-triggered downloads")
+    }
+
+    /// Same off-switch, whole-library path: `refreshAll()` must also respect
+    /// `autoDownloadCount == 0`.
+    func testRefreshAllWithAutoDownloadCountZeroDoesNotDownload() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(0, for: SettingsKey.autoDownloadCount)
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader)
+        _ = try await repo.subscribe(feedURL: "https://x/one.xml")
+        _ = try await repo.subscribe(feedURL: "https://x/two.xml")
+        fakeDownloader.reset()
+
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        _ = await repo.refreshAll()
+
+        XCTAssertTrue(fakeDownloader.downloaded.isEmpty, "autoDownloadCount == 0 must suppress refreshAll-triggered downloads")
+    }
+
+    /// `refreshAll()` must download only for podcasts that genuinely discovered a
+    /// new episode this pass -- a podcast with no change must not redownload its
+    /// existing episodes, and must not prevent a sibling podcast's genuinely-new
+    /// episode from downloading. Uses a per-URL fetcher (unlike `FakeFeedFetcher`,
+    /// which returns the same feed for every URL) so the two podcasts can diverge:
+    /// "unchanged.xml" never changes, "updated.xml" gains episode "b" before the
+    /// refresh pass.
+    func testRefreshAllOnlyDownloadsForPodcastsWithGenuinelyNewEpisodes() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(3, for: SettingsKey.autoDownloadCount)
+        let fetcher = PerURLFeedFetcher()
+        fetcher.setFeed(feed([episode("a", d1)]), for: "https://x/unchanged.xml")
+        fetcher.setFeed(feed([episode("a", d1)]), for: "https://x/updated.xml")
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader)
+        _ = try await repo.subscribe(feedURL: "https://x/unchanged.xml")
+        _ = try await repo.subscribe(feedURL: "https://x/updated.xml")
+        fakeDownloader.reset()
+
+        // Only "updated.xml" gains a genuinely new episode this pass.
+        fetcher.setFeed(feed([episode("a", d1), episode("b", d2)]), for: "https://x/updated.xml")
+        _ = await repo.refreshAll()
+
+        XCTAssertEqual(
+            fakeDownloader.downloaded.map(\.guid), ["b"],
+            "Only the podcast with a genuinely new episode should trigger a download"
+        )
+    }
+
+    // MARK: RefreshOutcome.newEpisodeIDs (#639)
+
+    /// The identifiers backing Bug 1's fix: `refresh(_:)` must report the
+    /// `persistentModelID` of every genuinely-new episode so the caller can
+    /// resolve and download them, and the IDs must actually resolve (proving
+    /// they were captured AFTER the background save, not before -- a
+    /// `persistentModelID` read before a SwiftData save is temporary).
+    func testRefreshOutcomeNewEpisodeIDsPopulatedForGenuinelyNewEpisodes() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+
+        fetcher.feed = feed([episode("a", d1), episode("b", d2), episode("c", d3)])
+        let outcome = try await repo.refresh(podcast)
+
+        XCTAssertEqual(outcome.newEpisodeIDs.count, 2, "Both b and c are genuinely new")
+        let resolvedGUIDs = Set(outcome.newEpisodeIDs.compactMap { id in
+            podcast.episodes.first { $0.persistentModelID == id }?.guid
+        })
+        XCTAssertEqual(resolvedGUIDs, ["b", "c"], "Every ID must resolve to the correct main-context episode")
+    }
+
+    /// Backfilled episodes must never populate `newEpisodeIDs`, mirroring
+    /// `wasBackfill` and `newestNewEpisodeGUID`.
+    func testBackfillRefreshOutcomeNewEpisodeIDsIsEmpty() async throws {
+        let ctx = TestStore.freshContext()
+        let shell = Podcast(feedURL: "https://x/feed.xml", title: "Shell")
+        ctx.insert(shell)
+        try ctx.save()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+
+        let outcome = try await repo.refresh(shell)
+
+        XCTAssertTrue(outcome.newEpisodeIDs.isEmpty, "Backfill must never carry auto-download-eligible IDs")
     }
 
     // MARK: Auto-queue on refresh

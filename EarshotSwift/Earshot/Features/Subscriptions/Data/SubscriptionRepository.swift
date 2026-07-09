@@ -32,19 +32,23 @@ extension DownloadManager: EpisodeDownloading {}
 /// catalog seed) where the inserted episodes are pre-existing catalog and must
 /// NOT trigger a new-episode notification (#72). `newestNewEpisodeGUID` is the
 /// guid of the newest genuinely-new episode, used as the deep-link / action
-/// target.
+/// target. `newEpisodeIDs` carries the `persistentModelID` of every genuinely-new
+/// episode from this refresh pass (both auto-queued and inbox-routed — auto-queue
+/// and auto-download are orthogonal) so the caller can trigger auto-download
+/// (#639); it is always empty on a backfill pass, matching the `wasBackfill` gate.
 ///
-/// `Sendable` — it carries only value types (a guid string, never a `@Model`
-/// `Episode`), so it can be returned from ``FeedRefreshActor`` across the actor
-/// boundary without dragging a SwiftData object onto another executor. (This
-/// also clears the swift6 baseline flag on the old `static let backfill` of a
-/// non-Sendable type.)
+/// `Sendable` — it carries only value types (a guid string and `PersistentIdentifier`s,
+/// never a `@Model` `Episode`), so it can be returned from ``FeedRefreshActor``
+/// across the actor boundary without dragging a SwiftData object onto another
+/// executor. (This also clears the swift6 baseline flag on the old `static let
+/// backfill` of a non-Sendable type.)
 struct RefreshOutcome: Sendable {
     var added: Int
     var wasBackfill: Bool
     var newestNewEpisodeGUID: String?
+    var newEpisodeIDs: [PersistentIdentifier] = []
 
-    static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisodeGUID: nil)
+    static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisodeGUID: nil, newEpisodeIDs: [])
 }
 
 /// Owns subscribe and refresh logic for podcasts. Views call into this instead
@@ -216,6 +220,12 @@ final class SubscriptionRepository {
     /// starved during a refresh (#382). Only the lightweight ``RefreshOutcome``
     /// (value type) crosses back. After the background save, the main context is
     /// re-read so callers holding `podcast` see the new episodes.
+    ///
+    /// If a `downloader` was provided at init and this pass discovered genuinely
+    /// new episodes (never a backfill pass), auto-downloads the newest
+    /// `autoDownloadCount` of them via ``autoDownloadRecent(episodeIDsPerPodcast:)``
+    /// — this is what makes auto-download fire on an ORDINARY refresh of an
+    /// already-subscribed podcast, not just on first subscribe (#639).
     @discardableResult
     func refresh(_ podcast: Podcast) async throws -> RefreshOutcome {
         let feedURL = podcast.feedURL
@@ -224,12 +234,15 @@ final class SubscriptionRepository {
             feedURL: feedURL, feed: feed, autoQueueEnabled: autoQueueEnabled
         ) else {
             // The podcast vanished between fetch and refresh; nothing to report.
-            return RefreshOutcome(added: 0, wasBackfill: false, newestNewEpisodeGUID: nil)
+            return RefreshOutcome(added: 0, wasBackfill: false, newestNewEpisodeGUID: nil, newEpisodeIDs: [])
         }
         // Pull the background context's writes into the main context so a caller
         // holding `podcast` (e.g. EpisodeListView, the tests) observes the new
         // episodes and advanced high-water mark immediately.
         mergeBackgroundWrites()
+        if downloader != nil, !outcome.newEpisodeIDs.isEmpty {
+            await autoDownloadRecent(episodeIDsPerPodcast: [outcome.newEpisodeIDs])
+        }
         return outcome
     }
 
@@ -263,6 +276,13 @@ final class SubscriptionRepository {
         // Pull the background context's writes into the main context so the UI
         // (and any held `Podcast`/`Episode` objects) reflect the refresh.
         mergeBackgroundWrites()
+
+        // Auto-download the newest `autoDownloadCount` genuinely-new episodes per
+        // podcast (never a backfill pass — `newEpisodeIDs` is empty there). This is
+        // what makes auto-download fire on the whole-library refresh path (pull-to-
+        // refresh, cold-launch throttled refresh, foreground-resume, and the
+        // BGTaskScheduler background refresh), not just on first subscribe (#639).
+        await autoDownloadRecent(episodeIDsPerPodcast: results.map { $0.outcome.newEpisodeIDs })
 
         // Build notifications from value-type results only — no `@Model` crossed
         // the actor boundary. Only notification-enabled podcasts with genuinely-new
