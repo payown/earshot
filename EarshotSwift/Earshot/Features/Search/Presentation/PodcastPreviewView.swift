@@ -22,6 +22,10 @@ struct PodcastPreviewView: View {
     /// search flow injects it (see `SearchView`).
     @Environment(PlayerService.self) private var player
 
+    /// The shared downloader, so subscribing from a preview auto-downloads the
+    /// newest episodes just like following from search or the Library (#639).
+    @Environment(DownloadManager.self) private var downloads
+
     /// Subscriptions, so the Follow / Unfollow control reflects live state and the
     /// label flips the moment the toggle completes — without re-entering the view.
     @Query private var podcasts: [Podcast]
@@ -224,7 +228,7 @@ struct PodcastPreviewView: View {
         } else {
             Task {
                 do {
-                    _ = try await SubscriptionRepository(context: context).subscribe(feedURL: result.feedURL)
+                    _ = try await SubscriptionRepository(context: context, downloader: downloads).subscribe(feedURL: result.feedURL)
                     Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
                 } catch {
                     AppLog.networking.error(

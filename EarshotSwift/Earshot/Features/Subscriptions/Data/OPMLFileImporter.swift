@@ -27,11 +27,17 @@ enum OPMLFileImporter {
     /// least one feed (so an unreadable/empty file never flashes an empty progress
     /// screen), and always clear it in a `defer` so a thrown/early return can't leave
     /// the screen stuck up.
+    /// `downloader` (typically the app's shared `DownloadManager`, read from the
+    /// environment by the caller) is threaded through to ``OPMLImportService`` so
+    /// auto-download fires for the imported feeds' newest episodes. Defaults to
+    /// `nil` so non-UI/test callers need no change — matching the existing
+    /// no-downloader OPML behavior (#639).
     @discardableResult
     static func importFile(
         at url: URL,
         context: ModelContext,
-        progress: OPMLImportProgress? = nil
+        progress: OPMLImportProgress? = nil,
+        downloader: EpisodeDownloading? = nil
     ) async -> Int? {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -52,7 +58,7 @@ enum OPMLFileImporter {
         // can't hang up.
         defer { progress?.finish() }
 
-        let count = await OPMLImportService(context: context).importOPML(
+        let count = await OPMLImportService(context: context, downloader: downloader).importOPML(
             opml,
             onResolveTotal: { total in
                 progress?.start(total: total)

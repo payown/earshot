@@ -496,7 +496,7 @@ struct SearchView<HeaderContent: View>: View {
     private func subscribe(_ result: PodcastSearchResult) {
         Task {
             do {
-                _ = try await SubscriptionRepository(context: context).subscribe(feedURL: result.feedURL)
+                _ = try await SubscriptionRepository(context: context, downloader: downloads).subscribe(feedURL: result.feedURL)
                 Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
             } catch {
                 AppLog.networking.error("Subscribe from search failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)")

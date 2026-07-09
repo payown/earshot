@@ -39,6 +39,7 @@ struct AddPodcastView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Environment(OPMLImportProgress.self) private var importProgress
+    @Environment(DownloadManager.self) private var downloads
 
     @State private var showingAddByURL = false
     @State private var importingOPML = false
@@ -110,7 +111,7 @@ struct AddPodcastView: View {
             return
         }
         Task {
-            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress)
+            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress, downloader: downloads)
         }
     }
 }

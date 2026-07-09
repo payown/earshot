@@ -5,6 +5,7 @@ struct SubscriptionsView: View {
     @Environment(\.modelContext) private var context
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
+    @Environment(DownloadManager.self) private var downloads
     @Query(sort: \Podcast.title) private var podcasts: [Podcast]
     @State private var showingAdd = false
     @State private var sharingPodcast: Podcast?
@@ -241,7 +242,7 @@ struct SubscriptionsView: View {
         // path actually finds new episodes must be the path that notifies, or the
         // notification is lost (#421). deliver() coalesces per podcast by a stable
         // identifier, so the same show notifying from both paths can never stack.
-        let notifications = await SubscriptionRepository(context: context).refreshAll()
+        let notifications = await SubscriptionRepository(context: context, downloader: downloads).refreshAll()
         AppSettingsStore(context: context).setDate(Date(), for: SettingsKey.lastFeedRefresh)
         if !notifications.isEmpty {
             await NotificationService().deliver(notifications)
