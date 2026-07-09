@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed), and the import sheet tells you how it went when it finishes. A clean
   install with nothing to bring over is treated as up to date, not a failure.
   (closes #429)
+- Podcast episode list: a "Mark all as played" toolbar button marks every unplayed episode in that show as played in one step, and dismisses newly-played episodes from your inbox the same way marking a single episode played does. It's disabled with an explanatory hint when there's nothing unplayed left. A confirmation dialog always asks first, naming the podcast and the episode count, and makes clear it can't be undone. (closes #640)
 
 ### Changed
 - New episode notifications: when a new episode is found while Earshot is open, the notification no longer interrupts you with a banner and sound. It goes quietly to Notification Center so it doesn't talk over what you're doing or pull screen reader focus away. (closes #421)
@@ -251,6 +252,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decoded once at the size it's actually displayed, off the main thread, so the
   Library and other artwork lists stay responsive during a flick. The lock-screen
   and Control Center artwork still looks the same. (#481)
+- Podcast episode list: "Mark all as played" is also reachable as a VoiceOver actions rotor item from the podcast title header, so you don't need to hunt for the toolbar button. When it finishes, VoiceOver announces the result, comma-grouped and singular-correct, like "Marked 1,204 episodes as played" or "Marked 1 episode as played." (#640)
 
 ### Phase 8 complete — Alpha build prep
 
