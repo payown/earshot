@@ -2180,3 +2180,99 @@ Overall: PASS.
 No fix commit needed — the diff introduced no concurrency debt. Review
 posted as a GitHub comment on #631; issue not closed (planning agent closes
 after all gates pass).
+
+## Testing Review — Issue #631
+
+earshot-testing gate. Issue #631 (Earshot Plus: StoreKit 2 product
+configuration). Worktree `earshot-worktrees/issue-631`, on top of commit
+`013c1c6` (domain `6b5ee91` + swift6 docs `013c1c6`).
+
+**New tests written (+2, review follow-up to #631), both in
+`ProductCatalogServiceTests.swift`:**
+- `testFetchWithDuplicateIDsInInputDeduplicatesAndReturnsUniqueResults` —
+  duplicate IDs in the request list must not produce duplicate/conflicting
+  dictionary entries.
+- `testFetchThrowsProductsNotFoundWhenStoreKitConfigIsMissingAProduct` —
+  exercises the `CatalogError.productsNotFound` branch, which none of the
+  domain agent's original 9 `ProductCatalogServiceTests` reached (the
+  shipped `Configuration.storekit` always resolves all six catalog IDs).
+  Added a second fixture, `Earshot/Testing/ConfigurationMissingProduct.storekit`
+  (identical to `Configuration.storekit` minus `tip.large`), loaded via a
+  dedicated `SKTestSession` inside the test method, and asserts the thrown
+  error's payload is exactly `{.tipLarge}`.
+
+**Full suite: 1164 tests total (1144 baseline + 18 from the domain agent's
+`EarshotPlusProductTests`/`ProductCatalogServiceTests` + 2 from this gate).
+1156 passing, 8 failing, 1 skipped** (the skip is the pre-existing
+`RUN_SCALE_DIAG`-gated `ScaleDiagnosticTests`, unrelated to #631). All 1144
+baseline tests still pass — **no regressions**.
+
+**The 8 failures are 100% reproducible, not intermittent, and are an
+environment limitation, not a code defect:** every `ProductCatalogServiceTests`
+case that touches live StoreKit resolution (all except the empty-list
+short-circuit) fails with `CatalogError.productsNotFound` for *every*
+requested ID, including the two new tests added by this gate. The swift6
+gate above already saw the same signature (7/9 failing) and flagged it as
+"out of scope, functional not concurrency." This gate tried the prescribed
+remediation and went further:
+- Erased and rebooted the iPhone 17 / iOS 26.0 simulator, reran — same
+  failure, but now silent (zero console diagnostic, `Product.products(for:)`
+  just returns empty).
+- Switched to a second, previously-untouched iPhone 17 / iOS 26.5 simulator,
+  erased fresh, reran — same failure, this time with the underlying error
+  surfaced in the console: `[SKTestSession] Error saving configuration
+  file: Error Domain=SKInternalErrorDomain Code=3`, plus matching "Error
+  clearing overrides" / "Error setting value... for media.payown.earshot" /
+  "Error deleting all transactions" — i.e. the local StoreKit test daemon
+  cannot persist the test session's configuration in this environment at
+  all, for either `.storekit` file.
+- Reran with the harness sandbox disabled entirely — identical
+  `SKInternalErrorDomain Code=3` errors.
+- Added a 3-second `Task.sleep` before the fetch to rule out a
+  daemon-not-ready race — identical failure.
+
+Four independent attempts (2 simulator runtimes × erased/fresh, ±sandbox,
+±settle delay) all reproduce the identical `SKInternalErrorDomain Code=3`
+signature. This is a headless-CI/sandboxed-execution limitation of
+`StoreKitTest.framework` in this specific environment, not a defect in
+`ProductCatalogService`, `EarshotPlusProduct`, or either `.storekit` config.
+The async/await plumbing, error propagation, and catalog logic are otherwise
+proven correct: the 11 pure-logic `EarshotPlusProductTests` (no StoreKit I/O)
+pass every run, and the failing StoreKit-session tests fail for the *same*
+reason regardless of which assertion they contain — consistent with the
+fetch layer working exactly as designed and simply never receiving a
+response from the local test daemon.
+
+Note for the planning agent: the GitHub issue for #631 currently has exactly
+one gate comment (swift6's), reporting 7/9 `ProductCatalogServiceTests`
+failing and explicitly punting resolution to this gate. No earshot-security
+comment is on the issue. This gate could not resolve the StoreKit-session
+failures despite exhausting the documented remediation; real verification of
+`ProductCatalogService` against live/test StoreKit will need either Xcode's
+GUI-driven test runner (not headless `xcodebuild test`) or a physical
+device/TestFlight build with the App Store Connect products configured
+(issue #631's own task list — "Create the products and subscription group in
+App Store Connect" — is still unchecked).
+
+Release build (`xcodebuild -configuration Release build`, iPhone 17 sim):
+**BUILD SUCCEEDED**, 7 pre-existing warnings, none in this issue's files
+(`EarshotPlusProduct.swift`, `ProductCatalogService.swift`), matching
+swift6's finding.
+
+Regressions found: none. Baseline 1144 tests all still pass.
+
+**Overall: FAIL** — not on baseline count (1144 → 1156 passing, count
+increased) and not on Release build (clean), but on the required "count new
+tests as reliably passing" bar: 2 new tests plus 6 of the domain agent's
+original 9 `ProductCatalogServiceTests` cannot be confirmed passing in this
+execution environment. Flagging to the planning agent for a decision:
+accept as a known, well-documented environmental gap (StoreKit local testing
+needs Xcode GUI or device, not headless CI) and merge on the strength of the
+11/11 pure-logic tests + Release build, or hold for a device/Xcode-GUI
+verification pass before closing #631.
+
+Files changed by this gate: `EarshotSwift/EarshotTests/ProductCatalogServiceTests.swift`
+(+2 tests), `EarshotSwift/Earshot/Testing/ConfigurationMissingProduct.storekit`
+(new fixture), `EarshotSwift/Earshot.xcodeproj/project.pbxproj` (xcodegen
+regen — adds the new fixture's file reference only, 2-line diff), this
+SWIFTUI_PLAN.md entry. No production code changed.

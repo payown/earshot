@@ -28,6 +28,19 @@ final class ProductCatalogServiceTests: XCTestCase {
             .appendingPathComponent("Earshot/Testing/Configuration.storekit")
     }()
 
+    /// A deliberately incomplete config (5 of 6 catalog products -
+    /// `tipLarge` is missing) used only by
+    /// `testFetchThrowsProductsNotFoundWhenStoreKitConfigIsMissingAProduct`
+    /// to exercise the `CatalogError.productsNotFound` branch. None of the
+    /// other tests reach that branch because `Configuration.storekit`
+    /// always has all six IDs.
+    private static let incompleteConfigurationURL: URL = {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // EarshotTests/
+            .deletingLastPathComponent() // EarshotSwift/
+            .appendingPathComponent("Earshot/Testing/ConfigurationMissingProduct.storekit")
+    }()
+
     override func setUpWithError() throws {
         try super.setUpWithError()
         session = try SKTestSession(contentsOf: Self.configurationURL)
@@ -96,5 +109,40 @@ final class ProductCatalogServiceTests: XCTestCase {
         let service = ProductCatalogService()
         let products = try await service.fetch([])
         XCTAssertTrue(products.isEmpty)
+    }
+
+    // MARK: Edge cases (review follow-up to #631)
+
+    /// Acceptance criterion: "Define a Product catalog / entitlement layer
+    /// ... reachable from the rest of the app" — callers may build the
+    /// request list from multiple sources (e.g. Earshot Plus products +
+    /// tips) and accidentally repeat an ID; the result must stay correct.
+    func testFetchWithDuplicateIDsInInputDeduplicatesAndReturnsUniqueResults() async throws {
+        let service = ProductCatalogService()
+        let products = try await service.fetch([.plusMonthly, .plusMonthly, .plusYearly])
+
+        XCTAssertEqual(products.count, 2, "duplicate IDs in the input must not produce duplicate/conflicting entries")
+        XCTAssertNotNil(products[.plusMonthly])
+        XCTAssertNotNil(products[.plusYearly])
+    }
+
+    /// Exercises the `CatalogError.productsNotFound` branch, which no other
+    /// test in this file reaches since `Configuration.storekit` always
+    /// resolves all six catalog IDs. Swaps in a StoreKit test session backed
+    /// by `ConfigurationMissingProduct.storekit`, which is identical except
+    /// `tipLarge` was deliberately omitted.
+    func testFetchThrowsProductsNotFoundWhenStoreKitConfigIsMissingAProduct() async throws {
+        session = try SKTestSession(contentsOf: Self.incompleteConfigurationURL)
+        session.resetToDefaultState()
+        session.disableDialogs = true
+        session.clearTransactions()
+
+        let service = ProductCatalogService()
+        do {
+            _ = try await service.fetchAll()
+            XCTFail("expected CatalogError.productsNotFound to be thrown")
+        } catch let error as ProductCatalogService.CatalogError {
+            XCTAssertEqual(error, .productsNotFound([.tipLarge]))
+        }
     }
 }
