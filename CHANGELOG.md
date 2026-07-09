@@ -67,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   install with nothing to bring over is treated as up to date, not a failure.
   (closes #429)
 - Behind the scenes: laid the groundwork for an upcoming paid tier, Earshot Plus (monthly, yearly, or one-time lifetime unlock). This is engineering foundation only, nothing to see or buy yet. No paywall, no purchase button, no change to how the app works today. (closes #631)
+- Podcast episode list: a "Mark all as played" toolbar button marks every unplayed episode in that show as played in one step, and dismisses newly-played episodes from your inbox the same way marking a single episode played does. It's disabled with an explanatory hint when there's nothing unplayed left. A confirmation dialog always asks first, naming the podcast and the episode count, and makes clear it can't be undone. (closes #640)
 
 ### Changed
 - New episode notifications: when a new episode is found while Earshot is open, the notification no longer interrupts you with a banner and sound. It goes quietly to Notification Center so it doesn't talk over what you're doing or pull screen reader focus away. (closes #421)
@@ -87,6 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sheet so danger is not signaled by color alone.
 
 ### Fixed
+- Playback: closed a narrow, cosmetic timing gap where a finished episode could very briefly show a stale resume position instead of the start. Right around the moment an episode is marked played, the app now stops writing any further position updates for it, so the just-cleared "start from the beginning" state can never get overwritten by a position captured a split second earlier. No visible change for normal playback. (closes #653)
 - Downloads: auto-download of newest episodes now actually works for shows you're already subscribed to. Two bugs combined to make it silently do nothing: an ordinary refresh (pull-to-refresh, cold launch, coming back to the app, or the background check) never triggered a download, only your first time subscribing did, and even then most of the app built its own downloader instead of using the real one, so downloads still didn't start. Auto-download now fires from every refresh path using the same shared downloader throughout the app. (closes #639)
 - Queue: playing an episode that wasn't at the top of the queue (leaving earlier episodes in place) now correctly continues to the next episode below it when it finishes, instead of jumping back to the top of the queue. This also fixes the same wrong jump for "Mark as played," removing the playing episode from the queue, and which episode gets buffered ahead of time for gapless playback. With "Group by podcast" turned on in the Queue tab, "next" now also follows that same grouped, same-show order shown on screen instead of the app's real (and possibly interleaved-with-other-shows) queue order — except an episode you "Play Next"-ed always plays immediately next regardless of grouping, exactly as it always has. (closes #627)
 - Your data is no longer at risk of being silently wiped when a store can't be opened. Before, any failure to open the on-device database triggered an automatic reset that deleted everything and started fresh, with no backup and no warning. Now Earshot never destroys your data on its own: if you open an older build over data written by a newer one, it leaves everything untouched and asks you to update the app; and if the data is genuinely unreadable, it shows a recovery screen that makes a backup copy first and only clears the data after you explicitly choose "Reset local data." The recovery screen is fully VoiceOver-accessible and scales with Dynamic Type. (closes #529)
@@ -252,6 +254,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decoded once at the size it's actually displayed, off the main thread, so the
   Library and other artwork lists stay responsive during a flick. The lock-screen
   and Control Center artwork still looks the same. (#481)
+- Podcast episode list: "Mark all as played" is also reachable as a VoiceOver actions rotor item from the podcast title header, so you don't need to hunt for the toolbar button. When it finishes, VoiceOver announces the result, comma-grouped and singular-correct, like "Marked 1,204 episodes as played" or "Marked 1 episode as played." (#640)
 
 ### Phase 8 complete — Alpha build prep
 

@@ -20,6 +20,10 @@ struct EpisodeListView: View {
     // still confirms, and the screen pops after the delete since its podcast is
     // gone. Wording matches InboxScreen / SubscriptionsView.
     @State private var pendingUnfollow: Podcast?
+    // "Mark all as played" confirmation gate (#640). Shared by the toolbar
+    // button and the screen-level rotor action so both entry points drive the
+    // exact same confirm-then-execute flow instead of duplicating it.
+    @State private var confirmingMarkAllPlayed = false
 
     // Focus targets for the rotor "Mark as played" under the Unheard filter,
     // where the marked row leaves the visible list (#579): the neighbor row, or
@@ -43,6 +47,18 @@ struct EpisodeListView: View {
     /// The visible set: the active filter applied to the sorted episodes.
     private var filteredSortedEpisodes: [Episode] {
         filter.apply(to: sortedEpisodes)
+    }
+
+    /// Count of unplayed episodes across the WHOLE podcast, not just the
+    /// current filter (#640) — `EpisodeRepository.markAllPlayed` marks every
+    /// unplayed episode in the podcast regardless of which filter is showing,
+    /// so this drives both the toolbar button's disabled state and the
+    /// confirmation copy. Derived from `sortedEpisodes` (the view's existing
+    /// unfiltered, sorted source) rather than re-deriving from
+    /// `podcast.episodes` directly, so it stays consistent with what the list
+    /// is already computing.
+    private var unplayedCount: Int {
+        sortedEpisodes.filter { !$0.isPlayed }.count
     }
 
     /// Persists and announces only on a genuine user change, so loading the
@@ -183,6 +199,26 @@ struct EpisodeListView: View {
                 .accessibilityValue(settings.episodeSortOrder.title)
             }
             ToolbarItem(placement: .topBarTrailing) {
+                // Bulk "Mark all as played" (#640) for shows with hundreds or
+                // thousands of episodes, where scrolling to mark each one is
+                // impractical. Disabled — not hidden — when there's nothing
+                // unplayed, mirroring InboxScreen's "Add to Queue" pattern, so
+                // VoiceOver users can still find it and learn why it's
+                // inactive rather than have it vanish unexplained.
+                Button {
+                    requestMarkAllPlayed()
+                } label: {
+                    Label("Mark all as played", systemImage: "checklist.checked")
+                }
+                .disabled(unplayedCount == 0)
+                .accessibilityLabel("Mark all as played")
+                .accessibilityHint(
+                    unplayedCount == 0
+                        ? "No unplayed episodes"
+                        : "Marks all \(unplayedCount) unplayed episodes in \(podcast.title) as played"
+                )
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingPodcastSettings = true
                 } label: {
@@ -217,6 +253,22 @@ struct EpisodeListView: View {
         } message: { podcast in
             Text("This removes \(podcast.title) and its episodes from your library. This can't be undone.")
         }
+        // Confirmation for the bulk "Mark all as played" action (#640),
+        // reached from either the toolbar button or the rotor action above.
+        // Destructive role + plain-text buttons (no icon) match the
+        // Clear-inbox / Unfollow confirmationDialog precedent in this app —
+        // unlike a `Menu` or custom bottom sheet, the system confirmation
+        // dialog doesn't render button icons.
+        .confirmationDialog(
+            markAllPlayedConfirmationTitle,
+            isPresented: $confirmingMarkAllPlayed,
+            titleVisibility: .visible
+        ) {
+            Button("Mark All as Played", role: .destructive) { markAllPlayed() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(markAllPlayedConfirmationMessage)
+        }
     }
 
     /// Unfollows the shown podcast via the centralized repository path shared
@@ -231,6 +283,34 @@ struct EpisodeListView: View {
         guard removed else { return }
         Announcer.announce("Unfollowed \(title)")
         dismiss()
+    }
+
+    /// Shared entry point for both the toolbar button and the rotor action
+    /// (#640) — both just open the same confirmation, never mark directly.
+    private func requestMarkAllPlayed() {
+        confirmingMarkAllPlayed = true
+    }
+
+    /// Title for the "Mark all as played" confirmation, e.g. "Mark all 1,204
+    /// episodes as played?" / "Mark all 1 episode as played?".
+    private var markAllPlayedConfirmationTitle: String {
+        MarkAllPlayedConfirmationCopy.title(unplayedCount: unplayedCount)
+    }
+
+    /// Body copy for the "Mark all as played" confirmation, naming the show
+    /// and stating the action can't be undone.
+    private var markAllPlayedConfirmationMessage: String {
+        MarkAllPlayedConfirmationCopy.message(unplayedCount: unplayedCount, podcastTitle: podcast.title)
+    }
+
+    /// Runs the batched repository call (#640) and announces the result.
+    /// Assertive so it interrupts current speech the way
+    /// InboxScreen.addSelectedToQueue's completion announcement does — the
+    /// user just confirmed a deliberate bulk action and needs to hear it
+    /// landed.
+    private func markAllPlayed() {
+        let count = EpisodeRepository(context: context).markAllPlayed(in: podcast)
+        Announcer.announce(MarkAllPlayedAnnouncement.text(count: count), assertive: true)
     }
 
     /// Podcast-level "Play oldest first" binge entry point (#488). Seeds the
@@ -264,6 +344,25 @@ struct EpisodeListView: View {
                 .font(.headline)
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
+                // Screen-level VoiceOver rotor equivalent of the toolbar button
+                // (#640) — this is a whole-podcast bulk action, not a per-row
+                // one, so there's no natural row to hang it off of. Attached
+                // here (the header title Text), not to the enclosing `List`:
+                // every other `.accessibilityAction(named:)` in this codebase
+                // (NowPlayingScreen transport buttons, ChapterListView rows,
+                // SearchView result rows) hangs off a real accessible leaf
+                // element. A `List` doesn't collapse into one — VoiceOver
+                // lands on its rows/sections, never on the List itself — so an
+                // action attached to the List directly is unreachable from the
+                // rotor. The title is the first element on this screen in every
+                // state (including the empty-list and loading states), so it's
+                // always reachable when there's something to mark. Only
+                // attached when there's something to mark, since a rotor
+                // action can't visually gray itself out the way the toolbar
+                // button can.
+                .markAllPlayedAccessibilityAction(enabled: unplayedCount > 0) {
+                    requestMarkAllPlayed()
+                }
             if let author = podcast.author, !author.isEmpty {
                 Text(author)
                     .font(.subheadline)
@@ -321,5 +420,49 @@ struct EpisodeListView: View {
             return [episode.title, url]
         }
         return [episode.title]
+    }
+}
+
+/// Pure VoiceOver completion wording for "Mark all as played" (#640).
+/// Comma-grouped (`1,204`, not `1204`) so large counts read correctly, and
+/// singular/plural correct for `count == 1`. Kept as a standalone pure
+/// function (not inline in the view) so it's unit-testable without a model
+/// context, mirroring `EpisodeListFilter.announcement(count:)`.
+enum MarkAllPlayedAnnouncement {
+    static func text(count: Int) -> String {
+        let noun = count == 1 ? "episode" : "episodes"
+        return "Marked \(count.formatted()) \(noun) as played"
+    }
+}
+
+/// Pure "Mark all as played" confirmation dialog copy (#640). Extracted
+/// alongside ``MarkAllPlayedAnnouncement`` so the singular/plural,
+/// comma-grouping, and podcast-title interpolation are unit-testable without
+/// standing up the view.
+enum MarkAllPlayedConfirmationCopy {
+    static func title(unplayedCount: Int) -> String {
+        let noun = unplayedCount == 1 ? "episode" : "episodes"
+        return "Mark all \(unplayedCount.formatted()) \(noun) as played?"
+    }
+
+    static func message(unplayedCount: Int, podcastTitle: String) -> String {
+        let noun = unplayedCount == 1 ? "episode" : "episodes"
+        return "This marks all \(unplayedCount.formatted()) unplayed \(noun) in \(podcastTitle) as played. This can't be undone."
+    }
+}
+
+private extension View {
+    /// Conditionally attaches the "Mark all as played" rotor action (#640).
+    /// A rotor action has no way to visually gray itself out the way a
+    /// toolbar button can via `.disabled`, so when there's nothing to mark
+    /// the action is omitted from the accessibility tree entirely rather than
+    /// left attached as a silent no-op.
+    @ViewBuilder
+    func markAllPlayedAccessibilityAction(enabled: Bool, action: @escaping () -> Void) -> some View {
+        if enabled {
+            self.accessibilityAction(named: "Mark all as played", action)
+        } else {
+            self
+        }
     }
 }

@@ -235,6 +235,47 @@ final class PlaybackLogicTests: XCTestCase {
         XCTAssertTrue(PlaybackLogic.shouldPersistTick(currentSecond: 10, lastPersistedSecond: 0, interval: 10))
     }
 
+    // MARK: Post-played stale-tick guard (#653)
+
+    func testDoesNotPersistStaleTickAfterEpisodeMarkedPlayed() {
+        // Reproduces the race: `markCurrentEpisodePlayed()` zeros the position
+        // but never resets `lastPersistedSecond`, so a later tick still satisfies
+        // the plain interval-elapsed condition below. Once `isPlayed` is true the
+        // tick must be refused outright so it can't clobber the zeroed position
+        // with this stale, still-climbing `currentSecond`.
+        XCTAssertTrue(
+            PlaybackLogic.shouldPersistTick(currentSecond: 300, lastPersistedSecond: 200),
+            "sanity check: without the isPlayed guard this tick would persist"
+        )
+        XCTAssertFalse(
+            PlaybackLogic.shouldPersistTick(currentSecond: 300, lastPersistedSecond: 200, isPlayed: true)
+        )
+    }
+
+    func testDoesNotPersistFirstTickWhenAlreadyPlayed() {
+        // Even the "no prior write" case (normally always persists) must be
+        // refused once played — there's nothing left to persist for it.
+        XCTAssertFalse(
+            PlaybackLogic.shouldPersistTick(currentSecond: 0, lastPersistedSecond: nil, isPlayed: true)
+        )
+    }
+
+    func testDoesNotPersistBackwardJumpWhenAlreadyPlayed() {
+        // A backward jump normally forces an immediate persist; isPlayed still
+        // wins because a played episode has no meaningful position to save.
+        XCTAssertFalse(
+            PlaybackLogic.shouldPersistTick(currentSecond: 10, lastPersistedSecond: 40, isPlayed: true)
+        )
+    }
+
+    func testUnplayedTicksUnaffectedByIsPlayedGuard() {
+        // Existing non-played behavior is unchanged, whether isPlayed is passed
+        // explicitly as false or omitted (default).
+        XCTAssertTrue(PlaybackLogic.shouldPersistTick(currentSecond: 0, lastPersistedSecond: nil, isPlayed: false))
+        XCTAssertFalse(PlaybackLogic.shouldPersistTick(currentSecond: 3, lastPersistedSecond: 0, isPlayed: false))
+        XCTAssertTrue(PlaybackLogic.shouldPersistTick(currentSecond: 5, lastPersistedSecond: 0, isPlayed: false))
+    }
+
     func testDefaultIntervalIsCoarserThanOneSecond() {
         // Guards against regressing back to a per-second save.
         XCTAssertGreaterThan(PlaybackLogic.positionPersistInterval, 1)
