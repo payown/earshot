@@ -2801,3 +2801,131 @@ test passed, not flaky).
 New agents created: none.
 
 Overall: PASS.
+
+## Testing Gate — Issue #634 (earshot-testing)
+
+earshot-testing gate complete. Issue #634 (Earshot Plus: on-device StoreKit 2
+receipt validation). Worktree `earshot-wt-634`, branch
+`feat/issue-634-receipt-validation`, starting commit `8f88c84` (domain agent +
+earshot-security PASS + earshot-swift6 PASS, both zero-code-change reviews).
+
+**Coverage assessment against the issue's 4 acceptance criteria + the
+ambiguous-state requirement**, tracing each to specific existing tests (per
+the #640 gate's approach):
+
+1. Entitlement check on app launch + `Transaction.updates` listener observed:
+   `EarshotApp.swift`'s launch `.task` calls `configure(context:)` ->
+   `startObservingTransactionUpdates()` -> `await resync()`, guarded by the
+   same `isRunningTests` pattern already used for
+   `BackgroundFeedRefresher`/`NotificationService` — not unit-tested at the
+   App level, matching that established precedent. Each piece is covered at
+   the component level: `testConfigureLoadsPersistedEntitledFlagWithNoAsyncWork`
+   / `testConfigureDefaultsToNotEntitledWhenNeverPersisted` (configure),
+   `testResyncWithAQualifyingFactGrantsEntitlement` (resync),
+   `testStartObservingTransactionUpdatesResyncsOnEachSignal` +
+   `testCallingStartObservingTwiceDoesNotCrashOrDoubleStart` (listener).
+2. `.verified` grants, `.unverified` denies, logged not silent:
+   `testVerifiedKnownProductProducesAFact` /
+   `testVerifiedKnownProductCarriesRevocationAndExpirationThrough` vs.
+   `testUnverifiedTransactionProducesNoFact`. Both deny branches in
+   `EntitlementFactMapper.fact(from:)` log via `AppLog.monetization.error`
+   before returning nil (confirmed by direct source read and observed in the
+   test log output, e.g. "[monetization] Unverified transaction for
+   media.payown.earshot.plus.lifetime: signature validation failed; not
+   granting entitlement") — this codebase has no log-capture test double
+   anywhere (`AppLog` is a plain `os.Logger` factory), so, consistent with
+   every other gate's practice here, log presence is verified by inspection
+   rather than an assertion on logger output.
+3. Persisted state readable synchronously without hitting StoreKit:
+   `testConfigureLoadsPersistedEntitledFlagWithNoAsyncWork` — `isEntitled` is
+   read immediately after the non-async `configure(context:)`, no `resync()`
+   involved.
+4. Revoked/refunded transactions downgrade entitlement gracefully, without
+   deleting user data: `testRevokedTransactionDowngradesEntitlementOnResync`,
+   `testExpiredSubscriptionDowngradesEntitlementOnResync`, and the explicit
+   regression guard `testResyncDoesNotDeleteAnyUserDataOnRevocation` (inserts
+   a real `Podcast`, revokes entitlement, asserts it survives).
+5. Ambiguous states deny, not grant: unrecognized product ID —
+   `testVerifiedButUnrecognizedProductIDProducesNoFact`; expiration boundary
+   — `testExpirationExactlyNowDoesNotGrantEntitlement` (`expirationDate ==
+   now` denies, not just `< now`).
+
+All 4 criteria plus the ambiguous-state requirement were already directly
+traceable to a specific passing test before this gate touched anything —
+confirms the security and swift6 gates' shared assessment that this issue
+needed no code changes.
+
+**Coverage gap found and closed.** `EntitlementStore.apply(entitled:)`
+persists via `settings?.setBool(...)` / `settings?.setDate(...)` — optional
+chaining against `settings: AppSettingsStore?`, which is `nil` until
+`configure(context:)` runs. In the real launch sequence `configure()` always
+precedes `resync()`, but nothing in `EntitlementStore` itself enforces that
+ordering as a precondition, and no existing test exercised calling
+`resync()` first. That's exactly the kind of edge case in the stateful type
+itself (as opposed to the already-well-covered pure `EntitlementEngine`/
+`EntitlementFactMapper` logic) this gate's mandate calls out. Added 4 tests
+to `EntitlementStoreTests.swift` (no production code changes needed — the
+optional-chaining behavior was already correct, just unasserted):
+
+- `testConfigureLoadsPersistedLastSyncedAt` — `configure(context:)` restores
+  `lastSyncedAt` from a persisted row on its own, without requiring a fresh
+  `resync()` (previously only `isEntitled` was asserted after a
+  configure-only call).
+- `testConfigureLeavesLastSyncedAtNilWhenNeverPersisted` — companion nil case.
+- `testResyncBeforeConfigureUpdatesInMemoryStateWithoutCrashing` — calling
+  `resync()` before `configure()` does not crash and still updates
+  `isEntitled`/`lastSyncedAt` in memory from the freshly computed result.
+- `testResyncBeforeConfigureDoesNotPersistToAppSettingsStore` — companion
+  assertion that the optional-chained persistence calls are true no-ops in
+  that ordering (a later `AppSettingsStore` read against the same context
+  finds nothing written), not a silent partial write.
+
+No production files changed; no extraction was warranted — `EntitlementEngine`
+and `EntitlementFactMapper` are already pure, already isolated into their own
+files, and already have direct fixture-based tests for every branch (see the
+per-criterion trace above), so there was no incidentally-covered pure logic
+left to pull out.
+
+**Full suite.** Baseline confirmed first: `xcodebuild test` on the pinned
+simulator (`id=C7CE2A99-3D54-42BB-8D59-97F7F5A00362`) reproduced exactly
+**1211 executed, 1 skipped, 0 failures** before any test additions. After
+adding the 4 tests above: **1215 executed, 1 skipped (env-gated
+`ScaleDiagnosticTests`, unchanged), 0 failures**. Ran the full suite twice
+(once pre-change to confirm baseline, once post-change) plus a
+`-only-testing` pass scoped to the three Monetization test files
+(30 executed, 0 failures) to iterate quickly while writing the new tests.
+
+**Release build.** `xcodebuild build -configuration Release -destination
+'generic/platform=iOS Simulator'`: **BUILD SUCCEEDED**. Grepped the log for
+"warning:" lines touching "Entitlement"/"Monetization" — zero matches, no new
+warnings in any changed file. (This issue touches no migration/schema files —
+2 plain `AppSetting` rows, no `@Model` — so the IS_BETA_BUILD migration-sheet
+gate scenario doesn't apply here; ran the plain Release build per this gate's
+standing instructions regardless.)
+
+**Regressions found:** none.
+
+Committed the 4 new tests plus this log entry in a single commit on
+`feat/issue-634-receipt-validation` (test-only change, no production code
+touched). Did not push, did not open a PR.
+
+```
+earshot-testing complete. Issue #634.
+
+New tests written: 4
+Previous test count: 1211 executed, 1 skipped, 0 failures
+New test count: 1215 executed, 1 skipped, 0 failures
+Count increased: yes
+
+Release build (IS_BETA_BUILD absent): PASS (plain Release build; no
+migration/schema files touched by this issue)
+PRD acceptance criteria covered: 1 (launch check + Transaction.updates
+listener), 2 (.verified grants / .unverified denies, logged), 3 (persisted
+state readable synchronously), 4 (revoked/refunded downgrades gracefully,
+no data deleted) — plus the ambiguous-state requirement (unrecognized
+product ID, expiration boundary both deny)
+
+Regressions found: none
+
+Overall: PASS
+```

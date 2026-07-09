@@ -35,6 +35,31 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertFalse(store.isEntitled)
     }
 
+    /// ``EntitlementStore/lastSyncedAt`` is read back from the persisted
+    /// ``AppSettingsStore`` row on ``EntitlementStore/configure(context:)``
+    /// alone, without requiring a fresh ``EntitlementStore/resync()`` — a
+    /// future paywall/diagnostics surface (#635) may read this immediately
+    /// after launch, before any StoreKit round trip completes.
+    func testConfigureLoadsPersistedLastSyncedAt() {
+        let context = makeContext()
+        let settings = AppSettingsStore(context: context)
+        let persisted = Date(timeIntervalSince1970: 1_700_000_000)
+        settings.setDate(persisted, for: SettingsKey.earshotPlusEntitlementLastSynced)
+
+        let store = EntitlementStore(source: FakeEntitlementTransactionSource())
+        store.configure(context: context)
+
+        XCTAssertEqual(store.lastSyncedAt, persisted)
+    }
+
+    func testConfigureLeavesLastSyncedAtNilWhenNeverPersisted() {
+        let context = makeContext()
+        let store = EntitlementStore(source: FakeEntitlementTransactionSource())
+        store.configure(context: context)
+
+        XCTAssertNil(store.lastSyncedAt)
+    }
+
     // MARK: resync()
 
     func testResyncWithAQualifyingFactGrantsEntitlement() async {
@@ -134,6 +159,43 @@ final class EntitlementStoreTests: XCTestCase {
 
         let podcasts = try? context.fetch(FetchDescriptor<Podcast>())
         XCTAssertEqual(podcasts?.count, 1)
+    }
+
+    // MARK: Defensive: resync() called before configure()
+
+    /// ``EntitlementStore/configure(context:)`` must run before
+    /// ``EntitlementStore/resync()`` in the real launch sequence
+    /// (`EarshotApp.swift`), but nothing in the type itself enforces that
+    /// ordering — `settings` is a plain optional, not a precondition. Calling
+    /// `resync()` first must not crash (the persistence calls are
+    /// optional-chained no-ops without a configured ``AppSettingsStore``),
+    /// and the in-memory ``EntitlementStore/isEntitled`` must still reflect
+    /// the freshly computed result even though nothing was persisted.
+    func testResyncBeforeConfigureUpdatesInMemoryStateWithoutCrashing() async {
+        let source = FakeEntitlementTransactionSource(facts: [EntitlementFact(product: .plusLifetime)])
+        let store = EntitlementStore(source: source)
+
+        let result = await store.resync()
+
+        XCTAssertTrue(result)
+        XCTAssertTrue(store.isEntitled)
+        XCTAssertNotNil(store.lastSyncedAt)
+    }
+
+    /// Companion to the above: since `resync()` before `configure()` cannot
+    /// persist (no ``AppSettingsStore`` yet), a subsequent `configure()` call
+    /// against a context that was never actually written to must not somehow
+    /// pick up the earlier in-memory-only result.
+    func testResyncBeforeConfigureDoesNotPersistToAppSettingsStore() async {
+        let source = FakeEntitlementTransactionSource(facts: [EntitlementFact(product: .plusLifetime)])
+        let store = EntitlementStore(source: source)
+        _ = await store.resync()
+        XCTAssertTrue(store.isEntitled)
+
+        let context = makeContext()
+        let settings = AppSettingsStore(context: context)
+        XCTAssertFalse(settings.bool(SettingsKey.earshotPlusEntitled, default: false))
+        XCTAssertNil(settings.date(SettingsKey.earshotPlusEntitlementLastSynced))
     }
 
     // MARK: Transaction.updates listener wiring
