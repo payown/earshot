@@ -183,6 +183,48 @@ final class PodcastSettingsViewTests: XCTestCase {
         XCTAssertEqual(p.notificationEnabled, false)
     }
 
+    // MARK: Inbox include toggle (#668)
+    //
+    // Mirrors the Auto-queue section above: PodcastSettingsView now binds a
+    // `Toggle("Include in Inbox", isOn: $podcast.inboxIncluded)` the same way
+    // it binds `autoQueue`, so this field gets the same default/set/toggle/
+    // persist coverage rather than relying solely on the InboxRepository-level
+    // membership tests in DownloadsInboxLogicTests.
+
+    func testInboxIncludedDefaultsToFalse() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        XCTAssertFalse(p.inboxIncluded, "a podcast is not opted into the inbox until the user explicitly includes it")
+    }
+
+    func testInboxIncludedCanBeEnabled() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        p.inboxIncluded = true
+        XCTAssertTrue(p.inboxIncluded)
+    }
+
+    func testInboxIncludedToggle() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        p.inboxIncluded = true
+        p.inboxIncluded.toggle()
+        XCTAssertFalse(p.inboxIncluded, "toggling the settings switch off must flip the model field back")
+    }
+
+    func testInboxIncludedIsPersisted() throws {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        p.inboxIncluded = true
+        try ctx.save()
+
+        let fetched = try ctx.fetch(FetchDescriptor<Podcast>()).first
+        XCTAssertEqual(
+            fetched?.inboxIncluded, true,
+            "the settings Toggle binding must round-trip through the model and survive a save/fetch cycle"
+        )
+    }
+
     // MARK: Multiple settings on the same podcast
 
     func testAllSettingsCanBeConfiguredIndependently() {
