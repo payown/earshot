@@ -4473,3 +4473,50 @@ N/A, untouched by this diff.
 docs-only.
 
 Overall: PASS
+
+## Issue #632 Closed — Earshot Plus paywall / upgrade screen
+
+Implemented by earshot-ui. Gates: earshot-testing, earshot-security,
+earshot-swift6, earshot-accessibility — all PASS (see sections above). Michael
+reviewed the paywall copy/design/VoiceOver flow from text description (no
+device screenshots) per #632's process requirement and approved, contingent
+on one fix.
+
+**Price-sync follow-up (post-approval, before merge):** the local
+`.storekit` test fixtures used flat $20.00/yr and $49.00 lifetime, which
+didn't match the real App Store Connect tiers ($19.99/yr, $49.99 lifetime;
+monthly $2.99 unaffected). Fixed in commit `78cf71e` on the same branch:
+`Configuration.storekit`, `ConfigurationMissingProduct.storekit` (the #631
+missing-product fixture), `EarshotPlusProduct.swift` doc comments, and every
+hardcoded price literal in `PaywallLogicTests.swift`/`PaywallViewModelTests.swift`.
+The "Best value — about 44% off monthly" badge math is unchanged (19.99/12
+still floors to 44%). Confirmed no hardcoded fallback price string exists
+anywhere in the paywall UI/logic — `PaywallView`/`PaywallViewModel` read
+`Product.displayPrice` directly, and `ProductCatalogService` throws
+`CatalogError.productsNotFound` on a missing product rather than falling
+back to a wrong number.
+
+Branch was rebased onto `swift` past #666 (tip jar) before merge — two
+benign parallel-addition conflicts (`CHANGELOG.md`, `project.pbxproj`
+Monetization group children) resolved by keeping both sides; no conflicts in
+`SettingsScreen.swift`/`DataSettingsView.swift` (auto-merged cleanly).
+
+Test count: 1302 executed (1254 baseline + 21 from #666 + 27 from #632: 20
+`PaywallLogicTests` + 3 `PaywallViewModelTests` + 4 `OPMLFileImporterTests`).
+11 unique pre-existing failures (`PaywallViewModelTests` x3,
+`ProductCatalogServiceTests` x8), all the documented `SKInternalErrorDomain
+Code=3` headless-CI StoreKitTest-sandbox limitation (needs Xcode GUI or
+device) — not a regression, tracked against #631/#633/#634/#635/#632
+repeatedly. Release build clean.
+
+Merged via PR #667 (squash), issue closed. Next priority-order item per
+Fix/Flutter-parity queue: continue down the Flutter parity queue (Export
+audio file action, Stop after this episode, Inbox limits per-podcast, Mark
+as played from player, Group move actions in queue, OPML share sheet, Quick
+Actions rotor order) — see "Work Priority Order" in CLAUDE.md.
+
+**Housekeeping note:** this file is ~4500 lines, well past the 400-line
+target. Archiving completed sections to `docs/phases/swiftui/` is overdue
+and out of scope for this narrow session — flagging for the next planning
+session to do a dedicated archive pass rather than mixing it into an
+unrelated fix.
