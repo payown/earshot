@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (closes #429)
 - Behind the scenes: laid the groundwork for an upcoming paid tier, Earshot Plus (monthly, yearly, or one-time lifetime unlock). This is engineering foundation only, nothing to see or buy yet. No paywall, no purchase button, no change to how the app works today. (closes #631)
 - Podcast episode list: a "Mark all as played" toolbar button marks every unplayed episode in that show as played in one step, and dismisses newly-played episodes from your inbox the same way marking a single episode played does. It's disabled with an explanatory hint when there's nothing unplayed left. A confirmation dialog always asks first, naming the podcast and the episode count, and makes clear it can't be undone. (closes #640)
+- Behind the scenes: every pull request into the SwiftUI rewrite now automatically builds the app and runs the full native test suite before it can merge, instead of relying on someone remembering to run tests by hand. Nothing to see or do differently as a user. (closes #656)
 
 ### Changed
 - New episode notifications: when a new episode is found while Earshot is open, the notification no longer interrupts you with a banner and sound. It goes quietly to Notification Center so it doesn't talk over what you're doing or pull screen reader focus away. (closes #421)
