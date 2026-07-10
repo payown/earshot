@@ -3978,4 +3978,173 @@ every prior gate, verified by device/simulator testing, not XCTest.
 Regressions found: none
 
 Overall: PASS
+
+## Security Review — Issue #632
+
+earshot-security review complete. Issue #632 (Earshot Plus: paywall /
+upgrade screen). Branch `feat/issue-632-paywall`, reviewed at HEAD `60d9c47`
+(domain `a166f72` + testing-gate follow-up `6a6f7ee`/`60d9c47`) on top of
+`swift` tip, in isolated worktree `earshot-wt-632`. No fix required.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found. Every `!` in the diff's production
+  files is boolean negation (`!isEntitled`, `!episodes.isEmpty`,
+  `!isRestoring`, etc.).
+- [x] Silent try?: PASS — no new `try?` introduced by this diff. The two
+  `try?` calls that exist in `OPMLFileImporter.swift`
+  (`String(contentsOf:)` at the top of `importFile`, and
+  `Task.sleep(nanoseconds:)` inside `announceSettled`) are both pre-existing
+  lines untouched by this PR — confirmed against the file's diff hunks,
+  which only touch the `onCapSkipped` parameter and its one call site.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new `Task {}` captures `self` on a class.
+  `PaywallViewModel` (the one new reference type) spawns no `Task` of its
+  own; every `Task {}` in the diff lives in a SwiftUI `View` struct
+  (`PaywallView`, `SettingsScreen`, `DataSettingsView`) capturing `model`/
+  local state, which is not a retain-cycle risk for a value type. No new
+  `.sink`, `addObserver`, or `Timer` in this diff.
+- [x] @MainActor: PASS — `PaywallViewModel` is `@MainActor @Observable`;
+  `purchase(_:entitlements:)` and `handle(result:for:entitlements:)` run
+  entirely on the main actor, and `EntitlementStore.resync()` (called from
+  inside `handle`) is itself `@MainActor`-isolated (confirmed by reading
+  `EntitlementStore.swift`'s class declaration). No SwiftData access in
+  this diff at all — `PaywallLogic`/`PaywallProductDisplay` are plain
+  StoreKit-free, SwiftData-free structs.
+- [ ] IS_BETA_BUILD Release build: N/A (no migration-sheet code in this
+  diff) — ran the Release build anyway as a general gate on the pinned
+  simulator (`39E0DF74-2312-4D8B-8612-05AAD43EB8B5`): **BUILD SUCCEEDED**,
+  zero errors/warnings.
+- [ ] Entitlements: N/A — `Earshot.entitlements` untouched;
+  `project.pbxproj` changed only to wire in the five new files
+  (`PaywallLogic.swift`, `PaywallView.swift`, `PaywallViewModel.swift`,
+  `PaywallLogicTests.swift`, `PaywallViewModelTests.swift`) — verified all
+  four required sections present for each (PBXBuildFile, PBXFileReference,
+  group children, PBXSourcesBuildPhase).
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new `Error` types introduced; this diff
+  reuses the existing `SubscriptionError.podcastCapReached` (#635) as a
+  catch target and StoreKit's own `Product.PurchaseResult`/
+  `VerificationResult` enums. No string-thrown errors.
+- [x] AppLog coverage: PASS — every catch/error branch in
+  `PaywallViewModel` logs via `AppLog.monetization.error(...)` (product
+  fetch failure, purchase throw, unverified transaction) before updating
+  state. No empty catch blocks.
+
+Purchase-flow-specific checks (issue-specific, per the task brief):
+1. **`Product.purchase()` verification handling**: PASS. `handle(result:for:
+   entitlements:)` switches on `Product.PurchaseResult` and, within
+   `.success`, on `VerificationResult` explicitly. `.verified(transaction)`
+   is the only path that calls `transaction.finish()` and
+   `entitlements.resync()`. `.unverified(_, error)` never finishes the
+   transaction and never touches entitlement state — it only logs via
+   `AppLog.monetization.error` and sets `outcome = .failed`. This is the
+   same "verify or deny, no middle ground" convention already established
+   and reviewed in `EntitlementFactMapper`/`EntitlementEngine` (#634); the
+   file's own doc comment explicitly calls out mirroring
+   `StoreKitEntitlementSource`'s conservative handling.
+2. **`transaction.finish()` timing**: PASS, reviewed in depth.
+   `transaction.finish()` is called *before* `entitlements.resync()` inside
+   the `.verified` branch, not after. This is a deliberate deviation from
+   the strict WWDC "verify → deliver content → finish" ordering, but it is
+   safe here and does not risk losing a grant: `EntitlementStore.resync()`
+   derives entitlement purely from `Transaction.currentEntitlements`
+   (confirmed by reading `EntitlementStore.swift`'s doc comment and body),
+   which is unaffected by a transaction's finished/unfinished state — only
+   the *redelivery* of that transaction via `Transaction.updates` depends
+   on finish state, not its presence in `currentEntitlements`. If the app
+   crashes between `finish()` and `resync()`, `EarshotApp.swift` calls
+   `entitlements.resync()` unconditionally at every launch (confirmed by
+   reading `EarshotApp.swift:102-103`), which self-heals the flag on next
+   launch by re-deriving it from the still-intact `currentEntitlements`
+   read. No double-finish risk: `purchase(_:entitlements:)` guards
+   re-entrancy with `purchasingProduct == nil` before any StoreKit call is
+   made, so a given `PaywallViewModel` instance can't race itself into two
+   `product.purchase()` calls, and StoreKit itself is the source of truth
+   for whether a given `Transaction` was already finished (finishing an
+   already-finished transaction is a documented safe no-op). The failure
+   path (`catch` around `product.purchase()`, `.pending`, `.userCancelled`,
+   `.unverified`) never calls `finish()`, so a transaction that didn't
+   settle as verified-success is correctly left for `Transaction.updates`
+   to pick up later — no unfinished-transaction leak on the success path,
+   no premature finish on any other path.
+3. **No sensitive data logged**: PASS. Every `AppLog.monetization` call in
+   `PaywallViewModel` logs only `display.product.rawValue` (a product ID
+   string) and `error.localizedDescription` — no transaction ID, no JWS
+   payload, no receipt data, no price. Matches the established
+   `EntitlementStore`/`RestorePurchasesRow` convention exactly (both log
+   `error.localizedDescription` only).
+4. **Race/reentrancy**: PASS, defense in depth at three layers. (a)
+   `PaywallViewModel.purchase(_:entitlements:)` itself: `guard
+   purchasingProduct == nil, let product = products[display.product] else
+   { return }` — a second call while one is in flight is a no-op. (b) Each
+   product's purchase `Button` in `PaywallView.productCard(_:badge:)`:
+   `.disabled(model.purchasingProduct != nil || model.outcome == .success)`.
+   (c) The whole `loadedView` scroll content:
+   `.disabled(model.purchasingProduct != nil)`. This exactly mirrors
+   `RestorePurchasesRow`'s `guard !isRestoring else { return }` +
+   `.disabled(isRestoring)` busy-guard pattern cited in the task brief.
+5. **Failure/cancellation paths never silently swallow errors**: PASS.
+   `product.purchase()`'s thrown-error catch, the `.unverified` branch, and
+   the `@unknown default` case all log via `AppLog.monetization.error`
+   before updating `outcome`. `.userCancelled` is the one path that
+   deliberately does not log or set `outcome` — this is correct, documented
+   behavior (not a swallowed error): cancellation is a normal user action,
+   not a failure, and the doc comment on `PaywallPurchaseOutcome` explains
+   why it has no case for it. `.pending` also doesn't log (also correct —
+   not an error, it's Ask-to-Buy/parental-approval, a valid non-failure
+   settlement state, and it does update `outcome = .pending` so the UI
+   reflects it).
+6. **`onCapSkipped` additive-only**: PASS, confirmed by reading the diff
+   hunk directly. New parameter `onCapSkipped: (@MainActor @Sendable () ->
+   Void)? = nil` defaults to `nil`; the one new call
+   (`onCapSkipped?()`) fires only inside the existing `if
+   outcome.skippedForCapCount > 0` branch, strictly after the existing
+   `announceSettled` message is composed and in addition to it (the
+   `await announceSettled(message)` call and its `return
+   outcome.importedCount` are unchanged and unmoved). No new
+   fetch/save/logic path — it's a single closure invocation appended to an
+   existing branch. `DataSettingsView`'s only call site
+   (`OPMLFileImporter.importFile(...)`) adds the new argument as a trailing
+   closure that just flips local `@State private var showPaywall`; every
+   other existing call site (onboarding, share-extension `onOpenURL`, and
+   all `OPMLFileImporterTests` cases not specifically testing the new
+   parameter) is untouched and continues to pass no closure. Verified this
+   compiles and behaves correctly via the 8/8 passing
+   `OPMLFileImporterTests` (including 4 new `onCapSkipped`-specific cases)
+   run myself on the pinned simulator.
+7. **Entitlements / project.pbxproj**: PASS — see checklist item above.
+   Nothing StoreKit-adjacent in this issue required a new entitlement
+   (StoreKit purchases don't need an App Group or any other capability);
+   `project.pbxproj` diff is pure xcodegen file-wiring, all four required
+   sections present for all five new files, no other project settings
+   touched.
+
+Build + test verification (ran myself on the pinned simulator
+`39E0DF74-2312-4D8B-8612-05AAD43EB8B5`, booted, `xcodebuild` run from
+`EarshotSwift/` with no `cd` to repo root):
+- Release build: **BUILD SUCCEEDED**, 0 errors, 0 warnings.
+- `PaywallLogicTests`: 20/20 passed (pure StoreKit-free logic — full
+  coverage, no environment limitation).
+- `OPMLFileImporterTests`: 8/8 passed, including all 4 new
+  `onCapSkipped`-specific cases.
+- `PaywallViewModelTests`: 3/3 failed — independently reproduced and
+  confirmed these are exactly the documented, pre-existing
+  `SKInternalErrorDomain Code=3` local-StoreKit-test-daemon limitation
+  (`[SKTestSession] Error saving configuration file:` in the log output),
+  the same failure signature already carried as a known environment gap
+  for `ProductCatalogServiceTests` since #631 and re-confirmed in the
+  #635 and testing-gate-#632 reviews above. Not a #632 regression — the
+  logic these tests exercise (`loadProducts()`'s delegation to
+  `ProductCatalogService.fetchEarshotPlusProducts()`) is otherwise
+  identical to already-covered code, and the StoreKit-free logic it feeds
+  (`PaywallLogic`) is fully covered and passing.
+
+New agents created: none.
+Feature suggestions identified: none this review — #632 itself already
+covers the natural iOS-native surface (StoreKit 2 paywall); no additional
+Siri Shortcut / Live Activity / Spotlight / Focus filter / Share Extension
+opportunity was identified specific to this diff's purchase-flow code that
+isn't already tracked by an existing open issue.
+
+Overall: PASS
 ```
