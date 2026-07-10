@@ -214,9 +214,21 @@ wording (drop "are opt-out and anonymized," since there's nothing to opt out
 of). Flagging it here rather than editing CLAUDE.md myself, since that's
 outside this issue's scope.
 
-## Worth flagging for Michael's judgment call
+## DECIDED: Send Feedback email diagnostics stay OUT of the nutrition label
 
-**Send Feedback email diagnostics.** `FeedbackComposer.swift` appends an
+**Michael's decision, 2026-07-10:** the Send Feedback email device info is
+deliberately NOT declared in the App Privacy nutrition label. Reasoning
+(settled — do not re-litigate on future updates): the info is composed into an
+email in the user's own Mail app and only sent if the user themselves taps
+Send. User-initiated email content that the person reviews and sends from their
+own mail account is not app-collected data under Apple's definition, so it
+needs no nutrition-label entry. This note is recorded here so future submission
+updates don't second-guess the call. The analysis that led to it is preserved
+below for reference.
+
+---
+
+**Send Feedback email diagnostics (analysis).** `FeedbackComposer.swift` appends an
 "anonymized system info" block (app version, build number, iOS version,
 device model string) to the feedback email body when the user opts in.
 
@@ -244,6 +256,7 @@ doesn't need its own nutrition-label entry.
 2. Confirm the Purchases entry once more right before submission, in case
    any monetization code changes between now and the App Store 1.0 launch
    milestone closing.
-3. Decide on the Send Feedback diagnostics question above.
+3. ~~Decide on the Send Feedback diagnostics question.~~ DECIDED 2026-07-10:
+   stays out of the nutrition label (see the DECIDED section above).
 4. Submit in App Store Connect, then update this file (or note in the PR)
    with the final submitted answers for the record.
