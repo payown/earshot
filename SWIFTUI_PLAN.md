@@ -1453,6 +1453,73 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 
 ## Data Decisions
 
+### Issue #634 — On-device StoreKit 2 receipt validation (Earshot Plus entitlement)
+- **No new SwiftData model, no schema bump.** Entitlement state is two
+  `AppSetting` key/value rows (`earshot_plus_entitled`,
+  `earshot_plus_entitlement_last_synced`), following the exact pattern
+  `TipsStore` already uses for "small piece of app state that should survive
+  relaunch." A dedicated `@Model` would have forced an `EarshotSchemaV5` bump
+  and a migration test purely to persist one bool + one date — not justified.
+- **Three-layer split, StoreKit isolated to one file.** `EntitlementFact`
+  (Domain) is a plain Sendable struct with no StoreKit import.
+  `EntitlementEngine` (Domain) is a pure, synchronous
+  `[EntitlementFact] -> Bool` decision function. `RawTransactionResult` +
+  `EntitlementFactMapper` (Domain) do the verify/reject mapping
+  (`VerificationResult`-shaped but StoreKit-free) so that logic is unit
+  testable with plain fixtures. `StoreKitEntitlementSource` (Data) is the
+  *only* type that imports `StoreKit` and touches
+  `Transaction.currentEntitlements` / `Transaction.updates` directly — it
+  reduces each real `VerificationResult<Transaction>` to a
+  `RawTransactionResult` and hands it to the pure mapper. `EntitlementStore`
+  (Data) wires persistence + an `EntitlementTransactionSource` together and
+  owns the listener lifecycle. This was worth the extra file because the
+  issue explicitly required the verify/reject and grant/deny logic to be
+  testable without a real or `SKTestSession`-simulated StoreKit environment
+  — `EntitlementFactMapperTests` and `EntitlementEngineTests` need zero
+  StoreKit setup as a result.
+- **`Transaction.updates` recomputes from scratch, not incrementally.**
+  `EntitlementTransactionSource.updateSignals()` carries no payload — a
+  signal just means "call `currentFacts()` again." Simpler and more robust
+  than trying to apply one transaction update as a delta against unknown
+  prior state, and it's the same code path Restore Purchases (#633) needs
+  anyway (`EntitlementStore.resync()`).
+- **`transaction.finish()` scoped to the three Plus products only.** The
+  `Transaction.updates` listener finishes verified transactions for
+  `EarshotPlusProduct.earshotPlusProducts` (entitlement granted = content
+  delivered), but deliberately leaves tip jar consumable transactions
+  unfinished — finishing a consumable is part of granting its content, which
+  is #636's job, not entitlement tracking's.
+  Unverified/unrecognized-product transactions are also left unfinished.
+- **Ambiguous-state resolutions (all denied, per Michael's explicit rule):**
+  unverified `VerificationResult` (unwrapped, logged via `AppLog.monetization`,
+  no fact produced); a verified transaction whose `productID` doesn't match
+  any `EarshotPlusProduct` case (unrecognized/retired ID — logged, no fact);
+  a fact whose `revocationDate` is set, regardless of any other field; a
+  subscription fact whose `expirationDate` is at or before `now` (defensive —
+  `Transaction.currentEntitlements` is documented to already exclude expired
+  subscriptions, but the engine doesn't trust that alone). None of these has
+  a "grant" branch anywhere in `EntitlementEngine` or `EntitlementFactMapper`.
+- **Listener lifecycle.** `EntitlementStore.startObservingTransactionUpdates()`
+  is called once from `EarshotApp`'s launch `.task` (same place
+  `BackgroundFeedRefresher`/`NotificationService` are wired), guarded by the
+  existing `isRunningTests` check. It's a `Task { [weak self] in ... }`
+  stored on the store and is idempotent (a second call is a no-op) so the
+  call site doesn't need to track whether it already started — matches the
+  existing `Task { [weak self] in ... }` pattern already used in
+  `PlayerService`.
+- **Public API for #633/#635 to build on:** `EntitlementStore.isEntitled`
+  (sync, reflects last-persisted state, no StoreKit round trip),
+  `EntitlementStore.configure(context:)` (load persisted state, call once at
+  launch before reading `isEntitled`), `EntitlementStore.resync() async ->
+  Bool` (forces a fresh StoreKit read + persist; #633's Restore Purchases
+  should call this after `AppStore.sync()`), and
+  `EntitlementStore.lastSyncedAt` (diagnostics).
+- **No user data deleted on revocation.** `EntitlementStore` only ever writes
+  its own two `AppSetting` rows; a regression test
+  (`testResyncDoesNotDeleteAnyUserDataOnRevocation`) asserts a `Podcast`
+  survives a revoke-then-resync round trip. Cap enforcement / lapse behavior
+  is #635's scope, not this issue's.
+
 ### Issue #425 — Freeze V2, add V3 + drift detection (launch-crash hardening)
 - **Frozen-schema architecture.** `EarshotSchemaV2` is now a verbatim frozen
   snapshot (nested `@Model` types) of the 10-entity graph as it shipped at #337
@@ -2527,3 +2594,340 @@ delta.
 
 Overall: PASS. Committed the `MarkAllPlayedConfirmationCopy` extraction and
 its 6 tests to this branch (`feat/issue-640-mark-all-played`).
+
+## Security Review — Issue #634
+
+earshot-security review complete. Issue #634 (Earshot Plus: on-device
+StoreKit 2 receipt validation). Branch `feat/issue-634-receipt-validation`,
+commit `3fa62af` on top of `swift` tip `b01974f`, reviewed in worktree
+`earshot-wt-634`.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found in any changed file. Every `!` match
+  is boolean negation (`!isRunningTests`, `!store.isEntitled`), not a
+  force-unwrap.
+- [x] Silent try?: PASS — none in the 5 new production Monetization files.
+  The 2 `try?` in `AppSettingsStore.swift` are pre-existing (this diff only
+  appended 9 lines of new `SettingsKey` constants), out of scope. The 2
+  `try?` in `EntitlementStoreTests.swift` match the existing
+  `ScaleDiagnosticTests.swift` test-only pattern against a fresh in-memory
+  context.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — `EntitlementStore.startObservingTransactionUpdates()`
+  uses `Task { [weak self] in ... guard let self else { return } ... }`, and
+  captures a local `source` (not `self`) for the `AsyncStream`.
+- [x] @MainActor: PASS — `EntitlementStore` is `@MainActor @Observable`;
+  `isEntitled`/`settings` mutation is fully main-actor-serialized, including
+  across the `resync()` await gap. `startObservingTransactionUpdates()`
+  double-call safety verified by `testCallingStartObservingTwiceDoesNotCrashOrDoubleStart`.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration/schema files changed
+  (entitlement state is 2 plain `AppSetting` rows, no `@Model`/schema bump).
+- [ ] Entitlements: N/A — `Earshot.entitlements`/App Group settings untouched;
+  `project.pbxproj` diff is the expected xcodegen wiring for 8 new files.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — deny states are `nil` returns + `AppLog.monetization`
+  logging (the module's explicit "ambiguous -> deny, never throw" design), no
+  typed `Error` needed.
+- [x] AppLog coverage: PASS — both deny branches in
+  `EntitlementFactMapper.fact(from:)` log via `AppLog.monetization.error`
+  before returning nil.
+
+Core receipt-validation correctness, verified directly against source:
+1. Verified-only gate: `EntitlementFactMapper.fact(from:)` has no branch
+   producing a fact from `.unverified` — confirmed by
+   `EntitlementFactMapperTests`.
+2. No product-ID bypass: the only ID→product path is
+   `EarshotPlusProduct(rawValue:)`; unrecognized IDs deny and log.
+   `EntitlementEngine.grantsEntitlement` re-checks
+   `earshotPlusProducts.contains(fact.product)` as a second gate, so tip-jar
+   facts are denied even if one reached the engine.
+3. Revocation/expiration: both checked independently
+   (`revocationDate == nil` AND `expirationDate` not `<= now`); boundary case
+   (expiration exactly now) denies, not grants
+   (`testExpirationExactlyNowDoesNotGrantEntitlement`).
+4. `transaction.finish()` scoped correctly: only called after the mapper
+   produces a fact AND it's one of the 3 Plus products (non-tip, verified,
+   recognized). Unfinished tip/unverified/unrecognized transactions can't
+   cause duplicate-entitlement or resource exhaustion because
+   `EntitlementEngine` denies non-qualifying facts on every redelivery and
+   `resync()` is an idempotent full recomputation each call.
+5. No test-only backdoors: no `#if DEBUG` entitlement grants, no
+   hardcoded-ID special-casing in `StoreKitEntitlementSource`;
+   `FakeEntitlementTransactionSource` lives only in the test target, behind
+   the `EntitlementTransactionSource` protocol, never reachable from
+   `EarshotApp.swift` (which constructs the real `StoreKitEntitlementSource`).
+
+No server-side/third-party receipt validation anywhere: confirmed —
+`StoreKitEntitlementSource` is the only file importing `StoreKit`, calling
+only local on-device `Transaction.currentEntitlements`/`Transaction.updates`.
+No network calls, no backend endpoint, no third-party SDK in the diff.
+
+Test suite: ran the full pinned-simulator suite
+(`platform=iOS Simulator,id=C7CE2A99-3D54-42BB-8D59-97F7F5A00362`) as a
+confirmation pass. Result: 1211 executed, 1 skipped, 0 failures — matches the
+domain agent's stated baseline exactly. No fixes were needed, so no
+additional commit was made on this branch.
+
+Feature suggestions identified: none this review.
+
+Overall: PASS.
+
+## Swift 6 Review — Issue #634 (earshot-swift6)
+
+earshot-swift6 review complete. Issue #634 (Earshot Plus: on-device StoreKit 2
+receipt validation). Worktree `earshot-wt-634`, branch
+`feat/issue-634-receipt-validation`, commit `c88ceae`. Required because the
+diff introduces an async `Transaction.updates` listener task and
+actor-isolated entitlement state.
+
+Concurrency mode: project.yml has `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (Swift 6 not yet flipped on for this
+target — tracked by #390). Reviewed under the project's real committed
+settings and under a forced `SWIFT_STRICT_CONCURRENCY=complete` override to
+surface anything the eventual migration would catch.
+
+Checklist:
+- [x] Sendable conformance: PASS. `EntitlementFact` (`Sendable, Equatable`,
+  all-value-type stored properties: `EarshotPlusProduct` (itself `String,
+  CaseIterable, Sendable`), two `Date?`), `RawTransactionResult` (`Sendable,
+  Equatable` enum, associated values all value types), `EntitlementEngine`
+  and `EntitlementFactMapper` (stateless case-less enums, trivially
+  Sendable) are all correctly usable off the main actor / in plain unit
+  tests with no StoreKit involved. `EntitlementTransactionSource` is
+  declared `Sendable`; `StoreKitEntitlementSource` (a `struct` with zero
+  stored properties) satisfies it for real, not via `@unchecked`.
+- [x] Actor isolation: PASS. `EntitlementStore` is `@MainActor @Observable
+  final class` with no escape hatches (no `nonisolated`, no
+  `nonisolated(unsafe)`, no `@unchecked Sendable` in production code). Every
+  stored property (`isEntitled`, `lastSyncedAt`, `settings`, `source`,
+  `listenerTask`) is mutated only from methods on this MainActor-isolated
+  type. `resync()`'s suspension point (`await source.currentFacts()`)
+  resumes back on the main actor automatically because the enclosing method
+  is MainActor-isolated — `apply(entitled:)` runs on the main actor both
+  before and after the await, confirmed by zero diagnostics under forced
+  `SWIFT_STRICT_CONCURRENCY=complete`.
+- [x] `listenerTask` double-start guard: PASS, race-free. `guard
+  listenerTask == nil else { return }` and the subsequent `listenerTask =
+  Task { ... }` assignment are both synchronous, with no `await` between
+  them, inside a synchronous (non-`async`) MainActor method. Actor-isolated
+  synchronous code cannot be preempted mid-execution by a second call to the
+  same method — two calls from `EarshotApp.swift`'s `.task` (even a
+  hypothetical re-run) execute this method to completion one at a time on
+  the main actor, so there is no reentrancy window. Covered by
+  `testCallingStartObservingTwiceDoesNotCrashOrDoubleStart`.
+- [x] `EntitlementTransactionSource: Sendable` / `StoreKitEntitlementSource`
+  Sendability: PASS (see above). `updateSignals()`'s `AsyncStream<Void>`
+  construction is correct: the build closure runs synchronously inside
+  `AsyncStream.init`, so the internal `Task { for await result in
+  Transaction.updates { ... } }` is created with the *static* isolation of
+  `updateSignals()` itself (a plain nonisolated struct method) — not the
+  caller's actor — so this listener loop correctly runs off the main actor,
+  appropriate for a pure StoreKit-listening/processing loop that touches no
+  UI state. `continuation.yield(())` and `continuation.onTermination = { _
+  in task.cancel() }` are both safe: `AsyncStream.Continuation` is designed
+  to be called from any concurrent context, and `task.cancel()` is captured
+  by value (`Task` is `Sendable`). Cancellation propagates correctly:
+  `EntitlementStore.stopObservingTransactionUpdates()` cancels
+  `listenerTask`, which cancels its `for await` loop over
+  `source.updateSignals()`, whose consumer-side cancellation tears down the
+  `AsyncStream` and fires `onTermination`, cancelling the inner
+  `Transaction.updates` task.
+- [x] `[weak self]` capture in the listener `Task`: PASS. Inside
+  `startObservingTransactionUpdates()`'s `Task { [weak self] in for await _
+  in source.updateSignals() { guard let self else { return }; await
+  self.resync() } }`, the `Task{}` itself inherits `@MainActor` isolation
+  from its enclosing (MainActor) method, so every loop iteration resumes on
+  the main actor. `guard let self else { return }` synchronously produces a
+  strongly-retained local binding on the main actor before the `await
+  self.resync()` call, so there is no window where a weakly-captured,
+  possibly-deallocated `self` is read racily — the strong reference is held
+  for the full synchronous span leading into the isolated `resync()` call.
+- [x] `Transaction`/`VerificationResult` Sendability: PASS. Confirmed
+  empirically, not just by assumption — the forced
+  `SWIFT_STRICT_CONCURRENCY=complete` build produced zero diagnostics
+  anywhere in `EntitlementTransactionSource.swift`, meaning the compiler
+  accepted `VerificationResult<Transaction>` crossing into
+  `Self.processUpdate(result)` (an `async` static function) and `Transaction`
+  crossing into `await transaction.finish()` under full strict checking, not
+  merely under today's `minimal` setting.
+- [x] `EntitlementFact`/`EntitlementEngine`/`EntitlementFactMapper`/
+  `RawTransactionResult` Sendable: PASS (see Sendable conformance above) —
+  all four are usable synchronously from any context, confirmed by
+  `EntitlementEngineTests` and `EntitlementFactMapperTests` calling them with
+  no actor annotation and no async required.
+- [x] Structured concurrency: PASS. No `Task.detached` anywhere in the diff.
+  Both `Task{}` usages (`EntitlementStore.startObservingTransactionUpdates()`
+  and `StoreKitEntitlementSource.updateSignals()`) are plain `Task{}`,
+  correctly long-running-but-cancellable via `stopObservingTransactionUpdates()`
+  / `AsyncStream.Continuation.onTermination`, not orphaned.
+- [x] Global state: PASS. None introduced; `EntitlementStore` is
+  instance-owned (`@State private var entitlements = EntitlementStore()` in
+  `EarshotApp.swift`), no new `static var`.
+- [x] Swift 6 build clean (for the new/changed files): PASS. Zero errors or
+  warnings anywhere in the six Monetization files or three test files under
+  both the project's real settings and forced
+  `SWIFT_STRICT_CONCURRENCY=complete`.
+
+Build detail:
+- Normal build (`xcodebuild build`, default settings, pinned iPhone 17 sim):
+  **BUILD SUCCEEDED**, zero warnings anywhere in the log (the one line
+  matching "warning:" is an unrelated `appintentsmetadataprocessor` Info
+  line, not a compiler diagnostic).
+- `SWIFT_STRICT_CONCURRENCY=complete` override: **BUILD FAILED**, but only on
+  the three previously-documented pre-existing baseline issues (identical to
+  the #639/#631/#640 gate reports): `QueueRepository.swift:345` `KeyPath`-not-
+  `Sendable` warning, `QueueScreen.swift:100` compiler-internal "failed to
+  produce diagnostic" crash, `QuickActionRepository.swift:64` `KeyPath`-not-
+  `Sendable` warning. Grepped the full log for "Monetization" and
+  "Entitlement" in both error and warning lines — zero matches. None of this
+  issue's files are touched by any of the three baseline diagnostics.
+
+Precision on the Swift-6-strict-concurrency-clean question (relevant to
+#390): this diff's own files are genuinely Swift-6-strict-concurrency-clean
+today, not merely "compiles fine under minimal mode" — verified by actually
+building them under `SWIFT_STRICT_CONCURRENCY=complete`, not by inspection
+alone. The *project* as a whole is still not strict-concurrency-clean (the
+three baseline diagnostics above, tracked by #390), but nothing in this
+issue adds to that debt.
+
+Test verification: no fixes were needed, so no additional commit. Ran the
+full pinned-simulator suite once as confirmation:
+`xcodebuild test -project Earshot.xcodeproj -scheme Earshot -destination
+'platform=iOS Simulator,id=C7CE2A99-3D54-42BB-8D59-97F7F5A00362'` — **1211
+executed, 1 skipped, 0 failures**, matching the stated baseline exactly,
+including all 24 new `EntitlementEngineTests`/`EntitlementFactMapperTests`/
+`EntitlementStoreTests` cases (the async
+`testStartObservingTransactionUpdatesResyncsOnEachSignal` listener-wiring
+test passed, not flaky).
+
+New agents created: none.
+
+Overall: PASS.
+
+## Testing Gate — Issue #634 (earshot-testing)
+
+earshot-testing gate complete. Issue #634 (Earshot Plus: on-device StoreKit 2
+receipt validation). Worktree `earshot-wt-634`, branch
+`feat/issue-634-receipt-validation`, starting commit `8f88c84` (domain agent +
+earshot-security PASS + earshot-swift6 PASS, both zero-code-change reviews).
+
+**Coverage assessment against the issue's 4 acceptance criteria + the
+ambiguous-state requirement**, tracing each to specific existing tests (per
+the #640 gate's approach):
+
+1. Entitlement check on app launch + `Transaction.updates` listener observed:
+   `EarshotApp.swift`'s launch `.task` calls `configure(context:)` ->
+   `startObservingTransactionUpdates()` -> `await resync()`, guarded by the
+   same `isRunningTests` pattern already used for
+   `BackgroundFeedRefresher`/`NotificationService` — not unit-tested at the
+   App level, matching that established precedent. Each piece is covered at
+   the component level: `testConfigureLoadsPersistedEntitledFlagWithNoAsyncWork`
+   / `testConfigureDefaultsToNotEntitledWhenNeverPersisted` (configure),
+   `testResyncWithAQualifyingFactGrantsEntitlement` (resync),
+   `testStartObservingTransactionUpdatesResyncsOnEachSignal` +
+   `testCallingStartObservingTwiceDoesNotCrashOrDoubleStart` (listener).
+2. `.verified` grants, `.unverified` denies, logged not silent:
+   `testVerifiedKnownProductProducesAFact` /
+   `testVerifiedKnownProductCarriesRevocationAndExpirationThrough` vs.
+   `testUnverifiedTransactionProducesNoFact`. Both deny branches in
+   `EntitlementFactMapper.fact(from:)` log via `AppLog.monetization.error`
+   before returning nil (confirmed by direct source read and observed in the
+   test log output, e.g. "[monetization] Unverified transaction for
+   media.payown.earshot.plus.lifetime: signature validation failed; not
+   granting entitlement") — this codebase has no log-capture test double
+   anywhere (`AppLog` is a plain `os.Logger` factory), so, consistent with
+   every other gate's practice here, log presence is verified by inspection
+   rather than an assertion on logger output.
+3. Persisted state readable synchronously without hitting StoreKit:
+   `testConfigureLoadsPersistedEntitledFlagWithNoAsyncWork` — `isEntitled` is
+   read immediately after the non-async `configure(context:)`, no `resync()`
+   involved.
+4. Revoked/refunded transactions downgrade entitlement gracefully, without
+   deleting user data: `testRevokedTransactionDowngradesEntitlementOnResync`,
+   `testExpiredSubscriptionDowngradesEntitlementOnResync`, and the explicit
+   regression guard `testResyncDoesNotDeleteAnyUserDataOnRevocation` (inserts
+   a real `Podcast`, revokes entitlement, asserts it survives).
+5. Ambiguous states deny, not grant: unrecognized product ID —
+   `testVerifiedButUnrecognizedProductIDProducesNoFact`; expiration boundary
+   — `testExpirationExactlyNowDoesNotGrantEntitlement` (`expirationDate ==
+   now` denies, not just `< now`).
+
+All 4 criteria plus the ambiguous-state requirement were already directly
+traceable to a specific passing test before this gate touched anything —
+confirms the security and swift6 gates' shared assessment that this issue
+needed no code changes.
+
+**Coverage gap found and closed.** `EntitlementStore.apply(entitled:)`
+persists via `settings?.setBool(...)` / `settings?.setDate(...)` — optional
+chaining against `settings: AppSettingsStore?`, which is `nil` until
+`configure(context:)` runs. In the real launch sequence `configure()` always
+precedes `resync()`, but nothing in `EntitlementStore` itself enforces that
+ordering as a precondition, and no existing test exercised calling
+`resync()` first. That's exactly the kind of edge case in the stateful type
+itself (as opposed to the already-well-covered pure `EntitlementEngine`/
+`EntitlementFactMapper` logic) this gate's mandate calls out. Added 4 tests
+to `EntitlementStoreTests.swift` (no production code changes needed — the
+optional-chaining behavior was already correct, just unasserted):
+
+- `testConfigureLoadsPersistedLastSyncedAt` — `configure(context:)` restores
+  `lastSyncedAt` from a persisted row on its own, without requiring a fresh
+  `resync()` (previously only `isEntitled` was asserted after a
+  configure-only call).
+- `testConfigureLeavesLastSyncedAtNilWhenNeverPersisted` — companion nil case.
+- `testResyncBeforeConfigureUpdatesInMemoryStateWithoutCrashing` — calling
+  `resync()` before `configure()` does not crash and still updates
+  `isEntitled`/`lastSyncedAt` in memory from the freshly computed result.
+- `testResyncBeforeConfigureDoesNotPersistToAppSettingsStore` — companion
+  assertion that the optional-chained persistence calls are true no-ops in
+  that ordering (a later `AppSettingsStore` read against the same context
+  finds nothing written), not a silent partial write.
+
+No production files changed; no extraction was warranted — `EntitlementEngine`
+and `EntitlementFactMapper` are already pure, already isolated into their own
+files, and already have direct fixture-based tests for every branch (see the
+per-criterion trace above), so there was no incidentally-covered pure logic
+left to pull out.
+
+**Full suite.** Baseline confirmed first: `xcodebuild test` on the pinned
+simulator (`id=C7CE2A99-3D54-42BB-8D59-97F7F5A00362`) reproduced exactly
+**1211 executed, 1 skipped, 0 failures** before any test additions. After
+adding the 4 tests above: **1215 executed, 1 skipped (env-gated
+`ScaleDiagnosticTests`, unchanged), 0 failures**. Ran the full suite twice
+(once pre-change to confirm baseline, once post-change) plus a
+`-only-testing` pass scoped to the three Monetization test files
+(30 executed, 0 failures) to iterate quickly while writing the new tests.
+
+**Release build.** `xcodebuild build -configuration Release -destination
+'generic/platform=iOS Simulator'`: **BUILD SUCCEEDED**. Grepped the log for
+"warning:" lines touching "Entitlement"/"Monetization" — zero matches, no new
+warnings in any changed file. (This issue touches no migration/schema files —
+2 plain `AppSetting` rows, no `@Model` — so the IS_BETA_BUILD migration-sheet
+gate scenario doesn't apply here; ran the plain Release build per this gate's
+standing instructions regardless.)
+
+**Regressions found:** none.
+
+Committed the 4 new tests plus this log entry in a single commit on
+`feat/issue-634-receipt-validation` (test-only change, no production code
+touched). Did not push, did not open a PR.
+
+```
+earshot-testing complete. Issue #634.
+
+New tests written: 4
+Previous test count: 1211 executed, 1 skipped, 0 failures
+New test count: 1215 executed, 1 skipped, 0 failures
+Count increased: yes
+
+Release build (IS_BETA_BUILD absent): PASS (plain Release build; no
+migration/schema files touched by this issue)
+PRD acceptance criteria covered: 1 (launch check + Transaction.updates
+listener), 2 (.verified grants / .unverified denies, logged), 3 (persisted
+state readable synchronously), 4 (revoked/refunded downgrades gracefully,
+no data deleted) — plus the ambiguous-state requirement (unrecognized
+product ID, expiration boundary both deny)
+
+Regressions found: none
+
+Overall: PASS
+```
