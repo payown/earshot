@@ -3356,3 +3356,88 @@ New agents created: none — no CarPlay or background-URLSession-delegate
 pattern encountered in this diff to warrant one.
 
 Overall: PASS
+
+## Accessibility Review — Issue #635
+
+earshot-accessibility review complete. Issue #635 (Earshot Plus: enforce
+10-podcast free tier cap). Reviewed at HEAD `114fd0e` (domain `cfc9b9b` +
+security fix `31d1cbf` + docs `72a7cf9`/`114fd0e`) in isolated worktree
+`earshot-wt-635`, branch `feat/issue-635-podcast-cap`. One fix applied at
+commit `bae6125`.
+
+Checklist:
+- [x] Library "Read-only" indicator: PASS. `Label("Read-only", systemImage:
+  "lock.fill")` is icon+text, not color alone; it's
+  `.accessibilityHidden(true)` because the same text ("Read-only, upgrade
+  to Earshot Plus to make changes") is folded into
+  `rowLabel(for:isReadOnly:)`, which becomes the row's ONE
+  `.accessibilityLabel(...)` (an explicit `accessibilityLabel` overrides
+  `.accessibilityElement(children: .combine)` entirely, so there's no
+  duplicate node/double-read). Verified by reading `row(for:)` and
+  `rowLabel(for:isReadOnly:)` together, not assuming from a partial read.
+- [x] Rotor actions on a read-only row: PASS, no fix needed.
+  `rotorActions(for:)` builds toggleNotifications/toggleAutoQueue/
+  unsubscribe/share — none of these add a subscription (the only thing
+  #635 gates at the repository layer), so none silently no-op or behave
+  oddly on a read-only podcast. Unsubscribe deliberately still works
+  (frees a slot).
+- [x] Cap-reached error surfacing: PASS. `AddFeedView`'s existing
+  icon+text error `Section` now displays
+  `SubscriptionError.podcastCapReached.errorDescription` verbatim ("You've
+  reached the 10-podcast limit on the free plan (currently 10). Upgrade to
+  Earshot Plus for unlimited podcasts.") — plain language, states limit +
+  current count + remedy. `SearchView`/`PodcastPreviewView`'s catch blocks
+  now speak the same specific message via `Announcer.announce` instead of
+  a generic "Couldn't follow {title}."
+- [x] OPML partial-import skip messaging: PASS. `OPMLImportOutcome`
+  (importedCount + skippedForCapCount) threads through to
+  `OPMLFileImporter.importFile`'s extended announcement. Verified the
+  skipped count runs through `String(localized: "^[...](inflect: true)")`
+  the same way the existing `imported` count does, so singular/plural both
+  resolve correctly. Reachable via the existing `announceSettled` (0.5s
+  delay + `assertive: true`), clear about the cap and the upgrade path.
+- [x] Dynamic Type / touch targets: PASS. No `.frame(` anywhere in
+  `SubscriptionsView.swift`; the new Label uses `.font(.caption)` (semantic,
+  matches the adjacent episode-count caption) with no `lineLimit`. At AX5
+  the caption `HStack` may wrap to a second line (no `Spacer`/priority
+  tuning) but nothing clips, and VoiceOver reads the correct combined label
+  regardless of visual wrap.
+
+FINDING — fixed, not just flagged: no live announcement existed for a
+*mid-session* entitlement transition. `EntitlementStore.resync()` can flip
+`isEntitled` at any time (the `Transaction.updates` listener — expiry,
+refund, another device), not just at launch. If that happens while the
+Library is open, several rows can flip read-only status at once with
+nothing telling the user — the row-level indicator is a passive disclosure
+only heard by revisiting that exact row, unlike every other consequential
+state change this app actively announces (speed, sleep timer, queue
+changes, download complete). This didn't violate the issue's literal text
+(the row indicator IS the required "visible, VoiceOver-reachable
+indicator," per SWIFTUI_PLAN's own #635 Data Decisions), but it left a real
+gap between the letter of the requirement and a blind user actually
+discovering their library changed. Fixed at `bae6125`: added
+`.onChange(of: entitlements.isEntitled)` to `SubscriptionsView` comparing
+`PodcastCapPolicy.readOnlyPodcastIDs(...)` (already exhaustively covered by
+`PodcastCapPolicyTests`) just before vs. after the transition, announcing
+(assertive) only when the read-only count actually changes — one message
+for newly-read-only ("Your Earshot Plus subscription has ended. N podcasts
+in your library now read-only. Upgrade to Earshot Plus to make changes
+again.") and one for restoration. No new untested pure logic — thin
+view-layer wrapper around the already-tested policy function, matching this
+codebase's existing convention that view-layer `Announcer` calls (e.g. the
+adjacent `librarySortOrder` announcement) aren't independently unit-tested.
+
+Verification: `xcodebuild build` on simulator
+`F868F72E-091C-47D9-B003-1AE0670E5455` — BUILD SUCCEEDED. `-only-testing`
+run of `PodcastCapPolicyTests` (14), `SubscriptionRepositoryTests` (47),
+`OPMLBulkImportTests` (11), `AppSettingsStoreTests` (18) — 90 tests, 0
+failures, after the fix. A full `xcodebuild test` run separately showed 8
+pre-existing `ProductCatalogServiceTests` failures from a StoreKitTest
+`SKTestSession` configuration error in this simulator environment —
+unrelated to this diff (file untouched by #635; reproduces in isolation via
+`-only-testing:EarshotTests/ProductCatalogServiceTests`).
+
+`git status --short` clean before and after the fix commit; dart-format
+pre-commit hook reformatted 0 files.
+
+Overall: PASS
