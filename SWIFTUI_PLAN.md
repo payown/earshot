@@ -3441,3 +3441,90 @@ unrelated to this diff (file untouched by #635; reproduces in isolation via
 pre-commit hook reformatted 0 files.
 
 Overall: PASS
+
+## Swift 6 Review — Issue #636
+
+earshot-swift6 review complete. Issue #636 (Tip jar: consumable IAP).
+Branch `feat/issue-636-tip-jar`, reviewed at commit `dedcc42` (on top of
+`swift` tip `c9bdf79`) in isolated worktree `earshot-wt-636`. No fix
+required.
+
+Concurrency mode: real project settings — `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (confirmed by reading `project.yml`).
+
+Checklist:
+- [x] Sendable conformance: PASS. `TipPurchaseAttempt: Sendable` holds
+  `result: RawPurchaseResult` (Sendable, Equatable, only `String`/productID
+  payloads) and `finish: (@Sendable () async -> Void)?`. The `finish`
+  closure, built in `StoreKitTipPurchaseSource.attempt(from:)`, captures a
+  real `StoreKit.Transaction` — verified `Transaction` is itself `Sendable`
+  per StoreKit 2's API and confirmed the already-merged
+  `StoreKitEntitlementSource.processUpdate(_:)`
+  (`EntitlementTransactionSource.swift`) relies on the identical fact
+  (`await transaction.finish()` called across an actor-hopping `Task`).
+  `RawPurchaseResult`/`TipJarOutcome` are plain `Sendable, Equatable` enums
+  with no non-Sendable associated values.
+- [x] Actor isolation: PASS. `TipJarViewModel` is `@MainActor @Observable`.
+  `purchase(_:)` awaits `purchaseSource.purchase(product)` (crossing into
+  the non-isolated but `Sendable` `TipPurchaseSource` protocol), then every
+  mutation (`purchasingProduct`, `lastOutcome`, `lastOutcomeProduct`,
+  `productsState`) happens after the `await` resumes on the main actor.
+  `apply(_:for:)` correctly sequences outcome-set-and-announce BEFORE
+  `await attempt.finish?()`, matching the doc comment's load-bearing
+  ordering claim. No live `Transaction`/`Product` ever crosses into the view
+  model — only the reduced `Sendable` `TipPurchaseAttempt`.
+- [ ] @Model/SwiftData actor boundary: N/A — no `@Model` types touched.
+- [ ] AVAudioSession main actor: N/A — no audio code touched.
+- [ ] Combine publishers: N/A — no Combine in this diff.
+- [x] nonisolated functions: PASS — no `nonisolated` needed or added.
+  `TipJarDecisionLogic`'s static funcs are pure, free-standing,
+  non-actor-isolated, matching the `PodcastCapPolicy` precedent from #635.
+- [x] Structured concurrency: PASS — no `Task.detached` anywhere.
+  `TipPresetButton`'s `Task { await action() }` inside a SwiftUI `Button`
+  action closure runs on the enclosing `@MainActor`-isolated view context
+  (SwiftUI's own global-actor annotations, not implicit inheritance from a
+  non-isolated context) — confirmed by the forced strict-complete build
+  below producing zero warnings on that line. `TipJarView.body`'s
+  `.task { await viewModel.loadProducts() }` is plain structured work.
+- [x] Global state: PASS — no new `static var`. `EarshotPlusProduct
+  .tipProducts` is pre-existing (#631), not new.
+- [x] `@unknown default` exhaustiveness: PASS —
+  `StoreKitTipPurchaseSource.attempt(from:)`'s outer switch on
+  `Product.PurchaseResult` has an explicit `@unknown default` mapping to
+  `.pending` (never-finish); the inner `VerificationResult` switch is a
+  2-case enum handled exhaustively with no payload silently dropped.
+- [x] Swift 6 build clean: PASS — Debug build under real project settings
+  on simulator `399785CB-676D-4415-98D8-40B4E04DA264`: **BUILD SUCCEEDED**,
+  zero warnings, zero errors (only a benign AppIntents-framework-not-found
+  notice, unrelated to this diff).
+
+Secondary informational check (forced `SWIFT_STRICT_CONCURRENCY=complete`
+override): **BUILD FAILED**, but exclusively with this repo's documented
+pre-existing baseline signature — `QueueScreen.swift:100` compiler-crash
+diagnostic, `KeyPath`-not-`Sendable` warnings (`FoldersScreen.swift`,
+`QueueRepository.swift:345`, `QuickActionRepository.swift:64`,
+`RootView`/`InboxScreen` `@Query`/`#Predicate` macros),
+`EarshotSchema*.versionIdentifier` global-state warnings,
+`EpisodeSummaryCache.shared`, `RSSParser`'s static `ISO8601DateFormatter`s,
+and `DownloadManager.swift:122` + `SubscriptionRepository.swift:181`
+non-Sendable `Episode`/`EpisodeDownloading` warnings. Grepped the full log
+specifically for `TipJarDecisionLogic.swift`, `TipPurchaseSource.swift`,
+`TipJarViewModel.swift`, `TipJarView.swift`, `HelpSettingsView.swift` — all
+five appear only in `SwiftCompile` invocation lines, zero diagnostics
+attributed to them.
+
+Test verification (isolated `-derivedDataPath` to avoid a build-database
+lock collision with the concurrently-running earshot-security gate in the
+same worktree): `-only-testing` run of `TipJarDecisionLogicTests` (8) +
+`TipJarViewModelTests` (13) — 21 tests, all passed, 0 failures. Includes
+`testSuccessfulPurchaseShowsThankYouBeforeFinishing` and
+`testSuccessfulPurchaseFinishesExactlyOnce`, which directly exercise the
+ordering/actor-isolation guarantee in `apply(_:for:)`.
+
+Re-checked `git log`/`git status` before finishing: HEAD still `dedcc42`,
+working tree clean — the concurrent earshot-security gate had not added a
+follow-up commit as of this review.
+
+New agents created: none.
+
+Overall: PASS
