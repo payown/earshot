@@ -123,7 +123,7 @@ final class SubscriptionRepository {
         // fetch. `isEntitled == nil` means the cap isn't enforced at this call
         // site (legacy/test behavior).
         if let isEntitled {
-            let currentCount = (try? context.fetchCount(FetchDescriptor<Podcast>())) ?? 0
+            let currentCount = currentPodcastCountForCapCheck()
             let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
             guard PodcastCapPolicy.canAddSubscription(currentCount: currentCount, isEntitled: isEntitled, grandfatheredCount: grandfathered) else {
                 throw SubscriptionError.podcastCapReached(
@@ -389,7 +389,7 @@ final class SubscriptionRepository {
         var allowedURLs = feedURLs
         var skippedForCap = 0
         if let isEntitled {
-            let currentCount = (try? context.fetchCount(FetchDescriptor<Podcast>())) ?? 0
+            let currentCount = currentPodcastCountForCapCheck()
             let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
             let allowedCount = PodcastCapPolicy.allowedNewSubscriptions(
                 currentCount: currentCount, requested: feedURLs.count, isEntitled: isEntitled, grandfatheredCount: grandfathered
@@ -452,7 +452,7 @@ final class SubscriptionRepository {
 
         var readOnlyIDs: Set<PersistentIdentifier> = []
         if let isEntitled, !isEntitled {
-            let allPodcasts = (try? context.fetch(FetchDescriptor<Podcast>())) ?? []
+            let allPodcasts = allPodcastsForCapCheck()
             let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
             readOnlyIDs = PodcastCapPolicy.readOnlyPodcastIDs(in: allPodcasts, isEntitled: isEntitled, grandfatheredCount: grandfathered)
         }
@@ -512,6 +512,40 @@ final class SubscriptionRepository {
         var descriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.persistentModelID == id })
         descriptor.fetchLimit = 1
         return (try? context.fetch(descriptor))?.first
+    }
+
+    /// Current podcast count for the free-tier cap check (#635). Unlike the
+    /// other `try?` fetch helpers above (whose fallback-to-nil/empty is a
+    /// genuinely benign "not found" outcome), a fetch failure HERE would
+    /// silently under-count and let a capped-out user add another podcast —
+    /// so it's logged rather than swallowed. Still falls back to 0 (never
+    /// throws out of a cap check) since blocking every subscribe on a rare
+    /// local SwiftData read failure would be a worse user-facing outcome than
+    /// the cap being momentarily under-enforced.
+    private func currentPodcastCountForCapCheck() -> Int {
+        do {
+            return try context.fetchCount(FetchDescriptor<Podcast>())
+        } catch {
+            AppLog.subscriptions.error(
+                "Podcast cap check: failed to fetch podcast count, treating as 0: \(error.localizedDescription, privacy: .public)"
+            )
+            return 0
+        }
+    }
+
+    /// Full podcast list for the free-tier cap's read-only-podcast computation
+    /// (#635). Same reasoning as ``currentPodcastCountForCapCheck()``: a fetch
+    /// failure here would silently skip the read-only auto-download gate, so
+    /// it's logged rather than swallowed.
+    private func allPodcastsForCapCheck() -> [Podcast] {
+        do {
+            return try context.fetch(FetchDescriptor<Podcast>())
+        } catch {
+            AppLog.subscriptions.error(
+                "Podcast cap check: failed to fetch podcasts, treating as empty: \(error.localizedDescription, privacy: .public)"
+            )
+            return []
+        }
     }
 }
 
