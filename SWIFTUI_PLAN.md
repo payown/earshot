@@ -4778,3 +4778,140 @@ New agents created: none.
 Overall: PASS
 
 Overall: PASS
+
+## Accessibility Review — Issue #671
+
+earshot-accessibility review complete. Issue #671 (mirror-image companion to
+#668: UI to exclude a podcast from the inbox in normal, non-opt-in mode).
+Branch `feat/issue-671-exclude-inbox`, reviewed at commit `26b4f80` in
+isolated worktree `earshot-wt-671`. No fixes needed — PASS on first pass, no
+code changes.
+
+VoiceOver:
+- [x] Labels/roles: PASS — the new `.toggleInboxExclude` rotor action, the
+  leading-edge swipe `Button`, and the `Toggle` all use state-derived,
+  unambiguous labels ("Exclude from Inbox" / "Include in Inbox") that name
+  the action and its target without relying on surrounding context. No role
+  words baked into the label text (SwiftUI's native `Toggle`/`Button`/rotor
+  action supply "switch"/"button" automatically).
+- [x] Hints: PASS — none added, none needed. The label alone states the
+  outcome plainly for both the swipe action and the rotor action, matching
+  #668's `.toggleInboxInclude` precedent (no hint there either). The
+  mandatory OPML-export hint requirement is not applicable to this diff.
+- [x] No empty accessibilityValue: PASS — none introduced. This diff never
+  sets `.accessibilityValue` at all; the settings `Toggle` gets its On/Off
+  value from the native control for free.
+- [x] Tab bar order: N/A — `RootView.swift` (verified directly, confirmed
+  zero-line diff between `9062882..HEAD`) is untouched by this issue; tab
+  order is unaffected.
+- [x] Migration sheet (IS_BETA_BUILD): N/A — no migration-sheet files
+  touched; confirmed via `git diff --stat` (only `PodcastAction.swift`,
+  `PodcastActionsBuilder.swift`, `PodcastSettingsView.swift`,
+  `SubscriptionsView.swift`, `CHANGELOG.md`, and three test files changed).
+- [x] No drag-only gestures: PASS — the new swipe action is `.swipeActions`
+  with a `Button`, which SwiftUI already exposes as an ordinary activatable
+  action in the VoiceOver Actions rotor (no drag required to reach it from
+  VoiceOver) — same mechanism #668's opt-in swipe action uses, already
+  verified working. The mirrored rotor action
+  (`buildPodcastActions`/`.toggleInboxExclude`) is the primary
+  VoiceOver-native path regardless, so the swipe gesture itself is never the
+  only way to reach this action.
+- [x] Rotor actions: PASS — `rotorActions(for:)` in `SubscriptionsView.swift`
+  was restructured from a single boolean expression into a `guard`+`if`
+  cascade so it can hold both the #668 opt-in-mode filter
+  (`.toggleInboxInclude` kept only when `settings.inboxOptInOnly`) and the
+  new #671 normal-mode filter (`.toggleInboxExclude` kept only when
+  `!settings.inboxOptInOnly`) without either one leaking into the wrong
+  mode. Verified by truth table against the old expression (not just
+  inspection) and confirmed against the dedicated predicate-isolation tests:
+  `testToggleInboxExcludeDroppedFromOrderWhenOptInOn`,
+  `testToggleInboxExcludeKeptInOrderWhenOptInOff`, plus the two pre-existing
+  #668 predicate tests
+  (`testToggleInboxIncludeDroppedFromOrderWhenOptInOff`,
+  `testToggleInboxIncludeKeptInOrderWhenOptInOn`) — all four pass. The
+  user's configured Quick Actions order still drives rotor action order;
+  this is a display-time filter only, the persisted order is untouched.
+- [x] Focus management: PASS/N/A — this diff adds no modal, sheet, screen
+  push, or list-collapsing delete; it's a same-row state toggle (rotor
+  action, swipe button, and settings `Toggle`), so none of the
+  dismiss-returns-focus / push-lands-on-heading / paged-TabView /
+  deferred-post-delete-focus patterns apply. VoiceOver stays on the same row
+  or the same settings `Toggle` after activation in all three paths, which
+  is correct here (no navigation occurred).
+- [x] State announcements: PASS — the rotor action and swipe action both
+  call `Announcer.announce("Excluded from inbox" / "Included in inbox")`
+  with no `assertive:` argument, i.e. `assertive: false` (confirmed the
+  `Announcer.announce` signature at
+  `Core/Accessibility/Announcer.swift:12` defaults `assertive` to `false`),
+  identical to `.toggleInboxInclude`'s `Announcer.announce("Added to inbox"
+  / "Removed from inbox")` call from #668. The settings-screen `Toggle`
+  path deliberately does **not** call `Announcer.announce` at all — it
+  relies on the native SwiftUI `Toggle`'s own On/Off announcement, exactly
+  matching the `autoQueue`/opt-in-mode `Toggle` precedent and the "Adjustable
+  value pickers" project lesson (never announce over a control that already
+  self-announces). No double-announcement or assertive/interrupting
+  announcement found anywhere in this diff.
+
+Dynamic Type:
+- [x] Semantic fonts only: PASS — no `Font` or `.font(.system(size:))` of
+  any kind introduced by this diff.
+- [x] No lineLimit(1) on essential content: PASS — none introduced.
+- [x] No fixed-height text containers: PASS — none introduced; the new
+  `Toggle` and swipe `Button` both use standard List/`.swipeActions` sizing.
+- [x] ViewThatFits on Now Playing bar: N/A — Now Playing bar untouched.
+
+Touch targets (44pt minimum): PASS — no custom-frame interactive elements
+introduced. The new `Toggle` is a standard `List` row toggle and the new
+swipe action is a standard `.swipeActions` `Button`; both get their touch
+target from the system List/swipe-action chrome, same as every other
+row/toggle in these two files (including the #668 toggle/swipe this diff
+mirrors, which already passed this exact check).
+
+Motion (Reduce Motion guard): N/A — no animation, transition, or
+`withAnimation` call introduced by this diff.
+
+Contrast (WCAG 2.2 AA): PASS — no new colors introduced; the swipe action
+uses `.tint(.accentColor)` (the existing semantic accent color, same as
+#668's opt-in swipe action), and the settings `Toggle` uses the system
+toggle appearance. No raw hex or `Color(red:green:blue:)` literals.
+
+Color independence: PASS — the swipe action pairs its label text
+("Exclude from Inbox" / "Include in Inbox") with a state-derived SF Symbol
+(`tray.and.arrow.up` / `tray.and.arrow.down`) in addition to the accent-color
+tint, so state is never conveyed by color alone. The rotor action and the
+settings `Toggle` both convey state through text/native control state, not
+color.
+
+F1-F16 patterns applied:
+- No `Focus(autofocus:)` misuse — none introduced (N/A, no container focus
+  code in this diff).
+- Announcement convention (non-assertive `Announcer.announce`, matching
+  `.toggleAutoQueue`/`.toggleInboxInclude`) — directly verified above; this
+  is the primary pattern this review was asked to confirm, and it holds.
+- Group header vs button separation, visible-but-hidden restore button,
+  deferred announce after delete, focusable empty states — not applicable;
+  this diff touches no group headers, no Downloads rows, no delete flow, and
+  no empty-state view.
+
+Additional verification performed:
+- `xcodebuild test -only-testing:EarshotTests/QuickActionBuildersTests
+  -only-testing:EarshotTests/DownloadsInboxLogicTests
+  -only-testing:EarshotTests/PodcastSettingsViewTests` on simulator
+  `58857CDF-1560-410D-8F46-7381F7ADF48A` — 109 tests, 0 failures, including
+  all #671 tests.
+- Read all four changed source files in full
+  (`PodcastAction.swift`, `PodcastActionsBuilder.swift`,
+  `PodcastSettingsView.swift`, `SubscriptionsView.swift`) plus the settings
+  footer text change, to confirm no double-reading between the new footer
+  string ("New episodes from this podcast appear in the inbox unless you
+  exclude it here.") and any hint — no hint exists on the `Toggle`, so no
+  double-reading risk.
+
+`git status --short` clean at end of review (aside from the known
+pre-existing unrelated `.dart` formatting noise from #660, left untouched);
+no fix commit needed.
+
+New agents created: none.
+Feature suggestions identified: none this review.
+
+Overall: PASS
