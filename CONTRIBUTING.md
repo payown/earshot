@@ -24,6 +24,14 @@ If you're not sure how to test with a screen reader, ask in an issue or Discord 
 
 See [README.md](README.md#building) for build instructions.
 
+One-time setup: point git at the repo's tracked hooks so the pre-commit
+formatter check runs (this also covers any `git worktree` checkouts of this
+repo, since `core.hooksPath` is shared repo-wide config):
+
+```bash
+git config core.hooksPath tool/hooks
+```
+
 Run before pushing:
 
 ```bash
