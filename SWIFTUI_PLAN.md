@@ -4472,4 +4472,77 @@ N/A, untouched by this diff.
 `git status --short` clean before and after this review — no code changes,
 docs-only.
 
+## Security Review — Issue #668
+
+earshot-security review complete. Issue #668 (BUG: no way to add a podcast
+to inbox with "Opt-in podcasts only" enabled). Branch
+`fix/issue-668-opt-in-inbox`, reviewed at commit `8700b49` on top of `swift`
+tip `c9bdf79`, in isolated worktree `earshot-wt-668`. No fixes needed — PASS
+on first pass.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found. Every `!` in the diff is boolean
+  negation (`!(podcast.notificationEnabled ?? false)`, `!podcasts.isEmpty`,
+  `!author.isEmpty`, `!notifications.isEmpty`). The `try? XCTUnwrap(...)` /
+  `firstOn!` lines in `QuickActionBuildersTests.swift` are pre-existing,
+  confirmed untouched by `git diff c9bdf79..HEAD` — out of scope for this
+  diff.
+- [x] Silent try?: PASS — none introduced.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new `Task {}`, `.sink`, `addObserver`, or
+  `Timer` closures. The new `.toggleInboxInclude` case in
+  `buildPodcastActions` and the new `toggleInboxInclude(_:)` helper in
+  `SubscriptionsView` are synchronous closures capturing a `Podcast`
+  (reference type, owned by the caller) and `ModelContext`, matching the
+  adjacent `.toggleAutoQueue`/`.toggleNotifications` cases and the existing
+  `unsubscribe(_:)` method exactly.
+- [x] @MainActor: PASS — `buildPodcastActions` keeps its existing
+  `@MainActor` annotation; the new case does a direct synchronous `@Model`
+  write (`podcast.inboxIncluded.toggle()`). The new swipe-action button and
+  the new `Toggle(isOn: $podcast.inboxIncluded)` binding both run as
+  main-thread SwiftUI event handlers — no background `Task`, no `ModelActor`
+  crossing.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration-related files changed
+  (`Podcast.inboxIncluded` and `StoreMigration` untouched; this only adds UI
+  writing an existing field). Ran a Debug build instead as a general
+  compile gate.
+- [ ] Entitlements: N/A — no entitlements/project.yml changes.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new `Error` types introduced. The one save
+  path routes through the existing `saveQuickAction(_:_:)` helper
+  (`EpisodeActionsBuilder.swift:131-139`), which already does `do`/`catch` +
+  `AppLog.quickActions.error(...)`.
+- [x] AppLog coverage: PASS — no new catch blocks added by this diff; the
+  shared `saveQuickAction` catch (pre-existing) covers both new call sites.
+
+Additional verification performed:
+- Confirmed no other exhaustive `switch` over `PodcastAction` exists outside
+  `PodcastActionsBuilder.swift` that could have silently missed the new
+  `.toggleInboxInclude` case (checked `QuickActionRepository.swift`,
+  `QuickActionStore.swift`, `QuickActionsSettingsView.swift` — all only
+  reference `PodcastAction.allCases`/arrays).
+- `xcodebuild build` (scheme Earshot, Debug, iPhone 17 sim) — BUILD
+  SUCCEEDED.
+- `xcodebuild build-for-testing` — TEST BUILD SUCCEEDED.
+- `-only-testing:EarshotTests/QuickActionBuildersTests
+  -only-testing:EarshotTests/DownloadsInboxLogicTests` — 60 tests, 0
+  failures, including the 6 new #668 tests (3 `InboxRepository` opt-in
+  inclusion cases, `testDefaultPodcastActionsIncludesToggleInboxInclude`,
+  `testToggleInboxIncludeLabelReflectsState`,
+  `testToggleInboxIncludeRunFlipsAndPersists`, plus the two rotor-filter
+  predicate tests).
+
+Non-blocking observation (pre-existing pattern, not introduced by this
+diff): the new swipe action and rotor toggle don't check
+`readOnlyPodcastIDs`/free-tier entitlement gating before writing
+`inboxIncluded` — but neither do the adjacent `.toggleAutoQueue`/
+`.toggleNotifications` actions this mirrors, so this is consistent, not a
+regression. Worth a follow-up issue if per-podcast settings should be
+entitlement-gated while read-only, but out of scope for #668.
+
+`git status --short` clean before and after review; no fix commit needed.
+
+New agents created: none.
+Feature suggestions identified: none this review.
+
 Overall: PASS
