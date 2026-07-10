@@ -2991,3 +2991,84 @@ Debug build **BUILD SUCCEEDED**; `RestorePurchasesTests` +
 No code changes made. No new feature suggestions this review.
 
 Overall: PASS
+
+## Testing Gate — Issue #633
+
+earshot-testing gate complete. Issue #633 (Earshot Plus: restore purchases
+flow). Branch `feat/issue-633-restore-purchases`, HEAD `4489e2a` (4 commits
+on `swift` tip `76c551b`), reviewed in worktree `earshot-wt-633` on
+simulator `CBBB2872-D6EA-40F5-AF56-0FDC5E59BAEB`.
+
+**Test coverage spot-check.** Read `RestorePurchasesTests.swift` (10 tests)
+against #633's required outcome matrix: lifetime restore, monthly-subscription
+restore, yearly-subscription restore (both subscription products, not just
+one), the two distinct "nothing to restore" shapes (already-entitled from
+lifetime, already-entitled from subscription, and genuinely-never-entitled —
+three separate tests, all mapping to `.noChange`), the sync-throws-so-resync-
+never-runs failure path (two dedicated regression tests, one of which
+pre-loads a qualifying fact specifically to prove the early return is real,
+not structurally implied), an already-entitled-and-sync-throws case
+(`.failed`, not `.noChange`), and cross-instance persistence. This is
+complete coverage of the matrix — no gap found, no additional tests written.
+`RestorePurchasesRow`'s "offered inline in the paywall" sub-task from the
+issue body is out of scope for this PR: no paywall view exists yet in this
+codebase (`grep -ril paywall` finds only forward-references marked #632,
+which is unbuilt), so there's nothing to test there — not a coverage gap in
+this PR's actual diff.
+
+**Full suite.** `xcodebuild test` on the pinned simulator:
+**1225 executed, 1 skipped (env-gated `ScaleDiagnosticTests`, unchanged),
+8 failures**, all in `ProductCatalogServiceTests`. Matches the domain agent's
+reported 1215 → 1225 (10 new `RestorePurchasesTests`, all passing).
+
+**Independent regression check on the 8 `ProductCatalogServiceTests`
+failures** (not just trusting the implementer's report): this PR's diff
+(`git diff --stat 76c551b..4489e2a`) touches only
+`EntitlementStore.swift`, `EntitlementTransactionSource.swift`,
+`SettingsScreen.swift`, `EntitlementStoreTests.swift`,
+`RestorePurchasesTests.swift`, and `project.pbxproj` (xcodegen wiring) —
+nowhere near `ProductCatalogService.swift`, `Configuration.storekit`, or
+`ProductCatalogServiceTests.swift`. To confirm rather than assume, built a
+throwaway worktree at `origin/swift` tip `76c551b` (this branch's unmodified
+base) and ran `-only-testing:EarshotTests/ProductCatalogServiceTests` there
+directly: **identical 8/9 failures**, identical root cause in the log
+(`[SKTestSession] Error saving configuration file: Error Domain=
+SKInternalErrorDomain Code=3`) — a local StoreKitTest/simulator
+infrastructure fault loading `SKTestSession` from the `.storekit` config
+file by URL, not a product-ID mismatch caused by any code change. This also
+matches this exact failure signature already logged against issue #631 in
+this file (`ProductCatalogServiceTests` needs an Xcode-GUI test run or a
+device, not headless `xcodebuild test`, to load StoreKit test sessions
+reliably) — a known, pre-existing, well-documented environmental gap, not a
+regression introduced by #633. Worktree removed after the check.
+
+**Release build.** `xcodebuild -configuration Release -destination
+'platform=iOS Simulator,id=CBBB2872-D6EA-40F5-AF56-0FDC5E59BAEB' build`:
+**BUILD SUCCEEDED**. This issue touches no migration/schema files, so the
+IS_BETA_BUILD gate doesn't apply — ran the plain Release build per standing
+instructions regardless.
+
+**Regressions found:** none. No new tests written (coverage was already
+complete). No commits made to the branch.
+
+```
+earshot-testing complete. Issue #633.
+
+New tests written: 0 (existing 10 RestorePurchasesTests already cover the
+full outcome matrix — spot-checked against the issue body, no gap found)
+Previous test count: 1215 executed, 1 skipped
+New test count: 1225 executed, 1 skipped, 8 failures (all pre-existing
+ProductCatalogServiceTests StoreKitTest-simulator failures, independently
+reproduced on unmodified origin/swift tip 76c551b — not a regression)
+Count increased: yes
+
+Release build (IS_BETA_BUILD absent): PASS
+PRD acceptance criteria covered: lifetime restore, subscription restore
+(monthly + yearly), already-entitled no-change (both product shapes),
+never-entitled no-change, sync-throws failure path (including the
+never-falls-through-to-resync regression test), cross-instance persistence
+
+Regressions found: none
+
+Overall: PASS
+```
