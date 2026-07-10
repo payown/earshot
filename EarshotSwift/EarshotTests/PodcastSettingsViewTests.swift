@@ -225,6 +225,47 @@ final class PodcastSettingsViewTests: XCTestCase {
         )
     }
 
+    // MARK: Inbox exclude toggle (#671)
+    //
+    // Mirrors the Inbox include toggle above: PodcastSettingsView now also binds
+    // a `Toggle("Exclude from Inbox", isOn: $podcast.inboxExcluded)` for normal
+    // (non-opt-in) mode, the companion gap #668 deliberately left out of scope.
+    // Same default/set/toggle/persist coverage.
+
+    func testInboxExcludedDefaultsToFalse() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        XCTAssertFalse(p.inboxExcluded, "a podcast is not excluded from the inbox until the user explicitly excludes it")
+    }
+
+    func testInboxExcludedCanBeEnabled() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        p.inboxExcluded = true
+        XCTAssertTrue(p.inboxExcluded)
+    }
+
+    func testInboxExcludedToggle() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        p.inboxExcluded = true
+        p.inboxExcluded.toggle()
+        XCTAssertFalse(p.inboxExcluded, "toggling the settings switch off must flip the model field back")
+    }
+
+    func testInboxExcludedIsPersisted() throws {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        p.inboxExcluded = true
+        try ctx.save()
+
+        let fetched = try ctx.fetch(FetchDescriptor<Podcast>()).first
+        XCTAssertEqual(
+            fetched?.inboxExcluded, true,
+            "the settings Toggle binding must round-trip through the model and survive a save/fetch cycle"
+        )
+    }
+
     // MARK: Multiple settings on the same podcast
 
     func testAllSettingsCanBeConfiguredIndependently() {

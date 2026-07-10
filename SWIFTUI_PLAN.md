@@ -744,6 +744,36 @@ ship; OPML export/import is the supported way to carry a library over.
   pattern of keeping VoiceOver wording pure and file-scoped rather than inline
   in the view.
 
+- **Normal-mode "Exclude from Inbox" UI (#671), the companion #668 deliberately
+  left out of scope.** `Podcast.inboxExcluded` and its `InboxRepository`/
+  `InboxLogic.isExcluded(inboxExcluded:inboxIncluded:)` enforcement already
+  existed and were untouched — this was UI-only, mirroring #668's shape
+  exactly but inverted: a new `PodcastAction.toggleInboxExclude` Quick Action
+  (label "Exclude from Inbox"/"Include in Inbox" reflecting `inboxExcluded`,
+  non-assertive `Announcer.announce`), filtered out of the rotor when opt-in
+  mode is ON (the inverse of `.toggleInboxInclude`'s filter); a leading-edge
+  sighted swipe action on Library rows in the `else` branch of the same
+  `if settings.inboxOptInOnly` swipe-actions block #668 added, gated on
+  `!voiceOverEnabled && !settings.inboxOptInOnly`; an "Exclude from Inbox"
+  `Toggle` in `PodcastSettingsView`'s Inbox section, shown only when opt-in
+  mode is OFF. **Judgment call: kept the two toggle cases and swipe branches
+  as parallel, separately-named code** (not a shared `direction:`-parameterized
+  helper) — each is ~6 lines, the inverted gating conditions read clearly
+  side by side, and a generalized helper would need an enum/bool parameter
+  whose meaning ("which mode, which field") isn't obviously simpler to read
+  than just seeing both cases. The one place genuinely shared is the rotor
+  filter in `SubscriptionsView.rotorActions(for:)`, restructured from two
+  chained `&&`/`||` clauses into a small `guard`+`if` cascade so adding the
+  second mode's condition didn't turn into an unreadable one-liner. Test
+  coverage mirrors #668's three-file shape: `QuickActionBuildersTests` (default
+  set membership, label-reflects-state both directions, run flips+persists,
+  rotor-filter predicate both directions), `DownloadsInboxLogicTests` (added
+  three new `InboxRepository` end-to-end normal-mode tests — the existing
+  #668 coverage only exercised `InboxLogic.isExcluded` directly plus opt-in-mode
+  `InboxRepository` end-to-end, leaving normal-mode end-to-end as a real gap),
+  `PodcastSettingsViewTests` (default/set/toggle/persist for `inboxExcluded`,
+  mirroring the `inboxIncluded` block). **Implemented by:** earshot-ui.
+
 ## Networking Decisions
 
 - **#381 Background feed refresh + 15-min skip window.** Registered a
@@ -4594,3 +4624,294 @@ target. Archiving completed sections to `docs/phases/swiftui/` is overdue
 and out of scope for this narrow session — flagging for the next planning
 session to do a dedicated archive pass rather than mixing it into an
 unrelated fix.
+
+## Security Review — Issue #671
+
+earshot-security review complete. Issue #671 (mirror-image companion to
+#668: UI to exclude a podcast from the inbox in normal, non-opt-in mode).
+Branch `feat/issue-671-exclude-inbox`, reviewed at commit `0c2d47c` on top of
+`swift` tip (via merged #668, commit `9062882`), in isolated worktree
+`earshot-wt-671`. No fixes needed — PASS on first pass.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found. Every `!` in the four changed
+  non-test source files is boolean negation (`!(podcast.notificationEnabled
+  ?? false)`, `!podcasts.isEmpty`, `!$0`, `!author.isEmpty`,
+  `!settings.inboxOptInOnly`, `!notifications.isEmpty`).
+- [x] Silent try?: PASS — none introduced.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new `Task {}`, `.sink`, `addObserver`, or
+  `Timer` closures. The new `.toggleInboxExclude` case in
+  `buildPodcastActions` and the new `toggleInboxExclude(_:)` helper in
+  `SubscriptionsView` are synchronous closures capturing a `Podcast`
+  (reference type, owned by the caller) and `ModelContext`, matching
+  `.toggleInboxInclude` (#668) and the adjacent `.toggleAutoQueue`/
+  `.toggleNotifications` cases exactly.
+- [x] @MainActor: PASS — `buildPodcastActions` keeps its existing
+  `@MainActor` annotation; the new case does a direct synchronous `@Model`
+  write (`podcast.inboxExcluded.toggle()`). The new swipe-action button and
+  the new `Toggle(isOn: $podcast.inboxExcluded)` binding both run as
+  main-thread SwiftUI event handlers — no background `Task`, no
+  `ModelActor` crossing.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration-related files changed
+  (`Podcast.inboxExcluded` and `EarshotSchema`/`StoreMigration` confirmed
+  untouched by `git diff 9062882..0c2d47c`; this diff only adds UI writing a
+  pre-existing, already-enforced field). Ran a Debug build instead as a
+  general compile gate.
+- [ ] Entitlements: N/A — confirmed zero-line diff on
+  `Earshot.entitlements`/`project.yml` between `9062882..0c2d47c`.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new `Error` types introduced. Both new save
+  paths route through the existing `saveQuickAction(_:_:)` helper, which
+  already does `do`/`catch` + `AppLog` logging.
+- [x] AppLog coverage: PASS — no new catch blocks added by this diff; the
+  shared `saveQuickAction` catch (pre-existing) covers both new call sites.
+
+Additional verification performed:
+- Special focus per the task brief: the `rotorActions(for:)` restructuring
+  in `SubscriptionsView.swift` (old single-condition `&&`/`||` expression
+  replaced with a `guard`+`if` cascade) was diffed line-by-line against the
+  #668 behavior it replaces. For `.toggleInboxInclude` the new cascade
+  (`if $0 == .toggleInboxInclude { return settings.inboxOptInOnly }`) is
+  logically identical to the old `($0 != .toggleInboxInclude ||
+  settings.inboxOptInOnly)` term — verified by truth table, not just
+  inspection. No regression to the #668 opt-in-mode filter. The new
+  `.toggleInboxExclude` arm is the exact mirror. Confirmed with the two new
+  predicate-isolation tests
+  (`testToggleInboxExcludeDroppedFromOrderWhenOptInOn`,
+  `testToggleInboxExcludeKeptInOrderWhenOptInOff`) plus the two pre-existing
+  #668 predicate tests, all passing.
+- Confirmed `Podcast.inboxExcluded` and its `InboxRepository`/`InboxLogic`
+  enforcement are pre-existing and untouched by this diff (`Data/Models/
+  Podcast.swift`, `Data/Persistence/EarshotSchema.swift` both show a
+  zero-line diff between `9062882..0c2d47c`) — this issue is UI-only, as
+  the implementing agent stated.
+- Confirmed no other exhaustive `switch` over `PodcastAction` exists outside
+  `PodcastActionsBuilder.swift` that could have silently missed the new
+  `.toggleInboxExclude` case (`QuickActionRepository.swift`,
+  `QuickActionStore.swift`, `QuickActionsSettingsView.swift` all only
+  reference `PodcastAction.allCases`/arrays) — same set #668 verified.
+- `xcodebuild build` (scheme Earshot, Debug, iPhone 17 sim
+  `58857CDF-1560-410D-8F46-7381F7ADF48A`) — BUILD SUCCEEDED.
+- `xcodebuild test -only-testing:EarshotTests/QuickActionBuildersTests
+  -only-testing:EarshotTests/DownloadsInboxLogicTests
+  -only-testing:EarshotTests/PodcastSettingsViewTests` — 109 tests, 0
+  failures, including all 10 new #671 tests (3 `InboxRepository`
+  normal-mode exclusion cases, 4 `PodcastSettingsViewTests` toggle cases,
+  and 3 `QuickActionBuildersTests` builder/predicate cases — plus 2 more
+  predicate tests counted above).
+
+`git status --short` clean before and after review (aside from the known
+pre-existing unrelated `.dart` formatting noise from #660, left untouched);
+no fix commit needed.
+
+New agents created: none.
+Feature suggestions identified: none this review.
+
+## Swift 6 Concurrency Review — Issue #671
+
+earshot-swift6 review complete. Issue #671 (mirror-image companion to #668:
+UI to exclude a podcast from the inbox in normal, non-opt-in mode). Branch
+`feat/issue-671-exclude-inbox`, reviewed at commit `86988e9` in isolated
+worktree `earshot-wt-671`. No fixes needed — PASS on first pass, no code
+changes.
+
+Concurrency mode: `SWIFT_STRICT_CONCURRENCY: minimal` / `SWIFT_VERSION: 5.0`
+(project baseline — Swift 6 not yet flipped on for this target). Ran an
+informational `SWIFT_STRICT_CONCURRENCY=complete` override build on top of
+the real-settings build, matching the #668/#639/#631 precedent.
+
+Checklist:
+- [x] Sendable conformance: PASS — no new `Sendable` surface introduced. The
+  new `.toggleInboxExclude` case's closure captures only `podcast` (a
+  `@Model` reference type) and `context` (`ModelContext`), never crossing an
+  actor boundary, matching every other case in `buildPodcastActions`.
+- [x] Actor isolation: PASS — `buildPodcastActions` stays `@MainActor` for
+  the whole function (unchanged). `SubscriptionsView` and
+  `PodcastSettingsView` are SwiftUI `View`s (implicit `@MainActor`). The new
+  `toggleInboxExclude(_:)` helper in `SubscriptionsView.swift` and the new
+  switch arm in `PodcastActionsBuilder.swift` both do a synchronous
+  `podcast.inboxExcluded.toggle()` write, `saveQuickAction(context, ...)`
+  (itself `@MainActor`), and `Announcer.announce(...)` (itself `@MainActor`)
+  — identical isolation shape to the pre-existing `.toggleInboxInclude`/
+  `toggleInboxInclude(_:)` pair from #668. Verified `saveQuickAction`
+  (`EpisodeActionsBuilder.swift:132`) and `Announcer.announce`
+  (`Announcer.swift:11`) are both explicitly `@MainActor`.
+- [x] @Model/SwiftData actor boundary: PASS — `Podcast` (`@Model`, confirmed
+  at `Data/Models/Podcast.swift:5-6`) never crosses an actor boundary in this
+  diff. No `PersistentIdentifier` re-fetch pattern needed because the
+  `@Model` instance is only ever touched synchronously on the main actor,
+  same as every other Quick Action toggle in the file.
+- [x] AVAudioSession main actor: N/A — no audio session code touched.
+- [x] Combine publishers: N/A — no Combine/`@Published` code touched;
+  `PodcastSettingsView`'s new `Toggle(isOn: $podcast.inboxExcluded)` uses
+  `@Bindable` (SwiftData's Observation-based binding), not Combine.
+- [x] nonisolated functions: PASS — used correctly; nothing in this diff
+  needed a `nonisolated` marker (no pure/computation-only helper added).
+- [x] Structured concurrency: PASS — `Task.detached` not used anywhere in
+  the diff. No new `Task {}` of any kind — both new call sites are plain
+  synchronous closures invoked directly from SwiftUI button/rotor actions.
+- [x] Global state: PASS — none found. No new global or static `var`.
+- [~] Swift 6 build clean: PASS for this diff specifically, project overall
+  not yet Swift 6.
+  - Real-settings build (`SWIFT_VERSION 5.0`, `SWIFT_STRICT_CONCURRENCY
+    minimal`, scheme Earshot, iPhone 17 Pro sim
+    `58857CDF-1560-410D-8F46-7381F7ADF48A`) — **BUILD SUCCEEDED**.
+  - Informational `SWIFT_STRICT_CONCURRENCY=complete` override build on the
+    same destination — **BUILD FAILED**, but grepping the full log for
+    `error:`/`warning:` on the four changed source files (`PodcastAction.
+    swift`, `PodcastActionsBuilder.swift`, `SubscriptionsView.swift`,
+    `PodcastSettingsView.swift`) returns zero matches — no new concurrency
+    diagnostic attributable to this diff. The failure is the same
+    pre-existing baseline noise documented on #639/#631/#656: the
+    `QueueScreen.swift:100` "failed to produce diagnostic for expression"
+    compiler-internal crash (tied to the in-progress #390 Swift 6
+    migration), `DownloadManager.swift:122` non-Sendable-`Episode`-parameter
+    warning, and widespread `@Query`/`#Predicate` macro-expansion
+    `KeyPath<...>: Sendable` warnings across `AppSettingsStore.swift`,
+    `SubscriptionRepository.swift`, `QueueRepository.swift`, and
+    `QuickActionRepository.swift`. Confirmed all six of those files have a
+    zero-line diff between `9062882..HEAD` (`git diff --stat`), so none of
+    that noise originates in this change.
+
+New agents created: none.
+Overall: PASS
+
+Overall: PASS
+
+## Accessibility Review — Issue #671
+
+earshot-accessibility review complete. Issue #671 (mirror-image companion to
+#668: UI to exclude a podcast from the inbox in normal, non-opt-in mode).
+Branch `feat/issue-671-exclude-inbox`, reviewed at commit `26b4f80` in
+isolated worktree `earshot-wt-671`. No fixes needed — PASS on first pass, no
+code changes.
+
+VoiceOver:
+- [x] Labels/roles: PASS — the new `.toggleInboxExclude` rotor action, the
+  leading-edge swipe `Button`, and the `Toggle` all use state-derived,
+  unambiguous labels ("Exclude from Inbox" / "Include in Inbox") that name
+  the action and its target without relying on surrounding context. No role
+  words baked into the label text (SwiftUI's native `Toggle`/`Button`/rotor
+  action supply "switch"/"button" automatically).
+- [x] Hints: PASS — none added, none needed. The label alone states the
+  outcome plainly for both the swipe action and the rotor action, matching
+  #668's `.toggleInboxInclude` precedent (no hint there either). The
+  mandatory OPML-export hint requirement is not applicable to this diff.
+- [x] No empty accessibilityValue: PASS — none introduced. This diff never
+  sets `.accessibilityValue` at all; the settings `Toggle` gets its On/Off
+  value from the native control for free.
+- [x] Tab bar order: N/A — `RootView.swift` (verified directly, confirmed
+  zero-line diff between `9062882..HEAD`) is untouched by this issue; tab
+  order is unaffected.
+- [x] Migration sheet (IS_BETA_BUILD): N/A — no migration-sheet files
+  touched; confirmed via `git diff --stat` (only `PodcastAction.swift`,
+  `PodcastActionsBuilder.swift`, `PodcastSettingsView.swift`,
+  `SubscriptionsView.swift`, `CHANGELOG.md`, and three test files changed).
+- [x] No drag-only gestures: PASS — the new swipe action is `.swipeActions`
+  with a `Button`, which SwiftUI already exposes as an ordinary activatable
+  action in the VoiceOver Actions rotor (no drag required to reach it from
+  VoiceOver) — same mechanism #668's opt-in swipe action uses, already
+  verified working. The mirrored rotor action
+  (`buildPodcastActions`/`.toggleInboxExclude`) is the primary
+  VoiceOver-native path regardless, so the swipe gesture itself is never the
+  only way to reach this action.
+- [x] Rotor actions: PASS — `rotorActions(for:)` in `SubscriptionsView.swift`
+  was restructured from a single boolean expression into a `guard`+`if`
+  cascade so it can hold both the #668 opt-in-mode filter
+  (`.toggleInboxInclude` kept only when `settings.inboxOptInOnly`) and the
+  new #671 normal-mode filter (`.toggleInboxExclude` kept only when
+  `!settings.inboxOptInOnly`) without either one leaking into the wrong
+  mode. Verified by truth table against the old expression (not just
+  inspection) and confirmed against the dedicated predicate-isolation tests:
+  `testToggleInboxExcludeDroppedFromOrderWhenOptInOn`,
+  `testToggleInboxExcludeKeptInOrderWhenOptInOff`, plus the two pre-existing
+  #668 predicate tests
+  (`testToggleInboxIncludeDroppedFromOrderWhenOptInOff`,
+  `testToggleInboxIncludeKeptInOrderWhenOptInOn`) — all four pass. The
+  user's configured Quick Actions order still drives rotor action order;
+  this is a display-time filter only, the persisted order is untouched.
+- [x] Focus management: PASS/N/A — this diff adds no modal, sheet, screen
+  push, or list-collapsing delete; it's a same-row state toggle (rotor
+  action, swipe button, and settings `Toggle`), so none of the
+  dismiss-returns-focus / push-lands-on-heading / paged-TabView /
+  deferred-post-delete-focus patterns apply. VoiceOver stays on the same row
+  or the same settings `Toggle` after activation in all three paths, which
+  is correct here (no navigation occurred).
+- [x] State announcements: PASS — the rotor action and swipe action both
+  call `Announcer.announce("Excluded from inbox" / "Included in inbox")`
+  with no `assertive:` argument, i.e. `assertive: false` (confirmed the
+  `Announcer.announce` signature at
+  `Core/Accessibility/Announcer.swift:12` defaults `assertive` to `false`),
+  identical to `.toggleInboxInclude`'s `Announcer.announce("Added to inbox"
+  / "Removed from inbox")` call from #668. The settings-screen `Toggle`
+  path deliberately does **not** call `Announcer.announce` at all — it
+  relies on the native SwiftUI `Toggle`'s own On/Off announcement, exactly
+  matching the `autoQueue`/opt-in-mode `Toggle` precedent and the "Adjustable
+  value pickers" project lesson (never announce over a control that already
+  self-announces). No double-announcement or assertive/interrupting
+  announcement found anywhere in this diff.
+
+Dynamic Type:
+- [x] Semantic fonts only: PASS — no `Font` or `.font(.system(size:))` of
+  any kind introduced by this diff.
+- [x] No lineLimit(1) on essential content: PASS — none introduced.
+- [x] No fixed-height text containers: PASS — none introduced; the new
+  `Toggle` and swipe `Button` both use standard List/`.swipeActions` sizing.
+- [x] ViewThatFits on Now Playing bar: N/A — Now Playing bar untouched.
+
+Touch targets (44pt minimum): PASS — no custom-frame interactive elements
+introduced. The new `Toggle` is a standard `List` row toggle and the new
+swipe action is a standard `.swipeActions` `Button`; both get their touch
+target from the system List/swipe-action chrome, same as every other
+row/toggle in these two files (including the #668 toggle/swipe this diff
+mirrors, which already passed this exact check).
+
+Motion (Reduce Motion guard): N/A — no animation, transition, or
+`withAnimation` call introduced by this diff.
+
+Contrast (WCAG 2.2 AA): PASS — no new colors introduced; the swipe action
+uses `.tint(.accentColor)` (the existing semantic accent color, same as
+#668's opt-in swipe action), and the settings `Toggle` uses the system
+toggle appearance. No raw hex or `Color(red:green:blue:)` literals.
+
+Color independence: PASS — the swipe action pairs its label text
+("Exclude from Inbox" / "Include in Inbox") with a state-derived SF Symbol
+(`tray.and.arrow.up` / `tray.and.arrow.down`) in addition to the accent-color
+tint, so state is never conveyed by color alone. The rotor action and the
+settings `Toggle` both convey state through text/native control state, not
+color.
+
+F1-F16 patterns applied:
+- No `Focus(autofocus:)` misuse — none introduced (N/A, no container focus
+  code in this diff).
+- Announcement convention (non-assertive `Announcer.announce`, matching
+  `.toggleAutoQueue`/`.toggleInboxInclude`) — directly verified above; this
+  is the primary pattern this review was asked to confirm, and it holds.
+- Group header vs button separation, visible-but-hidden restore button,
+  deferred announce after delete, focusable empty states — not applicable;
+  this diff touches no group headers, no Downloads rows, no delete flow, and
+  no empty-state view.
+
+Additional verification performed:
+- `xcodebuild test -only-testing:EarshotTests/QuickActionBuildersTests
+  -only-testing:EarshotTests/DownloadsInboxLogicTests
+  -only-testing:EarshotTests/PodcastSettingsViewTests` on simulator
+  `58857CDF-1560-410D-8F46-7381F7ADF48A` — 109 tests, 0 failures, including
+  all #671 tests.
+- Read all four changed source files in full
+  (`PodcastAction.swift`, `PodcastActionsBuilder.swift`,
+  `PodcastSettingsView.swift`, `SubscriptionsView.swift`) plus the settings
+  footer text change, to confirm no double-reading between the new footer
+  string ("New episodes from this podcast appear in the inbox unless you
+  exclude it here.") and any hint — no hint exists on the `Toggle`, so no
+  double-reading risk.
+
+`git status --short` clean at end of review (aside from the known
+pre-existing unrelated `.dart` formatting noise from #660, left untouched);
+no fix commit needed.
+
+New agents created: none.
+Feature suggestions identified: none this review.
+
+Overall: PASS
