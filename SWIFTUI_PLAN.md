@@ -48,6 +48,7 @@ Phase 2 = immediate fixes, the Flutter→SwiftUI migration, and audio DSP (#352)
 | Audio DSP | #352 | [~] | DONE pending device verify. `AudioEnhancementLogic` (pure mode/channel mapping, tested both ways). `configureSession` now conditional on `voiceEnhanceEnabled` (was hardcoded `.spokenAudio`); `applyAudioEnhancement()` sets mode + `setPreferredOutputNumberOfChannels` (1 mono / 2 stereo); all `AVAudioSession` calls in do/catch + `AppLog.player` (no silent `try?`). Public `effectiveRate` + `reapplyRate()`. RootView `.onChange` re-applies global speed + voice-enhance mid-playback (observation-based, not NotificationCenter). Per-podcast `speedOverride` has no setter UI yet (deferred F7) — `reapplyRate()` ready for it. Mono is audible only on device. |
 | BUG — tab switching blocked during playback | #362 | [x] | Per-second synchronous main-actor SwiftData `context.save()` from the 1s time observer starved the run loop, freezing TabView selection while audio played (severe VoiceOver nav regression). Fixed by throttling the per-tick position write to a 5s cadence via pure `PlaybackLogic.shouldPersistTick`; eager saves on pause/seek/episode-switch/30s-flush keep durability. All gates passed (security, testing, swift6, changelog; a11y N/A — no view changed). 210 tests green (was 204). Branch `fix/issue-362-tab-switching-playback`. Awaiting device verification. |
 | BUG — auto-download of newest episodes doesn't work | #639 | [x] | Two compounding bugs, both fixed. (1) `SubscriptionRepository.refresh(_:)`/`refreshAll(...)` never triggered auto-download for newly-discovered episodes on already-subscribed podcasts — only subscribe-time and OPML-import had it wired (an unfinished F8 follow-up, never completed). `RefreshOutcome` now carries `newEpisodeIDs: [PersistentIdentifier]` (resolved only AFTER `context.save()`, mirroring `subscribeAll`'s pending-ID pattern in `FeedRefreshActor`, since a pre-save read would silently reintroduce the bug); backfill passes correctly report zero new-episode IDs. `refresh`/`refreshAll` now call the existing `autoDownloadRecent(episodeIDsPerPodcast:)`. (2) The app's one real, shared `DownloadManager` was never threaded into ANY UI call site that constructs `SubscriptionRepository`/`OPMLImportService` (`AddFeedView`, `SubscriptionsView`, `SearchView`, `PodcastPreviewView`, `EpisodeListView`, OPML import) — all relied on the `downloader: nil` default, so even the working subscribe-time auto-download never fired from real usage. Now wired via `@Environment(DownloadManager.self)` at every call site. **Implemented by:** earshot-data. **Gates:** earshot-security PASS, earshot-swift6 PASS (one pre-existing unrelated strict-concurrency warning noted, not introduced here), earshot-accessibility PASS (no VoiceOver/announcement/focus surface change — download start stays silent, matching the pre-existing subscribe-time behavior), earshot-testing PASS (+9 tests total: 6 from earshot-data, 3 from the gate covering the `autoDownloadCount == 0` off-switch and partial-refreshAll cases). **1141 → 1144 tests**, Release build clean. **PR #654** squash-merged into `swift` (`09e7767`). Reported by TestFlight tester Greg Wocher on 1.0.0 (150). Not yet deployed to TestFlight (requires separate approval). |
+| BUG — no way to add a podcast to inbox with "Opt-in podcasts only" enabled | #668 | [x] | Root cause: pre-existing SwiftUI-rebuild parity gap, **not** a #659 regression (#659 was unrelated Mark-All-as-Played work). `Podcast.inboxIncluded` has existed since F2 (#337) and was already read/enforced by `InboxRepository.isExcluded(_:optInOnly:)`/`InboxLogic.isExcluded`, but no SwiftUI surface ever wrote it — the Flutter original's dual-mode `PodcastAction.toggleInboxExcluded` custom action (`all_podcasts_screen.dart`) was never ported. Fix (scoped to the opt-in path only, per the issue): new `PodcastAction.toggleInboxInclude` Quick Action (rotor, label "Add to Inbox"/"Remove from Inbox", toggles `inboxIncluded`, non-assertive `Announcer.announce` matching the `.toggleAutoQueue`/`.toggleNotifications` convention), filtered out of the rotor entirely when opt-in mode is off; a leading-edge sighted swipe action on Library rows gated on `!voiceOverEnabled && settings.inboxOptInOnly` (mirrors the existing Unfollow swipe/rotor split, #597); an "Include in Inbox" `Toggle` in `PodcastSettingsView`'s Inbox section, shown only when opt-in mode is on (native switch announcement, no custom `Announcer` needed). **Deliberately out of scope:** the symmetric "Exclude from Inbox" toggle for normal (non-opt-in) mode — `Podcast.inboxExcluded` also exists and is enforced but has no UI either; a separate, unreported gap, to be filed as a follow-up issue. **Implemented by:** earshot-ui. **Gates:** earshot-security PASS (no fix needed; logged review, commit `88c3eb3` — no force-unwraps, silent `try?`, retain cycles, or `@MainActor` violations; writes route through the existing `saveQuickAction` do/catch helper), earshot-swift6 PASS (no fix needed, no commits — no `@Model`/`ModelContext` crosses an actor boundary, no `Task.detached`, new arm matches `.toggleAutoQueue`'s isolation exactly, zero new warnings under an informational `SWIFT_STRICT_CONCURRENCY=complete` pass), earshot-accessibility PASS (no fix needed, no commits — rotor/swipe labels unambiguous and state-derived, correct opt-in-mode filtering verified against dedicated tests, icon+text swipe label not color-only, non-assertive announcement convention confirmed correct), earshot-testing PASS (gate added `PodcastSettingsViewTests` Toggle-binding coverage, a gap found during review — commit `462cbac`). **1254 → 1266 tests** on the isolated worktree before the final `swift`-rebase pulled in #663-#667's own test growth (1314 after rebase, all pre-existing); the only failures throughout were the already-known StoreKit sandbox (`SKTestSession`) `ProductCatalogServiceTests`/`PaywallViewModelTests` failures, confirmed unrelated (untouched by this diff). Release build clean. CHANGELOG updated (Fixed + Accessibility). CI green. **PR #670**, merging into `swift`. Reported by beta tester Bel, same class as #639. |
 
 **Follow-up from #362 security gate — FIXED by #653:** `PlayerService.persistPositionThrottled`
 (and the prior per-second save) lacked an `isPlayed` guard, so a tick after the
@@ -4471,6 +4472,79 @@ N/A, untouched by this diff.
 
 `git status --short` clean before and after this review — no code changes,
 docs-only.
+
+## Security Review — Issue #668
+
+earshot-security review complete. Issue #668 (BUG: no way to add a podcast
+to inbox with "Opt-in podcasts only" enabled). Branch
+`fix/issue-668-opt-in-inbox`, reviewed at commit `8700b49` on top of `swift`
+tip `c9bdf79`, in isolated worktree `earshot-wt-668`. No fixes needed — PASS
+on first pass.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found. Every `!` in the diff is boolean
+  negation (`!(podcast.notificationEnabled ?? false)`, `!podcasts.isEmpty`,
+  `!author.isEmpty`, `!notifications.isEmpty`). The `try? XCTUnwrap(...)` /
+  `firstOn!` lines in `QuickActionBuildersTests.swift` are pre-existing,
+  confirmed untouched by `git diff c9bdf79..HEAD` — out of scope for this
+  diff.
+- [x] Silent try?: PASS — none introduced.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new `Task {}`, `.sink`, `addObserver`, or
+  `Timer` closures. The new `.toggleInboxInclude` case in
+  `buildPodcastActions` and the new `toggleInboxInclude(_:)` helper in
+  `SubscriptionsView` are synchronous closures capturing a `Podcast`
+  (reference type, owned by the caller) and `ModelContext`, matching the
+  adjacent `.toggleAutoQueue`/`.toggleNotifications` cases and the existing
+  `unsubscribe(_:)` method exactly.
+- [x] @MainActor: PASS — `buildPodcastActions` keeps its existing
+  `@MainActor` annotation; the new case does a direct synchronous `@Model`
+  write (`podcast.inboxIncluded.toggle()`). The new swipe-action button and
+  the new `Toggle(isOn: $podcast.inboxIncluded)` binding both run as
+  main-thread SwiftUI event handlers — no background `Task`, no `ModelActor`
+  crossing.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration-related files changed
+  (`Podcast.inboxIncluded` and `StoreMigration` untouched; this only adds UI
+  writing an existing field). Ran a Debug build instead as a general
+  compile gate.
+- [ ] Entitlements: N/A — no entitlements/project.yml changes.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new `Error` types introduced. The one save
+  path routes through the existing `saveQuickAction(_:_:)` helper
+  (`EpisodeActionsBuilder.swift:131-139`), which already does `do`/`catch` +
+  `AppLog.quickActions.error(...)`.
+- [x] AppLog coverage: PASS — no new catch blocks added by this diff; the
+  shared `saveQuickAction` catch (pre-existing) covers both new call sites.
+
+Additional verification performed:
+- Confirmed no other exhaustive `switch` over `PodcastAction` exists outside
+  `PodcastActionsBuilder.swift` that could have silently missed the new
+  `.toggleInboxInclude` case (checked `QuickActionRepository.swift`,
+  `QuickActionStore.swift`, `QuickActionsSettingsView.swift` — all only
+  reference `PodcastAction.allCases`/arrays).
+- `xcodebuild build` (scheme Earshot, Debug, iPhone 17 sim) — BUILD
+  SUCCEEDED.
+- `xcodebuild build-for-testing` — TEST BUILD SUCCEEDED.
+- `-only-testing:EarshotTests/QuickActionBuildersTests
+  -only-testing:EarshotTests/DownloadsInboxLogicTests` — 60 tests, 0
+  failures, including the 6 new #668 tests (3 `InboxRepository` opt-in
+  inclusion cases, `testDefaultPodcastActionsIncludesToggleInboxInclude`,
+  `testToggleInboxIncludeLabelReflectsState`,
+  `testToggleInboxIncludeRunFlipsAndPersists`, plus the two rotor-filter
+  predicate tests).
+
+Non-blocking observation (pre-existing pattern, not introduced by this
+diff): the new swipe action and rotor toggle don't check
+`readOnlyPodcastIDs`/free-tier entitlement gating before writing
+`inboxIncluded` — but neither do the adjacent `.toggleAutoQueue`/
+`.toggleNotifications` actions this mirrors, so this is consistent, not a
+regression. Worth a follow-up issue if per-podcast settings should be
+entitlement-gated while read-only, but out of scope for #668.
+
+`git status --short` clean before and after review; no fix commit needed.
+
+New agents created: none.
+Feature suggestions identified: none this review.
 
 Overall: PASS
 

@@ -79,6 +79,27 @@ struct SubscriptionsView: View {
                                         Label("Unfollow", systemImage: "xmark.bin")
                                     }
                                 }
+                                // #668: the only sighted (or VoiceOver-rotor,
+                                // gated below) affordance to opt a podcast into
+                                // the inbox once "Opt-in podcasts only" is on —
+                                // there was previously no UI anywhere to do this.
+                                // Leading edge so it never collides with the
+                                // trailing destructive Unfollow swipe above. Only
+                                // relevant in opt-in mode, matching the rotor gate
+                                // in `rotorActions(for:)` below.
+                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                    if settings.inboxOptInOnly {
+                                        Button {
+                                            toggleInboxInclude(podcast)
+                                        } label: {
+                                            Label(
+                                                podcast.inboxIncluded ? "Remove from Inbox" : "Add to Inbox",
+                                                systemImage: podcast.inboxIncluded ? "tray.and.arrow.up" : "tray.and.arrow.down"
+                                            )
+                                        }
+                                        .tint(.accentColor)
+                                    }
+                                }
                         }
                     }
                 }
@@ -254,12 +275,30 @@ struct SubscriptionsView: View {
     private func rotorActions(for podcast: Podcast) -> [QuickActionItem] {
         buildPodcastActions(
             podcast: podcast,
-            order: quickActions.podcastActions.filter { $0 != .openDetail },
+            // `.toggleInboxInclude` only does anything in opt-in mode (#668):
+            // drop it from the rotor entirely when opt-in is off so it never
+            // shows up as a confusing, no-effect-feeling action outside its
+            // intended scope. The persisted Quick Action order still lists it —
+            // this is a display-time filter, not a stored-order change.
+            order: quickActions.podcastActions.filter {
+                $0 != .openDetail && ($0 != .toggleInboxInclude || settings.inboxOptInOnly)
+            },
             context: context,
             onOpenDetail: {},
             onShare: { sharingPodcast = podcast },
             onUnsubscribe: { pendingUnsubscribe = podcast }
         )
+    }
+
+    /// Shared toggle+save+announce for opting a podcast into/out of the inbox
+    /// while "Opt-in podcasts only" is on (#668). Used by both the leading-edge
+    /// swipe action above and, indirectly via `buildPodcastActions`, the
+    /// VoiceOver rotor — this one backs the swipe so the two surfaces share the
+    /// exact same effect.
+    private func toggleInboxInclude(_ podcast: Podcast) {
+        podcast.inboxIncluded.toggle()
+        saveQuickAction(context, "inbox-include")
+        Announcer.announce(podcast.inboxIncluded ? "Added to inbox" : "Removed from inbox")
     }
 
     private func unsubscribe(_ podcast: Podcast) {
