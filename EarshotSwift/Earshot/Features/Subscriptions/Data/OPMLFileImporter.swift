@@ -7,7 +7,9 @@ import SwiftData
 /// through ``OPMLImportService/importOPML(_:)``, and announces the outcome via
 /// ``Announcer`` so success and failure are both spoken to VoiceOver — there is no
 /// visual-only feedback path. Keep the read-to-String + scope + import + announce
-/// logic here only, so every entry point behaves identically.
+/// logic here only, so every entry point behaves identically. When the free-tier
+/// podcast cap (#635) trims the import, the announcement also reports how many
+/// feeds were skipped and why, with an upgrade mention.
 @MainActor
 enum OPMLFileImporter {
 
@@ -32,12 +34,20 @@ enum OPMLFileImporter {
     /// auto-download fires for the imported feeds' newest episodes. Defaults to
     /// `nil` so non-UI/test callers need no change — matching the existing
     /// no-downloader OPML behavior (#639).
+    ///
+    /// `isEntitled` (typically read from the shared `EntitlementStore`) is threaded
+    /// through for the free-tier podcast cap (#635). When the import hits the cap,
+    /// the spoken outcome is extended to say how many feeds were skipped and why,
+    /// with an upgrade mention — this Announcer call is the only accessible surface
+    /// for OPML import outcome in the app, so it carries the skip messaging rather
+    /// than a new screen. Defaults to `nil` so non-UI/test callers need no change.
     @discardableResult
     static func importFile(
         at url: URL,
         context: ModelContext,
         progress: OPMLImportProgress? = nil,
-        downloader: EpisodeDownloading? = nil
+        downloader: EpisodeDownloading? = nil,
+        isEntitled: Bool? = nil
     ) async -> Int? {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -58,7 +68,7 @@ enum OPMLFileImporter {
         // can't hang up.
         defer { progress?.finish() }
 
-        let count = await OPMLImportService(context: context, downloader: downloader).importOPML(
+        let outcome = await OPMLImportService(context: context, downloader: downloader, isEntitled: isEntitled).importOPML(
             opml,
             onResolveTotal: { total in
                 progress?.start(total: total)
@@ -76,9 +86,20 @@ enum OPMLFileImporter {
         // a raw interpolated literal here would make VoiceOver speak the literal
         // "caret bracket 1 podcast ... inflect true". `String(localized:)` resolves
         // it to the correct singular/plural spoken form first.
-        let imported = String(localized: "Imported ^[\(count) podcast](inflect: true)")
-        await announceSettled(imported)
-        return count
+        let imported = String(localized: "Imported ^[\(outcome.importedCount) podcast](inflect: true)")
+        let message: String
+        if outcome.skippedForCapCount > 0 {
+            // Free-tier cap (#635): tell the user how many were skipped and why,
+            // with an upgrade mention. This announcement is the only accessible
+            // surface for OPML import outcome in the app (no persistent status UI),
+            // so it must carry the full message, not just the imported count.
+            let skipped = String(localized: "^[\(outcome.skippedForCapCount) podcast](inflect: true)")
+            message = "\(imported). \(skipped) skipped — you've reached the \(PodcastCapPolicy.freeTierLimit)-podcast limit on the free plan. Upgrade to Earshot Plus to import them all."
+        } else {
+            message = imported
+        }
+        await announceSettled(message)
+        return outcome.importedCount
     }
 
     /// Speaks an outcome reliably across every entry point. Both the in-app

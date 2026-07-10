@@ -73,17 +73,26 @@ final class SubscriptionRepository {
     /// VoiceOver fix (#440). Nil in production.
     private let onMerge: (() -> Void)?
 
+    /// Whether the current user has an active Earshot Plus entitlement, for
+    /// free-tier podcast cap enforcement (#635). `nil` (the default) means "cap
+    /// not enforced" — preserves every existing call site / test that doesn't
+    /// pass this, matching how `downloader: EpisodeDownloading? = nil` already
+    /// works in this type.
+    private let isEntitled: Bool?
+
     init(
         context: ModelContext,
         feed: FeedFetching = FeedService(),
         downloader: EpisodeDownloading? = nil,
         queue: QueueRepository? = nil,
+        isEntitled: Bool? = nil,
         onMerge: (() -> Void)? = nil
     ) {
         self.context = context
         self.feed = feed
         self.downloader = downloader
         self.autoQueueEnabled = queue != nil
+        self.isEntitled = isEntitled
         self.onMerge = onMerge
     }
 
@@ -108,6 +117,21 @@ final class SubscriptionRepository {
     func subscribe(feedURL: String) async throws -> Podcast {
         let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if let existing = podcast(forFeedURL: trimmed) { return existing }
+
+        // Free-tier podcast cap (#635): block an 11th podcast for a non-Plus
+        // user BEFORE the network fetch below, so a blocked add never wastes a
+        // fetch. `isEntitled == nil` means the cap isn't enforced at this call
+        // site (legacy/test behavior).
+        if let isEntitled {
+            let currentCount = currentPodcastCountForCapCheck()
+            let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
+            guard PodcastCapPolicy.canAddSubscription(currentCount: currentCount, isEntitled: isEntitled, grandfatheredCount: grandfathered) else {
+                throw SubscriptionError.podcastCapReached(
+                    currentCount: currentCount,
+                    limit: PodcastCapPolicy.effectiveFreeLimit(grandfatheredCount: grandfathered)
+                )
+            }
+        }
 
         // Resolve the inbox seed count on the main actor (AppSettingsStore is
         // @MainActor) and pass it into the background actor, which must not touch
@@ -134,6 +158,9 @@ final class SubscriptionRepository {
             throw SubscriptionError.podcastNotFoundAfterSubscribe
         }
 
+        // No read-only check needed here (#635): the cap gate above already threw
+        // before this point when a non-entitled user was at/over the limit, so a
+        // freshly-created podcast can never itself be read-only at creation time.
         // Auto-download the N most recent episodes (global setting; 0 = off). The
         // downloader is @MainActor and needs main-context `Episode`s, so re-fetch
         // the inserted episodes by ID HERE (never inside the actor), sort newest
@@ -317,6 +344,17 @@ final class SubscriptionRepository {
         let episodeIDs: [PersistentIdentifier]
     }
 
+    /// The result of a bulk ``subscribeAll(feedURLs:onProgress:)`` pass: the
+    /// per-feed outcomes that were actually attempted, plus how many requested
+    /// feed URLs were trimmed off the front by the free-tier cap before the
+    /// pass even started (#635).
+    struct BulkSubscribeResult {
+        let outcomes: [BulkSubscribeOutcome]
+        /// How many requested feed URLs were NOT attempted because of the
+        /// free-tier cap (0 for Plus users, 0 when already under the cap). #635.
+        let skippedForCap: Int
+    }
+
     /// Subscribes to every URL in `feedURLs` in ONE background pass, reconciling the
     /// main context exactly ONCE afterward — not per feed. This is the bulk OPML
     /// import path. The old per-feed `subscribe()` merged the entire Podcast +
@@ -331,6 +369,13 @@ final class SubscriptionRepository {
     /// main actor after each feed with `(completed, total, currentTitle)` and is kept
     /// cheap (two ints + an optional String) so it can't reintroduce a stall.
     ///
+    /// Free-tier cap (#635): when `isEntitled == false`, `feedURLs` is trimmed to
+    /// however many free slots remain (`PodcastCapPolicy.allowedNewSubscriptions`)
+    /// BEFORE the background pass runs, so a capped-out user's request never wastes
+    /// network fetches on feeds that can't be added. The trimmed count is reported
+    /// back as ``BulkSubscribeResult/skippedForCap``. `isEntitled == nil` (the
+    /// default) means the cap isn't enforced at this call site.
+    ///
     /// Auto-download is NOT done here — the caller (`OPMLImportService`) runs it once
     /// at the end against the returned `episodeIDs`, so it too stays off the per-feed
     /// path. Returns one ``BulkSubscribeOutcome`` per feed that resolved, in input
@@ -338,8 +383,21 @@ final class SubscriptionRepository {
     func subscribeAll(
         feedURLs: [String],
         onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
-    ) async -> [BulkSubscribeOutcome] {
-        guard !feedURLs.isEmpty else { return [] }
+    ) async -> BulkSubscribeResult {
+        guard !feedURLs.isEmpty else { return BulkSubscribeResult(outcomes: [], skippedForCap: 0) }
+
+        var allowedURLs = feedURLs
+        var skippedForCap = 0
+        if let isEntitled {
+            let currentCount = currentPodcastCountForCapCheck()
+            let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
+            let allowedCount = PodcastCapPolicy.allowedNewSubscriptions(
+                currentCount: currentCount, requested: feedURLs.count, isEntitled: isEntitled, grandfatheredCount: grandfathered
+            )
+            allowedURLs = Array(feedURLs.prefix(allowedCount))
+            skippedForCap = feedURLs.count - allowedURLs.count
+        }
+        guard !allowedURLs.isEmpty else { return BulkSubscribeResult(outcomes: [], skippedForCap: skippedForCap) }
 
         // Resolve the inbox seed count on the main actor (AppSettingsStore is
         // @MainActor) so the bulk OPML path seeds the inbox identically to the
@@ -350,7 +408,7 @@ final class SubscriptionRepository {
         // returns only Sendable PersistentIdentifiers, batching its saves.
         let actor = FeedRefreshActor(modelContainer: context.container)
         let results = await actor.subscribeAll(
-            feedURLs: feedURLs, feed: feed, inboxSeedCount: inboxSeedCount, onProgress: onProgress
+            feedURLs: allowedURLs, feed: feed, inboxSeedCount: inboxSeedCount, onProgress: onProgress
         )
 
         // Reconcile the main context ONCE for the entire batch (the essential fix:
@@ -370,7 +428,7 @@ final class SubscriptionRepository {
                 )
             )
         }
-        return outcomes
+        return BulkSubscribeResult(outcomes: outcomes, skippedForCap: skippedForCap)
     }
 
     /// Auto-downloads the N most recent episodes (global `autoDownloadCount`; 0 =
@@ -379,6 +437,11 @@ final class SubscriptionRepository {
     /// OPML path to run auto-download ONCE at the end rather than per feed. No-op
     /// when no downloader was injected — preserving the OPML path's existing
     /// behavior, which has never had a downloader.
+    ///
+    /// Free-tier cap (#635): when `isEntitled == false`, episodes belonging to a
+    /// read-only podcast (``PodcastCapPolicy/readOnlyPodcastIDs``) are excluded —
+    /// "no new episodes download for podcasts beyond the first 10." `isEntitled ==
+    /// nil` (the default) means the cap isn't enforced at this call site.
     func autoDownloadRecent(episodeIDsPerPodcast: [[PersistentIdentifier]]) async {
         guard let downloader, !episodeIDsPerPodcast.isEmpty else { return }
         let count = AppSettingsStore(context: context).int(
@@ -386,9 +449,21 @@ final class SubscriptionRepository {
             default: SettingsDefault.autoDownloadCount
         )
         guard count > 0 else { return }
+
+        var readOnlyIDs: Set<PersistentIdentifier> = []
+        if let isEntitled, !isEntitled {
+            let allPodcasts = allPodcastsForCapCheck()
+            let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
+            readOnlyIDs = PodcastCapPolicy.readOnlyPodcastIDs(in: allPodcasts, isEntitled: isEntitled, grandfatheredCount: grandfathered)
+        }
+
         for episodeIDs in episodeIDsPerPodcast where !episodeIDs.isEmpty {
             let toDownload = episodeIDs
                 .compactMap { episode(forPersistentID: $0) }
+                .filter { episode in
+                    guard let podcastID = episode.podcast?.persistentModelID else { return true }
+                    return !readOnlyIDs.contains(podcastID)
+                }
                 .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
                 .prefix(count)
             for episode in toDownload {
@@ -438,6 +513,40 @@ final class SubscriptionRepository {
         descriptor.fetchLimit = 1
         return (try? context.fetch(descriptor))?.first
     }
+
+    /// Current podcast count for the free-tier cap check (#635). Unlike the
+    /// other `try?` fetch helpers above (whose fallback-to-nil/empty is a
+    /// genuinely benign "not found" outcome), a fetch failure HERE would
+    /// silently under-count and let a capped-out user add another podcast —
+    /// so it's logged rather than swallowed. Still falls back to 0 (never
+    /// throws out of a cap check) since blocking every subscribe on a rare
+    /// local SwiftData read failure would be a worse user-facing outcome than
+    /// the cap being momentarily under-enforced.
+    private func currentPodcastCountForCapCheck() -> Int {
+        do {
+            return try context.fetchCount(FetchDescriptor<Podcast>())
+        } catch {
+            AppLog.subscriptions.error(
+                "Podcast cap check: failed to fetch podcast count, treating as 0: \(error.localizedDescription, privacy: .public)"
+            )
+            return 0
+        }
+    }
+
+    /// Full podcast list for the free-tier cap's read-only-podcast computation
+    /// (#635). Same reasoning as ``currentPodcastCountForCapCheck()``: a fetch
+    /// failure here would silently skip the read-only auto-download gate, so
+    /// it's logged rather than swallowed.
+    private func allPodcastsForCapCheck() -> [Podcast] {
+        do {
+            return try context.fetch(FetchDescriptor<Podcast>())
+        } catch {
+            AppLog.subscriptions.error(
+                "Podcast cap check: failed to fetch podcasts, treating as empty: \(error.localizedDescription, privacy: .public)"
+            )
+            return []
+        }
+    }
 }
 
 /// Errors surfaced by ``SubscriptionRepository``.
@@ -446,4 +555,19 @@ enum SubscriptionError: Error {
     /// not be resolved on the main context afterward (should not happen in
     /// practice — guards a stale/missing re-fetch instead of force-unwrapping).
     case podcastNotFoundAfterSubscribe
+    /// Non-Plus user already has `PodcastCapPolicy.effectiveFreeLimit`(-or-more)
+    /// podcasts. #632's paywall screen is the intended next UI step; this issue
+    /// only defines the gate/result a future paywall presentation hooks into.
+    case podcastCapReached(currentCount: Int, limit: Int)
+}
+
+extension SubscriptionError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .podcastNotFoundAfterSubscribe:
+            return nil // preserves existing fallback-to-generic-message behavior
+        case let .podcastCapReached(currentCount, limit):
+            return "You've reached the \(limit)-podcast limit on the free plan (currently \(currentCount)). Upgrade to Earshot Plus for unlimited podcasts."
+        }
+    }
 }

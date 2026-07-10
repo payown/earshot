@@ -9,6 +9,7 @@ struct DataSettingsView: View {
     @Environment(\.modelContext) private var context
     @Environment(OPMLImportProgress.self) private var importProgress
     @Environment(DownloadManager.self) private var downloads
+    @Environment(EntitlementStore.self) private var entitlements
 
     @Query private var podcasts: [Podcast]
 
@@ -87,7 +88,7 @@ struct DataSettingsView: View {
         // in-app picker, the share-sheet (onOpenURL), and onboarding all behave
         // identically (#OPML share sheet).
         Task {
-            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress, downloader: downloads)
+            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress, downloader: downloads, isEntitled: entitlements.isEntitled)
         }
     }
 

@@ -24,7 +24,10 @@ import SwiftData
 ///
 /// This does not delete any user data on revocation — it only updates the
 /// entitlement flag. Cap enforcement / lapse behavior when Plus is lost is
-/// #635's responsibility.
+/// implemented by #635: see ``PodcastCapPolicy`` for the pure decision logic,
+/// and ``SubscriptionRepository``/`SubscriptionsView` for where `isEntitled`
+/// (read from this store) gates subscribe, OPML import, auto-download, and the
+/// Library's read-only indicator.
 @MainActor
 @Observable
 final class EntitlementStore {

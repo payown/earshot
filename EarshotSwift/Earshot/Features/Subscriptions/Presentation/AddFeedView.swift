@@ -5,6 +5,7 @@ struct AddFeedView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Environment(DownloadManager.self) private var downloads
+    @Environment(EntitlementStore.self) private var entitlements
 
     @State private var urlString = ""
     @State private var isLoading = false
@@ -78,7 +79,7 @@ struct AddFeedView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let podcast = try await SubscriptionRepository(context: context, downloader: downloads).subscribe(feedURL: urlString)
+            let podcast = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(feedURL: urlString)
             Announcer.announce("Now following \(podcast.title)")
             dismiss()
         } catch {

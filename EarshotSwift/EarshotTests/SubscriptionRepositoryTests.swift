@@ -882,6 +882,166 @@ final class SubscriptionRepositoryTests: XCTestCase {
             "The unfollowed show's episodes all leave the inbox"
         )
     }
+
+    // MARK: Free-tier podcast cap (#635)
+
+    /// Subscribing an 11th podcast throws `.podcastCapReached` for a non-entitled
+    /// user, and the 11th podcast is never inserted.
+    func testSubscribeThrowsCapReachedAtEleventhPodcastWhenNotEntitled() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, isEntitled: false)
+        for i in 0..<10 {
+            _ = try await repo.subscribe(feedURL: "https://x/feed\(i).xml")
+        }
+
+        do {
+            _ = try await repo.subscribe(feedURL: "https://x/feed10.xml")
+            XCTFail("Expected SubscriptionError.podcastCapReached")
+        } catch SubscriptionError.podcastCapReached(let currentCount, let limit) {
+            XCTAssertEqual(currentCount, 10)
+            XCTAssertEqual(limit, 10)
+        }
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 10, "The 11th podcast is never inserted")
+    }
+
+    /// An entitled (Plus) user can subscribe past 10 with no error.
+    func testSubscribeSucceedsWhenEntitledRegardlessOfCount() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, isEntitled: true)
+        for i in 0..<12 {
+            _ = try await repo.subscribe(feedURL: "https://x/feed\(i).xml")
+        }
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 12)
+    }
+
+    /// `isEntitled == nil` (the default) means the cap isn't enforced — every
+    /// legacy/test call site that predates #635 keeps working unchanged.
+    func testSubscribeSucceedsWhenIsEntitledNilRegardlessOfCount() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher) // isEntitled defaults to nil
+        for i in 0..<12 {
+            _ = try await repo.subscribe(feedURL: "https://x/feed\(i).xml")
+        }
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 12)
+    }
+
+    /// A grandfathered tester who already had 15 podcasts before gating shipped
+    /// cannot add ANY more while non-entitled — not just past 15 — because
+    /// `effectiveFreeLimit(grandfatheredCount: 15) == max(10, 15) == 15`, and their
+    /// current count (15) is already at that raised limit.
+    func testSubscribeRespectsRaisedGrandfatheredCount() async throws {
+        let ctx = TestStore.freshContext()
+        for i in 0..<15 {
+            ctx.insert(Podcast(feedURL: "https://x/existing\(i).xml", title: "Existing \(i)"))
+        }
+        try ctx.save()
+        AppSettingsStore(context: ctx).setInt(15, for: SettingsKey.grandfatheredPodcastCount)
+
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, isEntitled: false)
+
+        do {
+            _ = try await repo.subscribe(feedURL: "https://x/new.xml")
+            XCTFail("A grandfathered-15, non-entitled user cannot add ANY more podcast")
+        } catch SubscriptionError.podcastCapReached(let currentCount, let limit) {
+            XCTAssertEqual(currentCount, 15)
+            XCTAssertEqual(limit, 15, "effectiveFreeLimit = max(10, 15) = 15")
+        }
+    }
+
+    /// Bulk/OPML path (#635): with 3 already subscribed, requesting 12 more feeds
+    /// imports only however many free slots remain and reports the rest skipped.
+    func testSubscribeAllRespectsCapAndReportsSkipped() async throws {
+        let ctx = TestStore.freshContext()
+        for i in 0..<3 {
+            ctx.insert(Podcast(feedURL: "https://x/existing\(i).xml", title: "Existing \(i)"))
+        }
+        try ctx.save()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, isEntitled: false)
+
+        let feeds = (0..<12).map { "https://x/new\($0).xml" }
+        let result = await repo.subscribeAll(feedURLs: feeds)
+
+        XCTAssertEqual(result.outcomes.count, 7, "10 - 3 already subscribed = 7 free slots remaining")
+        XCTAssertEqual(result.skippedForCap, 5)
+    }
+
+    func testSubscribeAllEntitledImportsAllRegardlessOfCap() async throws {
+        let ctx = TestStore.freshContext()
+        for i in 0..<3 {
+            ctx.insert(Podcast(feedURL: "https://x/existing\(i).xml", title: "Existing \(i)"))
+        }
+        try ctx.save()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, isEntitled: true)
+
+        let feeds = (0..<12).map { "https://x/new\($0).xml" }
+        let result = await repo.subscribeAll(feedURLs: feeds)
+
+        XCTAssertEqual(result.outcomes.count, 12)
+        XCTAssertEqual(result.skippedForCap, 0)
+    }
+
+    func testSubscribeAllNilEntitlementDoesNotEnforceCap() async throws {
+        let ctx = TestStore.freshContext()
+        for i in 0..<3 {
+            ctx.insert(Podcast(feedURL: "https://x/existing\(i).xml", title: "Existing \(i)"))
+        }
+        try ctx.save()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher) // isEntitled defaults to nil
+
+        let feeds = (0..<12).map { "https://x/new\($0).xml" }
+        let result = await repo.subscribeAll(feedURLs: feeds)
+
+        XCTAssertEqual(result.outcomes.count, 12)
+        XCTAssertEqual(result.skippedForCap, 0)
+    }
+
+    /// Auto-download (#635): with a non-entitled user and podcasts beyond the cap,
+    /// episodes belonging to read-only podcasts are NOT downloaded, while episodes
+    /// for in-cap podcasts still download normally. Podcasts are inserted directly
+    /// with explicit, distinct `createdAt` values so rank is deterministic
+    /// (podcast 0 is oldest/in-cap; podcast 11 is newest/beyond the 10-podcast limit).
+    func testAutoDownloadRecentSkipsReadOnlyPodcastsWhenNotEntitled() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(3, for: SettingsKey.autoDownloadCount)
+
+        var podcasts: [Podcast] = []
+        for i in 0..<12 {
+            let podcast = Podcast(
+                feedURL: "https://x/feed\(i).xml", title: "Show \(i)",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000 + Double(i))
+            )
+            ctx.insert(podcast)
+            let ep = Episode(guid: "g\(i)", title: "Ep \(i)", audioURL: "https://x/\(i).mp3", pubDate: d1)
+            ep.podcast = podcast
+            ctx.insert(ep)
+            podcast.episodes = [ep]
+            podcasts.append(podcast)
+        }
+        try ctx.save()
+
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, downloader: fakeDownloader, isEntitled: false)
+
+        let inCap = podcasts[0] // rank 0 — well within the 10-podcast limit
+        let overCap = podcasts[11] // rank 11 — beyond the limit, read-only
+
+        await repo.autoDownloadRecent(episodeIDsPerPodcast: [
+            inCap.episodes.map(\.persistentModelID),
+            overCap.episodes.map(\.persistentModelID),
+        ])
+
+        let downloadedGUIDs = Set(fakeDownloader.downloaded.map(\.guid))
+        XCTAssertTrue(downloadedGUIDs.contains("g0"), "In-cap podcast's episode still downloads")
+        XCTAssertFalse(downloadedGUIDs.contains("g11"), "Read-only (beyond cap) podcast's episode is skipped")
+    }
 }
 
 /// Local actor-isolated mock of ``NotificationScheduling`` for the foreground

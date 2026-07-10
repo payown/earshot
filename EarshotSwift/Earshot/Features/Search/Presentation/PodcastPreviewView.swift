@@ -26,6 +26,9 @@ struct PodcastPreviewView: View {
     /// newest episodes just like following from search or the Library (#639).
     @Environment(DownloadManager.self) private var downloads
 
+    /// Earshot Plus entitlement, for the free-tier podcast cap gate (#635).
+    @Environment(EntitlementStore.self) private var entitlements
+
     /// Subscriptions, so the Follow / Unfollow control reflects live state and the
     /// label flips the moment the toggle completes — without re-entering the view.
     @Query private var podcasts: [Podcast]
@@ -228,13 +231,14 @@ struct PodcastPreviewView: View {
         } else {
             Task {
                 do {
-                    _ = try await SubscriptionRepository(context: context, downloader: downloads).subscribe(feedURL: result.feedURL)
+                    _ = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(feedURL: result.feedURL)
                     Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
                 } catch {
                     AppLog.networking.error(
                         "Follow from preview failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)"
                     )
-                    Announcer.announce("Couldn't follow \(result.title)")
+                    let detail = (error as? LocalizedError)?.errorDescription
+                    Announcer.announce(detail.map { "Couldn't follow \(result.title). \($0)" } ?? "Couldn't follow \(result.title)")
                 }
             }
         }

@@ -63,7 +63,8 @@ final class OPMLBulkImportTests: XCTestCase {
         let feeds = (0..<5).map { "https://feed\($0).com/rss" }
         let imported = await service.importOPML(opml(feeds: feeds))
 
-        XCTAssertEqual(imported, 5)
+        XCTAssertEqual(imported.importedCount, 5)
+        XCTAssertEqual(imported.skippedForCapCount, 0)
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 5)
         // Each feed's three episodes were inserted. With the default inbox seed of
         // 3 and exactly 3 episodes per feed, all of them are seeded into the inbox
@@ -96,7 +97,7 @@ final class OPMLBulkImportTests: XCTestCase {
         """
         let imported = await service.importOPML(opml)
 
-        XCTAssertEqual(imported, 3)
+        XCTAssertEqual(imported.importedCount, 3)
         let folders = try ctx.fetch(FetchDescriptor<PodcastFolder>())
         XCTAssertEqual(folders.map(\.name), ["News"])
         let memberships = try ctx.fetch(FetchDescriptor<FolderMembership>())
@@ -125,8 +126,8 @@ final class OPMLBulkImportTests: XCTestCase {
             context: ctx, subscriptions: SubscriptionRepository(context: ctx, feed: fetcher())
         ).importOPML(opml)
 
-        XCTAssertEqual(first, 2)
-        XCTAssertEqual(second, 2, "Re-import still resolves all feeds (now already-subscribed)")
+        XCTAssertEqual(first.importedCount, 2)
+        XCTAssertEqual(second.importedCount, 2, "Re-import still resolves all feeds (now already-subscribed)")
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 2, "No duplicate podcasts")
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 1, "No duplicate memberships")
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<PodcastFolder>()).count, 1, "No duplicate folders")
@@ -208,7 +209,64 @@ final class OPMLBulkImportTests: XCTestCase {
         let service = OPMLImportService(context: ctx, subscriptions: repo)
 
         let imported = await service.importOPML(opml(feeds: ["https://a.com/feed"]))
-        XCTAssertEqual(imported, 1) // completes, no crash, no downloads
+        XCTAssertEqual(imported.importedCount, 1) // completes, no crash, no downloads
+    }
+
+    // MARK: Free-tier podcast cap (#635)
+
+    /// With 3 podcasts already subscribed and a non-entitled user, requesting 12
+    /// more feeds imports only however many free slots remain
+    /// (`PodcastCapPolicy.freeTierLimit` 10 - 3 = 7) and reports the rest skipped.
+    func testBulkImportRespectsCapAndReportsSkippedCount() async throws {
+        let ctx = TestStore.freshContext()
+        for i in 0..<3 {
+            ctx.insert(Podcast(feedURL: "https://existing\(i).com/feed", title: "Existing \(i)"))
+        }
+        try ctx.save()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher(), isEntitled: false)
+        let service = OPMLImportService(context: ctx, subscriptions: repo)
+
+        let feeds = (0..<12).map { "https://feed\($0).com/rss" }
+        let outcome = await service.importOPML(opml(feeds: feeds))
+
+        XCTAssertEqual(outcome.importedCount, 7, "10 - 3 already subscribed = 7 free slots remaining")
+        XCTAssertEqual(outcome.skippedForCapCount, 5)
+        XCTAssertEqual(outcome.importedCount + outcome.skippedForCapCount, feeds.count, "Nothing is silently dropped")
+    }
+
+    /// An entitled (Plus) user imports every requested feed regardless of the cap.
+    func testBulkImportEntitledImportsAllRegardlessOfCap() async throws {
+        let ctx = TestStore.freshContext()
+        for i in 0..<3 {
+            ctx.insert(Podcast(feedURL: "https://existing\(i).com/feed", title: "Existing \(i)"))
+        }
+        try ctx.save()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher(), isEntitled: true)
+        let service = OPMLImportService(context: ctx, subscriptions: repo)
+
+        let feeds = (0..<12).map { "https://feed\($0).com/rss" }
+        let outcome = await service.importOPML(opml(feeds: feeds))
+
+        XCTAssertEqual(outcome.importedCount, 12)
+        XCTAssertEqual(outcome.skippedForCapCount, 0)
+    }
+
+    /// `isEntitled == nil` (the default) means the cap isn't enforced at this call
+    /// site, matching every legacy/test call site that predates #635.
+    func testBulkImportNilEntitlementDoesNotEnforceCap() async throws {
+        let ctx = TestStore.freshContext()
+        for i in 0..<3 {
+            ctx.insert(Podcast(feedURL: "https://existing\(i).com/feed", title: "Existing \(i)"))
+        }
+        try ctx.save()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher()) // isEntitled defaults to nil
+        let service = OPMLImportService(context: ctx, subscriptions: repo)
+
+        let feeds = (0..<12).map { "https://feed\($0).com/rss" }
+        let outcome = await service.importOPML(opml(feeds: feeds))
+
+        XCTAssertEqual(outcome.importedCount, 12)
+        XCTAssertEqual(outcome.skippedForCapCount, 0)
     }
 
     // MARK: Progress callback

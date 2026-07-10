@@ -10,6 +10,7 @@ struct OnboardingView: View {
     @Environment(\.modelContext) private var context
     @Environment(OPMLImportProgress.self) private var importProgress
     @Environment(DownloadManager.self) private var downloads
+    @Environment(EntitlementStore.self) private var entitlements
     @Environment(\.dismiss) private var dismiss
     @Query private var podcasts: [Podcast]
 
@@ -70,7 +71,7 @@ struct OnboardingView: View {
             return
         }
         Task {
-            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress, downloader: downloads)
+            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress, downloader: downloads, isEntitled: entitlements.isEntitled)
         }
     }
 

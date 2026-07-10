@@ -6,6 +6,7 @@ struct SubscriptionsView: View {
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
     @Environment(DownloadManager.self) private var downloads
+    @Environment(EntitlementStore.self) private var entitlements
     @Query(sort: \Podcast.title) private var podcasts: [Podcast]
     @State private var showingAdd = false
     @State private var sharingPodcast: Podcast?
@@ -166,10 +167,53 @@ struct SubscriptionsView: View {
         .onChange(of: settings.librarySortOrder) { _, newValue in
             Announcer.announce("Sorted by \(newValue.title)")
         }
+        // Live entitlement transition (#635): the per-row "Read-only" label is a
+        // passive disclosure — a user only hears it by landing on that specific
+        // row. If Plus lapses (or is restored) while the Library is already open
+        // (e.g. the background `Transaction.updates` listener in EntitlementStore
+        // fires mid-session for an expiry/refund), several rows can flip status
+        // at once with nothing telling the user it happened, unlike every other
+        // consequential state change in this app (speed, sleep timer, queue
+        // changes, etc., are all announced). Compare the read-only set just
+        // before vs. just after the transition and announce only when it
+        // actually changes the count — not on every `resync()` no-op.
+        .onChange(of: entitlements.isEntitled) { oldValue, newValue in
+            announceEntitlementTransitionIfNeeded(wasEntitled: oldValue, isNowEntitled: newValue)
+        }
+    }
+
+    private func announceEntitlementTransitionIfNeeded(wasEntitled: Bool, isNowEntitled: Bool) {
+        guard wasEntitled != isNowEntitled else { return }
+        let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
+        let before = PodcastCapPolicy.readOnlyPodcastIDs(in: podcasts, isEntitled: wasEntitled, grandfatheredCount: grandfathered).count
+        let after = PodcastCapPolicy.readOnlyPodcastIDs(in: podcasts, isEntitled: isNowEntitled, grandfatheredCount: grandfathered).count
+        guard before != after else { return }
+        if after > before {
+            let newlyReadOnly = after - before
+            let podcastPhrase = String(localized: "^[\(newlyReadOnly) podcast](inflect: true)")
+            Announcer.announce(
+                "Your Earshot Plus subscription has ended. \(podcastPhrase) in your library now read-only. Upgrade to Earshot Plus to make changes again.",
+                assertive: true
+            )
+        } else {
+            Announcer.announce("Your Earshot Plus subscription is active again. Your library is fully accessible.", assertive: true)
+        }
+    }
+
+    /// The `persistentModelID`s of every podcast that is read-only right now
+    /// because the free-tier cap (#635) is exceeded and Plus isn't active.
+    /// Recomputed live off the current entitlement and podcast list — there is
+    /// no persisted "read-only" flag anywhere, so resubscribing to Plus (or
+    /// dropping back under the cap) restores full access immediately with no
+    /// stale state to clear.
+    private var readOnlyPodcastIDs: Set<PersistentIdentifier> {
+        let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
+        return PodcastCapPolicy.readOnlyPodcastIDs(in: podcasts, isEntitled: entitlements.isEntitled, grandfatheredCount: grandfathered)
     }
 
     private func row(for podcast: Podcast) -> some View {
-        HStack(spacing: Spacing.md) {
+        let isReadOnly = readOnlyPodcastIDs.contains(podcast.persistentModelID)
+        return HStack(spacing: Spacing.md) {
             PodcastArtwork(urlString: podcast.artworkURL)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(podcast.title).font(.headline)
@@ -179,13 +223,24 @@ struct SubscriptionsView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Text("^[\(podcast.episodes.count) episode](inflect: true)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: Spacing.xs) {
+                    Text("^[\(podcast.episodes.count) episode](inflect: true)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if isReadOnly {
+                        // Icon + text, not color alone (#635 / accessibility rules).
+                        // The visible label is folded into the row's combined
+                        // accessibilityLabel below instead of being read twice.
+                        Label("Read-only", systemImage: "lock.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                }
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(rowLabel(for: podcast))
+        .accessibilityLabel(rowLabel(for: podcast, isReadOnly: isReadOnly))
         // Rotor order goes through the shared helper, which compensates for the
         // OS emitting `.accessibilityActions` children in reverse (#572).
         .quickActionsRotor(rotorActions(for: podcast))
@@ -223,11 +278,12 @@ struct SubscriptionsView: View {
         return [podcast.title]
     }
 
-    private func rowLabel(for podcast: Podcast) -> String {
+    private func rowLabel(for podcast: Podcast, isReadOnly: Bool) -> String {
         var parts = [podcast.title]
         if let author = podcast.author, !author.isEmpty { parts.append(author) }
         let count = podcast.episodes.count
         parts.append("\(count) \(count == 1 ? "episode" : "episodes")")
+        if isReadOnly { parts.append("Read-only, upgrade to Earshot Plus to make changes") }
         return parts.joined(separator: ", ")
     }
 
@@ -242,7 +298,7 @@ struct SubscriptionsView: View {
         // path actually finds new episodes must be the path that notifies, or the
         // notification is lost (#421). deliver() coalesces per podcast by a stable
         // identifier, so the same show notifying from both paths can never stack.
-        let notifications = await SubscriptionRepository(context: context, downloader: downloads).refreshAll()
+        let notifications = await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).refreshAll()
         AppSettingsStore(context: context).setDate(Date(), for: SettingsKey.lastFeedRefresh)
         if !notifications.isEmpty {
             await NotificationService().deliver(notifications)

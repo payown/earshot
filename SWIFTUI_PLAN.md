@@ -1453,6 +1453,86 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 
 ## Data Decisions
 
+### Issue #635 — Earshot Plus: enforce 10-podcast free tier cap
+- **Pure decision logic, no StoreKit/ModelContext.** `PodcastCapPolicy`
+  (Features/Monetization/Domain) takes primitives + `[Podcast]` arrays only —
+  no `ModelContext`, no StoreKit — matching how `InboxRepository.inbox(from:)`
+  / `QueueRepository.displayedCount(from:)` already take model arrays directly
+  in this codebase. Trivially unit-testable with in-memory `@Model` fixtures.
+- **`effectiveFreeLimit = max(freeTierLimit, grandfatheredCount)` is the whole
+  grandfathering mechanism.** Michael's confirmed rules combine two things: (a)
+  a lapsed user's over-cap podcasts go read-only but are never deleted, and (b)
+  current TestFlight testers already over 10 podcasts keep everything they
+  have, with the cap only applying to *adding* going forward. Naively combining
+  these has an edge case the issue text doesn't spell out: a grandfathered
+  tester's pre-existing podcasts must never themselves become read-only, even
+  if they later buy Plus, add more, and then lapse. `effectiveFreeLimit`
+  solves this: `PodcastCapPolicy.ranked()` orders podcasts oldest-`createdAt`
+  first, so a grandfathered user's original podcasts are always the
+  lowest-ranked (and thus always under the raised limit); they just get no
+  MORE free slots than they already had. A grandfathered-15 user who buys
+  Plus, adds 10 more (25 total), then lapses, has those 10 NEW podcasts (not
+  the original 15) go read-only. This is my synthesis of an edge case Michael
+  didn't spell out explicitly — flag for correction if he disagrees.
+- **Grandfathering is a one-time snapshot, taken once ever.** Two new
+  `AppSettingsStore` keys: `podcastCapGatingIntroduced` (Bool) and
+  `grandfatheredPodcastCount` (Int). `introducePodcastCapGatingIfNeeded(
+  currentPodcastCount:)` is idempotent — the first call snapshots the current
+  podcast count and flips the introduced flag; every later call is a no-op,
+  so the grandfathered allowance can never silently grow. Called from
+  `RootView`'s launch `.task`, right after `settings.configure`, before
+  `showOnboarding` is set — so it always runs ahead of any possible subscribe
+  action, including an onboarding OPML import.
+- **No persisted "this podcast is read-only" flag anywhere.**
+  `PodcastCapPolicy.readOnlyPodcastIDs` is computed live off the CURRENT
+  `EntitlementStore.isEntitled` + the current podcast list every time it's
+  read (Library row rendering, auto-download). Resubscribing to Plus (or
+  dropping back under the cap) restores full access immediately with no
+  stale state to clear — pinned down by a dedicated
+  `PodcastCapPolicyTests` case rather than left as an assumption.
+  `SubscriptionRepository`'s `isEntitled: Bool?` is `nil` by default (cap not
+  enforced), preserving every pre-existing call site and test.
+  `SubscriptionRepository(context:)` construction sites that only ever call
+  `unsubscribe` were deliberately NOT given `isEntitled:` — unsubscribing
+  doesn't touch the cap or downloads.
+- **Cap check happens before the network fetch.** `subscribe(feedURL:)` throws
+  `SubscriptionError.podcastCapReached(currentCount:limit:)` (now
+  `LocalizedError`) right after the existing-podcast early return but before
+  `FeedRefreshActor` is invoked, so a blocked add never wastes a fetch. The
+  bulk `subscribeAll(feedURLs:)` path (OPML) trims `feedURLs` to
+  `PodcastCapPolicy.allowedNewSubscriptions(...)` BEFORE handing anything to
+  the background actor, for the same reason, and returns a
+  `BulkSubscribeResult` (outcomes + `skippedForCap`) instead of a bare array.
+  `OPMLImportService.importOPML` now returns `OPMLImportOutcome` (importedCount
+  + skippedForCapCount) instead of a bare `Int` — every existing test call
+  site was updated to read `.importedCount`.
+- **Auto-download skips read-only podcasts' episodes.**
+  `SubscriptionRepository.autoDownloadRecent` computes
+  `PodcastCapPolicy.readOnlyPodcastIDs` once per call (only when
+  `isEntitled == false`) and filters them out of the download candidates —
+  this is the "no new episodes download for podcasts beyond the first 10"
+  requirement, wired into the exact #639 auto-download path.
+- **The Announcer is the only accessible surface for OPML import outcome** —
+  this app has no persistent OPML-import status screen. When the cap trims an
+  import, `OPMLFileImporter.importFile`'s spoken outcome is extended (not
+  replaced) to report how many feeds were skipped and why, with an upgrade
+  mention, rather than inventing a new screen just for this issue.
+- **Library read-only indicator is icon + text, not color alone**
+  (accessibility rules) — a `Label("Read-only", systemImage: "lock.fill")`
+  sits alongside the episode-count caption, `accessibilityHidden` because the
+  state is folded into the row's combined `accessibilityLabel` instead
+  (mirrors the sheet-heading / error-row pattern already used elsewhere in
+  this codebase, avoiding a duplicate VoiceOver node).
+- **Search/preview subscribe-failure announcements now surface the specific
+  error** (`(error as? LocalizedError)?.errorDescription`) instead of a
+  generic "Couldn't follow {title}" — needed so the cap message
+  ("You've reached the 10-podcast limit...") actually reaches VoiceOver from
+  `SearchView`/`PodcastPreviewView`, matching the pattern `AddFeedView`
+  already used before this issue.
+- **#632 (paywall) is NOT built here.** `SubscriptionError.podcastCapReached`
+  is the gate/result a future paywall presentation hooks into; this issue only
+  defines that contract, not the UI that reacts to it.
+
 ### Issue #634 — On-device StoreKit 2 receipt validation (Earshot Plus entitlement)
 - **No new SwiftData model, no schema bump.** Entitlement state is two
   `AppSetting` key/value rows (`earshot_plus_entitled`,
@@ -3072,3 +3152,292 @@ Regressions found: none
 
 Overall: PASS
 ```
+
+## Security Review — Issue #635
+
+earshot-security review complete. Issue #635 (Earshot Plus: enforce
+10-podcast free tier cap). Branch `feat/issue-635-podcast-cap`, reviewed at
+commit `cfc9b9b` on top of `swift` tip `76c551b`, in isolated worktree
+`earshot-wt-635`. One fix applied at commit `31d1cbf`.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found. Every `!` in the diff is boolean
+  negation (`!isEntitled`, `!feedURLs.isEmpty`, etc.).
+- [x] Silent try?: PASS after fix — the three new cap-enforcement
+  `try? context.fetch...` calls in `SubscriptionRepository.swift`
+  (`subscribe`, `subscribeAll`, `autoDownloadRecent`) fell back to `0`/`[]`
+  on a fetch failure with no logging. Because these gate an
+  entitlement-bypass check, a silent fallback is fail-open (a rare local
+  SwiftData read error would silently under-enforce the cap). Extracted into
+  `currentPodcastCountForCapCheck()`/`allPodcastsForCapCheck()` private
+  helpers that `do`/`catch` and log via `AppLog.subscriptions.error`, same
+  fallback value, now observable. Pre-existing `try?` fetch patterns
+  elsewhere in the file (podcast/episode lookups, `mergeBackgroundWrites`)
+  are untouched — genuinely benign "not found" cases, matching established
+  codebase convention.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new `Task {}`, `.sink`, `addObserver`, or
+  `Timer` closures; every `Task {}` in the diff is a pre-existing context
+  line.
+- [x] @MainActor: PASS — all new/changed code lives on already
+  `@MainActor`-isolated types (`SubscriptionRepository`,
+  `OPMLImportService`, `AppSettingsStore`, SwiftUI views); no SwiftData
+  access from a background `Task`.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration-sheet code in this
+  diff; ran the Release build anyway as a general gate — BUILD SUCCEEDED.
+- [ ] Entitlements: N/A — `Earshot.entitlements`/`project.yml` entitlement
+  settings untouched.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — new `SubscriptionError.podcastCapReached(currentCount:limit:)`
+  is a typed enum case with `LocalizedError` conformance; no string-thrown
+  errors.
+- [x] AppLog coverage: PASS after fix — see try? item above.
+
+Issue-specific checks:
+1. No data destruction on lapse: PASS. No `.delete(` or other destructive
+   call anywhere in the diff. `readOnlyPodcastIDs` (both the
+   `PodcastCapPolicy` pure function and `SubscriptionsView`'s wrapper) is
+   computed live off current entitlement + podcast list, never persisted,
+   never deletes. `autoDownloadRecent` only skips downloading for read-only
+   podcasts. Confirmed by
+   `PodcastCapPolicyTests.testReadOnlyPodcastIDsRecomputesLiveWhenEntitlementIsRestored`.
+2. Cap can't be trivially bypassed: PASS. Grepped every production
+   (non-test) call site of `SubscriptionRepository(...isEntitled:)`,
+   `OPMLImportService(...isEntitled:)`, and
+   `OPMLFileImporter.importFile(...isEntitled:)` myself — all 9 UI call
+   sites pass `entitlements.isEntitled` sourced from a real
+   `@Environment(EntitlementStore.self)`, never a literal or user-settable
+   value. `EntitlementStore.isEntitled` is `private(set)`, synced by
+   `resync()` from `EntitlementEngine.isEntitled(from:)` reading real
+   `Transaction.currentEntitlements` (#634). The one non-UI call site left
+   at the `nil` default (`BackgroundFeedRefresher.runRefresh`) only calls
+   `refreshAll()`, never a subscribe path — correct to leave unenforced.
+3. Grandfathering snapshot integrity: PASS.
+   `introducePodcastCapGatingIfNeeded` guards on
+   `!podcastCapGatingIntroduced()` before either write, and the two writes
+   can't be reordered to re-arm the guard. Verified by
+   `AppSettingsStoreTests.testIntroducePodcastCapGatingIfNeededIsNoOpOnSecondCall`.
+4. No secrets/entitlement receipts logged: PASS. No `AppLog` call in this
+   diff (including my follow-up fix) logs entitlement/receipt payloads —
+   only counts, booleans, feed URLs, and error descriptions.
+
+Build + test verification (ran myself on simulator
+`F868F72E-091C-47D9-B003-1AE0670E5455`):
+- Debug build: BUILD SUCCEEDED (before and after my fix).
+- Release build: BUILD SUCCEEDED, no new warnings (one pre-existing
+  unrelated warning at `OPMLImportService.swift:99` predates this PR).
+- Full test suite: 1244 tests, 8 failures — all 8 are the documented
+  `ProductCatalogServiceTests` StoreKit-sandbox `SKInternalErrorDomain
+  Code=3` failures (out of scope per the Testing Review — Issue #631
+  section above). Zero failures in `PodcastCapPolicyTests` (14),
+  `SubscriptionRepositoryTests` (47), `OPMLBulkImportTests` (11), and
+  `AppSettingsStoreTests` (18). Re-ran the full suite after the fix:
+  identical result, no regressions.
+
+Environment note (not a code issue): the `earshot-wt-635` worktree had no
+`.dart_tool` (never had `flutter pub get` run in it), so the repo's
+`pre-commit` hook (`dart format --set-exit-if-changed lib/ test/`) couldn't
+resolve `very_good_analysis` from `analysis_options.yaml` and reformatted
+~66 unrelated Flutter files with default formatter settings as a side
+effect of committing the Swift-only fix above. Those Dart changes were
+deliberately left unstaged/uncommitted (not part of commit `31d1cbf`), but
+still sit as local working-tree noise in this worktree. Recommend running
+`flutter pub get` in this worktree (or discarding those files) before any
+further work there.
+
+New agents created: none.
+Feature suggestions identified: none this review.
+
+Overall: PASS
+
+## Swift 6 Review — Issue #635
+
+earshot-swift6 review complete. Issue #635 (Earshot Plus: enforce
+10-podcast free tier cap). Branch `feat/issue-635-podcast-cap`, reviewed at
+HEAD `72a7cf9` (domain `cfc9b9b` + security fix `31d1cbf` + docs `72a7cf9`)
+in isolated worktree `earshot-wt-635`. No fix required.
+
+Concurrency mode: real project settings — `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (confirmed by reading `project.yml`
+myself, not assumed).
+
+Checklist:
+- [x] Sendable conformance: PASS — `PodcastCapPolicy` is a plain, non-actor
+  enum that takes `[Podcast]` (`@Model`, not `Sendable`) and primitives, and
+  returns `Set<PersistentIdentifier>`/`Bool`/`Int`. It is called
+  synchronously, only from already-`@MainActor` call sites
+  (`SubscriptionRepository`, `OPMLFileImporter`, `SubscriptionsView`) —
+  grepped every call site to confirm. It never crosses an actor boundary and
+  is never called from `FeedRefreshActor`, so the non-`Sendable` `Podcast`
+  argument never needs to be `Sendable`; the enum correctly does not need
+  `@MainActor` or `Sendable` annotations itself. `SubscriptionRepository`'s
+  new `isEntitled: Bool?` stored property and `BulkSubscribeResult`/
+  `BulkSubscribeOutcome` structs are all-value-type and trivially `Sendable`.
+  `SubscriptionError.podcastCapReached(currentCount:limit:)` carries only
+  `Int`s.
+- [x] Actor isolation: PASS — all new/changed cap-check code
+  (`currentPodcastCountForCapCheck()`, `allPodcastsForCapCheck()`, the cap
+  gate in `subscribe()`/`subscribeAll()`, `AppSettingsStore` calls) runs on
+  `SubscriptionRepository`'s `@MainActor` isolation, confirmed by reading the
+  class declaration (`@MainActor final class SubscriptionRepository`) and
+  every call site. The cap check in `subscribe(feedURL:)` (lines ~125-134)
+  runs and can throw BEFORE `FeedRefreshActor(modelContainer:)` is
+  constructed — verified from the actual code, not assumed from the issue
+  description — so a capped-out user's request never even hands off to the
+  background actor. Same ordering in `subscribeAll()`: `feedURLs` is trimmed
+  by the cap on the main actor before the single `FeedRefreshActor.subscribeAll`
+  call. `RootView`'s new one-time grandfathering snapshot
+  (`capSettings.introducePodcastCapGatingIfNeeded`) runs inside the existing
+  `@MainActor` launch `.task`, using `AppSettingsStore` (`@MainActor`) and a
+  synchronous `modelContext.fetchCount` — no isolation violation. All 9 new
+  `@Environment(EntitlementStore.self)` UI call sites (`RootView`,
+  `OnboardingView`, `PodcastPreviewView`, `SearchView`, `DataSettingsView`,
+  `AddFeedView`, `AddPodcastView`, `EpisodeListView`, `SubscriptionsView`)
+  read `entitlements.isEntitled` synchronously on the main actor from a
+  `@MainActor @Observable` store and pass it as a plain `Bool` into
+  `@MainActor`-isolated inits/methods — no boundary crossing.
+- [x] @Model/SwiftData actor boundary: PASS — the cap check's
+  `context.fetch`/`context.fetchCount` calls in
+  `currentPodcastCountForCapCheck()`/`allPodcastsForCapCheck()` run on the
+  main `ModelContext` from the main actor, never touching
+  `FeedRefreshActor`'s background context. No `@Model` object (`Podcast`,
+  `Episode`) is passed into or out of `FeedRefreshActor` by this diff; only
+  `Sendable` `PersistentIdentifier`s and the pre-existing `RefreshOutcome`/
+  new `BulkSubscribeOutcome`/`BulkSubscribeResult` value types cross that
+  boundary, matching the established pattern in this file.
+- [ ] AVAudioSession main actor: N/A — this diff touches no audio code.
+- [ ] Combine publishers: N/A — no Combine in this diff.
+- [x] nonisolated functions: PASS — no `nonisolated` added or needed;
+  `PodcastCapPolicy`'s static funcs are pure and free-standing (not
+  actor-isolated in the first place) rather than `nonisolated` members of an
+  isolated type.
+- [x] Structured concurrency: PASS — no `Task.detached` anywhere in the
+  diff. `RootView.handleIncomingURL` and the UI call sites use plain `Task {
+  }` (inherits the calling `@MainActor` context), matching pre-existing
+  usage. No new `withTaskGroup`.
+- [x] Global state: PASS — no new global/static `var`. `PodcastCapPolicy
+  .freeTierLimit` is `static let Int` (immutable, trivially safe). New
+  `SettingsKey`/`SettingsDefault` entries (`podcastCapGatingIntroduced`,
+  `grandfatheredPodcastCount`) are `static let String`/`Bool`/`Int`
+  constants, same pattern as every existing key in that enum.
+- [x] Swift 6 build clean: PASS — Debug build under the real project
+  settings (`SWIFT_VERSION: "5.0"`, `SWIFT_STRICT_CONCURRENCY: minimal`) on
+  simulator `F868F72E-091C-47D9-B003-1AE0670E5455`: **BUILD SUCCEEDED**,
+  zero warnings, zero errors.
+
+Secondary informational check (forced `SWIFT_STRICT_CONCURRENCY=complete`
+override, not the shipping config): **BUILD FAILED**, but with the same
+documented pre-existing baseline signature as prior gates on this repo —
+`QueueScreen.swift:100` compiler-crash diagnostic, `KeyPath`-not-`Sendable`
+warnings (`FoldersScreen.swift`, `QueueRepository.swift:345`,
+`QuickActionRepository.swift:64`, and the `@Query`/`#Predicate` macro
+expansions in `RootView`/`InboxScreen`), `EarshotSchema*.versionIdentifier`
+global-state warnings, `EpisodeSummaryCache.shared`, `RSSParser`'s static
+`ISO8601DateFormatter`s, and `DownloadManager.swift:122`. One warning
+initially looked diff-related — `SubscriptionRepository.swift:181:
+sending 'episode' ... non-Sendable type 'any EpisodeDownloading'` — but
+`git diff 76c551b..HEAD` shows that exact `await downloader.download(episode)`
+line is an untouched context line (pre-existing at old line 154, now at 181
+purely from insertions above it), so it's the same root-cause baseline issue
+as `DownloadManager.swift:122`, just visible at a second call site — not a
+new violation introduced by #635. No finding in this diff triggers a NEW
+warning or error under forced strict-complete mode.
+
+Test verification (ran myself on simulator
+`F868F72E-091C-47D9-B003-1AE0670E5455`, Debug/real settings): `-only-testing`
+run of `PodcastCapPolicyTests` (14), `SubscriptionRepositoryTests` (47),
+`OPMLBulkImportTests` (11), `AppSettingsStoreTests` (18) — 90 tests, all
+passed, 0 failures.
+
+`git status --short` in the worktree was clean before and after this
+review; no dart-format hook side effect to restore (no commit made).
+
+New agents created: none — no CarPlay or background-URLSession-delegate
+pattern encountered in this diff to warrant one.
+
+Overall: PASS
+
+## Accessibility Review — Issue #635
+
+earshot-accessibility review complete. Issue #635 (Earshot Plus: enforce
+10-podcast free tier cap). Reviewed at HEAD `114fd0e` (domain `cfc9b9b` +
+security fix `31d1cbf` + docs `72a7cf9`/`114fd0e`) in isolated worktree
+`earshot-wt-635`, branch `feat/issue-635-podcast-cap`. One fix applied at
+commit `bae6125`.
+
+Checklist:
+- [x] Library "Read-only" indicator: PASS. `Label("Read-only", systemImage:
+  "lock.fill")` is icon+text, not color alone; it's
+  `.accessibilityHidden(true)` because the same text ("Read-only, upgrade
+  to Earshot Plus to make changes") is folded into
+  `rowLabel(for:isReadOnly:)`, which becomes the row's ONE
+  `.accessibilityLabel(...)` (an explicit `accessibilityLabel` overrides
+  `.accessibilityElement(children: .combine)` entirely, so there's no
+  duplicate node/double-read). Verified by reading `row(for:)` and
+  `rowLabel(for:isReadOnly:)` together, not assuming from a partial read.
+- [x] Rotor actions on a read-only row: PASS, no fix needed.
+  `rotorActions(for:)` builds toggleNotifications/toggleAutoQueue/
+  unsubscribe/share — none of these add a subscription (the only thing
+  #635 gates at the repository layer), so none silently no-op or behave
+  oddly on a read-only podcast. Unsubscribe deliberately still works
+  (frees a slot).
+- [x] Cap-reached error surfacing: PASS. `AddFeedView`'s existing
+  icon+text error `Section` now displays
+  `SubscriptionError.podcastCapReached.errorDescription` verbatim ("You've
+  reached the 10-podcast limit on the free plan (currently 10). Upgrade to
+  Earshot Plus for unlimited podcasts.") — plain language, states limit +
+  current count + remedy. `SearchView`/`PodcastPreviewView`'s catch blocks
+  now speak the same specific message via `Announcer.announce` instead of
+  a generic "Couldn't follow {title}."
+- [x] OPML partial-import skip messaging: PASS. `OPMLImportOutcome`
+  (importedCount + skippedForCapCount) threads through to
+  `OPMLFileImporter.importFile`'s extended announcement. Verified the
+  skipped count runs through `String(localized: "^[...](inflect: true)")`
+  the same way the existing `imported` count does, so singular/plural both
+  resolve correctly. Reachable via the existing `announceSettled` (0.5s
+  delay + `assertive: true`), clear about the cap and the upgrade path.
+- [x] Dynamic Type / touch targets: PASS. No `.frame(` anywhere in
+  `SubscriptionsView.swift`; the new Label uses `.font(.caption)` (semantic,
+  matches the adjacent episode-count caption) with no `lineLimit`. At AX5
+  the caption `HStack` may wrap to a second line (no `Spacer`/priority
+  tuning) but nothing clips, and VoiceOver reads the correct combined label
+  regardless of visual wrap.
+
+FINDING — fixed, not just flagged: no live announcement existed for a
+*mid-session* entitlement transition. `EntitlementStore.resync()` can flip
+`isEntitled` at any time (the `Transaction.updates` listener — expiry,
+refund, another device), not just at launch. If that happens while the
+Library is open, several rows can flip read-only status at once with
+nothing telling the user — the row-level indicator is a passive disclosure
+only heard by revisiting that exact row, unlike every other consequential
+state change this app actively announces (speed, sleep timer, queue
+changes, download complete). This didn't violate the issue's literal text
+(the row indicator IS the required "visible, VoiceOver-reachable
+indicator," per SWIFTUI_PLAN's own #635 Data Decisions), but it left a real
+gap between the letter of the requirement and a blind user actually
+discovering their library changed. Fixed at `bae6125`: added
+`.onChange(of: entitlements.isEntitled)` to `SubscriptionsView` comparing
+`PodcastCapPolicy.readOnlyPodcastIDs(...)` (already exhaustively covered by
+`PodcastCapPolicyTests`) just before vs. after the transition, announcing
+(assertive) only when the read-only count actually changes — one message
+for newly-read-only ("Your Earshot Plus subscription has ended. N podcasts
+in your library now read-only. Upgrade to Earshot Plus to make changes
+again.") and one for restoration. No new untested pure logic — thin
+view-layer wrapper around the already-tested policy function, matching this
+codebase's existing convention that view-layer `Announcer` calls (e.g. the
+adjacent `librarySortOrder` announcement) aren't independently unit-tested.
+
+Verification: `xcodebuild build` on simulator
+`F868F72E-091C-47D9-B003-1AE0670E5455` — BUILD SUCCEEDED. `-only-testing`
+run of `PodcastCapPolicyTests` (14), `SubscriptionRepositoryTests` (47),
+`OPMLBulkImportTests` (11), `AppSettingsStoreTests` (18) — 90 tests, 0
+failures, after the fix. A full `xcodebuild test` run separately showed 8
+pre-existing `ProductCatalogServiceTests` failures from a StoreKitTest
+`SKTestSession` configuration error in this simulator environment —
+unrelated to this diff (file untouched by #635; reproduces in isolation via
+`-only-testing:EarshotTests/ProductCatalogServiceTests`).
+
+`git status --short` clean before and after the fix commit; dart-format
+pre-commit hook reformatted 0 files.
+
+Overall: PASS

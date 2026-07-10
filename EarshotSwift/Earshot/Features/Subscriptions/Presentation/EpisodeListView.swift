@@ -9,6 +9,7 @@ struct EpisodeListView: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
+    @Environment(EntitlementStore.self) private var entitlements
     @Environment(\.dismiss) private var dismiss
 
     @State private var showNotesEpisode: Episode?
@@ -407,7 +408,7 @@ struct EpisodeListView: View {
 
     private func refresh() async {
         do {
-            try await SubscriptionRepository(context: context, downloader: downloads).refresh(podcast)
+            try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).refresh(podcast)
             Announcer.announce("\(podcast.title) refreshed")
         } catch {
             AppLog.subscriptions.error("Refresh failed: \(error.localizedDescription, privacy: .public)")
