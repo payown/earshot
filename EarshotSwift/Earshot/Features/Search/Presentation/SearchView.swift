@@ -141,6 +141,12 @@ struct SearchView<HeaderContent: View>: View {
     /// primary tap and its VoiceOver Activate action alike, so both paths land on
     /// the same destination.
     @State private var directoryNavigation: DirectoryNavigation?
+    /// Presents the Earshot Plus paywall (#632) when a subscribe attempt hits
+    /// the free-tier podcast cap. Set from `subscribe(_:)`'s / `toggleFollow(_:)`'s
+    /// catch block, in ADDITION to the existing VoiceOver announcement — never
+    /// instead of it, since a user who dismisses the paywall without acting
+    /// still needs the spoken/visible reason the follow didn't happen.
+    @State private var showPaywall = false
 
     private let itunes = ITunesSearchService()
 
@@ -228,6 +234,10 @@ struct SearchView<HeaderContent: View>: View {
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
+        // Earshot Plus paywall (#632), presented on top of the free-tier
+        // podcast cap. Dismissible via its own explicit Close button, never
+        // drag-only.
+        .sheet(isPresented: $showPaywall) { PaywallView() }
         .overlay { emptyOverlay }
     }
 
@@ -503,6 +513,11 @@ struct SearchView<HeaderContent: View>: View {
                 AppLog.networking.error("Subscribe from search failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 let detail = (error as? LocalizedError)?.errorDescription
                 Announcer.announce(detail.map { "Couldn't follow \(result.title). \($0)" } ?? "Couldn't follow \(result.title)")
+                // In addition to the announcement above: an 11th-podcast attempt
+                // is exactly the moment a paywall should offer the upgrade (#632).
+                if case SubscriptionError.podcastCapReached = error {
+                    showPaywall = true
+                }
             }
         }
     }
