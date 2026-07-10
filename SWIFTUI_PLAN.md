@@ -2931,3 +2931,63 @@ Regressions found: none
 
 Overall: PASS
 ```
+
+## Security Review — Issue #633
+
+earshot-security review complete. Issue #633 (Earshot Plus: restore
+purchases flow). Branch `feat/issue-633-restore-purchases`, commit
+`b68a65e` on top of `swift` tip `76c551b`, reviewed in worktree
+`earshot-wt-633`. Files reviewed: `EntitlementTransactionSource.swift`,
+`EntitlementStore.swift`, `SettingsScreen.swift`,
+`EntitlementStoreTests.swift`, `RestorePurchasesTests.swift`,
+`project.pbxproj`.
+
+Checklist:
+- [x] Force-unwraps: PASS — none. Every `!` match is boolean negation
+  (`!wasEntitled`, `!isRestoring`).
+- [x] Silent try?: PASS — none introduced by this diff. The 2 `try?` in
+  `EntitlementStoreTests.swift` (lines 150, 160) are pre-existing, untouched
+  by this commit.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — the new `Task { }` in `RestorePurchasesRow.restore()`
+  lives inside a `View` struct (value type), no `self`-retention risk.
+  `EntitlementStore.restorePurchases()` is a plain async method, not a
+  closure capturing `self`.
+- [x] @MainActor: PASS — `EntitlementStore` is `@MainActor @Observable`;
+  `restorePurchases()`/`resync()` are fully main-actor-serialized.
+  `RestorePurchasesRow` is main-actor-inferred via `View` conformance, so
+  `isRestoring` and the `Task` body are isolated too. Non-blocking note:
+  `restorePurchases()` reads `wasEntitled` before `await source.sync()`; if
+  the background `Transaction.updates` listener's `resync()` interleaves
+  during that suspension, the `.restored`/`.noChange` *announcement* can be
+  stale in a narrow window. Persisted state is never wrong (`resync()`
+  always recomputes from the true snapshot) — flagged as a minor UX note,
+  not blocking.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration/schema files changed.
+- [ ] Entitlements: N/A — `Earshot.entitlements`/App Group settings
+  untouched; `project.pbxproj` diff is only xcodegen wiring for the new
+  `RestorePurchasesTests.swift` file.
+- [x] No secrets: PASS.
+- [x] Error types: PASS — `RestoreOutcome` is a typed enum (`.restored` /
+  `.noChange` / `.failed(String)`).
+- [x] AppLog coverage: PASS — `restorePurchases()`'s `catch` logs via
+  `AppLog.monetization.error` before returning `.failed`; the UI layer logs
+  again (redundant, harmless) before announcing a generic, non-sensitive
+  VoiceOver message.
+
+Specifically verified: `restorePurchases()` returns `.failed` inside the
+`catch`, before ever calling `resync()`, so a failed history refresh is
+never treated as "confirmed no purchases" — confirmed by
+`testRestoreWhenSyncThrowsNeverCallsResyncEvenWithAQualifyingFactAvailable`
+and `testRestoreWhenAlreadyEntitledAndSyncThrowsReportsFailedNotNoChange`,
+both passing. `.failed(String)` carries `error.localizedDescription`, only
+ever logged, never surfaced verbatim to VoiceOver (the UI announces a fixed
+generic string) — no sensitive-text leak.
+
+Build/test verification (simulator `CBBB2872-D6EA-40F5-AF56-0FDC5E59BAEB`):
+Debug build **BUILD SUCCEEDED**; `RestorePurchasesTests` +
+`EntitlementStoreTests` — 24/24 passed, 0 failures.
+
+No code changes made. No new feature suggestions this review.
+
+Overall: PASS
