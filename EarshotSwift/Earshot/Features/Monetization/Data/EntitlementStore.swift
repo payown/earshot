@@ -31,7 +31,7 @@ final class EntitlementStore {
     /// The result of an explicit ``restorePurchases()`` call, for the
     /// Settings action (#633) to turn into a VoiceOver announcement and any
     /// visible confirmation.
-    enum RestoreOutcome: Equatable {
+    enum RestoreOutcome: Equatable, Sendable {
         /// The user was not entitled before this call and is now, after a
         /// successful `AppStore.sync()` and re-derived entitlement state.
         case restored
