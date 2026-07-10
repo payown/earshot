@@ -41,13 +41,22 @@ enum OPMLFileImporter {
     /// with an upgrade mention — this Announcer call is the only accessible surface
     /// for OPML import outcome in the app, so it carries the skip messaging rather
     /// than a new screen. Defaults to `nil` so non-UI/test callers need no change.
+    ///
+    /// `onCapSkipped` (#632) fires once, synchronously on the main actor, only when
+    /// `outcome.skippedForCapCount > 0` — a caller wanting to present the Earshot
+    /// Plus paywall on a cap-trimmed import (e.g. `DataSettingsView`) passes a
+    /// closure that sets its own `showPaywall` state here. Deliberately additive:
+    /// defaults to `nil`, changes no existing call site's behavior, and fires in
+    /// ADDITION to (never instead of) the `announceSettled` call below, which
+    /// remains the only accessible surface for the outcome itself.
     @discardableResult
     static func importFile(
         at url: URL,
         context: ModelContext,
         progress: OPMLImportProgress? = nil,
         downloader: EpisodeDownloading? = nil,
-        isEntitled: Bool? = nil
+        isEntitled: Bool? = nil,
+        onCapSkipped: (@MainActor @Sendable () -> Void)? = nil
     ) async -> Int? {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -95,6 +104,7 @@ enum OPMLFileImporter {
             // so it must carry the full message, not just the imported count.
             let skipped = String(localized: "^[\(outcome.skippedForCapCount) podcast](inflect: true)")
             message = "\(imported). \(skipped) skipped — you've reached the \(PodcastCapPolicy.freeTierLimit)-podcast limit on the free plan. Upgrade to Earshot Plus to import them all."
+            onCapSkipped?()
         } else {
             message = imported
         }

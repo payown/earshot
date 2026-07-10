@@ -16,6 +16,11 @@ struct DataSettingsView: View {
     @State private var exportURL: ExportFile?
     @State private var confirmingReset = false
     @State private var importingOPML = false
+    /// Presents the Earshot Plus paywall (#632) when an OPML import gets
+    /// trimmed by the free-tier podcast cap. Set from `OPMLFileImporter`'s
+    /// `onCapSkipped` callback, in ADDITION to its existing Announcer outcome
+    /// message — never instead of it.
+    @State private var showPaywall = false
 
     var body: some View {
         Form {
@@ -64,6 +69,9 @@ struct DataSettingsView: View {
         } message: {
             Text("Removes every podcast, episode, download, and setting on this device. This can't be undone.")
         }
+        // Earshot Plus paywall (#632), dismissible via its own explicit Close
+        // button, never drag-only.
+        .sheet(isPresented: $showPaywall) { PaywallView() }
     }
 
     // MARK: Export
@@ -88,7 +96,14 @@ struct DataSettingsView: View {
         // in-app picker, the share-sheet (onOpenURL), and onboarding all behave
         // identically (#OPML share sheet).
         Task {
-            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress, downloader: downloads, isEntitled: entitlements.isEntitled)
+            await OPMLFileImporter.importFile(
+                at: url,
+                context: context,
+                progress: importProgress,
+                downloader: downloads,
+                isEntitled: entitlements.isEntitled,
+                onCapSkipped: { showPaywall = true }
+            )
         }
     }
 

@@ -7,13 +7,29 @@ import SwiftUI
 /// Every row is a native `NavigationLink` + `Label` (icon + text, never icon
 /// alone) with a hint describing what the screen contains.
 struct SettingsScreen: View {
+    @Environment(EntitlementStore.self) private var entitlements
+    @State private var showPaywall = false
+
     var body: some View {
         Form {
-            // Earshot Plus (#633). Only "Restore Purchases" lives here today —
-            // the paywall / entitlement status row (#632) is a separate,
-            // design-reviewed checkpoint that will add more to this section
-            // later.
+            // Earshot Plus (#633, #632). "Upgrade to Earshot Plus" opens the
+            // paywall sheet; hidden once the user already has Plus, since
+            // "upgrade" no longer makes sense to show a paying member (a
+            // judgment call — nothing else in this issue specifies
+            // already-entitled Settings copy, and PaywallView itself has no
+            // "you already have this" state). "Restore Purchases" stays
+            // visible either way — it's the recovery path for a reinstall or
+            // new device, useful regardless of this session's cached
+            // entitlement state.
             Section("Earshot Plus") {
+                if !entitlements.isEntitled {
+                    Button {
+                        showPaywall = true
+                    } label: {
+                        Text("Upgrade to Earshot Plus")
+                    }
+                    .accessibilityHint("Unlimited podcast subscriptions, no free-tier cap")
+                }
                 RestorePurchasesRow()
             }
 
@@ -91,6 +107,9 @@ struct SettingsScreen: View {
                     .accessibilityAddTraits(.isHeader)
             }
         }
+        // Earshot Plus paywall (#632), dismissible via its own explicit Close
+        // button, never drag-only.
+        .sheet(isPresented: $showPaywall) { PaywallView() }
     }
 }
 

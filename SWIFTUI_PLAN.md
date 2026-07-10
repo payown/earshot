@@ -1600,6 +1600,132 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
   survives a revoke-then-resync round trip. Cap enforcement / lapse behavior
   is #635's scope, not this issue's.
 
+### Issue #632 — Earshot Plus: paywall / upgrade screen
+- **StoreKit-free `PaywallLogic` mirrors the `EntitlementFact` pattern from
+  #634.** `PaywallProductDisplay`/`PaywallSubscriptionPeriod` (Domain) are
+  plain structs a live StoreKit `Product` gets mapped into by
+  `PaywallViewModel` (Presentation) — the only place besides
+  `purchase(_:entitlements:)`'s direct `product.purchase()` call that imports
+  `StoreKit`. Every other decision (badge math, accessibility labels,
+  disclosure copy, announcement text/assertiveness) is a pure function over
+  those structs, so it's fully covered by headless `PaywallLogicTests` (20
+  tests, 0 StoreKit I/O) rather than inheriting the `SKInternalErrorDomain
+  Code=3` local-daemon limitation documented for #631's
+  `ProductCatalogServiceTests`. A separate `PaywallViewModelTests` (3 tests)
+  exercises `loadProducts()` against a real `SKTestSession` the same way
+  `ProductCatalogServiceTests` does, and — as expected — hits the identical
+  known environment limitation in this sandbox; not a #632 regression, see
+  that file's doc comment.
+- **"Best value" badge is computed from real StoreKit prices, never
+  hardcoded, and can only ever be honest.** `PaywallLogic.bestValueBadge`
+  divides yearly's price by its `approximateMonths` (30-day months, 365-day
+  years — an approximation used only for this comparison, never for
+  billing), compares against monthly's price, and returns `nil` if yearly
+  doesn't actually save money or either input is missing/non-positive. The
+  percentage is floored, never rounded, so the claim can't overstate the
+  saving by even a fraction of a point. At the shipped `Configuration.storekit`
+  prices ($2.99/mo, $20/yr) this computes to "Best value — about 44% off
+  monthly" — a real, reproducible number, not a copy-writer's guess.
+- **Equal weight is structural, not just stylistic.** All three product
+  cards share one `productCard(_:badge:)` view builder — same font sizes,
+  same `.borderedProminent` button style, same card chrome — so Monthly
+  can't accidentally end up smaller/muted/buried by a future edit touching
+  only one card. The badge is the ONLY per-product visual difference, and
+  it's a `Label` (icon + text), not a background-color or size change.
+- **Disclosure text is a separate, always-visible element positioned before
+  the purchase button — never a hint, never a `DisclosureGroup`.** This was
+  the most load-bearing layout decision: App Store Review Guideline 3.1.2
+  requires price/terms be visible before purchase is reachable, and an
+  `accessibilityHint` technically satisfies "reachable" for VoiceOver (hints
+  speak right after the label) but does NOT satisfy "visible" for sighted
+  users scanning the card. A standalone `Text` row above the button solves
+  both at once, and happens to also give VoiceOver users the disclosure
+  BEFORE the button in swipe order for free, with no
+  `accessibilitySortPriority` needed.
+- **Purchase state machine lives in `PaywallViewModel`, not the view.**
+  `.success(.verified)` finishes the transaction directly (WWDC "Meet
+  StoreKit 2" pattern) and calls `entitlements.resync()` before returning,
+  rather than relying solely on the long-running `Transaction.updates`
+  listener (`EntitlementStore.startObservingTransactionUpdates()`, already
+  running since launch) — that listener WILL also observe this exact
+  transaction and is a safe no-op the second time, but finishing here is
+  what makes `isEntitled` flip before the async call returns instead of
+  racing listener timing. `.unverified` is never finished, mirroring
+  `StoreKitEntitlementSource`'s existing conservative handling.
+  `.userCancelled` deliberately does NOT set the `outcome` property at all —
+  see the next bullet.
+- **Judgment call: cancellation has no persistent UI state, only a brief,
+  non-alarming announcement.** `PaywallPurchaseOutcome` (the enum driving the
+  inline banner) intentionally has only 3 cases — `success`/`pending`/
+  `failed` — with no `cancelled` case. A user-cancelled purchase returns to
+  the exact same interactive paywall state as before tapping, with only
+  `PaywallLogic.cancelledAnnouncement` ("Purchase cancelled.", NOT assertive)
+  spoken. This was the most literal reading of the hard constraint
+  "dismissing must be exactly as easy and neutral as any other iOS sheet
+  dismissal" extended to cancelling a purchase specifically — a persistent
+  "Cancelled" banner would have made cancelling feel like a worse outcome
+  than just closing the sheet.
+- **Judgment call: success does NOT auto-dismiss.** The sheet shows an inline
+  success banner ("You're an Earshot Plus member. Thank you.") and purchase
+  buttons disable themselves, but the user closes it with the same explicit
+  Close button used at every other point. Considered auto-dismissing after
+  the "Earshot Plus unlocked." announcement, but rejected it: a timed
+  disappearance right after (or during) a VoiceOver announcement risks
+  cutting off speech or disorienting the user, and nothing else in this
+  paywall is time-based — an auto-dismiss would be the one moment the sheet
+  does something on its own schedule instead of the user's, which cuts
+  against the whole "no dark patterns" brief even though a success
+  auto-dismiss isn't itself manipulative.
+- **Judgment call: in-progress announcement is polite, not assertive.**
+  `PaywallLogic.inProgressAnnouncement` ("Purchasing Earshot Plus Monthly.")
+  is queued behind current speech, not interrupting — it's reassurance that
+  the tap registered, not an urgent state change. It supplements (does not
+  replace) the button's own accessibility-label swap to a busy phrase,
+  matching `RestorePurchasesRow`'s established busy-state pattern
+  (`.disabled` alone gives no spoken busy indication). All THREE settled
+  outcomes (success/pending/failed) are assertive, matching
+  `RestorePurchasesRow`'s outcome-announcement convention exactly.
+- **Judgment call: fixed product order (Monthly, Yearly, Lifetime), never
+  reordered by which one has a badge.** Shortest-to-longest commitment is a
+  neutral, predictable ordering; re-sorting by "best value" would have made
+  the ordering itself a subtle prominence signal, undermining the "equal
+  weight" requirement even with identical styling.
+- **Judgment call: Settings' new "Upgrade to Earshot Plus" row hides itself
+  once `entitlements.isEntitled` is true.** Nothing in the issue specified
+  already-entitled Settings copy, and `PaywallView` has no "you already have
+  this" state; showing "Upgrade" to a paying member reads as confusing at
+  best, so the row is conditionally hidden rather than building unrequested
+  UI for a state PaywallView doesn't otherwise handle. "Restore Purchases"
+  stays visible unconditionally either way (reinstall/new-device recovery
+  path, independent of cached entitlement state).
+- **OPML-cap wiring is additive, not a signature-breaking change.**
+  `OPMLFileImporter.importFile` gained one new optional parameter,
+  `onCapSkipped: (@MainActor @Sendable () -> Void)? = nil`, fired only when
+  `outcome.skippedForCapCount > 0`, in ADDITION to the existing Announcer
+  call (never instead of it). Every pre-existing call site (`RootView`,
+  `AddPodcastView`, `OnboardingView`, and every existing
+  `OPMLFileImporterTests`/`OnboardingOPMLImportTests`/`OPMLImportProgressTests`
+  case) is untouched — only `DataSettingsView` (explicitly named in scope)
+  passes the closure, setting its own `showPaywall` state.
+- **Subscribe-cap wiring reuses the existing announcement, doesn't replace
+  it.** `SearchView.subscribe(_:)` and `PodcastPreviewView.toggleFollow()`
+  both already announce `SubscriptionError.podcastCapReached`'s message
+  (#635); this issue adds `if case SubscriptionError.podcastCapReached =
+  error { showPaywall = true }` right after, in both catch blocks.
+  `AddPodcastView` needed no changes of its own — it embeds `SearchView` in
+  `.addPodcast` scope directly, so `SearchView`'s own paywall sheet already
+  covers it.
+- **No launch interstitial, no timer.** `PaywallView` is presented from
+  exactly three `.sheet(isPresented:)` call sites (`SearchView`,
+  `PodcastPreviewView`, `SettingsScreen`) plus one `.sheet(item:)`-adjacent
+  `DataSettingsView` cap-skip path — never from `RootView`/`EarshotApp`.
+  Verified `RootView.swift`/`EarshotApp.swift` were not touched by this
+  issue at all (`EntitlementStore` was already in `.environment()` from
+  #634).
+- **CHANGELOG entries marked "(pending design/copy review, not yet merged)"**
+  per this issue's explicit instruction — the visible copy (title, subtitle,
+  button/disclosure text) is a first pass, not confirmed final wording.
+
 ### Issue #425 — Freeze V2, add V3 + drift detection (launch-crash hardening)
 - **Frozen-schema architecture.** `EarshotSchemaV2` is now a verbatim frozen
   snapshot (nested `@Model` types) of the 10-entity graph as it shipped at #337

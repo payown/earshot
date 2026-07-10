@@ -35,6 +35,11 @@ struct PodcastPreviewView: View {
 
     @State private var model = PodcastPreviewModel()
 
+    /// Presents the Earshot Plus paywall (#632) when following this podcast
+    /// would hit the free-tier cap. Set from `toggleFollow()`'s catch block,
+    /// in ADDITION to the existing VoiceOver announcement.
+    @State private var showPaywall = false
+
     private var subscribed: Bool {
         podcasts.contains { $0.feedURL == result.feedURL }
     }
@@ -67,6 +72,9 @@ struct PodcastPreviewView: View {
         }
         .navigationTitle(result.title)
         .navigationBarTitleDisplayMode(.inline)
+        // Earshot Plus paywall (#632), dismissible via its own explicit Close
+        // button, never drag-only.
+        .sheet(isPresented: $showPaywall) { PaywallView() }
         .task { await model.load(feedURL: result.feedURL) }
     }
 
@@ -239,6 +247,12 @@ struct PodcastPreviewView: View {
                     )
                     let detail = (error as? LocalizedError)?.errorDescription
                     Announcer.announce(detail.map { "Couldn't follow \(result.title). \($0)" } ?? "Couldn't follow \(result.title)")
+                    // In addition to the announcement above: an 11th-podcast
+                    // attempt is exactly the moment a paywall should offer the
+                    // upgrade (#632).
+                    if case SubscriptionError.podcastCapReached = error {
+                        showPaywall = true
+                    }
                 }
             }
         }
