@@ -343,6 +343,38 @@ final class DownloadsInboxLogicTests: XCTestCase {
         XCTAssertTrue(repo.inboxEpisodes().isEmpty, "excluding removes the podcast's episode from the normal-mode inbox")
     }
 
+    /// A podcast can carry both `inboxExcluded == true` (set while in normal
+    /// mode) and `inboxIncluded == true` (set while in opt-in mode) if the user
+    /// switches "Opt-in podcasts only" back and forth and toggles both
+    /// per-podcast switches at different times — the two fields are independent
+    /// SwiftData properties, nothing clears one when the other is set. In normal
+    /// mode, `InboxRepository`'s private `isExcluded` helper delegates straight
+    /// to `InboxLogic.isExcluded(inboxExcluded:inboxIncluded:)`, whose pure-function
+    /// contract (asserted at the top of this file) says an explicit re-include
+    /// wins over exclusion. This is the end-to-end proof of that contract through
+    /// `InboxRepository` specifically for normal mode, so a future change to the
+    /// private helper's routing can't silently break the override.
+    @MainActor
+    func testNormalModeExplicitlyIncludedOverridesExcludedFlag() throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setBool(false, for: SettingsKey.inboxOptInOnly)
+
+        let podcast = Podcast(
+            feedURL: "https://x/both.xml", title: "Both Flags Show",
+            inboxExcluded: true, inboxIncluded: true
+        )
+        ctx.insert(podcast)
+        let ep = Episode(guid: "b1", title: "Both Ep", audioURL: "https://x/b1.mp3")
+        ep.podcast = podcast
+        ctx.insert(ep)
+        try ctx.save()
+
+        XCTAssertEqual(
+            InboxRepository(context: ctx).inboxEpisodes().map(\.guid), ["b1"],
+            "an explicit inboxIncluded=true overrides inboxExcluded=true even in normal mode"
+        )
+    }
+
     // MARK: ExpirationLogic
 
     func testQueueItemExpiresOlderThanAgeLimit() {
