@@ -70,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Behind the scenes: Earshot Plus entitlement is now checked and verified entirely on-device using StoreKit 2, with no backend involved. Still engineering foundation only — no paywall or purchase UI yet. (closes #634)
 - Podcast episode list: a "Mark all as played" toolbar button marks every unplayed episode in that show as played in one step, and dismisses newly-played episodes from your inbox the same way marking a single episode played does. It's disabled with an explanatory hint when there's nothing unplayed left. A confirmation dialog always asks first, naming the podcast and the episode count, and makes clear it can't be undone. (closes #640)
 - Behind the scenes: every pull request into the SwiftUI rewrite now automatically builds the app and runs the full native test suite before it can merge, instead of relying on someone remembering to run tests by hand. Nothing to see or do differently as a user. (closes #656)
+- Settings: a new "Earshot Plus" section adds a "Restore Purchases" action at the top of Settings. Tap it to re-sync your purchase history with your Apple ID and restore Earshot Plus if you've already bought it, whether as the lifetime unlock or a monthly or yearly subscription. While it's working, the button shows a busy state so a slow connection or an Apple ID sign-in prompt doesn't look like nothing happened. (closes #633)
 
 ### Changed
 - New episode notifications: when a new episode is found while Earshot is open, the notification no longer interrupts you with a banner and sound. It goes quietly to Notification Center so it doesn't talk over what you're doing or pull screen reader focus away. (closes #421)
@@ -257,6 +258,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Library and other artwork lists stay responsive during a flick. The lock-screen
   and Control Center artwork still looks the same. (#481)
 - Podcast episode list: "Mark all as played" is also reachable as a VoiceOver actions rotor item from the podcast title header, so you don't need to hunt for the toolbar button. When it finishes, VoiceOver announces the result, comma-grouped and singular-correct, like "Marked 1,204 episodes as played" or "Marked 1 episode as played." (#640)
+- Settings: the new "Restore Purchases" button announces "Restoring purchases" and disables itself while the sync is running, then announces one of three clear outcomes when it's done: "Earshot Plus restored," "No purchases to restore," or "Restore failed. Check your connection and try again." (#633)
 
 ### Phase 8 complete — Alpha build prep
 
