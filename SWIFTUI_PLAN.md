@@ -3441,3 +3441,264 @@ unrelated to this diff (file untouched by #635; reproduces in isolation via
 pre-commit hook reformatted 0 files.
 
 Overall: PASS
+
+## Swift 6 Review — Issue #636
+
+earshot-swift6 review complete. Issue #636 (Tip jar: consumable IAP).
+Branch `feat/issue-636-tip-jar`, reviewed at commit `dedcc42` (on top of
+`swift` tip `c9bdf79`) in isolated worktree `earshot-wt-636`. No fix
+required.
+
+Concurrency mode: real project settings — `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (confirmed by reading `project.yml`).
+
+Checklist:
+- [x] Sendable conformance: PASS. `TipPurchaseAttempt: Sendable` holds
+  `result: RawPurchaseResult` (Sendable, Equatable, only `String`/productID
+  payloads) and `finish: (@Sendable () async -> Void)?`. The `finish`
+  closure, built in `StoreKitTipPurchaseSource.attempt(from:)`, captures a
+  real `StoreKit.Transaction` — verified `Transaction` is itself `Sendable`
+  per StoreKit 2's API and confirmed the already-merged
+  `StoreKitEntitlementSource.processUpdate(_:)`
+  (`EntitlementTransactionSource.swift`) relies on the identical fact
+  (`await transaction.finish()` called across an actor-hopping `Task`).
+  `RawPurchaseResult`/`TipJarOutcome` are plain `Sendable, Equatable` enums
+  with no non-Sendable associated values.
+- [x] Actor isolation: PASS. `TipJarViewModel` is `@MainActor @Observable`.
+  `purchase(_:)` awaits `purchaseSource.purchase(product)` (crossing into
+  the non-isolated but `Sendable` `TipPurchaseSource` protocol), then every
+  mutation (`purchasingProduct`, `lastOutcome`, `lastOutcomeProduct`,
+  `productsState`) happens after the `await` resumes on the main actor.
+  `apply(_:for:)` correctly sequences outcome-set-and-announce BEFORE
+  `await attempt.finish?()`, matching the doc comment's load-bearing
+  ordering claim. No live `Transaction`/`Product` ever crosses into the view
+  model — only the reduced `Sendable` `TipPurchaseAttempt`.
+- [ ] @Model/SwiftData actor boundary: N/A — no `@Model` types touched.
+- [ ] AVAudioSession main actor: N/A — no audio code touched.
+- [ ] Combine publishers: N/A — no Combine in this diff.
+- [x] nonisolated functions: PASS — no `nonisolated` needed or added.
+  `TipJarDecisionLogic`'s static funcs are pure, free-standing,
+  non-actor-isolated, matching the `PodcastCapPolicy` precedent from #635.
+- [x] Structured concurrency: PASS — no `Task.detached` anywhere.
+  `TipPresetButton`'s `Task { await action() }` inside a SwiftUI `Button`
+  action closure runs on the enclosing `@MainActor`-isolated view context
+  (SwiftUI's own global-actor annotations, not implicit inheritance from a
+  non-isolated context) — confirmed by the forced strict-complete build
+  below producing zero warnings on that line. `TipJarView.body`'s
+  `.task { await viewModel.loadProducts() }` is plain structured work.
+- [x] Global state: PASS — no new `static var`. `EarshotPlusProduct
+  .tipProducts` is pre-existing (#631), not new.
+- [x] `@unknown default` exhaustiveness: PASS —
+  `StoreKitTipPurchaseSource.attempt(from:)`'s outer switch on
+  `Product.PurchaseResult` has an explicit `@unknown default` mapping to
+  `.pending` (never-finish); the inner `VerificationResult` switch is a
+  2-case enum handled exhaustively with no payload silently dropped.
+- [x] Swift 6 build clean: PASS — Debug build under real project settings
+  on simulator `399785CB-676D-4415-98D8-40B4E04DA264`: **BUILD SUCCEEDED**,
+  zero warnings, zero errors (only a benign AppIntents-framework-not-found
+  notice, unrelated to this diff).
+
+Secondary informational check (forced `SWIFT_STRICT_CONCURRENCY=complete`
+override): **BUILD FAILED**, but exclusively with this repo's documented
+pre-existing baseline signature — `QueueScreen.swift:100` compiler-crash
+diagnostic, `KeyPath`-not-`Sendable` warnings (`FoldersScreen.swift`,
+`QueueRepository.swift:345`, `QuickActionRepository.swift:64`,
+`RootView`/`InboxScreen` `@Query`/`#Predicate` macros),
+`EarshotSchema*.versionIdentifier` global-state warnings,
+`EpisodeSummaryCache.shared`, `RSSParser`'s static `ISO8601DateFormatter`s,
+and `DownloadManager.swift:122` + `SubscriptionRepository.swift:181`
+non-Sendable `Episode`/`EpisodeDownloading` warnings. Grepped the full log
+specifically for `TipJarDecisionLogic.swift`, `TipPurchaseSource.swift`,
+`TipJarViewModel.swift`, `TipJarView.swift`, `HelpSettingsView.swift` — all
+five appear only in `SwiftCompile` invocation lines, zero diagnostics
+attributed to them.
+
+Test verification (isolated `-derivedDataPath` to avoid a build-database
+lock collision with the concurrently-running earshot-security gate in the
+same worktree): `-only-testing` run of `TipJarDecisionLogicTests` (8) +
+`TipJarViewModelTests` (13) — 21 tests, all passed, 0 failures. Includes
+`testSuccessfulPurchaseShowsThankYouBeforeFinishing` and
+`testSuccessfulPurchaseFinishesExactlyOnce`, which directly exercise the
+ordering/actor-isolation guarantee in `apply(_:for:)`.
+
+Re-checked `git log`/`git status` before finishing: HEAD still `dedcc42`,
+working tree clean — the concurrent earshot-security gate had not added a
+follow-up commit as of this review.
+
+New agents created: none.
+
+Overall: PASS
+
+## Security Review — Issue #636
+
+earshot-security gate. Issue #636 (tip jar consumable IAP). Reviewed at
+commit `dedcc42` in the isolated worktree `earshot-wt-636`, branch
+`feat/issue-636-tip-jar`. **Verdict: PASS.** No fixes required; the branch
+is unchanged from `dedcc42`.
+
+Read all 6 new/changed files in full plus the pre-existing files the primary
+focus area required tracing into (`EntitlementTransactionSource.swift`,
+`EntitlementStore.swift`, `EntitlementFactMapper.swift`, `EntitlementFact.swift`,
+`EarshotPlusProduct.swift`, `ProductCatalogService.swift`). Confirmed via the
+installed SDK's `StoreKit.swiftinterface` (not assumed) that `StoreKit
+.Transaction` has unconditional `Sendable` conformance, since the project
+builds with `SWIFT_STRICT_CONCURRENCY: minimal` and a clean build alone
+wouldn't prove this. Ran `xcodebuild build` (BUILD SUCCEEDED) and
+`xcodebuild test -only-testing:EarshotTests/TipJarDecisionLogicTests
+-only-testing:EarshotTests/TipJarViewModelTests` (21/21 passed) on
+`platform=iOS Simulator,id=399785CB-676D-4415-98D8-40B4E04DA264`.
+
+**`Transaction.finish()` analysis (the primary ask) — all five sub-questions
+checked out clean:**
+1. `finish` is `nil` for `.unverified`/`.userCancelled`/`.pending`/
+   `@unknown default` at the type level in `StoreKitTipPurchaseSource
+   .attempt(from:)`, and gated again by `TipJarDecisionLogic
+   .shouldFinish(for:)` before ever being called.
+2. `apply(_:for:)` sets `lastOutcome`/`lastOutcomeProduct` and announces via
+   VoiceOver strictly before the `guard shouldFinish` + `await attempt
+   .finish?()` — no intervening `await`, so no race.
+3. A thrown `purchaseSource.purchase()` produces no `TipPurchaseAttempt` at
+   all. Traced the cross-file interaction with `EntitlementStore`'s global
+   `Transaction.updates` listener: it does see tip transactions (single
+   global stream), maps them to an `EntitlementFact`, but `EarshotPlusProduct
+   .earshotPlusProducts` excludes the three tip cases so it never finishes
+   them and never grants entitlement from one — confirmed no double-finish
+   path exists. Flagged one non-bug inefficiency (a redundant `resync()` per
+   tip purchase) for awareness only, not fixed — out of this diff's scope
+   and structurally harmless since `Transaction.currentEntitlements`
+   excludes consumables.
+4. `purchasingProduct` guard prevents any double-purchase/double-finish from
+   a double-tap or re-entrant call; verified by
+   `testPurchaseIsIgnoredWhileAnotherPurchaseIsInFlight`.
+5. Sendability confirmed sound at the SDK level, not just "it compiled."
+
+Full checklist (force-unwraps, `try?`, `fatalError`, retain cycles,
+`@MainActor`, entitlements/secrets, typed errors, `AppLog` coverage) also
+passed. No hardcoded secrets; no PII logged (product IDs and error
+descriptions only). Confirmed this code path never reads or writes
+`EntitlementStore.isEntitled` — tips can neither be gated by entitlement nor
+grant it.
+
+Full structured review posted to the issue:
+https://github.com/payown/earshot/issues/636#issuecomment-4931735122
+
+Overall: PASS
+
+## Accessibility Review — Issue #636
+
+earshot-accessibility gate. Issue #636 (Leave a Tip). Reviewed at commit
+`dedcc42` in the isolated worktree `earshot-wt-636`, branch
+`feat/issue-636-tip-jar` — working tree clean, no concurrent commits from
+the security/swift6 gates as of this review. No accessibility defects
+found; no fix commit necessary.
+
+Read all five relevant files in full (`TipJarView.swift`,
+`TipJarViewModel.swift`, `TipPurchaseSource.swift`,
+`TipJarDecisionLogic.swift`, `HelpSettingsView.swift`'s new row), plus
+`EarshotPlusProduct.swift` (exact product IDs/order), `Core/Accessibility
+/ReduceMotion.swift` (motionAwareAnimation definition), and `Earshot
+/Testing/Configuration.storekit` (exact StoreKit displayName/displayPrice
+strings used in this review's transcripts).
+
+**Every string on screen, in visual/reading order:**
+1. Nav title: "Leave a Tip"
+2. Body text: "Earshot is free to use, with no ads and no trackers. If it's
+   useful to you, a tip helps keep it that way."
+3. Loading state (transient): "Loading tip options"
+4. Loaded state — three preset rows (`Configuration.storekit` values):
+   "Small Tip" / "$1.99", "Medium Tip" / "$4.99", "Large Tip" / "$9.99"
+5. Failed-to-load state: "Couldn't load tip options." / "Check your
+   connection and try again." / "Try Again" (button)
+6. Outcome status text (only after an attempt), one of: "Thank you for your
+   $X.XX tip." (or "Thank you for your tip." if price unavailable), "Tip
+   cancelled.", "Purchase pending approval.", "Tip failed. Try again."
+
+**Full VoiceOver focus order** (verified against the actual `body`
+structure, matches the view's own doc comment):
+1. Navigation bar back button (system-standard)
+2. Body text, single stop (one `Text`, no internal concatenation)
+3. Preset 1 (Small): label `"Leave a $1.99 tip"` idle / `"Purchasing $1.99
+   tip"` mid-purchase; hint `"Purchases a one-time tip. Does not unlock
+   Earshot Plus."`
+4. Preset 2 (Medium): label `"Leave a $4.99 tip"` / `"Purchasing $4.99
+   tip"`; same hint
+5. Preset 3 (Large): label `"Leave a $9.99 tip"` / `"Purchasing $9.99
+   tip"`; same hint
+6. Outcome status (only present after an attempt):
+   `.accessibilityElement(children: .combine)` + `.accessibilityLabel
+   (message)` — reads exactly the on-screen message text, single stop, no
+   icon double-read
+
+No `.accessibilitySortPriority` anywhere in `Features/Monetization/` —
+order is pure DOM order as documented.
+
+**Announcement text and firing points** (`Announcer.announce(_,
+assertive: true)`, verified in `TipJarViewModel.swift`):
+- On `purchase()` entry, before the async purchase call: `"Purchasing
+  $X.XX tip."` (or `"Purchasing tip."` if price unavailable)
+- In `apply(_:for:)`, after the outcome is set but before `attempt
+  .finish?()` is awaited: the same string as `outcomeMessage`
+- In the `catch` block of `purchase()`: `"Tip failed. Try again."`
+- Race check: `purchase()` guards on `purchasingProduct == nil`, so a
+  second tap can't start a concurrent purchase; no double-announce or
+  stale-state path found, including across backgrounding mid-purchase.
+
+**Other checks, all PASS:** heart icon `.accessibilityHidden(true)`, not
+double-announced; `TipOutcomeStatus` icons follow the established
+icon+text+color pattern (never color alone); Dynamic Type — only
+`.lineLimit(2)` on the product name (cosmetic), no fixed-height frames,
+`.frame(minHeight: 44)` is a minimum not a fixed height; touch targets all
+>=44pt; `motionAwareAnimation` genuinely branches on `Motion.isReduced`
+(`UIAccessibility.isReduceMotionEnabled`); price is a real visible `Text`,
+not VoiceOver-only; grepped the whole feature folder — the screen is never
+gated behind `EntitlementStore.isEntitled`.
+
+**Dismissal-without-tipping judgment call:** the domain agent's choice
+(standard system back button only, no extra close button, since this is a
+pushed `NavigationLink` screen, not a sheet) is **sufficient as-is** —
+matches the identical pattern already used for `SendFeedbackView`/
+`AboutView` in the same `HelpSettingsView`, and the back button is already
+first in focus order, always visible, and 44pt. Agreed with the domain
+agent's flagged call: no change needed.
+
+Overall: PASS
+
+## Issue #636 Summary (Tip jar consumable IAP — Leave a Tip)
+
+**Owner:** earshot-ui (implementation spanned Domain/Data/Presentation
+under `Features/Monetization/`, matching the issue's dual "earshot-ui +
+earshot-data" ownership and the #631-#638 A-series precedent).
+
+**Gates:** earshot-security PASS, earshot-swift6 PASS, earshot-accessibility
+PASS. All three ran independently against commit `dedcc42`; none required a
+fix commit (only earshot-swift6 added a docs-only follow-up, `e75b6a5`,
+logging its own review into this file).
+
+**What shipped:** Settings > Help & About > "Leave a Tip" — three consumable
+presets ($1.99/$4.99/$9.99, `media.payown.earshot.tip.small/medium/large`,
+built on the #631 catalog), available to free and paid users (never gated
+on `EntitlementStore.isEntitled`). Purchase flow: verify (StoreKit 2 local
+cryptographic check) -> set outcome + announce to VoiceOver (thank-you is
+visible/spoken before anything else happens) -> `Transaction.finish()`,
+gated by a new pure `TipJarDecisionLogic.shouldFinish(for:)` so finish only
+ever runs for a verified result. New `TipPurchaseSource` protocol (mirroring
+the `EntitlementTransactionSource` pattern from #634) makes the finish-timing
+behavior directly unit-testable with a fake purchase source.
+
+**Test count:** 1254 -> 1275 (+21: 8 `TipJarDecisionLogicTests`, 13
+`TipJarViewModelTests`). The only failures in a full-suite run are 8
+pre-existing `ProductCatalogServiceTests` failures from a StoreKitTest
+`SKTestSession` configuration error in this simulator environment —
+documented as pre-existing/unrelated in the #631 and #635 gate reviews, not
+introduced here. Release build clean.
+
+**Process note:** the fresh worktree's `.dart_tool` package resolution was
+stale, which made the repo's unscoped `dart format --set-exit-if-changed
+lib/ test/` pre-commit hook reformat 66 unrelated legacy Flutter files (the
+tracked #660 noise) and block the commit. Fixed by running `flutter pub get`
+in the worktree (confirmed 0 files changed afterward) rather than bypassing
+the hook — no `--no-verify` used.
+
+**Branch:** `feat/issue-636-tip-jar` into `swift`, PR opened per Michael's
+explicit instruction to review design/copy before merge — **not merged, not
+closed.** Michael is reviewing this together with the #632 paywall PR.
