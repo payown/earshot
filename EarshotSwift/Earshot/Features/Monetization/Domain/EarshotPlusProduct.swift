@@ -18,9 +18,9 @@ import Foundation
 enum EarshotPlusProduct: String, CaseIterable, Sendable {
     /// $2.99/month, auto-renewing, in the "Earshot Plus" subscription group.
     case plusMonthly = "media.payown.earshot.plus.monthly"
-    /// $20/year, auto-renewing, in the "Earshot Plus" subscription group.
+    /// $19.99/year, auto-renewing, in the "Earshot Plus" subscription group.
     case plusYearly = "media.payown.earshot.plus.yearly"
-    /// $49 one-time purchase, non-consumable. NOT in the subscription group.
+    /// $49.99 one-time purchase, non-consumable. NOT in the subscription group.
     case plusLifetime = "media.payown.earshot.plus.lifetime"
     /// $1.99 tip jar purchase, consumable.
     case tipSmall = "media.payown.earshot.tip.small"

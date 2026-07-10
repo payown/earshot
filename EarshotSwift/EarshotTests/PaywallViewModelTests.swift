@@ -76,7 +76,7 @@ final class PaywallViewModelTests: XCTestCase {
         let model = PaywallViewModel()
         await model.loadProducts()
 
-        // Configuration.storekit prices $2.99/mo and $20.00/yr — matches
+        // Configuration.storekit prices $2.99/mo and $19.99/yr — matches
         // PaywallLogicTests' hand-built fixture math (~44% floored).
         XCTAssertEqual(model.bestValueBadge, "Best value — about 44% off monthly")
     }

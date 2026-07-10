@@ -20,7 +20,7 @@ final class PaywallLogicTests: XCTestCase {
         )
     }
 
-    private func yearly(price: Decimal = 20.00, displayPrice: String = "$20.00") -> PaywallProductDisplay {
+    private func yearly(price: Decimal = 19.99, displayPrice: String = "$19.99") -> PaywallProductDisplay {
         PaywallProductDisplay(
             product: .plusYearly,
             displayName: "Earshot Plus Yearly",
@@ -30,7 +30,7 @@ final class PaywallLogicTests: XCTestCase {
         )
     }
 
-    private func lifetime(price: Decimal = 49.00, displayPrice: String = "$49.00") -> PaywallProductDisplay {
+    private func lifetime(price: Decimal = 49.99, displayPrice: String = "$49.99") -> PaywallProductDisplay {
         PaywallProductDisplay(
             product: .plusLifetime,
             displayName: "Earshot Plus Lifetime",
@@ -43,7 +43,7 @@ final class PaywallLogicTests: XCTestCase {
     // MARK: bestValueBadge
 
     func testBestValueBadgeComputesHonestPercentageWhenYearlyIsCheaper() {
-        // $2.99/mo vs $20/yr ($1.667/mo equivalent) -> ~44.25% savings, floored to 44%.
+        // $2.99/mo vs $19.99/yr ($1.666/mo equivalent) -> ~44.29% savings, floored to 44%.
         let badge = PaywallLogic.bestValueBadge(monthly: monthly(), yearly: yearly())
         XCTAssertEqual(badge, "Best value — about 44% off monthly")
     }
@@ -73,8 +73,8 @@ final class PaywallLogicTests: XCTestCase {
 
     func testBestValueBadgeReturnsNilWhenYearlyHasNoSubscriptionPeriod() {
         let malformedYearly = PaywallProductDisplay(
-            product: .plusYearly, displayName: "Earshot Plus Yearly", displayPrice: "$20.00",
-            price: 20, subscriptionPeriod: nil
+            product: .plusYearly, displayName: "Earshot Plus Yearly", displayPrice: "$19.99",
+            price: 19.99, subscriptionPeriod: nil
         )
         XCTAssertNil(PaywallLogic.bestValueBadge(monthly: monthly(), yearly: malformedYearly))
     }
@@ -93,14 +93,14 @@ final class PaywallLogicTests: XCTestCase {
         )
         XCTAssertEqual(
             PaywallLogic.accessibilityLabel(for: yearly()),
-            "Earshot Plus Yearly, $20.00 per year"
+            "Earshot Plus Yearly, $19.99 per year"
         )
     }
 
     func testAccessibilityLabelForLifetimeCombinesNamePriceAndOneTimePurchase() {
         XCTAssertEqual(
             PaywallLogic.accessibilityLabel(for: lifetime()),
-            "Earshot Plus Lifetime, $49.00, one-time purchase"
+            "Earshot Plus Lifetime, $49.99, one-time purchase"
         )
     }
 
@@ -116,7 +116,7 @@ final class PaywallLogicTests: XCTestCase {
 
     func testLifetimeDisclosureExcludesAutoRenewLanguage() {
         let disclosure = PaywallLogic.lifetimeDisclosure(for: lifetime())
-        XCTAssertTrue(disclosure.contains("$49.00"))
+        XCTAssertTrue(disclosure.contains("$49.99"))
         XCTAssertTrue(disclosure.contains("one-time purchase"))
         XCTAssertFalse(disclosure.lowercased().contains("auto-renew"), "lifetime must never claim to auto-renew")
         XCTAssertFalse(disclosure.lowercased().contains("cancel"), "lifetime must never use subscription-cancel language")
