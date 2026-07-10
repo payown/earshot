@@ -4624,3 +4624,88 @@ target. Archiving completed sections to `docs/phases/swiftui/` is overdue
 and out of scope for this narrow session — flagging for the next planning
 session to do a dedicated archive pass rather than mixing it into an
 unrelated fix.
+
+## Security Review — Issue #671
+
+earshot-security review complete. Issue #671 (mirror-image companion to
+#668: UI to exclude a podcast from the inbox in normal, non-opt-in mode).
+Branch `feat/issue-671-exclude-inbox`, reviewed at commit `0c2d47c` on top of
+`swift` tip (via merged #668, commit `9062882`), in isolated worktree
+`earshot-wt-671`. No fixes needed — PASS on first pass.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found. Every `!` in the four changed
+  non-test source files is boolean negation (`!(podcast.notificationEnabled
+  ?? false)`, `!podcasts.isEmpty`, `!$0`, `!author.isEmpty`,
+  `!settings.inboxOptInOnly`, `!notifications.isEmpty`).
+- [x] Silent try?: PASS — none introduced.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new `Task {}`, `.sink`, `addObserver`, or
+  `Timer` closures. The new `.toggleInboxExclude` case in
+  `buildPodcastActions` and the new `toggleInboxExclude(_:)` helper in
+  `SubscriptionsView` are synchronous closures capturing a `Podcast`
+  (reference type, owned by the caller) and `ModelContext`, matching
+  `.toggleInboxInclude` (#668) and the adjacent `.toggleAutoQueue`/
+  `.toggleNotifications` cases exactly.
+- [x] @MainActor: PASS — `buildPodcastActions` keeps its existing
+  `@MainActor` annotation; the new case does a direct synchronous `@Model`
+  write (`podcast.inboxExcluded.toggle()`). The new swipe-action button and
+  the new `Toggle(isOn: $podcast.inboxExcluded)` binding both run as
+  main-thread SwiftUI event handlers — no background `Task`, no
+  `ModelActor` crossing.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration-related files changed
+  (`Podcast.inboxExcluded` and `EarshotSchema`/`StoreMigration` confirmed
+  untouched by `git diff 9062882..0c2d47c`; this diff only adds UI writing a
+  pre-existing, already-enforced field). Ran a Debug build instead as a
+  general compile gate.
+- [ ] Entitlements: N/A — confirmed zero-line diff on
+  `Earshot.entitlements`/`project.yml` between `9062882..0c2d47c`.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — no new `Error` types introduced. Both new save
+  paths route through the existing `saveQuickAction(_:_:)` helper, which
+  already does `do`/`catch` + `AppLog` logging.
+- [x] AppLog coverage: PASS — no new catch blocks added by this diff; the
+  shared `saveQuickAction` catch (pre-existing) covers both new call sites.
+
+Additional verification performed:
+- Special focus per the task brief: the `rotorActions(for:)` restructuring
+  in `SubscriptionsView.swift` (old single-condition `&&`/`||` expression
+  replaced with a `guard`+`if` cascade) was diffed line-by-line against the
+  #668 behavior it replaces. For `.toggleInboxInclude` the new cascade
+  (`if $0 == .toggleInboxInclude { return settings.inboxOptInOnly }`) is
+  logically identical to the old `($0 != .toggleInboxInclude ||
+  settings.inboxOptInOnly)` term — verified by truth table, not just
+  inspection. No regression to the #668 opt-in-mode filter. The new
+  `.toggleInboxExclude` arm is the exact mirror. Confirmed with the two new
+  predicate-isolation tests
+  (`testToggleInboxExcludeDroppedFromOrderWhenOptInOn`,
+  `testToggleInboxExcludeKeptInOrderWhenOptInOff`) plus the two pre-existing
+  #668 predicate tests, all passing.
+- Confirmed `Podcast.inboxExcluded` and its `InboxRepository`/`InboxLogic`
+  enforcement are pre-existing and untouched by this diff (`Data/Models/
+  Podcast.swift`, `Data/Persistence/EarshotSchema.swift` both show a
+  zero-line diff between `9062882..0c2d47c`) — this issue is UI-only, as
+  the implementing agent stated.
+- Confirmed no other exhaustive `switch` over `PodcastAction` exists outside
+  `PodcastActionsBuilder.swift` that could have silently missed the new
+  `.toggleInboxExclude` case (`QuickActionRepository.swift`,
+  `QuickActionStore.swift`, `QuickActionsSettingsView.swift` all only
+  reference `PodcastAction.allCases`/arrays) — same set #668 verified.
+- `xcodebuild build` (scheme Earshot, Debug, iPhone 17 sim
+  `58857CDF-1560-410D-8F46-7381F7ADF48A`) — BUILD SUCCEEDED.
+- `xcodebuild test -only-testing:EarshotTests/QuickActionBuildersTests
+  -only-testing:EarshotTests/DownloadsInboxLogicTests
+  -only-testing:EarshotTests/PodcastSettingsViewTests` — 109 tests, 0
+  failures, including all 10 new #671 tests (3 `InboxRepository`
+  normal-mode exclusion cases, 4 `PodcastSettingsViewTests` toggle cases,
+  and 3 `QuickActionBuildersTests` builder/predicate cases — plus 2 more
+  predicate tests counted above).
+
+`git status --short` clean before and after review (aside from the known
+pre-existing unrelated `.dart` formatting noise from #660, left untouched);
+no fix commit needed.
+
+New agents created: none.
+Feature suggestions identified: none this review.
+
+Overall: PASS
