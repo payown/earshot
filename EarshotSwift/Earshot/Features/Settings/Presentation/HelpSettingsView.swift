@@ -16,6 +16,18 @@ struct HelpSettingsView: View {
                 }
                 .accessibilityHint("Email the Earshot team with feedback, bug reports, or ideas")
 
+                // Tip jar (#636): a one-time, consumable purchase, available to
+                // every user regardless of Earshot Plus entitlement. Placed
+                // here rather than under the "Earshot Plus" section on the
+                // Settings root — it is not part of that entitlement and
+                // should not read as bundled with it.
+                NavigationLink {
+                    TipJarView()
+                } label: {
+                    Label("Leave a Tip", systemImage: "heart")
+                }
+                .accessibilityHint("Support Earshot development with a one-time tip")
+
                 NavigationLink {
                     AboutView()
                 } label: {
