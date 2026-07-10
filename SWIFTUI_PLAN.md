@@ -4292,3 +4292,184 @@ New agents created: none — no CarPlay or background-URLSession-delegate
 pattern encountered in this diff to warrant one.
 
 Overall: PASS
+
+## Accessibility Review — Issue #632
+
+earshot-accessibility review complete. Issue #632 (Earshot Plus: paywall /
+upgrade screen). Reviewed at HEAD `df0bf01` (domain `a166f72` + testing-gate
+`60d9c47` + security-gate `56b4cd0` + swift6-gate `df0bf01`, all docs-only
+after the domain commit) in isolated worktree `earshot-wt-632`, branch
+`feat/issue-632-paywall`, on the pinned simulator
+`39E0DF74-2312-4D8B-8612-05AAD43EB8B5`. No fix required — read
+`PaywallView.swift`, `PaywallViewModel.swift`, `PaywallLogic.swift`,
+`SettingsScreen.swift`, `SearchView.swift`, `PodcastPreviewView.swift`, and
+`DataSettingsView.swift` in full against all 13 of Michael's hard
+requirements individually, not just the domain agent's doc-comment claims.
+
+Checklist:
+- [x] No dark patterns: PASS. Grepped every changed file for
+  hurry/limited-time/spots-left/today-only/act-now/expires/offer-ends
+  language — zero hits. Header, disclosure, footer, and all four
+  announcement strings are plain factual statements ("Follow unlimited
+  podcasts...", "Auto-renews unless cancelled. Cancel anytime in Settings or
+  the App Store.", "Manage or cancel a subscription anytime in Settings,
+  under your Apple ID."). No countdown, no pre-checked upsell, no guilt copy
+  on any path including dismiss.
+- [x] Close button label: PASS. Verified the literal string at
+  `PaywallView.swift:75` — `.accessibilityLabel("Close")` on the toolbar
+  `Button` wrapping `Image(systemName: "xmark")` — an explicit word, not
+  shape recognition of the glyph. Standard `.topBarLeading` placement,
+  matches `NowPlayingScreen`/`AddFeedView`'s existing Close-button
+  convention in this codebase.
+- [x] Price/terms visible before purchase button reachable: PASS, verified
+  by tracing `productCard(_:badge:)`'s actual `VStack` order
+  (`PaywallView.swift:200-249`): name+price `HStack` → optional badge →
+  `Text(subscriptionDisclosure/lifetimeDisclosure)` → `Button`. The
+  disclosure `Text` is a standalone always-visible element, never a button
+  hint or inside a `DisclosureGroup`, and sits both visually and in default
+  top-to-bottom VoiceOver order strictly before the purchase `Button` in
+  every one of the three cards.
+- [x] Monthly/Yearly/Lifetime equal weight: PASS. Diffed the SwiftUI
+  modifiers applied to all three `productCard` calls
+  (`PaywallView.swift:187-197`) — identical `.font(.title3.weight
+  (.semibold))` name/price, identical `.borderedProminent`/
+  `.controlSize(.large)` button, identical card padding/background. The only
+  difference is Yearly's optional `Label(badge, systemImage: "star.fill")`
+  at `.caption.weight(.semibold)` — a small factual line below the
+  name/price row, not a size/color/muting change to Monthly or Lifetime.
+  Badge text itself is honestly computed (`PaywallLogic.bestValueBadge`
+  rounds down, returns `nil` on any non-positive or non-saving case) — not
+  hardcoded marketing copy.
+- [x] Combined price+period+name VoiceOver label: PASS. Verified the exact
+  composed strings in `PaywallLogic.accessibilityLabel(for:)`
+  (`PaywallLogic.swift:125-130`) — e.g. "Earshot Plus Monthly, $2.99 per
+  month" for subscriptions, "Earshot Plus Lifetime, $49.00, one-time
+  purchase" for the non-consumable — and confirmed it's wired as
+  `.accessibilityLabel(...)` directly on the purchase `Button` at
+  `PaywallView.swift:243-245` (swapped for "Purchasing {name}" while that
+  specific product is mid-purchase), not left as default fragmented
+  visible-only text.
+- [x] Focus order: PASS, traced myself top-to-bottom rather than trusting
+  the file's doc comment. `loadedView`'s `VStack` is header (title,
+  `.accessibilityAddTraits(.isHeader)`, then subtitle) → outcome banner (if
+  `model.outcome != nil`) → Monthly card → Yearly card → Lifetime card →
+  footer note. Grepped the file for `accessibilitySortPriority` and
+  `accessibilityElement(children:` — the only `children:` usage is
+  `.combine` on the loading/failed/banner views (merges an icon+text pair
+  into one node, does not reorder anything) and none of it changes reading
+  order. No override needed since default `VStack` order already matches
+  intended order. One minor observation, not a defect: `productCard`'s
+  name `Text` and price `Text` are separate sibling VoiceOver stops (not
+  merged via `.accessibilityElement(children: .combine)`), so a linear
+  swipe-through hears name, then price, then (for Yearly) the badge, then
+  the disclosure, then the button restating name+price+cadence as one
+  phrase. This is mild restatement, not fragmentation — the button's label
+  is still the single authoritative combined phrase required by #632, and
+  VoiceOver users using rotor "buttons" navigation (which most paywall users
+  purchasing by button would use) skip straight to it. Not fixing; flagging
+  only because the review must justify why this wasn't treated as a
+  fragmentation defect.
+- [x] State announcements distinct + correct assertiveness: PASS. Verified
+  all four/five strings and their `assertive:` flags directly in
+  `PaywallLogic.swift`: in-progress "Purchasing {name}." (`assertive:
+  false`), success "Earshot Plus unlocked." (`assertive: true`), pending
+  "Purchase pending approval. You'll be notified once it's approved."
+  (`assertive: true`), failed "Purchase failed. Check your connection and
+  try again." (`assertive: true`), cancelled "Purchase cancelled."
+  (`assertive: false`). All five strings are lexically distinct — a user
+  can tell cancellation from failure from the wording alone. Checked the
+  assertiveness choices against `Announcer.announce`'s actual implementation
+  (`assertive: false` sets `.accessibilitySpeechQueueAnnouncement: true`,
+  i.e. queues behind current speech; `assertive: true` omits it, i.e.
+  interrupts): in-progress and cancelled are correctly polite (reassurance/
+  neutral non-events that shouldn't interrupt), the three settled outcomes
+  are correctly assertive (a result the user is actively waiting on).
+  Nothing backwards — this is the exact policy Michael's brief asked me to
+  check for, already implemented correctly.
+- [x] No drag-only gestures: PASS. Sheet dismiss is an explicit toolbar
+  Close button (see above), reachable and functional in every state — see
+  the dismissal trace below. No reorderable list or drag gesture exists on
+  this screen at all.
+- [x] No unlabeled images: PASS. `Image(systemName: "xmark")` is labeled via
+  the parent Button's explicit `.accessibilityLabel("Close")`.
+  `Image(systemName: "exclamationmark.triangle.fill")`,
+  `"checkmark.circle.fill"`, and `"clock.fill"` in `failedView`/
+  `outcomeBanner` are each inside a SwiftUI `Label`, which VoiceOver already
+  presents as one element keyed to the title text (icon not separately
+  exposed) — no `ExcludeSemantics` equivalent needed, this is `Label`'s
+  built-in behavior. `Image(systemName: "star.fill")` in the badge `Label`
+  same treatment. No bare `Image(systemName:)` outside a `Label` or an
+  explicitly-labeled `Button` exists anywhere in the diff.
+- [x] Dynamic Type: PASS. Grepped `PaywallView.swift` for
+  `font(.system(size:`, `.frame(height:`, and `lineLimit(1)` — zero hits.
+  All text uses semantic styles (`.largeTitle`, `.title3`, `.body`,
+  `.footnote`, `.caption`, `.headline`). The one `lineLimit(2)` (product
+  name) is the permitted cosmetic-truncation ceiling, not `lineLimit(1)`.
+  No fixed-height container wraps any text.
+- [x] Touch targets: PASS. Purchase buttons explicit
+  `.frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)` (44pt).
+  "Try Again" explicit `.frame(minHeight: Spacing.minTouchTarget)`. Close
+  button has no explicit frame, consistent with every other toolbar Close
+  button already shipped in this codebase (`NowPlayingScreen.swift`,
+  `AddFeedView.swift`) — system nav-bar toolbar buttons meet 44pt via
+  standard chrome, not a new gap introduced by this diff.
+- [x] Reduce Motion: N/A. Grepped the whole `Features/Monetization/`
+  directory for `Motion.`, `withAnimation`, and `ViewThatFits` — zero hits.
+  No animation or transition was introduced by this diff to guard.
+- [x] Contrast / color independence: PASS. All banner/error states use
+  semantic `AppColor` tokens (`AppColor.played`/`.error`/`.secondaryText`/
+  `.accent`, all backed by system dynamic colors, not hardcoded hex) paired
+  with an icon and explanatory text — success/pending/failed/badge are all
+  icon+text+color, never color alone.
+- [x] Settings "Upgrade to Earshot Plus" row: PASS. Confirmed
+  `!entitlements.isEntitled` correctly gates the row
+  (`SettingsScreen.swift:22`) and "Restore Purchases" stays visible either
+  way (documented judgment call, reasonable — it's the reinstall/new-device
+  recovery path). The row itself is a plain `Button` + `Text` with a factual
+  hint ("Unlimited podcast subscriptions, no free-tier cap") — no badge,
+  icon, color treatment, or copy that reads as a promotional banner; it's
+  the plainest row in the whole Earshot Plus section. On the
+  disappear-after-purchase question: no new `.onChange`/announcement was
+  added for this row's conditional visibility, and I confirmed that's the
+  right call rather than a gap — unlike #635's fix (an entitlement lapsing
+  silently on ANOTHER screen while a user isn't looking, which genuinely
+  needed a fresh announcement), a purchase completed via this exact row
+  already spoke "Earshot Plus unlocked." inside the still-open paywall sheet
+  before the user explicitly taps Close, so there is no silent state change
+  this user hasn't already been told about. The one edge case worth naming:
+  if VoiceOver's post-dismiss focus return targets the "Upgrade to Earshot
+  Plus" button specifically and it has since vanished, UIKit's own
+  presentation-controller fallback (not something this diff controls or
+  regresses) picks the nearest remaining accessible element — standard,
+  widely-shipped iOS behavior, not a new defect.
+- [x] Dismissal friction/guilt copy: PASS, traced `dismiss()`'s call site
+  directly. The Close button's `Button { dismiss() }` at
+  `PaywallView.swift:68-70` is a toolbar item, never wrapped in the
+  `loadedView` `ScrollView`'s `.disabled(model.purchasingProduct != nil)`
+  modifier and has no guard/confirmation of its own — it is reachable and
+  fires identically at idle, mid-purchase-loading (`purchasingProduct !=
+  nil`), post-success (`outcome == .success`), and post-failure (`outcome
+  == .failed`). No dialog, no delay, no re-prompt, no copy change on any of
+  these paths. A successful purchase deliberately does not auto-dismiss
+  (per the file's own doc comment) so a VoiceOver user is never caught by a
+  timed disappearance mid-announcement, but the user's own explicit Close
+  tap always works immediately in every state.
+
+Verification: `xcodebuild build` on simulator
+`39E0DF74-2312-4D8B-8612-05AAD43EB8B5` (run from `EarshotSwift/`, no `cd` to
+repo root) — **BUILD SUCCEEDED**. `-only-testing:EarshotTests/
+PaywallLogicTests` — 20 tests, 0 failures (covers the pure copy/
+announcement/badge logic this review checked strings against).
+`-only-testing:EarshotTests/PaywallViewModelTests` reproduces the same
+pre-existing `SKInternalErrorDomain Code=3` headless-CI `SKTestSession`
+limitation already documented for #631/#633/#632's own testing gate above —
+unrelated to this review, not a regression. Confirmed tab bar order in
+`RootView.swift:357` reads `case inbox, queue, library, downloads, settings`
+— matches the required order exactly (this issue didn't touch `RootView`,
+checked directly rather than assumed). Migration sheet (`IS_BETA_BUILD`):
+N/A, untouched by this diff.
+
+`git status --short` clean before and after this review — no code changes,
+docs-only.
+
+Overall: PASS
