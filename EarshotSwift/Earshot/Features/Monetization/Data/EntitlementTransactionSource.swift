@@ -18,6 +18,16 @@ protocol EntitlementTransactionSource: Sendable {
     /// current-entitlements snapshot is simpler and more robust than trying to
     /// apply a single update as an incremental delta.
     func updateSignals() -> AsyncStream<Void>
+
+    /// Asks the App Store to re-fetch this device's transaction history,
+    /// which is what "Restore Purchases" means to a user (#633) — it can
+    /// trigger an Apple ID sign-in prompt and requires network access.
+    /// Throws on failure (no network, StoreKit unavailable, the user
+    /// cancelled a sign-in prompt, etc.); does not itself change any
+    /// entitlement state — callers must follow a successful ``sync()`` with
+    /// ``currentFacts()`` (typically via `EntitlementStore.resync()`) to
+    /// pick up whatever the refreshed history reveals.
+    func sync() async throws
 }
 
 /// Live adapter over `Transaction.currentEntitlements` / `Transaction.updates`.
@@ -53,6 +63,10 @@ struct StoreKitEntitlementSource: EntitlementTransactionSource {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    func sync() async throws {
+        try await AppStore.sync()
     }
 
     /// Processes one `Transaction.updates` element: maps it, and finishes the

@@ -28,6 +28,26 @@ import SwiftData
 @MainActor
 @Observable
 final class EntitlementStore {
+    /// The result of an explicit ``restorePurchases()`` call, for the
+    /// Settings action (#633) to turn into a VoiceOver announcement and any
+    /// visible confirmation.
+    enum RestoreOutcome: Equatable {
+        /// The user was not entitled before this call and is now, after a
+        /// successful `AppStore.sync()` and re-derived entitlement state.
+        case restored
+        /// `AppStore.sync()` succeeded but entitlement state did not change —
+        /// covers both "already entitled, nothing new to restore" and
+        /// "genuinely never purchased anything" identically, since neither
+        /// case is a failure and both leave ``isEntitled`` exactly as it was.
+        case noChange
+        /// `AppStore.sync()` threw (no network, StoreKit unavailable, the
+        /// user cancelled an Apple ID sign-in prompt, etc.). `isEntitled` is
+        /// left untouched — ``resync()`` is never attempted after a sync
+        /// failure. The associated string is a short, user-presentable
+        /// reason; callers should prefer a generic retry message for VoiceOver
+        /// rather than surfacing this raw text (it's most useful for logging).
+        case failed(String)
+    }
     /// Whether Earshot Plus is currently entitled, per the last-persisted
     /// sync. Reflects reality only as of the last ``resync()`` (launch, an
     /// applied `Transaction.updates` event, or an explicit Restore Purchases
@@ -68,6 +88,31 @@ final class EntitlementStore {
         let entitled = EntitlementEngine.isEntitled(from: facts)
         apply(entitled: entitled)
         return entitled
+    }
+
+    /// Asks the App Store to re-fetch this device's transaction history
+    /// (`AppStore.sync()`, which can prompt for Apple ID sign-in), then
+    /// recomputes entitlement state from the refreshed history. This is the
+    /// "Restore Purchases" action (#633) — a stateless, explicitly
+    /// user-initiated operation, not something called automatically at
+    /// launch (that's ``resync()`` alone, which only re-reads the entitlements
+    /// StoreKit already knows about locally).
+    ///
+    /// If ``EntitlementTransactionSource/sync()`` throws, this returns
+    /// ``RestoreOutcome/failed(_:)`` immediately without calling ``resync()``
+    /// — a failed history refresh should never be treated as "confirmed no
+    /// purchases exist".
+    @discardableResult
+    func restorePurchases() async -> RestoreOutcome {
+        let wasEntitled = isEntitled
+        do {
+            try await source.sync()
+        } catch {
+            AppLog.monetization.error("Restore Purchases: AppStore.sync() failed: \(error.localizedDescription, privacy: .public)")
+            return .failed(error.localizedDescription)
+        }
+        let nowEntitled = await resync()
+        return (!wasEntitled && nowEntitled) ? .restored : .noChange
     }
 
     /// Starts the long-running `Transaction.updates` observer exactly once
