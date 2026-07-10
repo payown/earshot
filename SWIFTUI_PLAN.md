@@ -4708,4 +4708,73 @@ no fix commit needed.
 New agents created: none.
 Feature suggestions identified: none this review.
 
+## Swift 6 Concurrency Review — Issue #671
+
+earshot-swift6 review complete. Issue #671 (mirror-image companion to #668:
+UI to exclude a podcast from the inbox in normal, non-opt-in mode). Branch
+`feat/issue-671-exclude-inbox`, reviewed at commit `86988e9` in isolated
+worktree `earshot-wt-671`. No fixes needed — PASS on first pass, no code
+changes.
+
+Concurrency mode: `SWIFT_STRICT_CONCURRENCY: minimal` / `SWIFT_VERSION: 5.0`
+(project baseline — Swift 6 not yet flipped on for this target). Ran an
+informational `SWIFT_STRICT_CONCURRENCY=complete` override build on top of
+the real-settings build, matching the #668/#639/#631 precedent.
+
+Checklist:
+- [x] Sendable conformance: PASS — no new `Sendable` surface introduced. The
+  new `.toggleInboxExclude` case's closure captures only `podcast` (a
+  `@Model` reference type) and `context` (`ModelContext`), never crossing an
+  actor boundary, matching every other case in `buildPodcastActions`.
+- [x] Actor isolation: PASS — `buildPodcastActions` stays `@MainActor` for
+  the whole function (unchanged). `SubscriptionsView` and
+  `PodcastSettingsView` are SwiftUI `View`s (implicit `@MainActor`). The new
+  `toggleInboxExclude(_:)` helper in `SubscriptionsView.swift` and the new
+  switch arm in `PodcastActionsBuilder.swift` both do a synchronous
+  `podcast.inboxExcluded.toggle()` write, `saveQuickAction(context, ...)`
+  (itself `@MainActor`), and `Announcer.announce(...)` (itself `@MainActor`)
+  — identical isolation shape to the pre-existing `.toggleInboxInclude`/
+  `toggleInboxInclude(_:)` pair from #668. Verified `saveQuickAction`
+  (`EpisodeActionsBuilder.swift:132`) and `Announcer.announce`
+  (`Announcer.swift:11`) are both explicitly `@MainActor`.
+- [x] @Model/SwiftData actor boundary: PASS — `Podcast` (`@Model`, confirmed
+  at `Data/Models/Podcast.swift:5-6`) never crosses an actor boundary in this
+  diff. No `PersistentIdentifier` re-fetch pattern needed because the
+  `@Model` instance is only ever touched synchronously on the main actor,
+  same as every other Quick Action toggle in the file.
+- [x] AVAudioSession main actor: N/A — no audio session code touched.
+- [x] Combine publishers: N/A — no Combine/`@Published` code touched;
+  `PodcastSettingsView`'s new `Toggle(isOn: $podcast.inboxExcluded)` uses
+  `@Bindable` (SwiftData's Observation-based binding), not Combine.
+- [x] nonisolated functions: PASS — used correctly; nothing in this diff
+  needed a `nonisolated` marker (no pure/computation-only helper added).
+- [x] Structured concurrency: PASS — `Task.detached` not used anywhere in
+  the diff. No new `Task {}` of any kind — both new call sites are plain
+  synchronous closures invoked directly from SwiftUI button/rotor actions.
+- [x] Global state: PASS — none found. No new global or static `var`.
+- [~] Swift 6 build clean: PASS for this diff specifically, project overall
+  not yet Swift 6.
+  - Real-settings build (`SWIFT_VERSION 5.0`, `SWIFT_STRICT_CONCURRENCY
+    minimal`, scheme Earshot, iPhone 17 Pro sim
+    `58857CDF-1560-410D-8F46-7381F7ADF48A`) — **BUILD SUCCEEDED**.
+  - Informational `SWIFT_STRICT_CONCURRENCY=complete` override build on the
+    same destination — **BUILD FAILED**, but grepping the full log for
+    `error:`/`warning:` on the four changed source files (`PodcastAction.
+    swift`, `PodcastActionsBuilder.swift`, `SubscriptionsView.swift`,
+    `PodcastSettingsView.swift`) returns zero matches — no new concurrency
+    diagnostic attributable to this diff. The failure is the same
+    pre-existing baseline noise documented on #639/#631/#656: the
+    `QueueScreen.swift:100` "failed to produce diagnostic for expression"
+    compiler-internal crash (tied to the in-progress #390 Swift 6
+    migration), `DownloadManager.swift:122` non-Sendable-`Episode`-parameter
+    warning, and widespread `@Query`/`#Predicate` macro-expansion
+    `KeyPath<...>: Sendable` warnings across `AppSettingsStore.swift`,
+    `SubscriptionRepository.swift`, `QueueRepository.swift`, and
+    `QuickActionRepository.swift`. Confirmed all six of those files have a
+    zero-line diff between `9062882..HEAD` (`git diff --stat`), so none of
+    that noise originates in this change.
+
+New agents created: none.
+Overall: PASS
+
 Overall: PASS
