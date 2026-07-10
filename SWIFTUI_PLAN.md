@@ -4148,3 +4148,147 @@ isn't already tracked by an existing open issue.
 
 Overall: PASS
 ```
+
+## Swift 6 Review — Issue #632
+
+earshot-swift6 review complete. Issue #632 (Earshot Plus: paywall / upgrade
+screen). Branch `feat/issue-632-paywall`, reviewed at HEAD `56b4cd0` (domain
+`a166f72` + testing-gate `6a6f7ee`/`60d9c47` + security-gate docs-only
+`56b4cd0`) in isolated worktree `earshot-wt-632`. No fix required.
+
+Concurrency mode: real project settings — `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (confirmed by reading `project.yml`
+myself, not assumed).
+
+Checklist:
+- [x] Sendable conformance: PASS — `PaywallViewModel` is correctly
+  `@MainActor @Observable` and correctly NOT marked `Sendable` (a mutable
+  reference type with `@MainActor` isolation is the right shape; adding
+  `Sendable` on top would be redundant/wrong). `PaywallProductDisplay` and
+  `PaywallSubscriptionPeriod` are `Equatable, Sendable` plain value structs
+  built entirely from `Sendable` primitives (`String`, `Decimal`, `Int`,
+  a `Sendable` nested `Unit` enum) — no `Product`/StoreKit reference
+  escapes them. `PaywallPurchaseOutcome` and `PaywallLogic.Announcement`
+  are `Equatable, Sendable` value types. `PaywallViewModel.LoadState` is
+  `Equatable, Sendable`. `PaywallLogic` itself is a StoreKit-free,
+  stored-property-free `enum` of pure static functions — needs no
+  isolation or `Sendable` annotation at all, confirming the domain agent's
+  stated design goal. `ProductCatalogService` (pre-existing, unchanged by
+  this diff) is `Sendable`; `EntitlementStore` (pre-existing, unchanged) is
+  `@MainActor @Observable`, matching `PaywallViewModel`'s own shape.
+- [x] Actor isolation: PASS, traced every `await` call site by hand.
+  `PaywallViewModel.loadProducts()` and `purchase(_:entitlements:)` are
+  `async` methods on a `@MainActor` class, so every `await` inside them
+  (`catalog.fetchEarshotPlusProducts()`, `product.purchase()`,
+  `transaction.finish()`, `entitlements.resync()`) resumes back on the
+  main actor — confirmed there is no `nonisolated`, no `Task.detached`,
+  and no escaping closure anywhere in the type that would hop off it.
+  `handle(result:for:entitlements:)` is a private method on the same
+  `@MainActor` class, so it and every mutation of `purchasingProduct` /
+  `outcome` inside it are main-actor-isolated too. `EntitlementStore
+  .resync()` (called from `handle(result:...)`) is itself `@MainActor`
+  (unchanged pre-existing code, re-verified by reading the class
+  declaration), so this is a same-actor call, not a boundary crossing —
+  no `await MainActor.run` wrapper needed or present. In `PaywallView`,
+  `@State private var model = PaywallViewModel()` and `@Environment
+  (EntitlementStore.self) private var entitlements` are both read/written
+  only from `View.body`/button-action closures, which SwiftUI always runs
+  on the main actor for a (implicitly `@MainActor`) `View` conformer — the
+  `Task { await model.purchase(display, entitlements: entitlements) }`
+  call in `productCard(_:badge:)` inherits that main-actor context
+  (plain `Task {}`, not `.detached`). Same pattern, independently verified,
+  for the four wiring call sites: `PodcastPreviewView.toggleFollow()`'s
+  and `SearchView.subscribe(_:)`'s catch blocks set `showPaywall = true`
+  synchronously inside an already-`@MainActor` `Task { }` body (the View's
+  own async subscribe task, not a new isolation context);
+  `SettingsScreen`'s "Upgrade to Earshot Plus" button and `DataSettingsView`
+  's `onCapSkipped: { showPaywall = true }` closure are both synchronous,
+  non-`Task`-wrapped mutations of `@State` directly inside `View` body/
+  button-action/closure contexts — no `await`, no boundary crossing
+  possible.
+- [x] @Model/SwiftData actor boundary: PASS — grepped the full diff for
+  `Podcast`/`Episode`/any `@Model` type; none appears anywhere in
+  `PaywallView.swift`, `PaywallViewModel.swift`, or `PaywallLogic.swift`.
+  This is purchase-flow code operating entirely on StoreKit `Product`/
+  `Transaction` types and the StoreKit-free `PaywallProductDisplay`
+  mirror — no SwiftData object of any kind is constructed, read, or passed
+  across an actor boundary by this diff.
+- [ ] AVAudioSession main actor: N/A — this diff touches no audio code.
+- [ ] Combine publishers: N/A — no Combine in this diff; `PaywallViewModel`
+  uses `@Observable`, not `ObservableObject`/`@Published`.
+- [x] nonisolated functions: PASS — no `nonisolated` keyword appears
+  anywhere in the diff. `PaywallLogic`'s static functions
+  (`bestValueBadge(monthly:yearly:)`, `accessibilityLabel(for:)`,
+  `subscriptionDisclosure(for:)`, `lifetimeDisclosure(for:)`,
+  `inProgressAnnouncement(displayName:)`, `announcement(for:)`) are pure,
+  free-standing static functions on a non-isolated `enum` with no stored
+  state — correctly need no explicit `nonisolated` marker because the
+  enclosing type was never actor-isolated in the first place (same
+  reasoning `PodcastCapPolicy` was credited for in the #635 gate).
+  `OPMLFileImporter.importFile(...)`'s new `onCapSkipped` parameter is
+  correctly typed `(@MainActor @Sendable () -> Void)?` rather than plain
+  `nonisolated` `() -> Void` — since `OPMLFileImporter` itself is
+  `@MainActor` and `onCapSkipped?()` is invoked synchronously in that same
+  context (line 107, inside the `if outcome.skippedForCapCount > 0`
+  branch, no `await`), the `@MainActor` annotation on the closure type is
+  correct and sufficient; it documents the isolation contract explicitly
+  rather than relying on inference, and matches the doc comment's claim
+  that it "fires once, synchronously on the main actor."
+- [x] Structured concurrency: PASS — grepped the entire diff for
+  `Task.detached`: zero occurrences. Every `Task { }` introduced or touched
+  by this diff (`PaywallView.swift` lines 107 and 232;
+  `PodcastPreviewView.swift`'s pre-existing `toggleFollow()` task, whose
+  catch block this diff only adds two lines to; `SearchView.swift`'s
+  pre-existing `subscribe(_:)` task, same shape; `DataSettingsView.swift`
+  line 98's pre-existing OPML-import task, whose call this diff only adds
+  a trailing closure argument to) is a plain, unstored, non-escaping
+  `Task { }` that inherits the calling `@MainActor` context — none of them
+  are retained past their triggering action, none race each other. Cross-
+  referenced against the security gate's finding
+  (`PaywallViewModel.purchase`'s `guard purchasingProduct == nil` at line
+  97): this guard is what actually prevents a double-tap from spawning a
+  second overlapping `product.purchase()` `Task` — the `Task {}` at
+  `PaywallView.swift:232` itself has no guard of its own, by design, since
+  the view is also `.disabled(model.purchasingProduct != nil)` while a
+  purchase is in flight (belt-and-suspenders, matches the security gate's
+  three-layer analysis). No dangling/leaked task: a second tap either
+  can't reach the button (disabled) or, if it somehow did, the view-model
+  guard makes the resulting `Task` an immediate no-op that returns without
+  mutating any state — never a redundant concurrent purchase attempt.
+- [x] Global state: PASS — no new global or static `var` anywhere in the
+  diff. `EarshotPlusProduct` (pre-existing, unchanged) is a `String,
+  CaseIterable, Sendable` enum with no stored mutable state.
+  `PaywallProductDisplay`/`PaywallSubscriptionPeriod`/
+  `PaywallPurchaseOutcome`/`PaywallLogic.Announcement` are all instance
+  values, never `static var`. `PaywallLogic.cancelledAnnouncement` is
+  `static let` (immutable `Announcement` value) — safe.
+- [x] Swift 6 build clean: PASS — Debug build under the real project
+  settings (`SWIFT_VERSION: "5.0"`, `SWIFT_STRICT_CONCURRENCY: minimal`) on
+  the pinned simulator `39E0DF74-2312-4D8B-8612-05AAD43EB8B5` (`xcodebuild`
+  run from `EarshotSwift/`, no `cd` to repo root): **BUILD SUCCEEDED**, 0
+  errors, 0 warnings.
+
+Secondary informational check (forced `SWIFT_STRICT_CONCURRENCY=complete`
+override, not the shipping config), same simulator: **BUILD FAILED**, but
+with exactly the same documented pre-existing baseline signature as prior
+gates on this repo — `QueueScreen.swift:100` compiler-crash diagnostic
+(`failed to produce diagnostic for expression`) and `KeyPath`-not-`Sendable`
+macro-expansion warnings (`AppSettingsStore.swift`'s `@Query`/`#Predicate`
+expansions, `QueueRepository.swift:345`). Grepped the full build log for
+every file touched by this diff (`PaywallView.swift`, `PaywallViewModel
+.swift`, `PaywallLogic.swift`, `SearchView.swift`, `PodcastPreviewView
+.swift`, `OPMLFileImporter.swift`, `DataSettingsView.swift`,
+`SettingsScreen.swift`) by name — zero warnings, zero errors from any of
+them, confirming this diff introduces no new concurrency issue under the
+stricter mode. One warning pair not previously itemized in the documented
+baseline set turned up (`AppearanceSettings.swift:119-120`, main-actor-
+isolated property mutation from a nonisolated context) — confirmed via
+`git diff swift...HEAD -- .../AppearanceSettings.swift` that this file is
+completely untouched by #632, so regardless of whether it's new baseline
+drift or simply undocumented until now, it is not this diff's problem; not
+attributing it to #632.
+
+New agents created: none — no CarPlay or background-URLSession-delegate
+pattern encountered in this diff to warrant one.
+
+Overall: PASS
