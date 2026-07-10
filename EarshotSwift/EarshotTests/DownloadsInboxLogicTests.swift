@@ -192,6 +192,81 @@ final class DownloadsInboxLogicTests: XCTestCase {
         XCTAssertTrue(inbox.inboxEpisodes().isEmpty, "a completed episode must leave the inbox")
     }
 
+    // MARK: InboxRepository — opt-in inclusion (#668)
+
+    /// With "Opt-in podcasts only" ON, only podcasts explicitly opted in via
+    /// `inboxIncluded` surface new episodes in the inbox — regression coverage
+    /// for #668, where no UI anywhere ever wrote `inboxIncluded`, so opt-in mode
+    /// left every subscriber with a permanently empty inbox and no way out.
+    @MainActor
+    func testOptInModeIncludesOnlyOptedInPodcast() throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.inboxOptInOnly)
+
+        let included = Podcast(feedURL: "https://x/in.xml", title: "Included Show", inboxIncluded: true)
+        ctx.insert(included)
+        let includedEp = Episode(guid: "in1", title: "In Ep", audioURL: "https://x/in1.mp3")
+        includedEp.podcast = included
+        ctx.insert(includedEp)
+
+        let excluded = Podcast(feedURL: "https://x/out.xml", title: "Excluded Show", inboxIncluded: false)
+        ctx.insert(excluded)
+        let excludedEp = Episode(guid: "out1", title: "Out Ep", audioURL: "https://x/out1.mp3")
+        excludedEp.podcast = excluded
+        ctx.insert(excludedEp)
+
+        try ctx.save()
+
+        let repo = InboxRepository(context: ctx)
+        XCTAssertEqual(
+            repo.inboxEpisodes().map(\.guid), ["in1"],
+            "only the podcast with inboxIncluded == true surfaces in the opt-in inbox"
+        )
+    }
+
+    /// A podcast that has never been opted in (`inboxIncluded` defaults false)
+    /// stays out of the inbox while opt-in mode is on, matching the pre-existing
+    /// `InboxRepository.isExcluded` enforcement this fix now has a UI path for.
+    @MainActor
+    func testOptInModeExcludesPodcastNeverOptedIn() throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.inboxOptInOnly)
+
+        let podcast = Podcast(feedURL: "https://x/default.xml", title: "Default Show")
+        ctx.insert(podcast)
+        let ep = Episode(guid: "d1", title: "Default Ep", audioURL: "https://x/d1.mp3")
+        ep.podcast = podcast
+        ctx.insert(ep)
+        try ctx.save()
+
+        XCTAssertTrue(InboxRepository(context: ctx).inboxEpisodes().isEmpty, "a never-opted-in podcast stays out of the opt-in inbox")
+    }
+
+    /// Toggling `inboxIncluded` on for a previously-excluded podcast, then
+    /// re-fetching, brings its new episode into the opt-in inbox — this is the
+    /// exact effect the new Quick Action / swipe action / settings Toggle (#668)
+    /// all drive.
+    @MainActor
+    func testTogglingInboxIncludedBringsPodcastIntoOptInInbox() throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.inboxOptInOnly)
+
+        let podcast = Podcast(feedURL: "https://x/toggle.xml", title: "Toggle Show", inboxIncluded: false)
+        ctx.insert(podcast)
+        let ep = Episode(guid: "t1", title: "Toggle Ep", audioURL: "https://x/t1.mp3")
+        ep.podcast = podcast
+        ctx.insert(ep)
+        try ctx.save()
+
+        let repo = InboxRepository(context: ctx)
+        XCTAssertTrue(repo.inboxEpisodes().isEmpty, "precondition: excluded before opting in")
+
+        podcast.inboxIncluded = true
+        try ctx.save()
+
+        XCTAssertEqual(repo.inboxEpisodes().map(\.guid), ["t1"], "opting in surfaces the podcast's episode in the inbox")
+    }
+
     // MARK: ExpirationLogic
 
     func testQueueItemExpiresOlderThanAgeLimit() {

@@ -42,6 +42,16 @@ func buildPodcastActions(
                 saveQuickAction(context, "auto-queue")
                 Announcer.announce(podcast.autoQueue ? "Auto-queue on" : "Auto-queue off")
             }
+        case .toggleInboxInclude:
+            let included = podcast.inboxIncluded
+            return QuickActionItem(
+                label: included ? "Remove from Inbox" : "Add to Inbox",
+                isDestructive: false
+            ) {
+                podcast.inboxIncluded.toggle()
+                saveQuickAction(context, "inbox-include")
+                Announcer.announce(podcast.inboxIncluded ? "Added to inbox" : "Removed from inbox")
+            }
         case .unsubscribe:
             return QuickActionItem(label: "Unfollow", isDestructive: true) {
                 onUnsubscribe()

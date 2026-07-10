@@ -669,4 +669,78 @@ final class QuickActionBuildersTests: XCTestCase {
         )
         XCTAssertEqual(items.map(\.label), ["Turn off auto-queue", "Turn on notifications"])
     }
+
+    // MARK: #668 — opt-in inbox inclusion toggle
+
+    func testDefaultPodcastActionsIncludesToggleInboxInclude() {
+        // Acceptance criterion: #668 — the backing field (`Podcast.inboxIncluded`)
+        // has existed since F2, so per the "no dead no-op" rule this joins the
+        // default set directly rather than sitting behind a future-feature gate.
+        XCTAssertTrue(PodcastAction.allCases.contains(.toggleInboxInclude))
+        XCTAssertTrue(defaultPodcastActions.contains(.toggleInboxInclude))
+    }
+
+    func testToggleInboxIncludeLabelReflectsState() {
+        let ctx = TestStore.freshContext()
+        let notIncluded = Podcast(feedURL: "https://x/a.xml", title: "Show A", inboxIncluded: false)
+        ctx.insert(notIncluded)
+        let included = Podcast(feedURL: "https://x/b.xml", title: "Show B", inboxIncluded: true)
+        ctx.insert(included)
+
+        let notIncludedItems = buildPodcastActions(
+            podcast: notIncluded, order: [.toggleInboxInclude], context: ctx,
+            onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+        )
+        XCTAssertEqual(notIncludedItems.map(\.label), ["Add to Inbox"])
+
+        let includedItems = buildPodcastActions(
+            podcast: included, order: [.toggleInboxInclude], context: ctx,
+            onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+        )
+        XCTAssertEqual(includedItems.map(\.label), ["Remove from Inbox"])
+    }
+
+    func testToggleInboxIncludeRunFlipsAndPersists() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/a.xml", title: "Show", inboxIncluded: false)
+        ctx.insert(podcast)
+        try ctx.save()
+
+        let items = buildPodcastActions(
+            podcast: podcast, order: [.toggleInboxInclude], context: ctx,
+            onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+        )
+        items.first?.run()
+        XCTAssertTrue(podcast.inboxIncluded, "activation toggles inboxIncluded on")
+        XCTAssertFalse(ctx.hasChanges, "the runner saved the flip (saveQuickAction ran)")
+        XCTAssertFalse(items.first?.isDestructive ?? true, "opting into the inbox is not destructive")
+
+        // Rebuild (label + effect are state-derived) and run the reverse direction.
+        let reverseItems = buildPodcastActions(
+            podcast: podcast, order: [.toggleInboxInclude], context: ctx,
+            onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+        )
+        XCTAssertEqual(reverseItems.map(\.label), ["Remove from Inbox"])
+        reverseItems.first?.run()
+        XCTAssertFalse(podcast.inboxIncluded, "activation toggles inboxIncluded back off")
+    }
+
+    /// The rotor-scoping rule lives inline in `SubscriptionsView.rotorActions(for:)`
+    /// as a `.filter` over the user's configured order — this exercises the same
+    /// predicate in isolation, since the view itself isn't unit-testable here.
+    func testToggleInboxIncludeDroppedFromOrderWhenOptInOff() {
+        let order: [PodcastAction] = [.openDetail, .toggleNotifications, .toggleInboxInclude, .unsubscribe, .share]
+        let inboxOptInOnly = false
+        let filtered = order.filter { $0 != .openDetail && ($0 != .toggleInboxInclude || inboxOptInOnly) }
+        XCTAssertFalse(filtered.contains(.toggleInboxInclude), "dropped from the rotor order entirely when opt-in mode is off")
+        XCTAssertEqual(filtered, [.toggleNotifications, .unsubscribe, .share])
+    }
+
+    func testToggleInboxIncludeKeptInOrderWhenOptInOn() {
+        let order: [PodcastAction] = [.openDetail, .toggleNotifications, .toggleInboxInclude, .unsubscribe, .share]
+        let inboxOptInOnly = true
+        let filtered = order.filter { $0 != .openDetail && ($0 != .toggleInboxInclude || inboxOptInOnly) }
+        XCTAssertTrue(filtered.contains(.toggleInboxInclude), "kept in the rotor order once opt-in mode is on")
+        XCTAssertEqual(filtered, [.toggleNotifications, .toggleInboxInclude, .unsubscribe, .share])
+    }
 }

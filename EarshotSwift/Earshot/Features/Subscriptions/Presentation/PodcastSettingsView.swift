@@ -14,6 +14,7 @@ struct PodcastSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(SettingsStore.self) private var settings
 
     /// Bumped each time the notification toggle is switched ON — or the
     /// "Enable Notifications" button below is tapped, which just bumps this
@@ -154,11 +155,25 @@ struct PodcastSettingsView: View {
 
     private var inboxSection: some View {
         Section {
+            // Only relevant in opt-in mode (#668): with "Opt-in podcasts only"
+            // off, every podcast is in the inbox by default and this toggle
+            // has nothing to opt into. Shown above the limit pickers below —
+            // a count/age cap is meaningless for a podcast that can't join the
+            // inbox at all, so this ordering matters for VoiceOver users
+            // navigating top to bottom. A plain Toggle gets the system
+            // "On"/"Off" announcement for free, matching `autoQueue` above.
+            if settings.inboxOptInOnly {
+                Toggle("Include in Inbox", isOn: $podcast.inboxIncluded)
+            }
             inboxMaxPicker
             inboxAgeLimitPicker
         } header: {
             Text("Inbox")
                 .accessibilityAddTraits(.isHeader)
+        } footer: {
+            if settings.inboxOptInOnly {
+                Text("\"Opt-in podcasts only\" is on in Inbox settings, so new episodes only appear in the inbox for podcasts you include here.")
+            }
         }
     }
 
