@@ -167,6 +167,37 @@ struct SubscriptionsView: View {
         .onChange(of: settings.librarySortOrder) { _, newValue in
             Announcer.announce("Sorted by \(newValue.title)")
         }
+        // Live entitlement transition (#635): the per-row "Read-only" label is a
+        // passive disclosure — a user only hears it by landing on that specific
+        // row. If Plus lapses (or is restored) while the Library is already open
+        // (e.g. the background `Transaction.updates` listener in EntitlementStore
+        // fires mid-session for an expiry/refund), several rows can flip status
+        // at once with nothing telling the user it happened, unlike every other
+        // consequential state change in this app (speed, sleep timer, queue
+        // changes, etc., are all announced). Compare the read-only set just
+        // before vs. just after the transition and announce only when it
+        // actually changes the count — not on every `resync()` no-op.
+        .onChange(of: entitlements.isEntitled) { oldValue, newValue in
+            announceEntitlementTransitionIfNeeded(wasEntitled: oldValue, isNowEntitled: newValue)
+        }
+    }
+
+    private func announceEntitlementTransitionIfNeeded(wasEntitled: Bool, isNowEntitled: Bool) {
+        guard wasEntitled != isNowEntitled else { return }
+        let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
+        let before = PodcastCapPolicy.readOnlyPodcastIDs(in: podcasts, isEntitled: wasEntitled, grandfatheredCount: grandfathered).count
+        let after = PodcastCapPolicy.readOnlyPodcastIDs(in: podcasts, isEntitled: isNowEntitled, grandfatheredCount: grandfathered).count
+        guard before != after else { return }
+        if after > before {
+            let newlyReadOnly = after - before
+            let podcastPhrase = String(localized: "^[\(newlyReadOnly) podcast](inflect: true)")
+            Announcer.announce(
+                "Your Earshot Plus subscription has ended. \(podcastPhrase) in your library now read-only. Upgrade to Earshot Plus to make changes again.",
+                assertive: true
+            )
+        } else {
+            Announcer.announce("Your Earshot Plus subscription is active again. Your library is fully accessible.", assertive: true)
+        }
     }
 
     /// The `persistentModelID`s of every podcast that is read-only right now
