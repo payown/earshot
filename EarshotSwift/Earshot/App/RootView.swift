@@ -11,6 +11,7 @@ struct RootView: View {
     @Environment(TipsStore.self) private var tips
     @Environment(OPMLImportProgress.self) private var importProgress
     @Environment(NotificationRouter.self) private var notificationRouter
+    @Environment(EntitlementStore.self) private var entitlements
 
     @State private var showOnboarding = false
 
@@ -226,6 +227,13 @@ struct RootView: View {
             // this launch (#575). iOS moves the app container on every update.
             downloads.reconcileDownloadPaths()
             settings.configure(context: modelContext)
+            // One-time free-tier podcast cap grandfathering snapshot (#635): must
+            // run before any subscribe action can occur (including an onboarding
+            // OPML import below), so it's placed right after settings load and
+            // before showOnboarding is set.
+            let capSettings = AppSettingsStore(context: modelContext)
+            let currentPodcastCount = (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0
+            capSettings.introducePodcastCapGatingIfNeeded(currentPodcastCount: currentPodcastCount)
             // Seed the launch tab from the now-loaded preference exactly once, so
             // the saved Launch screen choice is honored on cold launch (#492).
             // Only applies while the user hasn't already navigated; it never
@@ -293,7 +301,7 @@ struct RootView: View {
         let ext = url.pathExtension.lowercased()
         guard ext == "opml" || ext == "xml" else { return }
         Task {
-            await OPMLFileImporter.importFile(at: url, context: modelContext, progress: importProgress, downloader: downloads)
+            await OPMLFileImporter.importFile(at: url, context: modelContext, progress: importProgress, downloader: downloads, isEntitled: entitlements.isEntitled)
         }
     }
 

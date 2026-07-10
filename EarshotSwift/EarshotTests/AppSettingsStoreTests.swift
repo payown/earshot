@@ -158,4 +158,39 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(raw.bool(SettingsKey.chapterNavButtonsVisible, default: true), false)
     }
 
+    // MARK: Podcast cap grandfathering (#635)
+
+    func testPodcastCapGatingDefaultsWhenUnset() throws {
+        let store = try makeStore()
+        XCTAssertFalse(store.podcastCapGatingIntroduced())
+        XCTAssertEqual(store.grandfatheredPodcastCount(), 0)
+    }
+
+    func testIntroducePodcastCapGatingIfNeededSetsBothKeysOnFirstCall() throws {
+        let store = try makeStore()
+        store.introducePodcastCapGatingIfNeeded(currentPodcastCount: 17)
+
+        XCTAssertTrue(store.podcastCapGatingIntroduced())
+        XCTAssertEqual(store.grandfatheredPodcastCount(), 17)
+    }
+
+    /// A second call is a true no-op — the grandfathered count is a one-time
+    /// snapshot and must never be overwritten by a later podcast count.
+    func testIntroducePodcastCapGatingIfNeededIsNoOpOnSecondCall() throws {
+        let store = try makeStore()
+        store.introducePodcastCapGatingIfNeeded(currentPodcastCount: 17)
+        store.introducePodcastCapGatingIfNeeded(currentPodcastCount: 42)
+
+        XCTAssertTrue(store.podcastCapGatingIntroduced())
+        XCTAssertEqual(store.grandfatheredPodcastCount(), 17, "The second call's argument (42) must never overwrite the first snapshot")
+    }
+
+    func testIntroducePodcastCapGatingIfNeededOnFreshInstallSnapshotsZero() throws {
+        let store = try makeStore()
+        store.introducePodcastCapGatingIfNeeded(currentPodcastCount: 0)
+
+        XCTAssertTrue(store.podcastCapGatingIntroduced())
+        XCTAssertEqual(store.grandfatheredPodcastCount(), 0)
+    }
+
 }

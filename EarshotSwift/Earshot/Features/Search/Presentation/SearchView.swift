@@ -120,6 +120,7 @@ struct SearchView<HeaderContent: View>: View {
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
+    @Environment(EntitlementStore.self) private var entitlements
 
     @Query private var podcasts: [Podcast]
     @Query private var episodes: [Episode]
@@ -496,11 +497,12 @@ struct SearchView<HeaderContent: View>: View {
     private func subscribe(_ result: PodcastSearchResult) {
         Task {
             do {
-                _ = try await SubscriptionRepository(context: context, downloader: downloads).subscribe(feedURL: result.feedURL)
+                _ = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(feedURL: result.feedURL)
                 Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
             } catch {
                 AppLog.networking.error("Subscribe from search failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                Announcer.announce("Couldn't follow \(result.title)")
+                let detail = (error as? LocalizedError)?.errorDescription
+                Announcer.announce(detail.map { "Couldn't follow \(result.title). \($0)" } ?? "Couldn't follow \(result.title)")
             }
         }
     }

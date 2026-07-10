@@ -1453,6 +1453,86 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 
 ## Data Decisions
 
+### Issue #635 — Earshot Plus: enforce 10-podcast free tier cap
+- **Pure decision logic, no StoreKit/ModelContext.** `PodcastCapPolicy`
+  (Features/Monetization/Domain) takes primitives + `[Podcast]` arrays only —
+  no `ModelContext`, no StoreKit — matching how `InboxRepository.inbox(from:)`
+  / `QueueRepository.displayedCount(from:)` already take model arrays directly
+  in this codebase. Trivially unit-testable with in-memory `@Model` fixtures.
+- **`effectiveFreeLimit = max(freeTierLimit, grandfatheredCount)` is the whole
+  grandfathering mechanism.** Michael's confirmed rules combine two things: (a)
+  a lapsed user's over-cap podcasts go read-only but are never deleted, and (b)
+  current TestFlight testers already over 10 podcasts keep everything they
+  have, with the cap only applying to *adding* going forward. Naively combining
+  these has an edge case the issue text doesn't spell out: a grandfathered
+  tester's pre-existing podcasts must never themselves become read-only, even
+  if they later buy Plus, add more, and then lapse. `effectiveFreeLimit`
+  solves this: `PodcastCapPolicy.ranked()` orders podcasts oldest-`createdAt`
+  first, so a grandfathered user's original podcasts are always the
+  lowest-ranked (and thus always under the raised limit); they just get no
+  MORE free slots than they already had. A grandfathered-15 user who buys
+  Plus, adds 10 more (25 total), then lapses, has those 10 NEW podcasts (not
+  the original 15) go read-only. This is my synthesis of an edge case Michael
+  didn't spell out explicitly — flag for correction if he disagrees.
+- **Grandfathering is a one-time snapshot, taken once ever.** Two new
+  `AppSettingsStore` keys: `podcastCapGatingIntroduced` (Bool) and
+  `grandfatheredPodcastCount` (Int). `introducePodcastCapGatingIfNeeded(
+  currentPodcastCount:)` is idempotent — the first call snapshots the current
+  podcast count and flips the introduced flag; every later call is a no-op,
+  so the grandfathered allowance can never silently grow. Called from
+  `RootView`'s launch `.task`, right after `settings.configure`, before
+  `showOnboarding` is set — so it always runs ahead of any possible subscribe
+  action, including an onboarding OPML import.
+- **No persisted "this podcast is read-only" flag anywhere.**
+  `PodcastCapPolicy.readOnlyPodcastIDs` is computed live off the CURRENT
+  `EntitlementStore.isEntitled` + the current podcast list every time it's
+  read (Library row rendering, auto-download). Resubscribing to Plus (or
+  dropping back under the cap) restores full access immediately with no
+  stale state to clear — pinned down by a dedicated
+  `PodcastCapPolicyTests` case rather than left as an assumption.
+  `SubscriptionRepository`'s `isEntitled: Bool?` is `nil` by default (cap not
+  enforced), preserving every pre-existing call site and test.
+  `SubscriptionRepository(context:)` construction sites that only ever call
+  `unsubscribe` were deliberately NOT given `isEntitled:` — unsubscribing
+  doesn't touch the cap or downloads.
+- **Cap check happens before the network fetch.** `subscribe(feedURL:)` throws
+  `SubscriptionError.podcastCapReached(currentCount:limit:)` (now
+  `LocalizedError`) right after the existing-podcast early return but before
+  `FeedRefreshActor` is invoked, so a blocked add never wastes a fetch. The
+  bulk `subscribeAll(feedURLs:)` path (OPML) trims `feedURLs` to
+  `PodcastCapPolicy.allowedNewSubscriptions(...)` BEFORE handing anything to
+  the background actor, for the same reason, and returns a
+  `BulkSubscribeResult` (outcomes + `skippedForCap`) instead of a bare array.
+  `OPMLImportService.importOPML` now returns `OPMLImportOutcome` (importedCount
+  + skippedForCapCount) instead of a bare `Int` — every existing test call
+  site was updated to read `.importedCount`.
+- **Auto-download skips read-only podcasts' episodes.**
+  `SubscriptionRepository.autoDownloadRecent` computes
+  `PodcastCapPolicy.readOnlyPodcastIDs` once per call (only when
+  `isEntitled == false`) and filters them out of the download candidates —
+  this is the "no new episodes download for podcasts beyond the first 10"
+  requirement, wired into the exact #639 auto-download path.
+- **The Announcer is the only accessible surface for OPML import outcome** —
+  this app has no persistent OPML-import status screen. When the cap trims an
+  import, `OPMLFileImporter.importFile`'s spoken outcome is extended (not
+  replaced) to report how many feeds were skipped and why, with an upgrade
+  mention, rather than inventing a new screen just for this issue.
+- **Library read-only indicator is icon + text, not color alone**
+  (accessibility rules) — a `Label("Read-only", systemImage: "lock.fill")`
+  sits alongside the episode-count caption, `accessibilityHidden` because the
+  state is folded into the row's combined `accessibilityLabel` instead
+  (mirrors the sheet-heading / error-row pattern already used elsewhere in
+  this codebase, avoiding a duplicate VoiceOver node).
+- **Search/preview subscribe-failure announcements now surface the specific
+  error** (`(error as? LocalizedError)?.errorDescription`) instead of a
+  generic "Couldn't follow {title}" — needed so the cap message
+  ("You've reached the 10-podcast limit...") actually reaches VoiceOver from
+  `SearchView`/`PodcastPreviewView`, matching the pattern `AddFeedView`
+  already used before this issue.
+- **#632 (paywall) is NOT built here.** `SubscriptionError.podcastCapReached`
+  is the gate/result a future paywall presentation hooks into; this issue only
+  defines that contract, not the UI that reacts to it.
+
 ### Issue #634 — On-device StoreKit 2 receipt validation (Earshot Plus entitlement)
 - **No new SwiftData model, no schema bump.** Entitlement state is two
   `AppSetting` key/value rows (`earshot_plus_entitled`,

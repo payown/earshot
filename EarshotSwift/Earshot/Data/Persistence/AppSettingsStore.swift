@@ -119,6 +119,15 @@ enum SettingsKey {
     // records when that flag was last recomputed, for diagnostics only.
     static let earshotPlusEntitled = "earshot_plus_entitled"
     static let earshotPlusEntitlementLastSynced = "earshot_plus_entitlement_last_synced"
+
+    // One-time grandfathering snapshot for the free-tier podcast cap (#635).
+    // Set exactly once, on the first launch of the build that introduces cap
+    // gating: `podcastCapGatingIntroduced` flips true and
+    // `grandfatheredPodcastCount` snapshots the podcast count AT THAT MOMENT
+    // (0 for a fresh install). Never retroactively enforced against podcasts
+    // that already existed before gating shipped — see PodcastCapPolicy.
+    static let podcastCapGatingIntroduced = "podcast_cap_gating_introduced"
+    static let grandfatheredPodcastCount = "grandfathered_podcast_count"
 }
 
 /// Documented defaults for settings not yet written by the user.
@@ -168,6 +177,8 @@ enum SettingsDefault {
     /// Sentinel stored under ``SettingsKey/inboxDefaultCount`` meaning "seed the
     /// entire backlog" (no cap). Distinct from 0, which seeds nothing.
     static let inboxDefaultCountAll = -1
+    static let podcastCapGatingIntroduced = false
+    static let grandfatheredPodcastCount = 0
 }
 
 /// Typed access to the generic ``AppSetting`` key/value store. The full
@@ -368,6 +379,26 @@ final class AppSettingsStore {
     /// shadowed by an older saved cap on a future re-subscribe.
     func setPodcastInboxCap(_ cap: Int?, forFeedURL feedURL: String) {
         setOptionalInt(cap, for: SettingsKey.podcastInboxCap(feedURL: feedURL))
+    }
+
+    // MARK: Podcast cap grandfathering (#635)
+
+    func podcastCapGatingIntroduced() -> Bool {
+        bool(SettingsKey.podcastCapGatingIntroduced, default: SettingsDefault.podcastCapGatingIntroduced)
+    }
+
+    func grandfatheredPodcastCount() -> Int {
+        int(SettingsKey.grandfatheredPodcastCount, default: SettingsDefault.grandfatheredPodcastCount)
+    }
+
+    /// One-time: if gating hasn't been introduced yet on this install, snapshot
+    /// the current podcast count as the grandfathered allowance and mark gating
+    /// introduced. Idempotent — a second call is a no-op. Call from RootView's
+    /// launch `.task`, before any subscribe action can occur.
+    func introducePodcastCapGatingIfNeeded(currentPodcastCount: Int) {
+        guard !podcastCapGatingIntroduced() else { return }
+        setInt(currentPodcastCount, for: SettingsKey.grandfatheredPodcastCount)
+        setBool(true, for: SettingsKey.podcastCapGatingIntroduced)
     }
 
     private func save() {

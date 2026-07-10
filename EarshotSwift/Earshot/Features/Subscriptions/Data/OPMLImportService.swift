@@ -1,10 +1,21 @@
 import Foundation
 import SwiftData
 
+/// The result of ``OPMLImportService/importOPML(_:onResolveTotal:onProgress:)``:
+/// how many feeds were actually imported, plus how many were skipped because of
+/// the free-tier podcast cap (#635; 0 for Plus users or when already under cap).
+struct OPMLImportOutcome {
+    let importedCount: Int
+    /// How many requested feeds were skipped because of the free-tier cap
+    /// (0 for Plus users). #635.
+    let skippedForCapCount: Int
+}
+
 /// Imports an OPML document: subscribes to each feed and recreates folder groups
 /// (nested outlines) as ``PodcastFolder``s with memberships. Already-subscribed
-/// feeds are reused (subscribe is idempotent). Returns the number of feeds
-/// successfully imported.
+/// feeds are reused (subscribe is idempotent). Returns an ``OPMLImportOutcome``
+/// with the number of feeds successfully imported and how many were skipped
+/// because of the free-tier podcast cap (#635).
 @MainActor
 final class OPMLImportService {
     private let context: ModelContext
@@ -14,9 +25,11 @@ final class OPMLImportService {
     /// so the end-of-import auto-download pass below (`autoDownloadRecent`) actually
     /// has something to download with — previously every real call site left this
     /// `nil`, so OPML import auto-download was a no-op in practice (#639).
-    init(context: ModelContext, downloader: EpisodeDownloading? = nil) {
+    /// `isEntitled` is threaded through for free-tier podcast cap enforcement
+    /// (#635); `nil` (the default) means the cap isn't enforced.
+    init(context: ModelContext, downloader: EpisodeDownloading? = nil, isEntitled: Bool? = nil) {
         self.context = context
-        self.subscriptions = SubscriptionRepository(context: context, downloader: downloader)
+        self.subscriptions = SubscriptionRepository(context: context, downloader: downloader, isEntitled: isEntitled)
     }
 
     /// Test seam: inject a pre-built ``SubscriptionRepository`` (e.g. one with an
@@ -50,12 +63,17 @@ final class OPMLImportService {
     /// currentTitle)`. It is intentionally lightweight (two ints + an optional
     /// String) so it can't reintroduce a per-feed main-thread stall. Existing call
     /// sites pass `nil` (no behavior change) until the progress UI wires it up.
+    ///
+    /// Free-tier cap (#635): if the file would exceed the cap, only however many
+    /// free slots remain are imported; ``OPMLImportOutcome/skippedForCapCount``
+    /// reports how many requested feeds were skipped so the caller can tell the
+    /// user how many were skipped and why, with an upgrade option.
     @discardableResult
     func importOPML(
         _ opml: String,
         onResolveTotal: (@MainActor @Sendable (_ total: Int) -> Void)? = nil,
         onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
-    ) async -> Int {
+    ) async -> OPMLImportOutcome {
         let groups = OPMLDocument.groups(from: opml)
 
         // Flatten to an ordered list of feed URLs and a trimmed-URL -> folder-name
@@ -73,7 +91,7 @@ final class OPMLImportService {
                 }
             }
         }
-        guard !orderedURLs.isEmpty else { return 0 }
+        guard !orderedURLs.isEmpty else { return OPMLImportOutcome(importedCount: 0, skippedForCapCount: 0) }
 
         // Report the resolved (de-duped) total up front so the progress screen
         // presents with the correct count and its on-appear announcement speaks the
@@ -81,12 +99,13 @@ final class OPMLImportService {
         await onResolveTotal?(orderedURLs.count)
 
         // One bulk subscribe pass: fetch/parse/insert/save off the main actor,
-        // reconcile the main context ONCE afterward.
-        let outcomes = await subscriptions.subscribeAll(feedURLs: orderedURLs, onProgress: onProgress)
+        // reconcile the main context ONCE afterward. The free-tier cap (#635) may
+        // trim the requested URLs before the pass even starts.
+        let result = await subscriptions.subscribeAll(feedURLs: orderedURLs, onProgress: onProgress)
 
         // Create folders + memberships on the main context from the resolved
         // main-context podcasts. findOrCreateFolder/addMembership are unchanged.
-        for outcome in outcomes {
+        for outcome in result.outcomes {
             guard let folderName = folderForURL[outcome.feedURL] else { continue }
             let folder = findOrCreateFolder(named: folderName)
             addMembership(outcome.podcast, to: folder)
@@ -95,9 +114,9 @@ final class OPMLImportService {
 
         // Auto-download once at the end (no-op unless a downloader was injected,
         // which preserves the OPML path's existing behavior).
-        await subscriptions.autoDownloadRecent(episodeIDsPerPodcast: outcomes.map(\.episodeIDs))
+        await subscriptions.autoDownloadRecent(episodeIDsPerPodcast: result.outcomes.map(\.episodeIDs))
 
-        return outcomes.count
+        return OPMLImportOutcome(importedCount: result.outcomes.count, skippedForCapCount: result.skippedForCap)
     }
 
     private func findOrCreateFolder(named name: String) -> PodcastFolder {
