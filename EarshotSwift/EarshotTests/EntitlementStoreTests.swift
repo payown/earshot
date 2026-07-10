@@ -234,10 +234,12 @@ final class EntitlementStoreTests: XCTestCase {
     }
 }
 
-/// Sendable fake transaction source for ``EntitlementStoreTests``. Mirrors the
-/// `@unchecked Sendable` test-double pattern already used elsewhere in this
-/// target (e.g. `FakeFeed` / `ProgressBox` in `FeedRefreshActorTests.swift`).
-private final class FakeEntitlementTransactionSource: EntitlementTransactionSource, @unchecked Sendable {
+/// Sendable fake transaction source for ``EntitlementStoreTests`` and
+/// ``RestorePurchasesTests``. Mirrors the `@unchecked Sendable` test-double
+/// pattern already used elsewhere in this target (e.g. `FakeFeed` /
+/// `ProgressBox` in `FeedRefreshActorTests.swift`). Internal (not
+/// `private`/`fileprivate`) so both test files can share one definition.
+final class FakeEntitlementTransactionSource: EntitlementTransactionSource, @unchecked Sendable {
     private var facts: [EntitlementFact]
     private var continuation: AsyncStream<Void>.Continuation?
     /// Signals sent before a listener has subscribed (a real risk: the
@@ -246,6 +248,13 @@ private final class FakeEntitlementTransactionSource: EntitlementTransactionSour
     /// Buffered and flushed once `updateSignals()` is actually called, so
     /// `sendUpdateSignal()` never silently drops a signal sent "too early".
     private var pendingSignalCount = 0
+    /// When set, ``sync()`` throws this instead of no-op succeeding — the
+    /// restore-purchases test double for `AppStore.sync()` failing (#633:
+    /// network error, StoreKit unavailable, cancelled Apple ID prompt, etc).
+    var syncError: Error?
+    /// Number of times ``sync()`` was called, for tests that assert on call
+    /// count rather than just the outcome.
+    private(set) var syncCallCount = 0
 
     init(facts: [EntitlementFact] = []) {
         self.facts = facts
@@ -274,6 +283,13 @@ private final class FakeEntitlementTransactionSource: EntitlementTransactionSour
             continuation.yield(())
         } else {
             pendingSignalCount += 1
+        }
+    }
+
+    func sync() async throws {
+        syncCallCount += 1
+        if let syncError {
+            throw syncError
         }
     }
 }

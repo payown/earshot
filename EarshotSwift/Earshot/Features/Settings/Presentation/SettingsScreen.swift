@@ -9,6 +9,14 @@ import SwiftUI
 struct SettingsScreen: View {
     var body: some View {
         Form {
+            // Earshot Plus (#633). Only "Restore Purchases" lives here today —
+            // the paywall / entitlement status row (#632) is a separate,
+            // design-reviewed checkpoint that will add more to this section
+            // later.
+            Section("Earshot Plus") {
+                RestorePurchasesRow()
+            }
+
             Section {
                 NavigationLink {
                     PlaybackSettingsView()
@@ -82,6 +90,61 @@ struct SettingsScreen: View {
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)
             }
+        }
+    }
+}
+
+/// "Restore Purchases" action for Earshot Plus (#633). Re-syncs the current
+/// Apple ID's transaction history against StoreKit — covers a reinstall, a
+/// new device, or an entitlement that lapsed locally — and announces the
+/// result to VoiceOver. Stateless: no entitlement status or upsell copy here,
+/// that's #632's paywall.
+private struct RestorePurchasesRow: View {
+    @Environment(EntitlementStore.self) private var entitlements
+    @State private var isRestoring = false
+
+    var body: some View {
+        Button {
+            restore()
+        } label: {
+            HStack {
+                Text("Restore Purchases")
+                Spacer()
+                if isRestoring {
+                    ProgressView()
+                }
+            }
+        }
+        .disabled(isRestoring)
+        // `.disabled` alone only adds the "dimmed" trait — VoiceOver users get
+        // no spoken indication that a restore is actually in flight (the
+        // ProgressView above has no accessibility presence of its own once
+        // this Button's own accessibilityLabel flattens its children). Swap
+        // the label text itself, matching the busy-state pattern already used
+        // for AddFeedView's "Adding podcast" ProgressView.
+        .accessibilityLabel(isRestoring ? "Restoring purchases" : "Restore Purchases")
+        .accessibilityHint("Re-checks your Apple ID for past Earshot Plus purchases")
+    }
+
+    private func restore() {
+        guard !isRestoring else { return }
+        isRestoring = true
+        Task {
+            let outcome = await entitlements.restorePurchases()
+            isRestoring = false
+            announce(outcome)
+        }
+    }
+
+    private func announce(_ outcome: EntitlementStore.RestoreOutcome) {
+        switch outcome {
+        case .restored:
+            Announcer.announce("Earshot Plus restored.", assertive: true)
+        case .noChange:
+            Announcer.announce("No purchases to restore.", assertive: true)
+        case .failed(let reason):
+            AppLog.monetization.error("Restore Purchases failed: \(reason, privacy: .public)")
+            Announcer.announce("Restore failed. Check your connection and try again.", assertive: true)
         }
     }
 }
