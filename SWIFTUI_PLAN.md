@@ -3152,3 +3152,100 @@ Regressions found: none
 
 Overall: PASS
 ```
+
+## Security Review — Issue #635
+
+earshot-security review complete. Issue #635 (Earshot Plus: enforce
+10-podcast free tier cap). Branch `feat/issue-635-podcast-cap`, reviewed at
+commit `cfc9b9b` on top of `swift` tip `76c551b`, in isolated worktree
+`earshot-wt-635`. One fix applied at commit `31d1cbf`.
+
+Checklist:
+- [x] Force-unwraps: PASS — none found. Every `!` in the diff is boolean
+  negation (`!isEntitled`, `!feedURLs.isEmpty`, etc.).
+- [x] Silent try?: PASS after fix — the three new cap-enforcement
+  `try? context.fetch...` calls in `SubscriptionRepository.swift`
+  (`subscribe`, `subscribeAll`, `autoDownloadRecent`) fell back to `0`/`[]`
+  on a fetch failure with no logging. Because these gate an
+  entitlement-bypass check, a silent fallback is fail-open (a rare local
+  SwiftData read error would silently under-enforce the cap). Extracted into
+  `currentPodcastCountForCapCheck()`/`allPodcastsForCapCheck()` private
+  helpers that `do`/`catch` and log via `AppLog.subscriptions.error`, same
+  fallback value, now observable. Pre-existing `try?` fetch patterns
+  elsewhere in the file (podcast/episode lookups, `mergeBackgroundWrites`)
+  are untouched — genuinely benign "not found" cases, matching established
+  codebase convention.
+- [x] fatalError: PASS — none found.
+- [x] Retain cycles: PASS — no new `Task {}`, `.sink`, `addObserver`, or
+  `Timer` closures; every `Task {}` in the diff is a pre-existing context
+  line.
+- [x] @MainActor: PASS — all new/changed code lives on already
+  `@MainActor`-isolated types (`SubscriptionRepository`,
+  `OPMLImportService`, `AppSettingsStore`, SwiftUI views); no SwiftData
+  access from a background `Task`.
+- [ ] IS_BETA_BUILD Release build: N/A — no migration-sheet code in this
+  diff; ran the Release build anyway as a general gate — BUILD SUCCEEDED.
+- [ ] Entitlements: N/A — `Earshot.entitlements`/`project.yml` entitlement
+  settings untouched.
+- [x] No secrets: PASS — none found.
+- [x] Error types: PASS — new `SubscriptionError.podcastCapReached(currentCount:limit:)`
+  is a typed enum case with `LocalizedError` conformance; no string-thrown
+  errors.
+- [x] AppLog coverage: PASS after fix — see try? item above.
+
+Issue-specific checks:
+1. No data destruction on lapse: PASS. No `.delete(` or other destructive
+   call anywhere in the diff. `readOnlyPodcastIDs` (both the
+   `PodcastCapPolicy` pure function and `SubscriptionsView`'s wrapper) is
+   computed live off current entitlement + podcast list, never persisted,
+   never deletes. `autoDownloadRecent` only skips downloading for read-only
+   podcasts. Confirmed by
+   `PodcastCapPolicyTests.testReadOnlyPodcastIDsRecomputesLiveWhenEntitlementIsRestored`.
+2. Cap can't be trivially bypassed: PASS. Grepped every production
+   (non-test) call site of `SubscriptionRepository(...isEntitled:)`,
+   `OPMLImportService(...isEntitled:)`, and
+   `OPMLFileImporter.importFile(...isEntitled:)` myself — all 9 UI call
+   sites pass `entitlements.isEntitled` sourced from a real
+   `@Environment(EntitlementStore.self)`, never a literal or user-settable
+   value. `EntitlementStore.isEntitled` is `private(set)`, synced by
+   `resync()` from `EntitlementEngine.isEntitled(from:)` reading real
+   `Transaction.currentEntitlements` (#634). The one non-UI call site left
+   at the `nil` default (`BackgroundFeedRefresher.runRefresh`) only calls
+   `refreshAll()`, never a subscribe path — correct to leave unenforced.
+3. Grandfathering snapshot integrity: PASS.
+   `introducePodcastCapGatingIfNeeded` guards on
+   `!podcastCapGatingIntroduced()` before either write, and the two writes
+   can't be reordered to re-arm the guard. Verified by
+   `AppSettingsStoreTests.testIntroducePodcastCapGatingIfNeededIsNoOpOnSecondCall`.
+4. No secrets/entitlement receipts logged: PASS. No `AppLog` call in this
+   diff (including my follow-up fix) logs entitlement/receipt payloads —
+   only counts, booleans, feed URLs, and error descriptions.
+
+Build + test verification (ran myself on simulator
+`F868F72E-091C-47D9-B003-1AE0670E5455`):
+- Debug build: BUILD SUCCEEDED (before and after my fix).
+- Release build: BUILD SUCCEEDED, no new warnings (one pre-existing
+  unrelated warning at `OPMLImportService.swift:99` predates this PR).
+- Full test suite: 1244 tests, 8 failures — all 8 are the documented
+  `ProductCatalogServiceTests` StoreKit-sandbox `SKInternalErrorDomain
+  Code=3` failures (out of scope per the Testing Review — Issue #631
+  section above). Zero failures in `PodcastCapPolicyTests` (14),
+  `SubscriptionRepositoryTests` (47), `OPMLBulkImportTests` (11), and
+  `AppSettingsStoreTests` (18). Re-ran the full suite after the fix:
+  identical result, no regressions.
+
+Environment note (not a code issue): the `earshot-wt-635` worktree had no
+`.dart_tool` (never had `flutter pub get` run in it), so the repo's
+`pre-commit` hook (`dart format --set-exit-if-changed lib/ test/`) couldn't
+resolve `very_good_analysis` from `analysis_options.yaml` and reformatted
+~66 unrelated Flutter files with default formatter settings as a side
+effect of committing the Swift-only fix above. Those Dart changes were
+deliberately left unstaged/uncommitted (not part of commit `31d1cbf`), but
+still sit as local working-tree noise in this worktree. Recommend running
+`flutter pub get` in this worktree (or discarding those files) before any
+further work there.
+
+New agents created: none.
+Feature suggestions identified: none this review.
+
+Overall: PASS
