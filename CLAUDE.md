@@ -20,8 +20,8 @@ The full product requirements live in `docs/PRD.md`. Read it whenever you need p
 1. **Never work directly on main.** Every fix, feature, or change gets its own branch. Main must always be stable and deployable.
 2. **Accessibility is the highest priority.** Every UI element needs a proper semantic label, role, and state. Every PR that touches UI must include screen reader testing notes. Code that regresses accessibility is not merged.
 3. **Follow system settings.** Never override the user's theme, font size, motion, or contrast preferences. Earshot reads from the system, never imposes.
-4. **Minimum data collection.** Crash reports and analytics are opt-out and anonymized. Listening history is user-controlled. No third-party trackers, no advertising IDs.
-5. **Freemium.** Free tier: up to 10 podcast subscriptions. Paid unlock (unlimited podcasts): $2.99/month, $20/year, or $49 one-time (lifetime), via App Store IAP/subscription. An in-app tip jar (App Store IAP) is available to both free and paid users regardless of tier. No ads, no third-party trackers, no ad-based monetization of any kind. All code public on GitHub under MIT. (Reversed 2026-07-07 from the original "free and open, no in-app donations" policy — see git history on this file for the prior wording if needed.)
+4. **Zero data collection.** Earshot ships no telemetry SDK, no crash reporter, no analytics, and no third-party dependencies at all. It collects no data: no advertising IDs, no device identifiers, no third-party trackers. Listening history stays on device and is user-controlled. The App Store privacy nutrition label is "Data Not Collected" for every category except Purchases (StoreKit transaction/entitlement state, App Functionality only, not linked to identity, not used for tracking). The `crash_reporting_enabled` / `analytics_enabled` setting keys exist only as retained constants for data compatibility; no SDK reads them. (Corrected 2026-07-10 from earlier "crash reports and analytics are opt-out and anonymized" wording, which described a feature that was never built.)
+5. **Freemium.** Free tier: up to 10 podcast subscriptions. Paid unlock (unlimited podcasts), "Earshot Plus": $2.99/month, $19.99/year, or $49.99 one-time (lifetime), via App Store IAP/subscription. An in-app tip jar (App Store IAP, presets $1.99/$4.99/$9.99) is available to both free and paid users regardless of tier. No ads, no third-party trackers, no ad-based monetization of any kind. All code public on GitHub under MIT. (Prices corrected 2026-07-10 to the real App Store Connect tiers $19.99/$49.99, from the earlier flat $20/$49. Reversed 2026-07-07 from the original "free and open, no in-app donations" policy — see git history on this file for the prior wording if needed.)
 6. **GHCP prompts always in code blocks** when generating them.
 7. **Phase progression follows `.claude/rules/phase-progression.md`.** When a phase completes, verify the Definition of Done, capture learnings, and write the next phase's detailed doc before starting work on it.
 
@@ -199,6 +199,22 @@ Before this fix, the app would freeze after you confirmed. Let me know if it fee
 - **GHCP prompts in code blocks.**
 - **Conversational direct tone.** No hedging, no "I'd be happy to help."
 - **Short responses on simple questions.** Detail only where needed.
+
+## Local setup (fresh clone / new worktree)
+
+Install the repo's tracked git hooks once per clone so the pre-commit
+formatter check runs. `core.hooksPath` is shared repo-wide config, so this one
+command also covers every `git worktree add` checkout:
+
+```bash
+git config core.hooksPath tool/hooks
+```
+
+The hook (`tool/hooks/pre-commit`) formats only the Dart files actually staged
+under `lib/`/`test/` and is a no-op on Swift-only or docs-only commits (see
+`CONTRIBUTING.md` and issue #660). Without this config a fresh clone has no
+pre-commit hook active. Never use `git commit --no-verify` — the hook no longer
+touches unrelated files, so there is no reason to bypass it.
 
 ## What to do at the start of a session
 
