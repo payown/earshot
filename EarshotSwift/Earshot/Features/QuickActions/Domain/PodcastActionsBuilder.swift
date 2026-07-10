@@ -52,6 +52,20 @@ func buildPodcastActions(
                 saveQuickAction(context, "inbox-include")
                 Announcer.announce(podcast.inboxIncluded ? "Added to inbox" : "Removed from inbox")
             }
+        case .toggleInboxExclude:
+            // Companion to .toggleInboxInclude above, for normal (non-opt-in)
+            // mode (#671): opt-in mode has "everything excluded unless
+            // included," normal mode is "everything included unless
+            // excluded." Same non-destructive, announced toggle shape.
+            let excluded = podcast.inboxExcluded
+            return QuickActionItem(
+                label: excluded ? "Include in Inbox" : "Exclude from Inbox",
+                isDestructive: false
+            ) {
+                podcast.inboxExcluded.toggle()
+                saveQuickAction(context, "inbox-exclude")
+                Announcer.announce(podcast.inboxExcluded ? "Excluded from inbox" : "Included in inbox")
+            }
         case .unsubscribe:
             return QuickActionItem(label: "Unfollow", isDestructive: true) {
                 onUnsubscribe()

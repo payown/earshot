@@ -164,6 +164,13 @@ struct PodcastSettingsView: View {
             // "On"/"Off" announcement for free, matching `autoQueue` above.
             if settings.inboxOptInOnly {
                 Toggle("Include in Inbox", isOn: $podcast.inboxIncluded)
+            } else {
+                // Companion to the opt-in Toggle above, for normal mode (#671):
+                // with "Opt-in podcasts only" off, every podcast is in the
+                // inbox by default and this is the only way to keep one
+                // specific noisy podcast out of it. Mutually exclusive with
+                // the branch above since only one inbox mode is ever active.
+                Toggle("Exclude from Inbox", isOn: $podcast.inboxExcluded)
             }
             inboxMaxPicker
             inboxAgeLimitPicker
@@ -173,6 +180,8 @@ struct PodcastSettingsView: View {
         } footer: {
             if settings.inboxOptInOnly {
                 Text("\"Opt-in podcasts only\" is on in Inbox settings, so new episodes only appear in the inbox for podcasts you include here.")
+            } else {
+                Text("New episodes from this podcast appear in the inbox unless you exclude it here.")
             }
         }
     }

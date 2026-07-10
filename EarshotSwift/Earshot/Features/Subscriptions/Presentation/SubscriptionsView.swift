@@ -98,6 +98,24 @@ struct SubscriptionsView: View {
                                             )
                                         }
                                         .tint(.accentColor)
+                                    } else {
+                                        // #671: the companion sighted affordance for
+                                        // normal (non-opt-in) mode — the only UI
+                                        // anywhere to exclude a single noisy podcast
+                                        // from the inbox while every other podcast
+                                        // stays included by default. Same leading
+                                        // edge, same non-destructive tint, mutually
+                                        // exclusive with the opt-in swipe above since
+                                        // exactly one of the two modes is ever active.
+                                        Button {
+                                            toggleInboxExclude(podcast)
+                                        } label: {
+                                            Label(
+                                                podcast.inboxExcluded ? "Include in Inbox" : "Exclude from Inbox",
+                                                systemImage: podcast.inboxExcluded ? "tray.and.arrow.down" : "tray.and.arrow.up"
+                                            )
+                                        }
+                                        .tint(.accentColor)
                                     }
                                 }
                         }
@@ -275,13 +293,18 @@ struct SubscriptionsView: View {
     private func rotorActions(for podcast: Podcast) -> [QuickActionItem] {
         buildPodcastActions(
             podcast: podcast,
-            // `.toggleInboxInclude` only does anything in opt-in mode (#668):
-            // drop it from the rotor entirely when opt-in is off so it never
-            // shows up as a confusing, no-effect-feeling action outside its
-            // intended scope. The persisted Quick Action order still lists it —
-            // this is a display-time filter, not a stored-order change.
+            // `.toggleInboxInclude` only does anything in opt-in mode (#668),
+            // and `.toggleInboxExclude` only does anything in normal mode
+            // (#671) — drop whichever one is inactive from the rotor entirely
+            // so neither shows up as a confusing, no-effect-feeling action
+            // outside its intended scope. The persisted Quick Action order
+            // still lists both — this is a display-time filter, not a
+            // stored-order change.
             order: quickActions.podcastActions.filter {
-                $0 != .openDetail && ($0 != .toggleInboxInclude || settings.inboxOptInOnly)
+                guard $0 != .openDetail else { return false }
+                if $0 == .toggleInboxInclude { return settings.inboxOptInOnly }
+                if $0 == .toggleInboxExclude { return !settings.inboxOptInOnly }
+                return true
             },
             context: context,
             onOpenDetail: {},
@@ -299,6 +322,15 @@ struct SubscriptionsView: View {
         podcast.inboxIncluded.toggle()
         saveQuickAction(context, "inbox-include")
         Announcer.announce(podcast.inboxIncluded ? "Added to inbox" : "Removed from inbox")
+    }
+
+    /// Companion to `toggleInboxInclude` above for normal (non-opt-in) mode
+    /// (#671). Backs the leading-edge swipe action; the VoiceOver rotor path
+    /// runs the equivalent effect through `buildPodcastActions`.
+    private func toggleInboxExclude(_ podcast: Podcast) {
+        podcast.inboxExcluded.toggle()
+        saveQuickAction(context, "inbox-exclude")
+        Announcer.announce(podcast.inboxExcluded ? "Excluded from inbox" : "Included in inbox")
     }
 
     private func unsubscribe(_ podcast: Podcast) {

@@ -10,6 +10,7 @@ enum PodcastAction: String, CaseIterable, Identifiable, Codable {
     case toggleNotifications
     case toggleAutoQueue
     case toggleInboxInclude
+    case toggleInboxExclude
     case unsubscribe
     case share
 
@@ -23,6 +24,7 @@ enum PodcastAction: String, CaseIterable, Identifiable, Codable {
         case .toggleNotifications: return "Toggle notifications"
         case .toggleAutoQueue: return "Toggle auto-queue"
         case .toggleInboxInclude: return "Toggle inbox inclusion"
+        case .toggleInboxExclude: return "Toggle inbox exclusion"
         case .unsubscribe: return "Unfollow"
         case .share: return "Share podcast"
         }
@@ -34,6 +36,7 @@ let defaultPodcastActions: [PodcastAction] = [
     .toggleNotifications,
     .toggleAutoQueue,
     .toggleInboxInclude,
+    .toggleInboxExclude,
     .unsubscribe,
     .share,
 ]

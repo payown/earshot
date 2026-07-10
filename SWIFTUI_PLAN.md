@@ -744,6 +744,36 @@ ship; OPML export/import is the supported way to carry a library over.
   pattern of keeping VoiceOver wording pure and file-scoped rather than inline
   in the view.
 
+- **Normal-mode "Exclude from Inbox" UI (#671), the companion #668 deliberately
+  left out of scope.** `Podcast.inboxExcluded` and its `InboxRepository`/
+  `InboxLogic.isExcluded(inboxExcluded:inboxIncluded:)` enforcement already
+  existed and were untouched — this was UI-only, mirroring #668's shape
+  exactly but inverted: a new `PodcastAction.toggleInboxExclude` Quick Action
+  (label "Exclude from Inbox"/"Include in Inbox" reflecting `inboxExcluded`,
+  non-assertive `Announcer.announce`), filtered out of the rotor when opt-in
+  mode is ON (the inverse of `.toggleInboxInclude`'s filter); a leading-edge
+  sighted swipe action on Library rows in the `else` branch of the same
+  `if settings.inboxOptInOnly` swipe-actions block #668 added, gated on
+  `!voiceOverEnabled && !settings.inboxOptInOnly`; an "Exclude from Inbox"
+  `Toggle` in `PodcastSettingsView`'s Inbox section, shown only when opt-in
+  mode is OFF. **Judgment call: kept the two toggle cases and swipe branches
+  as parallel, separately-named code** (not a shared `direction:`-parameterized
+  helper) — each is ~6 lines, the inverted gating conditions read clearly
+  side by side, and a generalized helper would need an enum/bool parameter
+  whose meaning ("which mode, which field") isn't obviously simpler to read
+  than just seeing both cases. The one place genuinely shared is the rotor
+  filter in `SubscriptionsView.rotorActions(for:)`, restructured from two
+  chained `&&`/`||` clauses into a small `guard`+`if` cascade so adding the
+  second mode's condition didn't turn into an unreadable one-liner. Test
+  coverage mirrors #668's three-file shape: `QuickActionBuildersTests` (default
+  set membership, label-reflects-state both directions, run flips+persists,
+  rotor-filter predicate both directions), `DownloadsInboxLogicTests` (added
+  three new `InboxRepository` end-to-end normal-mode tests — the existing
+  #668 coverage only exercised `InboxLogic.isExcluded` directly plus opt-in-mode
+  `InboxRepository` end-to-end, leaving normal-mode end-to-end as a real gap),
+  `PodcastSettingsViewTests` (default/set/toggle/persist for `inboxExcluded`,
+  mirroring the `inboxIncluded` block). **Implemented by:** earshot-ui.
+
 ## Networking Decisions
 
 - **#381 Background feed refresh + 15-min skip window.** Registered a
