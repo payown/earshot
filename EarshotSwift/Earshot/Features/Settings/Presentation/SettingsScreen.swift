@@ -116,7 +116,13 @@ private struct RestorePurchasesRow: View {
             }
         }
         .disabled(isRestoring)
-        .accessibilityLabel("Restore Purchases")
+        // `.disabled` alone only adds the "dimmed" trait — VoiceOver users get
+        // no spoken indication that a restore is actually in flight (the
+        // ProgressView above has no accessibility presence of its own once
+        // this Button's own accessibilityLabel flattens its children). Swap
+        // the label text itself, matching the busy-state pattern already used
+        // for AddFeedView's "Adding podcast" ProgressView.
+        .accessibilityLabel(isRestoring ? "Restoring purchases" : "Restore Purchases")
         .accessibilityHint("Re-checks your Apple ID for past Earshot Plus purchases")
     }
 
