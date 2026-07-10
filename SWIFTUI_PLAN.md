@@ -3828,3 +3828,154 @@ the hook — no `--no-verify` used.
 **Branch:** `feat/issue-636-tip-jar` into `swift`, PR opened per Michael's
 explicit instruction to review design/copy before merge — **not merged, not
 closed.** Michael is reviewing this together with the #632 paywall PR.
+
+## Testing Gate — Issue #632
+
+earshot-testing gate complete. Issue #632 (Earshot Plus: paywall / upgrade
+screen). Worktree `earshot-wt-632`, branch `feat/issue-632-paywall`, HEAD
+`a166f72` (on `swift` tip `c9bdf79`), reviewed on pinned simulator
+`39E0DF74-2312-4D8B-8612-05AAD43EB8B5` (iPhone 17e).
+
+**Test coverage spot-check.** Read `PaywallLogic.swift`,
+`PaywallViewModel.swift`, `PaywallView.swift`, and all three trigger-point
+call sites (`SearchView.swift`, `PodcastPreviewView.swift`,
+`DataSettingsView.swift`/`OPMLFileImporter.swift`, `SettingsScreen.swift`)
+against #632's requirements. `PaywallLogicTests.swift` (20 tests) is
+StoreKit-free and covers the full pure-logic surface: best-value badge math
+(honest percentage, floor-never-round-up, nil for a false/non-existent
+saving, nil for missing/zero-price/malformed inputs), combined
+accessibility labels (name + price + cadence for subscriptions, name +
+price + "one-time purchase" for lifetime), subscription vs. lifetime
+disclosure copy (auto-renew/cancel language present for subscriptions,
+explicitly absent for lifetime), spoken cadence singular/plural forms, and
+every purchase-outcome announcement (in-progress polite, success/pending/
+failed all assertive, cancelled polite and never phrased like an error,
+and a compile-time-enforced guarantee that cancellation has no case in
+`PaywallPurchaseOutcome`). `PaywallViewModelTests.swift` (3 tests) exercises
+`loadProducts()` against a real `SKTestSession`, inheriting the same
+`SKInternalErrorDomain Code=3` headless-CI limitation already documented
+for #631/#633 (see below) — not a gap in this PR.
+
+**Coverage gap found and closed.** The three trigger points wire a new
+`showPaywall` sheet flag from three different failure paths, but one of
+them — `OPMLFileImporter.importFile`'s new `onCapSkipped` callback
+parameter, the signal `DataSettingsView` uses to present the paywall after
+a cap-trimmed OPML import — had zero test coverage. Neither
+`OPMLFileImporterTests.swift` nor `OPMLImportProgressTests.swift` passed
+`isEntitled` or `onCapSkipped` to any existing call, and the domain agent's
+own two new test files never touch `OPMLFileImporter` at all (that logic
+lives one layer up from `PaywallViewModel`/`PaywallLogic`). The other two
+trigger points (`SearchView`'s and `PodcastPreviewView`'s `subscribe(_:)`/
+`toggleFollow()` catch blocks) and the Settings row's `if
+!entitlements.isEntitled` guard are plain `@State`/view-body logic with no
+`ViewInspector` (or equivalent) in this codebase's dependency graph to
+drive a SwiftUI view tree in a headless unit test — consistent with every
+prior gate in this file, sheet-presentation wiring at the view-body level
+is verified by device/simulator testing, not XCTest. `onCapSkipped`,
+by contrast, is a plain synchronous callback on a `@MainActor` static
+function with a real, headless-testable seam, so its absence was a genuine
+gap, not an inherent view-testing limitation. Added 4 tests to
+`OPMLFileImporterTests.swift`:
+- `testOnCapSkippedFiresOnceWhenImportIsFullyTrimmedByCap` — a non-entitled
+  user already at/over the free-tier limit (15 existing podcasts, cap 10)
+  gets the whole 3-feed request trimmed to zero
+  (`PodcastCapPolicy.allowedNewSubscriptions` clamps at 0), and
+  `onCapSkipped` fires exactly once, not once per skipped feed. Stays fully
+  offline: because the request is trimmed to zero, none of the 3 requested
+  feeds are ever attempted, so they need not be pre-seeded as
+  already-subscribed.
+- `testOnCapSkippedDoesNotFireForEntitledUser` — an entitled (Plus) user's
+  import is never trimmed, so the callback must never fire even though
+  every feed is genuinely new.
+- `testOnCapSkippedDoesNotFireWhenImportStaysUnderCap` — a free-tier import
+  comfortably under the cap must not fire either; the paywall is only for a
+  genuinely trimmed import.
+- `testOnCapSkippedDoesNotFireWhenEntitlementIsNil` — `isEntitled == nil`
+  (the default, matching every legacy/test call site that predates #635)
+  means the cap isn't enforced at this call site at all, so the callback
+  must never fire regardless of requested count.
+
+All 4 new tests use the `@MainActor final class CapSkippedSpy` pattern
+already established by `OPMLBulkImportTests`' `ProgressRecorder` — a plain
+same-actor reference type captured by the `@MainActor @Sendable` callback,
+not a lock-guarded counter (unlike `OPMLBulkImportTests`' cross-actor
+`onMerge` spy, `onCapSkipped` only ever fires on the main actor here).
+Committed at `6a6f7ee`.
+
+**Full suite.** `xcodebuild test` on the pinned simulator: **1281 executed,
+1 skipped (env-gated `ScaleDiagnosticTests`, unchanged), 13 failures**
+(11 unique test methods — 2 appear twice in xcodebuild's summary listing
+but each `Test Case` log entry confirms a single run). Baseline of record
+was **1254 executed, 1 skipped, 8 known-environmental failures**. Count
+math: 1254 + 20 (`PaywallLogicTests`) + 3 (`PaywallViewModelTests`) + 4
+(this gate's `OPMLFileImporterTests` additions) = 1281. **Count increased,
+zero regressions** — every one of the original 1246 passing baseline tests
+(1254 minus the 8 known failures) still passes.
+
+**Independent verification of the StoreKit failures (not just trusting the
+domain agent's report).** The 11 unique failing tests are the same 8
+`ProductCatalogServiceTests` already logged against #631/#633 in this file,
+plus the domain agent's 3 `PaywallViewModelTests`. Grepped the actual test
+run's console output rather than assuming: every one of the 3
+`PaywallViewModelTests` failures logs the identical signature already
+documented for #631 —
+```
+[SKTestSession] Error saving configuration file: Error Domain=SKInternalErrorDomain Code=3 "(null)"
+[SKTestSession] Error clearing overrides: Error Domain=SKInternalErrorDomain Code=3 "(null)"
+[SKTestSession] Error setting value to 1 for identifier 2 for media.payown.earshot: Error Domain=SKInternalErrorDomain Code=3 "(null)"
+[SKTestSession] Error deleting all transactions: Error Domain=SKInternalErrorDomain Code=3 "(null)"
+[monetization] Paywall product fetch failed: The operation couldn't be completed. (Earshot.ProductCatalogService.CatalogError error 0.)
+```
+— the local StoreKitTest daemon failing to persist `SKTestSession`
+configuration in this headless environment, not a defect in
+`PaywallViewModel.loadProducts()` or `ProductCatalogService`. This is the
+exact same root cause already independently reproduced against an
+unmodified `swift` tip for #633's gate. Not a #632 regression.
+
+**Release build.** `xcodebuild -configuration Release build` on the pinned
+simulator: **BUILD SUCCEEDED**. First run reused already-built products
+from this worktree's DerivedData with zero recompilation, so re-ran after
+touching all 8 changed production files (`PaywallLogic.swift`,
+`PaywallView.swift`, `PaywallViewModel.swift`, `PodcastPreviewView.swift`,
+`SearchView.swift`, `DataSettingsView.swift`, `SettingsScreen.swift`,
+`OPMLFileImporter.swift`) to force a real recompile under Release/WMO.
+Second run: **BUILD SUCCEEDED**, 7 warning lines resolving to 3 unique
+messages (each appearing twice from two compile passes) — `ChapterParser.swift`
+(unused loop variable), `OPMLImportService.swift` (redundant `await`), and
+`DownloadManager.swift` (Swift 6 Sendable warning) — **none in a file this
+diff touches** (confirmed against the `git diff swift..HEAD --stat` file
+list). Zero new warnings introduced by #632.
+
+**Regressions found:** none.
+
+```
+earshot-testing complete. Issue #632.
+
+New tests written: 4 (OPMLFileImporterTests.swift — onCapSkipped paywall
+trigger wiring, a real coverage gap the domain agent's own two new test
+files didn't reach)
+Previous test count: 1254 executed, 1 skipped
+New test count: 1281 executed, 1 skipped, 13 failures / 11 unique failing
+tests (8 pre-existing ProductCatalogServiceTests + 3 new
+PaywallViewModelTests, all independently confirmed as the same
+SKInternalErrorDomain Code=3 StoreKitTest-sandbox limitation documented for
+#631/#633 — not a regression)
+Count increased: yes
+
+Release build (IS_BETA_BUILD absent): PASS — BUILD SUCCEEDED, 0 new
+warnings introduced by this diff
+PRD acceptance criteria covered: three products displayed with correct
+combined accessible labels (name+price+period), best-value badge honest
+percentage math, subscription vs. lifetime disclosure copy correctness,
+purchase-outcome-to-announcement mapping (in-progress/success/pending/
+failed/cancelled, including the compile-time guarantee cancellation has no
+outcome case), the OPML-import trigger point's onCapSkipped wiring (closed
+gap). The other two trigger points' sheet-presentation wiring and the
+Settings row's entitled-hide guard are plain SwiftUI view-body logic with
+no ViewInspector in this codebase to drive headlessly — consistent with
+every prior gate, verified by device/simulator testing, not XCTest.
+
+Regressions found: none
+
+Overall: PASS
+```
