@@ -3249,3 +3249,110 @@ New agents created: none.
 Feature suggestions identified: none this review.
 
 Overall: PASS
+
+## Swift 6 Review — Issue #635
+
+earshot-swift6 review complete. Issue #635 (Earshot Plus: enforce
+10-podcast free tier cap). Branch `feat/issue-635-podcast-cap`, reviewed at
+HEAD `72a7cf9` (domain `cfc9b9b` + security fix `31d1cbf` + docs `72a7cf9`)
+in isolated worktree `earshot-wt-635`. No fix required.
+
+Concurrency mode: real project settings — `SWIFT_VERSION: "5.0"` /
+`SWIFT_STRICT_CONCURRENCY: minimal` (confirmed by reading `project.yml`
+myself, not assumed).
+
+Checklist:
+- [x] Sendable conformance: PASS — `PodcastCapPolicy` is a plain, non-actor
+  enum that takes `[Podcast]` (`@Model`, not `Sendable`) and primitives, and
+  returns `Set<PersistentIdentifier>`/`Bool`/`Int`. It is called
+  synchronously, only from already-`@MainActor` call sites
+  (`SubscriptionRepository`, `OPMLFileImporter`, `SubscriptionsView`) —
+  grepped every call site to confirm. It never crosses an actor boundary and
+  is never called from `FeedRefreshActor`, so the non-`Sendable` `Podcast`
+  argument never needs to be `Sendable`; the enum correctly does not need
+  `@MainActor` or `Sendable` annotations itself. `SubscriptionRepository`'s
+  new `isEntitled: Bool?` stored property and `BulkSubscribeResult`/
+  `BulkSubscribeOutcome` structs are all-value-type and trivially `Sendable`.
+  `SubscriptionError.podcastCapReached(currentCount:limit:)` carries only
+  `Int`s.
+- [x] Actor isolation: PASS — all new/changed cap-check code
+  (`currentPodcastCountForCapCheck()`, `allPodcastsForCapCheck()`, the cap
+  gate in `subscribe()`/`subscribeAll()`, `AppSettingsStore` calls) runs on
+  `SubscriptionRepository`'s `@MainActor` isolation, confirmed by reading the
+  class declaration (`@MainActor final class SubscriptionRepository`) and
+  every call site. The cap check in `subscribe(feedURL:)` (lines ~125-134)
+  runs and can throw BEFORE `FeedRefreshActor(modelContainer:)` is
+  constructed — verified from the actual code, not assumed from the issue
+  description — so a capped-out user's request never even hands off to the
+  background actor. Same ordering in `subscribeAll()`: `feedURLs` is trimmed
+  by the cap on the main actor before the single `FeedRefreshActor.subscribeAll`
+  call. `RootView`'s new one-time grandfathering snapshot
+  (`capSettings.introducePodcastCapGatingIfNeeded`) runs inside the existing
+  `@MainActor` launch `.task`, using `AppSettingsStore` (`@MainActor`) and a
+  synchronous `modelContext.fetchCount` — no isolation violation. All 9 new
+  `@Environment(EntitlementStore.self)` UI call sites (`RootView`,
+  `OnboardingView`, `PodcastPreviewView`, `SearchView`, `DataSettingsView`,
+  `AddFeedView`, `AddPodcastView`, `EpisodeListView`, `SubscriptionsView`)
+  read `entitlements.isEntitled` synchronously on the main actor from a
+  `@MainActor @Observable` store and pass it as a plain `Bool` into
+  `@MainActor`-isolated inits/methods — no boundary crossing.
+- [x] @Model/SwiftData actor boundary: PASS — the cap check's
+  `context.fetch`/`context.fetchCount` calls in
+  `currentPodcastCountForCapCheck()`/`allPodcastsForCapCheck()` run on the
+  main `ModelContext` from the main actor, never touching
+  `FeedRefreshActor`'s background context. No `@Model` object (`Podcast`,
+  `Episode`) is passed into or out of `FeedRefreshActor` by this diff; only
+  `Sendable` `PersistentIdentifier`s and the pre-existing `RefreshOutcome`/
+  new `BulkSubscribeOutcome`/`BulkSubscribeResult` value types cross that
+  boundary, matching the established pattern in this file.
+- [ ] AVAudioSession main actor: N/A — this diff touches no audio code.
+- [ ] Combine publishers: N/A — no Combine in this diff.
+- [x] nonisolated functions: PASS — no `nonisolated` added or needed;
+  `PodcastCapPolicy`'s static funcs are pure and free-standing (not
+  actor-isolated in the first place) rather than `nonisolated` members of an
+  isolated type.
+- [x] Structured concurrency: PASS — no `Task.detached` anywhere in the
+  diff. `RootView.handleIncomingURL` and the UI call sites use plain `Task {
+  }` (inherits the calling `@MainActor` context), matching pre-existing
+  usage. No new `withTaskGroup`.
+- [x] Global state: PASS — no new global/static `var`. `PodcastCapPolicy
+  .freeTierLimit` is `static let Int` (immutable, trivially safe). New
+  `SettingsKey`/`SettingsDefault` entries (`podcastCapGatingIntroduced`,
+  `grandfatheredPodcastCount`) are `static let String`/`Bool`/`Int`
+  constants, same pattern as every existing key in that enum.
+- [x] Swift 6 build clean: PASS — Debug build under the real project
+  settings (`SWIFT_VERSION: "5.0"`, `SWIFT_STRICT_CONCURRENCY: minimal`) on
+  simulator `F868F72E-091C-47D9-B003-1AE0670E5455`: **BUILD SUCCEEDED**,
+  zero warnings, zero errors.
+
+Secondary informational check (forced `SWIFT_STRICT_CONCURRENCY=complete`
+override, not the shipping config): **BUILD FAILED**, but with the same
+documented pre-existing baseline signature as prior gates on this repo —
+`QueueScreen.swift:100` compiler-crash diagnostic, `KeyPath`-not-`Sendable`
+warnings (`FoldersScreen.swift`, `QueueRepository.swift:345`,
+`QuickActionRepository.swift:64`, and the `@Query`/`#Predicate` macro
+expansions in `RootView`/`InboxScreen`), `EarshotSchema*.versionIdentifier`
+global-state warnings, `EpisodeSummaryCache.shared`, `RSSParser`'s static
+`ISO8601DateFormatter`s, and `DownloadManager.swift:122`. One warning
+initially looked diff-related — `SubscriptionRepository.swift:181:
+sending 'episode' ... non-Sendable type 'any EpisodeDownloading'` — but
+`git diff 76c551b..HEAD` shows that exact `await downloader.download(episode)`
+line is an untouched context line (pre-existing at old line 154, now at 181
+purely from insertions above it), so it's the same root-cause baseline issue
+as `DownloadManager.swift:122`, just visible at a second call site — not a
+new violation introduced by #635. No finding in this diff triggers a NEW
+warning or error under forced strict-complete mode.
+
+Test verification (ran myself on simulator
+`F868F72E-091C-47D9-B003-1AE0670E5455`, Debug/real settings): `-only-testing`
+run of `PodcastCapPolicyTests` (14), `SubscriptionRepositoryTests` (47),
+`OPMLBulkImportTests` (11), `AppSettingsStoreTests` (18) — 90 tests, all
+passed, 0 failures.
+
+`git status --short` in the worktree was clean before and after this
+review; no dart-format hook side effect to restore (no commit made).
+
+New agents created: none — no CarPlay or background-URLSession-delegate
+pattern encountered in this diff to warrant one.
+
+Overall: PASS
