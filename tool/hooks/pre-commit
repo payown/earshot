@@ -1,0 +1,30 @@
+#!/bin/sh
+# Earshot pre-commit hook.
+#
+# Formats only the Dart files actually staged for this commit, under lib/
+# and test/. On Swift-only, docs-only, or any other commit that stages no
+# Dart files, this hook is a no-op.
+#
+# Why scoped instead of `dart format --set-exit-if-changed lib/ test/`:
+# the unscoped form reformats every Dart file in the tree whenever the
+# local Dart SDK's formatter output has drifted from whatever version
+# originally formatted the repo (see #660). That silently rewrote ~66
+# unrelated legacy Flutter files on Swift-only branches and blocked
+# routine commits that never touched lib/ or test/ at all.
+#
+# This hook is not tracked in .git/hooks (git never version-controls that
+# directory). It lives here so it can be installed once via:
+#   git config core.hooksPath tool/hooks
+# core.hooksPath is stored in the shared repo config, so it applies to
+# every `git worktree add` checkout of this repo automatically -- no
+# per-worktree setup needed.
+
+set -e
+
+if [ -z "$(git diff --cached --name-only --diff-filter=ACM -- ':(glob)lib/**/*.dart' ':(glob)test/**/*.dart')" ]; then
+  exit 0
+fi
+
+# NUL-delimited so staged filenames containing spaces are handled correctly.
+git diff --cached --name-only -z --diff-filter=ACM -- ':(glob)lib/**/*.dart' ':(glob)test/**/*.dart' \
+  | xargs -0 dart format --set-exit-if-changed
