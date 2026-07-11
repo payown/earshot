@@ -43,6 +43,10 @@ final class ProductCatalogServiceTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["EARSHOT_SKIP_STOREKIT_TESTS"] != nil,
+            "Quarantined on the self-hosted CI runner: Xcode 26.5's `xcodebuild test` CLI can't serve SKTestSession products (SKInternalErrorDomain Code=3). Runs in the Xcode IDE and on the 26.3 toolchain. Un-quarantine tracked in #679."
+        )
         session = try SKTestSession(contentsOf: Self.configurationURL)
         session.resetToDefaultState()
         session.disableDialogs = true
