@@ -1,0 +1,144 @@
+name: Direct-push guard
+
+# WHY THIS EXISTS
+# Branch protection cannot be ENFORCED on this repo: it is private on a free
+# plan, where GitHub blocks branch-protection rules and rulesets entirely
+# (`branches/swift/protection` and `rulesets` both return 403 "Upgrade to
+# GitHub Pro or make this repository public"). See issue #680. So the required
+# `Build and test (EarshotTests)` check can run and report, but cannot BLOCK a
+# direct push to `swift`.
+#
+# Instead of preventing direct pushes, we make them LOUD: on every push to
+# `swift`, verify the pushed head commit arrived via a merged PR. If it did
+# not, auto-open an issue flagging the direct-push violation. Detection, not
+# prevention — remove/relax once real enforcement lands (#680).
+#
+# Runs on the SELF-HOSTED runner, not ubuntu-latest: GitHub-hosted minutes are
+# billing-blocked on this account (the same reason swift-ci.yml migrated), so a
+# hosted job would never start. This job is a couple of API calls, so sharing
+# the Mac runner with swift-ci is cheap.
+
+on:
+  push:
+    branches: [swift]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: direct-push-guard-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  verify-pr-merge:
+    name: Verify push came from a PR merge
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 5
+    steps:
+      - name: Flag direct pushes to swift
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.sha;
+            const shortSha = sha.slice(0, 8);
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+            // A squash/rebase/merge of a PR leaves the resulting commit on
+            // `swift` associated with that PR. A raw `git push` does not.
+            // The association can lag a few seconds right after a merge, so
+            // retry before concluding it was a direct push (avoids
+            // false-flagging a legitimate PR merge — including this workflow's
+            // own merge commit).
+            let mergedIntoSwift = [];
+            for (let attempt = 1; attempt <= 4; attempt++) {
+              const { data: prs } =
+                await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  commit_sha: sha,
+                });
+              mergedIntoSwift = prs.filter(
+                (pr) => pr.base.ref === 'swift' && pr.merged_at != null
+              );
+              if (mergedIntoSwift.length > 0) break;
+              if (attempt < 4) {
+                core.info(
+                  `No PR association yet for ${shortSha} ` +
+                  `(attempt ${attempt}/4); retrying in 5s...`
+                );
+                await sleep(5000);
+              }
+            }
+
+            if (mergedIntoSwift.length > 0) {
+              const nums = mergedIntoSwift.map((p) => `#${p.number}`).join(', ');
+              core.info(`OK: ${shortSha} arrived via merged PR ${nums}.`);
+              return;
+            }
+
+            core.warning(
+              `Direct push detected: ${shortSha} is not associated with any ` +
+              `PR merged into swift.`
+            );
+
+            // De-dupe: don't open a second issue for the same commit.
+            const marker = `<!-- direct-push-guard:${sha} -->`;
+            const existing = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} in:body ` +
+                 `"${marker}" type:issue`,
+            });
+            if (existing.data.total_count > 0) {
+              core.info('Issue already exists for this commit; skipping.');
+              return;
+            }
+
+            const commit = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+            });
+            const author = commit.data.commit.author?.name ?? 'unknown';
+            const subject =
+              (commit.data.commit.message ?? '').split('\n')[0];
+            const compare =
+              `${context.serverUrl}/${context.repo.owner}/` +
+              `${context.repo.repo}/commit/${sha}`;
+
+            const body = [
+              marker,
+              '',
+              '## Direct push to `swift` detected',
+              '',
+              'A commit landed on `swift` **without** going through a merged ' +
+                'pull request. Every change must land via a PR into `swift` ' +
+                '(standing rule). Real branch protection is not enforceable on ' +
+                'this private free-plan repo yet — see #680 — so this workflow ' +
+                'flags the violation instead of blocking it.',
+              '',
+              `- **Commit:** [\`${shortSha}\`](${compare})`,
+              `- **Subject:** ${subject}`,
+              `- **Author:** ${author}`,
+              `- **Pushed by:** @${context.actor}`,
+              '',
+              '### What to do',
+              '1. Confirm the change was intended and is safe on `swift`.',
+              '2. If it should have been a PR, open a retroactive PR for the ' +
+                'diff (or revert and redo via PR).',
+              '3. Close this issue once reconciled.',
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Direct push to swift: ${shortSha} — ${subject}`.slice(0, 120),
+              body,
+              assignees: ['payown'],
+              labels: ['direct-push-violation'],
+            });
+
+            core.setFailed(
+              `Direct push ${shortSha} flagged; issue opened. This job fails ` +
+              `so the violation is visible in the Actions list too.`
+            );
