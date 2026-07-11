@@ -53,12 +53,17 @@ Earshot is developed by a blind podcaster and assistive technology specialist wh
 ## Keywords (100 char max)
 
 ```
-voiceover,blind,low vision,screen reader,rss,opml,chapters,queue,sleep timer,bookmarks,offline,feeds
+voiceover,blind,low,vision,screen,reader,rss,opml,chapters,queue,sleep,timer,bookmarks,offline,feeds
 ```
 
-100 characters. No spaces after commas. Does not repeat "Earshot" (app name)
-or "accessible" / "podcast" / "player" (all in the subtitle), since Apple
-indexes the name and subtitle separately and repeating them would waste slots.
+Exactly 100 characters. Multi-word phrases are split into single
+comma-separated keywords (`low`, `vision`, `screen`, `reader`, `sleep`,
+`timer`) so Apple can auto-combine them into more search phrases; the split is
+character-neutral (a comma replaces each space), so it stays at the 100-char
+limit with no slots freed. No spaces after commas. Does not repeat "Earshot"
+(app name) or "accessible" / "podcast" / "player" (all in the subtitle), since
+Apple indexes the name and subtitle separately and repeating them would waste
+slots.
 
 ---
 
