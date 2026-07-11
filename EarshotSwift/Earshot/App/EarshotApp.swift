@@ -36,10 +36,27 @@ struct EarshotApp: App {
     /// SwiftData work. During tests we keep the host inert.
     private let isRunningTests = NSClassFromString("XCTestCase") != nil
 
+    /// True when this launch is an App Store screenshot capture run (#643).
+    /// Always false in a Release build — the harness is `#if DEBUG` only.
+    private var isScreenshotRun: Bool {
+        #if DEBUG
+        return ScreenshotHarness.isActive
+        #else
+        return false
+        #endif
+    }
+
     init() {
         if NSClassFromString("XCTestCase") != nil {
             container = ModelContainerFactory.makeTestHostPlaceholder()
             storeRecovery = nil
+        } else if let screenshotStore = Self.screenshotContainer() {
+            // App Store screenshot capture (#643): use a fresh in-memory store
+            // instead of the on-device store. Seeding happens in RootView's
+            // launch task, which is main-actor isolated. DEBUG-only.
+            container = screenshotStore
+            storeRecovery = nil
+            DownloadManager.activate(container: screenshotStore)
         } else {
             let load = ModelContainerFactory.makeShared()
             container = load.container
@@ -54,6 +71,17 @@ struct EarshotApp: App {
         _notificationRouter = State(initialValue: router)
         notificationDelegate = NotificationDelegate(router: router)
     }
+
+    /// The seeded in-memory container for an App Store screenshot run, or `nil`
+    /// on a normal launch. Always `nil` in Release — the harness is DEBUG-only.
+    #if DEBUG
+    private static func screenshotContainer() -> ModelContainer? {
+        guard ScreenshotHarness.isSeeding else { return nil }
+        return try? ModelContainerFactory.makeInMemory()
+    }
+    #else
+    private static func screenshotContainer() -> ModelContainer? { nil }
+    #endif
 
     var body: some Scene {
         WindowGroup {
@@ -86,7 +114,7 @@ struct EarshotApp: App {
                         // user's inbox isn't a day stale (#470). No-op if a refresh
                         // ran within the FeedRefreshPolicy window or there are no
                         // subscriptions yet.
-                        guard !isRunningTests else { return }
+                        guard !isRunningTests, !isScreenshotRun else { return }
                         await BackgroundFeedRefresher.runRefresh(container: container)
                     }
                     .task {
@@ -97,7 +125,7 @@ struct EarshotApp: App {
                         // picked up immediately rather than waiting for the
                         // next update event. Skipped under XCTest — see
                         // isRunningTests above.
-                        guard !isRunningTests else { return }
+                        guard !isRunningTests, !isScreenshotRun else { return }
                         entitlements.configure(context: container.mainContext)
                         entitlements.startObservingTransactionUpdates()
                         await entitlements.resync()
@@ -109,7 +137,7 @@ struct EarshotApp: App {
         // so returning to the app surfaces new episodes immediately rather than
         // waiting on an opportunistic BGAppRefreshTask (#470). Skipped under tests.
         .onChange(of: scenePhase) { _, phase in
-            guard !isRunningTests else { return }
+            guard !isRunningTests, !isScreenshotRun else { return }
             switch phase {
             case .background:
                 BackgroundFeedRefresher.scheduleNext()
@@ -122,7 +150,7 @@ struct EarshotApp: App {
         // OS-launched background refresh. Re-schedule the chain FIRST, then run a
         // throttled refresh that respects task expiration. Skipped under tests —
         // BGTaskScheduler isn't available in the test host. (#381)
-        .backgroundRefreshTask(isEnabled: !isRunningTests, container: container)
+        .backgroundRefreshTask(isEnabled: !isRunningTests && !isScreenshotRun, container: container)
     }
 }
 

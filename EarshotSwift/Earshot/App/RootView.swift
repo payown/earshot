@@ -112,7 +112,20 @@ struct RootView: View {
             .tag(RootTab.downloads)
 
             NavigationStack {
+                #if DEBUG
+                // App Store screenshot capture (#643): the "Settings with
+                // auto-download" shot needs DownloadsSettingsView, which is a
+                // pushed destination in production. Rather than convert Settings'
+                // rows to value-based navigation just for a screenshot, render it
+                // as the tab root in screenshot mode only. No production change.
+                if ScreenshotHarness.requestedScreen == .settings {
+                    DownloadsSettingsView()
+                } else {
+                    SettingsScreen()
+                }
+                #else
                 SettingsScreen()
+                #endif
             }
             .modifier(TabChrome())
             .tabItem { Label("Settings", systemImage: "gearshape") }
@@ -213,6 +226,16 @@ struct RootView: View {
             player.updateRemoteSkipIntervals()
         }
         .task {
+            #if DEBUG
+            // App Store screenshot capture (#643): seed the in-memory store from
+            // fixtures before any of the configure/restore work below reads it.
+            // This task is main-actor isolated, so the settings writes in the
+            // seeder (AppSettingsStore is @MainActor) are safe here. DEBUG +
+            // launch-arg only; a normal launch never enters this branch.
+            if ScreenshotHarness.isSeeding {
+                ScreenshotFixtures.seed(into: modelContext)
+            }
+            #endif
             // Wire persistence and restore the last episode (paused) on launch.
             // Done here, not in a view body's computed work, so the context is
             // injected exactly once.
@@ -251,6 +274,19 @@ struct RootView: View {
             // removed with the rest of the abandoned migration feature (#580) —
             // OPML is the only re-import path.
             showOnboarding = !settings.onboardingComplete
+            #if DEBUG
+            // App Store screenshot capture (#643): route straight to the
+            // requested screen and never show onboarding. DEBUG + launch-arg only.
+            if ScreenshotHarness.isActive {
+                showOnboarding = false
+                ScreenshotHarness.apply(
+                    in: modelContext,
+                    player: player,
+                    selectTab: { selectedTab = $0 },
+                    pushLibrary: { libraryPath = $0 }
+                )
+            }
+            #endif
         }
     }
 
