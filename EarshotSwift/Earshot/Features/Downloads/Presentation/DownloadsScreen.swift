@@ -23,11 +23,36 @@ struct DownloadsScreen: View {
     // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
     // downloaded set and the expiration records are filtered in memory only.
     @State private var searchText = ""
+    // Global played/unheard filter for the Downloads list (#641). Loaded on
+    // appear (default ``EpisodeListFilter/all`` — show everything) and persisted
+    // globally on change. Applies only to the Downloaded section; Recently
+    // Expired is unaffected. Reuses the validated ``EpisodeListFilter`` type.
+    @State private var playedFilter: EpisodeListFilter = SettingsDefault.downloadsPlayedFilter
+    // Focus targets for the rotor "Mark as played" under the Unheard filter,
+    // where the marked download leaves the visible list (#641, mirroring the
+    // #579 fix on EpisodeListView): the neighbor row, or the empty-filter state
+    // when the last unheard download was just marked.
+    @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
+    @AccessibilityFocusState private var focusEmptyFilter: Bool
 
     private var downloaded: [Episode] {
         allEpisodes
             .filter { $0.downloadStatus == .downloaded }
             .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+    }
+
+    /// Binding that drives the segmented filter: persists the new value globally
+    /// and announces how many played downloads it hides or reveals (#641).
+    private func filterSelection(playedCount: Int) -> Binding<EpisodeListFilter> {
+        Binding(
+            get: { playedFilter },
+            set: { newValue in
+                guard newValue != playedFilter else { return }
+                playedFilter = newValue
+                AppSettingsStore(context: context).setDownloadsPlayedFilter(newValue)
+                Announcer.announce(DownloadsFilterAnnouncement.text(filter: newValue, playedCount: playedCount))
+            }
+        )
     }
 
     private var expiredEntries: [RecentlyExpired] {
@@ -42,8 +67,14 @@ struct DownloadsScreen: View {
         // With no search active the filters pass everything through unchanged.
         let allDownloaded = downloaded
         let allExpired = expiredEntries
-        let visibleDownloaded = EpisodeSearchFilter.filter(allDownloaded, query: searchText)
-        let visibleExpired = EpisodeSearchFilter.isActive(searchText)
+        let searchActive = EpisodeSearchFilter.isActive(searchText)
+        // Played count over the UNFILTERED downloads — what the played filter
+        // hides — for the toggle announcement and empty-state message (#641).
+        let playedCount = allDownloaded.filter(\.isPlayed).count
+        // Played filter first (#641), then the in-place search (#457).
+        let playedFilteredDownloaded = playedFilter.apply(to: allDownloaded)
+        let visibleDownloaded = EpisodeSearchFilter.filter(playedFilteredDownloaded, query: searchText)
+        let visibleExpired = searchActive
             ? allExpired.filter { entry in
                 entry.episode.map { EpisodeSearchFilter.matches($0, query: searchText) } ?? false
             }
@@ -55,16 +86,42 @@ struct DownloadsScreen: View {
                     systemImage: "arrow.down.circle",
                     description: Text("Episodes you download appear here.")
                 )
-            } else if visibleDownloaded.isEmpty && visibleExpired.isEmpty {
+            } else if searchActive && visibleDownloaded.isEmpty && visibleExpired.isEmpty {
                 // A search is active (there IS content, it just doesn't match).
+                // Guarded on `searchActive` so the played filter hiding every
+                // download falls through to the list's empty-filter state (#641)
+                // instead of the "no search matches" copy.
                 NoSearchMatchesView(query: searchText)
             } else {
                 List {
+                    // Played/unheard filter (#641). Only shown when there are
+                    // downloads to filter; it never touches Recently Expired.
+                    if !allDownloaded.isEmpty {
+                        Section {
+                            Picker("Filter downloads", selection: filterSelection(playedCount: playedCount)) {
+                                ForEach(EpisodeListFilter.allCases) { option in
+                                    Text(option.title).tag(option)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .accessibilityLabel("Filter downloads")
+                        }
+                    }
                     if !visibleDownloaded.isEmpty {
                         Section(header: Text("Downloaded").accessibilityAddTraits(.isHeader)) {
                             ForEach(visibleDownloaded) { episode in
-                                EpisodeRow(episode: episode, actions: actions(for: episode), includesPodcastName: true)
+                                EpisodeRow(episode: episode, actions: actions(for: episode, in: visibleDownloaded), includesPodcastName: true)
+                                    // Lets the rotor mark-played runner hand
+                                    // VoiceOver focus to this row when its neighbor
+                                    // vanishes under the Unheard filter (#641).
+                                    .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
                             }
+                        }
+                    } else if !allDownloaded.isEmpty && !searchActive {
+                        // The played filter hid every download (all played). Show
+                        // a message and a one-tap way back, not a blank list (#641).
+                        Section {
+                            emptyPlayedFilterState(playedCount: playedCount)
                         }
                     }
                     if !visibleExpired.isEmpty {
@@ -88,6 +145,12 @@ struct DownloadsScreen: View {
         .searchable(text: $searchText, prompt: "Search downloads")
         .onSubmit(of: .search) {
             announceMatches(count: visibleDownloaded.count + visibleExpired.count)
+        }
+        // Load the persisted global played filter on appear (#641). Mirrors the
+        // per-podcast episode-list filter load; the default is All (show every
+        // download) until the user opts into hiding played.
+        .task {
+            playedFilter = AppSettingsStore(context: context).downloadsPlayedFilter()
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -116,6 +179,30 @@ struct DownloadsScreen: View {
         } message: { podcast in
             Text("This removes \(podcast.title) and its episodes from your library. This can't be undone.")
         }
+    }
+
+    /// Shown when the played filter hides every download (all played) and no
+    /// search is active, so the list isn't blank (#641). The button switches back
+    /// to All, which also announces the change via ``filterSelection``.
+    private func emptyPlayedFilterState(playedCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("All downloads played")
+                .font(.headline)
+                // Focus lands here when the rotor mark-played removes the last
+                // unheard download (#641). The heading, not the container:
+                // focusing the VStack would make VoiceOver group-summarize all
+                // three children. Mirrors EpisodeListView.emptyFilterState.
+                .accessibilityFocused($focusEmptyFilter)
+            Text("^[\(playedCount) played episode](inflect: true) hidden. Switch to All to see them.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Button("Show all downloads") {
+                filterSelection(playedCount: playedCount).wrappedValue = .all
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, Spacing.xs)
     }
 
     private func expiredRow(_ episode: Episode, expiredAt: Date) -> some View {
@@ -160,7 +247,7 @@ struct DownloadsScreen: View {
         Announcer.announce("Restored \(episode.title) to the queue")
     }
 
-    private func actions(for episode: Episode) -> [QuickActionItem] {
+    private func actions(for episode: Episode, in visible: [Episode]) -> [QuickActionItem] {
         buildEpisodeActions(
             episode: episode,
             order: quickActions.episodeActions,
@@ -172,7 +259,25 @@ struct DownloadsScreen: View {
             onBookmarks: { bookmarksEpisode = episode },
             // Rotor "Unfollow this podcast" (#572): opens the destructive
             // confirmation above — activation never unfollows directly.
-            onUnfollow: { pendingUnfollow = episode.podcast }
+            onUnfollow: { pendingUnfollow = episode.podcast },
+            // Under the Unheard filter, rotor "Mark as played" removes this row
+            // from the Downloaded list (#641). The builder invokes this BEFORE
+            // the played flip, so the neighbor is captured while the row is still
+            // visible; focus moves after the list re-renders — to the neighbor,
+            // or the empty-filter state when this was the last unheard download.
+            // Under All the row stays put, so no focus management is needed.
+            // Mirrors EpisodeListView's #579 wiring.
+            onMarkPlayed: { nowPlayed in
+                guard playedFilter == .unheard, nowPlayed else { return }
+                let neighbor = neighborID(of: episode, in: visible)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if let neighbor {
+                        focusedEpisode = neighbor
+                    } else {
+                        focusEmptyFilter = true
+                    }
+                }
+            }
         )
     }
 

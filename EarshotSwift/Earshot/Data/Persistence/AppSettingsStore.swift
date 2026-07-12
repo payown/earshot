@@ -35,6 +35,9 @@ enum SettingsKey {
     static let chapterNavButtonsVisible = "chapter_nav_buttons_visible"
     static let inboxOptInOnly = "inbox_opt_in_only"
     static let wifiOnlyDownloads = "wifi_only_downloads"
+    /// Global played/unheard filter for the Downloads screen (#641). Not
+    /// per-podcast — Downloads spans every show — so it's a single scalar key.
+    static let downloadsPlayedFilter = "downloads_played_filter"
     static let groupQueueEpisodes = "group_queue_episodes"
     static let showEpisodeNumbers = "show_episode_numbers"
     // Whether playing an episode (the "Play now" default row action) also opens
@@ -165,6 +168,10 @@ enum SettingsDefault {
     static let episodeSortOrder: EpisodeSortOrder = .latestFirst
     /// Per-podcast episode-list filter default: hide played episodes (#489).
     static let episodeListFilter: EpisodeListFilter = .unheard
+    /// Downloads-screen played filter default: show everything (#641). Unlike a
+    /// per-podcast episode list, hiding played downloads is opt-in so the user is
+    /// never surprised by files they downloaded disappearing after playback.
+    static let downloadsPlayedFilter: EpisodeListFilter = .all
     // Appearance defaults (#461): follow the system everywhere until the user
     // explicitly overrides.
     static let themeOverride: ThemeOverride = .followSystem
@@ -359,6 +366,20 @@ final class AppSettingsStore {
 
     func setEpisodeListFilter(_ filter: EpisodeListFilter, forFeedURL feedURL: String) {
         setRawValue(filter.rawValue, for: SettingsKey.podcastFilter(feedURL: feedURL))
+    }
+
+    /// The global Downloads-screen played filter, defaulting to
+    /// ``SettingsDefault/downloadsPlayedFilter`` (.all) when unset or unparseable
+    /// (#641). Cross-podcast, so a single scalar key rather than per-feed.
+    func downloadsPlayedFilter() -> EpisodeListFilter {
+        guard let raw = rawValue(SettingsKey.downloadsPlayedFilter),
+              let filter = EpisodeListFilter(rawValue: raw)
+        else { return SettingsDefault.downloadsPlayedFilter }
+        return filter
+    }
+
+    func setDownloadsPlayedFilter(_ filter: EpisodeListFilter) {
+        setRawValue(filter.rawValue, for: SettingsKey.downloadsPlayedFilter)
     }
 
     /// The saved per-podcast inbox episode limit for this feed URL, or nil when
