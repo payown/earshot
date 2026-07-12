@@ -827,4 +827,73 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertTrue(filtered.contains(.toggleInboxExclude), "kept in the rotor order once opt-in mode is off (normal mode)")
         XCTAssertEqual(filtered, [.toggleNotifications, .toggleInboxExclude, .unsubscribe, .share])
     }
+
+    // MARK: #689 — Export audio action
+
+    func testExportAudioIncludedWhenRunnerProvided() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let items = buildEpisodeActions(
+            episode: episode, order: [.exportAudio, .share], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}, onExport: {}
+        )
+        XCTAssertEqual(items.map(\.label), ["Export audio", "Share"])
+    }
+
+    func testExportAudioOmittedWhenNoRunner() {
+        // Mirrors the optional-onUnfollow pattern: a surface that passes no
+        // onExport (the detached search preview) gets no "Export audio".
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let items = buildEpisodeActions(
+            episode: episode, order: [.exportAudio, .share], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}
+        )
+        XCTAssertEqual(items.map(\.label), ["Share"])
+    }
+
+    func testExportAudioOmittedWhenEpisodeHasNoAudioURL() {
+        let ctx = TestStore.freshContext()
+        let noAudio = Episode(guid: "n", title: "No audio", audioURL: "")
+        ctx.insert(noAudio)
+        let items = buildEpisodeActions(
+            episode: noAudio, order: [.exportAudio, .share], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}, onExport: {}
+        )
+        XCTAssertFalse(items.map(\.label).contains("Export audio"))
+    }
+
+    func testExportAudioRunnerInvokesCallback() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        var exported = false
+        let items = buildEpisodeActions(
+            episode: episode, order: [.exportAudio], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}, onExport: { exported = true }
+        )
+        items.first?.run()
+        XCTAssertTrue(exported)
+    }
+
+    func testDefaultOrderPlacesExportAudioLateAndBeforeUnfollow() {
+        // Placement matters for the migration append (#689): exportAudio must sit
+        // late (after Share) and before the destructive Unfollow, in BOTH the
+        // default order and the enum declaration order (which drives the append
+        // for existing users via QuickActionRepository.resolve).
+        XCTAssertTrue(defaultEpisodeActions.contains(.exportAudio))
+        if let e = defaultEpisodeActions.firstIndex(of: .exportAudio),
+           let u = defaultEpisodeActions.firstIndex(of: .unfollow) {
+            XCTAssertLessThan(e, u)
+        } else {
+            XCTFail("default order must contain both exportAudio and unfollow")
+        }
+        if let e = EpisodeAction.allCases.firstIndex(of: .exportAudio),
+           let u = EpisodeAction.allCases.firstIndex(of: .unfollow) {
+            XCTAssertLessThan(e, u, "declaration order feeds the upgrade append")
+        }
+    }
 }

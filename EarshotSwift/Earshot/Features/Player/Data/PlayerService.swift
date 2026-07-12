@@ -1017,43 +1017,10 @@ final class PlayerService {
     /// the on-disk audio.
     func exportCurrentEpisodeAudio(using downloads: DownloadManager) async -> URL? {
         guard let episode = currentEpisode else { return nil }
-
-        // Ensure the file is local first. download() returns at ENQUEUE (#544),
-        // so we must wait for the terminal event or the guard below always
-        // fails for a not-yet-downloaded episode and every export reports
-        // failure (#576). downloadAndWait() is an immediate true when already
-        // downloaded, an immediate false when the download can't start (Wi-Fi
-        // gate, bad URL), and false after its internal timeout.
-        if !currentEpisodeIsDownloaded {
-            let downloaded = await downloads.downloadAndWait(episode)
-            guard downloaded else {
-                AppLog.player.error("Export failed: download did not complete for \(episode.title, privacy: .public)")
-                return nil
-            }
-        }
-
-        guard let localURL = episode.localAudioURL,
-              FileManager.default.fileExists(atPath: localURL.path) else {
-            AppLog.player.error("Export failed: no local file for \(episode.title, privacy: .public)")
-            return nil
-        }
-        let fileName = EpisodeExportLogic.exportFileName(
-            podcastTitle: episode.podcast?.title,
-            episodeTitle: episode.title,
-            sourceURL: URL(string: episode.audioURL)
-        )
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent(fileName)
-
-        do {
-            // Copy (not move) so the original download stays intact for playback.
-            try? FileManager.default.removeItem(at: destination)
-            try FileManager.default.copyItem(at: localURL, to: destination)
-            return destination
-        } catch {
-            AppLog.player.error("Export copy failed for \(episode.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
+        // Shared with the per-row "Export audio" Quick Action (#689): the
+        // download-then-copy orchestration lives in ``EpisodeExporter`` so it
+        // works for any episode, not just the loaded one.
+        return await EpisodeExporter.export(episode: episode, using: downloads)
     }
 
     // MARK: Public — chapter auto-skip (#373)

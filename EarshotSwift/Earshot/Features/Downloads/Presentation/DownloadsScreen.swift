@@ -14,6 +14,9 @@ struct DownloadsScreen: View {
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
+    // The episode a pending "Export audio" Quick Action targets (#689). Setting
+    // it drives the shared `.episodeAudioExport` flow (download-then-share).
+    @State private var exportEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     // The podcast a pending "Unfollow this podcast" rotor Quick Action targets
     // (#572). Non-nil drives the destructive confirmation dialog below —
@@ -162,6 +165,7 @@ struct DownloadsScreen: View {
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
+        .episodeAudioExport($exportEpisode)
         // Podcast-level destructive confirmation for the row's "Unfollow this
         // podcast" Quick Action (#572). Wording copied from InboxScreen so the
         // flow reads identically everywhere it appears.
@@ -277,7 +281,10 @@ struct DownloadsScreen: View {
                         focusEmptyFilter = true
                     }
                 }
-            }
+            },
+            // Rotor "Export audio" (#689): shares the local file (already
+            // downloaded on this screen). Handled by `.episodeAudioExport`.
+            onExport: { exportEpisode = episode }
         )
     }
 

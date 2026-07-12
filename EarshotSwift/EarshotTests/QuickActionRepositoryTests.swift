@@ -49,11 +49,13 @@ final class QuickActionRepositoryTests: XCTestCase {
     func testEpisodeOrderRoundTripsAfterUserMovesUnfollow() {
         // Acceptance criterion: #572 — once the user reorders `.unfollow`
         // themselves, that position persists; resolve() must not force it last.
+        // The saved order here predates `.exportAudio` (#689), so resolve()
+        // appends it to the tail (the same migration path #572 relies on).
         let ctx = TestStore.freshContext()
         let moved: [EpisodeAction] = [.unfollow, .share, .openShowNotes, .viewBookmarks, .markPlayed, .download, .addToQueueTop, .addToQueueBottom, .playNow]
         QuickActionRepository(context: ctx).setEpisodeOrder(moved)
 
-        XCTAssertEqual(QuickActionRepository(context: ctx).episodeOrder(), moved)
+        XCTAssertEqual(QuickActionRepository(context: ctx).episodeOrder(), moved + [.exportAudio])
     }
 
     func testPartialStoredOrderResolvesWithUnfollowAppended() {
