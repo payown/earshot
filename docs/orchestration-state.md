@@ -31,28 +31,38 @@ the end of each work batch (via PR, like everything else).
 
 | PR | Branch | Target | Status |
 | --- | --- | --- | --- |
-| **#684** | `feature/641-downloads-hide-played` | `swift` | **Open** — #641 hide-played filter on Downloads. earshot-accessibility gate PASS; 1336 tests green. Awaiting Michael's device verification; then merge + `gh issue close 641`. |
+| **#691** | `fix/688-announcement-language` | `swift` | **Open** — #688 garbled-VoiceOver-announcement fix (A: Announcer language-pin; B: curated subscribe/feed errors). earshot-accessibility gate PASS; +12 tests, build clean. Awaiting Michael's device (VoiceOver) verification; then merge + `gh issue close 688`. |
 
 ## Milestone task status
 
 ### Done / merged this line of work
 - **#681** direct-push guard — merged (`eafb23b`).
-- Docs #673 / #674 / #676 — already merged (do not redo).
-- **C1 screenshots (#643)** — merged (PR #682, screenshots approved by Michael).
-  Repeatable harness at `EarshotSwift/scripts/screenshots/`; text descriptions in
-  `docs/appstore/screenshots.md`. **Follow-ups still owed on #643:** iPad
-  screenshot set (device family is iPhone+iPad, so ASC will require it — flagged
-  in an issue comment; see the iPad decision under "Blocked on Michael") and the
-  Earshot Plus paywall shot (deferred until A2 merges).
-- Orchestration-state doc — merged (PR #683).
+- Docs #673 / #674 / #676 / #683 / #685 — merged (do not redo).
+- **C1 screenshots (#643)** — merged (PR #682, approved by Michael). Repeatable
+  harness at `EarshotSwift/scripts/screenshots/`; text descriptions in
+  `docs/appstore/screenshots.md`. Remaining on #643: the Earshot Plus paywall
+  shot (deferred until A2 merges). iPad captures deferred with iPad support (see
+  below).
+- **#641 hide-played filter on Downloads** — merged (PR #684), **verified on
+  device by Michael, issue closed.** Default stays All (opt-in hiding).
+- **iPhone-only for 1.0 (#643 decision)** — merged (PR #687). `TARGETED_DEVICE_FAMILY = "1"`.
+  iPad support + iPad screenshots deferred to 1.1 (**#686**). This removed the
+  iPad screenshot requirement from the 1.0 submission.
 
 ### In progress
-- **#641** — hide-played filter on the Downloads screen. PR #684 open, gates
-  passed, awaiting Michael's device verification. Default is All (opt-in hiding);
-  flagged in the PR in case he wants it defaulting to Unheard.
+- **#688** — garbled VoiceOver announcement from untrusted feed data (Paul).
+  PR #691, gates passed, awaiting Michael's VoiceOver device verification.
+  Scoped to 1.0.
+
+### Beta feedback (Paul) — triaged
+- **#688** (garbled announcement) → **1.0**, in flight (PR #691).
+- **#689** (export audio from episode rows, no play-first) → **1.1** (additive
+  UX; export already works via the player).
+- **#690** (flaky `testFactoryResetRemovesArtworkCacheDirectory` / reset unlinks
+  artwork Cache.db while open) → low priority, fix before 1.0 QA.
 
 ### Next up
-- Awaiting direction after #641 verifies/merges. HOLD items below are not to be
+- After #688 verifies/merges, await direction. HOLD items below are not to be
   started without Michael.
 
 ### HOLD (do not start without Michael)
@@ -73,9 +83,6 @@ the end of each work batch (via PR, like everything else).
   Apps agreement.
 - **payown.media hosting** still 403 — oldest blocker; gates the privacy policy
   URL and legal copy.
-- **iPad support decision** for 1.0: keep (and capture an iPad screenshot set +
-  do iPad VoiceOver/layout QA) or drop to iPhone-only
-  (`TARGETED_DEVICE_FAMILY = "1"`). Flagged on #643.
 - **Heat test** on Michael's iPhone: does playback heat the phone on a
   downloaded/offline episode? (Isolates streaming-rebuffer vs outside-the-app.)
 
