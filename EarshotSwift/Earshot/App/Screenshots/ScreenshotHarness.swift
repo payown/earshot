@@ -10,6 +10,7 @@ enum ScreenshotScreen: String {
     case episodeList
     case nowPlaying
     case settings
+    case downloads
 }
 
 /// DEBUG-only App Store screenshot harness (#643). Never compiled into a Release
@@ -56,6 +57,8 @@ enum ScreenshotHarness {
             selectTab(.queue)
         case .library:
             selectTab(.library)
+        case .downloads:
+            selectTab(.downloads)
         case .settings:
             // RootView renders DownloadsSettingsView as the Settings-tab root in
             // screenshot mode, so selecting the tab is all that's needed.

@@ -26,11 +26,12 @@ typealias EpisodeActionItem = QuickActionItem
 ///
 /// `onMarkPlayed` is optional (#579): surfaces where marking played removes the
 /// row from the visible list (Inbox always; a podcast's episode list under the
-/// Unheard filter) pass a runner to keep VoiceOver focus oriented — it's invoked
-/// with the NEW played value BEFORE the state flips, so the surface can still
-/// find the row's neighbor in its visible list and move focus to it once the
-/// list re-renders. nil (the default) means no focus management, which is right
-/// for surfaces where the row stays put (Downloads, the search preview).
+/// Unheard filter; the Downloads list under its Unheard filter, #641) pass a
+/// runner to keep VoiceOver focus oriented — it's invoked with the NEW played
+/// value BEFORE the state flips, so the surface can still find the row's neighbor
+/// in its visible list and move focus to it once the list re-renders. nil (the
+/// default) means no focus management, which is right for surfaces where the row
+/// stays put (the search preview, or Downloads under the All filter).
 @MainActor
 func buildEpisodeActions(
     episode: Episode,
