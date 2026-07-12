@@ -31,24 +31,29 @@ the end of each work batch (via PR, like everything else).
 
 | PR | Branch | Target | Status |
 | --- | --- | --- | --- |
-| **#682** | `feature/643-app-store-screenshots` | `swift` | **Open** — C1 screenshot harness. Awaiting Michael's review of the captured shots. Does not close #643. |
-| _(this doc)_ | `docs/orchestration-state` | `swift` | Open — handoff doc. |
+| **#684** | `feature/641-downloads-hide-played` | `swift` | **Open** — #641 hide-played filter on Downloads. earshot-accessibility gate PASS; 1336 tests green. Awaiting Michael's device verification; then merge + `gh issue close 641`. |
 
 ## Milestone task status
 
 ### Done / merged this line of work
 - **#681** direct-push guard — merged (`eafb23b`).
 - Docs #673 / #674 / #676 — already merged (do not redo).
-- **C1 screenshots (#643)** — harness built, 6.9-inch set captured and verified
-  (PR #682, pending review). See `docs/appstore/screenshots.md` for text
-  descriptions and `EarshotSwift/scripts/screenshots/` for the repeatable
-  capture. **Follow-ups still owed on #643:** iPad screenshot set (device family
-  is iPhone+iPad, so ASC will require it — flagged in an issue comment) and the
+- **C1 screenshots (#643)** — merged (PR #682, screenshots approved by Michael).
+  Repeatable harness at `EarshotSwift/scripts/screenshots/`; text descriptions in
+  `docs/appstore/screenshots.md`. **Follow-ups still owed on #643:** iPad
+  screenshot set (device family is iPhone+iPad, so ASC will require it — flagged
+  in an issue comment; see the iPad decision under "Blocked on Michael") and the
   Earshot Plus paywall shot (deferred until A2 merges).
+- Orchestration-state doc — merged (PR #683).
 
-### Next up (in order)
-1. **#641** — hide-played filter. Normal merge flow (feature branch → PR into
-   `swift` → close issue after Michael verifies).
+### In progress
+- **#641** — hide-played filter on the Downloads screen. PR #684 open, gates
+  passed, awaiting Michael's device verification. Default is All (opt-in hiding);
+  flagged in the PR in case he wants it defaulting to Unheard.
+
+### Next up
+- Awaiting direction after #641 verifies/merges. HOLD items below are not to be
+  started without Michael.
 
 ### HOLD (do not start without Michael)
 - **#647** — age rating questionnaire (Michael's).
