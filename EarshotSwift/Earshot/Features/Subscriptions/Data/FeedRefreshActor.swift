@@ -37,6 +37,12 @@ actor FeedRefreshActor {
     /// hold a valid main-context object, the episodes so the @MainActor downloader
     /// can enqueue auto-downloads against main-context `Episode`s.
     ///
+    /// `episodeIDs` is NOT every inserted episode — it is only the newest
+    /// ``SubscribeOutcome/autoDownloadIDCap`` by pub date, because its sole
+    /// consumer is the auto-download pass (which keeps at most the newest
+    /// `autoDownloadCount`). Bounding it on the actor keeps a large OPML import
+    /// from making the main context resolve every episode of every feed (#696).
+    ///
     /// `alreadySubscribed` is true when the feed URL already resolved to an
     /// existing podcast — the actor did no fetch/insert/save and `episodeIDs` is
     /// empty, so the caller skips auto-download (mirroring the old early return).
@@ -249,10 +255,24 @@ actor FeedRefreshActor {
         let alreadySubscribed: Bool
         var title: String { podcast.title }
 
+        /// `SubscribeResult.episodeIDs` is consumed ONLY by the auto-download
+        /// pass, which keeps just the newest `autoDownloadCount` (UI max 10) per
+        /// podcast. Capping the IDs here — on the actor, where the episodes are
+        /// already in memory and cheap to sort — means the main context resolves
+        /// at most this many episodes per feed instead of re-fetching every
+        /// episode of every imported feed one-by-one. That per-episode main-actor
+        /// resolution storm is what stalled and spiked memory on a large OPML
+        /// import (the build-150 332-feed crash, #696).
+        static let autoDownloadIDCap = 10
+
         func result() -> SubscribeResult {
-            SubscribeResult(
+            let recentIDs = episodes
+                .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+                .prefix(Self.autoDownloadIDCap)
+                .map(\.persistentModelID)
+            return SubscribeResult(
                 podcastID: podcast.persistentModelID,
-                episodeIDs: episodes.map(\.persistentModelID),
+                episodeIDs: Array(recentIDs),
                 alreadySubscribed: alreadySubscribed
             )
         }
