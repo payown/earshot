@@ -511,8 +511,9 @@ struct SearchView<HeaderContent: View>: View {
                 Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
             } catch {
                 AppLog.networking.error("Subscribe from search failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                let detail = (error as? LocalizedError)?.errorDescription
-                Announcer.announce(detail.map { "Couldn't follow \(result.title). \($0)" } ?? "Couldn't follow \(result.title)")
+                // Curated, VoiceOver-safe message — never the raw transport
+                // string (#688). The title is safe via the Announcer language-pin.
+                Announcer.announce("Couldn't follow \(result.title). \(SubscribeErrorMessage.userFacing(error))")
                 // In addition to the announcement above: an 11th-podcast attempt
                 // is exactly the moment a paywall should offer the upgrade (#632).
                 if case SubscriptionError.podcastCapReached = error {

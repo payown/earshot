@@ -231,6 +231,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on iOS VoiceOver. Same fix applied to "Create new folder" row.
 
 ### Accessibility
+- VoiceOver announcements no longer garble mid-sentence. When an announcement included a podcast or episode title (for example "Now playing …" or "Downloaded …"), a stray web address or tracking code inside the title from the feed could make VoiceOver think part of the sentence was in another language and switch to a different, oddly-pitched voice partway through. Announcements are now spoken in your own system language throughout. A side effect worth knowing: a title that really is in another language is now read in your system voice too, which may not pronounce it perfectly, but you'll never get the garbled voice-switch again. (#688)
+- Add podcast / Search: when following a feed fails, VoiceOver now reads a plain message like "Couldn't reach that feed. Check your connection and try again." instead of a raw technical error string (for example an "NSURLErrorDomain -1009" code or a URL), which VoiceOver could mangle. The detailed error still goes to the logs. (#688)
 - Player: VoiceOver now announces "Playing" or "Paused" once when playback state
   changes, instead of repeating the announcement for every tab. (closes #366)
 - New episode notifications: notifications use plain, meaningful text with no emoji, so VoiceOver reads something useful like "Show name, 2 new episodes" instead of an icon. Tapping a notification moves focus to that show's detail screen in the Library. (closes #72)
