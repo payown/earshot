@@ -23,6 +23,9 @@ struct InboxScreen: View {
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
+    // The episode a pending "Export audio" Quick Action targets (#689). Drives
+    // the shared `.episodeAudioExport` download-then-share flow.
+    @State private var exportEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var confirmingClear = false
     // Inbox multi-select (#595): entering selection mode swaps every row's
@@ -263,6 +266,7 @@ struct InboxScreen: View {
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
+        .episodeAudioExport($exportEpisode)
     }
 
     /// Builds one row, switching it into checkbox mode while selecting (#595).
@@ -415,7 +419,10 @@ struct InboxScreen: View {
                         focusEmpty = true
                     }
                 }
-            }
+            },
+            // Rotor "Export audio" (#689): downloads if needed, then shares the
+            // local file. Handled by `.episodeAudioExport`.
+            onExport: { exportEpisode = episode }
         )
     }
 

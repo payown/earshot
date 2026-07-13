@@ -750,13 +750,6 @@ struct NowPlayingScreen: View {
     }
 }
 
-/// Identifiable wrapper so the exported local-file URL can drive a
-/// `.sheet(item:)` for the share sheet (#371).
-private struct ExportFile: Identifiable {
-    let url: URL
-    var id: String { url.absoluteString }
-}
-
 /// The in-app progress scrubber: a visual `Slider` for sighted drag, with its
 /// accessibility fully hand-authored via `.accessibilityRepresentation` so
 /// VoiceOver hears a spoken time position and adjusts in 30-second steps rather

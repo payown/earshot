@@ -43,7 +43,8 @@ func buildEpisodeActions(
     onShare: @escaping () -> Void,
     onBookmarks: @escaping () -> Void,
     onUnfollow: (() -> Void)? = nil,
-    onMarkPlayed: ((Bool) -> Void)? = nil
+    onMarkPlayed: ((Bool) -> Void)? = nil,
+    onExport: (() -> Void)? = nil
 ) -> [QuickActionItem] {
     order.compactMap { action -> QuickActionItem? in
         switch action {
@@ -111,6 +112,15 @@ func buildEpisodeActions(
         case .share:
             return QuickActionItem(label: "Share", isDestructive: false) {
                 onShare()
+            }
+        case .exportAudio:
+            // Downloads (if needed) then shares the LOCAL audio file (#689).
+            // Omitted (nil) when the surface can't export — the search-preview's
+            // detached episodes (no store/download) pass no runner — or when the
+            // episode has no audio URL to export at all, mirroring `.unfollow`.
+            guard let onExport, !episode.audioURL.isEmpty else { return nil }
+            return QuickActionItem(label: "Export audio", isDestructive: false) {
+                onExport()
             }
         case .unfollow:
             // Podcast-level unfollow from an episode row (#500/#572). Omitted

@@ -14,6 +14,9 @@ struct EpisodeListView: View {
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
+    // The episode a pending "Export audio" Quick Action targets (#689). Drives
+    // the shared `.episodeAudioExport` download-then-share flow.
+    @State private var exportEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var showingPodcastSettings = false
     // The pending "Unfollow this podcast" rotor Quick Action (#572). This is a
@@ -164,7 +167,10 @@ struct EpisodeListView: View {
                                             focusEmptyFilter = true
                                         }
                                     }
-                                }
+                                },
+                                // Rotor "Export audio" (#689): downloads if needed,
+                                // then shares the local file. See `.episodeAudioExport`.
+                                onExport: { exportEpisode = episode }
                             )
                         )
                         // Lets the rotor mark-played runner hand VoiceOver focus
@@ -237,6 +243,7 @@ struct EpisodeListView: View {
         .sheet(item: $sharingEpisode) { episode in
             ShareSheet(items: shareItems(for: episode))
         }
+        .episodeAudioExport($exportEpisode)
         // Podcast-level destructive confirmation for the row's "Unfollow this
         // podcast" Quick Action (#572). Wording copied from InboxScreen so the
         // flow reads identically everywhere it appears.

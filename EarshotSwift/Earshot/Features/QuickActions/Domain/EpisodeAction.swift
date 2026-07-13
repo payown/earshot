@@ -15,6 +15,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
     case viewBookmarks
     case openShowNotes
     case share
+    case exportAudio
     case unfollow
 
     var id: String { rawValue }
@@ -31,6 +32,10 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
         case .viewBookmarks: return "Bookmarks"
         case .openShowNotes: return "Open show notes"
         case .share: return "Share"
+        // Downloads (if needed) then shares the LOCAL audio file, so it can be
+        // saved to Files / AirDropped — distinct from `.share`, which shares the
+        // remote link (#689).
+        case .exportAudio: return "Export audio"
         // Podcast-level, reached from an episode row (#500/#572). Activation
         // opens a confirmation dialog — it never unfollows directly.
         case .unfollow: return "Unfollow this podcast"
@@ -50,5 +55,6 @@ let defaultEpisodeActions: [EpisodeAction] = [
     .viewBookmarks,
     .openShowNotes,
     .share,
+    .exportAudio,
     .unfollow,
 ]

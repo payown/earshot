@@ -118,9 +118,3 @@ struct DataSettingsView: View {
         }
     }
 }
-
-/// Identifiable wrapper so the export file URL can drive a `.sheet(item:)`.
-private struct ExportFile: Identifiable {
-    let url: URL
-    var id: String { url.absoluteString }
-}
