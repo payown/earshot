@@ -29,9 +29,7 @@ the end of each work batch (via PR, like everything else).
 
 ## In-flight PRs
 
-| PR | Branch | Target | Status |
-| --- | --- | --- | --- |
-| **#691** | `fix/688-announcement-language` | `swift` | **Open** — #688 garbled-VoiceOver-announcement fix (A: Announcer language-pin; B: curated subscribe/feed errors). earshot-accessibility gate PASS; +12 tests, build clean. Awaiting Michael's device (VoiceOver) verification; then merge + `gh issue close 688`. |
+None. (Last batch's PRs #691/#693 merged — see below.)
 
 ## Milestone task status
 
@@ -48,22 +46,25 @@ the end of each work batch (via PR, like everything else).
 - **iPhone-only for 1.0 (#643 decision)** — merged (PR #687). `TARGETED_DEVICE_FAMILY = "1"`.
   iPad support + iPad screenshots deferred to 1.1 (**#686**). This removed the
   iPad screenshot requirement from the 1.0 submission.
+- **#688 garbled VoiceOver announcement** — merged (PR #691), **verified on
+  device by Michael, issue closed.** Announcer language-pins to the user's
+  locale (documented trade-off: foreign-language titles spoken in the user's
+  voice); subscribe/feed errors curated (no raw transport strings to VoiceOver).
+- **#689 export audio from episode rows** — merged (PR #693), **verified on
+  device, issue closed.** Pulled into 1.0. `.exportAudio` Quick Action via the
+  VoiceOver rotor on Inbox/episode-list/Downloads; no swipe added (rotor is the
+  accessible home, a11y-approved). #688 + #689 were device-verified together on
+  a combined integration build.
 
-### In progress
-- **#688** — garbled VoiceOver announcement from untrusted feed data (Paul).
-  PR #691, gates passed, awaiting Michael's VoiceOver device verification.
-  Scoped to 1.0.
-
-### Beta feedback (Paul) — triaged
-- **#688** (garbled announcement) → **1.0**, in flight (PR #691).
-- **#689** (export audio from episode rows, no play-first) → **1.1** (additive
-  UX; export already works via the player).
+### Beta feedback (Paul) — status
+- **#688** (garbled announcement) → shipped to 1.0 (merged, verified).
+- **#689** (export from rows) → shipped to 1.0 (merged, verified).
 - **#690** (flaky `testFactoryResetRemovesArtworkCacheDirectory` / reset unlinks
-  artwork Cache.db while open) → low priority, fix before 1.0 QA.
+  artwork Cache.db while open) → **still open**, low priority, fix before 1.0 QA.
 
 ### Next up
-- After #688 verifies/merges, await direction. HOLD items below are not to be
-  started without Michael.
+- Awaiting direction. The only open engineering issue from recent batches is
+  **#690** (the flaky reset-race, low priority). HOLD items below need Michael.
 
 ### HOLD (do not start without Michael)
 - **#647** — age rating questionnaire (Michael's).
