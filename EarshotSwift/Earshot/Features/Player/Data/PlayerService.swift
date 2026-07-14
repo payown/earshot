@@ -367,16 +367,16 @@ final class PlayerService {
     /// 0.5×–2.0× — this engine plays 0.5×–5.0× plus a 4× fast-forward scan — and
     /// it can render a flushed buffer chunk garbled/pitch-shifted when the render
     /// pipeline is reconfigured (the tester-reported burst before export, #549).
-    /// `.timeDomain` (WSOLA) is Apple's recommended algorithm for spoken audio and
-    /// sounds noticeably cleaner than `.spectral` in the 1.25×–2× range where nearly
-    /// all podcast listening happens; `.spectral`'s phase-vocoder processing was
-    /// introducing watery/metallic artifacts at those everyday speeds (#605).
-    /// `.timeDomain` still supports the full 0.5×–5× range this app exposes, so it
-    /// does not reintroduce the #549 framework-default ceiling; it may just get
-    /// mildly choppier than `.spectral` at the rarely-used 4×–5× extreme.
+    /// Time-pitch algorithm. `.spectral` is the framework-default-adjacent phase
+    /// vocoder; `.timeDomain` (WSOLA, #605) sounds cleaner at everyday 1.25×–2×
+    /// speeds but is the most recent always-on change to the render path and is
+    /// the prime suspect for the build-150 "crashes a few seconds into playback"
+    /// fault on iOS 26.5 (#695). Reverted to `.spectral` while we confirm the
+    /// crash source on device; if the route-change fix (below) alone resolves it,
+    /// restore `.timeDomain` to get the #605 quality win back.
     private func makePlayerItem(url: URL) -> AVPlayerItem {
         let item = AVPlayerItem(url: url)
-        item.audioTimePitchAlgorithm = .timeDomain
+        item.audioTimePitchAlgorithm = .spectral
         return item
     }
 
@@ -1715,15 +1715,27 @@ final class PlayerService {
               let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
         // Headphones / Bluetooth unplugged: pause FIRST so audio doesn't blast
-        // aloud on the speaker. This must not be delayed by the synchronous
-        // AVAudioSession work below.
+        // aloud on the speaker. This must not be delayed by the AVAudioSession
+        // work below.
         if reason == .oldDeviceUnavailable, isPlaying {
             pause()
         }
-        // Any route change can reset the session's preferred output channel
-        // count / mode (#374), so reapply the current voice-enhance setting
-        // regardless of reason.
-        applyAudioEnhancement()
+        // Only reconfigure the live session when voice-enhance is actually on:
+        // its mono / `.spokenAudio` mode is what a route swap can reset (#374).
+        // For the default enhance-off listener the system's stereo `.playback`
+        // default is already correct, so we must NOT churn the AVAudioSession on
+        // every incidental route change — reconfiguring it mid-render is the
+        // suspected iOS 26.5 fault behind the build-150 crash (#695). Also gate
+        // to the reasons that can actually reset mode/channel count, skipping
+        // noise reasons (wake-from-sleep, no-suitable-route, unknown).
+        guard voiceEnhanceEnabled else { return }
+        switch reason {
+        case .newDeviceAvailable, .oldDeviceUnavailable, .override,
+             .categoryChange, .routeConfigurationChange:
+            applyAudioEnhancement()
+        default:
+            break
+        }
     }
 
     // MARK: Private — streaming stall recovery (#522)
