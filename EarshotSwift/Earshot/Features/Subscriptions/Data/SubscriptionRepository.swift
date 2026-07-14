@@ -265,8 +265,9 @@ final class SubscriptionRepository {
         }
         // Pull the background context's writes into the main context so a caller
         // holding `podcast` (e.g. EpisodeListView, the tests) observes the new
-        // episodes and advanced high-water mark immediately.
-        mergeBackgroundWrites()
+        // episodes and advanced high-water mark immediately. Only THIS podcast's
+        // episodes need re-faulting.
+        mergeBackgroundWrites(affectedPodcastIDs: [podcast.persistentModelID])
         if downloader != nil, !outcome.newEpisodeIDs.isEmpty {
             await autoDownloadRecent(episodeIDsPerPodcast: [outcome.newEpisodeIDs])
         }
@@ -301,8 +302,13 @@ final class SubscriptionRepository {
         )
 
         // Pull the background context's writes into the main context so the UI
-        // (and any held `Podcast`/`Episode` objects) reflect the refresh.
-        mergeBackgroundWrites()
+        // (and any held `Podcast`/`Episode` objects) reflect the refresh. Only the
+        // podcasts that actually gained episodes need their `.episodes` re-faulted,
+        // and one at a time — never the whole Episode table (#696).
+        let affectedIDs = results
+            .filter { $0.outcome.added > 0 }
+            .compactMap { self.podcast(forFeedURL: $0.feedURL)?.persistentModelID }
+        mergeBackgroundWrites(affectedPodcastIDs: affectedIDs)
 
         // Auto-download the newest `autoDownloadCount` genuinely-new episodes per
         // podcast (never a backfill pass — `newEpisodeIDs` is empty there). This is
@@ -483,9 +489,28 @@ final class SubscriptionRepository {
     /// can stay stale until something re-faults it. An explicit fetch over both
     /// types forces that re-fault deterministically — cheap relative to the
     /// network refresh it follows.
-    private func mergeBackgroundWrites() {
+    private func mergeBackgroundWrites(affectedPodcastIDs: [PersistentIdentifier] = []) {
+        // Re-register podcast rows so the Library @Query and any held Podcast
+        // reflect the background save. Cheap — a few hundred small rows, no
+        // episode graph.
         _ = try? context.fetch(FetchDescriptor<Podcast>())
-        _ = try? context.fetch(FetchDescriptor<Episode>())
+        // Re-fault ONLY the episodes of the podcasts this write actually touched,
+        // one podcast at a time, instead of materializing the ENTIRE Episode table
+        // at once. The old blanket `fetch(Episode)` was the #696 OOM: measured on
+        // device it cost +580 MB at 400 feeds and ~+1.7 GB at 1200 feeds, and it
+        // ran on every launch/resume/refresh/import — a memory-pressure jetsam kill
+        // on low-RAM devices (a 332-feed tester on an iPhone 13). SwiftData's
+        // cross-context merge already keeps @Query results current on its own; this
+        // targeted re-fault only fixes a caller holding a specific Podcast whose
+        // `.episodes` array faulted in before the background save (the single-feed
+        // refresh path). The scoped fetch stays flat with library size: +6.6 MB at
+        // 1184 feeds, down from ~1.7 GB.
+        for id in affectedPodcastIDs {
+            let scoped = FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.podcast?.persistentModelID == id }
+            )
+            _ = try? context.fetch(scoped)
+        }
         onMerge?()
     }
 
