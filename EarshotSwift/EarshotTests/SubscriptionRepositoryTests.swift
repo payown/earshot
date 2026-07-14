@@ -363,6 +363,37 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertTrue(fakeDownloader.downloaded.allSatisfy { $0.guid == "b" })
     }
 
+    /// #696 regression guard. `mergeBackgroundWrites` used to fetch the ENTIRE
+    /// Episode table to re-fault held objects after a background save — measured
+    /// on device at +580 MB (400 feeds) / ~+1.7 GB (1200 feeds), a memory-pressure
+    /// jetsam kill on low-RAM devices that ran on every launch/resume/refresh/import.
+    /// It now re-faults ONLY the episodes of the podcasts a refresh actually
+    /// touched, passed as `affectedPodcastIDs` (flat +6.6 MB at 1184 feeds). This
+    /// asserts the scoped re-fault still surfaces new episodes on the HELD
+    /// main-context `Podcast` objects across a whole-library `refreshAll()` — the
+    /// exact behavior the old blanket fetch provided, now for multiple affected IDs.
+    func testRefreshAllSurfacesNewEpisodesOnHeldPodcastsViaScopedRefault() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let one = try await repo.subscribe(feedURL: "https://x/one.xml")
+        let two = try await repo.subscribe(feedURL: "https://x/two.xml")
+        XCTAssertEqual(one.episodes.count, 1)
+        XCTAssertEqual(two.episodes.count, 1)
+
+        // Both feeds gain a newer episode "b"; refreshAll passes both podcast IDs
+        // to mergeBackgroundWrites as affectedPodcastIDs.
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        _ = await repo.refreshAll()
+
+        // The new episode is visible on the HELD Podcast objects — the scoped
+        // per-podcast re-fault worked without materializing the whole Episode table.
+        XCTAssertEqual(one.episodes.count, 2)
+        XCTAssertEqual(two.episodes.count, 2)
+        XCTAssertTrue(one.episodes.contains { $0.guid == "b" })
+        XCTAssertTrue(two.episodes.contains { $0.guid == "b" })
+    }
+
     /// `autoDownloadCount == 0` means auto-download is off. This must hold on the
     /// refresh path exactly as it already does on subscribe
     /// (`testSubscribeWithAutoDownloadCountZeroDoesNotDownload`) -- `refresh(_:)`
