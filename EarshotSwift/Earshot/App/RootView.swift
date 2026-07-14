@@ -15,17 +15,19 @@ struct RootView: View {
 
     @State private var showOnboarding = false
 
-    /// Candidate inbox episodes: non-dismissed, newest first. SwiftData keeps
-    /// this result current, so it both triggers a RootView re-render when inbox
-    /// membership changes AND supplies the rows the badge count is computed from
-    /// — without a fresh `context.fetch` on every body evaluation. The remaining
-    /// in-memory rules (status + per-podcast exclusion) are applied by
-    /// `InboxRepository.inbox(from:)`. Mirrors InboxScreen's pattern. The
-    /// predicate matches `inboxEpisodes()` exactly so the badge count is
-    /// identical to the Inbox heading.
-    @Query(filter: #Predicate<Episode> { $0.inboxDismissed == false },
-           sort: \Episode.pubDate, order: .reverse)
-    private var inboxCandidates: [Episode]
+    /// Candidate inbox episodes: non-dismissed, newest first, BOUNDED to
+    /// ``InboxBadge/cap`` rows (see `init()`). SwiftData keeps this result current,
+    /// so it both triggers a RootView re-render when inbox membership changes AND
+    /// supplies the rows the badge count is computed from — without a fresh
+    /// `context.fetch` on every body evaluation. The remaining in-memory rules
+    /// (status + per-podcast exclusion) are applied by `InboxRepository.inbox(from:)`.
+    ///
+    /// The cap (#699) means that above ``InboxBadge/cap`` inbox episodes the badge
+    /// is a lower bound shown as "N+", so it is intentionally NOT identical to the
+    /// InboxScreen heading's exact count there. Do not remove the bound to make them
+    /// match — the unbounded query materialized thousands of episodes on every
+    /// episode write and starved VoiceOver on large libraries (that is #699).
+    @Query private var inboxCandidates: [Episode]
 
     /// Every queue row. SwiftData keeps this current, so it both drives the
     /// re-render when the queue changes AND supplies the rows the Queue tab badge
@@ -45,6 +47,24 @@ struct RootView: View {
     /// detail screen onto it (#72).
     @State private var libraryPath: [Podcast] = []
 
+    /// Bounds the always-mounted inbox candidate query to ``InboxBadge/cap`` rows,
+    /// so it can't materialize an unbounded inbox (thousands of episodes on a large
+    /// library) on every episode write — the VoiceOver-starvation fix (#699). The
+    /// query drives the tab badge count and the RootView re-render; the exact count
+    /// above the cap isn't useful to announce, so the badge reads "N+" there. The
+    /// inbox list (InboxScreen) keeps its own unbounded query and is unaffected.
+    /// Prefetches each candidate's podcast so the in-memory exclusion check in
+    /// `InboxRepository.inbox(from:)` doesn't fault podcasts one at a time.
+    init() {
+        var descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.inboxDismissed == false },
+            sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
+        )
+        descriptor.fetchLimit = InboxBadge.cap
+        descriptor.relationshipKeyPathsForPrefetching = [\Episode.podcast]
+        _inboxCandidates = Query(descriptor, animation: .default)
+    }
+
     var body: some View {
         // Live unplayed-inbox count from the same source of truth as the Inbox
         // heading. Shown via a native `UITabBarItem` badge applied by
@@ -59,6 +79,10 @@ struct RootView: View {
         // into a full inbox re-fetch). The bubble is hidden automatically when
         // the count is 0.
         let inboxBadgeCount = InboxRepository(context: modelContext).inbox(from: inboxCandidates).count
+        // The candidate query is bounded to InboxBadge.cap (#699). When it hits the
+        // cap there may be more inbox episodes than we materialized, so the badge
+        // shows "count+" rather than an undercounted exact number.
+        let inboxBadgeTruncated = inboxCandidates.count >= InboxBadge.cap
         // Live queue count for the Queue tab badge, reduced the same way the Queue
         // screen builds its list (orphan rows dropped). Shown via the same native
         // `UITabBarItem` badge mechanism as Inbox so UIKit folds ", N items" into
@@ -134,7 +158,7 @@ struct RootView: View {
         // Native UITabBarItem badge for the Inbox unread count (#321 follow-up):
         // re-applies whenever `inboxBadgeCount` changes. Replaces SwiftUI's
         // `.badge`, which double-announced the count under VoiceOver.
-        .background(TabBarBadgeApplier(tabIndex: 0, count: inboxBadgeCount))
+        .background(TabBarBadgeApplier(tabIndex: 0, count: inboxBadgeCount, truncated: inboxBadgeTruncated))
         // Native UITabBarItem badge for the Queue episode count (#491): same
         // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
         .background(TabBarBadgeApplier(tabIndex: 1, count: queueBadgeCount))
@@ -148,7 +172,7 @@ struct RootView: View {
         // the tab-bar items on selection change and transiently drop a manually
         // set `badgeValue`. Cheap and idempotent.
         .onChange(of: selectedTab) { _, _ in
-            TabBarBadgeApplier.apply(tabIndex: 0, count: inboxBadgeCount)
+            TabBarBadgeApplier.apply(tabIndex: 0, count: inboxBadgeCount, truncated: inboxBadgeTruncated)
             TabBarBadgeApplier.apply(tabIndex: 1, count: queueBadgeCount)
         }
         // Appearance preferences (#461): theme override, accent tint, and layout

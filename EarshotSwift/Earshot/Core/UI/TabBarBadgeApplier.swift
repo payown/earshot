@@ -1,13 +1,27 @@
 import SwiftUI
 import UIKit
 
+/// The always-mounted RootView inbox `@Query` (which drives the tab badge count)
+/// is bounded to this many rows so it can't materialize an unbounded inbox —
+/// thousands of episodes on a large library — on every episode write. That
+/// unbounded materialization starved VoiceOver on big libraries (#699). The exact
+/// count above the cap isn't useful to announce anyway; the badge reads "N+"
+/// there. The inbox list itself (InboxScreen) is unbounded and unaffected.
+enum InboxBadge {
+    static let cap = 500
+}
+
 /// Pure formatting for the Inbox tab badge. Kept separate from the UIKit bridge
 /// so the visible string has one source of truth and can be unit-tested without a
 /// tab bar (mirrors the project's logic-test convention).
 enum TabBadgeFormat {
     /// The visible badge string (the red bubble). `nil` clears the bubble.
-    static func badgeText(_ count: Int) -> String? {
-        count > 0 ? "\(count)" : nil
+    /// `truncated` is true when the bounded candidate query hit ``InboxBadge/cap``
+    /// so there may be more inbox episodes than `count`; the badge then reads
+    /// "count+" (e.g. "500+") to signal a lower bound rather than an exact total.
+    static func badgeText(_ count: Int, truncated: Bool = false) -> String? {
+        guard count > 0 else { return nil }
+        return truncated ? "\(count)+" : "\(count)"
     }
 }
 
@@ -38,6 +52,10 @@ struct TabBarBadgeApplier: UIViewRepresentable {
     let tabIndex: Int
     /// Count to show. Zero or negative clears the badge entirely.
     let count: Int
+    /// True when `count` is a lower bound (the bounded candidate query hit
+    /// ``InboxBadge/cap``); the badge then reads "count+". Defaults false so the
+    /// Queue badge and existing call sites are unaffected.
+    var truncated: Bool = false
 
     func makeUIView(context: Context) -> UIView {
         let view = UIView(frame: .zero)
@@ -48,19 +66,19 @@ struct TabBarBadgeApplier: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
-        Self.apply(tabIndex: tabIndex, count: count)
+        Self.apply(tabIndex: tabIndex, count: count, truncated: truncated)
     }
 
     /// Sets (or clears) the native badge on the tab at `tabIndex`, then hides the
     /// badge subtree from accessibility. Deferred one runloop so the tab bar
     /// exists on first launch. Shared by `updateUIView` and the selection-change
     /// re-assert in RootView.
-    static func apply(tabIndex: Int, count: Int) {
+    static func apply(tabIndex: Int, count: Int, truncated: Bool = false) {
         DispatchQueue.main.async {
             guard let tabBar = findTabBar(),
                   let items = tabBar.items,
                   tabIndex >= 0, tabIndex < items.count else { return }
-            items[tabIndex].badgeValue = TabBadgeFormat.badgeText(count)
+            items[tabIndex].badgeValue = TabBadgeFormat.badgeText(count, truncated: truncated)
             // Force the badge view to exist this runloop so the suppression runs
             // before VoiceOver can read it.
             tabBar.layoutIfNeeded()
