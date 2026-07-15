@@ -7,6 +7,13 @@ import Foundation
 /// a Clear Inbox or an include/exclude restore).
 enum InboxLogic {
 
+    static let displayBatchSize = 100
+
+    /// Expands a large Inbox without ever exceeding the available result count.
+    static func nextDisplayLimit(current: Int, total: Int) -> Int {
+        min(max(0, total), max(0, current) + displayBatchSize)
+    }
+
     /// A podcast is inbox-excluded when opted out, unless explicitly re-included.
     static func isExcluded(inboxExcluded: Bool, inboxIncluded: Bool) -> Bool {
         inboxExcluded && !inboxIncluded

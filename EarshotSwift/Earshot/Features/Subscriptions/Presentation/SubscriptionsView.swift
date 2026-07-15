@@ -7,7 +7,11 @@ struct SubscriptionsView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(DownloadManager.self) private var downloads
     @Environment(EntitlementStore.self) private var entitlements
-    @Query(sort: \Podcast.title) private var podcasts: [Podcast]
+    // A live `@Query<Podcast>` asks Core Data to populate to-many faults for the
+    // inverse `episodes` relationship. On the 242K-episode device library that
+    // blocks VoiceOver even though this screen never needs those episodes.
+    @State private var podcasts: [Podcast] = []
+    @State private var hasLoadedPodcasts = false
     @State private var showingAdd = false
     @State private var sharingPodcast: Podcast?
     @State private var pendingUnsubscribe: Podcast?
@@ -45,8 +49,11 @@ struct SubscriptionsView: View {
     }
 
     var body: some View {
+        // Compute cap ranking once for this render. Doing this inside `row(for:)`
+        // sorted the full library once per row (quadratic work).
+        let readOnlyIDs = readOnlyPodcastIDs
         Group {
-            if podcasts.isEmpty {
+            if hasLoadedPodcasts && podcasts.isEmpty {
                 ContentUnavailableView {
                     Label("No podcasts yet", systemImage: "music.note")
                 } description: {
@@ -58,7 +65,7 @@ struct SubscriptionsView: View {
                 List {
                     ForEach(sortedPodcasts) { podcast in
                         let link = NavigationLink(value: podcast) {
-                            row(for: podcast)
+                            row(for: podcast, readOnlyIDs: readOnlyIDs)
                         }
                         if voiceOverEnabled {
                             link
@@ -181,7 +188,7 @@ struct SubscriptionsView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingAdd) { AddPodcastView() }
+        .sheet(isPresented: $showingAdd, onDismiss: loadPodcasts) { AddPodcastView() }
         .sheet(item: $sharingPodcast) { podcast in
             ShareSheet(items: shareItems(for: podcast))
         }
@@ -200,6 +207,7 @@ struct SubscriptionsView: View {
             Text("This removes \(podcast.title) and its episodes. This can't be undone.")
         }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
+        .task { loadPodcasts() }
         // Confirm the reorder for VoiceOver: the menu dismisses and the list
         // silently re-sorts, so without this the change gives no feedback. Mirrors
         // StatsScreen's period Picker. Announcer no-ops when VoiceOver is off.
@@ -250,8 +258,8 @@ struct SubscriptionsView: View {
         return PodcastCapPolicy.readOnlyPodcastIDs(in: podcasts, isEntitled: entitlements.isEntitled, grandfatheredCount: grandfathered)
     }
 
-    private func row(for podcast: Podcast) -> some View {
-        let isReadOnly = readOnlyPodcastIDs.contains(podcast.persistentModelID)
+    private func row(for podcast: Podcast, readOnlyIDs: Set<PersistentIdentifier>) -> some View {
+        let isReadOnly = readOnlyIDs.contains(podcast.persistentModelID)
         return HStack(spacing: Spacing.md) {
             PodcastArtwork(urlString: podcast.artworkURL)
             VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -262,14 +270,11 @@ struct SubscriptionsView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                HStack(spacing: Spacing.xs) {
-                    Text("^[\(podcast.episodes.count) episode](inflect: true)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if isReadOnly {
+                if isReadOnly {
+                    HStack(spacing: Spacing.xs) {
                         // Icon + text, not color alone (#635 / accessibility rules).
-                        // The visible label is folded into the row's combined
-                        // accessibilityLabel below instead of being read twice.
+                        // The visible label is represented in the row's explicit
+                        // accessibility label below instead of being read twice.
                         Label("Read-only", systemImage: "lock.fill")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -278,7 +283,11 @@ struct SubscriptionsView: View {
                 }
             }
         }
-        .accessibilityElement(children: .combine)
+        // The complete spoken label is supplied below, so resolving and
+        // combining every Text/Image child is redundant. On a real device,
+        // rapid VoiceOver navigation spent seconds rebuilding that attachment
+        // graph. Ignore the decorative child tree and expose one stable row.
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(rowLabel(for: podcast, isReadOnly: isReadOnly))
         // Rotor order goes through the shared helper, which compensates for the
         // OS emitting `.accessibilityActions` children in reverse (#572).
@@ -338,6 +347,7 @@ struct SubscriptionsView: View {
         // Centralized unsubscribe (removeFromAllFolders + delete + save). The repo
         // logs failures; announce only on a successful delete (#499/#500).
         if SubscriptionRepository(context: context).unsubscribe(podcast) {
+            podcasts.removeAll { $0.persistentModelID == podcast.persistentModelID }
             Announcer.announce("Unfollowed \(title)")
         }
     }
@@ -352,8 +362,6 @@ struct SubscriptionsView: View {
     private func rowLabel(for podcast: Podcast, isReadOnly: Bool) -> String {
         var parts = [podcast.title]
         if let author = podcast.author, !author.isEmpty { parts.append(author) }
-        let count = podcast.episodes.count
-        parts.append("\(count) \(count == 1 ? "episode" : "episodes")")
         if isReadOnly { parts.append("Read-only, upgrade to Earshot Plus to make changes") }
         return parts.joined(separator: ", ")
     }
@@ -374,6 +382,29 @@ struct SubscriptionsView: View {
         if !notifications.isEmpty {
             await NotificationService().deliver(notifications)
         }
+        loadPodcasts()
         Announcer.announce("Library refreshed")
+    }
+
+    /// Fetches only the scalar fields needed to construct and operate Library
+    /// rows. Opening a podcast can fault its remaining fields and episodes on
+    /// demand; merely entering Library cannot materialize every show's inverse
+    /// episode relationship.
+    private func loadPodcasts() {
+        var descriptor = FetchDescriptor<Podcast>(sortBy: [SortDescriptor(\.title)])
+        descriptor.propertiesToFetch = [
+            \Podcast.feedURL,
+            \Podcast.title,
+            \Podcast.author,
+            \Podcast.artworkURL,
+            \Podcast.autoQueue,
+            \Podcast.notificationEnabled,
+            \Podcast.inboxExcluded,
+            \Podcast.inboxIncluded,
+            \Podcast.createdAt,
+            \Podcast.lastSeenPubDate,
+        ]
+        podcasts = (try? context.fetch(descriptor)) ?? []
+        hasLoadedPodcasts = true
     }
 }

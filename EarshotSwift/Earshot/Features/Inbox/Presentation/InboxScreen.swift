@@ -46,6 +46,9 @@ struct InboxScreen: View {
     // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
     // @Query-backed inbox is filtered in memory, never re-fetched.
     @State private var searchText = ""
+    /// Keep initial view construction bounded on large inboxes. More episodes
+    /// remain available in explicit, predictable batches without deleting data.
+    @State private var displayedEpisodeLimit = InboxLogic.displayBatchSize
     @AccessibilityFocusState private var focusEmpty: Bool
     // Focus target for the row that should take VoiceOver focus after the rotor
     // "Mark as played" removes the focused row from the inbox (#579). Mirrors
@@ -69,6 +72,7 @@ struct InboxScreen: View {
         // What the list actually shows: the inbox narrowed by the search field
         // (#457). With no search active this IS `inbox` (same array, no copy).
         let visible = EpisodeSearchFilter.filter(inbox, query: searchText)
+        let displayed = visible.prefix(displayedEpisodeLimit)
         return Group {
             if inbox.isEmpty {
                 ContentUnavailableView(
@@ -99,7 +103,7 @@ struct InboxScreen: View {
                     // mirror was made redundant by the `.unfollow` Quick Action.
                     // Toggling VoiceOver mid-session updates `voiceOverEnabled`
                     // and re-renders these rows — no relaunch needed.
-                    ForEach(visible) { episode in
+                    ForEach(displayed) { episode in
                         let row = episodeRow(for: episode)
                             // Lets the rotor mark-played runner hand VoiceOver
                             // focus to this row when its neighbor vanishes (#579).
@@ -145,6 +149,20 @@ struct InboxScreen: View {
                                 }
                         }
                     }
+                    if displayed.count < visible.count {
+                        Button {
+                            displayedEpisodeLimit = InboxLogic.nextDisplayLimit(
+                                current: displayedEpisodeLimit,
+                                total: visible.count
+                            )
+                            let newCount = displayedEpisodeLimit
+                            Announcer.announce("Showing \(newCount) of \(visible.count) episodes")
+                        } label: {
+                            Label("Show 100 more", systemImage: "chevron.down.circle")
+                        }
+                        .accessibilityLabel("Show 100 more episodes")
+                        .accessibilityHint("Currently showing \(displayed.count) of \(visible.count) episodes")
+                    }
                 }
             }
         }
@@ -180,6 +198,7 @@ struct InboxScreen: View {
         // the user asks for the tally when they want it (the list itself
         // updates live as they type).
         .searchable(text: $searchText, prompt: "Search inbox")
+        .onChange(of: searchText) { _, _ in displayedEpisodeLimit = InboxLogic.displayBatchSize }
         .onSubmit(of: .search) { announceMatches(count: visible.count) }
         .toolbar {
             // Deliberately `inbox.count`, not `visible.count`: the title states

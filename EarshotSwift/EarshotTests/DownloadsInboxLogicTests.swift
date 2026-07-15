@@ -56,6 +56,12 @@ final class DownloadsInboxLogicTests: XCTestCase {
         XCTAssertEqual(InboxLogic.idsToDismissForCount([3, 2, 1], cap: 0), [3, 2, 1])
     }
 
+    func testInboxDisplayExpandsInBoundedHundredEpisodeBatches() {
+        XCTAssertEqual(InboxLogic.nextDisplayLimit(current: 100, total: 2_088), 200)
+        XCTAssertEqual(InboxLogic.nextDisplayLimit(current: 2_000, total: 2_088), 2_088)
+        XCTAssertEqual(InboxLogic.nextDisplayLimit(current: 100, total: 42), 42)
+    }
+
     // MARK: InboxLogic — title + count (#422)
 
     func testInboxTitleShowsCountWhenNonEmpty() {
