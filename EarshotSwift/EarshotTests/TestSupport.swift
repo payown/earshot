@@ -26,6 +26,7 @@ enum TestStore {
         wipe(ctx, RecentlyExpired.self)
         wipe(ctx, QuickActionConfig.self)
         wipe(ctx, AppSetting.self)
+        wipe(ctx, ActiveDownload.self)
         try? ctx.save()
         return ctx
     }

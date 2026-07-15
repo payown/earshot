@@ -975,12 +975,18 @@ enum EarshotSchemaV4: VersionedSchema {
 /// references the live top-level `@Model` types. V1-V4 are frozen nested
 /// snapshots.
 ///
-/// V4→V5 (#701 follow-up): `Episode.downloadStatus: DownloadStatus` becomes
-/// `Episode.downloadStatusRaw: String` (same `ZDOWNLOADSTATUS` column, via
-/// `@Attribute(originalName:)`), with `downloadStatus` demoted to a computed
-/// accessor. SwiftData refuses a Codable enum in a `#Predicate`, which forced
-/// DownloadManager to fetch the WHOLE Episode table at launch and filter in
-/// memory — 241,979 rows on a real library, a scene-create watchdog kill.
+/// V4→V5 (#701) adds exactly ONE thing: the new ``ActiveDownload`` entity. Every
+/// other entity — `Episode` above all — is byte-for-byte unchanged from the
+/// frozen V4 snapshot.
+///
+/// Why an entity and not a reshape: `DownloadManager` had to fetch the WHOLE
+/// Episode table at launch and filter in memory because `Episode.downloadStatus`
+/// is a Codable enum SwiftData refuses in a `#Predicate` — 241,979 rows on a real
+/// library, a scene-create watchdog kill. Turning that column into a queryable
+/// raw String is NOT lightweight-inferrable, and a `.custom` stage cannot rescue
+/// it (custom only brackets the inferred migration; if inference throws,
+/// `didMigrate` never runs). Adding a new entity IS inferrable, and it leaves the
+/// 242k Episode rows entirely out of the migration's path. See ``ActiveDownload``.
 enum EarshotSchemaV5: VersionedSchema {
     static var versionIdentifier = Schema.Version(5, 0, 0)
 
@@ -996,13 +1002,14 @@ enum EarshotSchemaV5: VersionedSchema {
             RecentlyExpired.self,
             QuickActionConfig.self,
             AppSetting.self,
+            ActiveDownload.self,
         ]
     }
 }
 
 /// The ordered migration plan for the Earshot store.
 ///
-/// Three stages:
+/// Four stages:
 ///   - **V1→V2** is a `.custom` stage. SwiftData cannot infer it (2 entities
 ///     become 10, with new non-optional attributes), so the heavy lifting stays
 ///     in ``StoreMigration`` (manual export/reimport). The plan's custom stage
@@ -1011,25 +1018,21 @@ enum EarshotSchemaV5: VersionedSchema {
 ///     stage only exists to keep the version chain complete and never throws.
 ///   - **V2→V3** is `.lightweight`: `notificationEnabled` becomes optional.
 ///   - **V3→V4** is `.lightweight`: adds `introSkipSeconds` (#456).
+///   - **V4→V5** is `.lightweight`: adds the ``ActiveDownload`` entity (#701).
 ///
-/// ``EarshotSchemaV5`` is deliberately NOT registered here yet, and
-/// ``migrateV4toV5`` is deliberately not in `stages`. V5 currently declares the
-/// exact same entity shapes as the frozen V4 snapshot, and SwiftData validates a
-/// plan by checksumming each schema: two identical schemas in one plan abort
-/// every store open with `NSInvalidArgumentException: Duplicate version
-/// checksums detected`. V5 becomes checksum-distinct the moment
-/// `Episode.downloadStatus` is replaced by `downloadStatusRaw`; the stage and the
-/// `schemas` entry are added in that same change. Until then a V4 store and a V5
-/// store are bit-for-bit the same thing, so opening one as the other needs no
-/// stage at all.
+/// Every schema in `schemas` must hash differently: SwiftData validates a plan by
+/// checksumming each one, and two that hash alike abort every migrating store
+/// open with `NSInvalidArgumentException: Duplicate version checksums detected`.
+/// V5 adds an entity the frozen V4 snapshot does not have, so it is
+/// checksum-distinct and safe to register.
 enum EarshotMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
         [EarshotSchemaV1.self, EarshotSchemaV2.self, EarshotSchemaV3.self,
-         EarshotSchemaV4.self]
+         EarshotSchemaV4.self, EarshotSchemaV5.self]
     }
 
     static var stages: [MigrationStage] {
-        [migrateV1toV2, migrateV2toV3, migrateV3toV4]
+        [migrateV1toV2, migrateV2toV3, migrateV3toV4, migrateV4toV5]
     }
 
     /// Marker stage. The real V1→V2 transform is the manual export/reimport in
@@ -1058,17 +1061,16 @@ enum EarshotMigrationPlan: SchemaMigrationPlan {
         toVersion: EarshotSchemaV4.self
     )
 
-    /// `Episode.downloadStatus: DownloadStatus` -> `Episode.downloadStatusRaw: String`,
-    /// mapped onto the SAME underlying column via `@Attribute(originalName:)`.
-    /// SQLite already stored the enum as its String raw value (`ZDOWNLOADSTATUS`
-    /// holds 'none'/'downloaded'/'failed'), so this is a rename with no value
-    /// rewrite. If the upgrade test shows SwiftData cannot infer it, this becomes a
-    /// `.custom` stage.
+    /// Adds the ``ActiveDownload`` entity (#701). A brand-new entity is exactly
+    /// what lightweight inference handles best: it creates an empty table and
+    /// touches no existing row. `Episode` is deliberately NOT reshaped, so the
+    /// 241,979 episode rows on a real library are never rewritten.
     ///
-    /// Defined but NOT yet in `stages` — see the note on ``EarshotMigrationPlan``.
-    /// Adding it while V5 still matches V4 makes SwiftData reject the plan with
-    /// "Duplicate version checksums detected". It is wired in by the change that
-    /// actually reshapes `Episode`.
+    /// An empty `ActiveDownload` table is the CORRECT post-migration state — no
+    /// download is in flight across an app update — so there is nothing to
+    /// backfill. Verified end to end by `StoreMigrationV4toV5Tests`, which
+    /// migrates a real on-disk V4 store and asserts every `downloadStatus` value
+    /// survives intact.
     static let migrateV4toV5 = MigrationStage.lightweight(
         fromVersion: EarshotSchemaV4.self,
         toVersion: EarshotSchemaV5.self

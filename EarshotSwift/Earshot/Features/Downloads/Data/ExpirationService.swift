@@ -66,7 +66,10 @@ final class ExpirationService {
             try? FileManager.default.removeItem(at: url)
         }
         episode.downloadPath = nil
-        episode.downloadStatus = .none
+        // Drops any ActiveDownload row in the same save (#701): .none is
+        // terminal, so an expired episode must not stay visible to download
+        // reconciliation.
+        ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
     }
 
     private func save() {

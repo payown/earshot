@@ -106,7 +106,7 @@ final class DownloadManagerTests: XCTestCase {
     // values to bare names when the file exists, resets rows whose file is
     // gone, and is idempotent.
 
-    func test_reconcileDownloadPaths_legacyAbsolutePathWithRealFile_rewritesToBareNameKeepsStatus() throws {
+    func test_reconcileDownloadPaths_legacyAbsolutePathWithRealFile_rewritesToBareNameKeepsStatus() async throws {
         let context = TestStore.freshContext()
         let name = "earshot-test-reconcile-\(UUID().uuidString).mp3"
         let fileURL = try plantDownloadFile(named: name)
@@ -117,14 +117,14 @@ final class DownloadManagerTests: XCTestCase {
         context.insert(episode)
         let manager = makeManager(context)
 
-        manager.reconcileDownloadPaths()
+        await manager.reconcileDownloadPaths()
 
         XCTAssertEqual(episode.downloadPath, name, "Legacy absolute path is rewritten to the bare file name")
         XCTAssertEqual(episode.downloadStatus, .downloaded, "Status is kept when the file exists")
         XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path), "Healing never deletes the file")
     }
 
-    func test_reconcileDownloadPaths_downloadedWithMissingFile_resetsToNone() {
+    func test_reconcileDownloadPaths_downloadedWithMissingFile_resetsToNone() async {
         let context = TestStore.freshContext()
         let episode = Episode(guid: "r2", title: "Gone", audioURL: "https://h/a.mp3",
                               downloadStatus: .downloaded,
@@ -132,32 +132,53 @@ final class DownloadManagerTests: XCTestCase {
         context.insert(episode)
         let manager = makeManager(context)
 
-        manager.reconcileDownloadPaths()
+        await manager.reconcileDownloadPaths()
 
         XCTAssertNil(episode.downloadPath)
         XCTAssertEqual(episode.downloadStatus, DownloadStatus.none,
                        "A downloaded row whose file is gone becomes re-downloadable")
     }
 
-    func test_reconcileDownloadPaths_downloadedWithNilOrEmptyPath_resetsToNone() {
+    func test_reconcileDownloadPaths_downloadedWithEmptyPath_resetsToNone() async {
+        // An empty-string path is still non-nil, so the bounded
+        // `downloadPath != nil` query (#701) still finds it and the reset branch
+        // still fires.
         let context = TestStore.freshContext()
-        let nilPath = Episode(guid: "r3", title: "Nil path", audioURL: "https://h/a.mp3",
-                              downloadStatus: .downloaded, downloadPath: nil)
         let emptyPath = Episode(guid: "r4", title: "Empty path", audioURL: "https://h/b.mp3",
                                 downloadStatus: .downloaded, downloadPath: "")
-        context.insert(nilPath)
         context.insert(emptyPath)
         let manager = makeManager(context)
 
-        manager.reconcileDownloadPaths()
+        await manager.reconcileDownloadPaths()
 
-        XCTAssertNil(nilPath.downloadPath)
-        XCTAssertEqual(nilPath.downloadStatus, DownloadStatus.none)
         XCTAssertNil(emptyPath.downloadPath)
         XCTAssertEqual(emptyPath.downloadStatus, DownloadStatus.none)
     }
 
-    func test_reconcileDownloadPaths_healthyBareNameRow_isUntouched() throws {
+    func test_reconcileDownloadPaths_downloadedWithNilPath_isLeftAlone() async {
+        // Documented, approved narrowing (#701). Reconciliation is now bounded by
+        // `downloadPath != nil`, because `downloadStatus` is a Codable enum
+        // SwiftData refuses in a #Predicate and the old whole-Episode-table fetch
+        // was a launch watchdog kill at 241,979 rows. A row marked .downloaded
+        // with NO path at all is the one case that drops out: it is already
+        // internally inconsistent, both real purposes of this function (legacy
+        // ABSOLUTE path rewriting, #575, and the file-gone reset) act only on
+        // non-nil paths, and preserving it would require querying the enum —
+        // which is impossible.
+        let context = TestStore.freshContext()
+        let nilPath = Episode(guid: "r3", title: "Nil path", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: nil)
+        context.insert(nilPath)
+        let manager = makeManager(context)
+
+        await manager.reconcileDownloadPaths()
+
+        XCTAssertNil(nilPath.downloadPath)
+        XCTAssertEqual(nilPath.downloadStatus, .downloaded,
+                       "Out of the bounded query's scope: left as-is, not reset")
+    }
+
+    func test_reconcileDownloadPaths_healthyBareNameRow_isUntouched() async throws {
         let context = TestStore.freshContext()
         let name = "earshot-test-healthy-\(UUID().uuidString).mp3"
         let fileURL = try plantDownloadFile(named: name)
@@ -167,14 +188,14 @@ final class DownloadManagerTests: XCTestCase {
         context.insert(episode)
         let manager = makeManager(context)
 
-        manager.reconcileDownloadPaths()
+        await manager.reconcileDownloadPaths()
 
         XCTAssertEqual(episode.downloadPath, name)
         XCTAssertEqual(episode.downloadStatus, .downloaded)
         XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
-    func test_reconcileDownloadPaths_secondRun_makesZeroChanges() throws {
+    func test_reconcileDownloadPaths_secondRun_makesZeroChanges() async throws {
         let context = TestStore.freshContext()
         let name = "earshot-test-idempotent-\(UUID().uuidString).mp3"
         let fileURL = try plantDownloadFile(named: name)
@@ -189,7 +210,7 @@ final class DownloadManagerTests: XCTestCase {
         context.insert(missing)
         let manager = makeManager(context)
 
-        manager.reconcileDownloadPaths()
+        await manager.reconcileDownloadPaths()
         try context.save()
 
         let pathAfterFirst = healable.downloadPath
@@ -201,7 +222,7 @@ final class DownloadManagerTests: XCTestCase {
 
         // Second pass over the healed store must be a no-op: no rewrites, no
         // resets, no dirty context.
-        manager.reconcileDownloadPaths()
+        await manager.reconcileDownloadPaths()
 
         XCTAssertEqual(healable.downloadPath, pathAfterFirst)
         XCTAssertEqual(healable.downloadStatus, statusAfterFirst)

@@ -2,26 +2,6 @@ import CoreData
 import Foundation
 import SwiftData
 
-/// Store open + manual V1 migration (issues #355, #425).
-///
-/// The current schema is ``EarshotSchemaV5`` and the normal open path runs the
-/// ``EarshotMigrationPlan``, which registers three stages: V1→V2 (a `.custom`
-/// no-op marker), V2→V3 and V3→V4 (both SwiftData-native lightweight stages, so
-/// a V2 or V3 store migrates rather than aborts). SwiftData still can't infer the
-/// original V1→V2 jump (2 entities become 10, with new non-optional attributes),
-/// so a store still at the original V1 schema is handled here by a manual
-/// export/reimport: read it through ``EarshotSchemaV1``, snapshot it into plain
-/// values, replace the store file, and reinsert the data as current (V5)
-/// objects. This preserves the tester's subscriptions, episodes, and played
-/// state.
-///
-/// There is deliberately NO registered V4→V5 stage yet: ``EarshotSchemaV5``
-/// currently declares the same entity shapes as the frozen V4 snapshot, and
-/// SwiftData aborts every store open with "Duplicate version checksums detected"
-/// if a plan carries two schemas that hash alike. A V4 store and a V5 store are
-/// therefore bit-for-bit identical and open interchangeably with no stage. The
-/// stage and the `schemas` entry get wired in by the change that gives `Episode`
-/// its `downloadStatusRaw` — see the note on ``EarshotMigrationPlan``.
 /// Why a terminal store-open failure happened, so ``ModelContainerFactory`` can
 /// react safely instead of blindly deleting the store (issue #529).
 ///
@@ -36,6 +16,21 @@ enum StoreOpenError: Error {
     case unreadable(underlying: Error)
 }
 
+/// Store open + manual V1 migration (issues #355, #425).
+///
+/// The current schema is ``EarshotSchemaV5`` and the normal open path runs the
+/// ``EarshotMigrationPlan``, which registers four stages: V1→V2 (a `.custom`
+/// no-op marker), then V2→V3, V3→V4 and V4→V5 (all SwiftData-native lightweight
+/// stages, so a V2, V3 or V4 store migrates rather than aborts). V4→V5 adds the
+/// ``ActiveDownload`` entity and nothing else (#701) — `Episode` is untouched, so
+/// a large library's episode rows are never rewritten by it.
+///
+/// SwiftData still can't infer the original V1→V2 jump (2 entities become 10,
+/// with new non-optional attributes), so a store still at the original V1 schema
+/// is handled here by a manual export/reimport: read it through
+/// ``EarshotSchemaV1``, snapshot it into plain values, replace the store file,
+/// and reinsert the data as current (V5) objects. This preserves the tester's
+/// subscriptions, episodes, and played state.
 enum StoreMigration {
 
     /// True when `error` (or anything in its underlying-error chain) indicates

@@ -221,6 +221,12 @@ final class SubscriptionRepository {
         )
         FolderRepository(context: context).removeFromAllFolders(podcast)
         StatsRepository(context: context).removeSessions(for: podcast)
+        // ActiveDownload.episode is a one-way reference (no inverse on Episode, so
+        // that Episode's shape stays out of the V4→V5 migration — #701), which
+        // means SwiftData will NOT nullify it when the cascade below deletes this
+        // podcast's episodes. Drop those rows first, in this same save, or they
+        // dangle at deleted rows.
+        ActiveDownload.removeRows(forEpisodesOf: podcast, in: context)
         context.delete(podcast)
         do {
             try context.save()

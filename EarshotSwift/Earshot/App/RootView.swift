@@ -248,7 +248,7 @@ struct RootView: View {
             // Rewrite legacy absolute download paths to bare file names and reset
             // episodes whose file is gone, BEFORE anything resolves a local file
             // this launch (#575). iOS moves the app container on every update.
-            downloads.reconcileDownloadPaths()
+            await downloads.reconcileDownloadPaths()
             settings.configure(context: modelContext)
             // One-time free-tier podcast cap grandfathering snapshot (#635): must
             // run before any subscribe action can occur (including an onboarding
