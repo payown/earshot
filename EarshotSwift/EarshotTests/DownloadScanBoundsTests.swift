@@ -131,7 +131,42 @@ final class DownloadScanBoundsTests: XCTestCase {
         XCTAssertEqual(rows(in: context).count, 1, "the pending row survives")
     }
 
-    // MARK: reconcileDownloadPaths
+    // MARK: Downloads tab + reconcileDownloadPaths
+
+    /// The Downloads tab is constructed with the root TabView even when another
+    /// tab is selected. Its live query must therefore share the same bounded
+    /// path predicate as reconciliation rather than loading every Episode at
+    /// launch. The terminal status check remains presentation-layer filtering.
+    func test_downloadListQuery_selectsOnlyEpisodesWithPaths() throws {
+        let context = TestStore.freshContext()
+        let downloaded = Episode(
+            guid: "dl-downloaded", title: "Downloaded", audioURL: "https://h/d.mp3",
+            downloadStatus: .downloaded, downloadPath: "d.mp3"
+        )
+        let inProgressWithPath = Episode(
+            guid: "dl-progress", title: "Progress", audioURL: "https://h/p.mp3",
+            downloadStatus: .downloading, downloadPath: "p.mp3"
+        )
+        let historical = Episode(
+            guid: "dl-history", title: "History", audioURL: "https://h/h.mp3",
+            downloadStatus: DownloadStatus.none, downloadPath: nil
+        )
+        context.insert(downloaded)
+        context.insert(inProgressWithPath)
+        context.insert(historical)
+        try context.save()
+
+        let candidates = try context.fetch(
+            FetchDescriptor<Episode>(predicate: DownloadListQuery.hasPath)
+        )
+
+        XCTAssertEqual(Set(candidates.map(\.guid)), ["dl-downloaded", "dl-progress"])
+        XCTAssertFalse(candidates.contains { $0.guid == historical.guid },
+                       "the historical backlog must never materialize for Downloads")
+        XCTAssertEqual(candidates.filter { $0.downloadStatus == .downloaded }.map(\.guid),
+                       [downloaded.guid],
+                       "the existing terminal-state guard still determines visible rows")
+    }
 
     /// The `downloadPath != nil` predicate must select every row that has a path
     /// and skip those that do not — the bounded replacement for the whole-table
