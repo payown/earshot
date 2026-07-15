@@ -649,20 +649,340 @@ enum EarshotSchemaV3: VersionedSchema {
     }
 }
 
-/// Version 4 — the **current** schema. Like V3 before it, this is the only
-/// versioned schema that references the live top-level `@Model` types. Every
-/// change to the live model graph must be matched by freezing the previous V
-/// into a nested snapshot and bumping this version (see ``SchemaDriftTests`` —
-/// CI fails if the live graph drifts from this snapshot without a version bump).
+/// Version 4 — a **frozen** snapshot of the schema exactly as it shipped
+/// between the V3→V4 (#456) and V4→V5 (#701 follow-up) bumps: the full
+/// 10-entity graph with `Podcast.introSkipSeconds` and
+/// `Episode.downloadStatus: DownloadStatus`.
 ///
-/// V3→V4 (#456) is a SwiftData-native lightweight stage: the only difference
-/// between the frozen V3 graph and the live V4 graph is the new
-/// `Podcast.introSkipSeconds: Int?` attribute (nil = no per-podcast intro skip
-/// configured). Adding a new OPTIONAL attribute is exactly the kind of additive
-/// change lightweight migration supports (see the V1→V2 doc comment above for
-/// why a NON-optional addition would NOT be lightweight-safe).
+/// Like ``EarshotSchemaV2`` and ``EarshotSchemaV3``, these are nested, frozen
+/// copies of the live models at that point in time — NOT references to the
+/// live top-level types. Do not edit; freeze a NEW version instead (see
+/// ``EarshotSchemaV5`` and ``SchemaDriftTests``).
 enum EarshotSchemaV4: VersionedSchema {
     static var versionIdentifier = Schema.Version(4, 0, 0)
+
+    static var models: [any PersistentModel.Type] {
+        [
+            EarshotSchemaV4.Podcast.self,
+            EarshotSchemaV4.Episode.self,
+            EarshotSchemaV4.QueueItem.self,
+            EarshotSchemaV4.ListeningSession.self,
+            EarshotSchemaV4.Bookmark.self,
+            EarshotSchemaV4.PodcastFolder.self,
+            EarshotSchemaV4.FolderMembership.self,
+            EarshotSchemaV4.RecentlyExpired.self,
+            EarshotSchemaV4.QuickActionConfig.self,
+            EarshotSchemaV4.AppSetting.self,
+        ]
+    }
+
+    @Model
+    final class Podcast {
+        @Attribute(.unique) var feedURL: String
+        var title: String
+        var author: String?
+        var podcastDescription: String?
+        var artworkURL: String?
+        var websiteURL: String?
+        var language: String?
+        var category: String?
+
+        var autoQueue: Bool
+        var notificationEnabled: Bool?
+
+        var speedOverride: Double?
+        var trimSilenceOverride: Bool?
+        var introSkipSeconds: Int?
+
+        var queueAgeLimitDays: Int?
+        var inboxMaxEpisodes: Int?
+        var inboxAgeLimitHours: Int?
+        var inboxExcluded: Bool
+        var inboxIncluded: Bool
+
+        var createdAt: Date
+        var refreshedAt: Date?
+        var lastSeenPubDate: Date?
+
+        @Relationship(deleteRule: .cascade, inverse: \EarshotSchemaV4.Episode.podcast)
+        var episodes: [EarshotSchemaV4.Episode]
+
+        init(
+            feedURL: String,
+            title: String,
+            author: String? = nil,
+            podcastDescription: String? = nil,
+            artworkURL: String? = nil,
+            websiteURL: String? = nil,
+            language: String? = nil,
+            category: String? = nil,
+            autoQueue: Bool = false,
+            notificationEnabled: Bool? = nil,
+            speedOverride: Double? = nil,
+            trimSilenceOverride: Bool? = nil,
+            introSkipSeconds: Int? = nil,
+            queueAgeLimitDays: Int? = nil,
+            inboxMaxEpisodes: Int? = nil,
+            inboxAgeLimitHours: Int? = nil,
+            inboxExcluded: Bool = false,
+            inboxIncluded: Bool = false,
+            createdAt: Date = .now,
+            refreshedAt: Date? = nil,
+            lastSeenPubDate: Date? = nil
+        ) {
+            self.feedURL = feedURL
+            self.title = title
+            self.author = author
+            self.podcastDescription = podcastDescription
+            self.artworkURL = artworkURL
+            self.websiteURL = websiteURL
+            self.language = language
+            self.category = category
+            self.autoQueue = autoQueue
+            self.notificationEnabled = notificationEnabled
+            self.speedOverride = speedOverride
+            self.trimSilenceOverride = trimSilenceOverride
+            self.introSkipSeconds = introSkipSeconds
+            self.queueAgeLimitDays = queueAgeLimitDays
+            self.inboxMaxEpisodes = inboxMaxEpisodes
+            self.inboxAgeLimitHours = inboxAgeLimitHours
+            self.inboxExcluded = inboxExcluded
+            self.inboxIncluded = inboxIncluded
+            self.createdAt = createdAt
+            self.refreshedAt = refreshedAt
+            self.lastSeenPubDate = lastSeenPubDate
+            self.episodes = []
+        }
+    }
+
+    @Model
+    final class Episode {
+        var guid: String
+        var title: String
+        var episodeDescription: String?
+        var audioURL: String
+        var durationSeconds: Int?
+        var pubDate: Date?
+        var artworkURL: String?
+        var episodeNumber: Int?
+        var seasonNumber: Int?
+        var chapterURL: String?
+        var transcriptURL: String?
+
+        var status: EpisodeStatus
+        var downloadStatus: DownloadStatus
+        var downloadPath: String?
+        var positionSeconds: Int
+        var playedAt: Date?
+        var inboxDismissed: Bool
+        var createdAt: Date
+
+        var podcast: EarshotSchemaV4.Podcast?
+
+        @Relationship(deleteRule: .cascade, inverse: \EarshotSchemaV4.QueueItem.episode)
+        var queueItem: EarshotSchemaV4.QueueItem?
+
+        @Relationship(deleteRule: .cascade, inverse: \EarshotSchemaV4.Bookmark.episode)
+        var bookmarks: [EarshotSchemaV4.Bookmark]
+
+        @Relationship(deleteRule: .cascade, inverse: \EarshotSchemaV4.RecentlyExpired.episode)
+        var recentlyExpired: EarshotSchemaV4.RecentlyExpired?
+
+        var isPlayed: Bool {
+            get { status == .played }
+            set {
+                status = newValue ? .played : .newEpisode
+                playedAt = newValue ? .now : nil
+            }
+        }
+
+        init(
+            guid: String,
+            title: String,
+            audioURL: String,
+            episodeDescription: String? = nil,
+            durationSeconds: Int? = nil,
+            pubDate: Date? = nil,
+            artworkURL: String? = nil,
+            episodeNumber: Int? = nil,
+            seasonNumber: Int? = nil,
+            chapterURL: String? = nil,
+            transcriptURL: String? = nil,
+            status: EpisodeStatus = .newEpisode,
+            downloadStatus: DownloadStatus = .none,
+            downloadPath: String? = nil,
+            positionSeconds: Int = 0,
+            playedAt: Date? = nil,
+            inboxDismissed: Bool = false,
+            createdAt: Date = .now
+        ) {
+            self.guid = guid
+            self.title = title
+            self.audioURL = audioURL
+            self.episodeDescription = episodeDescription
+            self.durationSeconds = durationSeconds
+            self.pubDate = pubDate
+            self.artworkURL = artworkURL
+            self.episodeNumber = episodeNumber
+            self.seasonNumber = seasonNumber
+            self.chapterURL = chapterURL
+            self.transcriptURL = transcriptURL
+            self.status = status
+            self.downloadStatus = downloadStatus
+            self.downloadPath = downloadPath
+            self.positionSeconds = positionSeconds
+            self.playedAt = playedAt
+            self.inboxDismissed = inboxDismissed
+            self.createdAt = createdAt
+            self.bookmarks = []
+        }
+    }
+
+    @Model
+    final class QueueItem {
+        var episode: EarshotSchemaV4.Episode?
+        var position: Int
+        var addedAt: Date
+
+        init(episode: EarshotSchemaV4.Episode? = nil, position: Int, addedAt: Date = .now) {
+            self.episode = episode
+            self.position = position
+            self.addedAt = addedAt
+        }
+    }
+
+    @Model
+    final class ListeningSession {
+        var episode: EarshotSchemaV4.Episode?
+        var podcast: EarshotSchemaV4.Podcast?
+        var durationSeconds: Int
+        var speed: Double
+        var date: Date
+
+        init(
+            episode: EarshotSchemaV4.Episode? = nil,
+            podcast: EarshotSchemaV4.Podcast? = nil,
+            durationSeconds: Int,
+            speed: Double = 1.0,
+            date: Date = .now
+        ) {
+            self.episode = episode
+            self.podcast = podcast
+            self.durationSeconds = durationSeconds
+            self.speed = speed
+            self.date = date
+        }
+    }
+
+    @Model
+    final class Bookmark {
+        var episode: EarshotSchemaV4.Episode?
+        var positionSeconds: Int
+        var note: String
+        var createdAt: Date
+
+        init(
+            episode: EarshotSchemaV4.Episode? = nil,
+            positionSeconds: Int,
+            note: String = "",
+            createdAt: Date = .now
+        ) {
+            self.episode = episode
+            self.positionSeconds = positionSeconds
+            self.note = note
+            self.createdAt = createdAt
+        }
+    }
+
+    @Model
+    final class PodcastFolder {
+        var name: String
+        var sortOrder: Int
+        var queueAgeLimitDays: Int?
+        var createdAt: Date
+
+        @Relationship(deleteRule: .cascade, inverse: \EarshotSchemaV4.FolderMembership.folder)
+        var memberships: [EarshotSchemaV4.FolderMembership]
+
+        init(
+            name: String,
+            sortOrder: Int = 0,
+            queueAgeLimitDays: Int? = nil,
+            createdAt: Date = .now
+        ) {
+            self.name = name
+            self.sortOrder = sortOrder
+            self.queueAgeLimitDays = queueAgeLimitDays
+            self.createdAt = createdAt
+            self.memberships = []
+        }
+    }
+
+    @Model
+    final class FolderMembership {
+        var folder: EarshotSchemaV4.PodcastFolder?
+        var podcast: EarshotSchemaV4.Podcast?
+        var sortOrder: Int
+
+        init(
+            folder: EarshotSchemaV4.PodcastFolder? = nil,
+            podcast: EarshotSchemaV4.Podcast? = nil,
+            sortOrder: Int = 0
+        ) {
+            self.folder = folder
+            self.podcast = podcast
+            self.sortOrder = sortOrder
+        }
+    }
+
+    @Model
+    final class RecentlyExpired {
+        var episode: EarshotSchemaV4.Episode?
+        var expiredAt: Date
+
+        init(episode: EarshotSchemaV4.Episode? = nil, expiredAt: Date = .now) {
+            self.episode = episode
+            self.expiredAt = expiredAt
+        }
+    }
+
+    @Model
+    final class QuickActionConfig {
+        var contentType: QuickActionContentType
+        var actionKey: String
+        var sortOrder: Int
+
+        init(contentType: QuickActionContentType, actionKey: String, sortOrder: Int) {
+            self.contentType = contentType
+            self.actionKey = actionKey
+            self.sortOrder = sortOrder
+        }
+    }
+
+    @Model
+    final class AppSetting {
+        @Attribute(.unique) var key: String
+        var value: String
+
+        init(key: String, value: String) {
+            self.key = key
+            self.value = value
+        }
+    }
+}
+
+/// Version 5 — the **current** schema, and the only versioned schema that
+/// references the live top-level `@Model` types. V1-V4 are frozen nested
+/// snapshots.
+///
+/// V4→V5 (#701 follow-up): `Episode.downloadStatus: DownloadStatus` becomes
+/// `Episode.downloadStatusRaw: String` (same `ZDOWNLOADSTATUS` column, via
+/// `@Attribute(originalName:)`), with `downloadStatus` demoted to a computed
+/// accessor. SwiftData refuses a Codable enum in a `#Predicate`, which forced
+/// DownloadManager to fetch the WHOLE Episode table at launch and filter in
+/// memory — 241,979 rows on a real library, a scene-create watchdog kill.
+enum EarshotSchemaV5: VersionedSchema {
+    static var versionIdentifier = Schema.Version(5, 0, 0)
 
     static var models: [any PersistentModel.Type] {
         [
@@ -691,9 +1011,21 @@ enum EarshotSchemaV4: VersionedSchema {
 ///     stage only exists to keep the version chain complete and never throws.
 ///   - **V2→V3** is `.lightweight`: `notificationEnabled` becomes optional.
 ///   - **V3→V4** is `.lightweight`: adds `introSkipSeconds` (#456).
+///
+/// ``EarshotSchemaV5`` is deliberately NOT registered here yet, and
+/// ``migrateV4toV5`` is deliberately not in `stages`. V5 currently declares the
+/// exact same entity shapes as the frozen V4 snapshot, and SwiftData validates a
+/// plan by checksumming each schema: two identical schemas in one plan abort
+/// every store open with `NSInvalidArgumentException: Duplicate version
+/// checksums detected`. V5 becomes checksum-distinct the moment
+/// `Episode.downloadStatus` is replaced by `downloadStatusRaw`; the stage and the
+/// `schemas` entry are added in that same change. Until then a V4 store and a V5
+/// store are bit-for-bit the same thing, so opening one as the other needs no
+/// stage at all.
 enum EarshotMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [EarshotSchemaV1.self, EarshotSchemaV2.self, EarshotSchemaV3.self, EarshotSchemaV4.self]
+        [EarshotSchemaV1.self, EarshotSchemaV2.self, EarshotSchemaV3.self,
+         EarshotSchemaV4.self]
     }
 
     static var stages: [MigrationStage] {
@@ -724,5 +1056,21 @@ enum EarshotMigrationPlan: SchemaMigrationPlan {
     static let migrateV3toV4 = MigrationStage.lightweight(
         fromVersion: EarshotSchemaV3.self,
         toVersion: EarshotSchemaV4.self
+    )
+
+    /// `Episode.downloadStatus: DownloadStatus` -> `Episode.downloadStatusRaw: String`,
+    /// mapped onto the SAME underlying column via `@Attribute(originalName:)`.
+    /// SQLite already stored the enum as its String raw value (`ZDOWNLOADSTATUS`
+    /// holds 'none'/'downloaded'/'failed'), so this is a rename with no value
+    /// rewrite. If the upgrade test shows SwiftData cannot infer it, this becomes a
+    /// `.custom` stage.
+    ///
+    /// Defined but NOT yet in `stages` — see the note on ``EarshotMigrationPlan``.
+    /// Adding it while V5 still matches V4 makes SwiftData reject the plan with
+    /// "Duplicate version checksums detected". It is wired in by the change that
+    /// actually reshapes `Episode`.
+    static let migrateV4toV5 = MigrationStage.lightweight(
+        fromVersion: EarshotSchemaV4.self,
+        toVersion: EarshotSchemaV5.self
     )
 }
