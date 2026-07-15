@@ -1,6 +1,26 @@
 import Foundation
 import SwiftData
 
+/// Store-queryable Inbox membership. Keeping the podcast rules in these
+/// predicates is important: reading `episode.podcast` in an in-memory filter
+/// faults the Podcast's inverse `episodes` relationship and can enumerate an
+/// entire large library on the main actor.
+enum InboxQuery {
+    static let normal = #Predicate<Episode> { episode in
+        episode.inboxDismissed == false &&
+        (episode.podcast == nil || episode.podcast?.inboxExcluded == false || episode.podcast?.inboxIncluded == true)
+    }
+
+    static let optInOnly = #Predicate<Episode> { episode in
+        episode.inboxDismissed == false &&
+        episode.podcast?.inboxIncluded == true
+    }
+
+    static func predicate(optInOnly: Bool) -> Predicate<Episode> {
+        optInOnly ? self.optInOnly : normal
+    }
+}
+
 /// The inbox is a view over episodes: `status == .newEpisode && !inboxDismissed`
 /// from non-excluded podcasts. Per-podcast caps (count / age) hide overflow by
 /// setting `inboxDismissed` — one-directional, so caps never fight Clear Inbox
@@ -17,20 +37,19 @@ final class InboxRepository {
 
     /// Inbox episodes, newest first.
     ///
-    /// Fetches only non-dismissed episodes via a `#Predicate` so the dismissed
-    /// backlog never materializes — the query stays cheap even with thousands of
-    /// episodes in the store, instead of fetching every row and filtering in
-    /// memory on the main actor (which made episode-heavy operations jank and
-    /// starve VoiceOver). Status and per-podcast exclusion are applied in-memory
-    /// on the already-small candidate set. (#396)
+    /// Relationship-based membership rules are translated to SQL. In
+    /// particular, podcast inclusion must not be evaluated by faulting
+    /// `Episode.podcast` in Swift: SwiftData can then populate the inverse
+    /// `Podcast.episodes` relationship, turning a 2,000-row Inbox into hundreds
+    /// of thousands of relationship rows. The Codable status enum remains a
+    /// bounded scalar check after the fetch.
     func inboxEpisodes() -> [Episode] {
+        let optInOnly = settings.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
         var descriptor = FetchDescriptor<Episode>(
-            predicate: #Predicate { $0.inboxDismissed == false },
+            predicate: InboxQuery.predicate(optInOnly: optInOnly),
             sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
         )
-        descriptor.relationshipKeyPathsForPrefetching = [\Episode.podcast]
-        let candidates = (try? context.fetch(descriptor)) ?? []
-        return inbox(from: candidates)
+        return ((try? context.fetch(descriptor)) ?? []).filter { $0.status == .newEpisode }
     }
 
     /// Applies the in-memory inbox membership rules (status + per-podcast

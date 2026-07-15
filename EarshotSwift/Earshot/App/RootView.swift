@@ -2,6 +2,20 @@ import SwiftUI
 import SwiftData
 import UIKit
 
+/// Owns the Inbox badge query separately from RootView so changing playback
+/// position cannot make RootView evaluate Inbox relationships. The predicate is
+/// identical to the Inbox screen's and is executed by the persistent store.
+private struct InboxTabBadge: View {
+    @Query(filter: InboxQuery.normal) private var normalEpisodes: [Episode]
+    @Query(filter: InboxQuery.optInOnly) private var optedInEpisodes: [Episode]
+    let optInOnly: Bool
+
+    var body: some View {
+        let episodes = optInOnly ? optedInEpisodes : normalEpisodes
+        TabBarBadgeApplier(tabIndex: 0, count: episodes.lazy.filter { $0.status == .newEpisode }.count)
+    }
+}
+
 struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(PlayerService.self) private var player
@@ -14,18 +28,6 @@ struct RootView: View {
     @Environment(EntitlementStore.self) private var entitlements
 
     @State private var showOnboarding = false
-
-    /// Candidate inbox episodes: non-dismissed, newest first. SwiftData keeps
-    /// this result current, so it both triggers a RootView re-render when inbox
-    /// membership changes AND supplies the rows the badge count is computed from
-    /// — without a fresh `context.fetch` on every body evaluation. The remaining
-    /// in-memory rules (status + per-podcast exclusion) are applied by
-    /// `InboxRepository.inbox(from:)`. Mirrors InboxScreen's pattern. The
-    /// predicate matches `inboxEpisodes()` exactly so the badge count is
-    /// identical to the Inbox heading.
-    @Query(filter: #Predicate<Episode> { $0.inboxDismissed == false },
-           sort: \Episode.pubDate, order: .reverse)
-    private var inboxCandidates: [Episode]
 
     /// Every queue row. SwiftData keeps this current, so it both drives the
     /// re-render when the queue changes AND supplies the rows the Queue tab badge
@@ -52,13 +54,10 @@ struct RootView: View {
         // count as its own VoiceOver element on top of the tab button, so the
         // count was announced twice when flicking past the Inbox tab; the applier
         // sets the visible badge and hides that duplicate element. The
-        // `inboxCandidates` @Query above drives the re-render that keeps this
-        // current AND supplies the rows, so the count is computed with
-        // `inbox(from:)` over the maintained query result rather than a fresh
-        // `context.fetch` on every render (a position save no longer fans out
-        // into a full inbox re-fetch). The bubble is hidden automatically when
-        // the count is 0.
-        let inboxBadgeCount = InboxRepository(context: modelContext).inbox(from: inboxCandidates).count
+        // `InboxTabBadge` owns the same store-level membership query as the
+        // Inbox screen. It never walks Episode→Podcast relationships in Swift,
+        // which keeps a playback-position save from fanning out into inverse
+        // relationship faults. The bubble is hidden automatically at 0.
         // Live queue count for the Queue tab badge, reduced the same way the Queue
         // screen builds its list (orphan rows dropped). Shown via the same native
         // `UITabBarItem` badge mechanism as Inbox so UIKit folds ", N items" into
@@ -134,7 +133,7 @@ struct RootView: View {
         // Native UITabBarItem badge for the Inbox unread count (#321 follow-up):
         // re-applies whenever `inboxBadgeCount` changes. Replaces SwiftUI's
         // `.badge`, which double-announced the count under VoiceOver.
-        .background(TabBarBadgeApplier(tabIndex: 0, count: inboxBadgeCount))
+        .background(InboxTabBadge(optInOnly: settings.inboxOptInOnly))
         // Native UITabBarItem badge for the Queue episode count (#491): same
         // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
         .background(TabBarBadgeApplier(tabIndex: 1, count: queueBadgeCount))
@@ -148,7 +147,6 @@ struct RootView: View {
         // the tab-bar items on selection change and transiently drop a manually
         // set `badgeValue`. Cheap and idempotent.
         .onChange(of: selectedTab) { _, _ in
-            TabBarBadgeApplier.apply(tabIndex: 0, count: inboxBadgeCount)
             TabBarBadgeApplier.apply(tabIndex: 1, count: queueBadgeCount)
         }
         // Appearance preferences (#461): theme override, accent tint, and layout
