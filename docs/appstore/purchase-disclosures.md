@@ -30,5 +30,5 @@ EULA.
 
 ## Canonical URLs
 
-- Privacy Policy: https://payown.media/privacy-policy/
+- Privacy Policy: https://payown.media/earshot-privacy-policy/
 - Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/

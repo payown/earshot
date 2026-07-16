@@ -13,10 +13,10 @@ import Foundation
 /// Store Connect's privacy-policy field in sync.
 enum PrivacyPolicy {
     /// The full privacy policy page.
-    static let policyURL = URL(string: "https://payown.media/privacy-policy/")
+    static let policyURL = URL(string: "https://payown.media/earshot-privacy-policy/")
 
     /// The "what we collect" section of the same page.
-    static let collectionURL = URL(string: "https://payown.media/privacy-policy/#what-we-collect")
+    static let collectionURL = URL(string: "https://payown.media/earshot-privacy-policy/#what-we-collect")
 
     /// Apple's standard EULA governs Earshot until Payown Media publishes a
     /// custom agreement. This is the canonical URL Apple provides for apps
