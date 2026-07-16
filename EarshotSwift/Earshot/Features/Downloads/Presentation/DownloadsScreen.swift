@@ -1,6 +1,19 @@
 import SwiftUI
 import SwiftData
 
+/// The store-level bound for the Downloads tab's live episode query.
+///
+/// `DownloadStatus` is a Codable enum that SwiftData cannot use in a predicate.
+/// `downloadPath`, however, is a queryable stored String and is present for every
+/// valid completed download. The presentation layer still checks `.downloaded`
+/// after this bound so an in-progress row that has written a destination path
+/// cannot appear prematurely. (#701)
+enum DownloadListQuery {
+    static var hasPath: Predicate<Episode> {
+        #Predicate<Episode> { $0.downloadPath != nil }
+    }
+}
+
 /// Downloads: everything downloaded, plus Recently Expired (episodes auto-removed
 /// from the queue, restorable for 7 days before their files are deleted).
 struct DownloadsScreen: View {
@@ -9,7 +22,15 @@ struct DownloadsScreen: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
 
-    @Query private var allEpisodes: [Episode]
+    // A TabView creates this screen even when Downloads is not selected, so an
+    // unfiltered @Query here is launch-path work. On the 242k-episode library it
+    // eagerly materialized the entire Episode table and held roughly 670 MB just
+    // to find ~200 downloads. A valid completed download has a path; this stored
+    // String is queryable even though the Codable `downloadStatus` enum is not.
+    // Keep the status check below as the final invariant guard. (#701)
+    @Query(filter: DownloadListQuery.hasPath,
+           sort: \Episode.pubDate, order: .reverse)
+    private var downloadCandidates: [Episode]
     @Query private var expiredRows: [RecentlyExpired]
 
     @State private var showNotesEpisode: Episode?
@@ -39,9 +60,8 @@ struct DownloadsScreen: View {
     @AccessibilityFocusState private var focusEmptyFilter: Bool
 
     private var downloaded: [Episode] {
-        allEpisodes
+        downloadCandidates
             .filter { $0.downloadStatus == .downloaded }
-            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
     }
 
     /// Binding that drives the segmented filter: persists the new value globally

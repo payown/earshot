@@ -9,17 +9,15 @@ struct InboxScreen: View {
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
+    @Environment(SettingsStore.self) private var settings
 
-    // Candidate inbox episodes: non-dismissed, newest first. SwiftData keeps this
-    // result current, so it both drives re-rendering when inbox membership changes
-    // AND supplies the rows the list/count come from — without a fresh
-    // `context.fetch` on every body evaluation. The remaining in-memory rules
-    // (status + per-podcast exclusion) are applied by `InboxRepository.inbox(from:)`,
-    // so the filtering rules still live in one place. The predicate matches
-    // `inboxEpisodes()` exactly, preserving contents and order.
-    @Query(filter: #Predicate<Episode> { $0.inboxDismissed == false },
-           sort: \Episode.pubDate, order: .reverse)
-    private var inboxCandidates: [Episode]
+    // Membership is wholly store-queryable. This prevents an in-memory access to
+    // each Episode's Podcast from faulting the Podcast's full inverse episode
+    // collection on large libraries.
+    @Query(filter: InboxQuery.normal, sort: \Episode.pubDate, order: .reverse)
+    private var normalCandidates: [Episode]
+    @Query(filter: InboxQuery.optInOnly, sort: \Episode.pubDate, order: .reverse)
+    private var optedInCandidates: [Episode]
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
@@ -48,6 +46,9 @@ struct InboxScreen: View {
     // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
     // @Query-backed inbox is filtered in memory, never re-fetched.
     @State private var searchText = ""
+    /// Keep initial view construction bounded on large inboxes. More episodes
+    /// remain available in explicit, predictable batches without deleting data.
+    @State private var displayedEpisodeLimit = InboxLogic.displayBatchSize
     @AccessibilityFocusState private var focusEmpty: Bool
     // Focus target for the row that should take VoiceOver focus after the rotor
     // "Mark as played" removes the focused row from the inbox (#579). Mirrors
@@ -63,10 +64,15 @@ struct InboxScreen: View {
         // Compute the inbox once per body so the list, empty-state check, title,
         // count, and Clear dialog all read a single value instead of re-running
         // the filter (formerly a re-fetch) several times per render.
-        let inbox = InboxRepository(context: context).inbox(from: inboxCandidates)
+        // EpisodeStatus is stored as a Codable enum and is not translated by
+        // SwiftData predicates. This bounded scalar check is safe; the expensive
+        // Podcast relationship rules have already run in SQLite.
+        let candidates = settings.inboxOptInOnly ? optedInCandidates : normalCandidates
+        let inbox = candidates.filter { $0.status == .newEpisode }
         // What the list actually shows: the inbox narrowed by the search field
         // (#457). With no search active this IS `inbox` (same array, no copy).
         let visible = EpisodeSearchFilter.filter(inbox, query: searchText)
+        let displayed = visible.prefix(displayedEpisodeLimit)
         return Group {
             if inbox.isEmpty {
                 ContentUnavailableView(
@@ -97,7 +103,7 @@ struct InboxScreen: View {
                     // mirror was made redundant by the `.unfollow` Quick Action.
                     // Toggling VoiceOver mid-session updates `voiceOverEnabled`
                     // and re-renders these rows — no relaunch needed.
-                    ForEach(visible) { episode in
+                    ForEach(displayed) { episode in
                         let row = episodeRow(for: episode)
                             // Lets the rotor mark-played runner hand VoiceOver
                             // focus to this row when its neighbor vanishes (#579).
@@ -143,6 +149,20 @@ struct InboxScreen: View {
                                 }
                         }
                     }
+                    if displayed.count < visible.count {
+                        Button {
+                            displayedEpisodeLimit = InboxLogic.nextDisplayLimit(
+                                current: displayedEpisodeLimit,
+                                total: visible.count
+                            )
+                            let newCount = displayedEpisodeLimit
+                            Announcer.announce("Showing \(newCount) of \(visible.count) episodes")
+                        } label: {
+                            Label("Show 100 more", systemImage: "chevron.down.circle")
+                        }
+                        .accessibilityLabel("Show 100 more episodes")
+                        .accessibilityHint("Currently showing \(displayed.count) of \(visible.count) episodes")
+                    }
                 }
             }
         }
@@ -178,6 +198,7 @@ struct InboxScreen: View {
         // the user asks for the tally when they want it (the list itself
         // updates live as they type).
         .searchable(text: $searchText, prompt: "Search inbox")
+        .onChange(of: searchText) { _, _ in displayedEpisodeLimit = InboxLogic.displayBatchSize }
         .onSubmit(of: .search) { announceMatches(count: visible.count) }
         .toolbar {
             // Deliberately `inbox.count`, not `visible.count`: the title states

@@ -241,6 +241,12 @@ enum ScreenshotFixtures {
     /// placeholder is empty — no shot renders audio bytes, and the featured
     /// Now Playing episode streams from its real remote URL, so nothing tries to
     /// decode these.
+    ///
+    /// The one place outside `ActiveDownload.setDownloadStatus(_:on:in:)` that
+    /// writes `downloadStatus` directly, and it is exempt on purpose (#701):
+    /// `.downloaded` is TERMINAL, so the invariant here is "no `ActiveDownload`
+    /// row exists" — and none can, because these episodes are freshly seeded and
+    /// have never been downloaded. Nothing to keep in step.
     private static func markDownloaded(_ episode: Episode, as fileName: String) {
         episode.downloadStatus = .downloaded
         episode.downloadPath = fileName

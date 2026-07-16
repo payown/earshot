@@ -120,16 +120,17 @@ final class DownloadManager {
     /// (``complete(guid:fileURL:)`` / ``fail(guid:)``), so this returns as soon as
     /// the task is enqueued — the transfer then survives app suspension.
     func download(_ episode: Episode) async {
+        guard let context else { return }
         guard episode.downloadStatus != .downloaded else { return }
         guard downloadsAllowed else {
-            episode.downloadStatus = .pending
+            ActiveDownload.setDownloadStatus(.pending, on: episode, in: context)
             save()
             Announcer.announce("Waiting for Wi-Fi to download \(episode.title)")
             AppLog.networking.info("Download gated (no Wi-Fi): \(episode.title, privacy: .public)")
             return
         }
         guard let rawURL = URL(string: episode.audioURL) else {
-            episode.downloadStatus = .failed
+            ActiveDownload.setDownloadStatus(.failed, on: episode, in: context)
             save()
             return
         }
@@ -138,7 +139,10 @@ final class DownloadManager {
         // (#387). HTTP-only hosts can still stream; only the download is affected.
         let url = SecureURL.upgradedForNonMedia(rawURL)
 
-        episode.downloadStatus = .downloading
+        // The ActiveDownload row and the .downloading write land in the SAME save
+        // (#701): a row that lagged behind would leave this episode invisible to
+        // reconcileStuckDownloads() and spinning forever — #544 returning.
+        ActiveDownload.setDownloadStatus(.downloading, on: episode, in: context)
         save()
 
         let task = Self.session.downloadTask(with: url)
@@ -194,13 +198,15 @@ final class DownloadManager {
     /// once on the first path report after launch. `download(_:)` re-checks the
     /// gate itself, so if connectivity no longer qualifies the episodes simply
     /// stay `.pending`.
-    private func startPendingDownloads() async {
+    ///
+    /// Bounded by the tiny ``ActiveDownload`` table (#701) instead of the old
+    /// whole-`Episode`-table fetch. Internal, not private, so tests can drive it.
+    func startPendingDownloads() async {
         guard let context, downloadsAllowed else { return }
-        let all = (try? context.fetch(FetchDescriptor<Episode>())) ?? []
-        let pending = all.filter { $0.downloadStatus == .pending }
-        guard !pending.isEmpty else { return }
-        AppLog.networking.info("Starting \(pending.count) Wi-Fi-gated download(s)")
-        for episode in pending {
+        let episodes = await activeEpisodes(state: .pending, in: context)
+        guard !episodes.isEmpty else { return }
+        AppLog.networking.info("Starting \(episodes.count) Wi-Fi-gated download(s)")
+        for episode in episodes {
             await download(episode)
         }
     }
@@ -209,10 +215,13 @@ final class DownloadManager {
     /// app was killed mid-transfer) so they don't hang forever (#544). Episodes
     /// whose task is still in flight are left untouched — the delegate will finish
     /// them. Call once at launch after ``configure(context:)``.
+    ///
+    /// The candidate rows now come from the bounded ``ActiveDownload`` table
+    /// rather than a whole-`Episode`-table fetch on the main actor (#701); the
+    /// orphan comparison itself is unchanged.
     func reconcileStuckDownloads() async {
         guard let context else { return }
-        let all = (try? context.fetch(FetchDescriptor<Episode>())) ?? []
-        let markedDownloading = all.filter { $0.downloadStatus == .downloading }
+        let markedDownloading = await activeEpisodes(state: .downloading, in: context)
         guard !markedDownloading.isEmpty else { return }
 
         let liveKeys = await Self.liveTaskKeys()
@@ -226,10 +235,74 @@ final class DownloadManager {
         )
         guard !orphaned.isEmpty else { return }
         for index in orphaned {
-            markedDownloading[index].downloadStatus = .failed
+            // Also drops the ActiveDownload row: .failed is terminal, so the work
+            // is over and reconciliation must not see it again.
+            ActiveDownload.setDownloadStatus(.failed, on: markedDownloading[index], in: context)
         }
         save()
         AppLog.networking.info("Reconciled \(orphaned.count) stuck download(s) to failed")
+    }
+
+    /// The episodes whose download is currently in `state`, resolved on the
+    /// caller's (main) context.
+    ///
+    /// The fetch itself runs on a throwaway background `ModelContext` so the
+    /// launch path never does store I/O on the main actor (#701), and only
+    /// Sendable `PersistentIdentifier`s cross back — SwiftData models are not
+    /// Sendable across contexts. Pending changes are saved first so the
+    /// background context sees a complete store.
+    ///
+    /// Any row whose episode has vanished is garbage-collected here: ``episode``
+    /// has no inverse, so SwiftData does not nullify it for us.
+    private func activeEpisodes(
+        state: ActiveDownloadState, in context: ModelContext
+    ) async -> [Episode] {
+        save()
+        let ids = await Self.activeDownloadIDs(state: state, in: context.container)
+        guard !ids.isEmpty else { return [] }
+
+        var episodes: [Episode] = []
+        for id in ids {
+            guard let row = Self.activeDownload(forPersistentID: id, in: context) else { continue }
+            if let episode = row.episode {
+                episodes.append(episode)
+            } else {
+                context.delete(row)
+            }
+        }
+        return episodes
+    }
+
+    /// Persistent IDs of the ``ActiveDownload`` rows in `state`, fetched off the
+    /// main actor on a throwaway context (#701). A plain-`String` predicate on
+    /// `stateRaw` is the whole reason this table exists: `Episode.downloadStatus`
+    /// is a Codable enum SwiftData refuses in a `#Predicate`.
+    private static func activeDownloadIDs(
+        state: ActiveDownloadState, in container: ModelContainer
+    ) async -> [PersistentIdentifier] {
+        let raw = state.rawValue
+        return await Task.detached(priority: .utility) {
+            let scan = ModelContext(container)
+            let descriptor = FetchDescriptor<ActiveDownload>(
+                predicate: #Predicate { $0.stateRaw == raw }
+            )
+            return ((try? scan.fetch(descriptor)) ?? []).map(\.persistentModelID)
+        }.value
+    }
+
+    /// Resolves an ``ActiveDownload`` on `context` from an identifier a
+    /// background context returned. Uses a predicate fetch (not
+    /// `ModelContext.model(for:)`, which traps on a missing ID) so a row deleted
+    /// in the meantime returns nil rather than crashing — mirroring the resolver
+    /// pattern in `SubscriptionRepository`.
+    private static func activeDownload(
+        forPersistentID id: PersistentIdentifier, in context: ModelContext
+    ) -> ActiveDownload? {
+        var descriptor = FetchDescriptor<ActiveDownload>(
+            predicate: #Predicate { $0.persistentModelID == id }
+        )
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
     }
 
     /// Removes a downloaded file and resets the episode's download state. The
@@ -237,11 +310,14 @@ final class DownloadManager {
     /// legacy absolute `downloadPath` from before an app update still deletes
     /// the real file instead of a dead path (#575).
     func removeDownload(_ episode: Episode) {
+        guard let context else { return }
         if let url = episode.localAudioURL {
             try? FileManager.default.removeItem(at: url)
         }
         episode.downloadPath = nil
-        episode.downloadStatus = .none
+        // Drops any ActiveDownload row too: removing a download mid-transfer must
+        // not leave reconciliation chasing it (#701).
+        ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
         save()
     }
 
@@ -250,28 +326,40 @@ final class DownloadManager {
     /// update, so every such path goes stale: playback silently fell back to
     /// streaming and Remove deleted a dead path while the real file survived.
     ///
-    /// For each episode marked `.downloaded`: rewrite a legacy absolute value
-    /// to just the file name; if the resolved file no longer exists on disk,
-    /// reset the episode to not-downloaded so the UI offers a re-download
+    /// For each episode that HAS a `downloadPath`: rewrite a legacy absolute
+    /// value to just the file name; if the resolved file no longer exists on
+    /// disk, reset the episode to not-downloaded so the UI offers a re-download
     /// instead of listing an unplayable file. Idempotent (healed rows are
-    /// skipped next launch) and cheap (one fetch; writes only rows that need
-    /// it). Never throws outward — unverifiable rows are left alone. Call once
-    /// at launch after ``configure(context:)``, alongside
-    /// ``reconcileStuckDownloads()``.
-    func reconcileDownloadPaths() {
+    /// skipped next launch) and cheap (writes only rows that need it). Never
+    /// throws outward — unverifiable rows are left alone. Call once at launch
+    /// after ``configure(context:)``, alongside ``reconcileStuckDownloads()``.
+    ///
+    /// **Scope (#701).** The candidate set is now the bounded
+    /// `downloadPath != nil` predicate rather than a fetch of the ENTIRE Episode
+    /// table filtered in memory for `.downloaded` — on a 241,979-row library that
+    /// fetch was a launch watchdog kill, and `downloadStatus` cannot be queried
+    /// (a Codable enum SwiftData rejects in a `#Predicate`). Both purposes of
+    /// this function are fully preserved: legacy ABSOLUTE paths (the #575 reason
+    /// it exists) and file-gone resets both operate on rows with a non-nil path.
+    ///
+    /// The one deliberate, approved narrowing: a row marked `.downloaded` with NO
+    /// path at all is no longer reset. That defensive branch cannot survive a
+    /// bounded query — catching it would mean querying the enum, which is
+    /// impossible — and it only ever fired on rows that were already internally
+    /// inconsistent. An empty-string path is still caught (`"" != nil`).
+    func reconcileDownloadPaths() async {
         guard let context else { return }
-        let all = (try? context.fetch(FetchDescriptor<Episode>())) ?? []
-        let downloaded = all.filter { $0.downloadStatus == .downloaded }
-        guard !downloaded.isEmpty else { return }
+        let episodes = await episodesWithDownloadPath(in: context)
+        guard !episodes.isEmpty else { return }
 
         var rewritten = 0
         var reset = 0
-        for episode in downloaded {
+        for episode in episodes {
             guard let name = DownloadPaths.storedFileName(episode.downloadPath) else {
-                // Marked downloaded with no usable path: inconsistent row; make
-                // it re-downloadable.
+                // A non-nil but unusable path (empty string): inconsistent row;
+                // make it re-downloadable.
                 episode.downloadPath = nil
-                episode.downloadStatus = .none
+                ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
                 reset += 1
                 continue
             }
@@ -287,13 +375,43 @@ final class DownloadManager {
                 }
             } else {
                 episode.downloadPath = nil
-                episode.downloadStatus = .none
+                ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
                 reset += 1
             }
         }
         guard rewritten > 0 || reset > 0 else { return }
         save()
         AppLog.networking.info("Reconciled download paths: \(rewritten) legacy path(s) rewritten, \(reset) missing file(s) reset")
+    }
+
+    /// Episodes with a non-nil `downloadPath`, resolved on the caller's (main)
+    /// context. Bounded by what the user actually downloaded (#701), and fetched
+    /// on a throwaway background context so the launch path does no store I/O on
+    /// the main actor. Only Sendable identifiers cross back.
+    private func episodesWithDownloadPath(in context: ModelContext) async -> [Episode] {
+        save()
+        let container = context.container
+        let ids = await Task.detached(priority: .utility) {
+            let scan = ModelContext(container)
+            let descriptor = FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.downloadPath != nil }
+            )
+            return ((try? scan.fetch(descriptor)) ?? []).map(\.persistentModelID)
+        }.value
+        return ids.compactMap { Self.episode(forPersistentID: $0, in: context) }
+    }
+
+    /// Resolves an ``Episode`` on `context` from an identifier a background
+    /// context returned. Predicate fetch, not `ModelContext.model(for:)` (which
+    /// traps on a missing ID), so a vanished row returns nil.
+    private static func episode(
+        forPersistentID id: PersistentIdentifier, in context: ModelContext
+    ) -> Episode? {
+        var descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.persistentModelID == id }
+        )
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
     }
 
     // MARK: Terminal events (delegate → main actor → SwiftData)
@@ -310,7 +428,9 @@ final class DownloadManager {
         // app update, so an absolute path goes stale (#575). Reads resolve the
         // name against the current container via `Episode.localAudioURL`.
         episode.downloadPath = fileURL.lastPathComponent
-        episode.downloadStatus = .downloaded
+        // Terminal: this also drops the ActiveDownload row, in the same save
+        // (#701).
+        ActiveDownload.setDownloadStatus(.downloaded, on: episode, in: context)
         save(context, action: "complete")
         Announcer.announce("Downloaded \(episode.title)")
         AppLog.networking.info("Download finished: \(episode.title, privacy: .public)")
@@ -322,7 +442,7 @@ final class DownloadManager {
               let episode = DownloadTaskKey.episode(matching: taskKey, in: context) else { return }
         // Don't clobber a state that already moved on (e.g. the user removed it).
         guard episode.downloadStatus == .downloading else { return }
-        episode.downloadStatus = .failed
+        ActiveDownload.setDownloadStatus(.failed, on: episode, in: context)
         save(context, action: "fail")
         AppLog.networking.error("Download failed: \(episode.title, privacy: .public)")
     }
