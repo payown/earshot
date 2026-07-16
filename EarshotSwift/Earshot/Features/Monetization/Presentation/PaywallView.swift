@@ -123,7 +123,7 @@ struct PaywallView: View {
                     outcomeBanner(outcome)
                 }
                 productsSection
-                footerNote
+                legalFooter
             }
             .padding()
         }
@@ -251,9 +251,23 @@ struct PaywallView: View {
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private var footerNote: some View {
-        Text("Manage or cancel a subscription anytime in Settings, under your Apple ID.")
+    private var legalFooter: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Subscriptions renew automatically unless cancelled. Lifetime is a one-time purchase. All purchases are processed by Apple.")
+                .font(.caption)
+                .foregroundStyle(AppColor.secondaryText)
+
+            HStack(spacing: Spacing.md) {
+                if let termsURL = PrivacyPolicy.termsURL {
+                    Link("Terms of Use", destination: termsURL)
+                        .accessibilityHint("Opens Apple's standard license agreement in your browser")
+                }
+                if let policyURL = PrivacyPolicy.policyURL {
+                    Link("Privacy Policy", destination: policyURL)
+                        .accessibilityHint("Opens Earshot's privacy policy in your browser")
+                }
+            }
             .font(.caption)
-            .foregroundStyle(AppColor.secondaryText)
+        }
     }
 }

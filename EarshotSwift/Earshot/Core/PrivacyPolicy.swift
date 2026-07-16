@@ -8,15 +8,18 @@ import Foundation
 /// the "what we collect" section of the same page so the two Settings links
 /// don't need two separate pages to maintain.
 ///
-/// > Important (#463): the page is hosted by Payown Media. The value below is a
-/// > placeholder on the brand domain — **confirm the final public URL and update
-/// > it here before any App Store or TestFlight submission.** App Store Connect
-/// > stores this URL, so it must be live and stable. The source of the page lives
-/// > in `docs/privacy/index.html`.
+/// The page is hosted by Payown Media. Its version-controlled source lives in
+/// `docs/privacy/index.html`; keep that source, the published page, and App
+/// Store Connect's privacy-policy field in sync.
 enum PrivacyPolicy {
     /// The full privacy policy page.
-    static let policyURL = URL(string: "https://payown.media/earshot/privacy")
+    static let policyURL = URL(string: "https://payown.media/earshot-privacy-policy/")
 
     /// The "what we collect" section of the same page.
-    static let collectionURL = URL(string: "https://payown.media/earshot/privacy#what-we-collect")
+    static let collectionURL = URL(string: "https://payown.media/earshot-privacy-policy/#what-we-collect")
+
+    /// Apple's standard EULA governs Earshot until Payown Media publishes a
+    /// custom agreement. This is the canonical URL Apple provides for apps
+    /// that use the standard licensed-application agreement.
+    static let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
 }

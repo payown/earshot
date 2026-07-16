@@ -110,8 +110,10 @@ final class PaywallLogicTests: XCTestCase {
         let disclosure = PaywallLogic.subscriptionDisclosure(for: monthly())
         XCTAssertTrue(disclosure.contains("$2.99"))
         XCTAssertTrue(disclosure.contains("per month"))
-        XCTAssertTrue(disclosure.contains("Auto-renews unless cancelled"))
-        XCTAssertTrue(disclosure.contains("Cancel anytime in Settings or the App Store"))
+        XCTAssertTrue(disclosure.contains("Payment is charged to your Apple ID"))
+        XCTAssertTrue(disclosure.contains("Auto-renews unless cancelled at least 24 hours"))
+        XCTAssertTrue(disclosure.contains("charged for renewal within 24 hours"))
+        XCTAssertTrue(disclosure.contains("Manage or cancel in your App Store account settings"))
     }
 
     func testLifetimeDisclosureExcludesAutoRenewLanguage() {

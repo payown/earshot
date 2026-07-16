@@ -133,11 +133,10 @@ enum PaywallLogic {
     /// Yearly). Rendered as a standalone element that sits BEFORE the
     /// purchase button in both layout and VoiceOver reading order — never a
     /// button hint or a hidden/collapsed detail. This inline disclosure is
-    /// what satisfies App Store Review Guideline 3.1.2 for now (the full
-    /// legal subscription-terms page is #638, not built yet).
+    /// paired with the always-visible Terms and Privacy links in the paywall.
     static func subscriptionDisclosure(for display: PaywallProductDisplay) -> String {
         let cadence = display.subscriptionPeriod?.spokenCadence ?? "per period"
-        return "\(display.displayPrice) \(cadence). Auto-renews unless cancelled. Cancel anytime in Settings or the App Store."
+        return "\(display.displayPrice) \(cadence). Payment is charged to your Apple ID when you confirm. Auto-renews unless cancelled at least 24 hours before the current period ends. Your Apple ID is charged for renewal within 24 hours before the current period ends. Manage or cancel in your App Store account settings."
     }
 
     /// Visible + spoken disclosure line for the lifetime product — states

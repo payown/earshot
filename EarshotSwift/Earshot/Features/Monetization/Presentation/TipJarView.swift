@@ -31,6 +31,22 @@ struct TipJarView: View {
                 .foregroundStyle(AppColor.primaryText)
 
                 content
+
+                Text("Tips are optional, one-time consumable purchases processed by Apple. They do not unlock Earshot Plus and are not subscriptions.")
+                    .font(.caption)
+                    .foregroundStyle(AppColor.secondaryText)
+
+                HStack(spacing: Spacing.md) {
+                    if let termsURL = PrivacyPolicy.termsURL {
+                        Link("Terms of Use", destination: termsURL)
+                            .accessibilityHint("Opens Apple's standard license agreement in your browser")
+                    }
+                    if let policyURL = PrivacyPolicy.policyURL {
+                        Link("Privacy Policy", destination: policyURL)
+                            .accessibilityHint("Opens Earshot's privacy policy in your browser")
+                    }
+                }
+                .font(.caption)
             }
             .padding()
         }
