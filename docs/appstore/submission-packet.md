@@ -15,6 +15,7 @@ in the linked files so one canonical source is used for each App Store field.
 - Terms: Apple's Standard EULA
 - App Privacy response published July 16, 2026: **No, we do not collect data
   from this app**
+- Age rating completed July 16, 2026: **9+**
 - Release configuration compiles successfully
 - Full automated suite: 1,380 tests, 14 known StoreKit quarantines, 0 failures
 - Large-library performance fixes verified with VoiceOver on Michael's device
@@ -35,7 +36,7 @@ in the linked files so one canonical source is used for each App Store field.
 - [x] Publish App Privacy answer: **No, we do not collect data from this app**
 - [ ] Enter the Privacy Policy and Support URLs from `app-store-urls.md`
 - [ ] Approve and enter the listing text
-- [ ] Complete the age-rating questionnaire
+- [x] Complete the age-rating questionnaire — calculated rating: **9+**
 - [ ] Upload the final iPhone screenshot set
 - [ ] Confirm Paid Apps Agreement, banking, and tax setup are active
 - [ ] Confirm all Earshot Plus and tip products are cleared for submission
