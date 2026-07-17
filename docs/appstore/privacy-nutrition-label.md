@@ -1,12 +1,12 @@
-# App Store Connect "App Privacy" (Nutrition Label): Draft Answers
+# App Store Connect "App Privacy": Final Recommended Answers
 
-Drafted for issue #646. **This is a draft for Michael's review, not a final
-submission.** Engineering compiled these answers from the current privacy
-policy (`docs/privacy/index.html`, effective July 2, 2026) and a direct
-read of the app's source, listed per category below. Michael is the one
-submitting to Apple and is the only person who can make the final
-legal/compliance call on each answer. Treat everything here as "what the
-code actually does today," not as pre-cleared copy.
+Final engineering recommendation for issue #646, based on Apple's current
+App Privacy definition, the published Earshot Privacy Policy, the privacy
+manifest, and a direct source review. Michael remains responsible for the
+final legal/compliance submission in App Store Connect.
+
+**Published in App Store Connect on July 16, 2026:** No, we do not collect
+data from this app.
 
 Structured to match App Store Connect's questionnaire flow: for each of
 Apple's data categories, the app asks (1) is data of this type collected,
@@ -15,13 +15,23 @@ tracking, (4) what is it used for.
 
 ## How to read "Collected"
 
-Apple's definition of "collected" is data transmitted off the device to
-Payown Media or a third party. Data that stays entirely on-device (SwiftData
-store, `UserDefaults`/`AppSettingsStore`) is not "collected" under Apple's
-definition even though the app reads and writes it locally. That's why
-almost every category below is "Not Collected" despite the app storing
-plenty of state (subscriptions, queue, playback position, bookmarks) on the
-device.
+Apple defines collection as transmitting data off the device in a way that
+lets the developer or an integrated third-party partner access it for longer
+than necessary to service a request in real time. Apple also says on-device
+processing is not collection and developers are not responsible for declaring
+data collected by Apple. Earshot has no backend or integrated analytics,
+advertising, crash-reporting, or tracking SDK.
+
+## Exact App Store Connect selection
+
+Select **No, we do not collect data from this app**, then save. App Store
+Connect should not present individual data-category questions after that
+selection.
+
+Authoritative Apple references:
+
+- https://developer.apple.com/app-store/app-privacy-details/
+- https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy
 
 ## Summary
 
@@ -39,14 +49,13 @@ The table below lists, for each Apple privacy category, whether Earshot collects
 | Browsing History | No | N/A | N/A | N/A |
 | Search History | No | N/A | N/A | N/A |
 | Identifiers | No | N/A | N/A | N/A |
-| Purchases | **Yes** | No | No | App Functionality |
+| Purchases | No | N/A | N/A | N/A |
 | Usage Data | No | N/A | N/A | N/A |
 | Diagnostics | No | N/A | N/A | N/A |
 | Other Data | No | N/A | N/A | N/A |
 
 Details for every category follow, including the reasoning for each "Not
-Collected" (so Michael can sanity-check the "no" answers, not just take them
-on faith) and the full detail for Purchases.
+Collected" answer.
 
 ---
 
@@ -118,46 +127,15 @@ identifiers exist because there are no ads. **This matches the CLAUDE.md/
 privacy-policy claim of "no advertising identifiers, no third-party
 trackers" with no discrepancy found.**
 
-## Purchases: Collected (App Functionality only)
+## Purchases: Not Collected
 
-This is the one real entry, added because of the Earshot Plus and tip jar
-StoreKit work (#631/#632/#633/#634/#635/#636).
-
-- **Data collected:** Purchase history, specifically StoreKit 2 product
-  IDs (e.g. which Earshot Plus tier or tip amount), transaction
-  verification state, and expiration/revocation dates for subscriptions.
-  Confirmed by reading the actual purchase code:
-  - `EntitlementTransactionSource.swift` / `StoreKitEntitlementSource`: the
-    only type that touches `Transaction.currentEntitlements` and
-    `Transaction.updates`. It reduces every result to a
-    `RawTransactionResult` carrying only `productID`, verification
-    outcome, and `revocationDate`/`expirationDate`. No card data and no
-    billing address ever come through this type. The file's
-    own doc comment states: "No backend, no server-side receipt validation
-    anywhere in this codebase... every transaction is checked with local,
-    on-device StoreKit 2 cryptographic verification only."
-  - `TipPurchaseSource.swift` / `StoreKitTipPurchaseSource`: same pattern
-    for one-time tip purchases. It reduces `Product.purchase()`'s result to a
-    `RawPurchaseResult` with just `productID` and verification
-    outcome/reason. Same "no backend, no server-side receipt validation"
-    comment.
-  - `EntitlementStore.swift`: persists only a boolean (`isEntitled`) and a
-    last-synced timestamp locally via `AppSettingsStore` (on-device
-    SwiftData-backed settings), which is what "remembers" that Plus is
-    active across launches. It is never uploaded anywhere.
-  - **Confirms the issue's claim:** Apple's StoreKit does 100% of payment
-    processing. Earshot's code never sees a card number, billing address,
-    or any other payment credential; only product IDs and
-    verification/entitlement state, all processed and stored on-device.
-- **Linked to your identity?** No. Nothing here is tied to a Payown Media
-  account (none exists) or any Earshot-side user identifier. The only
-  "identity" involved is the user's own Apple ID, which is entirely
-  Apple's/StoreKit's concern, not data Earshot links anything to.
-- **Used for tracking?** No. Never shared with a third-party data broker or
-  advertising network, never combined with data from other apps/companies.
-- **Purpose:** App Functionality only: restoring/verifying the Earshot
-  Plus entitlement (unlock unlimited subscriptions) and completing tip jar
-  purchases. Not used for analytics, advertising, or any other purpose.
+StoreKit provides locally verified product and entitlement information to the
+app. Earshot reduces that information to on-device entitlement state and never
+uploads product IDs, transaction state, expiration/revocation dates, receipts,
+or purchase history to Payown Media. Apple's guidance says developers are not
+responsible for declaring data collected by Apple. Payment information entered
+outside the app and never available to the developer also does not need to be
+declared.
 
 ## Usage Data: Not Collected
 
@@ -175,44 +153,6 @@ performance data, or other diagnostic data leave the device.
 Nothing else fits Apple's catalog of data types.
 
 ---
-
-## Discrepancy check: CLAUDE.md vs. actual code
-
-CLAUDE.md's non-negotiable rule #4 says: "Minimum data collection. Crash
-reports and analytics are opt-out and anonymized. Listening history is
-user-controlled. No third-party trackers, no advertising IDs."
-
-Read literally, "opt-out" implies a crash/analytics SDK exists and defaults
-to on. **That is not what's actually in the codebase.** What's really there:
-
-- `grep -rli "sentry|crashlytics|analytics|firebase"` across
-  `EarshotSwift/Earshot/` turns up exactly three files, and all three are
-  just user-facing *copy* stating that no analytics/crash reporting
-  exists, not an SDK:
-  - `Features/Settings/Presentation/PrivacySettingsView.swift`: "No crash
-    reporting, no analytics, no third-party trackers, no advertising IDs."
-  - `Features/Onboarding/Domain/OnboardingContent.swift`: same claim, in
-    onboarding copy.
-  - `Data/Persistence/AppSettingsStore.swift`: defines
-    `crash_reporting_enabled` / `analytics_enabled` setting keys, but its
-    own comment says: *"retained for data compatibility only. No crash
-    reporter or analytics SDK ships in the app"*; these keys exist purely
-    so old persisted settings values don't error on load; nothing reads
-    them to gate any actual telemetry.
-- No `Package.resolved` exists anywhere in the repo; there are zero Swift
-  Package Manager third-party dependencies at all, which rules out Sentry,
-  Crashlytics/Firebase, or any other analytics/crash SDK by construction.
-- No `import Sentry`, `import FirebaseCrashlytics`, or similar anywhere in
-  the codebase.
-
-**Conclusion:** this is CLAUDE.md describing a policy for a feature that was
-never built (or was deliberately dropped in favor of "ship nothing"), not a
-case of undisclosed telemetry running today. The privacy policy's "there is
-no crash reporter in the app" / "there is no analytics SDK in the app" is
-accurate as of this codebase. Michael should consider updating the CLAUDE.md
-wording (drop "are opt-out and anonymized," since there's nothing to opt out
-of). Flagging it here rather than editing CLAUDE.md myself, since that's
-outside this issue's scope.
 
 ## DECIDED: Send Feedback email diagnostics stay OUT of the nutrition label
 
@@ -250,13 +190,11 @@ doesn't need its own nutrition-label entry.
 
 ## Next steps
 
-1. Michael reviews every row above against actual App Store Connect wording
-   (Apple's category/purpose option lists don't always map 1:1 to this
-   summary, so transcribe carefully).
-2. Confirm the Purchases entry once more right before submission, in case
-   any monetization code changes between now and the App Store 1.0 launch
-   milestone closing.
-3. ~~Decide on the Send Feedback diagnostics question.~~ DECIDED 2026-07-10:
-   stays out of the nutrition label (see the DECIDED section above).
-4. Submit in App Store Connect, then update this file (or note in the PR)
-   with the final submitted answers for the record.
+1. In App Store Connect, open **App Privacy** and choose **Get Started**.
+2. Select **No, we do not collect data from this app** and save.
+3. Set the Privacy Policy URL to
+   `https://payown.media/earshot-privacy-policy/`.
+4. Leave the optional Privacy Choices URL blank because Earshot holds no
+   server-side user data to access, change, or delete.
+5. **Completed July 16, 2026:** privacy response published and recorded in
+   the submission packet.
