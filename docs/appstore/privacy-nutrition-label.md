@@ -5,6 +5,9 @@ App Privacy definition, the published Earshot Privacy Policy, the privacy
 manifest, and a direct source review. Michael remains responsible for the
 final legal/compliance submission in App Store Connect.
 
+**Published in App Store Connect on July 16, 2026:** No, we do not collect
+data from this app.
+
 Structured to match App Store Connect's questionnaire flow: for each of
 Apple's data categories, the app asks (1) is data of this type collected,
 (2) if yes, is it linked to the user's identity, (3) is it used for
@@ -193,5 +196,5 @@ doesn't need its own nutrition-label entry.
    `https://payown.media/earshot-privacy-policy/`.
 4. Leave the optional Privacy Choices URL blank because Earshot holds no
    server-side user data to access, change, or delete.
-5. Publish the privacy responses and record the completion date in the
-   submission packet.
+5. **Completed July 16, 2026:** privacy response published and recorded in
+   the submission packet.

@@ -13,6 +13,8 @@ in the linked files so one canonical source is used for each App Store field.
 - Privacy Policy: https://payown.media/earshot-privacy-policy/
 - Support: https://payown.media/earshot-support/
 - Terms: Apple's Standard EULA
+- App Privacy response published July 16, 2026: **No, we do not collect data
+  from this app**
 - Release configuration compiles successfully
 - Full automated suite: 1,380 tests, 14 known StoreKit quarantines, 0 failures
 - Large-library performance fixes verified with VoiceOver on Michael's device
@@ -30,7 +32,7 @@ in the linked files so one canonical source is used for each App Store field.
 
 ## App Store Connect actions remaining
 
-- [ ] Publish App Privacy answer: **No, we do not collect data from this app**
+- [x] Publish App Privacy answer: **No, we do not collect data from this app**
 - [ ] Enter the Privacy Policy and Support URLs from `app-store-urls.md`
 - [ ] Approve and enter the listing text
 - [ ] Complete the age-rating questionnaire
