@@ -1,0 +1,85 @@
+WORDPRESS INSTRUCTIONS
+
+1. In WordPress, create a new page titled: Earshot Support
+2. Set its URL slug to: earshot-support
+3. Open the WordPress editor's Code editor.
+4. Copy and paste everything below the BEGIN WORDPRESS CONTENT line, but do
+   not copy the BEGIN WORDPRESS CONTENT line itself.
+5. Publish the page at https://payown.media/earshot-support/
+6. Clear WordPress, LiteSpeed, and Cloudflare caches.
+
+BEGIN WORDPRESS CONTENT
+
+<!-- wp:paragraph -->
+<p>Earshot is an accessibility-first podcast player for iPhone, provided by Payown Media LLC.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Contact Earshot support</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>For help, bug reports, accessibility feedback, or feature suggestions, email <a href="mailto:michael@payown.media?subject=Earshot%20Support">michael@payown.media</a>.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>You can also contact us from Earshot by opening <strong>Settings</strong>, choosing <strong>Help &amp; About</strong>, and then choosing <strong>Send Feedback</strong>. Before sending, you can decide whether to include your Earshot version, iOS version, and device model. Earshot does not include your listening history or podcast subscriptions.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Include these details when reporting a problem</h2>
+<!-- /wp:heading -->
+
+<!-- wp:list -->
+<ul class="wp-block-list">
+<li>What you were trying to do.</li>
+<li>What happened instead.</li>
+<li>Whether VoiceOver was running.</li>
+<li>Your Earshot version and build number, shown under <strong>Settings</strong>, <strong>Help &amp; About</strong>, <strong>About</strong>.</li>
+<li>Your iPhone model and iOS version, if you are comfortable sharing them.</li>
+</ul>
+<!-- /wp:list -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Purchases and Earshot Plus</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>If a previous Earshot Plus purchase is not recognized, open <strong>Settings</strong> in Earshot and choose <strong>Restore Purchases</strong>. Purchases are processed by Apple and must use the same Apple ID that originally made the purchase.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>To manage or cancel an Earshot Plus subscription, open the iPhone <strong>Settings</strong> app, choose your name, and then choose <strong>Subscriptions</strong>. Billing and refund requests are handled by Apple.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>For Apple's purchase assistance, visit <a href="https://support.apple.com/billing">Apple Support for billing and subscriptions</a>.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Importing or exporting podcast subscriptions</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Earshot supports OPML files. In Earshot, open <strong>Settings</strong> and choose <strong>Data</strong>. Choose <strong>Import podcasts (OPML)</strong> to import subscriptions or <strong>Export podcasts (OPML)</strong> to create a backup that can be shared with another podcast app.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Privacy</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Earshot has no account, advertising, analytics, or tracking. Your subscriptions, listening history, and settings stay on your device. Read the complete <a href="https://payown.media/earshot-privacy-policy/">Earshot Privacy Policy</a>.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Accessibility support</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Accessibility problems are treated as product defects. When reporting an issue, tell us which screen and control were involved, what VoiceOver announced, and what you expected it to announce or do.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>Payown Media LLC<br>United States</p>
+<!-- /wp:paragraph -->
