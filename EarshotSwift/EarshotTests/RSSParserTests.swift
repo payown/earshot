@@ -137,6 +137,27 @@ final class RSSParserTests: XCTestCase {
         XCTAssertNil(RSSParser.parseDate(""))
     }
 
+    func testParseDateIsSafeAcrossConcurrentFeedRefreshes() async {
+        let values = [
+            "Tue, 10 Jun 2025 09:00:00 +0000",
+            "Tue, 10 Jun 2025 09:00:00 GMT",
+            "2025-06-10T09:00:00Z",
+            "2025-06-10T09:00:00.123Z",
+        ]
+
+        await withTaskGroup(of: Bool.self) { group in
+            for iteration in 0..<1_000 {
+                group.addTask {
+                    RSSParser.parseDate(values[iteration % values.count]) != nil
+                }
+            }
+
+            for await parsed in group {
+                XCTAssertTrue(parsed)
+            }
+        }
+    }
+
     // MARK: Partial results on malformed XML (#384)
 
     func testMalformedMidFeedReturnsSalvagedEpisodesAndTitle() throws {
