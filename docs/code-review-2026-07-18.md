@@ -1,7 +1,7 @@
 # Earshot native Swift security and stability review
 
-Date: 2026-07-18  
-Base: `origin/swift` at `4109d2b`  
+Date: 2026-07-18
+Base: `origin/swift` at `4109d2b`
 Scope: all 189 production Swift files under `EarshotSwift/Earshot`, the generated project and app configuration, plus repository history relevant to secret exposure
 
 ## Executive summary

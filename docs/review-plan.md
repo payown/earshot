@@ -1,8 +1,8 @@
 # Swift 6 Security Review Plan
 
-Date: 2026-07-18  
-Branch: `agent/swift-6-security-review`  
-Base: `origin/swift` at `4109d2b`  
+Date: 2026-07-18
+Branch: `agent/swift-6-security-review`
+Base: `origin/swift` at `4109d2b`
 Scope: native SwiftUI app in `EarshotSwift`
 
 ## Gates and constraints
@@ -77,7 +77,7 @@ No broad StoreKit skip environment variable is permitted for final verification.
 | Start | 0 | 0 | 0 | 0 | 0 |
 | After audit | 0 | 2 | 0 | 3 | 313 |
 | After concurrency conversion | 0 | 2 | 0 | 3 | 313 |
-| Before publishing | 0 | 2 | 0 | 3 | 421 |
+| Before publishing | 0 | 2 | 0 | 3 | 486 |
 
 Generated Xcode project changes are excluded from the 1,500-line gate. Documentation, configuration, production code, and tests are included.
 
@@ -88,7 +88,7 @@ Generated Xcode project changes are excluded from the 1,500-line gate. Documenta
 - Medium and low findings receive proposed GitHub issue titles in the final report; issues will not be created.
 - Critical/high candidates are implemented only when they satisfy the explicit file, dependency, test-validity, and line-budget gates.
 
-The final figure includes the 108-line review report; generated `project.pbxproj` changes remain excluded.
+The final figure includes both review documents; generated `project.pbxproj` changes remain excluded.
 
 ## Blockers
 
