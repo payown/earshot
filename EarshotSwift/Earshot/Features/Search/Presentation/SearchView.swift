@@ -539,10 +539,8 @@ private enum DirectoryNavigation: Hashable {
 }
 
 /// Optionally moves keyboard focus onto the `.searchable` field as the screen
-/// appears. `.searchFocused` is iOS 18+, so on iOS 17 this is a no-op and the user
-/// simply taps the visible search field. We never force focus onto a container —
-/// only the search field itself — so VoiceOver lands somewhere it can type, never
-/// on a merged group summary.
+/// appears. We never force focus onto a container — only the search field itself —
+/// so VoiceOver lands somewhere it can type, never on a merged group summary.
 ///
 /// Autofocus is suppressed while VoiceOver is running. Auto-popping the keyboard
 /// puts `.searchable` into its active state immediately; with VoiceOver that is
@@ -559,16 +557,12 @@ private struct SearchFieldFocus: ViewModifier {
     let autoFocus: Bool
 
     func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content
-                .searchFocused($focused)
-                .onAppear {
-                    if autoFocus && !UIAccessibility.isVoiceOverRunning {
-                        focused = true
-                    }
+        content
+            .searchFocused($focused)
+            .onAppear {
+                if autoFocus && !UIAccessibility.isVoiceOverRunning {
+                    focused = true
                 }
-        } else {
-            content
-        }
+            }
     }
 }

@@ -4,6 +4,7 @@ import XCTest
 /// Tests the per-episode summary cache that keeps the HTML strip off the
 /// VoiceOver focus-move path (#495). A fresh cache is used per test so results
 /// don't leak across cases.
+@MainActor
 final class EpisodeSummaryCacheTests: XCTestCase {
 
     private func makeEpisode(guid: String = "ep1", description: String?) -> Episode {

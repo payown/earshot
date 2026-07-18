@@ -6,7 +6,8 @@ import UserNotifications
 /// Routes the default tap (deep link to the show) and the two custom actions
 /// ("Add to queue", "Play now") into a ``NotificationRouter`` that ``RootView``
 /// observes. Also lets notifications present while the app is foregrounded (#72).
-final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+@MainActor
+final class NotificationDelegate: NSObject, @preconcurrency UNUserNotificationCenterDelegate {
     private let router: NotificationRouter
 
     init(router: NotificationRouter) {
@@ -18,7 +19,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     /// nil when the userInfo doesn't carry the feed URL we need (a malformed or
     /// foreign notification). Static + pure so it's unit-testable without a real
     /// `UNNotificationResponse`.
-    static func intent(
+    nonisolated static func intent(
         actionIdentifier: String,
         userInfo: [AnyHashable: Any]
     ) -> NotificationIntent? {

@@ -105,7 +105,10 @@ struct QueueScreen: View {
             // destination indices refer to the visible subset, not real queue
             // positions, so a drop would land in the wrong place. The rotor
             // move actions (which address the real queue) keep working.
-            .onMove(perform: searchActive ? nil : handleMove)
+            .onMove { from, to in
+                guard !searchActive else { return }
+                handleMove(from, to)
+            }
         }
     }
 

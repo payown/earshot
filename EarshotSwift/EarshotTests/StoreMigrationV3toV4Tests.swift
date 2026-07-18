@@ -13,8 +13,8 @@ import SwiftData
 /// back `introSkipSeconds` as nil for every pre-existing row.
 @MainActor
 final class StoreMigrationV3toV4Tests: XCTestCase {
-    private var dir: URL!
-    private var storeURL: URL!
+    nonisolated(unsafe) private var dir: URL!
+    nonisolated(unsafe) private var storeURL: URL!
 
     override func setUpWithError() throws {
         dir = URL(fileURLWithPath: NSTemporaryDirectory())

@@ -16,6 +16,7 @@ import UIKit
 /// Ratios are computed by compositing each foreground over its background
 /// (system label colors are translucent) and applying the WCAG relative-
 /// luminance formula.
+@MainActor
 final class ContrastAuditTests: XCTestCase {
 
     // MARK: WCAG math

@@ -166,7 +166,7 @@ final class FolderRepositoryTests: XCTestCase {
         let repo = FolderRepository(context: ctx)
         let folder = repo.createFolder(name: "F")
         let filed = makePodcast(ctx, "Filed")
-        let loose = makePodcast(ctx, "Loose")
+        _ = makePodcast(ctx, "Loose")
         repo.add(filed, to: folder)
         try? ctx.save()
 

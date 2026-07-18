@@ -9,8 +9,8 @@ import SwiftData
 /// on-disk store in a temp directory, the way a device upgrade/downgrade does.
 @MainActor
 final class StoreRecoveryTests: XCTestCase {
-    private var dir: URL!
-    private var storeURL: URL!
+    nonisolated(unsafe) private var dir: URL!
+    nonisolated(unsafe) private var storeURL: URL!
 
     override func setUpWithError() throws {
         dir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -134,7 +134,7 @@ final class FutureOnlyEntity {
 
 /// A schema newer than ``EarshotSchemaV4``: all of V4 plus one extra entity.
 enum SchemaVFutureFixture: VersionedSchema {
-    static var versionIdentifier = Schema.Version(99, 0, 0)
+    static let versionIdentifier = Schema.Version(99, 0, 0)
     static var models: [any PersistentModel.Type] {
         EarshotSchemaV4.models + [FutureOnlyEntity.self]
     }

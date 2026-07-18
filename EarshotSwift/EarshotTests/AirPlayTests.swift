@@ -24,7 +24,7 @@ final class AirPlayTests: XCTestCase {
     func test_airPlaySessionOptions_containsAllowAirPlay() {
         // Acceptance criterion: audio reaches AirPlay receivers without manual
         // workarounds. The flag must be present in the options bitmask.
-        let options: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetooth]
+        let options: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetoothHFP]
         XCTAssertTrue(options.contains(.allowAirPlay),
                       ".allowAirPlay must be present in the session options")
     }
@@ -34,8 +34,8 @@ final class AirPlayTests: XCTestCase {
     func test_airPlaySessionOptions_containsAllowBluetooth() {
         // Acceptance criterion: Bluetooth output routes should also be available
         // from the picker. The flag must be present.
-        let options: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetooth]
-        XCTAssertTrue(options.contains(.allowBluetooth),
+        let options: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetoothHFP]
+        XCTAssertTrue(options.contains(.allowBluetoothHFP),
                       ".allowBluetooth must be present in the session options")
     }
 
@@ -43,14 +43,14 @@ final class AirPlayTests: XCTestCase {
     /// flags we don't want (e.g. .mixWithOthers, which would let other apps
     /// keep playing while Earshot plays).
     func test_airPlaySessionOptions_doesNotContainMixWithOthers() {
-        let options: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetooth]
+        let options: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetoothHFP]
         XCTAssertFalse(options.contains(.mixWithOthers),
                        ".mixWithOthers must NOT be set — Earshot should duck other audio")
     }
 
     /// The two-flag options set is non-empty (sanity guard).
     func test_airPlaySessionOptions_isNonEmpty() {
-        let options: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetooth]
+        let options: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetoothHFP]
         XCTAssertFalse(options.isEmpty)
     }
 
@@ -97,9 +97,9 @@ final class AirPlayTests: XCTestCase {
     /// Combining the two options produces a distinct value from either flag alone.
     /// Guards against accidentally shipping only one flag.
     func test_airPlaySessionOptions_combinedIsDifferentFromEitherAlone() {
-        let combined: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetooth]
+        let combined: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetoothHFP]
         let airPlayOnly: AVAudioSession.CategoryOptions = [.allowAirPlay]
-        let bluetoothOnly: AVAudioSession.CategoryOptions = [.allowBluetooth]
+        let bluetoothOnly: AVAudioSession.CategoryOptions = [.allowBluetoothHFP]
         XCTAssertNotEqual(combined, airPlayOnly)
         XCTAssertNotEqual(combined, bluetoothOnly)
     }

@@ -51,25 +51,33 @@ final class PlayerDeletionTests: XCTestCase {
     /// block is `@Sendable`, but with `queue: nil` it runs synchronously on the
     /// posting (main) thread, so plain vars are safe in practice.
     private final class PostRecorder: @unchecked Sendable {
+        // The notification is posted synchronously on the main actor; the
+        // callback immediately reasserts that isolation before using context.
+        let context: ModelContext
         var postCount = 0
         var podcastIDInUserInfo: PersistentIdentifier?
         var podcastCountAtPost = -1
         var episodeCountAtPost = -1
+
+        init(context: ModelContext) {
+            self.context = context
+        }
     }
 
     /// Observes the pre-delete notification and records store counts INSIDE the
     /// handler, proving the post happens while the doomed rows are still alive.
     private func recordNextPost(context ctx: ModelContext) -> (PostRecorder, NSObjectProtocol) {
-        let recorder = PostRecorder()
+        let recorder = PostRecorder(context: ctx)
         let token = NotificationCenter.default.addObserver(
             forName: .earshotWillDeleteEpisodes, object: nil, queue: nil
         ) { note in
+            let podcastID =
+                note.userInfo?[PlayerService.willDeletePodcastIDKey] as? PersistentIdentifier
             MainActor.assumeIsolated {
                 recorder.postCount += 1
-                recorder.podcastIDInUserInfo =
-                    note.userInfo?[PlayerService.willDeletePodcastIDKey] as? PersistentIdentifier
-                recorder.podcastCountAtPost = (try? ctx.fetchCount(FetchDescriptor<Podcast>())) ?? -1
-                recorder.episodeCountAtPost = (try? ctx.fetchCount(FetchDescriptor<Episode>())) ?? -1
+                recorder.podcastIDInUserInfo = podcastID
+                recorder.podcastCountAtPost = (try? recorder.context.fetchCount(FetchDescriptor<Podcast>())) ?? -1
+                recorder.episodeCountAtPost = (try? recorder.context.fetchCount(FetchDescriptor<Episode>())) ?? -1
             }
         }
         return (recorder, token)

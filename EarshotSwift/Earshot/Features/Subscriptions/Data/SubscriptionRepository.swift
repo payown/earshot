@@ -20,6 +20,7 @@ protocol FeedFetching: Sendable {
 /// Abstraction over episode downloading so tests can assert download calls
 /// without hitting the network or filesystem. ``DownloadManager`` satisfies
 /// this protocol in production.
+@MainActor
 protocol EpisodeDownloading: AnyObject {
     func download(_ episode: Episode) async
 }

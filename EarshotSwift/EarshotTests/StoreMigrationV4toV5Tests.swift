@@ -21,8 +21,8 @@ import SwiftData
 @MainActor
 final class StoreMigrationV4toV5Tests: XCTestCase {
 
-    private var dir: URL!
-    private var storeURL: URL!
+    nonisolated(unsafe) private var dir: URL!
+    nonisolated(unsafe) private var storeURL: URL!
 
     override func setUpWithError() throws {
         dir = URL(fileURLWithPath: NSTemporaryDirectory())
