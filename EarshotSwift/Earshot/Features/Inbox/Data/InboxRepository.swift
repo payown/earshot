@@ -45,7 +45,7 @@ final class InboxRepository {
     /// bounded scalar check after the fetch.
     func inboxEpisodes() -> [Episode] {
         let optInOnly = settings.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
-        var descriptor = FetchDescriptor<Episode>(
+        let descriptor = FetchDescriptor<Episode>(
             predicate: InboxQuery.predicate(optInOnly: optInOnly),
             sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
         )

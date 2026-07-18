@@ -278,11 +278,11 @@ final class OPMLBulkImportTests: XCTestCase {
 
         let feeds = (0..<4).map { "https://feed\($0).com/rss" }
         let recorder = ProgressRecorder()
-        _ = await service.importOPML(opml(feeds: feeds)) { completed, total, title in
+        _ = await service.importOPML(opml(feeds: feeds), onProgress: { completed, total, title in
             recorder.completes.append(completed)
             recorder.total = total
             if let title { recorder.titles.append(title) }
-        }
+        })
 
         XCTAssertEqual(recorder.completes, [1, 2, 3, 4], "completed increments by one per feed up to total")
         XCTAssertEqual(recorder.total, 4)

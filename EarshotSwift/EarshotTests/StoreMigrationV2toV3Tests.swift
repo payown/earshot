@@ -12,8 +12,8 @@ import SwiftData
 /// asserts the upgrade completes without aborting and preserves all data.
 @MainActor
 final class StoreMigrationV2toV3Tests: XCTestCase {
-    private var dir: URL!
-    private var storeURL: URL!
+    nonisolated(unsafe) private var dir: URL!
+    nonisolated(unsafe) private var storeURL: URL!
 
     override func setUpWithError() throws {
         dir = URL(fileURLWithPath: NSTemporaryDirectory())

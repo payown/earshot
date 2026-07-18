@@ -740,9 +740,9 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let mock = TestNotificationCenter(status: .authorized)
         await NotificationService(center: mock).deliver(notifications)
 
-        let added = await mock.addedRequests
+        let added = await mock.addedRequestSummaries()
         XCTAssertEqual(added.count, 1, "Foreground refresh delivered the notification (not discarded)")
-        XCTAssertEqual(added.first?.content.title, "Show")
+        XCTAssertEqual(added.first, "Show")
     }
 
     /// A foreground pull stamps `lastFeedRefresh`, so the next background wake
@@ -779,8 +779,8 @@ final class SubscriptionRepositoryTests: XCTestCase {
         // NOT lost despite the background skip. deliver() coalesces per podcast by
         // a stable identifier, so even if the background path had run it could not
         // double-deliver the same show.
-        let added = await mock.addedRequests
-        XCTAssertEqual(added.count, 1, "Notification delivered once by the foreground path; never lost")
+        let addedCount = await mock.addedRequestCount()
+        XCTAssertEqual(addedCount, 1, "Notification delivered once by the foreground path; never lost")
     }
 
     // MARK: Unsubscribe (#499/#500)
@@ -1078,7 +1078,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
 /// Local actor-isolated mock of ``NotificationScheduling`` for the foreground
 /// delivery tests (#421). Mirrors the one in NotificationServiceTests, scoped
 /// here so the two test files stay independent.
-private actor TestNotificationCenter: NotificationScheduling {
+private actor TestNotificationCenter: @preconcurrency NotificationScheduling {
     private let status: UNAuthorizationStatus
     private(set) var addedRequests: [UNNotificationRequest] = []
 
@@ -1088,4 +1088,6 @@ private actor TestNotificationCenter: NotificationScheduling {
     func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool { true }
     func setNotificationCategories(_ categories: Set<UNNotificationCategory>) async {}
     func add(_ request: UNNotificationRequest) async throws { addedRequests.append(request) }
+    func addedRequestCount() -> Int { addedRequests.count }
+    func addedRequestSummaries() -> [String] { addedRequests.map(\.content.title) }
 }

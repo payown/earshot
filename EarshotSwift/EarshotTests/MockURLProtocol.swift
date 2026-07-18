@@ -22,8 +22,10 @@ final class MockURLProtocol: URLProtocol {
     }
 
     private static let lock = NSLock()
-    private static var outcomes: [Outcome] = []
-    private static var capturedRequests: [URLRequest] = []
+    // Every access is serialized by `lock`; the unsafe marker only teaches
+    // Swift about synchronization it cannot infer from NSLock.
+    nonisolated(unsafe) private static var outcomes: [Outcome] = []
+    nonisolated(unsafe) private static var capturedRequests: [URLRequest] = []
 
     /// The URLs of every request intercepted since the last ``reset()``, in order.
     /// Lets a test assert how the service built its request (e.g. that a search

@@ -8,8 +8,8 @@ import SwiftData
 /// *previous* schema with realistic data and asserts the upgrade preserves it.
 @MainActor
 final class StoreMigrationTests: XCTestCase {
-    private var dir: URL!
-    private var storeURL: URL!
+    nonisolated(unsafe) private var dir: URL!
+    nonisolated(unsafe) private var storeURL: URL!
 
     override func setUpWithError() throws {
         dir = URL(fileURLWithPath: NSTemporaryDirectory())

@@ -230,18 +230,18 @@ final class NotificationServiceTests: XCTestCase {
         )
         await service.deliver(notification)
 
-        let added = await mock.addedRequests
+        let added = await mock.addedRequestSnapshots()
         XCTAssertEqual(added.count, 1)
         let request = try? XCTUnwrap(added.first)
-        XCTAssertEqual(request?.content.title, "My Show")
-        XCTAssertEqual(request?.content.body, "3 new episodes")
-        XCTAssertEqual(request?.content.categoryIdentifier, NotificationService.newEpisodesCategoryID)
+        XCTAssertEqual(request?.title, "My Show")
+        XCTAssertEqual(request?.body, "3 new episodes")
+        XCTAssertEqual(request?.categoryIdentifier, NotificationService.newEpisodesCategoryID)
         XCTAssertEqual(
-            request?.content.userInfo[NotificationService.podcastFeedURLKey] as? String,
+            request?.feedURL,
             "https://x/feed.xml"
         )
         XCTAssertEqual(
-            request?.content.userInfo[NotificationService.episodeGUIDKey] as? String,
+            request?.episodeGUID,
             "g1"
         )
     }
@@ -264,8 +264,8 @@ final class NotificationServiceTests: XCTestCase {
             NewEpisodeNotification(podcastFeedURL: "b", episodeGUID: "2", podcastTitle: "B", newEpisodeCount: 2),
         ]
         await service.deliver(batch)
-        let added = await mock.addedRequests
-        XCTAssertEqual(added.count, 2)
+        let addedCount = await mock.addedRequestCount()
+        XCTAssertEqual(addedCount, 2)
     }
 
     // MARK: Toggle-ON permission trigger (#421)
@@ -305,7 +305,14 @@ final class NotificationServiceTests: XCTestCase {
 
 /// Actor-isolated mock of ``NotificationScheduling`` so async assertions are
 /// race-free. Records calls; can be configured to throw.
-private actor MockNotificationCenter: NotificationScheduling {
+private actor MockNotificationCenter: @preconcurrency NotificationScheduling {
+    struct RequestSnapshot: Sendable {
+        let title: String
+        let body: String
+        let categoryIdentifier: String
+        let feedURL: String?
+        let episodeGUID: String?
+    }
     private let status: UNAuthorizationStatus
     private let grantResult: Bool
     private let throwOnRequest: Bool
@@ -348,5 +355,19 @@ private actor MockNotificationCenter: NotificationScheduling {
             throw NSError(domain: "test", code: 2)
         }
         addedRequests.append(request)
+    }
+
+    func addedRequestCount() -> Int { addedRequests.count }
+
+    func addedRequestSnapshots() -> [RequestSnapshot] {
+        addedRequests.map { request in
+            RequestSnapshot(
+                title: request.content.title,
+                body: request.content.body,
+                categoryIdentifier: request.content.categoryIdentifier,
+                feedURL: request.content.userInfo[NotificationService.podcastFeedURLKey] as? String,
+                episodeGUID: request.content.userInfo[NotificationService.episodeGUIDKey] as? String
+            )
+        }
     }
 }

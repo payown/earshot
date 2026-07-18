@@ -105,6 +105,7 @@ enum AccentChoice: String, Codable, CaseIterable, Identifiable {
     /// increased-contrast variant (e.g. system blue's darker light-mode HC
     /// shade) rather than an invented color. Resolving freezes the color, which
     /// is safe because a High Contrast theme also forces a fixed scheme.
+    @MainActor
     func tint(for theme: ThemeOverride) -> Color? {
         guard let base = baseUIColor else { return nil }
         guard theme.isHighContrast else { return Color(uiColor: base) }
@@ -113,6 +114,7 @@ enum AccentChoice: String, Codable, CaseIterable, Identifiable {
 
     /// Resolves a dynamic palette color against the increased-contrast trait in
     /// the given style. Internal (not private) so the mapping is unit-testable.
+    @MainActor
     static func highContrastResolved(_ color: UIColor, darkMode: Bool) -> UIColor {
         // iOS 17 trait-builder API; init(traitsFrom:) is deprecated on our target.
         let traits = UITraitCollection { traits in

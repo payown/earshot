@@ -9,6 +9,7 @@ import SwiftUI
 /// directory request, the debounce task, and the "From the directory" section are
 /// all driven by `scope` in ``SearchView``, so the stored `scope` and the section
 /// flags it exposes are the single source of truth these tests pin down.
+@MainActor
 final class SearchScopeTests: XCTestCase {
 
     func testDefaultScopeIsAddPodcast() {
@@ -97,6 +98,7 @@ final class SearchScopeTests: XCTestCase {
 /// Tests for the shared ``AddPodcastOptions`` group used by both onboarding and the
 /// Library tab's Add Podcast sheet. It must expose exactly the three add actions,
 /// each wired to its own caller-supplied closure.
+@MainActor
 final class AddPodcastOptionsTests: XCTestCase {
 
     func testExposesAllThreeActions() {

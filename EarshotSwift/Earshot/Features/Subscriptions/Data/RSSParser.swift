@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct ParsedEpisode: Sendable {
     var guid: String
@@ -95,37 +96,44 @@ final class RSSParser: NSObject, XMLParserDelegate {
         "dd MMM yyyy HH:mm:ss zzz",
     ]
 
-    private static let rfc822Formatters: [DateFormatter] = rfc822Formats.map { format in
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = format
-        return f
+    /// Foundation formatters are mutable reference types. Feed refreshes may
+    /// parse concurrently, so keep the reusable instances behind one lock.
+    /// `@unchecked Sendable` is safe only because every access to these mutable
+    /// Foundation formatter objects occurs inside `dateFormatters.withLock`.
+    private struct DateFormatters: @unchecked Sendable {
+        let rfc822: [DateFormatter] = rfc822Formats.map { format in
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = format
+            return formatter
+        }
+        let iso8601: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter
+        }()
+        let iso8601Fractional: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter
+        }()
     }
 
-    /// ISO8601 (Atom `published`/`updated`), with and without fractional seconds.
-    private static let iso8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
-
-    private static let iso8601Fractional: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
+    private static let dateFormatters = OSAllocatedUnfairLock(initialState: DateFormatters())
 
     /// Parses a feed date string, trying the RFC822 variants then ISO8601.
     /// Returns nil only when no known format matches.
     static func parseDate(_ raw: String) -> Date? {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
-        for formatter in rfc822Formatters {
-            if let date = formatter.date(from: s) { return date }
+        return dateFormatters.withLock { formatters in
+            for formatter in formatters.rfc822 {
+                if let date = formatter.date(from: s) { return date }
+            }
+            if let date = formatters.iso8601Fractional.date(from: s) { return date }
+            if let date = formatters.iso8601.date(from: s) { return date }
+            return nil
         }
-        if let date = iso8601Fractional.date(from: s) { return date }
-        if let date = iso8601.date(from: s) { return date }
-        return nil
     }
 
     func parse(_ data: Data) -> ParsedFeed? {

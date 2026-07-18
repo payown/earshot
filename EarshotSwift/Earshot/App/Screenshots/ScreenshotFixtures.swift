@@ -31,6 +31,7 @@ import SwiftData
 ///
 /// Durations are assigned realistic values because the source feeds omit
 /// `itunes:duration`.
+@MainActor
 enum ScreenshotFixtures {
 
     /// GUID of the episode the "Now Playing" shot loads. Exposed so the harness

@@ -128,10 +128,10 @@ final class AppearanceSettingsTests: XCTestCase {
                 return XCTFail("named accent missing base color")
             }
             for darkMode in [false, true] {
-                let normalTraits = UITraitCollection(traitsFrom: [
-                    UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light),
-                    UITraitCollection(accessibilityContrast: .normal),
-                ])
+                let normalTraits = UITraitCollection { traits in
+                    traits.userInterfaceStyle = darkMode ? .dark : .light
+                    traits.accessibilityContrast = .normal
+                }
                 let normal = base.resolvedColor(with: normalTraits)
                 let high = AccentChoice.highContrastResolved(base, darkMode: darkMode)
                 XCTAssertNotEqual(

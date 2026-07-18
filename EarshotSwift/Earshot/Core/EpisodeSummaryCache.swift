@@ -10,6 +10,7 @@ import Foundation
 /// Keyed by the episode's stable identity (guid + audio URL) rather than the
 /// object instance, since SwiftData may hand back fresh instances across
 /// fetches. `NSCache` is thread-safe and evicts under memory pressure.
+@MainActor
 final class EpisodeSummaryCache {
     static let shared = EpisodeSummaryCache()
 

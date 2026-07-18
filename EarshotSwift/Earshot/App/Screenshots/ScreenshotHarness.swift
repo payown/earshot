@@ -75,6 +75,7 @@ enum ScreenshotHarness {
         }
     }
 
+    @MainActor
     private static func featuredPodcast(in context: ModelContext) -> Podcast? {
         let feedURL = ScreenshotFixtures.featuredPodcastFeedURL
         var descriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.feedURL == feedURL })
@@ -82,6 +83,7 @@ enum ScreenshotHarness {
         return (try? context.fetch(descriptor))?.first
     }
 
+    @MainActor
     private static func nowPlayingEpisode(in context: ModelContext) -> Episode? {
         let guid = ScreenshotFixtures.nowPlayingEpisodeGUID
         var descriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == guid })

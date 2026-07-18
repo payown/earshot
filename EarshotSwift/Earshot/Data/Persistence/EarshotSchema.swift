@@ -21,7 +21,7 @@ import SwiftData
 /// as a manual export/reimport in ``StoreMigration`` rather than via a
 /// `MigrationStage.lightweight`.
 enum EarshotSchemaV2: VersionedSchema {
-    static var versionIdentifier = Schema.Version(2, 0, 0)
+    static let versionIdentifier = Schema.Version(2, 0, 0)
 
     static var models: [any PersistentModel.Type] {
         [
@@ -343,7 +343,7 @@ enum EarshotSchemaV2: VersionedSchema {
 /// attribute optional is exactly the kind of additive change lightweight
 /// migration supports, so V2→V3 never aborts on a missing mandatory value.
 enum EarshotSchemaV3: VersionedSchema {
-    static var versionIdentifier = Schema.Version(3, 0, 0)
+    static let versionIdentifier = Schema.Version(3, 0, 0)
 
     static var models: [any PersistentModel.Type] {
         [
@@ -659,7 +659,7 @@ enum EarshotSchemaV3: VersionedSchema {
 /// live top-level types. Do not edit; freeze a NEW version instead (see
 /// ``EarshotSchemaV5`` and ``SchemaDriftTests``).
 enum EarshotSchemaV4: VersionedSchema {
-    static var versionIdentifier = Schema.Version(4, 0, 0)
+    static let versionIdentifier = Schema.Version(4, 0, 0)
 
     static var models: [any PersistentModel.Type] {
         [
@@ -988,7 +988,7 @@ enum EarshotSchemaV4: VersionedSchema {
 /// `didMigrate` never runs). Adding a new entity IS inferrable, and it leaves the
 /// 242k Episode rows entirely out of the migration's path. See ``ActiveDownload``.
 enum EarshotSchemaV5: VersionedSchema {
-    static var versionIdentifier = Schema.Version(5, 0, 0)
+    static let versionIdentifier = Schema.Version(5, 0, 0)
 
     static var models: [any PersistentModel.Type] {
         [

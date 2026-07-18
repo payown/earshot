@@ -19,6 +19,7 @@ import SwiftUI
 /// typing in the field can't regress scrolling on large lists. The tradeoff:
 /// the cached summary is capped (~140 chars), so only the opening of a long
 /// description is searchable. Title + podcast always match in full.
+@MainActor
 enum EpisodeSearchFilter {
 
     /// The query with surrounding whitespace removed — what matching actually

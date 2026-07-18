@@ -96,7 +96,7 @@ final class OPMLImportService {
         // Report the resolved (de-duped) total up front so the progress screen
         // presents with the correct count and its on-appear announcement speaks the
         // real number, not the 0 placeholder `start()` was seeded with.
-        await onResolveTotal?(orderedURLs.count)
+        onResolveTotal?(orderedURLs.count)
 
         // One bulk subscribe pass: fetch/parse/insert/save off the main actor,
         // reconcile the main context ONCE afterward. The free-tier cap (#635) may
