@@ -9,7 +9,7 @@ Scope: native SwiftUI app in `EarshotSwift`
 
 - [x] Work in a clean linked worktree; the primary `swift` worktree's App Store documentation edits remain untouched.
 - [x] Require Xcode 26.6, Apple Swift 6.3.3, and XcodeGen 2.45.4.
-- [ ] Reauthenticate GitHub CLI before publishing. Blocker: the saved `payown` token is invalid.
+- [x] GitHub CLI is authenticated as `payown` with repository access.
 - [ ] Stop for approval if a critical fix spans more than two files, a dependency requires a major-version bump, an existing test appears wrong, or projected non-generated changes exceed 1,500 lines.
 - [ ] Do not edit `SettingsReset`, retained Flutter-migration constants or cleanup behavior covered by issue #395, issue #395, accessibility modifiers or labels, signing, identifiers, entitlements, provisioning, or capabilities.
 - [ ] Do not enable default MainActor isolation.
@@ -18,16 +18,16 @@ Scope: native SwiftUI app in `EarshotSwift`
 
 | Phase | Status | Notes |
 |---|---|---|
-| Unchanged baseline build and complete unskipped tests | Blocked | Build succeeds with forthcoming Swift 6 warnings; StoreKit-backed tests fail in the CLI on both installed candidate runtimes. |
+| Unchanged baseline build and complete unskipped tests | Complete with approved exception | The Xcode 26.6 CLI StoreKitTest bug is tracked in #679. Per the merge gate, CLI verification excludes only `PaywallViewModelTests` and `ProductCatalogServiceTests`; the user will run either class in Xcode if a relevant change requires it. |
 | Inventory all production Swift files | Complete | The production target contains exactly 189 Swift files; the test target contains 105 Swift files. |
-| Security and App Store readiness | Pending | Includes full Git history secret scan, StoreKit, untrusted inputs, transport security, file protection/backup, privacy manifest, and deprecated APIs. |
-| Stability | Pending | Force operations, persistence, lifetimes, races, actors, background work, feed refresh, republish, and queue grouping. |
-| Performance | Pending | Launch, main-thread work, coalescing, SwiftUI recomputation, caches, and large libraries. |
-| Accessibility preservation | Pending | Changed paths must retain VoiceOver names, traits, focus, rotor actions, and gated UI. |
-| Swift 6 language-mode conversion | Pending | Narrow isolation only; complete strict concurrency. |
-| Critical/high fixes and regression tests | Pending | Each qualifying fix isolated and verified. |
-| Final report and verification | Pending | Clean Debug/Release builds and complete unskipped suite. |
-| Publish ready-for-review PR against `swift` | Blocked | GitHub CLI reauthentication required. |
+| Security and App Store readiness | Complete | History/current secret scan found no committed values; StoreKit verification/refresh, inputs, ATS, storage and privacy manifest reviewed. |
+| Stability | Complete | Two high concurrency defects found and fixed; persistence, background work, feeds, downloads, playback and queue paths reviewed. |
+| Performance | Complete | Launch, bounded fetches, parsing, refresh coalescing, artwork cache and large-library tests reviewed. |
+| Accessibility preservation | Complete | No accessibility modifier/label changed; names, traits, focus, rotor actions and VoiceOver autofocus suppression retained. |
+| Swift 6 language-mode conversion | Complete | Swift 6.0 mode with complete strict concurrency and narrow per-declaration isolation. |
+| Critical/high fixes and regression tests | Complete | RSS formatter synchronization and MediaPlayer artwork handler isolation pass targeted tests. |
+| Final report and verification | Complete | Report written; clean Debug/Release builds and eligible CLI suite pass. |
+| Publish ready-for-review PR against `swift` | Pending | GitHub CLI authentication confirmed. |
 
 ## Planned configuration changes
 
@@ -40,16 +40,16 @@ Scope: native SwiftUI app in `EarshotSwift`
 
 ## Verification commands
 
-Run from `EarshotSwift` against the iOS 26.3 iPhone 17 Pro simulator (`CBBB2872-D6EA-40F5-AF56-0FDC5E59BAEB`) once StoreKit CLI service is restored:
+Run from `EarshotSwift` against the iOS 26.5 iPhone 17 Pro simulator (`58857CDF-1560-410D-8F46-7381F7ADF48A`):
 
 ```sh
 xcodegen generate
 xcodebuild clean build -project Earshot.xcodeproj -scheme Earshot -configuration Debug -destination '<selected simulator>' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 xcodebuild clean build -project Earshot.xcodeproj -scheme Earshot -configuration Release -destination '<selected simulator>' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
-xcodebuild test -project Earshot.xcodeproj -scheme Earshot -configuration Debug -destination '<selected simulator>' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+xcodebuild test -project Earshot.xcodeproj -scheme Earshot -configuration Debug -destination '<selected simulator>' -skip-testing:EarshotTests/PaywallViewModelTests -skip-testing:EarshotTests/ProductCatalogServiceTests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
-No StoreKit skip environment variable is permitted for baseline or final verification. Targeted test commands will be added for each critical/high fix.
+No broad StoreKit skip environment variable is permitted for final verification. Only the two classes affected by Xcode 26.6 CLI bug #679 may be excluded explicitly. If a change affects either class or its production paths, verification pauses for the user to run the relevant class in Xcode. Targeted test commands will be added for each critical/high fix.
 
 ## Milestone results
 
@@ -63,20 +63,21 @@ No StoreKit skip environment variable is permitted for baseline or final verific
 
 ### Milestone 2: upgraded final state
 
-- Debug build: pending.
-- Release build: pending.
-- Complete unskipped tests: pending.
-- Compiler, strict-concurrency, and deprecation warnings: pending.
-- Unrelated toolchain/provisioning diagnostics: pending.
+- Debug build: clean build succeeded with exit code 0 and no compiler output.
+- Release build: clean build succeeded with exit code 0 and no compiler output.
+- Complete eligible CLI tests: passed; 1,369 executed, 1,367 passed, 2 environment-gated diagnostic skips, 0 failures. Only the two #679 StoreKit classes were explicitly excluded.
+- Compiler, strict-concurrency, and deprecation warnings: zero from app and test source.
+- Targeted high-fix tests: all 5 `NowPlayingArtworkTests` pass; `RSSParserTests.testParseDateIsSafeAcrossConcurrentFeedRefreshes` passes as part of the complete suite.
+- Unrelated toolchain/provisioning diagnostics: App Intents metadata extraction may report that no AppIntents dependency exists; signing was intentionally disabled for simulator builds. Xcode's test observer timing lines are informational.
 
 ## Findings and line budget
 
 | Checkpoint | Critical | High | Medium | Low | Non-generated lines changed |
 |---|---:|---:|---:|---:|---:|
 | Start | 0 | 0 | 0 | 0 | 0 |
-| After audit | Pending | Pending | Pending | Pending | Pending |
-| After concurrency conversion | Pending | Pending | Pending | Pending | Pending |
-| Before publishing | Pending | Pending | Pending | Pending | Pending |
+| After audit | 0 | 2 | 0 | 3 | 313 |
+| After concurrency conversion | 0 | 2 | 0 | 3 | 313 |
+| Before publishing | 0 | 2 | 0 | 3 | 421 |
 
 Generated Xcode project changes are excluded from the 1,500-line gate. Documentation, configuration, production code, and tests are included.
 
@@ -87,7 +88,8 @@ Generated Xcode project changes are excluded from the 1,500-line gate. Documenta
 - Medium and low findings receive proposed GitHub issue titles in the final report; issues will not be created.
 - Critical/high candidates are implemented only when they satisfy the explicit file, dependency, test-validity, and line-budget gates.
 
+The final figure includes the 108-line review report; generated `project.pbxproj` changes remain excluded.
+
 ## Blockers
 
-- GitHub CLI authentication for `payown` is invalid. Local review and verification can proceed; pushing and PR creation cannot.
-- The complete unmodified suite cannot currently pass from `xcodebuild` with Xcode 26.6/Swift 6.3.3. On both installed iOS 26.5 and 26.3 runtimes, `SKTestSession` cannot save/serve `Configuration.storekit` (`SKInternalErrorDomain Code=3`). This violates the preparation gate requiring every StoreKit-backed suite to run before repository work. No production, project, or existing test code has been changed.
+- None. The Xcode 26.6 CLI StoreKitTest failure is diagnosed as upstream bug #679 and has an explicit merge-gate exception limited to `PaywallViewModelTests` and `ProductCatalogServiceTests`.
