@@ -18,8 +18,8 @@ Scope: native SwiftUI app in `EarshotSwift`
 
 | Phase | Status | Notes |
 |---|---|---|
-| Unchanged baseline build and complete unskipped tests | In progress | Exact summaries pending. |
-| Inventory all production Swift files | Pending | Expected count will be recorded after source-membership validation. |
+| Unchanged baseline build and complete unskipped tests | Blocked | Build succeeds with forthcoming Swift 6 warnings; StoreKit-backed tests fail in the CLI on both installed candidate runtimes. |
+| Inventory all production Swift files | Complete | The production target contains exactly 189 Swift files; the test target contains 105 Swift files. |
 | Security and App Store readiness | Pending | Includes full Git history secret scan, StoreKit, untrusted inputs, transport security, file protection/backup, privacy manifest, and deprecated APIs. |
 | Stability | Pending | Force operations, persistence, lifetimes, races, actors, background work, feed refresh, republish, and queue grouping. |
 | Performance | Pending | Launch, main-thread work, coalescing, SwiftUI recomputation, caches, and large libraries. |
@@ -40,7 +40,7 @@ Scope: native SwiftUI app in `EarshotSwift`
 
 ## Verification commands
 
-Run from `EarshotSwift` against a compatible iOS simulator selected during baseline:
+Run from `EarshotSwift` against the iOS 26.3 iPhone 17 Pro simulator (`CBBB2872-D6EA-40F5-AF56-0FDC5E59BAEB`) once StoreKit CLI service is restored:
 
 ```sh
 xcodegen generate
@@ -55,10 +55,11 @@ No StoreKit skip environment variable is permitted for baseline or final verific
 
 ### Milestone 1: unchanged baseline
 
-- Build: pending.
-- Complete unskipped tests: pending.
-- Compiler warnings: pending.
-- Toolchain/provisioning diagnostics: pending.
+- Build: succeeded on the iOS 26.5 iPhone 17 Pro simulator (`58857CDF-1560-410D-8F46-7381F7ADF48A`): `** BUILD SUCCEEDED **`.
+- Complete unskipped tests: blocked by StoreKit test-service failure. Both iOS 26.5 and iOS 26.3 runtime runs executed 1,380 tests, with 2 environment-gated diagnostic tests skipped and 13 assertion failures (7 unexpected) caused by `SKTestSession` failing with `SKInternalErrorDomain Code=3` and returning no configured products. The exact iOS 26.3 summary was: `Executed 1380 tests, with 2 tests skipped and 13 failures (7 unexpected) in 17.256 (17.979) seconds` and `** TEST FAILED **`.
+- Compiler warnings: the unchanged Swift 5 build is not warning-clean. It emits forthcoming Swift 6 isolation warnings, including sending non-`Sendable` SwiftData `Episode` values into main-actor-isolated download implementations. These are upgrade work, but the preparation gate prevents starting that conversion until the unmodified StoreKit suite runs.
+- Toolchain/provisioning diagnostics: App Intents metadata extraction reports no `AppIntents.framework` dependency and skips extraction; code signing was intentionally disabled for simulator verification. Test logs also include expected simulator audio/network diagnostics. None caused the build failure.
+- Result bundles: `/tmp/EarshotSwift6Baseline.xcresult` (iOS 26.5) and `/tmp/EarshotSwift6Baseline263.xcresult` (iOS 26.3).
 
 ### Milestone 2: upgraded final state
 
@@ -89,3 +90,4 @@ Generated Xcode project changes are excluded from the 1,500-line gate. Documenta
 ## Blockers
 
 - GitHub CLI authentication for `payown` is invalid. Local review and verification can proceed; pushing and PR creation cannot.
+- The complete unmodified suite cannot currently pass from `xcodebuild` with Xcode 26.6/Swift 6.3.3. On both installed iOS 26.5 and 26.3 runtimes, `SKTestSession` cannot save/serve `Configuration.storekit` (`SKInternalErrorDomain Code=3`). This violates the preparation gate requiring every StoreKit-backed suite to run before repository work. No production, project, or existing test code has been changed.
