@@ -559,7 +559,7 @@ final class PlayerService {
     /// userInfo key for `.earshotWillDeleteEpisodes`: the `PersistentIdentifier`
     /// of the podcast whose episodes are about to be deleted. Absent means all
     /// local data is being wiped (factory reset).
-    static let willDeletePodcastIDKey = "podcastID"
+    nonisolated static let willDeletePodcastIDKey = "podcastID"
 
     /// Stops playback and detaches the player from its episode entirely (#574).
     /// Runs (via `.earshotWillDeleteEpisodes`) BEFORE the loaded episode's model
@@ -1639,14 +1639,17 @@ final class PlayerService {
             object: session,
             queue: .main
         ) { [weak self] note in
-            Task { @MainActor in self?.handleInterruption(note) }
+            let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let optionsValue = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+            Task { @MainActor in self?.handleInterruption(typeValue: typeValue, optionsValue: optionsValue) }
         }
         routeChangeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
             object: session,
             queue: .main
         ) { [weak self] note in
-            Task { @MainActor in self?.handleRouteChange(note) }
+            let reasonValue = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            Task { @MainActor in self?.handleRouteChange(reasonValue: reasonValue) }
         }
         // Pre-delete hook (#574). `queue: nil` runs the block SYNCHRONOUSLY on
         // the posting thread; both posters (SubscriptionRepository.unsubscribe,
@@ -1658,8 +1661,9 @@ final class PlayerService {
             object: nil,
             queue: nil
         ) { [weak self] note in
+            let podcastID = note.userInfo?[Self.willDeletePodcastIDKey] as? PersistentIdentifier
             MainActor.assumeIsolated {
-                self?.handleWillDeleteEpisodes(note)
+                self?.handleWillDeleteEpisodes(podcastID: podcastID)
             }
         }
     }
@@ -1669,8 +1673,8 @@ final class PlayerService {
     /// stop and unload; if only the gapless PRELOAD does, just drop the preload
     /// and leave unrelated playback running. With no podcast ID (factory
     /// reset): stop unconditionally when anything is loaded.
-    private func handleWillDeleteEpisodes(_ note: Notification) {
-        if let doomedPodcastID = note.userInfo?[Self.willDeletePodcastIDKey] as? PersistentIdentifier {
+    private func handleWillDeleteEpisodes(podcastID doomedPodcastID: PersistentIdentifier?) {
+        if let doomedPodcastID {
             let currentMatches = currentEpisode?.podcast?.persistentModelID == doomedPodcastID
             let preloadMatches = preloadedEpisode?.podcast?.persistentModelID == doomedPodcastID
             guard currentMatches || preloadMatches else { return }
@@ -1687,9 +1691,8 @@ final class PlayerService {
         stopAndUnload()
     }
 
-    private func handleInterruption(_ note: Notification) {
-        guard let info = note.userInfo,
-              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+    private func handleInterruption(typeValue: UInt?, optionsValue: UInt?) {
+        guard let typeValue,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
 
         switch type {
@@ -1699,7 +1702,7 @@ final class PlayerService {
                 pausedByInterruption = true
             }
         case .ended:
-            guard let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            guard let optionsValue else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
             if options.contains(.shouldResume), pausedByInterruption {
                 resume()
@@ -1710,9 +1713,8 @@ final class PlayerService {
         }
     }
 
-    private func handleRouteChange(_ note: Notification) {
-        guard let info = note.userInfo,
-              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+    private func handleRouteChange(reasonValue: UInt?) {
+        guard let reasonValue,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
         // Headphones / Bluetooth unplugged: pause FIRST so audio doesn't blast
         // aloud on the speaker. This must not be delayed by the AVAudioSession
@@ -1895,7 +1897,11 @@ final class PlayerService {
     /// field. Safe to call after `updateNowPlayingInfo` has already run — only
     /// the artwork key is mutated.
     func setArtwork(_ image: UIImage) {
-        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        // MediaPlayer invokes this handler on its private access queue. The
+        // image is immutable after decoding, so it is safe to return without
+        // inheriting PlayerService's main-actor isolation.
+        let artworkImage = image
+        let artwork = MPMediaItemArtwork(boundsSize: image.size) { @Sendable _ in artworkImage }
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         info[MPMediaItemPropertyArtwork] = artwork
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
