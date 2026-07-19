@@ -1,4 +1,6 @@
+import StoreKit
 import SwiftUI
+import UIKit
 
 /// Earshot Plus upgrade paywall (#632).
 ///
@@ -20,11 +22,9 @@ import SwiftUI
 /// size, color, or prominence manipulation of the other two options. Monthly
 /// is never smaller, muted, or buried.
 ///
-/// Price and subscription terms are a standalone, always-visible `Text`
-/// element positioned BEFORE each purchase button in both layout and
-/// VoiceOver reading order — never a button hint, never gated behind a tap
-/// or a `DisclosureGroup`. See ``PaywallLogic/subscriptionDisclosure(for:)``
-/// and ``PaywallLogic/lifetimeDisclosure(for:)``.
+/// Each purchasable card remains one VoiceOver Button. Its label contains only
+/// decision information; compressed terms live in its hint, and one shared,
+/// fully focusable legal disclosure follows all tier controls.
 ///
 /// Dismissal (the top-leading "Close" button) works identically before,
 /// during, and after a purchase attempt — there is no guilt-tripping
@@ -38,16 +38,23 @@ import SwiftUI
 /// `accessibilitySortPriority` overrides needed since the default List/VStack
 /// order already produces this):
 ///   heading ("Earshot Plus") → subtitle → [outcome banner, if a purchase has
-///   settled] → Monthly card (name+price → disclosure → purchase button with
-///   its own combined label) → Yearly card (same shape, badge included in the
-///   name+price line) → Lifetime card (same shape) → footer note → Close
+///   settled] → available tier controls (three in the standard paywall) → one
+///   shared purchase-terms element → Terms/Privacy links → Close
 ///   button (nav bar, read as part of the nav bar's own VoiceOver group,
 ///   reachable at any time independent of scroll position).
 struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(\.openURL) private var openURL
 
     @State private var model = PaywallViewModel()
+    @State private var openingManageSubscriptions = false
+
+    let mode: PaywallPresentationMode
+
+    init(mode: PaywallPresentationMode = .upgrade) {
+        self.mode = mode
+    }
 
     var body: some View {
         NavigationStack {
@@ -122,6 +129,9 @@ struct PaywallView: View {
                 if let outcome = model.outcome {
                     outcomeBanner(outcome)
                 }
+                if model.showsLifetimeCancellationGuidance {
+                    lifetimeCancellationGuidance
+                }
                 productsSection
                 legalFooter
             }
@@ -140,7 +150,9 @@ struct PaywallView: View {
                 .accessibilityAddTraits(.isHeader)
             // Plain-language, honest description of what Plus unlocks. No
             // "supercharge"/"unlock your potential" language — just what it does.
-            Text("Follow unlimited podcasts. The free plan is capped at \(PodcastCapPolicy.freeTierLimit) subscriptions — Earshot Plus removes that limit.")
+            Text(mode == .changePlan
+                ? "Review your current plan and available Earshot Plus upgrades."
+                : "Follow unlimited podcasts. The free plan is capped at \(PodcastCapPolicy.freeTierLimit) subscriptions — Earshot Plus removes that limit.")
                 .font(.body)
                 .foregroundStyle(AppColor.secondaryText)
         }
@@ -151,7 +163,9 @@ struct PaywallView: View {
         switch outcome {
         case .success:
             Label {
-                Text("You're an Earshot Plus member. Thank you.")
+                Text(mode == .changePlan
+                    ? "Your Earshot Plus plan is updated. Thank you."
+                    : "You're an Earshot Plus member. Thank you.")
             } icon: {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(AppColor.played)
@@ -180,27 +194,35 @@ struct PaywallView: View {
     }
 
     private var productsSection: some View {
-        // Fixed order — Monthly, Yearly, Lifetime — regardless of which one
-        // (if any) earns the "Best value" badge. The badge is the only
-        // differentiation; ordering by shortest-to-longest commitment is a
-        // deliberate, neutral judgment call, not a ranking by "best."
         VStack(spacing: Spacing.md) {
-            if let monthly = model.monthlyDisplay {
-                productCard(monthly, badge: nil)
+            ForEach(PaywallLogic.tierOptions(
+                mode: mode,
+                currentProduct: entitlements.activeProduct
+            )) { option in
+                if let display = model.display(for: option.product) {
+                    switch option.status {
+                    case .current:
+                        currentPlanCard(display)
+                    case .offer:
+                        productCard(
+                            display,
+                            badge: display.product == .plusYearly ? model.bestValueBadge : nil
+                        )
+                    }
+                }
             }
-            if let yearly = model.yearlyDisplay {
-                productCard(yearly, badge: model.bestValueBadge)
-            }
-            if let lifetime = model.lifetimeDisplay {
-                productCard(lifetime, badge: nil)
-            }
+            sharedLegalDisclosure
         }
     }
 
     private func productCard(_ display: PaywallProductDisplay, badge: String?) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
+        let showsSubscriberNotice = mode == .changePlan
+            && display.product == .plusLifetime
+            && entitlements.hasActiveSubscription
+
+        return VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(alignment: .firstTextBaseline) {
-                Text(display.displayName)
+                Text(PaywallLogic.decisionDisplayName(for: display))
                     .font(.title3.weight(.semibold))
                     .lineLimit(2)
                 Spacer()
@@ -208,6 +230,7 @@ struct PaywallView: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(AppColor.secondaryText)
             }
+            .accessibilityHidden(true)
             if let badge {
                 // A small factual badge — icon + text, matching the
                 // never-color-alone rule even though this isn't a state
@@ -218,45 +241,147 @@ struct PaywallView: View {
                 Label(badge, systemImage: "star.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppColor.accent)
+                    .accessibilityHidden(true)
             }
-            // Standalone, always-visible disclosure — see the type doc
-            // comment above for why this must be a separate element, not a
-            // button hint.
-            Text(display.subscriptionPeriod != nil
-                 ? PaywallLogic.subscriptionDisclosure(for: display)
-                 : PaywallLogic.lifetimeDisclosure(for: display))
-                .font(.footnote)
-                .foregroundStyle(AppColor.secondaryText)
+            if showsSubscriberNotice {
+                Text(PaywallLogic.lifetimeSubscriberNotice)
+                    .font(.footnote)
+                    .foregroundStyle(AppColor.secondaryText)
+                    // The concise equivalent lives in the button hint, so this
+                    // visible warning does not add another mandatory flick.
+                    .accessibilityHidden(true)
+            }
 
-            Button {
-                Task { await model.purchase(display, entitlements: entitlements) }
-            } label: {
-                Text(model.purchasingProduct == display.product ? "Purchasing…" : "Continue")
-                    .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
+            HStack {
+                Spacer()
+                Button {
+                    Task { await model.purchase(display, entitlements: entitlements) }
+                } label: {
+                    Text(buttonTitle(for: display))
+                        .frame(minHeight: Spacing.minTouchTarget)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.purchasingProduct != nil || model.outcome == .success)
+                // `.disabled` alone only adds the "dimmed" trait, no spoken
+                // busy indication. Swap the label while StoreKit is active.
+                .accessibilityLabel(model.purchasingProduct == display.product
+                    ? "Purchasing \(PaywallLogic.decisionDisplayName(for: display))"
+                    : PaywallLogic.tierAccessibilityLabel(for: display, badge: badge))
+                .accessibilityHint(PaywallLogic.purchaseHint(
+                    for: display,
+                    mode: mode,
+                    hasActiveSubscription: entitlements.hasActiveSubscription
+                ))
+                Spacer()
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(model.purchasingProduct != nil || model.outcome == .success)
-            // `.disabled` alone only adds the "dimmed" trait, no spoken busy
-            // indication (matches `RestorePurchasesRow`'s documented reasoning)
-            // — swap the label text itself for the busy state.
-            .accessibilityLabel(model.purchasingProduct == display.product
-                ? "Purchasing \(display.displayName)"
-                : PaywallLogic.accessibilityLabel(for: display))
-            .accessibilityHint(display.subscriptionPeriod != nil
-                ? "Starts the subscription immediately"
-                : "Completes a one-time purchase")
         }
         .padding()
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    private func currentPlanCard(_ display: PaywallProductDisplay) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(PaywallLogic.decisionDisplayName(for: display))
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(2)
+                Spacer()
+                Text(display.displayPrice)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(AppColor.secondaryText)
+            }
+            Label("Current plan", systemImage: "checkmark.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppColor.accent)
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(PaywallLogic.currentPlanAccessibilityLabel(for: display))
+    }
+
+    private var sharedLegalDisclosure: some View {
+        Text(PaywallLogic.sharedLegalDisclosure)
+            .font(.footnote)
+            .foregroundStyle(AppColor.secondaryText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Purchase terms. \(PaywallLogic.sharedLegalDisclosure)")
+    }
+
+    private var lifetimeCancellationGuidance: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Label("Subscription action needed", systemImage: "exclamationmark.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(AppColor.accent)
+                Text("Your Lifetime purchase does not cancel your subscription automatically. Cancel the subscription to avoid future charges.")
+                    .font(.body)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Subscription action needed. Your Lifetime purchase does not cancel your subscription automatically. Cancel the subscription to avoid future charges.")
+
+            Button {
+                openManageSubscriptions()
+            } label: {
+                Text(openingManageSubscriptions ? "Opening Subscriptions…" : "Manage Subscription")
+                    .frame(minHeight: Spacing.minTouchTarget)
+            }
+            .buttonStyle(.bordered)
+            .disabled(openingManageSubscriptions)
+            .accessibilityLabel(openingManageSubscriptions ? "Opening subscriptions" : "Manage Subscription")
+            .accessibilityHint("Opens Apple's subscription management")
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func buttonTitle(for display: PaywallProductDisplay) -> String {
+        if model.purchasingProduct == display.product {
+            return "Purchasing…"
+        }
+        guard mode == .changePlan else { return "Continue" }
+        switch display.product {
+        case .plusYearly: return "Upgrade to Yearly"
+        case .plusLifetime: return "Buy Lifetime"
+        case .plusMonthly, .tipSmall, .tipMedium, .tipLarge: return "Continue"
+        }
+    }
+
+    private func openManageSubscriptions() {
+        guard !openingManageSubscriptions else { return }
+        openingManageSubscriptions = true
+        Task {
+            guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive })
+            else {
+                openManageSubscriptionsFallback()
+                return
+            }
+            do {
+                try await AppStore.showManageSubscriptions(in: scene)
+                openingManageSubscriptions = false
+            } catch {
+                AppLog.monetization.error("Manage subscriptions sheet failed: \(error.localizedDescription, privacy: .public)")
+                openManageSubscriptionsFallback()
+            }
+        }
+    }
+
+    private func openManageSubscriptionsFallback() {
+        openingManageSubscriptions = false
+        guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
+        openURL(url) { accepted in
+            if !accepted {
+                AppLog.monetization.error("No application accepted the subscriptions account URL")
+                Announcer.announce("Could not open subscriptions. Try again from App Store account settings.", assertive: true)
+            }
+        }
+    }
+
     private var legalFooter: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Subscriptions renew automatically unless cancelled. Lifetime is a one-time purchase. All purchases are processed by Apple.")
-                .font(.caption)
-                .foregroundStyle(AppColor.secondaryText)
-
             HStack(spacing: Spacing.md) {
                 if let termsURL = PrivacyPolicy.termsURL {
                     Link("Terms of Use", destination: termsURL)

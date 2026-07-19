@@ -65,6 +65,26 @@ struct PaywallSubscriptionPeriod: Equatable, Sendable {
     }
 }
 
+/// Why the paywall is being presented. The standard upgrade mode shows all
+/// three purchase choices; plan change mode derives a current, non-purchasable
+/// tier plus only the valid upgrade offers from the verified entitlement.
+enum PaywallPresentationMode: Equatable, Sendable {
+    case upgrade
+    case changePlan
+}
+
+/// One product card in the paywall's StoreKit-free presentation model.
+struct PaywallTierOption: Equatable, Sendable, Identifiable {
+    enum Status: Equatable, Sendable {
+        case current
+        case offer
+    }
+
+    var id: EarshotPlusProduct { product }
+    let product: EarshotPlusProduct
+    let status: Status
+}
+
 /// The three settled, non-cancellation purchase outcomes the paywall UI
 /// renders an inline state for. Cancellation is deliberately NOT a case here
 /// — per #632's hard constraint, cancelling must be exactly as easy and
@@ -92,6 +112,66 @@ enum PaywallLogic {
     struct Announcement: Equatable, Sendable {
         let message: String
         let assertive: Bool
+    }
+
+    /// Product cards for the requested paywall state. Yearly owners are not
+    /// offered a Monthly downgrade, avoiding a delayed-change path in this
+    /// upgrade-focused surface. Lifetime is final and therefore has no offers.
+    static func tierOptions(
+        mode: PaywallPresentationMode,
+        currentProduct: EarshotPlusProduct?
+    ) -> [PaywallTierOption] {
+        switch mode {
+        case .upgrade:
+            return EarshotPlusProduct.earshotPlusProducts.map {
+                PaywallTierOption(product: $0, status: .offer)
+            }
+        case .changePlan:
+            switch currentProduct {
+            case .plusMonthly:
+                return [
+                    PaywallTierOption(product: .plusMonthly, status: .current),
+                    PaywallTierOption(product: .plusYearly, status: .offer),
+                    PaywallTierOption(product: .plusLifetime, status: .offer)
+                ]
+            case .plusYearly:
+                return [
+                    PaywallTierOption(product: .plusYearly, status: .current),
+                    PaywallTierOption(product: .plusLifetime, status: .offer)
+                ]
+            case .plusLifetime:
+                return [PaywallTierOption(product: .plusLifetime, status: .current)]
+            case .tipSmall, .tipMedium, .tipLarge, nil:
+                return []
+            }
+        }
+    }
+
+    static func hasPlanChangeOffers(currentProduct: EarshotPlusProduct?) -> Bool {
+        tierOptions(mode: .changePlan, currentProduct: currentProduct)
+            .contains { $0.status == .offer }
+    }
+
+    static func shortPlanName(for product: EarshotPlusProduct) -> String {
+        switch product {
+        case .plusMonthly: "Monthly"
+        case .plusYearly: "Yearly"
+        case .plusLifetime: "Lifetime"
+        case .tipSmall: "Small Tip"
+        case .tipMedium: "Medium Tip"
+        case .tipLarge: "Large Tip"
+        }
+    }
+
+    /// App Store Connect intentionally uses "Earshot Plus" for both
+    /// subscription display names. Append the cadence name for decision copy,
+    /// while avoiding duplication if StoreKit already supplies it.
+    static func decisionDisplayName(for display: PaywallProductDisplay) -> String {
+        let suffix = shortPlanName(for: display.product)
+        if display.displayName.lowercased().hasSuffix(suffix.lowercased()) {
+            return display.displayName
+        }
+        return "\(display.displayName) \(suffix)"
     }
 
     /// The "Best value" badge text for the yearly product, computed honestly
@@ -123,28 +203,72 @@ enum PaywallLogic {
     /// month"). The lifetime product combines name, price, and "one-time
     /// purchase" instead of a cadence.
     static func accessibilityLabel(for display: PaywallProductDisplay) -> String {
+        let name = decisionDisplayName(for: display)
         if let period = display.subscriptionPeriod {
-            return "\(display.displayName), \(display.displayPrice) \(period.spokenCadence)"
+            return "\(name), \(display.displayPrice) \(period.spokenCadence)"
         }
-        return "\(display.displayName), \(display.displayPrice), one-time purchase"
+        return "\(name), \(display.displayPrice), one-time purchase"
     }
 
-    /// Visible + spoken disclosure line for a subscription product (Monthly,
-    /// Yearly). Rendered as a standalone element that sits BEFORE the
-    /// purchase button in both layout and VoiceOver reading order — never a
-    /// button hint or a hidden/collapsed detail. This inline disclosure is
-    /// paired with the always-visible Terms and Privacy links in the paywall.
-    static func subscriptionDisclosure(for display: PaywallProductDisplay) -> String {
-        let cadence = display.subscriptionPeriod?.spokenCadence ?? "per period"
-        return "\(display.displayPrice) \(cadence). Payment is charged to your Apple ID when you confirm. Auto-renews unless cancelled at least 24 hours before the current period ends. Your Apple ID is charged for renewal within 24 hours before the current period ends. Manage or cancel in your App Store account settings."
+    /// Short decision label for one product card's single VoiceOver element.
+    /// Legal terms live in the hint and the shared disclosure after all tiers,
+    /// keeping routine flick navigation concise.
+    static func tierAccessibilityLabel(for display: PaywallProductDisplay, badge: String?) -> String {
+        var parts = [accessibilityLabel(for: display)]
+        if let badge {
+            parts.append(badge)
+        }
+        return parts.joined(separator: ". ") + "."
     }
 
-    /// Visible + spoken disclosure line for the lifetime product — states
-    /// plainly that it's a one-time purchase and deliberately avoids the
-    /// word "renew" in any form (not just "auto-renews unless cancelled"),
-    /// since no renewal language of any kind applies to a non-consumable.
-    static func lifetimeDisclosure(for display: PaywallProductDisplay) -> String {
-        "\(display.displayPrice), one-time purchase. Not a subscription — charged once, yours forever."
+    static func currentPlanAccessibilityLabel(for display: PaywallProductDisplay) -> String {
+        "\(accessibilityLabel(for: display)). Current plan."
+    }
+
+    /// One shared, visually-present and VoiceOver-focusable legal disclosure
+    /// after all tier controls. Price and cadence are deliberately absent
+    /// because every tier's decision label already speaks them.
+    static let sharedLegalDisclosure = "Payment is charged to your Apple ID when you confirm. Subscriptions auto-renew unless cancelled at least 24 hours before the current period ends. Your Apple ID is charged for renewal within 24 hours before the current period ends. Manage or cancel subscriptions in your App Store account settings. Lifetime is a one-time purchase and does not renew."
+
+    static let lifetimeSubscriberNotice = "Buying Lifetime does not cancel your current subscription. Cancel the subscription to avoid future charges."
+
+    /// A short action cue plus compressed terms. VoiceOver speaks this only
+    /// when the user has hints enabled, after the decision label pause.
+    static func purchaseHint(
+        for display: PaywallProductDisplay,
+        mode: PaywallPresentationMode,
+        hasActiveSubscription: Bool
+    ) -> String {
+        if display.product == .plusLifetime {
+            return hasActiveSubscription
+                ? "Double tap to buy once. Your subscription continues until you cancel it in App Store settings."
+                : "Double tap to buy once. No subscription or renewal."
+        }
+        if mode == .changePlan, display.product == .plusYearly {
+            return "Double tap to upgrade now. Apple applies this change immediately."
+        }
+        return "Double tap to subscribe. Auto-renews; cancel anytime in App Store settings."
+    }
+
+    static func shouldShowLifetimeCancellationGuidance(
+        purchasedProduct: EarshotPlusProduct,
+        hasActiveSubscription: Bool
+    ) -> Bool {
+        purchasedProduct == .plusLifetime && hasActiveSubscription
+    }
+
+    static func successAnnouncement(
+        for display: PaywallProductDisplay,
+        requiresSubscriptionCancellation: Bool
+    ) -> Announcement {
+        let current = "\(decisionDisplayName(for: display)) is now your current plan."
+        if requiresSubscriptionCancellation {
+            return Announcement(
+                message: "\(current) Your subscription is still active. Cancel it to avoid future charges.",
+                assertive: true
+            )
+        }
+        return Announcement(message: current, assertive: true)
     }
 
     /// The busy-state announcement fired the moment a purchase starts.

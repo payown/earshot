@@ -72,6 +72,8 @@ final class EntitlementStoreTests: XCTestCase {
 
         XCTAssertTrue(result)
         XCTAssertTrue(store.isEntitled)
+        XCTAssertEqual(store.activeProduct, .plusLifetime)
+        XCTAssertFalse(store.hasActiveSubscription)
         XCTAssertNotNil(store.lastSyncedAt)
     }
 
@@ -106,6 +108,44 @@ final class EntitlementStoreTests: XCTestCase {
         let second = EntitlementStore(source: FakeEntitlementTransactionSource())
         second.configure(context: context)
         XCTAssertTrue(second.isEntitled)
+        XCTAssertEqual(second.activeProduct, .plusYearly)
+        XCTAssertTrue(second.hasActiveSubscription)
+    }
+
+    func testPlanChangeResyncUpdatesActiveProductFromMonthlyToYearly() async {
+        let context = makeContext()
+        let source = FakeEntitlementTransactionSource(facts: [
+            EntitlementFact(product: .plusMonthly, expirationDate: .now.addingTimeInterval(3_600))
+        ])
+        let store = EntitlementStore(source: source)
+        store.configure(context: context)
+        _ = await store.resync()
+        XCTAssertEqual(store.activeProduct, .plusMonthly)
+
+        source.setFacts([
+            EntitlementFact(product: .plusYearly, expirationDate: .now.addingTimeInterval(86_400))
+        ])
+        _ = await store.resync()
+
+        XCTAssertTrue(store.isEntitled)
+        XCTAssertEqual(store.activeProduct, .plusYearly)
+        XCTAssertTrue(store.hasActiveSubscription)
+    }
+
+    func testResyncPrefersLifetimeForPresentationWhenMultipleProductsAreActive() async {
+        let context = makeContext()
+        let source = FakeEntitlementTransactionSource(facts: [
+            EntitlementFact(product: .plusMonthly, expirationDate: .now.addingTimeInterval(3_600)),
+            EntitlementFact(product: .plusLifetime)
+        ])
+        let store = EntitlementStore(source: source)
+        store.configure(context: context)
+
+        _ = await store.resync()
+
+        XCTAssertTrue(store.isEntitled)
+        XCTAssertEqual(store.activeProduct, .plusLifetime)
+        XCTAssertTrue(store.hasActiveSubscription, "subscription remains active during Lifetime overlap")
     }
 
     func testRevokedTransactionDowngradesEntitlementOnResync() async {
@@ -122,6 +162,8 @@ final class EntitlementStoreTests: XCTestCase {
 
         XCTAssertFalse(result)
         XCTAssertFalse(store.isEntitled)
+        XCTAssertNil(store.activeProduct)
+        XCTAssertFalse(store.hasActiveSubscription)
     }
 
     func testExpiredSubscriptionDowngradesEntitlementOnResync() async {
@@ -141,7 +183,7 @@ final class EntitlementStoreTests: XCTestCase {
 
     func testResyncDoesNotDeleteAnyUserDataOnRevocation() async {
         // Explicit regression guard for the issue's out-of-scope boundary:
-        // this store only ever writes the two entitlement AppSetting rows,
+        // this store only ever writes the four entitlement AppSetting rows,
         // never touches Podcast/Episode/QueueItem — cap enforcement/lapse
         // behavior belongs to #635, not here.
         let context = makeContext()
