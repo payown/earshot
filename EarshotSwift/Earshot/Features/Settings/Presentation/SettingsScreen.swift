@@ -13,24 +13,22 @@ struct SettingsScreen: View {
     var body: some View {
         Form {
             // Earshot Plus (#633, #632). "Upgrade to Earshot Plus" opens the
-            // paywall sheet; hidden once the user already has Plus, since
-            // "upgrade" no longer makes sense to show a paying member (a
-            // judgment call — nothing else in this issue specifies
-            // already-entitled Settings copy, and PaywallView itself has no
-            // "you already have this" state). "Restore Purchases" stays
-            // visible either way — it's the recovery path for a reinstall or
-            // new device, useful regardless of this session's cached
-            // entitlement state.
+            // paywall sheet; entitled members instead get a thank-you and the
+            // verified plan type. Restore remains directly reachable for both
+            // states, but is visually secondary once access is active.
             Section("Earshot Plus") {
-                if !entitlements.isEntitled {
+                if entitlements.isEntitled {
+                    EarshotPlusThankYouRow(product: entitlements.activeProduct)
+                    RestorePurchasesRow(isSecondary: true)
+                } else {
                     Button {
                         showPaywall = true
                     } label: {
                         Text("Upgrade to Earshot Plus")
                     }
                     .accessibilityHint("Unlimited podcast subscriptions, no free-tier cap")
+                    RestorePurchasesRow()
                 }
-                RestorePurchasesRow()
             }
 
             Section {
@@ -113,6 +111,36 @@ struct SettingsScreen: View {
     }
 }
 
+/// One concise status element for an active Earshot Plus entitlement. The
+/// verified product identity is presentation metadata from ``EntitlementStore``;
+/// it does not participate in access control.
+private struct EarshotPlusThankYouRow: View {
+    let product: EarshotPlusProduct?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Label("You have Earshot Plus", systemImage: "checkmark.seal.fill")
+                .font(.headline)
+                .foregroundStyle(AppColor.accent)
+            Text("Thank you for supporting accessible podcast listening!")
+            Text("Plan: \(planName)")
+                .font(.subheadline)
+                .foregroundStyle(AppColor.secondaryText)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("You have Earshot Plus. Thank you for supporting accessible podcast listening! Plan: \(planName).")
+    }
+
+    private var planName: String {
+        switch product {
+        case .plusMonthly: "Monthly"
+        case .plusYearly: "Yearly"
+        case .plusLifetime: "Lifetime"
+        case .tipSmall, .tipMedium, .tipLarge, nil: "Checking purchase details"
+        }
+    }
+}
+
 /// "Restore Purchases" action for Earshot Plus (#633). Re-syncs the current
 /// Apple ID's transaction history against StoreKit — covers a reinstall, a
 /// new device, or an entitlement that lapsed locally — and announces the
@@ -121,6 +149,7 @@ struct SettingsScreen: View {
 private struct RestorePurchasesRow: View {
     @Environment(EntitlementStore.self) private var entitlements
     @State private var isRestoring = false
+    var isSecondary = false
 
     var body: some View {
         Button {
@@ -128,11 +157,14 @@ private struct RestorePurchasesRow: View {
         } label: {
             HStack {
                 Text("Restore Purchases")
+                    .font(isSecondary ? .footnote : .body)
+                    .foregroundStyle(isSecondary ? AppColor.secondaryText : AppColor.primaryText)
                 Spacer()
                 if isRestoring {
                     ProgressView()
                 }
             }
+            .frame(minHeight: isSecondary ? Spacing.minTouchTarget : nil)
         }
         .disabled(isRestoring)
         // `.disabled` alone only adds the "dimmed" trait — VoiceOver users get

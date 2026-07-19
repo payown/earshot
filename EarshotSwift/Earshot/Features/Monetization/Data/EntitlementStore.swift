@@ -57,6 +57,11 @@ final class EntitlementStore {
     /// call) — reading it never itself talks to StoreKit.
     private(set) var isEntitled: Bool = false
 
+    /// The verified Plus product supplying the current entitlement, used only
+    /// to present Monthly, Yearly, or Lifetime in Settings. This never grants
+    /// access by itself; ``isEntitled`` remains the sole gating value.
+    private(set) var activeProduct: EarshotPlusProduct?
+
     /// The last time ``resync()`` completed, or `nil` if it has never run in
     /// this store's lifetime (persisted state may still be from a prior
     /// launch even so).
@@ -77,6 +82,14 @@ final class EntitlementStore {
         let store = AppSettingsStore(context: context)
         settings = store
         isEntitled = store.bool(SettingsKey.earshotPlusEntitled, default: false)
+        if isEntitled,
+           let rawProduct = store.rawValue(SettingsKey.earshotPlusEntitlementProduct),
+           let product = EarshotPlusProduct(rawValue: rawProduct),
+           EarshotPlusProduct.earshotPlusProducts.contains(product) {
+            activeProduct = product
+        } else {
+            activeProduct = nil
+        }
         lastSyncedAt = store.date(SettingsKey.earshotPlusEntitlementLastSynced)
     }
 
@@ -89,7 +102,8 @@ final class EntitlementStore {
     func resync() async -> Bool {
         let facts = await source.currentFacts()
         let entitled = EntitlementEngine.isEntitled(from: facts)
-        apply(entitled: entitled)
+        let activeProduct = Self.presentationProduct(from: facts)
+        apply(entitled: entitled, activeProduct: activeProduct)
         return entitled
     }
 
@@ -141,11 +155,26 @@ final class EntitlementStore {
         listenerTask = nil
     }
 
-    private func apply(entitled: Bool) {
+    private static func presentationProduct(from facts: [EntitlementFact], now: Date = .now) -> EarshotPlusProduct? {
+        // A lifetime purchase is the clearest plan to present if StoreKit ever
+        // returns it alongside a subscription; otherwise prefer the longer
+        // active subscription. This selection is display metadata only and
+        // does not participate in the grant/deny decision.
+        let priority: [EarshotPlusProduct] = [.plusLifetime, .plusYearly, .plusMonthly]
+        return priority.first { product in
+            facts.contains { fact in
+                fact.product == product && EntitlementEngine.grantsEntitlement(fact, now: now)
+            }
+        }
+    }
+
+    private func apply(entitled: Bool, activeProduct: EarshotPlusProduct?) {
         isEntitled = entitled
+        self.activeProduct = entitled ? activeProduct : nil
         let now = Date.now
         lastSyncedAt = now
         settings?.setBool(entitled, for: SettingsKey.earshotPlusEntitled)
+        settings?.setRawValue(self.activeProduct?.rawValue ?? "", for: SettingsKey.earshotPlusEntitlementProduct)
         settings?.setDate(now, for: SettingsKey.earshotPlusEntitlementLastSynced)
     }
 }
