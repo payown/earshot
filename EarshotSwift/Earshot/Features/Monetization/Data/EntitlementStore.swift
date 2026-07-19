@@ -62,6 +62,11 @@ final class EntitlementStore {
     /// access by itself; ``isEntitled`` remains the sole gating value.
     private(set) var activeProduct: EarshotPlusProduct?
 
+    /// Whether the latest verified snapshot contains an active Monthly or
+    /// Yearly fact. Advisory presentation state only: used to warn Lifetime
+    /// buyers that their separate subscription remains active.
+    private(set) var hasActiveSubscription = false
+
     /// The last time ``resync()`` completed, or `nil` if it has never run in
     /// this store's lifetime (persisted state may still be from a prior
     /// launch even so).
@@ -90,6 +95,8 @@ final class EntitlementStore {
         } else {
             activeProduct = nil
         }
+        hasActiveSubscription = isEntitled
+            && store.bool(SettingsKey.earshotPlusActiveSubscription, default: false)
         lastSyncedAt = store.date(SettingsKey.earshotPlusEntitlementLastSynced)
     }
 
@@ -103,7 +110,15 @@ final class EntitlementStore {
         let facts = await source.currentFacts()
         let entitled = EntitlementEngine.isEntitled(from: facts)
         let activeProduct = Self.presentationProduct(from: facts)
-        apply(entitled: entitled, activeProduct: activeProduct)
+        let hasActiveSubscription = facts.contains { fact in
+            (fact.product == .plusMonthly || fact.product == .plusYearly)
+                && EntitlementEngine.grantsEntitlement(fact)
+        }
+        apply(
+            entitled: entitled,
+            activeProduct: activeProduct,
+            hasActiveSubscription: hasActiveSubscription
+        )
         return entitled
     }
 
@@ -168,13 +183,19 @@ final class EntitlementStore {
         }
     }
 
-    private func apply(entitled: Bool, activeProduct: EarshotPlusProduct?) {
+    private func apply(
+        entitled: Bool,
+        activeProduct: EarshotPlusProduct?,
+        hasActiveSubscription: Bool
+    ) {
         isEntitled = entitled
         self.activeProduct = entitled ? activeProduct : nil
+        self.hasActiveSubscription = entitled && hasActiveSubscription
         let now = Date.now
         lastSyncedAt = now
         settings?.setBool(entitled, for: SettingsKey.earshotPlusEntitled)
         settings?.setRawValue(self.activeProduct?.rawValue ?? "", for: SettingsKey.earshotPlusEntitlementProduct)
+        settings?.setBool(self.hasActiveSubscription, for: SettingsKey.earshotPlusActiveSubscription)
         settings?.setDate(now, for: SettingsKey.earshotPlusEntitlementLastSynced)
     }
 }

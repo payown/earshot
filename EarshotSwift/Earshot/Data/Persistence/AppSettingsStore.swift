@@ -120,10 +120,13 @@ enum SettingsKey {
     // ``EntitlementStore``. `earshotPlusEntitled` is the flag a future paywall
     // gate (#635) reads synchronously; `earshotPlusEntitlementProduct` stores
     // which verified Plus product supplies the entitlement for presentation;
+    // `earshotPlusActiveSubscription` records whether a still-active monthly
+    // or yearly fact exists so Lifetime overlap guidance is accurate;
     // `earshotPlusEntitlementLastSynced` records when the state was last
     // recomputed, for diagnostics only.
     static let earshotPlusEntitled = "earshot_plus_entitled"
     static let earshotPlusEntitlementProduct = "earshot_plus_entitlement_product"
+    static let earshotPlusActiveSubscription = "earshot_plus_active_subscription"
     static let earshotPlusEntitlementLastSynced = "earshot_plus_entitlement_last_synced"
 
     // One-time grandfathering snapshot for the free-tier podcast cap (#635).
