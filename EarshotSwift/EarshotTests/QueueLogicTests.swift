@@ -6,6 +6,27 @@ import XCTest
 /// by reassigning positions 0..N-1 (compaction).
 final class QueueLogicTests: XCTestCase {
 
+    // MARK: grouped drag mapping
+
+    func testGroupedDragMapsForwardInsertionIndexToDownMoves() {
+        XCTAssertEqual(
+            GroupedQueueDrag.directions(from: 0, to: 3, itemCount: 3),
+            [.down, .down]
+        )
+    }
+
+    func testGroupedDragMapsBackwardInsertionIndexToUpMoves() {
+        XCTAssertEqual(
+            GroupedQueueDrag.directions(from: 2, to: 0, itemCount: 3),
+            [.up, .up]
+        )
+    }
+
+    func testGroupedDragSamePositionAndInvalidSourceAreNoOps() {
+        XCTAssertEqual(GroupedQueueDrag.directions(from: 1, to: 2, itemCount: 3), [])
+        XCTAssertEqual(GroupedQueueDrag.directions(from: 3, to: 0, itemCount: 3), [])
+    }
+
     // MARK: moveToTop
 
     func testMoveToTopMovesItemToFront() {
