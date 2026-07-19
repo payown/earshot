@@ -410,6 +410,17 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   switches. That same show also has a twenty-second jingle intro every week
   that she'd thumbed past by feel; a new per-podcast "Skip intro" setting
   does it for her now (Chapter 46)
+- A quiet week (the longest gap in a while) where nothing visible changed while
+  the app was rebuilt underneath again, this time for thread safety (the
+  Swift 6 concurrency work, distinct from the Chapter 22 SwiftUI rewrite);
+  Kashe has no word for it, just notices two small things stop happening: a
+  rare crash when she locked her phone mid-episode with the artwork up, and a
+  feed bug older than her whole time with the app that occasionally delivered a
+  show's episodes out of order (she'd been re-sorting them in her head). New
+  detail: Kashe has never let a debt go unpaid, and with Earshot Plus now
+  available she pays for the app for the first time rather than keep running on
+  Renata's nephew's work free for most of a year; she doesn't tell Renata
+  (Chapter 47)
 
 ## What you can generate
 
@@ -1544,6 +1555,34 @@ It kept happening. Earbuds to Bluetooth, Bluetooth to the windowsill speaker at 
 This build holds it through the switch. Plug in, connect, cast to the speaker, and it stays exactly how she left it.
 
 That same show still opens with twenty seconds of the same jingle every week, and she still thumbs past it by feel before the talking starts. Podcast Settings has a dial for that now too. She sets it once. The jingle just isn't there anymore, and neither is the reach for the skip button.
+
+---
+
+### Chapter 47 — Build 151
+
+*A full week with no new build passes, the longest quiet stretch in a while, while the app is quietly rebuilt underneath for thread safety; two old bugs get caught in the act, and Earshot Plus opens so the app can be supported.*
+
+**What to test:**
+
+Lock your phone mid-episode with cover art on the Lock Screen, several times across a few shows. Playback should keep going, no drop-out.
+
+Refresh a show that lists episodes with odd or missing dates. They should land in the right order every time, not occasionally scrambled.
+
+Open Settings and find Earshot Plus. You can now support the app: unlock unlimited follows, or leave a tip. Confirm the purchase flow and restore both work.
+
+After updating, confirm your subscriptions, inbox, queue, and resume points are all still there.
+
+A week went by and nothing changed. No new build, no little box appearing next to something, no toggle behaving differently than the day before. After months of small surprises, the quiet felt almost loud.
+
+She didn't know the whole thing had been taken apart and rebuilt underneath, every moving piece now made to answer to one strict foreman who won't let two of them grab the same wire at once. She'd have no word for it. She just knew the app stopped doing two small things it used to do.
+
+Locking her phone mid-episode with the artwork up used to, once in a while, drop the whole thing. Rare enough she never caught it happening, just noticed the silence and reached to restart. That stopped.
+
+The other she'd never have named. Now and then a show's episodes came in scrambled, last week's stacked on this week's, and she'd sort it in her head without thinking. A crack older than her whole time with the app, finally sealed.
+
+And one thing was new, the only new thing all week: a quiet line down in the settings, a way to actually pay for it. Renata's nephew built this, and she'd been running on his work free for most of a year, which sat wrong with a woman who has never let a debt go unpaid.
+
+She didn't tell Renata. She found the button and settled it.
 
 ---
 

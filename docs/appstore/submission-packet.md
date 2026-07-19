@@ -27,6 +27,7 @@ in the linked files so one canonical source is used for each App Store field.
 - URLs: `docs/appstore/app-store-urls.md`
 - Purchase disclosures: `docs/appstore/purchase-disclosures.md`
 - Screenshot inventory: `docs/appstore/screenshots.md`
+- App Review information: `docs/appstore/app-review-information.md`
 - Privacy Policy WordPress source:
   `docs/privacy/earshot-privacy-policy-wordpress.txt`
 - Support WordPress source: `docs/support/earshot-support-wordpress.txt`
@@ -42,6 +43,11 @@ in the linked files so one canonical source is used for each App Store field.
 - [ ] Confirm all Earshot Plus and tip products are cleared for submission
 - [ ] Enter App Review contact information and reviewer notes
 - [ ] Attach the In-App Purchases/subscriptions to version 1.0 for review
+
+Complete the purchase setup and sandbox validation before selecting the final
+build or submitting version 1.0. Listing text and screenshots may be entered and
+saved earlier, but the version must not be submitted until every product is
+ready and attached.
 
 ## Release validation remaining
 

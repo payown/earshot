@@ -14,9 +14,23 @@ by screen reader).
   `EarshotSwift/Earshot/App/Screenshots/ScreenshotFixtures.swift`.
 - **Status bar:** overridden to the standard 9:41, full battery/signal/Wi-Fi.
 
-> **iPad set still owed at submission.** The app declares iPad support, so App
-> Store Connect will also require an iPad screenshot set. Tracked on #643. Not
-> part of this pass.
+Earshot 1.0 targets iPhone only (`TARGETED_DEVICE_FAMILY = 1`), so no iPad
+screenshots are required for this version.
+
+## App Store Connect upload order
+
+Upload all six images. Use this order so the three images Apple may show on the
+installation sheet communicate the core experience first:
+
+1. `inbox.png`
+2. `nowPlaying.png`
+3. `library.png`
+4. `queue.png`
+5. `episodeList.png`
+6. `settings.png`
+
+The numbered descriptions below document the capture set's production order;
+the App Store Connect order above is the release order.
 
 ## Paywall shot deferred
 
