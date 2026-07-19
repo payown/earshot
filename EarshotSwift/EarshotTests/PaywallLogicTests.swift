@@ -107,43 +107,123 @@ final class PaywallLogicTests: XCTestCase {
     func testTierAccessibilityLabelPreservesAllMonthlyInformationInOnePhrase() {
         let label = PaywallLogic.tierAccessibilityLabel(for: monthly(), badge: nil)
 
-        XCTAssertTrue(label.hasPrefix("Earshot Plus Monthly, $2.99 per month."))
-        XCTAssertTrue(label.contains(PaywallLogic.subscriptionDisclosure(for: monthly())))
+        XCTAssertEqual(label, "Earshot Plus Monthly, $2.99 per month.")
+        XCTAssertFalse(label.lowercased().contains("auto-renew"))
+        XCTAssertFalse(label.contains("Payment is charged"))
     }
 
-    func testTierAccessibilityLabelIncludesYearlyBadgeAndDisclosure() {
+    func testTierAccessibilityLabelIncludesYearlyDecisionInfoAndBadgeOnly() {
         let badge = "Best value — about 44% off monthly"
         let label = PaywallLogic.tierAccessibilityLabel(for: yearly(), badge: badge)
 
-        XCTAssertTrue(label.contains(badge))
-        XCTAssertTrue(label.contains(PaywallLogic.subscriptionDisclosure(for: yearly())))
+        XCTAssertEqual(
+            label,
+            "Earshot Plus Yearly, $19.99 per year. Best value — about 44% off monthly."
+        )
+        XCTAssertEqual(label.components(separatedBy: "$19.99").count - 1, 1)
+        XCTAssertFalse(label.lowercased().contains("auto-renew"))
     }
 
-    func testTierAccessibilityLabelPreservesLifetimeDisclosure() {
+    func testTierAccessibilityLabelKeepsLifetimeDecisionInfoShort() {
         let label = PaywallLogic.tierAccessibilityLabel(for: lifetime(), badge: nil)
 
-        XCTAssertTrue(label.hasPrefix("Earshot Plus Lifetime, $49.99, one-time purchase."))
-        XCTAssertTrue(label.contains(PaywallLogic.lifetimeDisclosure(for: lifetime())))
+        XCTAssertEqual(label, "Earshot Plus Lifetime, $49.99, one-time purchase.")
+        XCTAssertFalse(label.lowercased().contains("auto-renew"))
     }
 
-    // MARK: disclosure copy
+    func testDecisionNameAddsPlanWhenStoreKitDisplayNameUsesSharedGroupName() {
+        let display = PaywallProductDisplay(
+            product: .plusYearly,
+            displayName: "Earshot Plus",
+            displayPrice: "$19.99",
+            price: 19.99,
+            subscriptionPeriod: PaywallSubscriptionPeriod(unit: .year, value: 1)
+        )
 
-    func testSubscriptionDisclosureIncludesPriceCadenceAutoRenewAndCancelLanguage() {
-        let disclosure = PaywallLogic.subscriptionDisclosure(for: monthly())
-        XCTAssertTrue(disclosure.contains("$2.99"))
-        XCTAssertTrue(disclosure.contains("per month"))
+        XCTAssertEqual(
+            PaywallLogic.tierAccessibilityLabel(for: display, badge: nil),
+            "Earshot Plus Yearly, $19.99 per year."
+        )
+    }
+
+    func testCurrentPlanLabelSpeaksCurrentPlan() {
+        XCTAssertEqual(
+            PaywallLogic.currentPlanAccessibilityLabel(for: monthly()),
+            "Earshot Plus Monthly, $2.99 per month. Current plan."
+        )
+    }
+
+    // MARK: plan-change options
+
+    func testMonthlyPlanChangeShowsCurrentYearlyAndLifetime() {
+        XCTAssertEqual(
+            PaywallLogic.tierOptions(mode: .changePlan, currentProduct: .plusMonthly),
+            [
+                PaywallTierOption(product: .plusMonthly, status: .current),
+                PaywallTierOption(product: .plusYearly, status: .offer),
+                PaywallTierOption(product: .plusLifetime, status: .offer)
+            ]
+        )
+    }
+
+    func testLifetimePlanChangeHasNoOffers() {
+        let options = PaywallLogic.tierOptions(mode: .changePlan, currentProduct: .plusLifetime)
+
+        XCTAssertEqual(options, [PaywallTierOption(product: .plusLifetime, status: .current)])
+        XCTAssertTrue(options.filter { $0.status == .offer }.isEmpty)
+    }
+
+    func testYearlyPlanChangeDoesNotOfferMonthlyDowngrade() {
+        XCTAssertEqual(
+            PaywallLogic.tierOptions(mode: .changePlan, currentProduct: .plusYearly),
+            [
+                PaywallTierOption(product: .plusYearly, status: .current),
+                PaywallTierOption(product: .plusLifetime, status: .offer)
+            ]
+        )
+    }
+
+    // MARK: disclosure and hints
+
+    func testSharedLegalDisclosureIsReachableWithoutRepeatingTierPrice() {
+        let disclosure = PaywallLogic.sharedLegalDisclosure
+        XCTAssertFalse(disclosure.contains("$2.99"))
+        XCTAssertFalse(disclosure.contains("per month"))
         XCTAssertTrue(disclosure.contains("Payment is charged to your Apple ID"))
-        XCTAssertTrue(disclosure.contains("Auto-renews unless cancelled at least 24 hours"))
+        XCTAssertTrue(disclosure.contains("auto-renew unless cancelled at least 24 hours"))
         XCTAssertTrue(disclosure.contains("charged for renewal within 24 hours"))
-        XCTAssertTrue(disclosure.contains("Manage or cancel in your App Store account settings"))
+        XCTAssertTrue(disclosure.contains("Manage or cancel subscriptions"))
+        XCTAssertTrue(disclosure.contains("Lifetime is a one-time purchase"))
     }
 
-    func testLifetimeDisclosureExcludesAutoRenewLanguage() {
-        let disclosure = PaywallLogic.lifetimeDisclosure(for: lifetime())
-        XCTAssertTrue(disclosure.contains("$49.99"))
-        XCTAssertTrue(disclosure.contains("one-time purchase"))
-        XCTAssertFalse(disclosure.lowercased().contains("auto-renew"), "lifetime must never claim to auto-renew")
-        XCTAssertFalse(disclosure.lowercased().contains("cancel"), "lifetime must never use subscription-cancel language")
+    func testPurchaseHintsAreShortAndContextSpecific() {
+        XCTAssertEqual(
+            PaywallLogic.purchaseHint(for: monthly(), mode: .upgrade, hasActiveSubscription: false),
+            "Double tap to subscribe. Auto-renews; cancel anytime in App Store settings."
+        )
+        XCTAssertEqual(
+            PaywallLogic.purchaseHint(for: yearly(), mode: .changePlan, hasActiveSubscription: true),
+            "Double tap to upgrade now. Apple applies this change immediately."
+        )
+        XCTAssertEqual(
+            PaywallLogic.purchaseHint(for: lifetime(), mode: .changePlan, hasActiveSubscription: true),
+            "Double tap to buy once. Your subscription continues until you cancel it in App Store settings."
+        )
+    }
+
+    func testLifetimeCancellationGuidanceRequiresLifetimeAndActiveSubscription() {
+        XCTAssertTrue(PaywallLogic.shouldShowLifetimeCancellationGuidance(
+            purchasedProduct: .plusLifetime,
+            hasActiveSubscription: true
+        ))
+        XCTAssertFalse(PaywallLogic.shouldShowLifetimeCancellationGuidance(
+            purchasedProduct: .plusLifetime,
+            hasActiveSubscription: false
+        ))
+        XCTAssertFalse(PaywallLogic.shouldShowLifetimeCancellationGuidance(
+            purchasedProduct: .plusYearly,
+            hasActiveSubscription: true
+        ))
     }
 
     // MARK: spoken cadence / approximate months

@@ -9,6 +9,7 @@ import SwiftUI
 struct SettingsScreen: View {
     @Environment(EntitlementStore.self) private var entitlements
     @State private var showPaywall = false
+    @State private var paywallMode: PaywallPresentationMode = .upgrade
 
     var body: some View {
         Form {
@@ -19,9 +20,17 @@ struct SettingsScreen: View {
             Section("Earshot Plus") {
                 if entitlements.isEntitled {
                     EarshotPlusThankYouRow(product: entitlements.activeProduct)
+                    if PaywallLogic.hasPlanChangeOffers(currentProduct: entitlements.activeProduct) {
+                        Button("Change plan") {
+                            paywallMode = .changePlan
+                            showPaywall = true
+                        }
+                        .accessibilityHint("Shows available Earshot Plus upgrades")
+                    }
                     RestorePurchasesRow(isSecondary: true)
                 } else {
                     Button {
+                        paywallMode = .upgrade
                         showPaywall = true
                     } label: {
                         Text("Upgrade to Earshot Plus")
@@ -107,7 +116,7 @@ struct SettingsScreen: View {
         }
         // Earshot Plus paywall (#632), dismissible via its own explicit Close
         // button, never drag-only.
-        .sheet(isPresented: $showPaywall) { PaywallView() }
+        .sheet(isPresented: $showPaywall) { PaywallView(mode: paywallMode) }
     }
 }
 

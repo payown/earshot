@@ -46,6 +46,9 @@ final class PaywallViewModel {
     /// the inline success/pending/failed banner. Cancellation never sets
     /// this — see ``PaywallPurchaseOutcome``'s doc comment.
     private(set) var outcome: PaywallPurchaseOutcome?
+    /// True only after a verified Lifetime purchase whose post-purchase
+    /// entitlement snapshot still contains an active subscription fact.
+    private(set) var showsLifetimeCancellationGuidance = false
 
     private var products: [EarshotPlusProduct: Product] = [:]
     private let catalog: ProductCatalogService
@@ -57,6 +60,10 @@ final class PaywallViewModel {
     var monthlyDisplay: PaywallProductDisplay? { displays.first { $0.product == .plusMonthly } }
     var yearlyDisplay: PaywallProductDisplay? { displays.first { $0.product == .plusYearly } }
     var lifetimeDisplay: PaywallProductDisplay? { displays.first { $0.product == .plusLifetime } }
+
+    func display(for product: EarshotPlusProduct) -> PaywallProductDisplay? {
+        displays.first { $0.product == product }
+    }
 
     /// The "Best value" badge for the yearly product, or `nil` if it doesn't
     /// honestly earn one right now (see ``PaywallLogic/bestValueBadge``).
@@ -97,7 +104,10 @@ final class PaywallViewModel {
         guard purchasingProduct == nil, let product = products[display.product] else { return }
         purchasingProduct = display.product
         outcome = nil
-        speak(PaywallLogic.inProgressAnnouncement(displayName: display.displayName))
+        showsLifetimeCancellationGuidance = false
+        speak(PaywallLogic.inProgressAnnouncement(
+            displayName: PaywallLogic.decisionDisplayName(for: display)
+        ))
 
         do {
             let result = try await product.purchase()
@@ -127,9 +137,18 @@ final class PaywallViewModel {
                 // method returns, instead of racing the listener's timing.
                 await transaction.finish()
                 _ = await entitlements.resync()
+                let requiresSubscriptionCancellation =
+                    PaywallLogic.shouldShowLifetimeCancellationGuidance(
+                        purchasedProduct: display.product,
+                        hasActiveSubscription: entitlements.hasActiveSubscription
+                    )
                 purchasingProduct = nil
                 outcome = .success
-                speak(PaywallLogic.announcement(for: .success))
+                showsLifetimeCancellationGuidance = requiresSubscriptionCancellation
+                speak(PaywallLogic.successAnnouncement(
+                    for: display,
+                    requiresSubscriptionCancellation: requiresSubscriptionCancellation
+                ))
             case .unverified(_, let error):
                 // Mirrors `StoreKitEntitlementSource`'s conservative handling:
                 // an unverified transaction is never finished here and never
