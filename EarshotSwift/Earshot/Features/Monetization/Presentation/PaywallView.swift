@@ -155,6 +155,17 @@ struct PaywallView: View {
                 : "Follow unlimited podcasts. The free plan is capped at \(PodcastCapPolicy.freeTierLimit) subscriptions — Earshot Plus removes that limit.")
                 .font(.body)
                 .foregroundStyle(AppColor.secondaryText)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                ForEach(PaywallLogic.visibleBenefits, id: \.self) { benefit in
+                    Label(benefit, systemImage: "checkmark.circle.fill")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AppColor.primaryText)
+                }
+            }
+            // The existing subtitle already carries the benefit in upgrade mode,
+            // and plan-change VoiceOver users already hear the tier decision
+            // labels. This row is the missing visual layer, not another stop.
+            .accessibilityHidden(true)
         }
     }
 
@@ -258,9 +269,13 @@ struct PaywallView: View {
                     Task { await model.purchase(display, entitlements: entitlements) }
                 } label: {
                     Text(buttonTitle(for: display))
-                        .frame(minHeight: Spacing.minTouchTarget)
                 }
                 .buttonStyle(.borderedProminent)
+                // Match the intrinsic visual height used by the app's other
+                // primary bordered buttons. The transparent outer region keeps
+                // the full 44-point target without inflating the blue chrome.
+                .frame(minHeight: Spacing.minTouchTarget)
+                .contentShape(Rectangle())
                 .disabled(model.purchasingProduct != nil || model.outcome == .success)
                 // `.disabled` alone only adds the "dimmed" trait, no spoken
                 // busy indication. Swap the label while StoreKit is active.
