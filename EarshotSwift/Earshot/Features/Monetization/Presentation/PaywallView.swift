@@ -20,11 +20,11 @@ import SwiftUI
 /// size, color, or prominence manipulation of the other two options. Monthly
 /// is never smaller, muted, or buried.
 ///
-/// Price and subscription terms are a standalone, always-visible `Text`
-/// element positioned BEFORE each purchase button in both layout and
-/// VoiceOver reading order — never a button hint, never gated behind a tap
-/// or a `DisclosureGroup`. See ``PaywallLogic/subscriptionDisclosure(for:)``
-/// and ``PaywallLogic/lifetimeDisclosure(for:)``.
+/// Price and subscription terms remain always-visible `Text` positioned
+/// before each Continue button. Semantically, every card is one Button: the
+/// supplementary visual text is hidden from the accessibility tree and all
+/// of its information is preserved in that button's combined label. See
+/// ``PaywallLogic/tierAccessibilityLabel(for:badge:)``.
 ///
 /// Dismissal (the top-leading "Close" button) works identically before,
 /// during, and after a purchase attempt — there is no guilt-tripping
@@ -38,9 +38,8 @@ import SwiftUI
 /// `accessibilitySortPriority` overrides needed since the default List/VStack
 /// order already produces this):
 ///   heading ("Earshot Plus") → subtitle → [outcome banner, if a purchase has
-///   settled] → Monthly card (name+price → disclosure → purchase button with
-///   its own combined label) → Yearly card (same shape, badge included in the
-///   name+price line) → Lifetime card (same shape) → footer note → Close
+///   settled] → Monthly card button → Yearly card button → Lifetime card
+///   button → footer note → Close
 ///   button (nav bar, read as part of the nav bar's own VoiceOver group,
 ///   reachable at any time independent of scroll position).
 struct PaywallView: View {
@@ -208,6 +207,7 @@ struct PaywallView: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(AppColor.secondaryText)
             }
+            .accessibilityHidden(true)
             if let badge {
                 // A small factual badge — icon + text, matching the
                 // never-color-alone rule even though this isn't a state
@@ -218,31 +218,33 @@ struct PaywallView: View {
                 Label(badge, systemImage: "star.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppColor.accent)
+                    .accessibilityHidden(true)
             }
-            // Standalone, always-visible disclosure — see the type doc
-            // comment above for why this must be a separate element, not a
-            // button hint.
+            // Always-visible disclosure. Its information is repeated in the
+            // one combined Button label below, so this visual copy must not
+            // become a second VoiceOver stop.
             Text(display.subscriptionPeriod != nil
                  ? PaywallLogic.subscriptionDisclosure(for: display)
                  : PaywallLogic.lifetimeDisclosure(for: display))
                 .font(.footnote)
                 .foregroundStyle(AppColor.secondaryText)
+                .accessibilityHidden(true)
 
             Button {
                 Task { await model.purchase(display, entitlements: entitlements) }
             } label: {
                 Text(model.purchasingProduct == display.product ? "Purchasing…" : "Continue")
+                    .font(.headline)
                     .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
             .disabled(model.purchasingProduct != nil || model.outcome == .success)
             // `.disabled` alone only adds the "dimmed" trait, no spoken busy
             // indication (matches `RestorePurchasesRow`'s documented reasoning)
             // — swap the label text itself for the busy state.
             .accessibilityLabel(model.purchasingProduct == display.product
                 ? "Purchasing \(display.displayName)"
-                : PaywallLogic.accessibilityLabel(for: display))
+                : PaywallLogic.tierAccessibilityLabel(for: display, badge: badge))
             .accessibilityHint(display.subscriptionPeriod != nil
                 ? "Starts the subscription immediately"
                 : "Completes a one-time purchase")

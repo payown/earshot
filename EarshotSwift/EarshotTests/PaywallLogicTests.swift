@@ -104,6 +104,28 @@ final class PaywallLogicTests: XCTestCase {
         )
     }
 
+    func testTierAccessibilityLabelPreservesAllMonthlyInformationInOnePhrase() {
+        let label = PaywallLogic.tierAccessibilityLabel(for: monthly(), badge: nil)
+
+        XCTAssertTrue(label.hasPrefix("Earshot Plus Monthly, $2.99 per month."))
+        XCTAssertTrue(label.contains(PaywallLogic.subscriptionDisclosure(for: monthly())))
+    }
+
+    func testTierAccessibilityLabelIncludesYearlyBadgeAndDisclosure() {
+        let badge = "Best value — about 44% off monthly"
+        let label = PaywallLogic.tierAccessibilityLabel(for: yearly(), badge: badge)
+
+        XCTAssertTrue(label.contains(badge))
+        XCTAssertTrue(label.contains(PaywallLogic.subscriptionDisclosure(for: yearly())))
+    }
+
+    func testTierAccessibilityLabelPreservesLifetimeDisclosure() {
+        let label = PaywallLogic.tierAccessibilityLabel(for: lifetime(), badge: nil)
+
+        XCTAssertTrue(label.hasPrefix("Earshot Plus Lifetime, $49.99, one-time purchase."))
+        XCTAssertTrue(label.contains(PaywallLogic.lifetimeDisclosure(for: lifetime())))
+    }
+
     // MARK: disclosure copy
 
     func testSubscriptionDisclosureIncludesPriceCadenceAutoRenewAndCancelLanguage() {

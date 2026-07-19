@@ -129,11 +129,26 @@ enum PaywallLogic {
         return "\(display.displayName), \(display.displayPrice), one-time purchase"
     }
 
+    /// The complete label for one product card's single VoiceOver element.
+    /// All visible name, price, cadence, badge, and purchase-term text remains
+    /// spoken, but the user no longer has to flick through each visual text
+    /// fragment before reaching the purchase action.
+    static func tierAccessibilityLabel(for display: PaywallProductDisplay, badge: String?) -> String {
+        var parts = [accessibilityLabel(for: display)]
+        if let badge {
+            parts.append(badge)
+        }
+        parts.append(display.subscriptionPeriod != nil
+            ? subscriptionDisclosure(for: display)
+            : lifetimeDisclosure(for: display))
+        return parts.joined(separator: ". ")
+    }
+
     /// Visible + spoken disclosure line for a subscription product (Monthly,
-    /// Yearly). Rendered as a standalone element that sits BEFORE the
-    /// purchase button in both layout and VoiceOver reading order — never a
-    /// button hint or a hidden/collapsed detail. This inline disclosure is
-    /// paired with the always-visible Terms and Privacy links in the paywall.
+    /// Yearly). It stays visually present before Continue and is included in
+    /// the card's single combined VoiceOver label rather than becoming a
+    /// separate focus stop. This inline disclosure is paired with the
+    /// always-visible Terms and Privacy links in the paywall.
     static func subscriptionDisclosure(for display: PaywallProductDisplay) -> String {
         let cadence = display.subscriptionPeriod?.spokenCadence ?? "per period"
         return "\(display.displayPrice) \(cadence). Payment is charged to your Apple ID when you confirm. Auto-renews unless cancelled at least 24 hours before the current period ends. Your Apple ID is charged for renewal within 24 hours before the current period ends. Manage or cancel in your App Store account settings."
