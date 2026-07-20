@@ -356,4 +356,95 @@ enum PlaybackLogic {
         let target = duration / targetScrubberFlicks
         return min(max(target, minScrubberStepSeconds), maxScrubberStepSeconds)
     }
+
+    // MARK: Remote command / lock-screen state (Bluetooth pause fix)
+
+    /// The action a single play/pause toggle should take.
+    enum RemoteToggleAction: Equatable {
+        case pause
+        case resume
+    }
+
+    /// Decides whether a `togglePlayPauseCommand` (the command single-button
+    /// Bluetooth earbuds send — Bose Ultra Open, Shokz OpenFit) should pause or
+    /// resume.
+    ///
+    /// The decision is made from the user's PLAYBACK INTENT and the player's real
+    /// transport state, never from ``PlayerService``'s `isPlaying` display flag
+    /// alone. That flag has many mutation sites and nothing syncs it from the
+    /// live player, so it can read stale-`false` while audio is actually
+    /// rendering. When a toggle handler trusted that stale flag it resumed
+    /// (a no-op — already playing) instead of pausing, so the first earbud press
+    /// did nothing and only a second press paused (the Shokz two-press symptom).
+    ///
+    /// Pause whenever the user intends playback OR the player is actively playing;
+    /// resume only when we are genuinely stopped. `intendsToPlay` deliberately
+    /// dominates so that a press mid-buffer (`.waitingToPlayAtSpecifiedRate`,
+    /// where `playerIsPlaying` is still false) still pauses rather than issuing a
+    /// redundant resume.
+    ///
+    /// - Parameters:
+    ///   - intendsToPlay: The user's standing intent to play — set on play/resume,
+    ///     cleared on pause/stop/finish. Survives buffering and stalls.
+    ///   - playerIsPlaying: `true` when `AVPlayer.timeControlStatus == .playing`.
+    static func remoteToggleAction(
+        intendsToPlay: Bool,
+        playerIsPlaying: Bool
+    ) -> RemoteToggleAction {
+        (intendsToPlay || playerIsPlaying) ? .pause : .resume
+    }
+
+    /// The playback rate to publish to `MPNowPlayingInfoPropertyPlaybackRate`.
+    ///
+    /// Derived from the user's intent and the INTENDED effective rate, not the
+    /// live `AVPlayer.rate`. With `automaticallyWaitsToMinimizeStalling` on,
+    /// `resume()` reports now-playing while the player is still in
+    /// `.waitingToPlayAtSpecifiedRate`, where `AVPlayer.rate` can read 0 — which
+    /// would advertise "paused" to the system while audio is starting. Bluetooth/
+    /// AVRCP accessories that mirror the system's play state (Bose Ultra Open)
+    /// then believe playback is paused and send PLAY on a button press, so the
+    /// press never pauses. Reporting the intended rate keeps that accessory-side
+    /// state model correct.
+    ///
+    /// Returns 0 exactly when the user is not intending playback (paused/stopped),
+    /// the fast-forward scan rate while a hold-to-scan is active, otherwise the
+    /// effective (per-podcast or global) rate.
+    ///
+    /// - Parameters:
+    ///   - intendsToPlay: The user's standing intent to play.
+    ///   - effectiveRate: The per-podcast-or-global speed for the current episode.
+    ///   - isFastForwarding: Whether a hold-to-fast-forward scan is active.
+    ///   - fastForwardRate: The scan rate to report while fast-forwarding.
+    static func nowPlayingRate(
+        intendsToPlay: Bool,
+        effectiveRate: Double,
+        isFastForwarding: Bool,
+        fastForwardRate: Double
+    ) -> Double {
+        guard intendsToPlay else { return 0 }
+        return isFastForwarding ? fastForwardRate : effectiveRate
+    }
+
+    /// Whether `PlayerService` should flip its `isPlaying` display flag to `true`
+    /// in response to a `timeControlStatus` change.
+    ///
+    /// Closes the drift where the player reaches `.playing` without an explicit
+    /// resume having set the flag — most notably automatic stall recovery, which
+    /// re-issues `player.play()` but never touches `isPlaying`. Only flips when
+    /// the player is actually playing AND the user still intends playback (so a
+    /// brief post-pause `.playing` blip can't revive a paused UI), and only when
+    /// the flag is currently `false` (so callers can skip a redundant now-playing
+    /// rewrite).
+    ///
+    /// - Parameters:
+    ///   - playerIsPlaying: `true` when `AVPlayer.timeControlStatus == .playing`.
+    ///   - intendsToPlay: The user's standing intent to play.
+    ///   - currentlyMarkedPlaying: The present value of `isPlaying`.
+    static func shouldMarkPlayingOnTransition(
+        playerIsPlaying: Bool,
+        intendsToPlay: Bool,
+        currentlyMarkedPlaying: Bool
+    ) -> Bool {
+        playerIsPlaying && intendsToPlay && !currentlyMarkedPlaying
+    }
 }

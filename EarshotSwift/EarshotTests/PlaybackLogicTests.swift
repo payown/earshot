@@ -609,4 +609,140 @@ final class PlaybackLogicTests: XCTestCase {
             )
         }
     }
+
+    // MARK: Remote toggle action (Bluetooth pause fix)
+
+    func testTogglePausesWhenActivelyPlaying() {
+        XCTAssertEqual(
+            PlaybackLogic.remoteToggleAction(intendsToPlay: true, playerIsPlaying: true),
+            .pause
+        )
+    }
+
+    func testToggleResumesWhenGenuinelyStopped() {
+        XCTAssertEqual(
+            PlaybackLogic.remoteToggleAction(intendsToPlay: false, playerIsPlaying: false),
+            .resume
+        )
+    }
+
+    func testTogglePausesFromIntentEvenWhenPlayerFlagIsStaleFalse() {
+        // The Shokz two-press / Bose "pause does nothing" case: audio is intended
+        // (and rendering) but the live transport flag reads false, e.g. still in
+        // .waitingToPlayAtSpecifiedRate. A single press must still pause.
+        XCTAssertEqual(
+            PlaybackLogic.remoteToggleAction(intendsToPlay: true, playerIsPlaying: false),
+            .pause
+        )
+    }
+
+    func testTogglePausesWhenPlayingEvenIfIntentFlagLags() {
+        // Defensive symmetry: if the player is demonstrably playing, pause,
+        // regardless of the intent flag.
+        XCTAssertEqual(
+            PlaybackLogic.remoteToggleAction(intendsToPlay: false, playerIsPlaying: true),
+            .pause
+        )
+    }
+
+    // MARK: Now-playing reported rate (Bluetooth pause fix)
+
+    func testNowPlayingRateIsZeroWhenNotIntendingPlayback() {
+        XCTAssertEqual(
+            PlaybackLogic.nowPlayingRate(
+                intendsToPlay: false,
+                effectiveRate: 1.5,
+                isFastForwarding: false,
+                fastForwardRate: 4.0
+            ),
+            0
+        )
+    }
+
+    func testNowPlayingRateReportsEffectiveRateWhilePlaying() {
+        // Reports the INTENDED rate even mid-buffer (when live player.rate is 0),
+        // so accessories mirroring system play state don't believe we're paused.
+        XCTAssertEqual(
+            PlaybackLogic.nowPlayingRate(
+                intendsToPlay: true,
+                effectiveRate: 1.5,
+                isFastForwarding: false,
+                fastForwardRate: 4.0
+            ),
+            1.5
+        )
+    }
+
+    func testNowPlayingRateReportsFastForwardScanRate() {
+        XCTAssertEqual(
+            PlaybackLogic.nowPlayingRate(
+                intendsToPlay: true,
+                effectiveRate: 1.5,
+                isFastForwarding: true,
+                fastForwardRate: 4.0
+            ),
+            4.0
+        )
+    }
+
+    func testNowPlayingRateStaysZeroWhenPausedDuringFastForwardFlag() {
+        // Intent gate wins: a stale fast-forward flag can't report motion once the
+        // user has paused.
+        XCTAssertEqual(
+            PlaybackLogic.nowPlayingRate(
+                intendsToPlay: false,
+                effectiveRate: 1.5,
+                isFastForwarding: true,
+                fastForwardRate: 4.0
+            ),
+            0
+        )
+    }
+
+    // MARK: isPlaying sync on timeControlStatus transition (stall-recovery drift)
+
+    func testMarksPlayingWhenPlayerReachesPlayingWhileFlagIsStale() {
+        // Stall recovery re-issues play() without setting isPlaying; the transition
+        // to .playing while the user still intends playback must flip the flag.
+        XCTAssertTrue(
+            PlaybackLogic.shouldMarkPlayingOnTransition(
+                playerIsPlaying: true,
+                intendsToPlay: true,
+                currentlyMarkedPlaying: false
+            )
+        )
+    }
+
+    func testDoesNotReMarkPlayingWhenFlagAlreadyTrue() {
+        // Avoids a redundant now-playing rewrite when nothing changed.
+        XCTAssertFalse(
+            PlaybackLogic.shouldMarkPlayingOnTransition(
+                playerIsPlaying: true,
+                intendsToPlay: true,
+                currentlyMarkedPlaying: true
+            )
+        )
+    }
+
+    func testDoesNotMarkPlayingOnPostPausePlayingBlipWithoutIntent() {
+        // A momentary .playing report after the user paused must not revive the UI.
+        XCTAssertFalse(
+            PlaybackLogic.shouldMarkPlayingOnTransition(
+                playerIsPlaying: true,
+                intendsToPlay: false,
+                currentlyMarkedPlaying: false
+            )
+        )
+    }
+
+    func testDoesNotMarkPlayingWhenPlayerNotYetPlaying() {
+        // Still buffering (.waitingToPlayAtSpecifiedRate): don't claim .playing.
+        XCTAssertFalse(
+            PlaybackLogic.shouldMarkPlayingOnTransition(
+                playerIsPlaying: false,
+                intendsToPlay: true,
+                currentlyMarkedPlaying: false
+            )
+        )
+    }
 }

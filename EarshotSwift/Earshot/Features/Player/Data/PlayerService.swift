@@ -529,7 +529,19 @@ final class PlayerService {
     }
 
     func togglePlayPause() {
-        isPlaying ? pause() : resume()
+        // Decide from playback intent + the live transport, never the `isPlaying`
+        // display flag alone: single-button Bluetooth earbuds send this command,
+        // and a stale-`false` flag made the first press resume (a no-op) instead
+        // of pause (Shokz two-press / Bose "pause does nothing"). See
+        // `PlaybackLogic.remoteToggleAction`.
+        let action = PlaybackLogic.remoteToggleAction(
+            intendsToPlay: intendsToPlay,
+            playerIsPlaying: player.timeControlStatus == .playing
+        )
+        switch action {
+        case .pause: pause()
+        case .resume: resume()
+        }
     }
 
     func resume() {
@@ -681,6 +693,20 @@ final class PlayerService {
     /// Current effective playback rate (per-podcast override or global). Readable
     /// by the UI to display e.g. "1.5×".
     var effectiveRate: Double { currentEffectiveRate }
+
+    /// The rate to publish to `MPNowPlayingInfoPropertyPlaybackRate`. Derived from
+    /// playback intent and the intended effective rate — NOT the live
+    /// `player.rate`, which reads 0 mid-buffer and would falsely advertise
+    /// "paused" to Bluetooth/AVRCP accessories that mirror the system's play state
+    /// (Bose Ultra Open). See `PlaybackLogic.nowPlayingRate`.
+    private var reportedNowPlayingRate: Double {
+        PlaybackLogic.nowPlayingRate(
+            intendsToPlay: intendsToPlay,
+            effectiveRate: currentEffectiveRate,
+            isFastForwarding: isFastForwarding,
+            fastForwardRate: ChapterSkipLogic.fastForwardRate
+        )
+    }
 
     /// The AVPlayer's `defaultRate`, exposed only so tests can assert it never goes
     /// stale relative to ``effectiveRate`` (#609). Not for UI use -- read
@@ -1786,6 +1812,20 @@ final class PlayerService {
             let reason = player.reasonForWaitingToPlay?.rawValue ?? "unknown"
             AppLog.player.info("Player waiting to play (reason: \(reason, privacy: .public))")
         }
+        // Sync the display flag when the player actually reaches `.playing`
+        // without an explicit resume having set it — most notably automatic stall
+        // recovery, which re-issues `player.play()` but never touches `isPlaying`.
+        // Left unsynced, the flag reads stale-`false` while audio plays, which
+        // feeds the toggle/now-playing-rate drift the Bluetooth pause fix
+        // addresses. `intendsToPlay` gates out a brief post-pause `.playing` blip.
+        if PlaybackLogic.shouldMarkPlayingOnTransition(
+            playerIsPlaying: player.timeControlStatus == .playing,
+            intendsToPlay: intendsToPlay,
+            currentlyMarkedPlaying: isPlaying
+        ) {
+            isPlaying = true
+            updateNowPlayingInfo()
+        }
         attemptStallRecovery()
     }
 
@@ -1836,7 +1876,7 @@ final class PlayerService {
             info[MPMediaItemPropertyPlaybackDuration] = durationSeconds
         }
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentPositionSeconds
-        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? player.rate : 0
+        info[MPNowPlayingInfoPropertyPlaybackRate] = reportedNowPlayingRate
         // Preserve artwork that was already set by a prior fetch so it isn't
         // cleared by this synchronous update. The async artwork path will
         // overwrite it (or set it for the first time) when the image arrives.
@@ -1925,7 +1965,7 @@ final class PlayerService {
     private func updateNowPlayingElapsed() {
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentPositionSeconds
-        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? player.rate : 0
+        info[MPNowPlayingInfoPropertyPlaybackRate] = reportedNowPlayingRate
         if durationSeconds > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = durationSeconds
         }
@@ -1941,16 +1981,19 @@ final class PlayerService {
 
         center.playCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
+            guard self.currentEpisode != nil else { return .noSuchContent }
             self.resume()
             return .success
         }
         center.pauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
+            guard self.currentEpisode != nil else { return .noSuchContent }
             self.pause()
             return .success
         }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
+            guard self.currentEpisode != nil else { return .noSuchContent }
             self.togglePlayPause()
             return .success
         }
