@@ -21,6 +21,9 @@ struct QueueGroup: Identifiable {
 /// ``QueueLogic`` never reason about the raw position integers.
 @MainActor
 final class QueueRepository {
+    /// Freshness window used when a podcast has no explicit queue age limit.
+    static let autoQueueOptInDefaultAgeLimitDays = 7
+
     private let context: ModelContext
 
     init(context: ModelContext) {
@@ -61,6 +64,54 @@ final class QueueRepository {
     }
 
     // MARK: Adding (status -> inQueue)
+
+    /// Applies an auto-queue setting change. A false -> true transition may add
+    /// exactly the podcast's newest existing episode so an active show takes
+    /// effect immediately; every other transition only updates the setting.
+    ///
+    /// The latest episode must be dated, non-future, inside the podcast's queue
+    /// age limit (or the seven-day default), and still genuinely untriaged. A
+    /// played, dismissed, previously expired/skipped, or already-queued latest
+    /// episode blocks enrollment rather than falling back into deeper backlog.
+    @discardableResult
+    func setAutoQueue(_ enabled: Bool, for podcast: Podcast, now: Date = .now) -> Bool {
+        let wasEnabled = podcast.autoQueue
+        podcast.autoQueue = enabled
+        guard enabled, !wasEnabled else { return false }
+
+        let podcastID = podcast.persistentModelID
+        var descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.podcast?.persistentModelID == podcastID },
+            sortBy: [
+                SortDescriptor(\.pubDate, order: .reverse),
+                SortDescriptor(\.createdAt, order: .reverse),
+            ]
+        )
+        descriptor.fetchLimit = 1
+
+        guard let episode = (try? context.fetch(descriptor))?.first,
+              let pubDate = episode.pubDate,
+              pubDate <= now
+        else { return false }
+
+        let ageLimitDays = max(
+            0,
+            podcast.queueAgeLimitDays ?? Self.autoQueueOptInDefaultAgeLimitDays
+        )
+        let cutoff = now.addingTimeInterval(-Double(ageLimitDays) * 86_400)
+        guard pubDate >= cutoff,
+              episode.status == .newEpisode,
+              !episode.inboxDismissed,
+              episode.recentlyExpired == nil,
+              episode.queueItem == nil
+        else { return false }
+
+        // Match refresh-time auto-queue: once enrolled, the episode must not
+        // resurface in Inbox if it later leaves the queue.
+        episode.inboxDismissed = true
+        add(episode)
+        return true
+    }
 
     /// Appends `episode` to the end. Idempotent: an already-queued episode is
     /// left untouched.

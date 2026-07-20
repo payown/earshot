@@ -25,6 +25,88 @@ final class QueueRepositoryTests: XCTestCase {
         repo.queue().map(\.title)
     }
 
+    // MARK: auto-queue opt-in enrollment
+
+    func testAutoQueueOptInQueuesOnlyLatestRecentEpisodeUsingSevenDayDefault() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "A")
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let older = makeEpisode(ctx, "older", podcast: podcast)
+        older.pubDate = now.addingTimeInterval(-2 * 86_400)
+        let latest = makeEpisode(ctx, "latest", podcast: podcast)
+        latest.pubDate = now.addingTimeInterval(-86_400)
+        try ctx.save()
+
+        let repo = QueueRepository(context: ctx)
+        XCTAssertTrue(repo.setAutoQueue(true, for: podcast, now: now))
+
+        XCTAssertTrue(podcast.autoQueue)
+        XCTAssertEqual(repo.queue().map(\.guid), ["latest"])
+        XCTAssertEqual(older.status, .newEpisode, "opt-in must not enroll deeper backlog")
+        XCTAssertTrue(latest.inboxDismissed, "auto-queued episodes stay out of Inbox")
+    }
+
+    func testAutoQueueOptInRejectsLatestEpisodeOutsidePodcastAgeLimit() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "A")
+        podcast.queueAgeLimitDays = 1
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let stale = makeEpisode(ctx, "stale", podcast: podcast)
+        stale.pubDate = now.addingTimeInterval(-2 * 86_400)
+        try ctx.save()
+
+        let repo = QueueRepository(context: ctx)
+        XCTAssertFalse(repo.setAutoQueue(true, for: podcast, now: now))
+
+        XCTAssertTrue(podcast.autoQueue, "the setting still turns on when nothing qualifies")
+        XCTAssertTrue(repo.queue().isEmpty)
+    }
+
+    func testAutoQueueOptInRejectsPlayedDismissedAndExpiredLatestEpisodes() throws {
+        let ctx = TestStore.freshContext()
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+
+        let playedPodcast = makePodcast(ctx, "Played")
+        let played = makeEpisode(ctx, "played", podcast: playedPodcast)
+        played.pubDate = now.addingTimeInterval(-86_400)
+        played.isPlayed = true
+
+        let dismissedPodcast = makePodcast(ctx, "Dismissed")
+        let dismissed = makeEpisode(ctx, "dismissed", podcast: dismissedPodcast)
+        dismissed.pubDate = now.addingTimeInterval(-86_400)
+        dismissed.inboxDismissed = true
+
+        let expiredPodcast = makePodcast(ctx, "Expired")
+        let expired = makeEpisode(ctx, "expired", podcast: expiredPodcast)
+        expired.pubDate = now.addingTimeInterval(-86_400)
+        expired.status = .expired
+        ctx.insert(RecentlyExpired(episode: expired, expiredAt: now))
+        try ctx.save()
+
+        let repo = QueueRepository(context: ctx)
+        XCTAssertFalse(repo.setAutoQueue(true, for: playedPodcast, now: now))
+        XCTAssertFalse(repo.setAutoQueue(true, for: dismissedPodcast, now: now))
+        XCTAssertFalse(repo.setAutoQueue(true, for: expiredPodcast, now: now))
+        XCTAssertTrue(repo.queue().isEmpty)
+    }
+
+    func testDisablingAndReenablingAutoQueueDoesNotDuplicateLatestEpisode() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "A")
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let latest = makeEpisode(ctx, "latest", podcast: podcast)
+        latest.pubDate = now.addingTimeInterval(-86_400)
+        try ctx.save()
+
+        let repo = QueueRepository(context: ctx)
+        XCTAssertTrue(repo.setAutoQueue(true, for: podcast, now: now))
+        XCTAssertFalse(repo.setAutoQueue(false, for: podcast, now: now))
+        XCTAssertFalse(repo.setAutoQueue(true, for: podcast, now: now))
+
+        XCTAssertEqual(repo.queue().map(\.guid), ["latest"])
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QueueItem>()), 1)
+    }
+
     // MARK: displayedCount (tab badge reducer, #491)
 
     func testDisplayedCountMatchesQueuedEpisodes() {

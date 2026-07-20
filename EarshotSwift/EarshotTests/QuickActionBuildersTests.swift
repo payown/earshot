@@ -670,6 +670,32 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Turn off auto-queue", "Turn on notifications"])
     }
 
+    func testPodcastAutoQueueOptInActionQueuesLatestRecentEpisode() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/a.xml", title: "Show")
+        ctx.insert(podcast)
+        let episode = Episode(
+            guid: "latest",
+            title: "Latest",
+            audioURL: "https://x/latest.mp3",
+            pubDate: Date().addingTimeInterval(-86_400)
+        )
+        episode.podcast = podcast
+        ctx.insert(episode)
+        try ctx.save()
+
+        let items = buildPodcastActions(
+            podcast: podcast,
+            order: [.toggleAutoQueue],
+            context: ctx,
+            onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+        )
+        items.first?.run()
+
+        XCTAssertTrue(podcast.autoQueue)
+        XCTAssertEqual(QueueRepository(context: ctx).queue().map(\.guid), ["latest"])
+    }
+
     // MARK: #668 — opt-in inbox inclusion toggle
 
     func testDefaultPodcastActionsIncludesToggleInboxInclude() {

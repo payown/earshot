@@ -145,7 +145,7 @@ struct PodcastSettingsView: View {
 
     private var queueSection: some View {
         Section {
-            Toggle("Add new episodes to queue", isOn: $podcast.autoQueue)
+            Toggle("Add new episodes to queue", isOn: autoQueueBinding)
             queueAgeLimitPicker
         } header: {
             Text("Queue")
@@ -390,6 +390,18 @@ struct PodcastSettingsView: View {
     }
 
     // MARK: Bindings
+
+    /// Preserves the native Toggle's label, value, traits, focus, and system
+    /// announcement while adding the approved false -> true enrollment behavior.
+    private var autoQueueBinding: Binding<Bool> {
+        Binding(
+            get: { podcast.autoQueue },
+            set: { newValue in
+                QueueRepository(context: modelContext)
+                    .setAutoQueue(newValue, for: podcast)
+            }
+        )
+    }
 
     /// Maps between `Optional<Double>` on the model and the Picker's tag type.
     private var speedOverrideBinding: Binding<Double?> {
