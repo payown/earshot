@@ -104,6 +104,12 @@ enum PaywallPurchaseOutcome: Equatable, Sendable {
 /// ``PaywallProductDisplay`` values, so it's testable with plain literals.
 enum PaywallLogic {
 
+    /// Benefits that must remain visibly rendered before every purchase option.
+    /// The paywall currently unlocks one paid capability; keeping this as an
+    /// explicit collection makes the visual contract testable and prevents plan
+    /// management copy from replacing the benefit again.
+    static let visibleBenefits = ["Unlimited podcast subscriptions"]
+
     /// One VoiceOver announcement: the message and whether it should
     /// interrupt current speech (`assertive: true`) or queue behind it
     /// (`assertive: false`). Mirrors the two-argument shape of

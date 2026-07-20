@@ -129,6 +129,10 @@ struct QueueScreen: View {
                     ForEach(group.episodes) { episode in
                         row(episode, position: nil, total: nil, moveMode: .grouped)
                     }
+                    .onMove { from, to in
+                        guard !searchActive else { return }
+                        handleGroupedMove(group, from: from, to: to)
+                    }
                 } header: {
                     groupHeader(group)
                 }
@@ -253,7 +257,7 @@ struct QueueScreen: View {
         // Edit (drag reorder) is hidden while a search is active, matching the
         // suspended `.onMove` — reordering a partial view of the queue would
         // move rows to the wrong real positions (#457).
-        if !episodes.isEmpty && !settings.groupQueueEpisodes && !searchActive {
+        if !episodes.isEmpty && !searchActive {
             ToolbarItem(placement: .topBarLeading) { EditButton() }
         }
         ToolbarItem(placement: .topBarTrailing) {
@@ -284,6 +288,27 @@ struct QueueScreen: View {
         focusedEpisode = episode.persistentModelID
     }
 
+    /// Grouped drag mirrors the existing VoiceOver row actions: a row may move
+    /// only within its podcast group. Applying the same repository operation
+    /// repeatedly preserves the interleaved flat queue and #444/#445 parity.
+    private func handleGroupedMove(_ group: QueueGroup, from: IndexSet, to: Int) {
+        guard let source = from.first, group.episodes.indices.contains(source) else { return }
+        let episode = group.episodes[source]
+        for direction in GroupedQueueDrag.directions(
+            from: source,
+            to: to,
+            itemCount: group.episodes.count
+        ) {
+            switch direction {
+            case .up:
+                repo.moveUpWithinGroup(episode)
+            case .down:
+                repo.moveDownWithinGroup(episode)
+            }
+        }
+        focusedEpisode = episode.persistentModelID
+    }
+
     // MARK: Search
 
     /// Announces the search's match count on submit (#457). Guarded so an empty
@@ -295,6 +320,29 @@ struct QueueScreen: View {
         Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: count))
     }
 
+}
+
+/// Converts SwiftUI's insertion-index `onMove` destination into the same
+/// one-row-at-a-time directions exposed by the grouped VoiceOver actions.
+/// Presentation-only and pure so the drag mapping can be regression-tested.
+enum GroupedQueueDrag {
+    enum Direction: Equatable {
+        case up
+        case down
+    }
+
+    static func directions(from source: Int, to destination: Int, itemCount: Int) -> [Direction] {
+        guard itemCount > 1, (0..<itemCount).contains(source) else { return [] }
+        let insertionAdjusted = destination > source ? destination - 1 : destination
+        let target = max(0, min(insertionAdjusted, itemCount - 1))
+        if target < source {
+            return Array(repeating: .up, count: source - target)
+        }
+        if target > source {
+            return Array(repeating: .down, count: target - source)
+        }
+        return []
+    }
 }
 
 /// One queue row: a single VoiceOver element whose Actions rotor is the user's

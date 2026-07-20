@@ -8,6 +8,11 @@ import XCTest
 /// `ProductCatalogServiceTests`.
 final class PaywallLogicTests: XCTestCase {
 
+    func testVisibleBenefitsAlwaysDescribeWhatPlusUnlocks() {
+        XCTAssertEqual(PaywallLogic.visibleBenefits, ["Unlimited podcast subscriptions"])
+        XCTAssertTrue(PaywallLogic.visibleBenefits.allSatisfy { !$0.isEmpty })
+    }
+
     // MARK: Fixtures
 
     private func monthly(price: Decimal = 2.99, displayPrice: String = "$2.99") -> PaywallProductDisplay {
