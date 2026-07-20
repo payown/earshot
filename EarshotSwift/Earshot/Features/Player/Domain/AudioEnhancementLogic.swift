@@ -7,6 +7,11 @@ import AVFoundation
 /// Voice enhance on  => spoken-audio mode (system voice-clarity processing) + mono.
 /// Voice enhance off => default mode + stereo (the baseline for new installs).
 enum AudioEnhancementLogic {
+    /// Speech-focused variable-rate processing used by every player item.
+    /// `.spectral` reintroduced the tester-reported watery/metallic artifacts at
+    /// everyday podcast speeds when it was restored provisionally in #697.
+    static let timePitchAlgorithm: AVAudioTimePitchAlgorithm = .timeDomain
+
     static func mode(voiceEnhanceEnabled: Bool) -> AVAudioSession.Mode {
         voiceEnhanceEnabled ? .spokenAudio : .default
     }
