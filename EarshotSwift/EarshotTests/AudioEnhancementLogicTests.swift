@@ -4,6 +4,10 @@ import AVFoundation
 
 final class AudioEnhancementLogicTests: XCTestCase {
 
+    func testPlaybackUsesTimeDomainPitchProcessing() {
+        XCTAssertEqual(AudioEnhancementLogic.timePitchAlgorithm, .timeDomain)
+    }
+
     func testVoiceEnhanceOnMapsToSpokenAudioAndMono() {
         XCTAssertEqual(AudioEnhancementLogic.mode(voiceEnhanceEnabled: true), .spokenAudio)
         XCTAssertEqual(AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: true), 1)

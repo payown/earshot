@@ -367,16 +367,14 @@ final class PlayerService {
     /// 0.5×–2.0× — this engine plays 0.5×–5.0× plus a 4× fast-forward scan — and
     /// it can render a flushed buffer chunk garbled/pitch-shifted when the render
     /// pipeline is reconfigured (the tester-reported burst before export, #549).
-    /// Time-pitch algorithm. `.spectral` is the framework-default-adjacent phase
-    /// vocoder; `.timeDomain` (WSOLA, #605) sounds cleaner at everyday 1.25×–2×
-    /// speeds but is the most recent always-on change to the render path and is
-    /// the prime suspect for the build-150 "crashes a few seconds into playback"
-    /// fault on iOS 26.5 (#695). Reverted to `.spectral` while we confirm the
-    /// crash source on device; if the route-change fix (below) alone resolves it,
-    /// restore `.timeDomain` to get the #605 quality win back.
+    /// `.timeDomain` (WSOLA) is Apple's spoken-audio algorithm and sounds cleaner
+    /// than `.spectral` at everyday podcast speeds. #697 provisionally reverted
+    /// this while isolating #695; build 151 remained crash-stable after the same
+    /// change stopped needless live-session reconfiguration, so the #607 quality
+    /// fix is restored here without changing session routing.
     private func makePlayerItem(url: URL) -> AVPlayerItem {
         let item = AVPlayerItem(url: url)
-        item.audioTimePitchAlgorithm = .spectral
+        item.audioTimePitchAlgorithm = AudioEnhancementLogic.timePitchAlgorithm
         return item
     }
 
