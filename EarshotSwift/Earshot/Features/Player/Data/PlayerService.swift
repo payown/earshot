@@ -1812,6 +1812,20 @@ final class PlayerService {
             let reason = player.reasonForWaitingToPlay?.rawValue ?? "unknown"
             AppLog.player.info("Player waiting to play (reason: \(reason, privacy: .public))")
         }
+        // Sync the display flag when the player actually reaches `.playing`
+        // without an explicit resume having set it — most notably automatic stall
+        // recovery, which re-issues `player.play()` but never touches `isPlaying`.
+        // Left unsynced, the flag reads stale-`false` while audio plays, which
+        // feeds the toggle/now-playing-rate drift the Bluetooth pause fix
+        // addresses. `intendsToPlay` gates out a brief post-pause `.playing` blip.
+        if PlaybackLogic.shouldMarkPlayingOnTransition(
+            playerIsPlaying: player.timeControlStatus == .playing,
+            intendsToPlay: intendsToPlay,
+            currentlyMarkedPlaying: isPlaying
+        ) {
+            isPlaying = true
+            updateNowPlayingInfo()
+        }
         attemptStallRecovery()
     }
 

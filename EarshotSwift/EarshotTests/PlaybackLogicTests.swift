@@ -698,4 +698,51 @@ final class PlaybackLogicTests: XCTestCase {
             0
         )
     }
+
+    // MARK: isPlaying sync on timeControlStatus transition (stall-recovery drift)
+
+    func testMarksPlayingWhenPlayerReachesPlayingWhileFlagIsStale() {
+        // Stall recovery re-issues play() without setting isPlaying; the transition
+        // to .playing while the user still intends playback must flip the flag.
+        XCTAssertTrue(
+            PlaybackLogic.shouldMarkPlayingOnTransition(
+                playerIsPlaying: true,
+                intendsToPlay: true,
+                currentlyMarkedPlaying: false
+            )
+        )
+    }
+
+    func testDoesNotReMarkPlayingWhenFlagAlreadyTrue() {
+        // Avoids a redundant now-playing rewrite when nothing changed.
+        XCTAssertFalse(
+            PlaybackLogic.shouldMarkPlayingOnTransition(
+                playerIsPlaying: true,
+                intendsToPlay: true,
+                currentlyMarkedPlaying: true
+            )
+        )
+    }
+
+    func testDoesNotMarkPlayingOnPostPausePlayingBlipWithoutIntent() {
+        // A momentary .playing report after the user paused must not revive the UI.
+        XCTAssertFalse(
+            PlaybackLogic.shouldMarkPlayingOnTransition(
+                playerIsPlaying: true,
+                intendsToPlay: false,
+                currentlyMarkedPlaying: false
+            )
+        )
+    }
+
+    func testDoesNotMarkPlayingWhenPlayerNotYetPlaying() {
+        // Still buffering (.waitingToPlayAtSpecifiedRate): don't claim .playing.
+        XCTAssertFalse(
+            PlaybackLogic.shouldMarkPlayingOnTransition(
+                playerIsPlaying: false,
+                intendsToPlay: true,
+                currentlyMarkedPlaying: false
+            )
+        )
+    }
 }

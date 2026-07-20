@@ -424,4 +424,27 @@ enum PlaybackLogic {
         guard intendsToPlay else { return 0 }
         return isFastForwarding ? fastForwardRate : effectiveRate
     }
+
+    /// Whether `PlayerService` should flip its `isPlaying` display flag to `true`
+    /// in response to a `timeControlStatus` change.
+    ///
+    /// Closes the drift where the player reaches `.playing` without an explicit
+    /// resume having set the flag — most notably automatic stall recovery, which
+    /// re-issues `player.play()` but never touches `isPlaying`. Only flips when
+    /// the player is actually playing AND the user still intends playback (so a
+    /// brief post-pause `.playing` blip can't revive a paused UI), and only when
+    /// the flag is currently `false` (so callers can skip a redundant now-playing
+    /// rewrite).
+    ///
+    /// - Parameters:
+    ///   - playerIsPlaying: `true` when `AVPlayer.timeControlStatus == .playing`.
+    ///   - intendsToPlay: The user's standing intent to play.
+    ///   - currentlyMarkedPlaying: The present value of `isPlaying`.
+    static func shouldMarkPlayingOnTransition(
+        playerIsPlaying: Bool,
+        intendsToPlay: Bool,
+        currentlyMarkedPlaying: Bool
+    ) -> Bool {
+        playerIsPlaying && intendsToPlay && !currentlyMarkedPlaying
+    }
 }
