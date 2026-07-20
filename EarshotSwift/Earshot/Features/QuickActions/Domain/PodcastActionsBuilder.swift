@@ -38,9 +38,10 @@ func buildPodcastActions(
                 label: on ? "Turn off auto-queue" : "Turn on auto-queue",
                 isDestructive: false
             ) {
-                podcast.autoQueue.toggle()
+                let newValue = !podcast.autoQueue
+                QueueRepository(context: context).setAutoQueue(newValue, for: podcast)
                 saveQuickAction(context, "auto-queue")
-                Announcer.announce(podcast.autoQueue ? "Auto-queue on" : "Auto-queue off")
+                Announcer.announce(newValue ? "Auto-queue on" : "Auto-queue off")
             }
         case .toggleInboxInclude:
             let included = podcast.inboxIncluded
