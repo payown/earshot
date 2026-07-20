@@ -1586,4 +1586,34 @@ She didn't tell Renata. She found the button and settled it.
 
 ---
 
+### Chapter 48 — Build 152
+
+*Four things she'd quietly given up on start working again in one morning: the reasons to go Plus show up, the queue lets her drag shows into order, sped-up voices stop sounding metallic, and turning on auto-queue finally grabs the newest episode right then.*
+
+**What to test:**
+
+Open Earshot Plus from Settings. The list of what you get should be visible again, not blank.
+
+In the Queue, tap Edit and drag an episode to reorder it by hand. It should move and stay put.
+
+Speed a show up past 1.3 and listen. Voices should sound clean, not metallic. Does sped-up audio sound right to you now?
+
+Turn on auto-queue for a show you actively follow. Its newest episode should drop into your Queue right away, not wait for the next one to publish. Did the newest episode appear?
+
+After updating, confirm your subscriptions, inbox, queue, and resume points are all still there.
+
+She found the metallic thing first, the morning after she paid. Sped a show past 1.3 the way she does on the route, and the host came back with a wire in his throat, every S a little serrated. She sat with it a day, decided her ears were just tired, and stopped speeding shows up. A thing she'd earned back in the spring, handed back without a word.
+
+The Plus screen had gone quiet too. The list of what her money actually bought had stopped showing, a blank where the reasons used to be. She'd already paid, so it cost her nothing but the small worry that she'd bought a blank.
+
+The queue was the one that made her mutter. She could add and drop episodes, but not take two shows and swap them by hand, and some mornings the order matters more than the list.
+
+And auto-queue, when she finally trusted it on the show she never misses, sat there empty, waiting on next week instead of handing her this week.
+
+This build gives all four back at once. Voices come clean at speed again. The Plus screen says what it's for. She drags Tuesday's show above Monday's with one finger. And the second she flips auto-queue on, the newest episode is just there, waiting.
+
+She didn't report any of it. She just noticed, four times in one morning, that something she'd stopped expecting to work was working again.
+
+---
+
 *More chapters added here as Earshot ships.*
