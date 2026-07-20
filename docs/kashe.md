@@ -421,6 +421,18 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   available she pays for the app for the first time rather than keep running on
   Renata's nephew's work free for most of a year; she doesn't tell Renata
   (Chapter 47)
+- Kashe's earbuds are single-button: she pinches the left stem once to pause,
+  quiet, both hands free for a client's cuff, forty times a day. That one press
+  had stopped taking (Earshot went by its own stale idea of whether it was
+  already stopped instead of the button's play/pause toggle command), so she'd
+  learned to press twice or dig the phone out of her pocket, and filed it under
+  "things her earbuds just don't do," not the app. This build hears the button
+  the first time. Reinforces the earbuds-in-pocket, hands-busy pattern
+  (Chapters 14, 27) (Chapter 49)
+- Build 153 is the last TestFlight build before the App Store release: after it,
+  Earshot stops being just Kashe, Renata's nephew, and a handful of testers and
+  becomes a thing anyone can find. She doesn't know it; the world is about to
+  arrive (Chapter 49)
 
 ## What you can generate
 
@@ -1613,6 +1625,22 @@ And auto-queue, when she finally trusted it on the show she never misses, sat th
 This build gives all four back at once. Voices come clean at speed again. The Plus screen says what it's for. She drags Tuesday's show above Monday's with one finger. And the second she flips auto-queue on, the newest episode is just there, waiting.
 
 She didn't report any of it. She just noticed, four times in one morning, that something she'd stopped expecting to work was working again.
+
+---
+
+### Chapter 49 — Build 153
+
+*The release candidate. Kashe's single-button earbuds finally pause on the first press, and this is the last quiet build before Earshot reaches the App Store. (This chapter is the story portion only; it ships below a divider, after the build's factual notes.)*
+
+Kashe pinches the left earbud to pause, the way she does forty times a day. A client's asking her something. The host keeps talking.
+
+She pinches it again. Nothing. She knows this move cold: one press, quiet, both hands free for the cuff. Except lately the press went nowhere, and she'd end up digging the phone out of her pocket to stop the audio the long way. She'd started pressing twice on reflex, then reaching for the phone before the second one landed. Filed it under things her earbuds just don't do. Not the app.
+
+It was the app. The button had been talking the whole time. Earshot just wasn't listening for that one word, one press meaning stop, going by its own stale idea of whether it was already stopped. Now it hears it the first time.
+
+She pinches once between clients. The host stops mid-sentence. She pinches again and he picks up right where he dropped off. One press, every time, the way she'd always assumed it already worked.
+
+She doesn't know this is the last of the quiet builds. That after this one it stops being just her and Renata's nephew and a handful of testers, and turns into a thing anyone can go and find. She just gets in the car, presses the button, and the show comes on.
 
 ---
 
