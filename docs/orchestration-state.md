@@ -6,7 +6,15 @@ the end of each work batch (via PR, like everything else).
 
 - **Work branch:** `swift` (NOT `main`; `swift` is not the default branch, so
   merged issues need explicit `gh issue close`).
-- **Last updated:** 2026-07-11.
+- **Last updated:** 2026-07-19.
+- **Latest TestFlight:** build **152** / v1.0.0 (Kashe Chapter 48), deployed
+  `--both`, betaReviewSubmitted, buildId `4ea1269e-…`, processingState VALID.
+  Shipped four TF-151 feedback fixes (no schema bump): restored visible paywall
+  benefits (`adc9416`), sighted drag-reorder in the grouped queue (`7a25943`),
+  clean spoken-audio time-pitch — no more metallic sped-up voices (`0cebc86`),
+  and auto-queue opt-in grabbing the latest episode immediately (`db00f80`).
+  Awaiting Michael's on-device verification of the two feedback asks (sped-up
+  audio quality; auto-queue newest-episode pickup).
 
 ## CI / infrastructure
 
