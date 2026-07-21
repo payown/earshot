@@ -6,8 +6,18 @@ import UIKit
 /// position cannot make RootView evaluate Inbox relationships. The predicate is
 /// identical to the Inbox screen's and is executed by the persistent store.
 private struct InboxTabBadge: View {
-    @Query(filter: InboxQuery.normal) private var normalEpisodes: [Episode]
-    @Query(filter: InboxQuery.optInOnly) private var optedInEpisodes: [Episode]
+    // Restricted to UNPLAYED, non-dismissed episodes (`playedAt == nil`). This
+    // badge is inset into all five tabs, so it is always in the tree during
+    // playback, and every 5-second position save invalidates these queries. The
+    // old `InboxQuery.normal`/`optInOnly` returned every non-dismissed episode —
+    // a set that grows without bound because finished episodes are never
+    // dismissed — so each save re-materialized the whole library on the main
+    // thread and iOS force-killed the app under `cpu_resource_fatal` (~93% CPU /
+    // 60s) about a minute into playback. `playedAt == nil` trims the unbounded
+    // played history out of the fetch in SQLite; the exact `.newEpisode` check
+    // stays an in-memory pass (SwiftData can't translate the stored enum).
+    @Query(filter: InboxQuery.normalUnplayed) private var normalEpisodes: [Episode]
+    @Query(filter: InboxQuery.optInOnlyUnplayed) private var optedInEpisodes: [Episode]
     let optInOnly: Bool
 
     var body: some View {

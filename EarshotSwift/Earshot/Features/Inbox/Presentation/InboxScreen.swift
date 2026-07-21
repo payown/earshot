@@ -13,10 +13,16 @@ struct InboxScreen: View {
 
     // Membership is wholly store-queryable. This prevents an in-memory access to
     // each Episode's Podcast from faulting the Podcast's full inverse episode
-    // collection on large libraries.
-    @Query(filter: InboxQuery.normal, sort: \Episode.pubDate, order: .reverse)
+    // collection on large libraries. Restricted to unplayed episodes
+    // (`playedAt == nil`) so a 5-second playback-position save doesn't
+    // re-materialize the whole non-dismissed library — which grows without bound
+    // over listening history — while this screen is on top during playback. The
+    // `.newEpisode` narrowing below is unchanged, so the displayed rows are
+    // identical (played episodes were already filtered out); this only keeps them
+    // out of the fetch. Mirrors `RootView.InboxTabBadge`.
+    @Query(filter: InboxQuery.normalUnplayed, sort: \Episode.pubDate, order: .reverse)
     private var normalCandidates: [Episode]
-    @Query(filter: InboxQuery.optInOnly, sort: \Episode.pubDate, order: .reverse)
+    @Query(filter: InboxQuery.optInOnlyUnplayed, sort: \Episode.pubDate, order: .reverse)
     private var optedInCandidates: [Episode]
 
     @State private var showNotesEpisode: Episode?
