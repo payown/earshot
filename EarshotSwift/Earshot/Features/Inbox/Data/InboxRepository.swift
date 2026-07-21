@@ -108,6 +108,22 @@ final class InboxRepository {
         return candidates.filter { $0.status == .newEpisode }.count
     }
 
+    /// A store-level COUNT of the same candidate set ``inboxCount`` fetches
+    /// (unplayed, non-dismissed), WITHOUT materializing any `Episode` objects.
+    ///
+    /// This is the badge's per-save change-detector (#736). ``inboxCount`` still
+    /// has to load the candidates to apply the in-memory `.newEpisode` check, so
+    /// running it on every 5-second playback-position save cost hundreds of ms on
+    /// a large library and heated the phone. A position save mutates only
+    /// `positionSeconds`, which never changes this count — so when it's unchanged
+    /// the badge can skip the expensive ``inboxCount`` entirely. Measured ~140x
+    /// cheaper than ``inboxCount`` at 15k candidates (a SQL COUNT vs. a full
+    /// fetch + filter), which is what keeps the badge off the playback hot path.
+    func inboxCandidateCount(optInOnly: Bool) -> Int {
+        let descriptor = FetchDescriptor<Episode>(predicate: InboxQuery.unplayedPredicate(optInOnly: optInOnly))
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
+
     /// Applies the in-memory inbox membership rules (status + per-podcast
     /// exclusion) to an already-fetched, already-sorted candidate set — the
     /// non-dismissed episodes, newest first.

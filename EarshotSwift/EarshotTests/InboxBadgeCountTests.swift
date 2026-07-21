@@ -129,4 +129,51 @@ final class InboxBadgeCountTests: XCTestCase {
         XCTAssertFalse(guids.contains("played-1"))
         XCTAssertFalse(guids.contains("played-2"))
     }
+
+    /// #736: the badge's cheap change-detector `inboxCandidateCount` is a
+    /// store-level COUNT of the unplayed, non-dismissed set — a superset of the
+    /// exact `inboxCount` (it also counts queued/expired unplayed episodes). It
+    /// must never undercount the badge, or the detector could hide a real change.
+    func testInboxCandidateCountIsSupersetOfInboxCount() {
+        let ctx = TestStore.freshContext()
+        let a = podcast(ctx, "A")
+        episode(ctx, "new1", podcast: a)
+        episode(ctx, "new2", podcast: a)
+        episode(ctx, "queued", podcast: a, status: .inQueue)   // unplayed, not dismissed → candidate only
+        episode(ctx, "expired", podcast: a, status: .expired)  // unplayed, not dismissed → candidate only
+        episode(ctx, "played", podcast: a, played: true)       // excluded from both
+        episode(ctx, "dismissed", podcast: a, dismissed: true) // excluded from both
+        try? ctx.save()
+
+        let repo = InboxRepository(context: ctx)
+        XCTAssertEqual(repo.inboxCount(optInOnly: false), 2, "exact badge = the 2 new episodes")
+        XCTAssertEqual(repo.inboxCandidateCount(optInOnly: false), 4,
+                       "candidates add queued + expired (still unplayed, non-dismissed)")
+        XCTAssertGreaterThanOrEqual(repo.inboxCandidateCount(optInOnly: false),
+                                    repo.inboxCount(optInOnly: false),
+                                    "candidate detector must never undercount the badge")
+    }
+
+    /// #736: the detector's guarantee. A playback-position save mutates only
+    /// `positionSeconds`, so it must NOT change the candidate total — that's what
+    /// lets `InboxTabBadge` skip the expensive exact recompute on the ~5-second
+    /// position-save hot path that was heating the phone.
+    func testPositionSaveDoesNotChangeCandidateCount() {
+        let ctx = TestStore.freshContext()
+        let a = podcast(ctx, "A")
+        for i in 0..<20 { episode(ctx, "e\(i)", podcast: a) }
+        try? ctx.save()
+
+        let repo = InboxRepository(context: ctx)
+        let before = repo.inboxCandidateCount(optInOnly: false)
+
+        let first = try? ctx.fetch(
+            FetchDescriptor<Episode>(predicate: InboxQuery.normalUnplayed)
+        ).first
+        first?.positionSeconds = 321
+        try? ctx.save()
+
+        XCTAssertEqual(repo.inboxCandidateCount(optInOnly: false), before,
+                       "a position save must not move the candidate total")
+    }
 }

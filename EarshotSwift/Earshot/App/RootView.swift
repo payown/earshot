@@ -1,28 +1,61 @@
+import Combine
 import SwiftUI
 import SwiftData
 import UIKit
 
-/// Owns the Inbox badge query separately from RootView so changing playback
-/// position cannot make RootView evaluate Inbox relationships. The predicate is
-/// identical to the Inbox screen's and is executed by the persistent store.
+/// Owns the Inbox badge count separately from RootView so changing playback
+/// position cannot make RootView evaluate Inbox relationships.
+///
+/// This does NOT use a live `@Query` (#736). A `@Query` re-materializes its
+/// whole result set on every context save, and `PlayerService` saves the
+/// playback position every ~5 seconds. On a large library that meant fetching
+/// and filtering the entire unplayed backlog ~18 times a minute during playback
+/// (~510 ms each at 15k episodes) — sustained main-thread CPU that heated the
+/// phone. `#732`'s `playedAt == nil` bound stopped the earlier
+/// `cpu_resource_fatal` crash but left this residual per-save cost.
+///
+/// Instead: recompute on saves, but gate the expensive exact count behind a
+/// cheap store-level `fetchCount` change-detector. A position save never changes
+/// the candidate total, so it short-circuits in ~a few ms; the full count only
+/// runs on a real inbox change (ingest, play, dismiss, include/exclude) or a
+/// queue swap. Reads go through the store, so a background feed refresh's inserts
+/// are seen once committed.
 private struct InboxTabBadge: View {
-    // Restricted to UNPLAYED, non-dismissed episodes (`playedAt == nil`). This
-    // badge is inset into all five tabs, so it is always in the tree during
-    // playback, and every 5-second position save invalidates these queries. The
-    // old `InboxQuery.normal`/`optInOnly` returned every non-dismissed episode —
-    // a set that grows without bound because finished episodes are never
-    // dismissed — so each save re-materialized the whole library on the main
-    // thread and iOS force-killed the app under `cpu_resource_fatal` (~93% CPU /
-    // 60s) about a minute into playback. `playedAt == nil` trims the unbounded
-    // played history out of the fetch in SQLite; the exact `.newEpisode` check
-    // stays an in-memory pass (SwiftData can't translate the stored enum).
-    @Query(filter: InboxQuery.normalUnplayed) private var normalEpisodes: [Episode]
-    @Query(filter: InboxQuery.optInOnlyUnplayed) private var optedInEpisodes: [Episode]
+    @Environment(\.modelContext) private var context
     let optInOnly: Bool
 
+    @State private var count = 0
+    /// Last candidate total (unplayed, non-dismissed) seen. `-1` forces the
+    /// first recompute to materialize.
+    @State private var lastCandidates = -1
+
     var body: some View {
-        let episodes = optInOnly ? optedInEpisodes : normalEpisodes
-        TabBarBadgeApplier(tabIndex: 0, count: episodes.lazy.filter { $0.status == .newEpisode }.count)
+        TabBarBadgeApplier(tabIndex: 0, count: count)
+            .onAppear { recompute(force: true) }
+            .onChange(of: optInOnly) { _, _ in recompute(force: true) }
+            // A save is the only thing that can change the inbox. The cheap
+            // fetchCount detector inside `recompute` short-circuits the ~every-5s
+            // position saves off the playback hot path (#736). Delivered on the
+            // main queue since a background context (feed refresh) may post it.
+            .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave).receive(on: DispatchQueue.main)) { _ in
+                recompute(force: false)
+            }
+            // Queue add/remove swaps an episode between `.newEpisode` and
+            // `.inQueue` WITHOUT changing the candidate total, so the detector
+            // wouldn't catch it — force the exact recompute here.
+            .onReceive(NotificationCenter.default.publisher(for: .earshotQueueDidChange).receive(on: DispatchQueue.main)) { _ in
+                recompute(force: true)
+            }
+    }
+
+    /// Cheap detector first: if the candidate total is unchanged and we aren't
+    /// forced, the badge can't have changed, so skip the expensive exact count.
+    private func recompute(force: Bool) {
+        let repo = InboxRepository(context: context)
+        let candidates = repo.inboxCandidateCount(optInOnly: optInOnly)
+        guard force || candidates != lastCandidates else { return }
+        lastCandidates = candidates
+        count = repo.inboxCount(optInOnly: optInOnly)
     }
 }
 
