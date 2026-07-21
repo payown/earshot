@@ -144,6 +144,10 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   play/pause label to Renata, months before it got fixed (Chapter 22)
 - She now sees the inbox count on the Inbox tab itself, not just the heading, so
   she can tell what's waiting from the tab bar before opening it (Chapter 22)
+- Her large following (already canon: "too many subscriptions") is what triggered
+  the builds 152/153 crash that killed playback ~90 seconds in; she'd started
+  bracing for the drop without realizing it was the app, not her earbuds or phone
+  (Chapter 50)
 - On the build-119 upgrade her data held (shows, queue, and her saved place all
   intact, no empty-shelf morning like the wedding); she found the new
   Settings > Data "Import older data" row (status plus on-demand re-import) and
@@ -1641,6 +1645,32 @@ It was the app. The button had been talking the whole time. Earshot just wasn't 
 She pinches once between clients. The host stops mid-sentence. She pinches again and he picks up right where he dropped off. One press, every time, the way she'd always assumed it already worked.
 
 She doesn't know this is the last of the quiet builds. That after this one it stops being just her and Renata's nephew and a handful of testers, and turns into a thing anyone can go and find. She just gets in the car, presses the button, and the show comes on.
+
+---
+
+### Chapter 50 — Build 154
+
+*The app kept crashing about ninety seconds into any episode on her large library; this build makes playback stay up, and quietly cleans up the Now Playing bar for VoiceOver.*
+
+**What to test:**
+
+Play an episode and let it run past a minute and a half without touching anything. It should keep going, no crash, even with a large library.
+
+Let an episode finish on its own with nothing queued behind it. The Now Playing bar should disappear, and VoiceOver should say "Episode finished."
+
+Pause an episode. The bar should stay put so you can start it again.
+
+With VoiceOver on, flick through a screen. The Now Playing group should read last, just above the tabs, not first.
+
+After updating, confirm your subscriptions, inbox, queue, and resume points are all still there.
+
+The show would get about a minute and a half in and just die. Not pause, not stumble. Gone, screen and all, like someone reached over and shut it off. She follows more shows than she'll admit to, and that turned out to be the reason, though she'd never have connected the two.
+
+The last two builds handed her back small things that worked, and she couldn't use any of them past ninety seconds. She'd started timing it without meaning to. Pull out of a client's drive, get a sentence into the host, brace for the drop.
+
+This build lets her forget she was counting. She pulls out, the host starts, and a minute and a half comes and goes with nothing under it but the road.
+
+The other thing she only caught with the phone in her pocket and the earbuds in. When a show ends on its own now, a small voice says episode finished, and the dead little bar that used to sit there afterward is just gone. Pause instead and the bar waits, the way it should. She'd never have asked for either one. She just stopped reaching to check whether it was really over.
 
 ---
 
