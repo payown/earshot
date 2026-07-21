@@ -639,6 +639,37 @@ final class PlayerService {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
+    /// Clears every observable "now playing" surface after playback stops with
+    /// nothing to advance to — a natural end-of-episode with an empty queue, an
+    /// end-of-episode sleep timer, stop-after-current, or "mark played" with
+    /// nothing queued (#730). ``currentTitle`` drives the mini player's
+    /// visibility, so nil-ing it hides the bar instead of leaving it stranded on
+    /// a finished episode. The lock screen is cleared (``updateNowPlayingInfo``
+    /// would write an empty-title dict, not clear it), and the persisted
+    /// last-playing episode is dropped so a relaunch doesn't restore a finished
+    /// episode back into the bar.
+    ///
+    /// Deliberately NOT called on pause, seek, interruption, buffering, or
+    /// auto-advance to a next queue item — every one of those keeps the bar.
+    /// Lighter than ``stopAndUnload`` (no player-item teardown): the item has
+    /// already played to its end, and the next ``play`` replaces it anyway.
+    private func clearNowPlayingPresentation() {
+        setCurrentEpisode(nil)
+        currentTitle = nil
+        currentArtist = nil
+        durationSeconds = 0
+        currentPositionSeconds = 0
+        currentChapters = []
+        resetChapterObservables()
+        // Drop the persisted last-playing episode so launch restore doesn't
+        // repopulate the bar with the episode that just finished. An empty
+        // string reads as "nothing stored" to `PlaybackStartup` (#730).
+        settings?.setRawValue("", for: SettingsKey.lastPlayingEpisodeID)
+        // Clear the lock screen / Control Center entirely rather than leaving a
+        // stale (or empty) title behind, exactly as `stopAndUnload` does.
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
+
     /// Skips forward by the user-configured interval (default 30s).
     func skipForward() {
         seek(by: Double(skipForwardSeconds))
@@ -951,11 +982,10 @@ final class PlayerService {
         Announcer.announce("Marked as played")
 
         guard let nextEpisode else {
-            // Nothing queued after this one: stop cleanly with the bar cleared.
+            // Nothing queued after this one: stop cleanly and hide the bar (#730).
             pause()
             isPlaying = false
-            setCurrentEpisode(nil)
-            updateNowPlayingInfo()
+            clearNowPlayingPresentation()
             return
         }
 
@@ -1007,11 +1037,10 @@ final class PlayerService {
         repo.cancelFromQueue(episodeToRemove)
 
         guard let nextEpisode else {
-            // Nothing queued after this one: stop cleanly with the bar cleared.
+            // Nothing queued after this one: stop cleanly and hide the bar (#730).
             pause()
             isPlaying = false
-            setCurrentEpisode(nil)
-            updateNowPlayingInfo()
+            clearNowPlayingPresentation()
             return
         }
 
@@ -1559,8 +1588,7 @@ final class PlayerService {
             saveContext()
             isPlaying = false
             intendsToPlay = false
-            setCurrentEpisode(nil)
-            updateNowPlayingInfo()
+            clearNowPlayingPresentation()
             Announcer.announce("Sleep timer ended. Playback stopped.")
             return
         }
@@ -1576,8 +1604,7 @@ final class PlayerService {
             saveContext()
             isPlaying = false
             intendsToPlay = false
-            setCurrentEpisode(nil)
-            updateNowPlayingInfo()
+            clearNowPlayingPresentation()
             Announcer.announce("Stopped after this episode")
             return
         }
@@ -1593,10 +1620,15 @@ final class PlayerService {
         saveContext()
 
         guard let nextEpisode else {
+            // Episode finished with nothing queued after it: stop and hide the
+            // mini player instead of leaving it on a finished episode (#730).
+            // Announce completion explicitly — without it a VoiceOver listener
+            // hears only the root-level "Paused" and can't tell an episode ended
+            // from an accidental pause of a bar that just vanished.
             isPlaying = false
             intendsToPlay = false
-            setCurrentEpisode(nil)
-            updateNowPlayingInfo()
+            clearNowPlayingPresentation()
+            Announcer.announce("Episode finished")
             return
         }
         // We're advancing to it now, so its Play-next override is spent.

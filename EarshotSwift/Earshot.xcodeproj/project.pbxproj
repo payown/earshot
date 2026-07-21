@@ -48,6 +48,7 @@
 		1F0116AC3D1E02927613340E /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D593C7355D8CEF192497648 /* NotificationService.swift */; };
 		1FBD881481458AAC273BC891 /* EpisodeListFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5328EA352C41EB58843220A /* EpisodeListFilter.swift */; };
 		212FA36BD3487D0B46646A2B /* TranscriptSegment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53319B8883C9321760CF5CD3 /* TranscriptSegment.swift */; };
+		2258FFC512958C84E9497954 /* MiniPlayerVisibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CB3E4F2331A594B97D1D82B /* MiniPlayerVisibilityTests.swift */; };
 		24062BAF7CBBE2E1CA3DA2EE /* TranscriptFormatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68C1822B403C990C9F0C4303 /* TranscriptFormatTests.swift */; };
 		241D56FB5DF51ECB2555D8D4 /* StoreMigrationV3toV4Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C57098ADD143BE0710A2708A /* StoreMigrationV3toV4Tests.swift */; };
 		251963B6D5F51C922BCDD6C7 /* EpisodeSummaryCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60FC5E0CACB16838EACB447D /* EpisodeSummaryCacheTests.swift */; };
@@ -469,6 +470,7 @@
 		7AC3DCB2D8747147D27BB32E /* PrivacyPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyPolicy.swift; sourceTree = "<group>"; };
 		7B3D418DEEE23B973A761F26 /* QuickActionConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionConfig.swift; sourceTree = "<group>"; };
 		7C091B032EDF249C457F096E /* AddPodcastOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPodcastOptions.swift; sourceTree = "<group>"; };
+		7CB3E4F2331A594B97D1D82B /* MiniPlayerVisibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerVisibilityTests.swift; sourceTree = "<group>"; };
 		7CF61D55C48D468680AB681C /* Podcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Podcast.swift; sourceTree = "<group>"; };
 		7D1FF1B05CD9DD1E0A619E9F /* ITunesSearchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITunesSearchServiceTests.swift; sourceTree = "<group>"; };
 		7D40AFBC69A987AAC98236BF /* BookmarksListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarksListView.swift; sourceTree = "<group>"; };
@@ -881,6 +883,7 @@
 				3F992A474580C7C064FBD876 /* LargeLibraryMemoryTests.swift */,
 				C27CF4D211EF845D99883619 /* LibrarySortTests.swift */,
 				CC5516772971764A4DD64AB3 /* MarkAllPlayedAnnouncementTests.swift */,
+				7CB3E4F2331A594B97D1D82B /* MiniPlayerVisibilityTests.swift */,
 				62ED2FC514BDF3D857EBC8EF /* MockURLProtocol.swift */,
 				935DE9BF07F90D248001ADE9 /* ModelGraphTests.swift */,
 				4318B4B42ABC13117266E542 /* NotificationServiceTests.swift */,
@@ -1875,6 +1878,7 @@
 				69EF05CA2664706F91AA2EC4 /* LargeLibraryMemoryTests.swift in Sources */,
 				C35D439E9E576F4A27BFD711 /* LibrarySortTests.swift in Sources */,
 				01CF340C4BC5B394005C104F /* MarkAllPlayedAnnouncementTests.swift in Sources */,
+				2258FFC512958C84E9497954 /* MiniPlayerVisibilityTests.swift in Sources */,
 				9E710C86EB230B361A7D8B75 /* MockURLProtocol.swift in Sources */,
 				F0CF93FBA3262643F8E54460 /* ModelGraphTests.swift in Sources */,
 				51FCE985808351F9473615DF /* NotificationServiceTests.swift in Sources */,
@@ -1978,7 +1982,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 150;
+				CURRENT_PROJECT_VERSION = 153;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -2063,7 +2067,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 150;
+				CURRENT_PROJECT_VERSION = 153;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
