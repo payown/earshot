@@ -19,6 +19,38 @@ enum InboxQuery {
     static func predicate(optInOnly: Bool) -> Predicate<Episode> {
         optInOnly ? self.optInOnly : normal
     }
+
+    // The same membership rules, but ALSO restricted to unplayed episodes
+    // (`playedAt == nil`). Inbox membership is `status == .newEpisode`, and
+    // `status` cannot be expressed in a `#Predicate` — comparing the stored enum
+    // to a case degenerates to an unsupported `\.newEpisode` key path, and even
+    // when coaxed to compile it silently matches zero rows. So the store cannot
+    // filter to `.newEpisode` directly. But a played episode always carries a
+    // non-nil `playedAt` (see `Episode.isPlayed`'s setter), and played episodes
+    // are the bucket that grows without bound: `markCurrentEpisodePlayed` never
+    // dismisses them, so every episode ever finished stays `inboxDismissed ==
+    // false` forever and bloats ``normal``/``optInOnly``. Adding `playedAt ==
+    // nil` (a plain optional-`Date` comparison the store executes correctly)
+    // trims that unbounded played history out of the fetch. The result is a small
+    // superset of the inbox — unplayed, non-dismissed episodes — over which the
+    // exact `.newEpisode` check is a cheap in-memory pass. This keeps the badge's
+    // per-save cost proportional to the (bounded) unplayed set instead of the
+    // whole library, which is what the `cpu_resource_fatal` termination needed.
+    static let normalUnplayed = #Predicate<Episode> { episode in
+        episode.playedAt == nil &&
+        episode.inboxDismissed == false &&
+        (episode.podcast == nil || episode.podcast?.inboxExcluded == false || episode.podcast?.inboxIncluded == true)
+    }
+
+    static let optInOnlyUnplayed = #Predicate<Episode> { episode in
+        episode.playedAt == nil &&
+        episode.inboxDismissed == false &&
+        episode.podcast?.inboxIncluded == true
+    }
+
+    static func unplayedPredicate(optInOnly: Bool) -> Predicate<Episode> {
+        optInOnly ? optInOnlyUnplayed : normalUnplayed
+    }
 }
 
 /// The inbox is a view over episodes: `status == .newEpisode && !inboxDismissed`
@@ -50,6 +82,30 @@ final class InboxRepository {
             sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
         )
         return ((try? context.fetch(descriptor)) ?? []).filter { $0.status == .newEpisode }
+    }
+
+    /// The inbox membership COUNT, backing the always-mounted tab badge
+    /// (`RootView.InboxTabBadge`).
+    ///
+    /// The badge previously counted by materializing the *whole* non-dismissed
+    /// library and filtering `status` in Swift. That re-runs on every `Episode`
+    /// save — including the 5-second playback-position save — and on a large
+    /// library each pass costs hundreds of ms to seconds (measured: ~320ms at
+    /// 10k rows, ~3s at 100k) because finished episodes are never dismissed, so
+    /// the non-dismissed set grows without bound over listening history. Once
+    /// that per-save cost exceeds the save cadence the main thread saturates and
+    /// iOS force-terminates the app under `cpu_resource_fatal` (~93% CPU / 60s).
+    ///
+    /// Fetching ``InboxQuery/unplayedPredicate(optInOnly:)`` restricts the store
+    /// work to unplayed, non-dismissed episodes — a bounded superset of the
+    /// inbox that excludes the unbounded played-history bucket — and the exact
+    /// `.newEpisode` check is then a cheap in-memory pass. `status` can't be
+    /// pushed into the predicate (SwiftData silently matches zero rows for a
+    /// stored-enum comparison), so this in-memory filter stays authoritative.
+    func inboxCount(optInOnly: Bool) -> Int {
+        let descriptor = FetchDescriptor<Episode>(predicate: InboxQuery.unplayedPredicate(optInOnly: optInOnly))
+        let candidates = (try? context.fetch(descriptor)) ?? []
+        return candidates.filter { $0.status == .newEpisode }.count
     }
 
     /// Applies the in-memory inbox membership rules (status + per-podcast

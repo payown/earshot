@@ -190,9 +190,17 @@ final class QueueRepository {
     }
 
     /// Empties the queue, reverting every episode to `newEpisode`.
+    ///
+    /// Reverts through `isPlayed = false` rather than a raw `status = .newEpisode`
+    /// so `playedAt` is cleared alongside `status`, preserving the invariant that
+    /// a `.newEpisode` episode is unplayed. This matters now that the inbox badge
+    /// and list fetch unplayed episodes only (`InboxQuery.normalUnplayed`): a
+    /// played-then-queued episode resurfaced here with a stale `playedAt` would be
+    /// silently dropped from the inbox count. For an already-unplayed episode this
+    /// is equivalent to the old assignment.
     func clear() {
         for item in orderedItems() {
-            item.episode?.status = .newEpisode
+            item.episode?.isPlayed = false
             context.delete(item)
         }
         save()
