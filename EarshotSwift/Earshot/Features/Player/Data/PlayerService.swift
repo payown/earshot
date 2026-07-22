@@ -140,7 +140,11 @@ final class PlayerService {
     // out by `StatsLogic.isListeningStep`.
     @ObservationIgnored private var lastTickPosition: Double?
     @ObservationIgnored private var accumulatedListenSeconds: Double = 0
-    @ObservationIgnored private let sessionFlushSeconds: Double = 30
+    // Flush every 5 minutes (was 30s) so a long continuous listen isn't doing a
+    // `context.save()` — and the resulting large-library `@Query` invalidation —
+    // twice a minute while playing (#736). Pause / stop / episode switch /
+    // background still flush, so at most ~5 min of stats is at risk on a crash.
+    @ObservationIgnored private let sessionFlushSeconds: Double = 300
 
     // Position-persistence throttle (#362). The periodic time observer fires
     // every second, but a synchronous main-actor `context.save()` every second
@@ -454,7 +458,7 @@ final class PlayerService {
 
         // Resume position: honor saved progress unless past the threshold.
         let decision = PlaybackLogic.completionDecision(
-            position: episode.positionSeconds,
+            position: resumePosition(for: episode),
             duration: episode.durationSeconds,
             introSkipSeconds: episode.podcast?.introSkipSeconds
         )
@@ -512,7 +516,7 @@ final class PlayerService {
         observeCurrentItem(item)
 
         let decision = PlaybackLogic.completionDecision(
-            position: episode.positionSeconds,
+            position: resumePosition(for: episode),
             duration: episode.durationSeconds,
             introSkipSeconds: episode.podcast?.introSkipSeconds
         )
@@ -637,6 +641,8 @@ final class PlayerService {
         // is left exactly as the existing stop paths leave it (never
         // deactivated here), so route/interruption behavior is unchanged.
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        // Nothing loaded → no crash-recovery position to keep (#736).
+        clearLivePosition()
     }
 
     /// Clears every observable "now playing" surface after playback stops with
@@ -665,6 +671,9 @@ final class PlayerService {
         // repopulate the bar with the episode that just finished. An empty
         // string reads as "nothing stored" to `PlaybackStartup` (#730).
         settings?.setRawValue("", for: SettingsKey.lastPlayingEpisodeID)
+        // And drop the UserDefaults crash-recovery position so a finished
+        // episode is never resumed on the next launch (#736).
+        clearLivePosition()
         // Clear the lock screen / Control Center entirely rather than leaving a
         // stale (or empty) title behind, exactly as `stopAndUnload` does.
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
@@ -1401,9 +1410,63 @@ final class PlayerService {
         )
     }
 
+    // MARK: Live playback position — crash recovery without a per-tick store save (#736)
+
+    enum LivePositionKey {
+        static let episode = "live_playback_episode_key"
+        static let seconds = "live_playback_seconds"
+    }
+
+    /// Records the in-flight playback position to `UserDefaults` (NOT SwiftData)
+    /// on the ~5s tick. A `context.save()` there invalidates every live `@Query`
+    /// — the Inbox screen re-materializes the whole unplayed backlog — which on a
+    /// large library heated the phone during playback. This keeps ~5s
+    /// crash-recovery granularity with no store write. Keyed by the same
+    /// composite the last-playing-episode restore uses, so it's only ever honored
+    /// for that exact episode.
+    private func writeLivePosition(_ episode: Episode, second: Int) {
+        let key = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        let defaults = UserDefaults.standard
+        defaults.set(key, forKey: LivePositionKey.episode)
+        defaults.set(second, forKey: LivePositionKey.seconds)
+    }
+
+    private func clearLivePosition() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: LivePositionKey.episode)
+        defaults.removeObject(forKey: LivePositionKey.seconds)
+    }
+
+    /// The UserDefaults live position stored for `episode`, or nil if the stored
+    /// live position is for a different (or no) episode.
+    private func livePosition(for episode: Episode) -> Int? {
+        let key = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: LivePositionKey.episode) == key,
+              defaults.object(forKey: LivePositionKey.seconds) != nil else { return nil }
+        return defaults.integer(forKey: LivePositionKey.seconds)
+    }
+
+    /// The position to resume `episode` from: the durable SwiftData value, or the
+    /// fresher UserDefaults live value if a crash left one for this same episode
+    /// (#736). Prevents losing progress on a crash now that the ~5s tick no
+    /// longer writes to the store.
+    private func resumePosition(for episode: Episode) -> Int {
+        max(episode.positionSeconds, livePosition(for: episode) ?? 0)
+    }
+
+    /// Durably persists position + listening session when the app backgrounds —
+    /// a natural anchor now that the ~5s tick no longer writes to the store
+    /// (#736). Saving here is off the visible view hot path, so the resulting
+    /// `@Query` invalidation costs nothing the user can feel.
+    func persistForBackground() {
+        persistCurrentPosition()
+        flushListeningSession()
+    }
+
     /// Eagerly writes the current position to disk (used by pause, seek, episode
-    /// switch — the durability anchors). Resets the per-tick throttle so the next
-    /// tick doesn't redundantly re-save the same second.
+    /// switch, and app-background — the durability anchors). Resets the per-tick
+    /// throttle so the next tick doesn't redundantly re-save the same second.
     private func persistCurrentPosition() {
         // A transient Search-preview stream is never persisted (#517).
         guard !currentEpisodeIsTransient else { return }
@@ -1425,6 +1488,10 @@ final class PlayerService {
         episode.positionSeconds = second
         lastPersistedSecond = second
         saveContext()
+        // Keep the UserDefaults live position in step with the durable value so a
+        // seek/pause can't leave a stale (larger) live value that resume would
+        // wrongly prefer (#736).
+        writeLivePosition(episode, second: second)
     }
 
     /// Per-tick position write, throttled to ``PlaybackLogic/positionPersistInterval``
@@ -1446,9 +1513,15 @@ final class PlayerService {
             lastPersistedSecond: lastPersistedSecond,
             isPlayed: episode.isPlayed
         ) else { return }
-        episode.positionSeconds = max(0, currentSecond)
         lastPersistedSecond = currentSecond
-        saveContext()
+        // #736: do NOT `context.save()` on the playback tick. A save invalidates
+        // every live `@Query` and, on a large library, re-materializes the whole
+        // unplayed backlog (Inbox screen) every ~5s — sustained main-thread work
+        // that ran the phone hot. Record the position to UserDefaults instead;
+        // the durable SwiftData write happens at the anchors (pause / seek /
+        // switch / background), and `resumePosition` reads this back after a
+        // crash so we still recover within ~5s.
+        writeLivePosition(episode, second: max(0, currentSecond))
     }
 
     // MARK: Private — listening-session recording

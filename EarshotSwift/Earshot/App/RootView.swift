@@ -89,6 +89,11 @@ struct RootView: View {
     /// detail screen onto it (#72).
     @State private var libraryPath: [Podcast] = []
 
+    /// Drives the app-background durability anchor for playback position/stats
+    /// (#736): the ~5s tick no longer writes to the store, so persist on
+    /// background instead.
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
         // Live unplayed-inbox count from the same source of truth as the Inbox
         // heading. Shown via a native `UITabBarItem` badge applied by
@@ -208,6 +213,13 @@ struct RootView: View {
         // times per toggle. Announcer no-ops when VoiceOver is off.
         .onChange(of: player.isPlaying) { _, isPlaying in
             Announcer.announce(isPlaying ? "Playing" : "Paused")
+        }
+        // Durably persist playback position + listening stats when the app goes
+        // to the background (#736). The ~5s playback tick no longer writes to the
+        // store — it records to UserDefaults — so this is the anchor that flushes
+        // to SwiftData when the user locks the phone or switches apps.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { player.persistForBackground() }
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
