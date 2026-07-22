@@ -1,6 +1,16 @@
 import Foundation
 import SwiftData
 
+extension Notification.Name {
+    /// Posted when something that can change the Inbox unread count changes —
+    /// episodes ingested, played/unplayed, dismissed, cap-hidden, or a podcast
+    /// included/excluded. The Inbox tab badge listens for this (plus queue
+    /// changes and app-foreground) and recomputes ONLY then, so it never does
+    /// store work on the ~5-second playback-position save that heated the phone
+    /// on large libraries (#736).
+    static let earshotInboxDidChange = Notification.Name("earshotInboxDidChange")
+}
+
 /// Store-queryable Inbox membership. Keeping the podcast rules in these
 /// predicates is important: reading `episode.podcast` in an in-memory filter
 /// faults the Podcast's inverse `episodes` relationship and can enumerate an
@@ -108,21 +118,6 @@ final class InboxRepository {
         return candidates.filter { $0.status == .newEpisode }.count
     }
 
-    /// A store-level COUNT of the same candidate set ``inboxCount`` fetches
-    /// (unplayed, non-dismissed), WITHOUT materializing any `Episode` objects.
-    ///
-    /// This is the badge's per-save change-detector (#736). ``inboxCount`` still
-    /// has to load the candidates to apply the in-memory `.newEpisode` check, so
-    /// running it on every 5-second playback-position save cost hundreds of ms on
-    /// a large library and heated the phone. A position save mutates only
-    /// `positionSeconds`, which never changes this count — so when it's unchanged
-    /// the badge can skip the expensive ``inboxCount`` entirely. Measured ~140x
-    /// cheaper than ``inboxCount`` at 15k candidates (a SQL COUNT vs. a full
-    /// fetch + filter), which is what keeps the badge off the playback hot path.
-    func inboxCandidateCount(optInOnly: Bool) -> Int {
-        let descriptor = FetchDescriptor<Episode>(predicate: InboxQuery.unplayedPredicate(optInOnly: optInOnly))
-        return (try? context.fetchCount(descriptor)) ?? 0
-    }
 
     /// Applies the in-memory inbox membership rules (status + per-podcast
     /// exclusion) to an already-fetched, already-sorted candidate set — the
@@ -207,6 +202,9 @@ final class InboxRepository {
         guard context.hasChanges else { return }
         do {
             try context.save()
+            // Inbox membership changed (dismiss / clear / caps) — refresh the
+            // tab badge without it having to poll on every save (#736).
+            NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
         } catch {
             AppLog.data.error("Inbox save failed: \(error.localizedDescription, privacy: .public)")
         }

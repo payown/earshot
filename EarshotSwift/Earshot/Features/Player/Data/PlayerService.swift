@@ -1526,6 +1526,9 @@ final class PlayerService {
         episode.isPlayed = true
         episode.positionSeconds = 0
         saveContext()
+        // The finished episode just left the inbox — refresh the tab badge
+        // (the badge no longer polls on every position save, #736).
+        NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
         AppLog.player.info("Marked episode played: \(episode.title, privacy: .public)")
     }
 

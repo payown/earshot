@@ -6,56 +6,55 @@ import UIKit
 /// Owns the Inbox badge count separately from RootView so changing playback
 /// position cannot make RootView evaluate Inbox relationships.
 ///
-/// This does NOT use a live `@Query` (#736). A `@Query` re-materializes its
-/// whole result set on every context save, and `PlayerService` saves the
-/// playback position every ~5 seconds. On a large library that meant fetching
-/// and filtering the entire unplayed backlog ~18 times a minute during playback
-/// (~510 ms each at 15k episodes) — sustained main-thread CPU that heated the
-/// phone. `#732`'s `playedAt == nil` bound stopped the earlier
-/// `cpu_resource_fatal` crash but left this residual per-save cost.
+/// It does NOT use a live `@Query`, and it deliberately does NOT observe
+/// `ModelContext.didSave` (#736). A `@Query` re-materializes its whole result
+/// set on every context save, and `PlayerService` saves the playback position
+/// every ~5 seconds — so on a large library the badge was fetching and filtering
+/// the entire unplayed backlog ~18 times a minute during playback, sustained
+/// main-thread CPU that ran the phone hot. `#732`'s `playedAt == nil` bound
+/// stopped the earlier `cpu_resource_fatal` crash but left that residual cost.
 ///
-/// Instead: recompute on saves, but gate the expensive exact count behind a
-/// cheap store-level `fetchCount` change-detector. A position save never changes
-/// the candidate total, so it short-circuits in ~a few ms; the full count only
-/// runs on a real inbox change (ingest, play, dismiss, include/exclude) or a
-/// queue swap. Reads go through the store, so a background feed refresh's inserts
-/// are seen once committed.
+/// Instead the count is recomputed ONLY on the events that can actually change
+/// it — an explicit `.earshotInboxDidChange` (ingest, play, dismiss, caps), a
+/// queue change, opt-in-mode change, and app-foreground (which self-heals any
+/// signal we didn't get). A playback-position save triggers nothing here, so the
+/// badge does zero work on the hot path. On a tab switch the native badge is
+/// re-asserted from the cached count (SwiftData rebuilds the tab items and drops
+/// the manually set `badgeValue`) — a pure UIKit re-apply, no store work.
 private struct InboxTabBadge: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     let optInOnly: Bool
+    let selectedTab: RootTab?
 
     @State private var count = 0
-    /// Last candidate total (unplayed, non-dismissed) seen. `-1` forces the
-    /// first recompute to materialize.
-    @State private var lastCandidates = -1
 
     var body: some View {
         TabBarBadgeApplier(tabIndex: 0, count: count)
-            .onAppear { recompute(force: true) }
-            .onChange(of: optInOnly) { _, _ in recompute(force: true) }
-            // A save is the only thing that can change the inbox. The cheap
-            // fetchCount detector inside `recompute` short-circuits the ~every-5s
-            // position saves off the playback hot path (#736). Delivered on the
-            // main queue since a background context (feed refresh) may post it.
-            .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave).receive(on: DispatchQueue.main)) { _ in
-                recompute(force: false)
+            .onAppear { recompute() }
+            .onChange(of: optInOnly) { _, _ in recompute() }
+            // Foreground heals any inbox change we didn't get an explicit signal
+            // for (a background feed refresh, a podcast include/exclude).
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { recompute() }
             }
-            // Queue add/remove swaps an episode between `.newEpisode` and
-            // `.inQueue` WITHOUT changing the candidate total, so the detector
-            // wouldn't catch it — force the exact recompute here.
+            // Re-assert the native badge after a tab switch drops it. No store
+            // work — just re-apply the cached count.
+            .onChange(of: selectedTab) { _, _ in
+                TabBarBadgeApplier.apply(tabIndex: 0, count: count)
+            }
+            // Recompute only on real inbox changes — never on a position save.
+            // Delivered on main since a background context can post these.
+            .onReceive(NotificationCenter.default.publisher(for: .earshotInboxDidChange).receive(on: DispatchQueue.main)) { _ in
+                recompute()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .earshotQueueDidChange).receive(on: DispatchQueue.main)) { _ in
-                recompute(force: true)
+                recompute()
             }
     }
 
-    /// Cheap detector first: if the candidate total is unchanged and we aren't
-    /// forced, the badge can't have changed, so skip the expensive exact count.
-    private func recompute(force: Bool) {
-        let repo = InboxRepository(context: context)
-        let candidates = repo.inboxCandidateCount(optInOnly: optInOnly)
-        guard force || candidates != lastCandidates else { return }
-        lastCandidates = candidates
-        count = repo.inboxCount(optInOnly: optInOnly)
+    private func recompute() {
+        count = InboxRepository(context: context).inboxCount(optInOnly: optInOnly)
     }
 }
 
@@ -176,7 +175,7 @@ struct RootView: View {
         // Native UITabBarItem badge for the Inbox unread count (#321 follow-up):
         // re-applies whenever `inboxBadgeCount` changes. Replaces SwiftUI's
         // `.badge`, which double-announced the count under VoiceOver.
-        .background(InboxTabBadge(optInOnly: settings.inboxOptInOnly))
+        .background(InboxTabBadge(optInOnly: settings.inboxOptInOnly, selectedTab: selectedTab))
         // Native UITabBarItem badge for the Queue episode count (#491): same
         // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
         .background(TabBarBadgeApplier(tabIndex: 1, count: queueBadgeCount))

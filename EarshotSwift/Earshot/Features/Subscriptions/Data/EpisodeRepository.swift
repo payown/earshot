@@ -60,6 +60,9 @@ final class EpisodeRepository {
         do {
             try context.save()
             onSave?()
+            // Marking episodes played/unplayed changes inbox membership — nudge
+            // the tab badge to recompute (#736).
+            NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
         } catch {
             AppLog.data.error("Episode bulk save failed: \(error.localizedDescription, privacy: .public)")
         }

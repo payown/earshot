@@ -130,50 +130,45 @@ final class InboxBadgeCountTests: XCTestCase {
         XCTAssertFalse(guids.contains("played-2"))
     }
 
-    /// #736: the badge's cheap change-detector `inboxCandidateCount` is a
-    /// store-level COUNT of the unplayed, non-dismissed set — a superset of the
-    /// exact `inboxCount` (it also counts queued/expired unplayed episodes). It
-    /// must never undercount the badge, or the detector could hide a real change.
-    func testInboxCandidateCountIsSupersetOfInboxCount() {
+    /// #736: the badge no longer polls the store on every save — it recomputes
+    /// only when it receives `.earshotInboxDidChange`. So the inbox-mutating
+    /// operations must post it. Clearing the inbox is one such operation.
+    func testClearInboxPostsInboxDidChange() {
         let ctx = TestStore.freshContext()
         let a = podcast(ctx, "A")
         episode(ctx, "new1", podcast: a)
         episode(ctx, "new2", podcast: a)
-        episode(ctx, "queued", podcast: a, status: .inQueue)   // unplayed, not dismissed → candidate only
-        episode(ctx, "expired", podcast: a, status: .expired)  // unplayed, not dismissed → candidate only
-        episode(ctx, "played", podcast: a, played: true)       // excluded from both
-        episode(ctx, "dismissed", podcast: a, dismissed: true) // excluded from both
         try? ctx.save()
 
-        let repo = InboxRepository(context: ctx)
-        XCTAssertEqual(repo.inboxCount(optInOnly: false), 2, "exact badge = the 2 new episodes")
-        XCTAssertEqual(repo.inboxCandidateCount(optInOnly: false), 4,
-                       "candidates add queued + expired (still unplayed, non-dismissed)")
-        XCTAssertGreaterThanOrEqual(repo.inboxCandidateCount(optInOnly: false),
-                                    repo.inboxCount(optInOnly: false),
-                                    "candidate detector must never undercount the badge")
+        var posted = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: .earshotInboxDidChange, object: nil, queue: nil
+        ) { _ in posted += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        InboxRepository(context: ctx).clearInbox()
+
+        XCTAssertGreaterThan(posted, 0, "clearing the inbox must post .earshotInboxDidChange for the badge")
     }
 
-    /// #736: the detector's guarantee. A playback-position save mutates only
-    /// `positionSeconds`, so it must NOT change the candidate total — that's what
-    /// lets `InboxTabBadge` skip the expensive exact recompute on the ~5-second
-    /// position-save hot path that was heating the phone.
-    func testPositionSaveDoesNotChangeCandidateCount() {
+    /// #736: marking episodes played changes the inbox count, so it must post
+    /// `.earshotInboxDidChange` too — otherwise the badge would stay stale until
+    /// the next foreground.
+    func testMarkAllPlayedPostsInboxDidChange() {
         let ctx = TestStore.freshContext()
         let a = podcast(ctx, "A")
-        for i in 0..<20 { episode(ctx, "e\(i)", podcast: a) }
+        episode(ctx, "new1", podcast: a)
+        episode(ctx, "new2", podcast: a)
         try? ctx.save()
 
-        let repo = InboxRepository(context: ctx)
-        let before = repo.inboxCandidateCount(optInOnly: false)
+        var posted = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: .earshotInboxDidChange, object: nil, queue: nil
+        ) { _ in posted += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
 
-        let first = try? ctx.fetch(
-            FetchDescriptor<Episode>(predicate: InboxQuery.normalUnplayed)
-        ).first
-        first?.positionSeconds = 321
-        try? ctx.save()
+        EpisodeRepository(context: ctx).markAllPlayed(in: a)
 
-        XCTAssertEqual(repo.inboxCandidateCount(optInOnly: false), before,
-                       "a position save must not move the candidate total")
+        XCTAssertGreaterThan(posted, 0, "marking played must post .earshotInboxDidChange")
     }
 }
