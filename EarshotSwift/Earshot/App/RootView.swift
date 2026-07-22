@@ -1,28 +1,60 @@
+import Combine
 import SwiftUI
 import SwiftData
 import UIKit
 
-/// Owns the Inbox badge query separately from RootView so changing playback
-/// position cannot make RootView evaluate Inbox relationships. The predicate is
-/// identical to the Inbox screen's and is executed by the persistent store.
+/// Owns the Inbox badge count separately from RootView so changing playback
+/// position cannot make RootView evaluate Inbox relationships.
+///
+/// It does NOT use a live `@Query`, and it deliberately does NOT observe
+/// `ModelContext.didSave` (#736). A `@Query` re-materializes its whole result
+/// set on every context save, and `PlayerService` saves the playback position
+/// every ~5 seconds — so on a large library the badge was fetching and filtering
+/// the entire unplayed backlog ~18 times a minute during playback, sustained
+/// main-thread CPU that ran the phone hot. `#732`'s `playedAt == nil` bound
+/// stopped the earlier `cpu_resource_fatal` crash but left that residual cost.
+///
+/// Instead the count is recomputed ONLY on the events that can actually change
+/// it — an explicit `.earshotInboxDidChange` (ingest, play, dismiss, caps), a
+/// queue change, opt-in-mode change, and app-foreground (which self-heals any
+/// signal we didn't get). A playback-position save triggers nothing here, so the
+/// badge does zero work on the hot path. On a tab switch the native badge is
+/// re-asserted from the cached count (SwiftData rebuilds the tab items and drops
+/// the manually set `badgeValue`) — a pure UIKit re-apply, no store work.
 private struct InboxTabBadge: View {
-    // Restricted to UNPLAYED, non-dismissed episodes (`playedAt == nil`). This
-    // badge is inset into all five tabs, so it is always in the tree during
-    // playback, and every 5-second position save invalidates these queries. The
-    // old `InboxQuery.normal`/`optInOnly` returned every non-dismissed episode —
-    // a set that grows without bound because finished episodes are never
-    // dismissed — so each save re-materialized the whole library on the main
-    // thread and iOS force-killed the app under `cpu_resource_fatal` (~93% CPU /
-    // 60s) about a minute into playback. `playedAt == nil` trims the unbounded
-    // played history out of the fetch in SQLite; the exact `.newEpisode` check
-    // stays an in-memory pass (SwiftData can't translate the stored enum).
-    @Query(filter: InboxQuery.normalUnplayed) private var normalEpisodes: [Episode]
-    @Query(filter: InboxQuery.optInOnlyUnplayed) private var optedInEpisodes: [Episode]
+    @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     let optInOnly: Bool
+    let selectedTab: RootTab?
+
+    @State private var count = 0
 
     var body: some View {
-        let episodes = optInOnly ? optedInEpisodes : normalEpisodes
-        TabBarBadgeApplier(tabIndex: 0, count: episodes.lazy.filter { $0.status == .newEpisode }.count)
+        TabBarBadgeApplier(tabIndex: 0, count: count)
+            .onAppear { recompute() }
+            .onChange(of: optInOnly) { _, _ in recompute() }
+            // Foreground heals any inbox change we didn't get an explicit signal
+            // for (a background feed refresh, a podcast include/exclude).
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { recompute() }
+            }
+            // Re-assert the native badge after a tab switch drops it. No store
+            // work — just re-apply the cached count.
+            .onChange(of: selectedTab) { _, _ in
+                TabBarBadgeApplier.apply(tabIndex: 0, count: count)
+            }
+            // Recompute only on real inbox changes — never on a position save.
+            // Delivered on main since a background context can post these.
+            .onReceive(NotificationCenter.default.publisher(for: .earshotInboxDidChange).receive(on: DispatchQueue.main)) { _ in
+                recompute()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .earshotQueueDidChange).receive(on: DispatchQueue.main)) { _ in
+                recompute()
+            }
+    }
+
+    private func recompute() {
+        count = InboxRepository(context: context).inboxCount(optInOnly: optInOnly)
     }
 }
 
@@ -56,6 +88,11 @@ struct RootView: View {
     /// Navigation path for the Library tab, so a notification can push a podcast
     /// detail screen onto it (#72).
     @State private var libraryPath: [Podcast] = []
+
+    /// Drives the app-background durability anchor for playback position/stats
+    /// (#736): the ~5s tick no longer writes to the store, so persist on
+    /// background instead.
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         // Live unplayed-inbox count from the same source of truth as the Inbox
@@ -143,7 +180,7 @@ struct RootView: View {
         // Native UITabBarItem badge for the Inbox unread count (#321 follow-up):
         // re-applies whenever `inboxBadgeCount` changes. Replaces SwiftUI's
         // `.badge`, which double-announced the count under VoiceOver.
-        .background(InboxTabBadge(optInOnly: settings.inboxOptInOnly))
+        .background(InboxTabBadge(optInOnly: settings.inboxOptInOnly, selectedTab: selectedTab))
         // Native UITabBarItem badge for the Queue episode count (#491): same
         // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
         .background(TabBarBadgeApplier(tabIndex: 1, count: queueBadgeCount))
@@ -176,6 +213,13 @@ struct RootView: View {
         // times per toggle. Announcer no-ops when VoiceOver is off.
         .onChange(of: player.isPlaying) { _, isPlaying in
             Announcer.announce(isPlaying ? "Playing" : "Paused")
+        }
+        // Durably persist playback position + listening stats when the app goes
+        // to the background (#736). The ~5s playback tick no longer writes to the
+        // store — it records to UserDefaults — so this is the anchor that flushes
+        // to SwiftData when the user locks the phone or switches apps.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { player.persistForBackground() }
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()

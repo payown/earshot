@@ -129,4 +129,46 @@ final class InboxBadgeCountTests: XCTestCase {
         XCTAssertFalse(guids.contains("played-1"))
         XCTAssertFalse(guids.contains("played-2"))
     }
+
+    /// #736: the badge no longer polls the store on every save — it recomputes
+    /// only when it receives `.earshotInboxDidChange`. So the inbox-mutating
+    /// operations must post it. Clearing the inbox is one such operation.
+    func testClearInboxPostsInboxDidChange() {
+        let ctx = TestStore.freshContext()
+        let a = podcast(ctx, "A")
+        episode(ctx, "new1", podcast: a)
+        episode(ctx, "new2", podcast: a)
+        try? ctx.save()
+
+        var posted = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: .earshotInboxDidChange, object: nil, queue: nil
+        ) { _ in posted += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        InboxRepository(context: ctx).clearInbox()
+
+        XCTAssertGreaterThan(posted, 0, "clearing the inbox must post .earshotInboxDidChange for the badge")
+    }
+
+    /// #736: marking episodes played changes the inbox count, so it must post
+    /// `.earshotInboxDidChange` too — otherwise the badge would stay stale until
+    /// the next foreground.
+    func testMarkAllPlayedPostsInboxDidChange() {
+        let ctx = TestStore.freshContext()
+        let a = podcast(ctx, "A")
+        episode(ctx, "new1", podcast: a)
+        episode(ctx, "new2", podcast: a)
+        try? ctx.save()
+
+        var posted = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: .earshotInboxDidChange, object: nil, queue: nil
+        ) { _ in posted += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        EpisodeRepository(context: ctx).markAllPlayed(in: a)
+
+        XCTAssertGreaterThan(posted, 0, "marking played must post .earshotInboxDidChange")
+    }
 }

@@ -124,6 +124,10 @@ actor FeedRefreshActor {
 
         // Flush the final partial batch and resolve its IDs.
         flushPending()
+        // Newly ingested episodes can change the inbox count — signal the tab
+        // badge once, at the end of the whole operation rather than per batch,
+        // so it refreshes without polling on every save (#736).
+        NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
         return results
     }
 
@@ -242,6 +246,10 @@ actor FeedRefreshActor {
 
         // Flush the final partial batch and resolve its IDs.
         flushPending()
+        // Newly ingested episodes can change the inbox count — signal the tab
+        // badge once, at the end of the whole operation rather than per batch,
+        // so it refreshes without polling on every save (#736).
+        NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
         return results
     }
 
