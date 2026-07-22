@@ -437,6 +437,16 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   Earshot stops being just Kashe, Renata's nephew, and a handful of testers and
   becomes a thing anyone can find. She doesn't know it; the world is about to
   arrive (Chapter 49)
+- She carries her phone in a breast/shirt pocket while she works, so she feels
+  its warmth against her; on long afternoon drives it used to run hot, which she
+  blamed on the sun and the dashboard rather than the app (the app was doing
+  background busywork every few seconds all session; build 155 stops it and the
+  phone stays cool over an hour-plus listen, place still saved) (Chapter 51)
+- Habit that ties to her hands-on care work: she checks a warm thing by pressing
+  two fingers flat against it the way she'd feel a client's forehead for fever
+  (Chapter 51)
+- Her dry, independent line for normalizing friction instead of reporting it:
+  "You don't report the weather" (Chapter 51)
 
 ## What you can generate
 
@@ -1671,6 +1681,32 @@ The last two builds handed her back small things that worked, and she couldn't u
 This build lets her forget she was counting. She pulls out, the host starts, and a minute and a half comes and goes with nothing under it but the road.
 
 The other thing she only caught with the phone in her pocket and the earbuds in. When a show ends on its own now, a small voice says episode finished, and the dead little bar that used to sit there afterward is just gone. Pause instead and the bar waits, the way it should. She'd never have asked for either one. She just stopped reaching to check whether it was really over.
+
+---
+
+### Chapter 51 — Build 155
+
+*On her large library, long listening sessions used to warm the phone up; this build stops that background busywork so it stays cool over an hour or more, while still saving her place just as safely.*
+
+**What to test:**
+
+On a large library, play an episode at a faster speed like 1.5x and let it run for an hour or more. The phone should stay cool, not warm up in your hand or pocket.
+
+While it's playing, force-quit the app and reopen it. It should drop you back within a few seconds of where you left off.
+
+After updating, confirm your subscriptions, inbox, queue, and resume points are all still there.
+
+She'd been blaming the sun.
+
+The phone rode warm in her breast pocket most afternoons, and she'd decided it was the dashboard, the July light, the long drives with a show running between the far clients. She'd catch it at a stoplight, press two fingers flat to the back of the case the way she'd feel a forehead, and think: hot again. Not a word to anyone. You don't report the weather.
+
+It wasn't the weather. The app had been doing quiet busywork the whole time she listened, over and over, every few seconds, a full hour of it stacked under one episode. On a following as big as hers it added up to a phone running a low fever all afternoon.
+
+This build lets it rest. She plays a long interview at one and a half speed across three visits, and the phone comes out of her pocket at the end no warmer than it went in. She presses two fingers to it out of habit before she can stop herself. Cool.
+
+She kills the app at a light, the way she does when her hands need something to do, and opens it again. It sets her down a breath from where she left off, like it never went anywhere.
+
+She'll tell Renata the heat's gone. Or she won't. Either way she's stopped checking it like a patient.
 
 ---
 
