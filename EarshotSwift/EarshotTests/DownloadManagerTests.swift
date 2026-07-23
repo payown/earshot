@@ -100,6 +100,77 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, DownloadStatus.none)
     }
 
+    // MARK: clearAllDownloads
+
+    func test_clearAllDownloads_deletesEveryFileAndResetsState() async throws {
+        let context = TestStore.freshContext()
+        let nameA = "earshot-test-clear-a-\(UUID().uuidString).mp3"
+        let nameB = "earshot-test-clear-b-\(UUID().uuidString).mp3"
+        let fileA = try plantDownloadFile(named: nameA)
+        let fileB = try plantDownloadFile(named: nameB)
+
+        let a = Episode(guid: "c1", title: "A", audioURL: "https://h/a.mp3",
+                        downloadStatus: .downloaded, downloadPath: nameA)
+        let b = Episode(guid: "c2", title: "B", audioURL: "https://h/b.mp3",
+                        downloadStatus: .downloaded, downloadPath: nameB)
+        // An idle (never-downloaded) episode must be left completely alone.
+        let idle = Episode(guid: "c3", title: "Idle", audioURL: "https://h/i.mp3",
+                           downloadStatus: DownloadStatus.none)
+        context.insert(a)
+        context.insert(b)
+        context.insert(idle)
+        let manager = makeManager(context)
+
+        let removed = await manager.clearAllDownloads()
+
+        XCTAssertEqual(removed, 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileA.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileB.path))
+        XCTAssertNil(a.downloadPath)
+        XCTAssertNil(b.downloadPath)
+        XCTAssertEqual(a.downloadStatus, DownloadStatus.none)
+        XCTAssertEqual(b.downloadStatus, DownloadStatus.none)
+        XCTAssertEqual(idle.downloadStatus, DownloadStatus.none,
+                       "A never-downloaded episode is untouched")
+    }
+
+    func test_clearAllDownloads_noDownloads_returnsZeroAndDoesNothing() async {
+        let context = TestStore.freshContext()
+        let idle = Episode(guid: "c4", title: "Idle", audioURL: "https://h/i.mp3",
+                           downloadStatus: DownloadStatus.none)
+        context.insert(idle)
+        let manager = makeManager(context)
+
+        let removed = await manager.clearAllDownloads()
+
+        XCTAssertEqual(removed, 0)
+        XCTAssertEqual(idle.downloadStatus, DownloadStatus.none)
+        XCTAssertFalse(context.hasChanges, "Nothing to clear must write nothing")
+    }
+
+    func test_clearAllDownloads_legacyAbsolutePath_deletesFileAtResolvedLocation() async throws {
+        // Bulk clear must honor the same #575 resolution as removeDownload: a
+        // legacy absolute path still deletes the real file in the CURRENT
+        // Downloads directory.
+        let context = TestStore.freshContext()
+        let name = "earshot-test-clear-legacy-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let legacyPath = "/var/mobile/Containers/Data/Application/DEAD-UUID/Documents/Downloads/\(name)"
+
+        let episode = Episode(guid: "c5", title: "Legacy", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: legacyPath)
+        context.insert(episode)
+        let manager = makeManager(context)
+
+        let removed = await manager.clearAllDownloads()
+
+        XCTAssertEqual(removed, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path),
+                       "The real file at the resolved location must be deleted")
+        XCTAssertNil(episode.downloadPath)
+        XCTAssertEqual(episode.downloadStatus, DownloadStatus.none)
+    }
+
     // MARK: reconcileDownloadPaths (#575)
 
     // Acceptance criterion: launch reconciliation rewrites legacy absolute

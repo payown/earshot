@@ -47,6 +47,8 @@ struct DownloadsScreen: View {
     // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
     // downloaded set and the expiration records are filtered in memory only.
     @State private var searchText = ""
+    // Drives the "Clear all downloads" destructive confirmation from the toolbar.
+    @State private var showClearAllConfirm = false
     // Global played/unheard filter for the Downloads list (#641). Loaded on
     // appear (default ``EpisodeListFilter/all`` — show everything) and persisted
     // globally on change. Applies only to the Downloaded section; Recently
@@ -181,6 +183,20 @@ struct DownloadsScreen: View {
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)
             }
+            // Quick one-tap way to reclaim storage. Disabled (not hidden) when
+            // there's nothing downloaded, so its position stays stable for
+            // VoiceOver users. Never clears directly — routes through the
+            // destructive confirmation below.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showClearAllConfirm = true
+                } label: {
+                    Label("Clear all downloads", systemImage: "trash")
+                }
+                .disabled(downloaded.isEmpty)
+                .accessibilityLabel("Clear all downloads")
+                .accessibilityHint("Removes every downloaded episode from this device")
+            }
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
@@ -202,6 +218,29 @@ struct DownloadsScreen: View {
             Button("Cancel", role: .cancel) { pendingUnfollow = nil }
         } message: { podcast in
             Text("This removes \(podcast.title) and its episodes from your library. This can't be undone.")
+        }
+        // Destructive "Clear all downloads" confirmation (toolbar trash button).
+        // Same shape as the unfollow dialog above so the flow reads identically.
+        .confirmationDialog(
+            "Clear all downloads?",
+            isPresented: $showClearAllConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear all downloads", role: .destructive) { clearAllDownloads() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes ^[\(downloaded.count) downloaded episode](inflect: true) from this device. This can't be undone.")
+        }
+    }
+
+    /// Removes every downloaded file and resets download state in one pass. The
+    /// `downloadPath != nil` @Query drops the cleared rows automatically, so the
+    /// list empties without any manual refresh. Announces the outcome for
+    /// VoiceOver (Announcer is a no-op when VoiceOver is off).
+    private func clearAllDownloads() {
+        Task {
+            let removed = await downloads.clearAllDownloads()
+            Announcer.announce(removed == 1 ? "Cleared 1 download" : "Cleared \(removed) downloads")
         }
     }
 

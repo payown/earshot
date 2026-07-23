@@ -321,6 +321,70 @@ final class DownloadManager {
         save()
     }
 
+    /// Removes every downloaded file and resets all download state in one pass —
+    /// the bulk equivalent of ``removeDownload(_:)``. Returns the number of
+    /// episodes cleared (files removed plus in-flight transfers cancelled).
+    ///
+    /// Order matters: cancel any live background transfers FIRST so a completion
+    /// can't land a fresh file on disk after the sweep. Cancellation delivers an
+    /// `onFailed` terminal event, but every affected episode is reset to `.none`
+    /// here regardless, and the `ActiveDownload` row is dropped in the same save,
+    /// so a late `.failed` write has nothing to clobber (it early-returns on the
+    /// `.downloading` guard in ``fail(taskKey:)``).
+    ///
+    /// The candidate set is the two bounded, queryable sources (#701): episodes
+    /// with a file on disk (`downloadPath != nil`) and in-flight rows
+    /// (`ActiveDownload`, `.pending` / `.downloading`). A stray `.failed` episode
+    /// has no file and no row, so there is nothing to remove for it.
+    @discardableResult
+    func clearAllDownloads() async -> Int {
+        guard let context else { return 0 }
+
+        var affected: [Episode] = await episodesWithDownloadPath(in: context)
+        var seen = Set(affected.map(\.persistentModelID))
+        var hasInFlight = false
+        for state in [ActiveDownloadState.pending, .downloading] {
+            for episode in await activeEpisodes(state: state, in: context) {
+                hasInFlight = true
+                if seen.insert(episode.persistentModelID).inserted {
+                    affected.append(episode)
+                }
+            }
+        }
+        guard !affected.isEmpty else { return 0 }
+
+        // Cancel live transfers BEFORE resetting state so a completion delivered
+        // mid-clear can't write `downloadPath`/`.downloaded` back onto a row we
+        // just cleared. Only reach for the shared background session when a
+        // transfer is actually in flight — the common "delete downloaded files"
+        // path never forces the session into existence.
+        if hasInFlight {
+            await Self.cancelAllTasks()
+        }
+
+        for episode in affected {
+            if let url = episode.localAudioURL {
+                try? FileManager.default.removeItem(at: url)
+            }
+            episode.downloadPath = nil
+            ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+        }
+        save()
+        AppLog.networking.info("Cleared \(affected.count) download(s)")
+        return affected.count
+    }
+
+    /// Cancels every task on the shared background session. Used by
+    /// ``clearAllDownloads()`` so no in-flight transfer completes after a clear.
+    private static func cancelAllTasks() async {
+        await withCheckedContinuation { continuation in
+            session.getAllTasks { tasks in
+                for task in tasks { task.cancel() }
+                continuation.resume()
+            }
+        }
+    }
+
     /// Heals `downloadPath` values written by pre-#575 builds, which stored
     /// ABSOLUTE container paths. iOS relocates the app container on every app
     /// update, so every such path goes stale: playback silently fell back to
