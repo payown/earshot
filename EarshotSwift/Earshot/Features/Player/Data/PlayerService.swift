@@ -640,7 +640,7 @@ final class PlayerService {
         // entirely rather than leaving a stale title behind. The AVAudioSession
         // is left exactly as the existing stop paths leave it (never
         // deactivated here), so route/interruption behavior is unchanged.
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        clearNowPlayingInfo()
         // Nothing loaded → no crash-recovery position to keep (#736).
         clearLivePosition()
     }
@@ -676,7 +676,7 @@ final class PlayerService {
         clearLivePosition()
         // Clear the lock screen / Control Center entirely rather than leaving a
         // stale (or empty) title behind, exactly as `stopAndUnload` does.
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        clearNowPlayingInfo()
     }
 
     /// Skips forward by the user-configured interval (default 30s).
@@ -1349,7 +1349,12 @@ final class PlayerService {
         let interval = CMTime(seconds: 1, preferredTimescale: 1)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
-            Task { @MainActor in
+            // The observer is already delivered on the main queue, so run the
+            // tick synchronously instead of allocating a `Task` and deferring a
+            // runloop hop every second. At 1.5x-3x playback this fired 1.5-3x a
+            // second continuously; the hop was pure overhead (heat trim, see
+            // docs/plans/2026-07-downloads-and-heat.md).
+            MainActor.assumeIsolated {
                 self.handleTick(currentSeconds: time.seconds)
             }
         }
@@ -1974,6 +1979,31 @@ final class PlayerService {
 
     // MARK: Private — Now Playing info
 
+    /// Local mirror of `MPNowPlayingInfoCenter.default().nowPlayingInfo`, kept in
+    /// lockstep with the center by routing every write through
+    /// ``writeNowPlayingInfo(_:)`` / ``clearNowPlayingInfo()``. Its one reader is
+    /// the throttled per-tick elapsed sync (``updateNowPlayingElapsed()``), which
+    /// mutates this cache instead of reading the cross-process dict back — the
+    /// `nowPlayingInfo` getter is a `mediaserverd` round-trip that copies the whole
+    /// dict (artwork reference included), and it fired every ~5 media seconds
+    /// (#412 heat trim). The infrequent artwork paths still read the center
+    /// directly so they stay correct regardless of the cache's state.
+    private var cachedNowPlayingInfo: [String: Any] = [:]
+
+    /// Assigns `info` to the Now Playing center and updates the local mirror in
+    /// one step. Every write to `nowPlayingInfo` must go through here (or
+    /// ``clearNowPlayingInfo()``) so the cache never drifts from the center.
+    private func writeNowPlayingInfo(_ info: [String: Any]) {
+        cachedNowPlayingInfo = info
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    /// Clears the Now Playing center and the local mirror together.
+    private func clearNowPlayingInfo() {
+        cachedNowPlayingInfo = [:]
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
+
     private func updateNowPlayingInfo() {
         var info: [String: Any] = [:]
         info[MPMediaItemPropertyTitle] = currentTitle ?? ""
@@ -1991,7 +2021,7 @@ final class PlayerService {
         if let existing = MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] {
             info[MPMediaItemPropertyArtwork] = existing
         }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        writeNowPlayingInfo(info)
 
         // This is a discontinuity write (play / pause / seek / resume): the elapsed
         // time and rate are now exact, so re-anchor the per-tick throttle (#412) and
@@ -2022,7 +2052,7 @@ final class PlayerService {
             lastArtworkURL = nil
             var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
             info.removeValue(forKey: MPMediaItemPropertyArtwork)
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            writeNowPlayingInfo(info)
             return
         }
 
@@ -2050,7 +2080,7 @@ final class PlayerService {
         let artwork = MPMediaItemArtwork(boundsSize: image.size) { @Sendable _ in artworkImage }
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         info[MPMediaItemPropertyArtwork] = artwork
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        writeNowPlayingInfo(info)
     }
 
     /// Per-tick entry point for the lock-screen elapsed time, throttled to
@@ -2071,13 +2101,15 @@ final class PlayerService {
     /// Writes just the moving fields (elapsed time, rate, duration) into
     /// `nowPlayingInfo` without disturbing the title/artist/artwork.
     private func updateNowPlayingElapsed() {
-        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        // Start from the local mirror rather than reading the cross-process
+        // dictionary back — this is the throttled per-tick path (#412 heat trim).
+        var info = cachedNowPlayingInfo
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentPositionSeconds
         info[MPNowPlayingInfoPropertyPlaybackRate] = reportedNowPlayingRate
         if durationSeconds > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = durationSeconds
         }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        writeNowPlayingInfo(info)
     }
 
     // MARK: Private — remote commands
