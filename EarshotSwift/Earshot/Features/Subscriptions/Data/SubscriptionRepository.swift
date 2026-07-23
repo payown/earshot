@@ -23,6 +23,14 @@ protocol FeedFetching: Sendable {
 @MainActor
 protocol EpisodeDownloading: AnyObject {
     func download(_ episode: Episode) async
+    /// Downloads queued-but-not-downloaded episodes when the user's
+    /// "Auto-download queued episodes" setting is on. Defaulted to a no-op so
+    /// test fakes and non-DownloadManager conformers need not implement it.
+    func downloadQueuedIfEnabled() async
+}
+
+extension EpisodeDownloading {
+    func downloadQueuedIfEnabled() async {}
 }
 
 extension DownloadManager: EpisodeDownloading {}
@@ -186,6 +194,9 @@ final class SubscriptionRepository {
                 )
             }
         }
+        // Cover episodes a fresh subscribe auto-queued (podcast.autoQueue). No-op
+        // unless "Auto-download queued episodes" is on and something is queued.
+        await downloader?.downloadQueuedIfEnabled()
 
         return podcast
     }
@@ -278,6 +289,10 @@ final class SubscriptionRepository {
         if downloader != nil, !outcome.newEpisodeIDs.isEmpty {
             await autoDownloadRecent(episodeIDsPerPodcast: [outcome.newEpisodeIDs])
         }
+        // Refresh-time auto-queue enqueues on a background context (no
+        // .earshotQueueDidChange), so trigger the queued-download sweep here on the
+        // main actor, where the downloader lives. No-op unless the setting is on.
+        await downloader?.downloadQueuedIfEnabled()
         return outcome
     }
 
@@ -323,6 +338,10 @@ final class SubscriptionRepository {
         // refresh, cold-launch throttled refresh, foreground-resume, and the
         // BGTaskScheduler background refresh), not just on first subscribe (#639).
         await autoDownloadRecent(episodeIDsPerPodcast: results.map { $0.outcome.newEpisodeIDs })
+        // Auto-download queued episodes surfaced by refresh-time auto-queue (which
+        // enqueues on a background context and posts no .earshotQueueDidChange).
+        // No-op unless the setting is on. One sweep covers the whole queue.
+        await downloader?.downloadQueuedIfEnabled()
 
         // Build notifications from value-type results only — no `@Model` crossed
         // the actor boundary. Only notification-enabled podcasts with genuinely-new

@@ -33,6 +33,8 @@ final class DownloadManager {
     @ObservationIgnored private var context: ModelContext?
     @ObservationIgnored private var settings: AppSettingsStore?
     @ObservationIgnored private let monitor = NWPathMonitor()
+    /// Observer for `.earshotQueueDidChange`, so queued episodes auto-download.
+    @ObservationIgnored private var queueChangeObserver: NSObjectProtocol?
 
     // MARK: Shared background session (one per identifier per process)
 
@@ -105,6 +107,19 @@ final class DownloadManager {
             }
         }
         monitor.start(queue: DispatchQueue(label: "media.payown.earshot.swift.network"))
+
+        // Auto-download queued episodes (#downloads): every manual/opt-in enqueue
+        // funnels through QueueRepository.save, which posts this. The scan is
+        // bounded by the queue and idempotent, so it's safe to react to every
+        // queue mutation (adds, reorders, removals). Refresh-time auto-queue posts
+        // on a background context and is covered separately by SubscriptionRepository.
+        if queueChangeObserver == nil {
+            queueChangeObserver = NotificationCenter.default.addObserver(
+                forName: .earshotQueueDidChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in await self?.downloadQueuedIfEnabled() }
+            }
+        }
     }
 
     /// Whether a download may start right now under the Wi-Fi gate.
@@ -207,6 +222,30 @@ final class DownloadManager {
         guard !episodes.isEmpty else { return }
         AppLog.networking.info("Starting \(episodes.count) Wi-Fi-gated download(s)")
         for episode in episodes {
+            await download(episode)
+        }
+    }
+
+    /// Downloads every queued episode that isn't already downloaded or in flight,
+    /// when "Auto-download queued episodes" is on (default). Bounded by the (small)
+    /// queue: it fetches the ``QueueItem`` table, never the Episode table. Honors
+    /// the Wi-Fi gate automatically because it routes through ``download(_:)`` — a
+    /// gated episode parks at `.pending` and starts later, exactly like a manual
+    /// download.
+    ///
+    /// Fired for manual/opt-in adds via the ``Notification/Name/earshotQueueDidChange``
+    /// observer wired in ``configure(context:)``, and for refresh-time auto-queue
+    /// from ``SubscriptionRepository``'s refresh completion. Idempotent: an episode
+    /// already `.downloaded` / `.downloading` / `.pending` is skipped, so repeated
+    /// queue changes (including reorders) never re-enqueue work. A `.failed`
+    /// episode is left for a manual retry rather than re-hammered on every change.
+    func downloadQueuedIfEnabled() async {
+        guard let context else { return }
+        guard settings?.bool(SettingsKey.autoDownloadQueued, default: SettingsDefault.autoDownloadQueued) == true
+        else { return }
+        let items = (try? context.fetch(FetchDescriptor<QueueItem>())) ?? []
+        for item in items {
+            guard let episode = item.episode, episode.downloadStatus == .none else { continue }
             await download(episode)
         }
     }

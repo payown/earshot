@@ -37,6 +37,8 @@ struct DownloadsSettingsView: View {
                     selection: $settings.autoDownloadCount,
                     hint: "How many recent episodes download automatically. Flick up for more, down to turn off."
                 )
+                Toggle("Auto-download queued episodes", isOn: $settings.autoDownloadQueued)
+                    .accessibilityHint("When on, episodes added to the queue download automatically so you can play them offline. The Wi-Fi-only setting still applies.")
             }
 
             Section {

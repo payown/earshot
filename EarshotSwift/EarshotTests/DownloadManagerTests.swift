@@ -236,6 +236,46 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, DownloadStatus.none)
     }
 
+    // MARK: downloadQueuedIfEnabled — auto-download queued episodes
+
+    func test_downloadQueuedIfEnabled_on_kicksQueuedNotDownloadedEpisodes() async {
+        let context = TestStore.freshContext()
+        // Setting is on by default. Invalid audioURL so download() takes the
+        // enqueue-failure branch (marks .failed) WITHOUT forcing the shared
+        // background session or starting a real transfer — enough to prove the
+        // queued episode was handed to download().
+        let queued = Episode(guid: "q1", title: "Queued", audioURL: "")
+        context.insert(queued)
+        context.insert(QueueItem(episode: queued, position: 0))
+        // An already-downloaded queued episode must be skipped, not re-kicked.
+        let done = Episode(guid: "q2", title: "Done", audioURL: "https://h/a.mp3",
+                           downloadStatus: .downloaded, downloadPath: "a.mp3")
+        context.insert(done)
+        context.insert(QueueItem(episode: done, position: 1))
+        let manager = makeManager(context)
+
+        await manager.downloadQueuedIfEnabled()
+
+        XCTAssertEqual(queued.downloadStatus, .failed,
+                       "A queued, not-downloaded episode is sent to download()")
+        XCTAssertEqual(done.downloadStatus, .downloaded, "Already-downloaded queued episode is skipped")
+        XCTAssertEqual(done.downloadPath, "a.mp3")
+    }
+
+    func test_downloadQueuedIfEnabled_off_doesNothing() async {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(false, for: SettingsKey.autoDownloadQueued)
+        let queued = Episode(guid: "q3", title: "Queued", audioURL: "")
+        context.insert(queued)
+        context.insert(QueueItem(episode: queued, position: 0))
+        let manager = makeManager(context)
+
+        await manager.downloadQueuedIfEnabled()
+
+        XCTAssertEqual(queued.downloadStatus, DownloadStatus.none,
+                       "Setting off: queued episode is left untouched")
+    }
+
     // MARK: reconcileDownloadPaths (#575)
 
     // Acceptance criterion: launch reconciliation rewrites legacy absolute

@@ -39,6 +39,9 @@ enum SettingsKey {
     /// episode is marked played, from any mark-played path. Global, off by
     /// default (destructive, opt-in).
     static let deleteDownloadAfterPlayed = "delete_download_after_played"
+    /// When on, any episode added to the queue (manually or by auto-queue) is
+    /// downloaded for offline playback, honoring the Wi-Fi-only gate. On by default.
+    static let autoDownloadQueued = "auto_download_queued"
     /// Global played/unheard filter for the Downloads screen (#641). Not
     /// per-podcast — Downloads spans every show — so it's a single scalar key.
     static let downloadsPlayedFilter = "downloads_played_filter"
@@ -157,6 +160,9 @@ enum SettingsDefault {
     /// Auto-delete downloads after played is OFF by default: it destroys files,
     /// so it must be an explicit opt-in.
     static let deleteDownloadAfterPlayed = false
+    /// Auto-download queued episodes is ON by default so queued episodes are
+    /// playable offline out of the box; the Wi-Fi-only gate still applies.
+    static let autoDownloadQueued = true
     static let directTouchEnabled = false  // retained; not read by SettingsStore (#610)
     /// Chapter navigation buttons shown by default; users who prefer the artwork
     /// VoiceOver rotor can turn them off (#515).
