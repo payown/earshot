@@ -447,6 +447,17 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   (Chapter 51)
 - Her dry, independent line for normalizing friction instead of reporting it:
   "You don't report the weather" (Chapter 51)
+- Her Thursday client is out past a grain elevator where the cell signal quits
+  for good; she reaches it by a gravel road. On Sunday planning nights (Chapter
+  43) she used to run a second chore after building the queue: manually download
+  each episode for that dead-signal drive, thumbing down the list to confirm each
+  "Downloaded" label one at a time, because a show that claims it's there and
+  isn't is worse than silence on that road. Auto-download of queued episodes now
+  does that chore for her (Chapter 52)
+- Her downloads had quietly filled the phone with months of finished episodes she
+  never cleared; back in spring she'd deleted a hundred photos to make room and
+  blamed the camera. "Delete downloads after played" plus one-tap Clear all
+  downloads gave her the storage back (Chapter 52)
 
 ## What you can generate
 
@@ -1707,6 +1718,34 @@ This build lets it rest. She plays a long interview at one and a half speed acro
 She kills the app at a light, the way she does when her hands need something to do, and opens it again. It sets her down a breath from where she left off, like it never went anywhere.
 
 She'll tell Renata the heat's gone. Or she won't. Either way she's stopped checking it like a patient.
+
+---
+
+### Chapter 52 — Build 157
+
+*Anything she queues now downloads itself for offline, so the dead-signal drive no longer needs a second pass the night before, and the downloads that piled up for months clear in one tap.*
+
+**What to test:**
+
+Add episodes to your queue, by hand or by letting them auto-queue. With auto-download on (Settings > Downloads, on by default), each queued episode should download for offline on its own, honoring your Wi-Fi-only setting.
+
+Turn on "Delete downloads after played" (Settings > Downloads, off by default). Mark a downloaded episode played and its download should disappear on its own.
+
+On the Downloads screen, tap the trash button in the toolbar (also under Settings > Downloads) to clear every download at once. Confirm the count, that it asks first, and that any in-progress downloads cancel too.
+
+Play a long episode above 1x for a while. Playback stays smooth, place still saved, phone still cool.
+
+Sunday night, coffee going cold, she built the week's queue the way she always does. Work through the inbox, send what she wants to the queue, let the rest wait.
+
+Then the second chore, every Sunday. Go back through and download each one for the Thursday client, the one out past the grain elevator where the signal quits for good. Thumb down the list, confirm each Downloaded label one at a time, because a show that says it's there and isn't is worse than silence on that road.
+
+This week she forgot the second part. Caught herself Thursday morning already onto the gravel, bracing for the gap. But the shows played. Every one she'd queued Sunday was sitting on the phone, downloaded while she wasn't looking.
+
+She never asked for that. It just did the chore she'd done by hand for years.
+
+The other thing she found by accident. Her downloads had quietly eaten the phone, months of finished episodes she'd never cleared. Back in spring she'd deleted a hundred photos to make room and blamed the camera. She turned on delete-after-played, cleared the rest in one tap, and watched the number fall to almost nothing.
+
+She didn't tell Renata. She just had her phone back.
 
 ---
 
