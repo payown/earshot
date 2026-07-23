@@ -94,6 +94,11 @@ func buildEpisodeActions(
                 episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
                     nowPlayed: nowPlayed, wasDismissed: episode.inboxDismissed
                 )
+                // Auto-delete the download when this marks it played and the user
+                // opted in. Only on the played direction, never on unplayed.
+                if nowPlayed {
+                    DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
+                }
                 saveQuickAction(context, "played state")
                 // The rotor path's only announcement (#579). The sighted swipe
                 // announces on its own path (InboxScreen.markPlayed) and never

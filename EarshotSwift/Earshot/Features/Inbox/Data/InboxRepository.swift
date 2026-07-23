@@ -163,6 +163,8 @@ final class InboxRepository {
     func markPlayed(_ episode: Episode) {
         episode.isPlayed = true
         episode.inboxDismissed = true
+        // Auto-delete the download once played, when the user opted in (#downloads).
+        DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
         save()
     }
 

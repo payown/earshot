@@ -45,11 +45,17 @@ final class EpisodeRepository {
         let unplayed = podcast.episodes.filter { !$0.isPlayed }
         guard !unplayed.isEmpty else { return 0 }
 
+        // Gate the "delete downloads after played" setting once for the whole
+        // batch rather than refetching it per episode.
+        let deleteAfterPlayed = DownloadCleanup.deleteAfterPlayedEnabled(context)
         for episode in unplayed {
             episode.isPlayed = true
             episode.inboxDismissed = InboxLogic.inboxDismissedAfterPlayedChange(
                 nowPlayed: true, wasDismissed: episode.inboxDismissed
             )
+            if deleteAfterPlayed {
+                DownloadCleanup.removeDownloadFileAndState(episode, in: context)
+            }
         }
         save()
         return unplayed.count

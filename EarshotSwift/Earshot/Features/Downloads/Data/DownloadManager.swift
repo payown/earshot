@@ -581,3 +581,42 @@ final class DownloadManager {
         Self.save(context, action: "state")
     }
 }
+
+/// Download-side reactions to episode lifecycle changes that any layer can call
+/// without a ``DownloadManager`` (which is `@MainActor` and owns the live
+/// background session). Lives here, alongside the download logic it mirrors,
+/// rather than in its own file, because the Xcode project uses manual file
+/// references.
+@MainActor
+enum DownloadCleanup {
+    /// Whether "Delete downloads after played" is on. Read once and reused when
+    /// clearing many episodes in a loop (e.g. Mark all as played) so a bulk
+    /// action doesn't refetch the setting per episode.
+    static func deleteAfterPlayedEnabled(_ context: ModelContext) -> Bool {
+        AppSettingsStore(context: context)
+            .bool(SettingsKey.deleteDownloadAfterPlayed, default: SettingsDefault.deleteDownloadAfterPlayed)
+    }
+
+    /// Deletes `episode`'s downloaded file and resets its download state — the
+    /// same file+state contract as ``DownloadManager/removeDownload(_:)`` (delete
+    /// via the resolved ``Episode/localAudioURL``, reset through
+    /// ``ActiveDownload/setDownloadStatus(_:on:in:)``). No-op unless the episode
+    /// is actually `.downloaded`, so an in-flight transfer is never touched. The
+    /// caller saves the context (every mark-played path already saves right after).
+    static func removeDownloadFileAndState(_ episode: Episode, in context: ModelContext) {
+        guard episode.downloadStatus == .downloaded else { return }
+        if let url = episode.localAudioURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        episode.downloadPath = nil
+        ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+    }
+
+    /// Convenience for the single-episode mark-played paths: removes the download
+    /// only when the setting is on. Bulk callers should gate once with
+    /// ``deleteAfterPlayedEnabled(_:)`` and call ``removeDownloadFileAndState(_:in:)``.
+    static func removeDownloadAfterPlayedIfEnabled(_ episode: Episode, in context: ModelContext) {
+        guard deleteAfterPlayedEnabled(context) else { return }
+        removeDownloadFileAndState(episode, in: context)
+    }
+}

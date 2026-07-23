@@ -39,6 +39,7 @@ final class SettingsStore {
 
     // Downloads
     var wifiOnlyDownloads: Bool = SettingsDefault.wifiOnlyDownloads { didSet { persist { $0.setBool(wifiOnlyDownloads, for: SettingsKey.wifiOnlyDownloads) } } }
+    var deleteDownloadAfterPlayed: Bool = SettingsDefault.deleteDownloadAfterPlayed { didSet { persist { $0.setBool(deleteDownloadAfterPlayed, for: SettingsKey.deleteDownloadAfterPlayed) } } }
     var autoDownloadCount: Int = SettingsDefault.autoDownloadCount { didSet { persist { $0.setInt(autoDownloadCount, for: SettingsKey.autoDownloadCount) } } }
     var historyRetentionDays: Int = SettingsDefault.historyRetentionDays { didSet { persist { $0.setInt(historyRetentionDays, for: SettingsKey.historyRetentionDays) } } }
 
@@ -78,6 +79,7 @@ final class SettingsStore {
         inboxOptInOnly = store.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
         inboxDefaultCount = store.inboxDefaultCount()
         wifiOnlyDownloads = store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads)
+        deleteDownloadAfterPlayed = store.bool(SettingsKey.deleteDownloadAfterPlayed, default: SettingsDefault.deleteDownloadAfterPlayed)
         autoDownloadCount = store.int(SettingsKey.autoDownloadCount, default: SettingsDefault.autoDownloadCount)
         historyRetentionDays = store.int(SettingsKey.historyRetentionDays, default: SettingsDefault.historyRetentionDays)
         statsStreaksEnabled = store.bool(SettingsKey.statsStreaksEnabled, default: SettingsDefault.statsStreaksEnabled)

@@ -186,6 +186,9 @@ final class QueueRepository {
         remove(episode) {
             $0.isPlayed = true
             $0.inboxDismissed = true
+            // Auto-delete the download once played, when the user opted in. In
+            // the same save as the played flip so the file and state clear atomically.
+            DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: context)
         }
     }
 

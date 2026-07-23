@@ -35,6 +35,10 @@ enum SettingsKey {
     static let chapterNavButtonsVisible = "chapter_nav_buttons_visible"
     static let inboxOptInOnly = "inbox_opt_in_only"
     static let wifiOnlyDownloads = "wifi_only_downloads"
+    /// When on, an episode's downloaded file is deleted automatically once the
+    /// episode is marked played, from any mark-played path. Global, off by
+    /// default (destructive, opt-in).
+    static let deleteDownloadAfterPlayed = "delete_download_after_played"
     /// Global played/unheard filter for the Downloads screen (#641). Not
     /// per-podcast — Downloads spans every show — so it's a single scalar key.
     static let downloadsPlayedFilter = "downloads_played_filter"
@@ -150,6 +154,9 @@ enum SettingsDefault {
     static let skipForwardSeconds = 30
     static let skipBackSeconds = 15
     static let wifiOnlyDownloads = true
+    /// Auto-delete downloads after played is OFF by default: it destroys files,
+    /// so it must be an explicit opt-in.
+    static let deleteDownloadAfterPlayed = false
     static let directTouchEnabled = false  // retained; not read by SettingsStore (#610)
     /// Chapter navigation buttons shown by default; users who prefer the artwork
     /// VoiceOver rotor can turn them off (#515).

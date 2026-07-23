@@ -1603,6 +1603,11 @@ final class PlayerService {
         }
         episode.isPlayed = true
         episode.positionSeconds = 0
+        // Auto-delete the download once played, when the user opted in. Uses the
+        // player's own context so it lands in the same saveContext() below.
+        if let context {
+            DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
+        }
         saveContext()
         // The finished episode just left the inbox — refresh the tab badge
         // (the badge no longer polls on every position save, #736).

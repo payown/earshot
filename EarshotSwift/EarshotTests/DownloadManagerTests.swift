@@ -171,6 +171,71 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, DownloadStatus.none)
     }
 
+    // MARK: DownloadCleanup — delete downloads after played
+
+    func test_removeDownloadAfterPlayed_enabled_deletesFileAndResetsState() throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let name = "earshot-test-afterplayed-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let episode = Episode(guid: "p1", title: "Played", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        context.insert(episode)
+
+        DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertNil(episode.downloadPath)
+        XCTAssertEqual(episode.downloadStatus, DownloadStatus.none)
+    }
+
+    func test_removeDownloadAfterPlayed_disabledByDefault_keepsFile() throws {
+        let context = TestStore.freshContext()
+        // Setting is off by default — do not set it.
+        let name = "earshot-test-afterplayed-off-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let episode = Episode(guid: "p2", title: "Played", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        context.insert(episode)
+
+        DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path),
+                      "Off by default: the file must be kept")
+        XCTAssertEqual(episode.downloadPath, name)
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+    }
+
+    func test_removeDownloadAfterPlayed_enabledButNotDownloaded_isNoOp() {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let episode = Episode(guid: "p3", title: "Streaming", audioURL: "https://h/a.mp3",
+                              downloadStatus: DownloadStatus.none)
+        context.insert(episode)
+
+        DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
+
+        XCTAssertEqual(episode.downloadStatus, DownloadStatus.none)
+        XCTAssertNil(episode.downloadPath)
+    }
+
+    func test_inboxMarkPlayed_withDeleteAfterPlayedOn_removesDownload() throws {
+        // Integration: proves the mark-played choke point actually fires cleanup.
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let name = "earshot-test-inbox-afterplayed-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let episode = Episode(guid: "p4", title: "Inbox", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        context.insert(episode)
+
+        InboxRepository(context: context).markPlayed(episode)
+
+        XCTAssertTrue(episode.isPlayed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertEqual(episode.downloadStatus, DownloadStatus.none)
+    }
+
     // MARK: reconcileDownloadPaths (#575)
 
     // Acceptance criterion: launch reconciliation rewrites legacy absolute
