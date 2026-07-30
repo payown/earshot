@@ -842,4 +842,4 @@ Future<void> movePodcastsToFolder(int folderId, List<int> podcastIds);
 
 ---
 
-*Draft for Michael's review. Nothing here is built yet. The §14, §16.12, and §17.9 decisions are resolved (2026-07-30); confirm the phase order in §12 and the sync-schema epoch (§16.4) before any branch is cut. Per project rules, no work starts on `main`, and every UI PR gets a `mobile-accessibility` review first. Scope is iOS/iPadOS only.*
+*For Michael. Nothing here is built yet. **All decisions are confirmed (2026-07-30):** the §14, §16.12, and §17.9 records, the §12 phase order (folder Phases 1–4 with Sync Phases A–D interleaved), and the single combined folder+sync migration epoch (§16.4). **Next step:** keep this as the reference PRD; per-phase docs and GitHub issues are written just-in-time when each phase begins (per `.claude/rules/phase-progression.md`). Per project rules, no work starts on `main`, and every UI PR gets a `mobile-accessibility` review first. Scope is iOS/iPadOS only.*
