@@ -98,13 +98,13 @@ See `docs/swiftui-accessibility-audit.md` and the `earshot-accessibility` agent.
 
 ## Deploy to TestFlight
 
-Run the deploy script from the feature branch after the code is committed:
+Run the deploy script from **`main`** (the trunk) after the change is on it:
 
 ```bash
-bash tool/swiftui-testflight.sh --notes "Fix: <brief description of what was fixed>"
+bash tool/swiftui-testflight.sh --notes "What to test"
 ```
 
-The script bumps `CURRENT_PROJECT_VERSION` in `project.yml`, regenerates the project via xcodegen, archives with `xcodebuild`, and uploads to the Internal Testing Group. **Never pre-bump the build number manually.** Builds go out from the feature branch, not from main; main gets the change after Michael verifies on device and the PR is merged.
+The script requires a clean `main` in sync with origin, bumps `CURRENT_PROJECT_VERSION` in `project.yml`, commits that bump to `main`, regenerates the project via xcodegen, archives with `xcodebuild`, and uploads to the Internal Testing Group. **Never pre-bump the build number manually.** TestFlight builds go out from `main`, so device verification of a change happens on the build cut after it lands on `main`.
 
 After upload, tell Michael: the build number, the issue being tested, exact step-by-step device instructions, what correct behavior looks like, and what the broken behavior looked like before.
 
@@ -116,8 +116,8 @@ After upload, tell Michael: the build number, the issue being tested, exact step
 4. Fix only what the issue describes. No scope creep. No new dependencies.
 5. Run `earshot-accessibility` on any UI change before considering it done.
 6. Commit (Conventional Commits), push, open a PR into `main`, assign `@payown`. Keep non-generated changes reviewable (~1,500 lines).
-7. Deploy to TestFlight from the branch; give Michael device test steps.
-8. **Stop and wait.** Do not merge or close the issue until Michael verifies on device.
+7. After the change is on `main`, cut a TestFlight build (`tool/swiftui-testflight.sh` from `main`) and give Michael device test steps.
+8. **Stop and wait.** Do not close the issue until Michael verifies the TestFlight build on device.
 
 If a fix did not work, stay on the branch and keep investigating.
 

@@ -62,8 +62,8 @@ fi
 if [[ "$RESUME" != true ]]; then
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-if [[ "$BRANCH" != "swift" ]]; then
-  echo "❌ Must be on the swift branch to deploy. Currently on: $BRANCH"
+if [[ "$BRANCH" != "main" ]]; then
+  echo "❌ Must be on the main branch to deploy. Currently on: $BRANCH"
   exit 1
 fi
 
