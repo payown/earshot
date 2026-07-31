@@ -4,7 +4,7 @@
 
 - Required toolchain: Xcode 26.6, Apple Swift 6.3.3, and XcodeGen 2.45.4.
 - The app uses Swift 6 language mode with complete strict concurrency and targets iOS 18.0.
-- `EarshotSwift/project.yml` is the project source of truth. After changing it, run `xcodegen` from `EarshotSwift/` and commit the regenerated project.
+- `project.yml` (repo root) is the project source of truth. After changing it, run `xcodegen` from the repo root and commit the regenerated project.
 - There are no third-party Swift dependencies.
 
 ## Tests and StoreKit
@@ -14,7 +14,7 @@
 
 ## Worktrees, reviews, and protected scope
 
-- Target PRs to `swift`. Work only on feature branches in linked worktrees; never develop directly in `~/code/earshot`, which may contain Michael's uncommitted documentation.
+- Target PRs to `main` (the SwiftUI trunk). Work only on feature branches in linked worktrees; never develop directly in `~/code/earshot`, which may contain Michael's uncommitted documentation.
 - Assign PRs to `@payown`. Keep commits small and screen-reader-reviewable. Keep non-generated PR changes within 1,500 lines.
 - Do not touch issue #395 areas, `SettingsReset`, accessibility semantics, signing, entitlements, capabilities, or purchase UI without explicit sign-off.
 - For device signing, use command-line overrides only: `-allowProvisioningUpdates`, `DEVELOPMENT_TEAM=72PH974742`, and automatic signing. Never edit project signing settings.

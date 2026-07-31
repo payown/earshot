@@ -1,8 +1,12 @@
 # Earshot SwiftUI Conversion Plan
 
-Living task log for the SwiftUI rebuild on the `swift` branch. Maintained by the
-Planning Agent. The Flutter app (`lib/`, `ios/`, `tool/`) and TestFlight are
-read-only references — never modified, never deployed from this branch.
+Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
+
+> **2026-07-30 — restructure.** SwiftUI is now the primary codebase and the app
+> lives at the **repo root** (it was under `EarshotSwift/` while this plan was
+> written, so older entries below reference that path — read them as historical).
+> The retired Flutter app moved to `archive/flutter/` (restore point: tag
+> `flutter-final`). `main` is the SwiftUI trunk. See root `CLAUDE.md`.
 
 ## Status Legend
 - [ ] Pending

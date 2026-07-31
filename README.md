@@ -31,8 +31,7 @@ feature-by-feature, toward parity with the Flutter app.
 ## Run it
 
 ```bash
-cd EarshotSwift
-# The Xcode project is committed, just open it:
+# The Xcode project is committed at the repo root, just open it:
 open Earshot.xcodeproj
 # (If you change project.yml, regenerate with: xcodegen generate)
 ```

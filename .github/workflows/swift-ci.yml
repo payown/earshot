@@ -15,9 +15,9 @@ name: Swift CI
 
 on:
   pull_request:
-    branches: [swift]
+    branches: [main, swift]
   push:
-    branches: [swift]
+    branches: [main, swift]
 
 # Per-ref concurrency: pushing a new commit to a branch cancels that branch's
 # now-stale in-flight run. Across DIFFERENT PRs, serialization is guaranteed by

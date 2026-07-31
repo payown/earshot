@@ -6,10 +6,10 @@
 
 ## Accessibility checklist
 <!-- Required if any UI change. -->
-- [ ] Tested with VoiceOver (iOS) or TalkBack (Android)
-- [ ] All interactive elements have semantic labels
+- [ ] Tested with VoiceOver on device
+- [ ] All interactive elements have correct label / value / traits
 - [ ] Color is not the only signal for any state
-- [ ] Touch targets meet minimum size (48dp Android, 44pt iOS)
+- [ ] Touch targets meet minimum size (44pt)
 - [ ] Tested at largest Dynamic Type / system font size
 - [ ] Reduce Motion respected (if animations involved)
 

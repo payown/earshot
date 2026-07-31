@@ -1,162 +1,80 @@
-# Accessibility rules
+# Accessibility rules (SwiftUI)
 
-These rules apply to every UI change in Earshot. Earshot exists to serve screen reader users; accessibility is the highest priority.
+Earshot exists to serve screen reader users. Michael is blind and uses
+VoiceOver. Accessibility is the highest priority and the acceptance bar, not a
+review step. Treat every UI as VoiceOver-first: design the spoken/keyboard path
+first, then layer visuals on top.
 
-## Mandatory for every widget
+The `earshot-accessibility` agent is a required gate on every PR that touches
+SwiftUI views. The deep audit lives in `docs/swiftui-accessibility-audit.md`.
 
-1. **Every interactive widget has accessible labels.**
-   - Use `Semantics(label: ..., button: true, ...)` or built-in widget semantics (e.g., `IconButton(tooltip: ...)`).
-   - If a widget shows only an icon, the icon's purpose must be in the semantic label.
-   - For images: `Image.asset(..., semanticLabel: ...)`. Decorative images use `excludeSemantics: true`.
+## Mandatory for every view
 
-2. **Touch targets meet minimum size.**
-   - 48x48 dp on Android, 44x44 pt on iOS.
-   - Use `InkWell` or `GestureDetector` with adequate padding rather than tiny tap zones.
+1. **Every interactive control has a correct accessible name.**
+   - Prefer native controls (`Button`, `Toggle`, `Slider`, `Stepper`, `List`,
+     `NavigationLink`) — they carry correct roles/traits for free. Override only
+     when the default is wrong.
+   - Icon-only controls: give a real `.accessibilityLabel("…")`. Never ship a
+     control whose only name is an SF Symbol.
+   - Decorative images/icons: `Image(decorative:)` or
+     `.accessibilityHidden(true)` so they are not focus stops.
 
-3. **Color is never the only signal.**
-   - Played state: icon + "Played" label + color.
-   - Error state: error icon + error text + color.
-   - Selected state: visible indicator + announced "Selected".
+2. **Label / Value / Hint / Traits are used for what they mean.**
+   - `.accessibilityLabel` = what it is. `.accessibilityValue` = its current
+     state ("1.5x", "Played"). `.accessibilityHint` = what activating it does,
+     only when non-obvious. `.accessibilityAddTraits`/`removeTraits` for
+     `.isButton`, `.isSelected`, `.isHeader`, etc.
+   - Combine a composed row into one element with
+     `.accessibilityElement(children: .combine)` (or `.ignore` + explicit
+     label) so VoiceOver reads one coherent thing, not five fragments.
 
-4. **Text scales with Dynamic Type.**
-   - Use `Theme.of(context).textTheme.bodyLarge` (or appropriate style), never `TextStyle(fontSize: 14)`.
-   - Test at largest accessibility size; nothing should clip or be cut off.
+3. **Quick Actions map to the VoiceOver actions rotor.** Expose per-item actions
+   with `.accessibilityAction(named:)` and keep the user's configured order. The
+   first configured action is the default activation. See `QuickActionsRotor`.
 
-5. **Focus order matches visual order.**
-   - Default Flutter focus order is usually correct. Override with `FocusTraversalOrder` only when necessary, and document why.
+4. **Focus is managed deliberately after mutations.** Use
+   `@AccessibilityFocusState` to move focus to a stable anchor after rows are
+   moved/removed; never strand focus on a deleted element. Don't steal focus on
+   routine updates.
 
-6. **Reduce Motion is respected.**
-   - Check `MediaQuery.of(context).disableAnimations` before any non-essential animation.
-   - When true, use instant transitions.
+5. **Announce meaningful change, stay quiet otherwise.** Use the app's Announcer
+   for results the user must know ("Moved 3 episodes to News", "Playing",
+   "Speed 1.5x"). Not for routine list updates.
 
-## Quick Actions implementation
+6. **Color is never the only signal.** Pair every color-coded state (played,
+   selected, error, downloaded) with an icon and a spoken label/value.
 
-Quick Actions map to VoiceOver actions rotor (iOS) and TalkBack custom actions (Android).
+7. **Dynamic Type + touch targets.** Use semantic `Font`/text styles; never a
+   hardcoded point size. Verify nothing clips at the largest accessibility size.
+   Every control ≥ 44pt.
 
-Use `customSemanticsActions` on the widget:
+8. **Reduce Motion + system settings.** Honor `accessibilityReduceMotion`
+   (instant transitions) and never override the user's theme, contrast, or type
+   size. Earshot reads from the system, never imposes.
 
-```dart
-Semantics(
-  label: episode.title,
-  customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
-    const CustomSemanticsAction(label: 'Play now'): () => _playNow(episode),
-    const CustomSemanticsAction(label: 'Add to queue'): () => _addToQueue(episode),
-    const CustomSemanticsAction(label: 'Open show notes'): () => _openNotes(episode),
-  },
-  child: ...,
-)
-```
+9. **Focus order matches visual order.** Fix ordering with
+   `.accessibilitySortPriority` only when necessary, and document why.
 
-The user's Quick Action order must be respected. The first Quick Action in the user's settings becomes the default activation (`onTap`).
+## Refactors
 
-## Status announcements
-
-Use `SemanticsService.announce(message, textDirection)` for important state changes:
-
-- "Episode added to queue, position 3 of 7"
-- "Playing"
-- "Speed changed to 1.5x"
-- "Sleep timer extended by 5 minutes"
-
-Don't announce noise. Reserve announcements for changes the user must know about.
+Refactors must preserve spoken labels, values, traits, rotor actions, and focus
+behavior **byte-for-byte** unless Michael explicitly approves a semantics
+change. Do not touch accessibility semantics, `SettingsReset`, or purchase UI
+without sign-off (see `AGENTS.md`).
 
 ## Testing requirements
 
-Every new screen needs:
-
-- A widget test that checks semantic labels are present
-- A manual screen reader test note in the PR description ("Tested with VoiceOver on iOS 17 simulator, all actions reachable")
-
-When in doubt, test with VoiceOver or TalkBack physically before merging.
+- Every new screen has a test asserting its accessibility labels/values.
+- Every UI PR includes a manual VoiceOver test note ("Tested with VoiceOver on
+  iOS 18, all actions reachable via swipe and rotor").
+- `earshot-accessibility` run and findings resolved before merge.
+- When in doubt, test with VoiceOver on a physical device before merging.
 
 ## Patterns to avoid
 
-- `Tooltip` as the only label (not all screen readers announce tooltips reliably)
-- Nested `GestureDetector` with no semantic role
-- `Visibility(visible: false)` for elements that should remain in tree but inaccessible (use `ExcludeSemantics` or remove from tree)
-- Custom gesture-based controls without alternative button-based access
-- Reading text aloud via TTS yourself; let the system screen reader handle it
-
-## Modal bottom sheets
-
-Always set `barrierLabel` so VoiceOver doesn't announce the scrim as "scrim":
-
-```dart
-showModalBottomSheet<void>(
-  context: context,
-  isScrollControlled: true,
-  useSafeArea: true,
-  barrierLabel: 'Dismiss folder picker',  // required
-  builder: (_) => MySheet(),
-);
-```
-
-Never put `Focus(autofocus: true)` on the sheet's root container widget. VoiceOver treats any `Focus`-wrapped container as a group and reads a merged summary of all children on entry ("Add to Folder, Done, heading"). `barrierLabel` is sufficient to route VoiceOver past the scrim.
-
-## Overriding built-in widget semantics
-
-**Trust the widget first.** `CheckboxListTile`, `Switch`, `Slider`, `IconButton`, `ListTile` all produce correct semantics. Override only when the default label is wrong.
-
-**When you DO override with an outer `Semantics` node:**
-
-```dart
-// CORRECT — exclude the whole interactive widget so only the outer node exists
-Semantics(
-  button: true,
-  label: 'Done',
-  hint: 'Save changes and close',
-  child: ExcludeSemantics(       // wrap the entire FilledButton
-    child: FilledButton(
-      onPressed: onDone,
-      child: const Text('Done'), // Text does NOT need ExcludeSemantics here
-    ),
-  ),
-),
-```
-
-```dart
-// WRONG — ExcludeSemantics only on the Text leaves FilledButton creating its
-// own unnamed button node alongside the outer Semantics node
-Semantics(
-  button: true,
-  label: 'Done',
-  child: FilledButton(
-    onPressed: onDone,
-    child: const ExcludeSemantics(child: Text('Done')),  // ❌
-  ),
-),
-```
-
-**Never do this to a checkbox/toggle widget:**
-
-```dart
-// WRONG — ExcludeSemantics strips the gesture recognizer; iOS marks the node
-// "dimmed". Semantics(checked:) without a proper type maps to "switch button".
-Semantics(
-  checked: value,
-  onTap: () => onToggle(!value),
-  child: ExcludeSemantics(child: CheckboxListTile(...)),  // ❌
-),
-
-// CORRECT — let CheckboxListTile own its semantics
-CheckboxListTile(
-  value: value,
-  onChanged: (v) => onToggle(v ?? false),
-  title: Text(label),
-  secondary: const ExcludeSemantics(child: Icon(Icons.folder_outlined)),
-),
-```
-
-## Sheet headings
-
-`Semantics(header: true)` without an explicit `label:` derives its label from the child widget, creating two nodes with the same text (the `Semantics` node and the `Text` node). Always write:
-
-```dart
-Semantics(
-  header: true,
-  label: title,                      // explicit label
-  child: ExcludeSemantics(           // prevent child Text from making a 2nd node
-    child: Text(title, style: ...),
-  ),
-),
-```
+- SF Symbol as the only label; `.help()` tooltip as the only name.
+- Custom gesture-only controls with no accessible action alternative.
+- Reading text aloud yourself; let VoiceOver do it.
+- Hiding a still-interactive element from accessibility (`.accessibilityHidden`
+  on something the user must reach).
+- Splitting one logical row into many focus stops with no combined element.

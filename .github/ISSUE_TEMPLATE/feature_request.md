@@ -11,7 +11,7 @@ labels: enhancement
 <!-- The problem it solves or value it adds -->
 
 ## Accessibility considerations
-<!-- How would this work with VoiceOver, TalkBack, large text, etc. -->
+<!-- How would this work with VoiceOver, large text, etc. -->
 
 ## How it might work
 <!-- Optional: sketch of the UX or behavior -->

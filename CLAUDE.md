@@ -4,9 +4,11 @@ This file provides essential project context to Claude Code at the start of ever
 
 ## Project identity
 
-**Earshot** is an accessibility-first podcast player built with Flutter, targeting iOS first then Android. It is open source (MIT) and a Payown Media LLC project with deep connection to BITS and the ACB community. Freemium: free up to 10 podcast subscriptions, paid tier unlocks unlimited (see rule 5).
+**Earshot** is an accessibility-first podcast player for **iOS/iPadOS**, built in **SwiftUI + SwiftData**. It is open source (MIT) and a Payown Media LLC project with deep connection to BITS and the ACB community. Freemium: free up to 10 podcast subscriptions, paid tier unlocks unlimited (see rule 5).
 
-The full product requirements live in `docs/PRD.md`. Read it whenever you need product context. Phase plans live in `docs/phases/`.
+Earshot originally shipped on Flutter, then was rewritten in SwiftUI. **The SwiftUI app is the one and only product; it lives at the repository root.** The retired Flutter implementation is kept for reference under `archive/flutter/` and tagged `flutter-final`. Do not build on the Flutter tree.
+
+The SwiftUI implementation plan and decision log live in `SWIFTUI_PLAN.md`. Agent guidance lives in `AGENTS.md`. Read them for context.
 
 ## Owner and voice
 
@@ -18,259 +20,153 @@ The full product requirements live in `docs/PRD.md`. Read it whenever you need p
 ## Non-negotiable rules
 
 1. **Never work directly on main.** Every fix, feature, or change gets its own branch. Main must always be stable and deployable.
-2. **Accessibility is the highest priority.** Every UI element needs a proper semantic label, role, and state. Every PR that touches UI must include screen reader testing notes. Code that regresses accessibility is not merged.
+2. **Accessibility is the highest priority.** Michael is blind and uses VoiceOver. Every UI element needs a correct accessibility label, value, trait, and focus behavior. Every PR that touches UI includes VoiceOver testing notes. Code that regresses accessibility is not merged.
 3. **Follow system settings.** Never override the user's theme, font size, motion, or contrast preferences. Earshot reads from the system, never imposes.
-4. **Zero data collection.** Earshot ships no telemetry SDK, no crash reporter, no analytics, and no third-party dependencies at all. It collects no data: no advertising IDs, no device identifiers, no third-party trackers. Listening history stays on device and is user-controlled. The App Store privacy nutrition label is "Data Not Collected" for every category except Purchases (StoreKit transaction/entitlement state, App Functionality only, not linked to identity, not used for tracking). The `crash_reporting_enabled` / `analytics_enabled` setting keys exist only as retained constants for data compatibility; no SDK reads them. (Corrected 2026-07-10 from earlier "crash reports and analytics are opt-out and anonymized" wording, which described a feature that was never built.)
-5. **Freemium.** Free tier: up to 10 podcast subscriptions. Paid unlock (unlimited podcasts), "Earshot Plus": $2.99/month, $19.99/year, or $49.99 one-time (lifetime), via App Store IAP/subscription. An in-app tip jar (App Store IAP, presets $1.99/$4.99/$9.99) is available to both free and paid users regardless of tier. No ads, no third-party trackers, no ad-based monetization of any kind. All code public on GitHub under MIT. (Prices corrected 2026-07-10 to the real App Store Connect tiers $19.99/$49.99, from the earlier flat $20/$49. Reversed 2026-07-07 from the original "free and open, no in-app donations" policy — see git history on this file for the prior wording if needed.)
+4. **Zero data collection.** Earshot ships no telemetry SDK, no crash reporter, no analytics, and no third-party dependencies at all. It collects no data: no advertising IDs, no device identifiers, no third-party trackers. Listening history stays on device and is user-controlled. The App Store privacy nutrition label is "Data Not Collected" for every category except Purchases (StoreKit transaction/entitlement state, App Functionality only, not linked to identity, not used for tracking).
+5. **Freemium.** Free tier: up to 10 podcast subscriptions. Paid unlock (unlimited podcasts), "Earshot Plus": $2.99/month, $19.99/year, or $49.99 one-time (lifetime), via App Store IAP/subscription. An in-app tip jar (App Store IAP, presets $1.99/$4.99/$9.99) is available to both free and paid users regardless of tier. No ads, no third-party trackers, no ad-based monetization of any kind. All code public on GitHub under MIT.
 6. **GHCP prompts always in code blocks** when generating them.
 7. **Phase progression follows `.claude/rules/phase-progression.md`.** When a phase completes, verify the Definition of Done, capture learnings, and write the next phase's detailed doc before starting work on it.
 
 ## Accessibility agents
 
-Agent files are installed at `~/.claude/agents/` from the `accessibility-agents` plugin (v3.2.0).
+Agent files are installed at `~/.claude/agents/`.
 
-If agents stop resolving after a Claude Code update, reinstall from the local repo:
-
-```bash
-cd ~/.claude/.a11y-agent-team-repo && bash install.sh
-```
-
-**Invoke via the Agent tool** using just the agent name (no namespace prefix needed):
+**Invoke via the Agent tool** using just the agent name:
 
 | When | Agent |
 |------|-------|
-| Any Flutter UI change | `mobile-accessibility` |
+| Any SwiftUI UI change (required gate) | `earshot-accessibility` |
+| Generic mobile/iOS a11y review | `mobile-accessibility` |
 | Full audit / unknown scope | `accessibility-lead` |
 | Docs / markdown | `markdown-a11y-assistant` |
-| PR review | `pr-review` |
 
-**Rule:** Run `mobile-accessibility` on every PR that touches Flutter UI before merging. Do not skip this even for "small" changes.
+**Rule:** Run `earshot-accessibility` on every PR that touches SwiftUI views before merging. Do not skip this even for "small" changes. It reviews VoiceOver labels/values/traits, focus order, the actions rotor, Announcer timing, Dynamic Type, touch targets, contrast, and motion.
 
 ## Tech stack
 
-- **Framework:** Flutter (stable channel, currently 3.41.x)
-- **Language:** Dart
-- **State management:** Riverpod
-- **Audio:** `just_audio` + `audio_service`
-- **Local storage:** SQLite via `drift`
-- **HTTP:** `dio`
-- **Logging:** `logging` package (no `print()` statements)
-- **Lints:** `very_good_analysis`
-- **Testing:** Flutter test framework + `mocktail`
+- **UI:** SwiftUI (iOS 18.0 deployment target; iPhone for 1.0, iPad tracked for 1.1)
+- **Language:** Swift 6 language mode, **complete** strict concurrency
+- **Local storage:** SwiftData (`@Model`), versioned schema + explicit migration plan
+- **Audio/media:** AVFoundation (playback, chapters, downloads)
+- **Monetization:** StoreKit 2 (IAP subscription + lifetime unlock + tip jar)
+- **Logging:** `AppLog` (an `os.Logger` wrapper — `AppLog.data`, `AppLog.networking`, etc.). **No `print()`.**
+- **Project generation:** XcodeGen (`project.yml` is the source of truth)
+- **Testing:** XCTest (`EarshotTests`)
+- **Dependencies:** none. There are **no third-party Swift packages**. Do not add one without confirmation.
+- **Toolchain:** Xcode 26.6, Swift 6.3.x, XcodeGen. CI runs on a self-hosted Apple Silicon Mac.
 
 ## Architecture conventions
 
-- **Feature-first folder structure** under `lib/features/`
-- **Three layers per feature:** `data/` (repositories, models), `domain/` (use cases, entities), `presentation/` (widgets, providers)
-- **No business logic in widgets.** Widgets are purely presentational.
-- **Dependencies via Riverpod providers.** No global singletons. No new instances in widgets.
-- **Colors from `Theme.of(context).colorScheme`.** Never hardcoded.
-- **Text styles from `Theme.of(context).textTheme`.** Never inline raw font sizes.
-- **No `print()`.** Use `package:logging` with a project logger.
-- **`const` constructors everywhere possible.**
+- **Feature-first:** `Earshot/Features/<feature>/{Data,Domain,Presentation}` (e.g. `Earshot/Features/Folders/...`).
+- **Shared code:** `Earshot/Core/` (UI helpers, networking, theme). Cross-feature data/models in `Earshot/Data/` (`Models/`, `Persistence/`).
+- **No business logic in views.** Views are presentational; logic lives in `@Observable` view models / services / `Domain` types.
+- **Colors and text from the system.** Use semantic `Color`/`Font` and Dynamic Type. Never hardcode raw font sizes or fixed colors that fight the user's theme.
+- **`AppLog`, not `print()`.**
+- **Concurrency:** respect Swift 6 actor isolation and `Sendable`. `@MainActor` for UI; keep DB/network work off the main actor.
 
-## iOS platform channel development
+## SwiftData migrations (read before any model change)
 
-When adding a new `.swift` file to `ios/Runner/`, Flutter does **not** auto-discover it. You must register it manually in `ios/Runner.xcodeproj/project.pbxproj` or the file will silently not compile (you'll get "Cannot find 'YourClass' in scope" at build time).
+The data layer is the highest-risk surface: TestFlight testers carry real on-device data across builds, and a broken migration can dead-end the app on launch (this happened once historically). Follow `.claude/rules/database-migrations.md`.
 
-Four places to edit in `project.pbxproj` — use the existing `AppDelegate.swift` / `SceneDelegate.swift` entries as the pattern, and generate two new UUIDs (24 hex chars each):
-
-1. **PBXBuildFile section** — `NEWUUID_A /* YourFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = NEWUUID_B /* YourFile.swift */; };`
-2. **PBXFileReference section** — `NEWUUID_B /* YourFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YourFile.swift; sourceTree = "<group>"; };`
-3. **Runner group children list** — add `NEWUUID_B /* YourFile.swift */,` alongside AppDelegate.swift
-4. **PBXSourcesBuildPhase files list** — add `NEWUUID_A /* YourFile.swift in Sources */,` alongside AppDelegate.swift in Sources
-
-Also: `registrar(forPlugin:)` on `FlutterPluginRegistry` returns an optional. Always unwrap with `guard let`:
-```swift
-guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "MyChannel") else { return }
-MyChannel.register(with: registrar.messenger())
-```
+- Persistence lives in `Earshot/Data/Persistence/`: `EarshotSchema.swift` (frozen `VersionedSchema` snapshots V2-V5), `EarshotSchemaV1.swift`, `StoreMigration.swift` (the migration plan + the manual V1→V2 export/reimport), and `ModelContainerFactory.swift`.
+- **Freeze a NEW schema version; never edit a shipped one.** SwiftData keys entities off class name and a computed version hash; a frozen snapshot must keep matching what that build wrote to disk. `SchemaDriftTests` guards this.
+- Every model change bumps the schema and adds its migration stage in the same PR, tested against realistic aged fixtures (`onUpgrade`-equivalent must not throw on a tester's real data).
+- A failing store-open must never destroy data or dead-end the app. `ModelContainerFactory` distinguishes "store newer than app" (never delete) from genuine corruption (backed-up, user-consented reset only). See issues #529, #708.
 
 ## Accessibility implementation requirements
 
-- Every interactive widget has a `Semantics` wrapper or built-in semantic properties
-- Custom Quick Actions use `customSemanticsActions` to expose to VoiceOver actions rotor and TalkBack custom actions
-- All text scales with system Dynamic Type (use `Theme.of(context).textTheme.*`, never hardcoded font sizes)
-- All touch targets minimum 48dp (Material guidance) or 44pt (HIG)
-- Color is never the only signal for state
-- Reduce Motion respected (`MediaQuery.of(context).disableAnimations`)
-- Focus order matches visual order
+- Every interactive control has a correct `accessibilityLabel`, and `accessibilityValue`/`accessibilityHint`/`accessibilityAddTraits` where they add meaning.
+- Quick Actions map to the VoiceOver **actions rotor**; keep the user's configured order. Refactors preserve spoken labels, values, traits, rotor actions, and focus **byte-for-byte** unless Michael approves a semantics change.
+- Post-mutation focus is moved deliberately (e.g. `AccessibilityFocusState`) to a stable anchor; never strand focus on a removed row.
+- All text scales with Dynamic Type; nothing clips at the largest size. Touch targets ≥ 44pt. Color is never the only signal. Reduce Motion respected. Focus order matches visual order.
+- Meaningful state changes are announced via the app's Announcer, sparingly.
 
-## Flutter accessibility patterns (hard-won)
+See `docs/swiftui-accessibility-audit.md` and the `earshot-accessibility` agent.
 
-These were discovered through VoiceOver testing. Add detail to `.claude/rules/accessibility.md`.
+## Project generation and build
 
-**Do:**
-- Use `barrierLabel: 'Dismiss ...'` on every `showModalBottomSheet` call
-- Use `Semantics(header: true, label: title, child: ExcludeSemantics(child: Text(title)))` for sheet headings
-- Use `Semantics(button: true, label: '...', child: ExcludeSemantics(child: FilledButton(...)))` — exclude the WHOLE button widget, not just its text child
-- Trust built-in widget semantics: `CheckboxListTile`, `Switch`, `Slider`, `IconButton` all handle their own roles correctly
-- Put decorative icons in `ExcludeSemantics` when they sit alongside labeled text
-
-**Don't:**
-- `ExcludeSemantics(child: CheckboxListTile(...))` — strips the gesture recognizer, iOS marks the node "dimmed"
-- `Semantics(checked: ..., onTap: ..., child: ExcludeSemantics(child: CheckboxListTile(...)))` — maps to "switch button" not "checkbox" on iOS
-- `Focus(autofocus: true)` on a container Column — VoiceOver treats it as a group and announces a merged summary
-- `Semantics(button: true, label: '...', child: SomeInteractiveWidget(...))` without `ExcludeSemantics` on the child — creates two button nodes
-
-## Bug fix workflow
-
-This is the primary workflow right now. There are 7 open issues on GitHub (payown/earshot, issues #15-21) to work through one at a time.
-
-**For each issue:**
-
-1. Ask Michael which issue number to start with.
-2. Read the full issue on GitHub before touching any code: `gh issue view <number>`
-3. Check out a new branch from main before writing anything:
-   ```bash
-   git checkout main && git pull origin main
-   git checkout -b fix/issue-<number>-<short-description>
-   ```
-   Example: `git checkout -b fix/issue-15-now-playing-bar`
-4. Outline the proposed fix and which files will change. Wait for Michael to confirm before writing code.
-5. Fix only what the issue describes. No scope creep. No unrelated changes.
-6. Run `mobile-accessibility` agent on any UI changes before considering the fix complete.
-7. Commit the fix with a clear message:
-   ```bash
-   git add -A && git commit -m "fix: <description> (closes #<number>)"
-   ```
-8. Push the branch and open a PR to main:
-   ```bash
-   git push origin fix/issue-<number>-<short-description>
-   gh pr create --title "fix: <description>" --body "Closes #<number>" --base main
-   ```
-9. Add a comment to the GitHub issue describing what was changed and where.
-10. Build and deploy to TestFlight from the fix branch (see Deploy section below).
-11. Tell Michael exactly what to test on device. Be specific about which screen, which action, and what correct behavior looks like.
-12. **Stop and wait.** Do not merge the PR, close the issue, or move to the next issue until Michael confirms the fix is verified on device.
-13. When Michael confirms it's working:
-    ```bash
-    gh pr merge --squash
-    gh issue close <number> --comment "Verified fixed on device. Merged via PR."
-    git checkout main && git pull origin main
-    git branch -d fix/issue-<number>-<short-description>
-    ```
-14. Ask Michael which issue to work on next.
-
-If Michael says a fix did not work, stay on the same branch and investigate further. Do not close the issue or merge the PR.
+- `project.yml` (repo root) is the source of truth. After changing it, run `xcodegen generate` **from the repo root** and commit the regenerated `Earshot.xcodeproj` (the project is committed; CI builds it directly, no xcodegen in CI).
+- Local build/test example (StoreKit suites are quarantined under this Xcode — #679):
+  ```bash
+  xcodebuild test -project Earshot.xcodeproj -scheme Earshot -configuration Debug \
+    -destination 'platform=iOS Simulator,name=iPhone 17' \
+    -skip-testing:EarshotTests/PaywallViewModelTests \
+    -skip-testing:EarshotTests/ProductCatalogServiceTests \
+    CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+  ```
+- **Signing:** command-line overrides only — `-allowProvisioningUpdates`, `DEVELOPMENT_TEAM=72PH974742`, automatic signing. Never edit project signing settings, entitlements, or capabilities without sign-off.
 
 ## Deploy to TestFlight
 
-Run the deploy script from the fix branch after the code is committed and pushed:
+Run the deploy script from the feature branch after the code is committed:
 
 ```bash
-bash tool/testflight.sh --notes "Fix: <brief description of what was fixed>"
+bash tool/swiftui-testflight.sh --notes "Fix: <brief description of what was fixed>"
 ```
 
-The script will:
-- Verify the working tree is clean and in sync with remote
-- Bump the build number in `pubspec.yaml` and commit it automatically
-- Build a release IPA
-- Upload to the Internal Testing Group on TestFlight and notify testers
+The script bumps `CURRENT_PROJECT_VERSION` in `project.yml`, regenerates the project via xcodegen, archives with `xcodebuild`, and uploads to the Internal Testing Group. **Never pre-bump the build number manually.** Builds go out from the feature branch, not from main; main gets the change after Michael verifies on device and the PR is merged.
 
-**Never pre-bump the build number manually.** The script handles it.
+After upload, tell Michael: the build number, the issue being tested, exact step-by-step device instructions, what correct behavior looks like, and what the broken behavior looked like before.
 
-**The TestFlight build goes out from the fix branch, not from main.** Main only gets the fix after Michael verifies it works on device and the PR is merged.
+## Fix / feature workflow
 
-After the upload completes, tell Michael:
-- The build number that was deployed
-- The issue number and title being tested
-- Step-by-step instructions for what to do on device to verify the fix
-- What correct behavior looks like
-- What the broken behavior looked like before, so he knows what to compare against
+1. Read the full issue first: `gh issue view <number>`.
+2. Branch off main into a **linked worktree** (never develop directly in `~/code/earshot`, which may hold Michael's uncommitted docs): `git checkout -b fix/issue-<n>-<slug>`.
+3. Outline the change and files affected. Wait for confirmation before writing code.
+4. Fix only what the issue describes. No scope creep. No new dependencies.
+5. Run `earshot-accessibility` on any UI change before considering it done.
+6. Commit (Conventional Commits), push, open a PR into `main`, assign `@payown`. Keep non-generated changes reviewable (~1,500 lines).
+7. Deploy to TestFlight from the branch; give Michael device test steps.
+8. **Stop and wait.** Do not merge or close the issue until Michael verifies on device.
 
-Example format:
-```
-Build 42 is on TestFlight for issue #17 (Mark All as Played crash).
-
-To test:
-1. Open Earshot and go to the Inbox tab.
-2. Tap the options button and choose Mark All as Played.
-3. Confirm when prompted.
-4. The app should stay responsive and show all episodes marked as played.
-
-Before this fix, the app would freeze after you confirmed. Let me know if it feels stable or if you're still seeing the crash.
-```
+If a fix did not work, stay on the branch and keep investigating.
 
 ## Working style preferences
 
-- **Plan-first, code-second.** Before writing code, outline what's being changed and why. For multi-step work, propose the steps and ask for confirmation before doing them.
-- **One issue per branch, one branch per PR.** Never bundle unrelated fixes.
-- **GHCP prompts in code blocks.**
-- **Conversational direct tone.** No hedging, no "I'd be happy to help."
+- **Plan-first, code-second.** Outline what's changing and why; for multi-step work, propose steps and get confirmation.
+- **One issue per branch, one branch per PR.** Never bundle unrelated changes.
+- **Conversational, direct tone.** No hedging.
 - **Short responses on simple questions.** Detail only where needed.
-
-## Local setup (fresh clone / new worktree)
-
-Install the repo's tracked git hooks once per clone so the pre-commit
-formatter check runs. `core.hooksPath` is shared repo-wide config, so this one
-command also covers every `git worktree add` checkout:
-
-```bash
-git config core.hooksPath tool/hooks
-```
-
-The hook (`tool/hooks/pre-commit`) formats only the Dart files actually staged
-under `lib/`/`test/` and is a no-op on Swift-only or docs-only commits (see
-`CONTRIBUTING.md` and issue #660). Without this config a fresh clone has no
-pre-commit hook active. Never use `git commit --no-verify` — the hook no longer
-touches unrelated files, so there is no reason to bypass it.
-
-## What to do at the start of a session
-
-1. Run `git status` and `git branch` to see where things stand.
-2. If on main, confirm there's no work in progress before starting anything.
-3. Ask Michael which issue to work on.
-4. Read the issue fully before proposing anything.
 
 ## What to NOT do
 
-- Don't work directly on main. Ever.
-- Don't start writing code before outlining the fix and getting confirmation.
+- Don't work directly on main, or develop in `~/code/earshot` directly.
+- Don't start coding before outlining the change and getting confirmation.
 - Don't bundle multiple issues into one branch or PR.
-- Don't merge a PR until Michael confirms the fix works on device.
-- Don't close a GitHub issue without device verification from Michael.
-- Don't move to the next issue until the current one is closed.
-- Don't make architecture changes without proposing them first.
-- Don't add dependencies without confirmation.
-- Don't use platform channels unless absolutely necessary.
-- Don't suppress lints without an explanatory comment linking to a tracking issue.
+- Don't merge a PR until Michael confirms on device; don't close an issue without that.
+- Don't touch `SettingsReset`, accessibility semantics, signing, entitlements, capabilities, or purchase UI without explicit sign-off.
+- Don't add Swift package dependencies without confirmation.
+- Don't edit a shipped/frozen SwiftData schema version.
 
-## Repository structure (target)
+## Repository structure
 
 ```
 earshot/
-├── .claude/                # Claude Code workspace config
-│   └── rules/              # Modular rule files (create as needed)
-├── docs/                   # PRD, phases, design notes
-│   ├── PRD.md
-│   └── phases/
-├── lib/                    # Flutter app source
-│   ├── core/               # Shared utilities, theme, accessibility helpers
-│   ├── features/           # Feature modules (player, subscriptions, etc.)
-│   ├── data/               # Cross-feature data (db, network)
-│   └── main.dart
-├── test/                   # Unit and widget tests
-├── integration_test/       # Integration tests
-├── ios/                    # iOS platform code
-├── android/                # Android platform code
-├── assets/
-│   └── icon/
-│       └── icon.png        # Source icon — run tool/install_icons.py to generate all sizes
+├── Earshot/                 # SwiftUI app source
+│   ├── App/                 # App entry, RootView
+│   ├── Core/                # Shared UI, networking, theme
+│   ├── Data/                # Models (@Model) + Persistence (schema, migration)
+│   └── Features/            # Feature modules (Folders, Player, Inbox, ...)
+│       └── <feature>/{Data,Domain,Presentation}
+├── EarshotTests/            # XCTest suite
+├── Earshot.xcodeproj/       # Generated from project.yml, committed
+├── project.yml              # XcodeGen source of truth
+├── scripts/                 # Screenshot capture, etc.
 ├── tool/
-│   ├── testflight.sh       # Deploy to TestFlight (never run from main)
-│   └── install_icons.py    # Resize icon.png into all required iOS and Android sizes
-├── analysis_options.yaml
-├── pubspec.yaml
-├── LICENSE
-├── README.md
-└── CLAUDE.md
+│   └── swiftui-testflight.sh # Deploy to TestFlight
+├── docs/                    # Product + design docs, decision logs
+├── archive/flutter/         # Retired Flutter implementation (reference only)
+├── SWIFTUI_PLAN.md          # SwiftUI plan + decision log
+├── AGENTS.md                # Agent guidance
+├── LICENSE / README.md / CLAUDE.md
 ```
 
 ## Related documents
 
-- Full product spec: `docs/PRD.md`
-- Phase plans: `docs/phases/`
-- Accessibility rules: `.claude/rules/accessibility.md` (create when needed)
-- Flutter style rules: `.claude/rules/flutter-style.md` (create when needed)
-- Architecture decisions: `docs/adr/` (created as decisions are made)
+- SwiftUI plan + decisions: `SWIFTUI_PLAN.md`
+- Agent guidance: `AGENTS.md`
+- Accessibility rules: `.claude/rules/accessibility.md`
+- Migration rules: `.claude/rules/database-migrations.md`
+- Git/PR workflow: `.claude/rules/git-workflow.md`
+- Security/perf reviews: `docs/code-review-2026-07-18.md`, `docs/perf-baseline.md`
+- Retired Flutter app: `archive/flutter/` (restore point: `git checkout flutter-final`)
