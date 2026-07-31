@@ -33,7 +33,7 @@ BUNDLE_ID="media.payown.earshot"
 SIM_UDID="${EARSHOT_SCREENSHOT_SIM:-38284C7C-E08A-40E5-AACA-C654C8A48E2A}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"   # EarshotSwift/
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"   # repo root (Earshot.xcodeproj lives here)
 OUT_DIR="${1:-$SCRIPT_DIR/output}"
 
 # Order matters: the first screen that shows artwork warms the shared artwork

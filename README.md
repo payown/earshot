@@ -1,75 +1,50 @@
-# Earshot
+# Earshot (native Swift) — accessibility-core slice
 
-A podcast player built for the way you listen.
+A native SwiftUI rewrite of Earshot, on the `swift` branch. This is the first
+runnable slice, not the full app. It exists so you can feel native iOS
+accessibility (especially the VoiceOver Actions rotor) on a real device and
+compare it head-to-head with the Flutter build.
 
-Earshot is an accessibility-first podcast player developed by [Payown Media LLC](https://payown.media/). It's free, open source, and built with deep care for screen reader users.
+## What works in this slice
 
-## Why Earshot
+- Subscribe to a podcast by RSS URL (two sample feeds provided), persisted with
+  SwiftData.
+- Accessible episode list per podcast.
+- **Quick Actions + VoiceOver rotor:** each episode row exposes Play now, Mark
+  as played/unplayed, Open show notes, and Share as VoiceOver custom actions, in
+  the order you set. The first action is the default double-tap.
+- **Reorder in the Actions tab** and the rotor updates **immediately** — no
+  startup seeding, no relaunch. (This is the native payoff over the Flutter
+  build, where the rotor order is locked per launch.)
+- Basic AVFoundation playback with a Now Playing bar (play/pause).
 
-Most podcast apps are accessible enough to use, but none are designed *for* screen reader users. Earshot is. It's built by someone who uses VoiceOver, TalkBack, and JAWS daily, with input from the BITS (Blind Information Technology Solutions) and ACB (American Council of the Blind) communities.
+## Not in this slice yet
 
-The two features that set Earshot apart:
+Downloads, queue, inbox, OPML, share extension, search, bookmarks, sleep timer,
+podcast/player screens, settings beyond Quick Actions. These come next,
+feature-by-feature, toward parity with the Flutter app.
 
-- **Quick Actions** you configure. Pick which actions appear on each content type, and in what order. Play now, add to queue, open show notes, whatever fits your workflow.
-- **Queue expiration** per podcast. News show? Episodes auto-expire after 2 days. Weekly long-form? Set it to 2 weeks. Or off entirely.
+## Requirements
 
-Plus comprehensive listening stats that show you how much time you've spent and how much time silence trimming saved you.
+- Xcode 16+ (built with Xcode 26.5), iOS 17+ device or simulator.
 
-## Status
-
-Pre-development. The product requirements doc lives in [`docs/PRD.md`](docs/PRD.md). The phased build plan lives in [`docs/phases/`](docs/phases/).
-
-## Platforms
-
-- iOS 16+
-- Android 10 (API 29)+
-- iOS launches first, Android within 6 months.
-
-## Tech stack
-
-- Flutter (latest stable)
-- Dart
-- Riverpod for state management
-- `just_audio` and `audio_service` for audio
-- `drift` for local SQLite storage
-
-## Building
-
-Prerequisites:
-- Flutter SDK (latest stable)
-- Xcode (for iOS)
-- Android Studio (for Android)
-- CocoaPods (`sudo gem install cocoapods`)
+## Run it
 
 ```bash
-git clone https://github.com/payown/earshot.git
-cd earshot
-flutter pub get
-flutter run
+cd EarshotSwift
+# The Xcode project is committed, just open it:
+open Earshot.xcodeproj
+# (If you change project.yml, regenerate with: xcodegen generate)
 ```
 
-To build for iOS device, you'll need a free Apple ID configured in Xcode. For the App Store, an Apple Developer account is required.
+In Xcode: pick a simulator or your device, press Run. Bundle id is
+`media.payown.earshot.swift`, so it installs alongside the Flutter Earshot.
 
-## Contributing
+## What to test (VoiceOver)
 
-Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-**Important:** Accessibility is non-negotiable. PRs that regress accessibility will not be merged. Every UI change requires testing with VoiceOver or TalkBack and notes in the PR description.
-
-## License
-
-[MIT](LICENSE). Use it, fork it, learn from it.
-
-## Acknowledgements
-
-Earshot exists because of the people who taught me what accessible software actually means. Thanks to:
-
-- **BITS** (Blind Information Technology Solutions), an affiliate of the American Council of the Blind
-- The broader **ACB community**
-- Every beta tester who shaped the app
-
-## Contact
-
-- Project: [github.com/payown/earshot](https://github.com/payown/earshot)
-- Maintainer: Michael Babcock (michael@payown.media)
-- Payown Media: [payown.media](https://payown.media)
+1. Add a sample feed (Podcasts tab → +).
+2. Open a podcast, turn on VoiceOver, focus an episode.
+3. Open the Actions rotor (rotate to "Actions", swipe up/down). Confirm the
+   actions are in the configured order; double-tap the row to run the default.
+4. Go to the Actions tab, tap Edit, drag to reorder, tap Done.
+5. Back on an episode, check the rotor order changed **without relaunching**.

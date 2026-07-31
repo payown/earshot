@@ -82,10 +82,15 @@ lib/core/config/api_keys.dart
 # Local test fixtures (sample OPML feed lists)
 *.opml
 
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+
 # sourcekit-lsp build server config (machine-specific, absolute paths)
 buildServer.json
 .bsp/
 .compile
 
 # App Store screenshot capture output (#643) — generated PNGs, not source
-EarshotSwift/scripts/screenshots/output/
+scripts/screenshots/output/

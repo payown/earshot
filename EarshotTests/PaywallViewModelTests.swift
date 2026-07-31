@@ -35,7 +35,7 @@ final class PaywallViewModelTests: XCTestCase {
     private static let configurationURL: URL = {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // EarshotTests/
-            .deletingLastPathComponent() // EarshotSwift/
+            .deletingLastPathComponent() // repo root (Earshot/ and EarshotTests/ are siblings here)
             .appendingPathComponent("Earshot/Testing/Configuration.storekit")
     }()
 

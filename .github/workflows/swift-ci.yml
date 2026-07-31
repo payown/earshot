@@ -65,7 +65,6 @@ jobs:
       # `name=iPhone 17`, which matches multiple devices and caused runner
       # contention when several builds ran at once).
       - name: Run EarshotTests
-        working-directory: EarshotSwift
         # TEST_RUNNER_EARSHOT_SKIP_STOREKIT_TESTS: xcodebuild strips the
         # TEST_RUNNER_ prefix and forwards EARSHOT_SKIP_STOREKIT_TESTS into the
         # on-simulator test process, where the StoreKit-Test suites read it and

@@ -8,7 +8,7 @@ the same six screens every time.
 ## Run it
 
 ```bash
-EarshotSwift/scripts/screenshots/capture.sh
+scripts/screenshots/capture.sh
 ```
 
 Output PNGs land in `scripts/screenshots/output/` (git-ignored). Six files:
@@ -18,14 +18,14 @@ Output PNGs land in `scripts/screenshots/output/` (git-ignored). Six files:
 To reuse a build you already have:
 
 ```bash
-EARSHOT_APP_PATH=/path/to/Earshot.app EarshotSwift/scripts/screenshots/capture.sh
+EARSHOT_APP_PATH=/path/to/Earshot.app scripts/screenshots/capture.sh
 ```
 
 To target a different simulator (must be a 6.9-inch device, and never the
 CI-reserved UDID):
 
 ```bash
-EARSHOT_SCREENSHOT_SIM=<UDID> EarshotSwift/scripts/screenshots/capture.sh
+EARSHOT_SCREENSHOT_SIM=<UDID> scripts/screenshots/capture.sh
 ```
 
 ## Device / size

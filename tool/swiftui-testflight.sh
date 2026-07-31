@@ -16,7 +16,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SWIFT_ROOT="$REPO_ROOT/EarshotSwift"
+# The SwiftUI app now lives at the repo root (was EarshotSwift/ before the
+# 2026-07-30 promotion). SWIFT_ROOT is kept as a name for the project dir.
+SWIFT_ROOT="$REPO_ROOT"
 PROJECT_YML="$SWIFT_ROOT/project.yml"
 SCHEME="Earshot"
 ARCHIVE_PATH="/tmp/Earshot.xcarchive"
