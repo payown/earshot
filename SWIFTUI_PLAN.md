@@ -367,6 +367,31 @@ ship; OPML export/import is the supported way to carry a library over.
 
 ## UI Decisions
 
+- **Podcast settings Folders section + "Add to folder" picker (#754, Folders Phase 1).**
+  `PodcastSettingsView` gains a `foldersSection` between Inbox and Notifications:
+  it lists the folders this podcast is in (via `FolderRepository.folders(containing:)`),
+  each rendered by its full `FolderLogic.pathString` breadcrumb, or a single
+  "Not in any folder" row when empty, followed by an "Add to folder…" button.
+  The section reads a `@Query` over `PodcastFolder` (Podcast has no inverse to
+  `FolderMembership` — the F2 decision — so it can't observe membership on its
+  own; the query plus body re-eval on sheet dismiss keep it current). The button
+  presents `PodcastFolderPickerView` (new, `Features/Folders/Presentation/`), the
+  inverse of `FolderPodcastPickerView`: it lists all folders **nested** (a
+  depth-first walk from `parent == nil` roots through `children`, cycle-guarded)
+  with each row labelled by its breadcrumb path so depth rides the label, not
+  indentation. Toggling a row writes membership immediately (no Save button,
+  mirroring the sibling) and a "New folder…" row creates a top-level folder
+  (`createSubfolder(under: nil)`) and files the podcast into it on the spot.
+  **A11y adjudication (earshot-accessibility gate):** #754 asked for both
+  `.isToggle` (matching the sibling) AND an explicit "Added to News › Daily"
+  announcement — those collide, because `.isToggle` auto-speaks a generic state
+  word that talks over the informative announcement. Resolution: drop `.isToggle`,
+  keep `.isSelected` (still exposes membership to the rotor) plus the path
+  announcement, which names *which* folder changed — more useful here than the
+  flat sibling since folders nest and a podcast can be in several. The `create()`
+  announcement is deferred 0.5 s so it clears the alert-dismissal focus utterance.
+  Phase 2 will replace the minimal picker with a fully shared `FolderPickerView`.
+
 - **Per-screen search is one shared filter, presentation-only (#457 Part A).**
   Inbox, Queue, and Downloads each get an in-place `.searchable` field backed by
   `EpisodeSearchFilter` (`Core/UI/`), a pure enum: case- and diacritic-insensitive

@@ -77,6 +77,7 @@
 		33C506B6499A0ED5BFBA8756 /* ModelEnums.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0E82F35CB949845DE1189C9 /* ModelEnums.swift */; };
 		3569E4DF882AA0744DF03F6B /* FolderLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4003700266EC96D55971CD8F /* FolderLogic.swift */; };
 		3685A73FDD41B6BB274592BE /* TipJarDecisionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD6B7B2E464E2146715A5481 /* TipJarDecisionLogicTests.swift */; };
+		36ACAB0369B721E1BC021D1F /* PodcastFolderPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03715203B50D5DE8AE64CEB5 /* PodcastFolderPickerView.swift */; };
 		36F063B141F605CB5193359F /* PlaybackLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EC414F03B2203A2D9FC8456 /* PlaybackLogic.swift */; };
 		387A6B9D205F92CFF6C98F8B /* BookmarkRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5716DC7465AF0422B02CD0CF /* BookmarkRepositoryTests.swift */; };
 		388BE077DBF1E14B55493529 /* QuickActionRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC944C7D4C1D3D3D7C4E1A9 /* QuickActionRepositoryTests.swift */; };
@@ -328,6 +329,7 @@
 		0140FFFD2CE006140D813DBB /* HTTPClientRetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPClientRetryTests.swift; sourceTree = "<group>"; };
 		0211EBB7D7E3070090F1A781 /* ConfigurationMissingProduct.storekit */ = {isa = PBXFileReference; path = ConfigurationMissingProduct.storekit; sourceTree = "<group>"; };
 		02A02D971B095CF5F43CDFD4 /* PodcastSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastSettingsView.swift; sourceTree = "<group>"; };
+		03715203B50D5DE8AE64CEB5 /* PodcastFolderPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastFolderPickerView.swift; sourceTree = "<group>"; };
 		044D6ACA2D0B0C41F1170B2A /* DownloadPathsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadPathsTests.swift; sourceTree = "<group>"; };
 		064DC8E32EAD773F3D9DC9F5 /* TipPurchaseSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipPurchaseSource.swift; sourceTree = "<group>"; };
 		08020597D3A064F49F78DCA0 /* EpisodeListFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeListFilterTests.swift; sourceTree = "<group>"; };
@@ -681,6 +683,7 @@
 				BDC724CA4ACA6B86ADE5CCF6 /* FolderDetailScreen.swift */,
 				F67B8AAA16F69CB84C899E27 /* FolderPodcastPickerView.swift */,
 				C75A4D2E9D30DDEF48E91230 /* FoldersScreen.swift */,
+				03715203B50D5DE8AE64CEB5 /* PodcastFolderPickerView.swift */,
 			);
 			path = Presentation;
 			sourceTree = "<group>";
@@ -1772,6 +1775,7 @@
 				BCC4D9C61F2DA7D7F9975DD2 /* PodcastArtwork.swift in Sources */,
 				A17BD04A2E9B376E2A5F0351 /* PodcastCapPolicy.swift in Sources */,
 				C2575FA0F95FEF33CA069017 /* PodcastFolder.swift in Sources */,
+				36ACAB0369B721E1BC021D1F /* PodcastFolderPickerView.swift in Sources */,
 				77AEFD0D76FDCFA2AD6436B0 /* PodcastPreviewModel.swift in Sources */,
 				D9461712C09C0BA1E024B285 /* PodcastPreviewView.swift in Sources */,
 				D862E332C55415448B80C48C /* PodcastSettingsView.swift in Sources */,
