@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 # Deploy Earshot SwiftUI to TestFlight.
-# Usage: swiftui-testflight.sh [--notes "What to test"] [--public] [--both]
+# Usage: swiftui-testflight.sh [--notes "What to test"] [--public] [--both] [--test]
 #
 #   (no flag)   Upload to Internal Testing Group only
 #   --public    Upload to Public Testers only
 #   --both      Upload to both groups
+#   --test      Allow deploying from a NON-main branch (pre-merge test build).
+#               Use this to TestFlight-test a feature/integration branch before
+#               merging it to main. Bumps + commits the build number on THAT
+#               branch, so use a throwaway/integration branch, and when you
+#               later merge it to main the build-number bump comes along.
+#
+# Release builds run from `main`. Pre-merge test builds run from any branch
+# with --test.
 #
 # What this does:
 #   1. Verifies the working tree is clean and in sync with remote
@@ -28,12 +36,14 @@ ASC_APP_ID="6770760602"
 GROUP="Internal Testing Group"
 SUBMIT_FOR_REVIEW=false
 NOTES=""
+TEST_BUILD=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --notes|-n) NOTES="$2"; shift 2 ;;
     --public)   GROUP="Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
     --both)     GROUP="Internal Testing Group,Public Testers"; SUBMIT_FOR_REVIEW=true; shift ;;
+    --test)     TEST_BUILD=true; shift ;;
     --resume)   RESUME=true; shift ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
@@ -62,8 +72,14 @@ fi
 if [[ "$RESUME" != true ]]; then
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-if [[ "$BRANCH" != "main" ]]; then
-  echo "❌ Must be on the main branch to deploy. Currently on: $BRANCH"
+if [[ "$BRANCH" == "main" ]]; then
+  : # production release from the trunk
+elif [[ "$TEST_BUILD" == true ]]; then
+  echo "⚠️  TEST build from non-main branch '$BRANCH' (pre-merge testing)."
+  echo "    The build-number bump commits to '$BRANCH', not main."
+else
+  echo "❌ Releases deploy from 'main'. To cut a pre-merge test build from"
+  echo "   this branch ('$BRANCH'), pass --test. Currently on: $BRANCH"
   exit 1
 fi
 
