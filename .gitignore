@@ -78,7 +78,19 @@ secrets/
 *.p12
 *.mobileprovision
 lib/core/config/api_keys.dart
-docs/kashe.md
 
 # Local test fixtures (sample OPML feed lists)
 *.opml
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+
+# sourcekit-lsp build server config (machine-specific, absolute paths)
+buildServer.json
+.bsp/
+.compile
+
+# App Store screenshot capture output (#643) — generated PNGs, not source
+scripts/screenshots/output/

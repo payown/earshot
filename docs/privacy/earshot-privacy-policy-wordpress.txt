@@ -1,0 +1,127 @@
+WORDPRESS INSTRUCTIONS
+
+1. Set the WordPress page title to: Earshot Privacy Policy
+2. Open the WordPress editor's Code editor.
+3. Remove the existing page content.
+4. Copy and paste everything below the BEGIN WORDPRESS CONTENT line, but do
+   not copy the BEGIN WORDPRESS CONTENT line itself.
+5. Preview the page and confirm each section is a heading.
+6. Publish or update the page, then clear WordPress, LiteSpeed, and Cloudflare
+   caches.
+
+BEGIN WORDPRESS CONTENT
+
+<!-- wp:paragraph -->
+<p><em>Effective July 15, 2026</em></p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>Earshot is an accessibility-first podcast player provided by Payown Media LLC. This policy applies specifically to the Earshot application.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>The short version: Earshot does not collect information about you. There is no Earshot account, no sign-in, no advertising, and no tracking. Your subscriptions, listening history, and settings stay on your device.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2,"anchor":"what-we-collect"} -->
+<h2 class="wp-block-heading" id="what-we-collect">What Earshot collects</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Earshot does not collect, store off your device, or share:</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:list -->
+<ul class="wp-block-list">
+<li>Your identity. Earshot has no account or login.</li>
+<li>Your podcast subscriptions, listening history, queue, folders, bookmarks, or settings.</li>
+<li>Analytics or usage data. Earshot contains no analytics SDK.</li>
+<li>Crash reports. Earshot contains no third-party crash-reporting service.</li>
+<li>Advertising identifiers. Earshot has no advertising and does not access an advertising identifier.</li>
+<li>Information for cross-app or cross-website tracking. Earshot contains no third-party trackers.</li>
+</ul>
+<!-- /wp:list -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">What stays on your device</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Your podcast subscriptions, listening history, queue, folders, bookmarks, playback position, downloads, and settings are stored locally on your device. Earshot does not upload this information to Payown Media LLC or anyone else.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>If you delete Earshot, its locally stored data is ordinarily deleted with it. Data may remain in a device backup controlled by you or Apple, depending on your device and backup settings.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Network connections Earshot makes</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Earshot connects to the internet to provide podcast-player functionality. Depending on the actions you take, Earshot may connect to:</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:list -->
+<ul class="wp-block-list">
+<li>Podcast publishers and hosting providers to retrieve podcast feeds, episode audio, transcripts, chapters, and artwork.</li>
+<li>The public podcast directory when you search for podcasts.</li>
+<li>Apple services when Earshot retrieves product information, processes purchases, or verifies purchase status through StoreKit.</li>
+</ul>
+<!-- /wp:list -->
+
+<!-- wp:paragraph -->
+<p>Those requests go directly to the relevant service. As with any internet connection, the service may receive technical information needed to respond to the request, such as your IP address. Earshot does not add an Earshot account identifier, advertising identifier, or tracking identifier to these requests. Each external service is responsible for its own privacy practices.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Purchases</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Earshot Plus subscriptions, the lifetime unlock, and optional tips are processed by Apple through StoreKit. Payown Media LLC does not receive your payment-card details, billing address, Apple ID, or complete StoreKit transaction history.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>Earshot checks purchase and subscription status on your device so it can provide the features you purchased. Earshot stores the resulting entitlement status locally and does not upload it to Payown Media LLC.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>Apple's handling of purchase information is governed by <a href="https://www.apple.com/legal/privacy/">Apple's Privacy Policy</a>.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Optional feedback</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Earshot can help you compose a feedback email. Sending feedback is optional. You can review and edit the message before sending it through your email provider. If you send an email, Payown Media LLC receives the information you choose to include, such as your email address and message. That information is used to respond to your request and provide support.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Children</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Earshot does not knowingly collect personal information from children. Earshot has no user accounts, advertising, analytics, or tracking.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Changes to this policy</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>If Earshot's privacy practices change, this page will be updated and will display a new effective date.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">Contact Payown Media LLC</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>For privacy questions or requests concerning Earshot, email <a href="mailto:michael@payown.media">michael@payown.media</a>.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>Payown Media LLC<br>United States</p>
+<!-- /wp:paragraph -->

@@ -1,0 +1,119 @@
+import XCTest
+@testable import Earshot
+
+/// Unit tests for the pure manual previous/next chapter navigation logic (#508).
+final class ChapterNavLogicTests: XCTestCase {
+
+    // MARK: nextIndex
+
+    func testNextNoChaptersIsNil() {
+        XCTAssertNil(ChapterNavLogic.nextIndex(currentIndex: nil, count: 0))
+        XCTAssertNil(ChapterNavLogic.nextIndex(currentIndex: 0, count: 0))
+    }
+
+    func testNextBeforeFirstChapterGoesToFirst() {
+        // Position is before the first chapter starts (active index nil).
+        XCTAssertEqual(ChapterNavLogic.nextIndex(currentIndex: nil, count: 4), 0)
+    }
+
+    func testNextFromMiddleStepsForward() {
+        XCTAssertEqual(ChapterNavLogic.nextIndex(currentIndex: 1, count: 4), 2)
+    }
+
+    func testNextFromLastIsNilNoOp() {
+        XCTAssertNil(ChapterNavLogic.nextIndex(currentIndex: 3, count: 4))
+    }
+
+    func testNextSingleChapterIsNil() {
+        XCTAssertNil(ChapterNavLogic.nextIndex(currentIndex: 0, count: 1))
+    }
+
+    // MARK: previousIndex
+
+    func testPreviousNoChaptersIsNil() {
+        XCTAssertNil(ChapterNavLogic.previousIndex(
+            currentIndex: nil, count: 0, positionWithinChapter: 0))
+        XCTAssertNil(ChapterNavLogic.previousIndex(
+            currentIndex: 1, count: 0, positionWithinChapter: 10))
+    }
+
+    func testPreviousBeforeFirstChapterGoesToFirst() {
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: nil, count: 4, positionWithinChapter: 0), 0)
+    }
+
+    func testPreviousDeepIntoChapterRestartsCurrent() {
+        // More than the threshold into chapter 2 -> restart chapter 2.
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: 2, count: 4, positionWithinChapter: 30), 2)
+    }
+
+    func testPreviousNearChapterStartGoesToPrior() {
+        // Within the threshold of chapter 2's start -> step to chapter 1.
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: 2, count: 4, positionWithinChapter: 1), 1)
+    }
+
+    func testPreviousAtFirstChapterWithinThresholdRestartsFirst() {
+        // Within the threshold of chapter 0 -> clamp to chapter 0 (restart),
+        // never underflow to a negative index.
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: 0, count: 4, positionWithinChapter: 1), 0)
+    }
+
+    func testPreviousAtFirstChapterDeepRestartsFirst() {
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: 0, count: 4, positionWithinChapter: 30), 0)
+    }
+
+    func testPreviousSingleChapterClampsToSelf() {
+        // Only one chapter: near its start clamps to 0 (never underflows)...
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: 0, count: 1, positionWithinChapter: 1), 0)
+        // ...and deep into it restarts the same chapter.
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: 0, count: 1, positionWithinChapter: 30), 0)
+    }
+
+    // MARK: threshold boundary
+
+    func testPreviousExactlyAtThresholdStepsToPrior() {
+        // Boundary is exclusive: exactly `threshold` is NOT "more than", so we
+        // step to the previous chapter.
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: 2,
+            count: 4,
+            positionWithinChapter: ChapterNavLogic.previousRestartThreshold), 1)
+    }
+
+    func testPreviousJustOverThresholdRestartsCurrent() {
+        XCTAssertEqual(ChapterNavLogic.previousIndex(
+            currentIndex: 2,
+            count: 4,
+            positionWithinChapter: ChapterNavLogic.previousRestartThreshold + 0.01), 2)
+    }
+
+    // MARK: flanking nav-button visibility (#515)
+
+    func testNavButtonsShownWhenChaptersExistAndSettingOn() {
+        // Acceptance criterion: buttons visible by default when the episode has
+        // chapters and the setting is on.
+        XCTAssertTrue(ChapterNavLogic.shouldShowNavButtons(chapterCount: 5, settingEnabled: true))
+    }
+
+    func testNavButtonsHiddenWhenSettingOff() {
+        // Acceptance criterion: turning the setting off hides the flanking buttons
+        // even when the episode has chapters.
+        XCTAssertFalse(ChapterNavLogic.shouldShowNavButtons(chapterCount: 5, settingEnabled: false))
+    }
+
+    func testNavButtonsHiddenWhenNoChaptersEvenIfSettingOn() {
+        // No chapters: nothing to navigate, so the buttons stay hidden regardless
+        // of the setting.
+        XCTAssertFalse(ChapterNavLogic.shouldShowNavButtons(chapterCount: 0, settingEnabled: true))
+    }
+
+    func testNavButtonsHiddenWhenNoChaptersAndSettingOff() {
+        XCTAssertFalse(ChapterNavLogic.shouldShowNavButtons(chapterCount: 0, settingEnabled: false))
+    }
+}

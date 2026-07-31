@@ -1,0 +1,69 @@
+name: Earshot
+options:
+  bundleIdPrefix: media.payown
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+configs:
+  Debug: debug
+  Release: release
+fileGroups:
+  - Earshot/Testing
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "157"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+targets:
+  Earshot:
+    type: application
+    platform: iOS
+    sources:
+      - path: Earshot
+        excludes:
+          - "Testing/**"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot
+        INFOPLIST_FILE: Earshot/App/Info.plist
+        # iPhone-only for 1.0 (#643 decision): iPad has had no real testing this
+        # cycle, so we won't ship it to App Review blind. iPad support (family
+        # "1,2") + its own VoiceOver/layout QA and screenshot set is tracked for
+        # 1.1. See docs/orchestration-state.md and the #643 iPad note.
+        TARGETED_DEVICE_FAMILY: "1"
+        DEVELOPMENT_TEAM: "72PH974742"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_PREVIEWS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+  EarshotTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: EarshotTests
+    dependencies:
+      - target: Earshot
+      - sdk: StoreKitTest.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.tests
+        DEVELOPMENT_TEAM: "72PH974742"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Earshot:
+    build:
+      targets:
+        Earshot: all
+        EarshotTests: [test]
+    test:
+      targets:
+        - EarshotTests
+      gatherCoverageData: true
+      storeKitConfiguration: Earshot/Testing/Configuration.storekit
+    run:
+      config: Debug
+      storeKitConfiguration: Earshot/Testing/Configuration.storekit

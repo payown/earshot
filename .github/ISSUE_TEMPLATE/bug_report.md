@@ -17,9 +17,9 @@ labels: bug
 
 ## Device info
 - Device: <!-- e.g., iPhone 15 Pro, Pixel 8 -->
-- OS version: <!-- e.g., iOS 17.5, Android 14 -->
+- OS version: <!-- e.g., iOS 18.5 -->
 - Earshot version: <!-- e.g., 1.0.0 -->
-- Screen reader (if relevant): <!-- VoiceOver, TalkBack, etc. -->
+- Screen reader (if relevant): <!-- VoiceOver -->
 
 ## Logs or screenshots
 <!-- Optional but helpful -->

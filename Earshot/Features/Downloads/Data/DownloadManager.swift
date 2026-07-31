@@ -1,0 +1,661 @@
+import Foundation
+import Network
+import Observation
+import SwiftData
+
+/// Downloads episode audio to the app's Documents/Downloads folder, gated on
+/// Wi-Fi when the user has "Wi-Fi only" enabled. Writes `downloadPath` /
+/// `downloadStatus` so the player prefers the local file. The pure gating
+/// decision lives in ``DownloadGate``.
+///
+/// Downloads run on a process-wide **background** `URLSession` (#544), so a
+/// transfer continues while the app is suspended and completes on relaunch
+/// instead of dying and stranding the episode at `.downloading`. Because iOS
+/// allows only one background session per identifier per process, the session
+/// and its delegate are shared statics used by every `DownloadManager` instance
+/// (the app's and the transient one ``BackgroundFeedRefresher`` creates for
+/// auto-download). Terminal events are resolved against the app's shared
+/// container by the composite ``DownloadTaskKey`` (`"feedURL|guid"`, #576 —
+/// guids alone repeat across podcasts), decoupled from whichever instance
+/// started the download.
+@MainActor
+@Observable
+final class DownloadManager {
+    /// True when the current path is Wi-Fi (or wired). Drives the gate.
+    private(set) var isOnWifi = true
+
+    /// False until `NWPathMonitor` delivers its first path report. Used so the
+    /// first report also kicks `.pending` downloads at launch (#576) —
+    /// `isOnWifi` optimistically defaults to true, so a launch already on Wi-Fi
+    /// would otherwise never see a "became Wi-Fi" transition.
+    @ObservationIgnored private var hasReceivedNetworkPath = false
+
+    @ObservationIgnored private var context: ModelContext?
+    @ObservationIgnored private var settings: AppSettingsStore?
+    @ObservationIgnored private let monitor = NWPathMonitor()
+    /// Observer for `.earshotQueueDidChange`, so queued episodes auto-download.
+    @ObservationIgnored private var queueChangeObserver: NSObjectProtocol?
+
+    // MARK: Shared background session (one per identifier per process)
+
+    /// Background session identifier; also matched by the app delegate's
+    /// `handleEventsForBackgroundURLSession`.
+    static let sessionIdentifier = "media.payown.earshot.swift.downloads"
+
+    @ObservationIgnored private static let delegate = DownloadSessionDelegate()
+
+    /// The one background session for the process. Lazily created; recreating it
+    /// on a background relaunch reconnects the delegate to outstanding tasks.
+    @ObservationIgnored static let session: URLSession = {
+        let config = URLSessionConfiguration.background(withIdentifier: sessionIdentifier)
+        config.sessionSendsLaunchEvents = true
+        config.isDiscretionary = false
+        // The app enforces its own Wi-Fi-only gate before starting a task, so the
+        // session itself may use cellular.
+        config.allowsCellularAccess = true
+        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+    }()
+
+    /// Set by the app delegate when iOS relaunches the app to deliver background
+    /// URL-session events; invoked once all events have been delivered.
+    @ObservationIgnored static var backgroundCompletionHandler: (() -> Void)?
+
+    /// The container terminal events resolve completed episodes against.
+    @ObservationIgnored private static var container: ModelContainer?
+
+    /// Wires the shared session's delegate to the app's container and forces the
+    /// session into existence so it can reconnect to any tasks that finished
+    /// while the app was suspended. Call once at launch (not under tests).
+    static func activate(container: ModelContainer) {
+        self.container = container
+        delegate.onFinished = { taskKey, fileURL in
+            Task { @MainActor in complete(taskKey: taskKey, fileURL: fileURL) }
+        }
+        delegate.onFailed = { taskKey in
+            Task { @MainActor in fail(taskKey: taskKey) }
+        }
+        delegate.onEventsFinished = {
+            Task { @MainActor in
+                let handler = backgroundCompletionHandler
+                backgroundCompletionHandler = nil
+                handler?()
+            }
+        }
+        _ = session
+    }
+
+    func configure(context: ModelContext) {
+        self.context = context
+        self.settings = AppSettingsStore(context: context)
+        monitor.pathUpdateHandler = { [weak self] path in
+            let onWifi = path.status == .satisfied
+                && (path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet))
+            Task { @MainActor in
+                guard let self else { return }
+                // Episodes parked at `.pending` by the Wi-Fi gate previously had
+                // no reader and never started (#576). Kick them on the Wi-Fi
+                // transition, and once on the FIRST path report so launch
+                // reconciliation covers pending rows left over from a prior run
+                // (start now or keep waiting, per current connectivity).
+                let becameWifi = onWifi && !self.isOnWifi
+                let firstPath = !self.hasReceivedNetworkPath
+                self.hasReceivedNetworkPath = true
+                self.isOnWifi = onWifi
+                if becameWifi || firstPath {
+                    await self.startPendingDownloads()
+                }
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "media.payown.earshot.swift.network"))
+
+        // Auto-download queued episodes (#downloads): every manual/opt-in enqueue
+        // funnels through QueueRepository.save, which posts this. The scan is
+        // bounded by the queue and idempotent, so it's safe to react to every
+        // queue mutation (adds, reorders, removals). Refresh-time auto-queue posts
+        // on a background context and is covered separately by SubscriptionRepository.
+        if queueChangeObserver == nil {
+            queueChangeObserver = NotificationCenter.default.addObserver(
+                forName: .earshotQueueDidChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in await self?.downloadQueuedIfEnabled() }
+            }
+        }
+    }
+
+    /// Whether a download may start right now under the Wi-Fi gate.
+    var downloadsAllowed: Bool {
+        let wifiOnly = settings?.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads)
+            ?? SettingsDefault.wifiOnlyDownloads
+        return DownloadGate.allowed(wifiOnly: wifiOnly, isOnWifi: isOnWifi)
+    }
+
+    /// Starts downloading `episode`'s audio on the background session. No-op when
+    /// already downloaded; sets `downloadStatus = .pending` and returns when
+    /// blocked by the Wi-Fi gate. Completion is handled by the session delegate
+    /// (``complete(guid:fileURL:)`` / ``fail(guid:)``), so this returns as soon as
+    /// the task is enqueued — the transfer then survives app suspension.
+    func download(_ episode: Episode) async {
+        guard let context else { return }
+        guard episode.downloadStatus != .downloaded else { return }
+        guard downloadsAllowed else {
+            ActiveDownload.setDownloadStatus(.pending, on: episode, in: context)
+            save()
+            Announcer.announce("Waiting for Wi-Fi to download \(episode.title)")
+            AppLog.networking.info("Download gated (no Wi-Fi): \(episode.title, privacy: .public)")
+            return
+        }
+        guard let rawURL = URL(string: episode.audioURL) else {
+            ActiveDownload.setDownloadStatus(.failed, on: episode, in: context)
+            save()
+            return
+        }
+        // A download is a non-media URLSession fetch (unlike AVFoundation
+        // streaming), so upgrade http→https under the media-only ATS policy
+        // (#387). HTTP-only hosts can still stream; only the download is affected.
+        let url = SecureURL.upgradedForNonMedia(rawURL)
+
+        // The ActiveDownload row and the .downloading write land in the SAME save
+        // (#701): a row that lagged behind would leave this episode invisible to
+        // reconcileStuckDownloads() and spinning forever — #544 returning.
+        ActiveDownload.setDownloadStatus(.downloading, on: episode, in: context)
+        save()
+
+        let task = Self.session.downloadTask(with: url)
+        // taskDescription (unlike taskIdentifier) survives an app relaunch, so a
+        // completion delivered after the app was killed still resolves the
+        // episode. The composite "feedURL|guid" key (#576) disambiguates guids
+        // that repeat across podcasts.
+        task.taskDescription = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        task.resume()
+        AppLog.networking.info("Download started (background): \(episode.title, privacy: .public)")
+    }
+
+    /// Downloads `episode` and suspends until the transfer reaches a TERMINAL
+    /// state — unlike ``download(_:)``, which returns as soon as the task is
+    /// enqueued (#544). Returns true when the episode ends up downloaded.
+    ///
+    /// Returns false without waiting when the download is gated on Wi-Fi
+    /// (`.pending`) or failed to start (no terminal event will ever arrive for
+    /// those), and after `timeout` seconds without a terminal event — the
+    /// background task itself is left running and can still finish normally
+    /// later. Safe to call concurrently for the same episode: each caller parks
+    /// its own continuation and every continuation is resumed exactly once,
+    /// either by the terminal event or by its own timeout (removal from
+    /// ``downloadWaiters`` before resuming is the single ownership point, and
+    /// all access is main-actor-serialized).
+    func downloadAndWait(_ episode: Episode, timeout: TimeInterval = 120) async -> Bool {
+        if episode.downloadStatus == .downloaded { return true }
+        await download(episode)
+        switch episode.downloadStatus {
+        case .downloaded:
+            return true
+        case .downloading:
+            break
+        case .none, .pending, .failed:
+            return false
+        }
+        let key = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        // No suspension between download(_:) returning and the waiter being
+        // parked (this closure runs synchronously on the main actor), so the
+        // terminal event can't slip past unobserved.
+        return await withCheckedContinuation { continuation in
+            let id = Self.addWaiter(continuation, for: key)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                // No-op when the terminal event already resolved this waiter.
+                Self.timeOutWaiter(id: id, for: key)
+            }
+        }
+    }
+
+    /// Starts every episode parked at `.pending` (Wi-Fi-gated, #576) through the
+    /// normal ``download(_:)`` path. Called when the network becomes Wi-Fi and
+    /// once on the first path report after launch. `download(_:)` re-checks the
+    /// gate itself, so if connectivity no longer qualifies the episodes simply
+    /// stay `.pending`.
+    ///
+    /// Bounded by the tiny ``ActiveDownload`` table (#701) instead of the old
+    /// whole-`Episode`-table fetch. Internal, not private, so tests can drive it.
+    func startPendingDownloads() async {
+        guard let context, downloadsAllowed else { return }
+        let episodes = await activeEpisodes(state: .pending, in: context)
+        guard !episodes.isEmpty else { return }
+        AppLog.networking.info("Starting \(episodes.count) Wi-Fi-gated download(s)")
+        for episode in episodes {
+            await download(episode)
+        }
+    }
+
+    /// Downloads every queued episode that isn't already downloaded or in flight,
+    /// when "Auto-download queued episodes" is on (default). Bounded by the (small)
+    /// queue: it fetches the ``QueueItem`` table, never the Episode table. Honors
+    /// the Wi-Fi gate automatically because it routes through ``download(_:)`` — a
+    /// gated episode parks at `.pending` and starts later, exactly like a manual
+    /// download.
+    ///
+    /// Fired for manual/opt-in adds via the ``Notification/Name/earshotQueueDidChange``
+    /// observer wired in ``configure(context:)``, and for refresh-time auto-queue
+    /// from ``SubscriptionRepository``'s refresh completion. Idempotent: an episode
+    /// already `.downloaded` / `.downloading` / `.pending` is skipped, so repeated
+    /// queue changes (including reorders) never re-enqueue work. A `.failed`
+    /// episode is left for a manual retry rather than re-hammered on every change.
+    func downloadQueuedIfEnabled() async {
+        guard let context else { return }
+        guard settings?.bool(SettingsKey.autoDownloadQueued, default: SettingsDefault.autoDownloadQueued) == true
+        else { return }
+        let items = (try? context.fetch(FetchDescriptor<QueueItem>())) ?? []
+        for item in items {
+            guard let episode = item.episode, episode.downloadStatus == .none else { continue }
+            await download(episode)
+        }
+    }
+
+    /// Resets episodes stuck at `.downloading` with no live background task (the
+    /// app was killed mid-transfer) so they don't hang forever (#544). Episodes
+    /// whose task is still in flight are left untouched — the delegate will finish
+    /// them. Call once at launch after ``configure(context:)``.
+    ///
+    /// The candidate rows now come from the bounded ``ActiveDownload`` table
+    /// rather than a whole-`Episode`-table fetch on the main actor (#701); the
+    /// orphan comparison itself is unchanged.
+    func reconcileStuckDownloads() async {
+        guard let context else { return }
+        let markedDownloading = await activeEpisodes(state: .downloading, in: context)
+        guard !markedDownloading.isEmpty else { return }
+
+        let liveKeys = await Self.liveTaskKeys()
+        let identities = markedDownloading.map { episode in
+            (composite: DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid),
+             bare: episode.guid)
+        }
+        let orphaned = DownloadReconciliation.orphanedIndices(
+            markedDownloading: identities,
+            liveTaskKeys: liveKeys
+        )
+        guard !orphaned.isEmpty else { return }
+        for index in orphaned {
+            // Also drops the ActiveDownload row: .failed is terminal, so the work
+            // is over and reconciliation must not see it again.
+            ActiveDownload.setDownloadStatus(.failed, on: markedDownloading[index], in: context)
+        }
+        save()
+        AppLog.networking.info("Reconciled \(orphaned.count) stuck download(s) to failed")
+    }
+
+    /// The episodes whose download is currently in `state`, resolved on the
+    /// caller's (main) context.
+    ///
+    /// The fetch itself runs on a throwaway background `ModelContext` so the
+    /// launch path never does store I/O on the main actor (#701), and only
+    /// Sendable `PersistentIdentifier`s cross back — SwiftData models are not
+    /// Sendable across contexts. Pending changes are saved first so the
+    /// background context sees a complete store.
+    ///
+    /// Any row whose episode has vanished is garbage-collected here: ``episode``
+    /// has no inverse, so SwiftData does not nullify it for us.
+    private func activeEpisodes(
+        state: ActiveDownloadState, in context: ModelContext
+    ) async -> [Episode] {
+        save()
+        let ids = await Self.activeDownloadIDs(state: state, in: context.container)
+        guard !ids.isEmpty else { return [] }
+
+        var episodes: [Episode] = []
+        for id in ids {
+            guard let row = Self.activeDownload(forPersistentID: id, in: context) else { continue }
+            if let episode = row.episode {
+                episodes.append(episode)
+            } else {
+                context.delete(row)
+            }
+        }
+        return episodes
+    }
+
+    /// Persistent IDs of the ``ActiveDownload`` rows in `state`, fetched off the
+    /// main actor on a throwaway context (#701). A plain-`String` predicate on
+    /// `stateRaw` is the whole reason this table exists: `Episode.downloadStatus`
+    /// is a Codable enum SwiftData refuses in a `#Predicate`.
+    private static func activeDownloadIDs(
+        state: ActiveDownloadState, in container: ModelContainer
+    ) async -> [PersistentIdentifier] {
+        let raw = state.rawValue
+        return await Task.detached(priority: .utility) {
+            let scan = ModelContext(container)
+            let descriptor = FetchDescriptor<ActiveDownload>(
+                predicate: #Predicate { $0.stateRaw == raw }
+            )
+            return ((try? scan.fetch(descriptor)) ?? []).map(\.persistentModelID)
+        }.value
+    }
+
+    /// Resolves an ``ActiveDownload`` on `context` from an identifier a
+    /// background context returned. Uses a predicate fetch (not
+    /// `ModelContext.model(for:)`, which traps on a missing ID) so a row deleted
+    /// in the meantime returns nil rather than crashing — mirroring the resolver
+    /// pattern in `SubscriptionRepository`.
+    private static func activeDownload(
+        forPersistentID id: PersistentIdentifier, in context: ModelContext
+    ) -> ActiveDownload? {
+        var descriptor = FetchDescriptor<ActiveDownload>(
+            predicate: #Predicate { $0.persistentModelID == id }
+        )
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
+    }
+
+    /// Removes a downloaded file and resets the episode's download state. The
+    /// file is deleted via the RESOLVED URL (`Episode.localAudioURL`), so a
+    /// legacy absolute `downloadPath` from before an app update still deletes
+    /// the real file instead of a dead path (#575).
+    func removeDownload(_ episode: Episode) {
+        guard let context else { return }
+        if let url = episode.localAudioURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        episode.downloadPath = nil
+        // Drops any ActiveDownload row too: removing a download mid-transfer must
+        // not leave reconciliation chasing it (#701).
+        ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+        save()
+    }
+
+    /// Removes every downloaded file and resets all download state in one pass —
+    /// the bulk equivalent of ``removeDownload(_:)``. Returns the number of
+    /// episodes cleared (files removed plus in-flight transfers cancelled).
+    ///
+    /// Order matters: cancel any live background transfers FIRST so a completion
+    /// can't land a fresh file on disk after the sweep. Cancellation delivers an
+    /// `onFailed` terminal event, but every affected episode is reset to `.none`
+    /// here regardless, and the `ActiveDownload` row is dropped in the same save,
+    /// so a late `.failed` write has nothing to clobber (it early-returns on the
+    /// `.downloading` guard in ``fail(taskKey:)``).
+    ///
+    /// The candidate set is the two bounded, queryable sources (#701): episodes
+    /// with a file on disk (`downloadPath != nil`) and in-flight rows
+    /// (`ActiveDownload`, `.pending` / `.downloading`). A stray `.failed` episode
+    /// has no file and no row, so there is nothing to remove for it.
+    @discardableResult
+    func clearAllDownloads() async -> Int {
+        guard let context else { return 0 }
+
+        var affected: [Episode] = await episodesWithDownloadPath(in: context)
+        var seen = Set(affected.map(\.persistentModelID))
+        var hasInFlight = false
+        for state in [ActiveDownloadState.pending, .downloading] {
+            for episode in await activeEpisodes(state: state, in: context) {
+                hasInFlight = true
+                if seen.insert(episode.persistentModelID).inserted {
+                    affected.append(episode)
+                }
+            }
+        }
+        guard !affected.isEmpty else { return 0 }
+
+        // Cancel live transfers BEFORE resetting state so a completion delivered
+        // mid-clear can't write `downloadPath`/`.downloaded` back onto a row we
+        // just cleared. Only reach for the shared background session when a
+        // transfer is actually in flight — the common "delete downloaded files"
+        // path never forces the session into existence.
+        if hasInFlight {
+            await Self.cancelAllTasks()
+        }
+
+        for episode in affected {
+            if let url = episode.localAudioURL {
+                try? FileManager.default.removeItem(at: url)
+            }
+            episode.downloadPath = nil
+            ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+        }
+        save()
+        AppLog.networking.info("Cleared \(affected.count) download(s)")
+        return affected.count
+    }
+
+    /// Cancels every task on the shared background session. Used by
+    /// ``clearAllDownloads()`` so no in-flight transfer completes after a clear.
+    private static func cancelAllTasks() async {
+        await withCheckedContinuation { continuation in
+            session.getAllTasks { tasks in
+                for task in tasks { task.cancel() }
+                continuation.resume()
+            }
+        }
+    }
+
+    /// Heals `downloadPath` values written by pre-#575 builds, which stored
+    /// ABSOLUTE container paths. iOS relocates the app container on every app
+    /// update, so every such path goes stale: playback silently fell back to
+    /// streaming and Remove deleted a dead path while the real file survived.
+    ///
+    /// For each episode that HAS a `downloadPath`: rewrite a legacy absolute
+    /// value to just the file name; if the resolved file no longer exists on
+    /// disk, reset the episode to not-downloaded so the UI offers a re-download
+    /// instead of listing an unplayable file. Idempotent (healed rows are
+    /// skipped next launch) and cheap (writes only rows that need it). Never
+    /// throws outward — unverifiable rows are left alone. Call once at launch
+    /// after ``configure(context:)``, alongside ``reconcileStuckDownloads()``.
+    ///
+    /// **Scope (#701).** The candidate set is now the bounded
+    /// `downloadPath != nil` predicate rather than a fetch of the ENTIRE Episode
+    /// table filtered in memory for `.downloaded` — on a 241,979-row library that
+    /// fetch was a launch watchdog kill, and `downloadStatus` cannot be queried
+    /// (a Codable enum SwiftData rejects in a `#Predicate`). Both purposes of
+    /// this function are fully preserved: legacy ABSOLUTE paths (the #575 reason
+    /// it exists) and file-gone resets both operate on rows with a non-nil path.
+    ///
+    /// The one deliberate, approved narrowing: a row marked `.downloaded` with NO
+    /// path at all is no longer reset. That defensive branch cannot survive a
+    /// bounded query — catching it would mean querying the enum, which is
+    /// impossible — and it only ever fired on rows that were already internally
+    /// inconsistent. An empty-string path is still caught (`"" != nil`).
+    func reconcileDownloadPaths() async {
+        guard let context else { return }
+        let episodes = await episodesWithDownloadPath(in: context)
+        guard !episodes.isEmpty else { return }
+
+        var rewritten = 0
+        var reset = 0
+        for episode in episodes {
+            guard let name = DownloadPaths.storedFileName(episode.downloadPath) else {
+                // A non-nil but unusable path (empty string): inconsistent row;
+                // make it re-downloadable.
+                episode.downloadPath = nil
+                ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+                reset += 1
+                continue
+            }
+            guard let resolved = DownloadPaths.resolveLocalURL(storedValue: name) else {
+                // Downloads directory unavailable right now — don't clear state
+                // we can't verify; try again next launch.
+                continue
+            }
+            if FileManager.default.fileExists(atPath: resolved.path) {
+                if episode.downloadPath != name {
+                    episode.downloadPath = name
+                    rewritten += 1
+                }
+            } else {
+                episode.downloadPath = nil
+                ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+                reset += 1
+            }
+        }
+        guard rewritten > 0 || reset > 0 else { return }
+        save()
+        AppLog.networking.info("Reconciled download paths: \(rewritten) legacy path(s) rewritten, \(reset) missing file(s) reset")
+    }
+
+    /// Episodes with a non-nil `downloadPath`, resolved on the caller's (main)
+    /// context. Bounded by what the user actually downloaded (#701), and fetched
+    /// on a throwaway background context so the launch path does no store I/O on
+    /// the main actor. Only Sendable identifiers cross back.
+    private func episodesWithDownloadPath(in context: ModelContext) async -> [Episode] {
+        save()
+        let container = context.container
+        let ids = await Task.detached(priority: .utility) {
+            let scan = ModelContext(container)
+            let descriptor = FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.downloadPath != nil }
+            )
+            return ((try? scan.fetch(descriptor)) ?? []).map(\.persistentModelID)
+        }.value
+        return ids.compactMap { Self.episode(forPersistentID: $0, in: context) }
+    }
+
+    /// Resolves an ``Episode`` on `context` from an identifier a background
+    /// context returned. Predicate fetch, not `ModelContext.model(for:)` (which
+    /// traps on a missing ID), so a vanished row returns nil.
+    private static func episode(
+        forPersistentID id: PersistentIdentifier, in context: ModelContext
+    ) -> Episode? {
+        var descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.persistentModelID == id }
+        )
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
+    }
+
+    // MARK: Terminal events (delegate → main actor → SwiftData)
+
+    private static func complete(taskKey: String, fileURL: URL) {
+        // Wake downloadAndWait callers first, unconditionally, so a failed
+        // episode lookup can't leave a continuation parked until its timeout.
+        // Resumption only SCHEDULES the waiter — it runs after this function
+        // returns, so it observes the persisted state below.
+        resolveWaiters(for: taskKey, success: true)
+        guard let context = container?.mainContext,
+              let episode = DownloadTaskKey.episode(matching: taskKey, in: context) else { return }
+        // Store only the file NAME: iOS relocates the app container on every
+        // app update, so an absolute path goes stale (#575). Reads resolve the
+        // name against the current container via `Episode.localAudioURL`.
+        episode.downloadPath = fileURL.lastPathComponent
+        // Terminal: this also drops the ActiveDownload row, in the same save
+        // (#701).
+        ActiveDownload.setDownloadStatus(.downloaded, on: episode, in: context)
+        save(context, action: "complete")
+        Announcer.announce("Downloaded \(episode.title)")
+        AppLog.networking.info("Download finished: \(episode.title, privacy: .public)")
+    }
+
+    private static func fail(taskKey: String) {
+        resolveWaiters(for: taskKey, success: false)
+        guard let context = container?.mainContext,
+              let episode = DownloadTaskKey.episode(matching: taskKey, in: context) else { return }
+        // Don't clobber a state that already moved on (e.g. the user removed it).
+        guard episode.downloadStatus == .downloading else { return }
+        ActiveDownload.setDownloadStatus(.failed, on: episode, in: context)
+        save(context, action: "fail")
+        AppLog.networking.error("Download failed: \(episode.title, privacy: .public)")
+    }
+
+    /// The task keys (composite `"feedURL|guid"`, or bare guids from tasks
+    /// enqueued by a pre-#576 build) of tasks the background session still has
+    /// in flight.
+    private static func liveTaskKeys() async -> Set<String> {
+        await withCheckedContinuation { continuation in
+            session.getAllTasks { tasks in
+                continuation.resume(returning: Set(tasks.compactMap { $0.taskDescription }))
+            }
+        }
+    }
+
+    // MARK: downloadAndWait continuations (#576)
+
+    /// Continuations parked by ``downloadAndWait(_:timeout:)``, keyed by the
+    /// composite task key. Each entry is resumed EXACTLY once: removal from
+    /// this dictionary before resuming is the single ownership point, and every
+    /// access is main-actor-isolated, so the terminal event and the timeout
+    /// task can't double-resume. Every waiter is paired with a timeout task, so
+    /// none can leak if a terminal event never arrives.
+    @ObservationIgnored private static var downloadWaiters:
+        [String: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)]] = [:]
+
+    private static func addWaiter(
+        _ continuation: CheckedContinuation<Bool, Never>, for key: String
+    ) -> UUID {
+        let id = UUID()
+        downloadWaiters[key, default: []].append((id: id, continuation: continuation))
+        return id
+    }
+
+    /// Resumes and removes every waiter parked for `key`. Called on the
+    /// terminal complete/fail event. No-op when nothing is waiting.
+    private static func resolveWaiters(for key: String, success: Bool) {
+        guard let parked = downloadWaiters.removeValue(forKey: key) else { return }
+        for waiter in parked {
+            waiter.continuation.resume(returning: success)
+        }
+    }
+
+    /// Resumes exactly the ONE waiter identified by `id` with false. Called by
+    /// that waiter's timeout task; no-op when the terminal event already
+    /// resolved it. Other callers waiting on the same key keep waiting.
+    private static func timeOutWaiter(id: UUID, for key: String) {
+        guard var parked = downloadWaiters[key],
+              let index = parked.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = parked.remove(at: index)
+        downloadWaiters[key] = parked.isEmpty ? nil : parked
+        AppLog.networking.error("downloadAndWait timed out for task key")
+        waiter.continuation.resume(returning: false)
+    }
+
+    // MARK: Internals
+
+    /// The one save path for download state (#576): logs failures instead of
+    /// discarding them. Static so the delegate-driven terminal events (which
+    /// run without an instance) share it with instance methods via ``save()``.
+    private static func save(_ context: ModelContext, action: String) {
+        guard context.hasChanges else { return }
+        do {
+            try context.save()
+        } catch {
+            AppLog.networking.error("Download \(action, privacy: .public) save failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func save() {
+        guard let context else { return }
+        Self.save(context, action: "state")
+    }
+}
+
+/// Download-side reactions to episode lifecycle changes that any layer can call
+/// without a ``DownloadManager`` (which is `@MainActor` and owns the live
+/// background session). Lives here, alongside the download logic it mirrors,
+/// rather than in its own file, because the Xcode project uses manual file
+/// references.
+@MainActor
+enum DownloadCleanup {
+    /// Whether "Delete downloads after played" is on. Read once and reused when
+    /// clearing many episodes in a loop (e.g. Mark all as played) so a bulk
+    /// action doesn't refetch the setting per episode.
+    static func deleteAfterPlayedEnabled(_ context: ModelContext) -> Bool {
+        AppSettingsStore(context: context)
+            .bool(SettingsKey.deleteDownloadAfterPlayed, default: SettingsDefault.deleteDownloadAfterPlayed)
+    }
+
+    /// Deletes `episode`'s downloaded file and resets its download state — the
+    /// same file+state contract as ``DownloadManager/removeDownload(_:)`` (delete
+    /// via the resolved ``Episode/localAudioURL``, reset through
+    /// ``ActiveDownload/setDownloadStatus(_:on:in:)``). No-op unless the episode
+    /// is actually `.downloaded`, so an in-flight transfer is never touched. The
+    /// caller saves the context (every mark-played path already saves right after).
+    static func removeDownloadFileAndState(_ episode: Episode, in context: ModelContext) {
+        guard episode.downloadStatus == .downloaded else { return }
+        if let url = episode.localAudioURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        episode.downloadPath = nil
+        ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+    }
+
+    /// Convenience for the single-episode mark-played paths: removes the download
+    /// only when the setting is on. Bulk callers should gate once with
+    /// ``deleteAfterPlayedEnabled(_:)`` and call ``removeDownloadFileAndState(_:in:)``.
+    static func removeDownloadAfterPlayedIfEnabled(_ episode: Episode, in context: ModelContext) {
+        guard deleteAfterPlayedEnabled(context) else { return }
+        removeDownloadFileAndState(episode, in: context)
+    }
+}

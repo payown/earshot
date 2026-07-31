@@ -85,7 +85,6 @@ The launch goal is 1,000 downloads across iOS and Android combined, at which poi
 ### 5.1 Subscriptions and discovery
 
 - Search **Apple Podcasts** directory (iTunes Search API, no key required)
-- Search **Podcast Index** (free API key required, supports Podcasting 2.0 metadata)
 - Add podcast by **RSS URL**
 - Import subscriptions from **OPML** file
 - Export subscriptions to **OPML** file
@@ -173,7 +172,6 @@ The **first action** in the user's configured list is the default action (plain 
 - **Bookmarks:** mark any timestamp with optional note, share as timestamp link
 - **System integration:**
   - Lock screen, Control Center (iOS), media notification (Android)
-  - CarPlay
   - Android Auto
   - AirPlay
 - **Bluetooth/headphone handling:**
@@ -401,19 +399,16 @@ Minimum data required for a good experience. User has maximum control. Plain-Eng
 - Listening history: Don't keep / 30 days / 90 days (default) / 1 year / Keep forever
 - Always-available "Delete all history" button in privacy settings
 
-### Sent off-device (with user control)
+### Sent off-device
 
-**Crash reports (anonymized):**
-- Service: Sentry (privacy-respecting, can self-host)
-- Default: ON, opt-out in privacy settings
-- Contains: device model, OS version, app version, stack trace, anonymized event breadcrumbs
-- Never contains: user identifier, email, podcast names, episode titles
+**Earshot collects no data.** There is no crash-reporting SDK and no analytics SDK in the app:
 
-**Anonymous usage analytics:**
-- Service: PostHog (privacy-respecting, self-hostable)
-- Default: ON, opt-out in privacy settings
-- Captures: feature usage counts, aggregate stats, version adoption
-- Never captures: subscriptions, episodes played, search queries, bookmark text, names, emails, location
+- **No crash reporting SDK.** Sentry (and any equivalent) is not integrated. No stack traces, breadcrumbs, or device metadata are sent anywhere.
+- **No usage analytics SDK.** PostHog (and any equivalent) is not integrated. No feature-usage counts, adoption metrics, or aggregate stats leave the device.
+- The only network requests Earshot makes are the ones inherent to being a podcast app: fetching the RSS feeds, episode audio, and artwork for the podcasts the user chooses to follow, directly from those podcasts' hosts. Nothing about the user's activity is reported to Payown Media or any third party.
+- The App Store Privacy Nutrition Label is **"Data Not Collected."** `App/PrivacyInfo.xcprivacy` is present and consistent with this.
+
+(There is no opt-out toggle because there is nothing to opt out of. Any future addition of an off-device telemetry SDK would be opt-in, disclosed here, and reflected in the store privacy label before shipping.)
 
 ### Never collected
 - Advertising IDs (no IDFA, no AAID)

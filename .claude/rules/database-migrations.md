@@ -1,55 +1,68 @@
-# Database migration rules
+# SwiftData migration rules
 
-Earshot uses drift (SQLite), single growing schema in
-`lib/data/db/app_database.dart` (currently `schemaVersion = 12`). TestFlight
-testers carry real on-device data across builds — every schema bump runs
-`onUpgrade` against THEIR data, not a fresh database.
+Earshot stores user data in **SwiftData**. TestFlight testers carry real
+on-device data across builds, so every schema change runs a migration against
+THEIR data, not a fresh store. A broken migration can dead-end the app on
+launch — this happened once on the old Flutter/drift stack (a first-query
+migration threw before the UI existed and left the app permanently stuck). The
+same failure mode exists in SwiftData. Treat the data layer as the highest-risk
+surface in the app.
 
-## Background: the 2026-06-10 "loading -> Something went wrong" issue
+## Where it lives
 
-Some testers on older builds got stuck on a loading screen, then a permanent
-"Something went wrong" with no recovery except uninstall/reinstall. Likely
-root cause: an `onUpgrade` migration step (most likely one of the newer
-`customStatement` backfills) threw for that tester's real data. Drift runs
-the *entire* migration chain on the first DB query regardless of which table
-it targets, and `main.dart`'s first DB call
-(`settingsRepo.isCrashReportingEnabled()`) has no try/catch and runs before
-`runApp` — so a migration failure there hangs the app with no error screen at
-all. Once a migration step fails, `user_version` never advances, so it fails
-the same way on every future launch until the db file is deleted (reinstall).
-See issue #231 / PR #233 for the diagnostics work that preceded this.
+`Earshot/Data/Persistence/`:
+
+- `EarshotSchema.swift` — frozen `VersionedSchema` snapshots (`EarshotSchemaV2` … `EarshotSchemaV5`). Each is a verbatim, **nested, frozen** copy of the models as they shipped at that version.
+- `EarshotSchemaV1.swift` — the original 2-entity V1 schema, kept so a store still at V1 can be read and migrated.
+- `StoreMigration.swift` — the `SchemaMigrationPlan` (`EarshotMigrationPlan`) with its stages, plus the manual V1→V2 export/reimport, plus store-open error classification (`StoreOpenError`).
+- `ModelContainerFactory.swift` — builds the container and decides what to do on a terminal open failure.
 
 ## Rules for every schema change
 
-1. **Bump `schemaVersion` and add the matching `onUpgrade` step in the same
-   commit/PR as the table change.** Never let them drift apart.
+1. **Freeze a NEW version; never edit a shipped one.** SwiftData keys an entity
+   off its class NAME and a computed version hash. A frozen snapshot
+   (`EarshotSchemaVN`) must keep matching exactly what that build wrote to disk.
+   Editing a shipped snapshot changes its hash and breaks migration for anyone
+   on that version. When the live models change, add `EarshotSchemaV{N+1}` and a
+   new migration stage. `SchemaDriftTests` fails if a live model drifts from the
+   latest frozen snapshot — that failure means "freeze a new version," not "edit
+   the old one."
 
-2. **Test the upgrade path, not just `onCreate`.** A migration step that
-   works against an empty/fresh table can fail against real aged data (large
-   tables, NULLs in older rows, orphaned foreign keys). Before merging a
-   schema bump:
-   - Build a test DB at the PREVIOUS schema version with realistic fixture
-     data (multiple podcasts, episodes with NULL fields where allowed, queue
-     items, etc.).
-   - Run `onUpgrade` against it and assert it completes without throwing.
-   - Add this as a drift test under `test/data/db/`.
+2. **Bump the schema and add the migration stage in the same PR** as the model
+   change. Never let them separate.
 
-3. **Before any TestFlight release that bumps `schemaVersion`, manually test
-   the upgrade path on device**: install the PREVIOUS TestFlight build, use
-   the app to create real data (subscribe to a few feeds, queue episodes,
-   mark some played), then install the NEW build OVER it (do not uninstall
-   first). Confirm subscriptions, inbox, queue, and playback restoration all
-   load without errors. A clean install always works and proves nothing about
+3. **Prefer a lightweight stage; use `.custom` only when you must.** SwiftData's
+   lightweight migration **cannot** add a non-optional attribute (it does not
+   honor Swift property defaults as store defaults — verified in
+   `StoreMigrationTests`). Adding a non-optional field, splitting entities, or
+   backfilling requires a `.custom` stage (or the manual export/reimport pattern
+   used for V1→V2). New attributes that can be optional, and new `@Model` types,
+   migrate lightweight.
+
+4. **Test the upgrade path, not just fresh creation.** A stage that works on an
+   empty store can throw on real aged data (large tables, NULLs in older rows,
+   orphaned relationships). Add/extend a migration test in `EarshotTests` that
+   opens a store seeded at the PREVIOUS version with realistic fixtures and
+   asserts the migration completes without throwing. This is a **required
+   gate**, run in CI (`swift-ci.yml`), not optional.
+
+5. **Before any TestFlight release that bumps the schema, verify on device:**
+   install the PREVIOUS TestFlight build, create real data (subscribe, queue,
+   mark played, make folders), then install the NEW build OVER it (do not
+   uninstall). Confirm everything loads. A clean install proves nothing about
    migrations.
 
-4. **Raw `customStatement` migrations need defensive SQL.** Handle NULLs
-   explicitly, don't assume every existing row has the new column populated,
-   and be cautious with correlated subqueries (`EXISTS`, scalar subqueries)
-   against tables that can have hundreds of rows for active testers.
+6. **A failing store-open must never destroy data or dead-end the app.**
+   `ModelContainerFactory` must distinguish:
+   - **store newer than app** (a downgrade — `NSPersistentStoreIncompatibleVersionHashError` / `NSMigrationMissingMappingModelError`): the store is intact, never delete it; the user needs a newer app.
+   - **genuine corruption**: the only case that may reset — and only backed-up and user-consented.
+   Container creation and the first store access must not be able to hang the
+   launch with no recovery path. See issues #529, #708.
 
-5. **A failing migration must never be a permanent dead end.** Any DB-touching
-   call that runs before `runApp` (currently `main.dart` lines ~111-114) must
-   be wrapped in try/catch, log + Sentry.captureException, and fall back to
-   safe defaults so the app still reaches a screen — ideally one offering a
-   "Reset local data" recovery action, since a stuck migration cannot fix
-   itself without removing the db file.
+## iCloud / CloudKit note
+
+If SwiftData's CloudKit sync is ever enabled, CloudKit imposes extra schema
+constraints (all attributes optional or defaulted, no unique constraints, every
+relationship optional and inverse). Designing for sync changes the model rules,
+so plan the schema for it up front rather than retrofitting. (Tracked in the
+folders + iCloud sync PRD, `docs/folders.md`.)

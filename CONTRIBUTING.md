@@ -16,23 +16,27 @@ Every UI change must include:
 2. **Proper semantic labels** on every interactive element.
 3. **Dynamic Type support** verified at the largest accessibility size.
 4. **Color independence** verified (state is never communicated by color alone).
-5. **Touch targets** at minimum sizes (48dp Android, 44pt iOS).
+5. **Touch targets** at minimum size (44pt).
 
 If you're not sure how to test with a screen reader, ask in an issue or Discord and we'll help.
 
 ## Development setup
 
-See [README.md](README.md#building) for build instructions.
+See [README.md](README.md) for build instructions. Earshot is a **SwiftUI +
+SwiftData** iOS app; you need Xcode and (only if you edit `project.yml`)
+XcodeGen. There are no third-party Swift dependencies.
 
 Run before pushing:
 
 ```bash
-flutter analyze
-dart format --set-exit-if-changed lib/ test/
-flutter test
+xcodebuild test -project Earshot.xcodeproj -scheme Earshot -configuration Debug \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -skip-testing:EarshotTests/PaywallViewModelTests \
+  -skip-testing:EarshotTests/ProductCatalogServiceTests \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
-CI will fail if any of these fail.
+CI runs the same suite on every PR into `main`.
 
 ## Branch and commit conventions
 
@@ -59,22 +63,22 @@ Example: `feat: add Quick Action configurator for episodes`
 - **New tests** to improve coverage
 - **Documentation improvements**
 - **Performance optimizations** with benchmarks
-- **Internationalization** (we plan to use Flutter's built-in ARB/l10n)
+- **Internationalization** (SwiftUI String Catalogs)
 - **Bug reports** with clear reproduction steps
 
 ## What to avoid in PRs
 
 - Large architectural changes without prior discussion (open an issue first)
 - New dependencies without discussion
-- Feature work outside the current phase (see `docs/phases/`)
-- Code style preferences not in `.claude/rules/flutter-style.md`
+- Feature work outside the current plan (see `SWIFTUI_PLAN.md`)
+- Code style preferences not in the project conventions (`CLAUDE.md` / `AGENTS.md`)
 
 ## Reporting accessibility issues
 
 Open an issue labeled `accessibility` with:
 
 - Device and OS version
-- Screen reader (VoiceOver, TalkBack, etc.) and version
+- VoiceOver version (iOS)
 - Steps to reproduce
 - Expected vs actual behavior
 

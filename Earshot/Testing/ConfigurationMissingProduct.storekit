@@ -1,0 +1,173 @@
+{
+  "identifier" : "1B2C3D4E-5F6A-4B7C-8D9E-0F1A2B3C4D5E",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "49.99",
+      "familyShareable" : false,
+      "internalID" : "94807E93",
+      "localizations" : [
+        {
+          "description" : "One-time purchase. Unlocks unlimited podcast subscriptions in Earshot Plus, forever.",
+          "displayName" : "Earshot Plus Lifetime",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "media.payown.earshot.plus.lifetime",
+      "referenceName" : "Earshot Plus - Lifetime",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "1.99",
+      "familyShareable" : false,
+      "internalID" : "6FD0C21E",
+      "localizations" : [
+        {
+          "description" : "A small tip to support Earshot development.",
+          "displayName" : "Small Tip",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "media.payown.earshot.tip.small",
+      "referenceName" : "Tip - Small",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "7C3701B9",
+      "localizations" : [
+        {
+          "description" : "A medium tip to support Earshot development.",
+          "displayName" : "Medium Tip",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "media.payown.earshot.tip.medium",
+      "referenceName" : "Tip - Medium",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "0",
+    "_developerTeamID" : "72PH974742",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 0,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "EA0287B2-6BE5-4DA0-AA56-2807296B1595",
+      "localizations" : [
+
+      ],
+      "name" : "Earshot Plus",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "2.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "00F22DA3",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Monthly Earshot Plus subscription. Unlimited podcast subscriptions.",
+              "displayName" : "Earshot Plus Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "media.payown.earshot.plus.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Earshot Plus - Monthly",
+          "subscriptionGroupID" : "EA0287B2-6BE5-4DA0-AA56-2807296B1595",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "19.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "0A08A590",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Yearly Earshot Plus subscription. Unlimited podcast subscriptions.",
+              "displayName" : "Earshot Plus Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "media.payown.earshot.plus.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Earshot Plus - Yearly",
+          "subscriptionGroupID" : "EA0287B2-6BE5-4DA0-AA56-2807296B1595",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

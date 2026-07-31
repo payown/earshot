@@ -2,35 +2,52 @@
 
 ## Branches
 
-- `main` is the protected branch. Direct commits to `main` are not allowed (CI enforces).
-- Feature branches: `feature/<short-description>` (e.g., `feature/quick-actions`)
-- Bug fixes: `fix/<short-description>` (e.g., `fix/queue-reorder-crash`)
-- Phase work: `phase/<n>-<short-name>` (e.g., `phase/3-accessibility-layer`)
+- `main` is the trunk and holds the shipping **SwiftUI** app. It must always be
+  stable and deployable. Do not commit to `main` directly; every change is a
+  branch + PR.
+- Work on feature branches in **linked worktrees** — never develop directly in
+  `~/code/earshot`, which may hold Michael's uncommitted docs.
+- Feature branches: `feature/<short-description>` (e.g. `feature/smart-folders`)
+- Bug fixes: `fix/issue-<n>-<short-description>`
+- Phase work: `phase/<n>-<short-name>`
 
 ## Commits
 
-- Use Conventional Commits format:
-  - `feat: add Quick Actions configurator`
+- Conventional Commits:
+  - `feat: add nested folder picker`
   - `fix: prevent crash when queue is empty`
-  - `docs: update PRD section on transcripts`
-  - `chore: bump just_audio to 0.9.40`
-  - `test: add widget tests for sleep timer`
-  - `refactor: extract download service from subscriptions feature`
-- Keep commits small and focused. One logical change per commit.
-- Message body explains why, not what (the diff shows what).
+  - `docs: rework folders PRD for SwiftUI`
+  - `chore: bump build number to 158 for TestFlight`
+  - `test: add migration test for schema V6`
+  - `refactor: extract download service`
+- Small, focused commits. One logical change each. The body explains **why**.
 
 ## Pull requests
 
 Before opening a PR:
 
-1. All tests pass locally: `flutter test`
-2. Lints pass: `flutter analyze`
-3. Format clean: `dart format --set-exit-if-changed lib/ test/`
-4. New features have tests
-5. Accessibility tested with VoiceOver or TalkBack if UI changes are involved
-6. CHANGELOG.md updated for user-visible changes
+1. The Swift tests pass locally (see `.claude/rules/database-migrations.md` for
+   the exact `xcodebuild test` invocation and the StoreKit-suite skips):
+   ```bash
+   xcodebuild test -project Earshot.xcodeproj -scheme Earshot -configuration Debug \
+     -destination 'platform=iOS Simulator,name=iPhone 17' \
+     -skip-testing:EarshotTests/PaywallViewModelTests \
+     -skip-testing:EarshotTests/ProductCatalogServiceTests \
+     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+   ```
+2. Any schema bump has its matching migration test (required gate — see
+   `database-migrations.md`).
+3. New behavior has tests.
+4. `earshot-accessibility` run on any UI change; VoiceOver-tested on device when
+   UI changed.
+5. `CHANGELOG.md` updated for user-visible changes.
+6. If `project.yml` changed, `Earshot.xcodeproj` regenerated (`xcodegen
+   generate` from the repo root) and committed.
 
-PR description template (also in `.github/PULL_REQUEST_TEMPLATE.md`):
+Target PRs to `main` and assign `@payown`. Keep non-generated changes
+reviewable (~1,500 lines).
+
+PR description template (`.github/PULL_REQUEST_TEMPLATE.md`):
 
 ```markdown
 ## What
@@ -40,27 +57,33 @@ Short summary of the change.
 The user need or bug this addresses.
 
 ## Accessibility checklist
-- [ ] Tested with VoiceOver / TalkBack
-- [ ] All interactive elements have semantic labels
+- [ ] Tested with VoiceOver on device
+- [ ] All interactive elements have correct label / value / traits
 - [ ] Color is not the only signal
-- [ ] Touch targets meet minimum size
+- [ ] Touch targets ≥ 44pt
 - [ ] Tested at largest Dynamic Type size
-
-## Screenshots / recordings
-(if UI change)
 
 ## Testing notes
 How a reviewer can verify this.
 ```
 
+## Swift CI
+
+`.github/workflows/swift-ci.yml` runs the full `EarshotTests` suite
+(`xcodebuild test`) on every push and PR into `main` (no path filters, so it
+always runs and is safe to mark "Required" in branch protection). It runs on a
+self-hosted Apple Silicon Mac with a pinned Xcode and a dedicated CI simulator.
+A failing schema migration must be caught here, not by a TestFlight tester (see
+`database-migrations.md`, issue #656).
+
 ## Code review
 
 - Accessibility regressions block merge, no exceptions.
-- One approval required from a maintainer.
+- One maintainer approval required.
 - Author resolves conversations, not the reviewer.
 
 ## Releases
 
-- Tag releases on `main`: `v1.0.0`, `v1.0.1`, etc.
-- Each tag has a GitHub release with notes from CHANGELOG.md.
-- App Store and Play Store build numbers bump on every release.
+- iOS/iPadOS only. TestFlight via `tool/swiftui-testflight.sh`.
+- Tag releases on `main`: `v1.0.0`, `v1.0.1`, …, with GitHub release notes from
+  `CHANGELOG.md`. The App Store build number bumps on every release.

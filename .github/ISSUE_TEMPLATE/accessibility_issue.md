@@ -18,7 +18,7 @@ labels: accessibility
 ## Assistive technology
 - Device: <!-- e.g., iPhone 15 Pro, Pixel 8 -->
 - OS version:
-- Screen reader and version: <!-- VoiceOver iOS 17.5, TalkBack 14.x, JAWS 2026, etc. -->
+- Screen reader and version: <!-- VoiceOver on iOS 18, etc. -->
 - Other assistive tech: <!-- Zoom, large text, switch control, voice control, etc. -->
 
 ## Severity

@@ -144,6 +144,10 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   play/pause label to Renata, months before it got fixed (Chapter 22)
 - She now sees the inbox count on the Inbox tab itself, not just the heading, so
   she can tell what's waiting from the tab bar before opening it (Chapter 22)
+- Her large following (already canon: "too many subscriptions") is what triggered
+  the builds 152/153 crash that killed playback ~90 seconds in; she'd started
+  bracing for the drop without realizing it was the app, not her earbuds or phone
+  (Chapter 50)
 - On the build-119 upgrade her data held (shows, queue, and her saved place all
   intact, no empty-shelf morning like the wedding); she found the new
   Settings > Data "Import older data" row (status plus on-demand re-import) and
@@ -433,6 +437,27 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   Earshot stops being just Kashe, Renata's nephew, and a handful of testers and
   becomes a thing anyone can find. She doesn't know it; the world is about to
   arrive (Chapter 49)
+- She carries her phone in a breast/shirt pocket while she works, so she feels
+  its warmth against her; on long afternoon drives it used to run hot, which she
+  blamed on the sun and the dashboard rather than the app (the app was doing
+  background busywork every few seconds all session; build 155 stops it and the
+  phone stays cool over an hour-plus listen, place still saved) (Chapter 51)
+- Habit that ties to her hands-on care work: she checks a warm thing by pressing
+  two fingers flat against it the way she'd feel a client's forehead for fever
+  (Chapter 51)
+- Her dry, independent line for normalizing friction instead of reporting it:
+  "You don't report the weather" (Chapter 51)
+- Her Thursday client is out past a grain elevator where the cell signal quits
+  for good; she reaches it by a gravel road. On Sunday planning nights (Chapter
+  43) she used to run a second chore after building the queue: manually download
+  each episode for that dead-signal drive, thumbing down the list to confirm each
+  "Downloaded" label one at a time, because a show that claims it's there and
+  isn't is worse than silence on that road. Auto-download of queued episodes now
+  does that chore for her (Chapter 52)
+- Her downloads had quietly filled the phone with months of finished episodes she
+  never cleared; back in spring she'd deleted a hundred photos to make room and
+  blamed the camera. "Delete downloads after played" plus one-tap Clear all
+  downloads gave her the storage back (Chapter 52)
 
 ## What you can generate
 
@@ -1641,6 +1666,86 @@ It was the app. The button had been talking the whole time. Earshot just wasn't 
 She pinches once between clients. The host stops mid-sentence. She pinches again and he picks up right where he dropped off. One press, every time, the way she'd always assumed it already worked.
 
 She doesn't know this is the last of the quiet builds. That after this one it stops being just her and Renata's nephew and a handful of testers, and turns into a thing anyone can go and find. She just gets in the car, presses the button, and the show comes on.
+
+---
+
+### Chapter 50 — Build 154
+
+*The app kept crashing about ninety seconds into any episode on her large library; this build makes playback stay up, and quietly cleans up the Now Playing bar for VoiceOver.*
+
+**What to test:**
+
+Play an episode and let it run past a minute and a half without touching anything. It should keep going, no crash, even with a large library.
+
+Let an episode finish on its own with nothing queued behind it. The Now Playing bar should disappear, and VoiceOver should say "Episode finished."
+
+Pause an episode. The bar should stay put so you can start it again.
+
+With VoiceOver on, flick through a screen. The Now Playing group should read last, just above the tabs, not first.
+
+After updating, confirm your subscriptions, inbox, queue, and resume points are all still there.
+
+The show would get about a minute and a half in and just die. Not pause, not stumble. Gone, screen and all, like someone reached over and shut it off. She follows more shows than she'll admit to, and that turned out to be the reason, though she'd never have connected the two.
+
+The last two builds handed her back small things that worked, and she couldn't use any of them past ninety seconds. She'd started timing it without meaning to. Pull out of a client's drive, get a sentence into the host, brace for the drop.
+
+This build lets her forget she was counting. She pulls out, the host starts, and a minute and a half comes and goes with nothing under it but the road.
+
+The other thing she only caught with the phone in her pocket and the earbuds in. When a show ends on its own now, a small voice says episode finished, and the dead little bar that used to sit there afterward is just gone. Pause instead and the bar waits, the way it should. She'd never have asked for either one. She just stopped reaching to check whether it was really over.
+
+---
+
+### Chapter 51 — Build 155
+
+*On her large library, long listening sessions used to warm the phone up; this build stops that background busywork so it stays cool over an hour or more, while still saving her place just as safely.*
+
+**What to test:**
+
+On a large library, play an episode at a faster speed like 1.5x and let it run for an hour or more. The phone should stay cool, not warm up in your hand or pocket.
+
+While it's playing, force-quit the app and reopen it. It should drop you back within a few seconds of where you left off.
+
+After updating, confirm your subscriptions, inbox, queue, and resume points are all still there.
+
+She'd been blaming the sun.
+
+The phone rode warm in her breast pocket most afternoons, and she'd decided it was the dashboard, the July light, the long drives with a show running between the far clients. She'd catch it at a stoplight, press two fingers flat to the back of the case the way she'd feel a forehead, and think: hot again. Not a word to anyone. You don't report the weather.
+
+It wasn't the weather. The app had been doing quiet busywork the whole time she listened, over and over, every few seconds, a full hour of it stacked under one episode. On a following as big as hers it added up to a phone running a low fever all afternoon.
+
+This build lets it rest. She plays a long interview at one and a half speed across three visits, and the phone comes out of her pocket at the end no warmer than it went in. She presses two fingers to it out of habit before she can stop herself. Cool.
+
+She kills the app at a light, the way she does when her hands need something to do, and opens it again. It sets her down a breath from where she left off, like it never went anywhere.
+
+She'll tell Renata the heat's gone. Or she won't. Either way she's stopped checking it like a patient.
+
+---
+
+### Chapter 52 — Build 157
+
+*Anything she queues now downloads itself for offline, so the dead-signal drive no longer needs a second pass the night before, and the downloads that piled up for months clear in one tap.*
+
+**What to test:**
+
+Add episodes to your queue, by hand or by letting them auto-queue. With auto-download on (Settings > Downloads, on by default), each queued episode should download for offline on its own, honoring your Wi-Fi-only setting.
+
+Turn on "Delete downloads after played" (Settings > Downloads, off by default). Mark a downloaded episode played and its download should disappear on its own.
+
+On the Downloads screen, tap the trash button in the toolbar (also under Settings > Downloads) to clear every download at once. Confirm the count, that it asks first, and that any in-progress downloads cancel too.
+
+Play a long episode above 1x for a while. Playback stays smooth, place still saved, phone still cool.
+
+Sunday night, coffee going cold, she built the week's queue the way she always does. Work through the inbox, send what she wants to the queue, let the rest wait.
+
+Then the second chore, every Sunday. Go back through and download each one for the Thursday client, the one out past the grain elevator where the signal quits for good. Thumb down the list, confirm each Downloaded label one at a time, because a show that says it's there and isn't is worse than silence on that road.
+
+This week she forgot the second part. Caught herself Thursday morning already onto the gravel, bracing for the gap. But the shows played. Every one she'd queued Sunday was sitting on the phone, downloaded while she wasn't looking.
+
+She never asked for that. It just did the chore she'd done by hand for years.
+
+The other thing she found by accident. Her downloads had quietly eaten the phone, months of finished episodes she'd never cleared. Back in spring she'd deleted a hundred photos to make room and blamed the camera. She turned on delete-after-played, cleared the rest in one tap, and watched the number fall to almost nothing.
+
+She didn't tell Renata. She just had her phone back.
 
 ---
 
