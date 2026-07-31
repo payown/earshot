@@ -1,8 +1,13 @@
 import SwiftUI
 import SwiftData
 
-/// A single folder: its podcasts (drag-reorder, remove), plus rename, set queue
-/// age limit, add podcasts, queue the folder, and delete.
+/// A single folder: its subfolders (drill-down, non-drag reorder) and its
+/// podcasts (drag-reorder, remove), plus a breadcrumb of where it sits in the
+/// tree, "go up one level", create a subfolder here, rename, set queue age
+/// limit, add podcasts, queue the folder, and delete. Nesting UI is folders
+/// phase 1 (#753); it reuses the drill-down destination declared by
+/// ``FoldersScreen`` at the root of this stack, so tapping a subfolder pushes
+/// another ``FolderDetailScreen`` for the child.
 struct FolderDetailScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +19,13 @@ struct FolderDetailScreen: View {
     @State private var showingAgeLimit = false
     @State private var ageLimitText = ""
     @State private var showingDelete = false
+    @State private var showingNewSubfolder = false
+    @State private var newSubfolderName = ""
+
+    // Re-anchored after a non-drag subfolder move so VoiceOver focus rides the
+    // moved row to its new spot instead of being stranded (#753). Keyed on the
+    // stable PersistentIdentifier, like FoldersScreen and the Quick Actions list.
+    @AccessibilityFocusState private var focusedSubfolderID: PersistentIdentifier?
 
     // Tracked by SwiftUI, so toggling VoiceOver while this screen is open
     // re-renders the rows and attaches/removes the sighted-only remove swipe
@@ -22,9 +34,17 @@ struct FolderDetailScreen: View {
     // row's custom "Remove from folder" action (#577).
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
+    private var repository: FolderRepository { FolderRepository(context: context) }
+
     private var members: [Podcast] {
-        FolderRepository(context: context).podcasts(in: folder)
+        repository.podcasts(in: folder)
     }
+
+    private var subfolders: [PodcastFolder] {
+        repository.childFolders(of: folder)
+    }
+
+    private var isNested: Bool { folder.parent != nil }
 
     var body: some View {
         content
@@ -38,6 +58,13 @@ struct FolderDetailScreen: View {
                 TextField("Folder name", text: $renameText)
                 Button("Rename") { rename() }
                 Button("Cancel", role: .cancel) {}
+            }
+            .alert("New subfolder", isPresented: $showingNewSubfolder) {
+                TextField("Subfolder name", text: $newSubfolderName)
+                Button("Create") { createSubfolder() }
+                Button("Cancel", role: .cancel) { newSubfolderName = "" }
+            } message: {
+                Text("Creates a folder nested inside \(folder.name).")
             }
             .alert("Queue expiration", isPresented: $showingAgeLimit) {
                 TextField("Days", text: $ageLimitText)
@@ -62,31 +89,167 @@ struct FolderDetailScreen: View {
 
     @ViewBuilder
     private var content: some View {
-        if members.isEmpty {
-            ContentUnavailableView {
-                Label("No podcasts yet", systemImage: "folder")
-            } description: {
-                Text("Add podcasts to this folder to group them.")
-            } actions: {
-                Button("Add podcasts") { showingPicker = true }
-            }
+        if subfolders.isEmpty && members.isEmpty {
+            emptyState
         } else {
             List {
-                Section {
-                    ForEach(members) { podcast in
-                        row(for: podcast)
-                    }
-                    .onMove(perform: move)
-                } footer: {
-                    ageLimitFooter
+                breadcrumbSection
+                subfoldersSection
+                podcastsSection
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        // Even an empty folder must let the user act on it — and, when nested,
+        // find their way back out — so the breadcrumb and go-up affordance are
+        // offered alongside the two calls to action.
+        ContentUnavailableView {
+            Label("Empty folder", systemImage: "folder")
+        } description: {
+            Text("Add podcasts to group them, or create a subfolder inside \(folder.name).")
+        } actions: {
+            Button("Add podcasts") { showingPicker = true }
+            Button("New subfolder here") { startNewSubfolder() }
+            if isNested {
+                Button("Go up one level") { goUp() }
+            }
+        }
+        .accessibilityHint(isNested ? "Folder path: \(FolderLogic.pathString(folder))" : "")
+    }
+
+    // MARK: Breadcrumb + go up
+
+    /// The path header and the go-up affordance. Only shown for a nested folder;
+    /// a top-level folder needs no breadcrumb (its name is the whole path) and
+    /// its "back" is the standard navigation bar Back button to the folder list.
+    @ViewBuilder
+    private var breadcrumbSection: some View {
+        if isNested {
+            Section {
+                Button {
+                    goUp()
+                } label: {
+                    Label("Go up one level", systemImage: "arrow.up.left")
                 }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            } header: {
+                // The full path, wrapping at large Dynamic Type (no lineLimit) so
+                // it never clips — the reason it lives here rather than in the
+                // single-line inline nav title. Header trait + a plain, comma-
+                // joined spoken label so VoiceOver reads "Folder path: News, Daily"
+                // rather than voicing the visual `›`. Carries a "Go up one level"
+                // rotor action so the breadcrumb itself is the non-drag way up.
+                Text(FolderLogic.pathString(folder))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .textCase(nil)
+                    .accessibilityLabel(FolderDetailLabel.breadcrumb(path: FolderLogic.folderPath(folder).map(\.name)))
+                    .accessibilityAddTraits(.isHeader)
+                    .rotorActions([
+                        QuickActionItem(label: "Go up one level", isDestructive: false) { goUp() },
+                    ])
+            }
+        }
+    }
+
+    // MARK: Subfolders
+
+    @ViewBuilder
+    private var subfoldersSection: some View {
+        if !subfolders.isEmpty {
+            Section("Subfolders") {
+                ForEach(Array(subfolders.enumerated()), id: \.element.persistentModelID) { index, child in
+                    subfolderRow(for: child, index: index)
+                }
+                .onMove(perform: moveSubfolders)
+            }
+        }
+    }
+
+    private func subfolderRow(for child: PodcastFolder, index: Int) -> some View {
+        // The drill-down link resolves against the `PodcastFolder` destination
+        // declared by FoldersScreen at the root of this stack, so tapping pushes
+        // another FolderDetailScreen for the child.
+        let link = NavigationLink(value: child) {
+            subfolderRowContent(for: child)
+        }
+        .accessibilityLabel(
+            FolderDetailLabel.subfolderRow(
+                name: child.name,
+                subfolderCount: child.children.count,
+                podcastCount: child.memberships.count
+            )
+        )
+        .accessibilityHint("Use the actions rotor to move this subfolder without dragging.")
+        .accessibilityFocused($focusedSubfolderID, equals: child.persistentModelID)
+        // Non-drag reorder — the same "Move to top / up / down / to bottom"
+        // vocabulary every reorderable list in the app offers (Queue, Quick
+        // Actions, FoldersScreen). Routed through the shared helper so the rotor
+        // announces them in the designed order despite the OS's reversed
+        // emission (#572, #577). Drag (`.onMove`) stays for sighted users.
+        .rotorActions(
+            QuickActionMoveLogic.targets(index: index, count: subfolders.count)
+                .map { target in
+                    QuickActionItem(label: target.label, isDestructive: false) {
+                        moveSubfolders(IndexSet(integer: index), target.destinationOffset)
+                        Announcer.announce(
+                            FolderDetailLabel.moveAnnouncement(
+                                name: child.name,
+                                position: target.resultingIndex + 1,
+                                count: subfolders.count
+                            )
+                        )
+                        focusedSubfolderID = child.persistentModelID
+                    }
+                }
+        )
+        return link
+    }
+
+    private func subfolderRowContent(for child: PodcastFolder) -> some View {
+        // Visual only — the accessible label (with counts) is set on the enclosing
+        // NavigationLink so the row is one element carrying the rotor move actions.
+        // The folder glyph and the link's disclosure chevron are hidden so the row
+        // reads as one coherent thing.
+        HStack(spacing: Spacing.md) {
+            Image(systemName: "folder")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text(child.name).font(.headline)
+                Text("^[\(child.children.count) subfolder](inflect: true), ^[\(child.memberships.count) podcast](inflect: true)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: Podcasts
+
+    @ViewBuilder
+    private var podcastsSection: some View {
+        if !members.isEmpty {
+            Section {
+                ForEach(members) { podcast in
+                    row(for: podcast)
+                }
+                .onMove(perform: move)
+            } header: {
+                if !subfolders.isEmpty {
+                    Text("Podcasts")
+                }
+            } footer: {
+                ageLimitFooter
             }
         }
     }
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        if !members.isEmpty {
+        if !members.isEmpty || !subfolders.isEmpty {
             ToolbarItem(placement: .topBarTrailing) {
                 EditButton()
             }
@@ -110,6 +273,18 @@ struct FolderDetailScreen: View {
                 showingPicker = true
             } label: {
                 Label("Add podcasts", systemImage: "plus")
+            }
+            Button {
+                startNewSubfolder()
+            } label: {
+                Label("New subfolder here", systemImage: "folder.badge.plus")
+            }
+            if isNested {
+                Button {
+                    goUp()
+                } label: {
+                    Label("Go up one level", systemImage: "arrow.up.left")
+                }
             }
             Button {
                 renameText = folder.name
@@ -190,7 +365,7 @@ struct FolderDetailScreen: View {
     // MARK: Actions
 
     private func queueFolder() {
-        let count = FolderRepository(context: context).addFolderToQueue(folder)
+        let count = repository.addFolderToQueue(folder)
         if count == 0 {
             Announcer.announce("No unplayed episodes to queue in \(folder.name)")
         } else {
@@ -198,33 +373,63 @@ struct FolderDetailScreen: View {
         }
     }
 
+    private func startNewSubfolder() {
+        newSubfolderName = ""
+        showingNewSubfolder = true
+    }
+
+    private func createSubfolder() {
+        let trimmed = newSubfolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        newSubfolderName = ""
+        guard !trimmed.isEmpty else { return }
+        let child = repository.createSubfolder(named: trimmed, under: folder)
+        Announcer.announce("Created \(child.name)")
+    }
+
+    /// Pops to the parent folder's detail. Because the drill-down back stack
+    /// mirrors the folder hierarchy (every subfolder is reached from its parent),
+    /// dismissing this screen lands exactly one level up.
+    private func goUp() {
+        let destination = folder.parent?.name
+        dismiss()
+        if let destination {
+            Announcer.announce("Moved up to \(destination)")
+        }
+    }
+
     private func rename() {
-        FolderRepository(context: context).rename(folder, to: renameText)
+        repository.rename(folder, to: renameText)
     }
 
     private func saveAgeLimit() {
         let days = Int(ageLimitText.trimmingCharacters(in: .whitespaces))
-        FolderRepository(context: context).setQueueAgeLimit(folder, days: days)
+        repository.setQueueAgeLimit(folder, days: days)
     }
 
     private func clearAgeLimit() {
-        FolderRepository(context: context).setQueueAgeLimit(folder, days: nil)
+        repository.setQueueAgeLimit(folder, days: nil)
     }
 
     private func remove(_ podcast: Podcast) {
-        FolderRepository(context: context).remove(podcast, from: folder)
+        repository.remove(podcast, from: folder)
         Announcer.announce("Removed \(podcast.title) from \(folder.name)")
     }
 
     private func move(_ offsets: IndexSet, _ destination: Int) {
         var reordered = members
         reordered.move(fromOffsets: offsets, toOffset: destination)
-        FolderRepository(context: context).reorderPodcasts(in: folder, ordered: reordered)
+        repository.reorderPodcasts(in: folder, ordered: reordered)
+    }
+
+    private func moveSubfolders(_ offsets: IndexSet, _ destination: Int) {
+        var reordered = subfolders
+        reordered.move(fromOffsets: offsets, toOffset: destination)
+        repository.reorderFolders(reordered)
     }
 
     private func deleteFolder() {
         let name = folder.name
-        FolderRepository(context: context).delete(folder)
+        repository.delete(folder)
         Announcer.announce("Deleted folder \(name)")
         dismiss()
     }
