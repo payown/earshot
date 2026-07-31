@@ -1489,6 +1489,37 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 
 ## Data Decisions
 
+### Issue #751 — Folders phase 1, SwiftData schema V6
+- **Purely additive, lightweight-inferrable migration (V5→V6).** The whole point
+  of phase 1 is the safest possible schema bump: no attribute is reshaped and
+  nothing non-optional is added, so SwiftData's lightweight inference handles it
+  and no `.custom` stage is needed. Two additions: (a) a new
+  `EpisodeFolderMembership` entity (episode↔folder join, the analogue of
+  `FolderMembership`), and (b) optional self-referential `parent`
+  (`PodcastFolder?`, `.nullify`) + inverse `children` (`[PodcastFolder]`) on
+  `PodcastFolder` for nesting. Every existing folder migrates as top-level
+  (`parent == nil`); the new join table starts empty.
+- **V5 was frozen into a nested snapshot before the live models changed.** V5
+  previously pointed at the live top-level `@Model` types; per the drift-crash
+  discipline (#425), it was copied verbatim into nested `EarshotSchemaV5.*`
+  classes (matching how V4 is frozen) so V5 keeps hashing to exactly what
+  shipped. V6 is now the only versioned schema referencing the live types.
+- **No inverse on `Episode` for the new join (the #701 discipline).**
+  `EpisodeFolderMembership.episode` is deliberately one-way. An
+  `@Relationship(inverse:)` collection on `Episode` would change `Episode`'s
+  shape and put a real library's ~242k episode rows back into the migration's
+  path. Cleanup of orphaned join rows on episode/podcast delete is a later phase
+  (`// TODO(folders P2): cleanup on episode delete`), following the same manual
+  discipline `FolderMembership`/`ActiveDownload` already use.
+- **Migration is a required CI gate.** `StoreMigrationV5toV6Tests` seeds a real
+  on-disk store at frozen V5 (folders, memberships, a podcast with NULL
+  optionals, episodes, a queue item), opens it through the production
+  `StoreMigration.openOrMigrate` path, and asserts nothing throws, folders and
+  memberships survive, `parent` is nil, and both nesting and the new join table
+  work post-migration. `SchemaDriftTests` now guards V6 against the live types
+  and asserts the live graph differs from frozen V5 only by the intentional
+  additions.
+
 ### Issue #635 — Earshot Plus: enforce 10-podcast free tier cap
 - **Pure decision logic, no StoreKit/ModelContext.** `PodcastCapPolicy`
   (Features/Monetization/Domain) takes primitives + `[Podcast]` arrays only —
