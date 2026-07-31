@@ -367,6 +367,28 @@ ship; OPML export/import is the supported way to carry a library over.
 
 ## UI Decisions
 
+- **Folder drill-down: breadcrumb lives in-content, not the nav title (#753).**
+  `FolderDetailScreen` gains a Subfolders section above its podcasts; each row is
+  a `NavigationLink(value:)` resolving against the `PodcastFolder` destination
+  `FoldersScreen` declares at the stack root (no duplicate destination), so a
+  child pushes another `FolderDetailScreen`. The breadcrumb is rendered as a
+  **wrapping Section header** (full `FolderLogic.pathString`, `.isHeader`,
+  comma-joined spoken label so VoiceOver doesn't voice the visual `›`) rather
+  than the inline `navigationTitle` — inline titles are single-line and would
+  clip a deep path at large Dynamic Type with no way for VoiceOver to recover the
+  tail; the wrapping header reflows and is Headings-rotor navigable. "Go up one
+  level" (only when `parent != nil`) is a visible button + a rotor action on the
+  breadcrumb + a menu item, and just `dismiss()`es since the back stack mirrors
+  the hierarchy; its announcement is deferred 0.5s past the pop's screen-change
+  utterance. Subfolder reorder is the shared `QuickActionMoveLogic` rotor set
+  (non-drag) plus `.onMove` drag, persisted via `reorderFolders`. Reactivity fix:
+  `subfolders` is derived by sorting the **tracked `folder.children` relationship**
+  (not a detached `FetchDescriptor`), mirroring how `members` reads through
+  `folder.memberships`, so Observation re-renders on a `sortOrder` mutation —
+  otherwise the row would announce "Moved…" while the list stayed put. Spoken
+  strings (subfolder row = "name, N subfolders, M podcasts, folder"; breadcrumb;
+  move announcement) are a pure `FolderDetailLabel` helper, unit-tested.
+
 - **Per-screen search is one shared filter, presentation-only (#457 Part A).**
   Inbox, Queue, and Downloads each get an in-place `.searchable` field backed by
   `EpisodeSearchFilter` (`Core/UI/`), a pure enum: case- and diacritic-insensitive

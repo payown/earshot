@@ -129,4 +129,38 @@ final class FolderDetailLabelTests: XCTestCase {
         let labels = QuickActionMoveLogic.targets(index: 0, count: 3).map(\.label)
         XCTAssertEqual(labels, ["Move down", "Move to bottom"])
     }
+
+    /// The screen derives its Subfolders section by sorting the tracked
+    /// `parent.children` relationship (so SwiftUI's Observation re-renders on a
+    /// reorder), then persists the new order with `reorderFolders`. This asserts
+    /// that read path stays in lock-step with `childFolders(of:)` after a move —
+    /// the reactivity fix for the "announced but didn't move" hazard.
+    func testChildrenRelationshipSortMatchesRepositoryOrderAfterReorder() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let parent = repo.createFolder(name: "News")
+        _ = repo.createSubfolder(named: "A", under: parent)
+        _ = repo.createSubfolder(named: "B", under: parent)
+        _ = repo.createSubfolder(named: "C", under: parent)
+
+        // The screen's `subfolders` computed: sort the tracked relationship.
+        func screenOrder() -> [String] {
+            parent.children
+                .sorted { lhs, rhs in
+                    lhs.sortOrder != rhs.sortOrder ? lhs.sortOrder < rhs.sortOrder : lhs.name < rhs.name
+                }
+                .map(\.name)
+        }
+
+        XCTAssertEqual(screenOrder(), ["A", "B", "C"])
+        XCTAssertEqual(screenOrder(), repo.childFolders(of: parent).map(\.name))
+
+        // Move "C" to the top the way the screen does, then persist.
+        var reordered = repo.childFolders(of: parent)
+        reordered.move(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        repo.reorderFolders(reordered)
+
+        XCTAssertEqual(screenOrder(), ["C", "A", "B"])
+        XCTAssertEqual(screenOrder(), repo.childFolders(of: parent).map(\.name))
+    }
 }

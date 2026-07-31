@@ -41,7 +41,16 @@ struct FolderDetailScreen: View {
     }
 
     private var subfolders: [PodcastFolder] {
-        repository.childFolders(of: folder)
+        // Read through the tracked `children` relationship — NOT a detached
+        // `FetchDescriptor` — so SwiftUI's Observation re-renders when a non-drag
+        // reorder mutates a child's `sortOrder`. This mirrors how `members` reads
+        // through `folder.memberships`: a bare repository fetch wouldn't be
+        // observed, so the row would announce "Moved…" while the list stayed put.
+        // Sorted by `sortOrder` then name to match `FolderRepository.childFolders(of:)`.
+        folder.children.sorted { lhs, rhs in
+            if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+            return lhs.name < rhs.name
+        }
     }
 
     private var isNested: Bool { folder.parent != nil }
@@ -108,7 +117,17 @@ struct FolderDetailScreen: View {
         ContentUnavailableView {
             Label("Empty folder", systemImage: "folder")
         } description: {
-            Text("Add podcasts to group them, or create a subfolder inside \(folder.name).")
+            if isNested {
+                // The path is content, not an action, so it's real text with a
+                // header trait — not an `.accessibilityHint` — and it's the only
+                // place the path appears in the empty branch (the breadcrumb
+                // header lives in the non-empty List). Comma-joined spoken label
+                // so VoiceOver doesn't voice the visual `›`.
+                Text("Inside \(FolderLogic.pathString(folder)). Add podcasts to group them, or create a subfolder here.")
+                    .accessibilityLabel("Inside \(FolderDetailLabel.breadcrumb(path: FolderLogic.folderPath(folder).map(\.name))). Add podcasts to group them, or create a subfolder here.")
+            } else {
+                Text("Add podcasts to group them, or create a subfolder inside \(folder.name).")
+            }
         } actions: {
             Button("Add podcasts") { showingPicker = true }
             Button("New subfolder here") { startNewSubfolder() }
@@ -116,7 +135,6 @@ struct FolderDetailScreen: View {
                 Button("Go up one level") { goUp() }
             }
         }
-        .accessibilityHint(isNested ? "Folder path: \(FolderLogic.pathString(folder))" : "")
     }
 
     // MARK: Breadcrumb + go up
@@ -384,15 +402,27 @@ struct FolderDetailScreen: View {
         guard !trimmed.isEmpty else { return }
         let child = repository.createSubfolder(named: trimmed, under: folder)
         Announcer.announce("Created \(child.name)")
+        // Land focus on the new row rather than stranding it on the dismissed
+        // alert — especially when this was the first subfolder and the empty
+        // state has just been replaced by the List. Deferred a beat so the row
+        // exists before focus moves to it.
+        let newID = child.persistentModelID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            focusedSubfolderID = newID
+        }
     }
 
     /// Pops to the parent folder's detail. Because the drill-down back stack
     /// mirrors the folder hierarchy (every subfolder is reached from its parent),
     /// dismissing this screen lands exactly one level up.
     private func goUp() {
-        let destination = folder.parent?.name
+        guard let destination = folder.parent?.name else { dismiss(); return }
         dismiss()
-        if let destination {
+        // Delay so the announcement lands after the pop's screen-change VoiceOver
+        // utterance finishes (otherwise the focus change swallows it) — the same
+        // deferred-announce pattern used after other navigations in the app. The
+        // closure captures only the String, so it's safe once this view is gone.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             Announcer.announce("Moved up to \(destination)")
         }
     }
