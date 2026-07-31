@@ -82,8 +82,22 @@ A failing schema migration must be caught here, not by a TestFlight tester (see
 - One maintainer approval required.
 - Author resolves conversations, not the reviewer.
 
+## TestFlight
+
+- **Device verification is pre-merge.** The normal way to get Michael a build to
+  test is a **test build from the branch**, before merging to `main`:
+  `tool/swiftui-testflight.sh --test [--both]`. For a batch of related work, cut
+  it from an **integration branch** (e.g. `test/<feature>`) that merges the
+  feature branches together, so he tests the whole thing at once. `--test`
+  permits a non-`main` branch and commits the build-number bump there; that bump
+  rides along when the work later merges to `main`. Merge to `main` only after
+  Michael verifies on device.
+- A user-facing build also gets a Kashe chapter (`earshot-kashe`) for the release
+  notes.
+
 ## Releases
 
-- iOS/iPadOS only. TestFlight via `tool/swiftui-testflight.sh`.
+- iOS/iPadOS only. Production releases deploy from a clean `main`
+  (`tool/swiftui-testflight.sh [--both]`).
 - Tag releases on `main`: `v1.0.0`, `v1.0.1`, …, with GitHub release notes from
   `CHANGELOG.md`. The App Store build number bumps on every release.
