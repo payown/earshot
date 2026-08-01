@@ -11,9 +11,11 @@ func buildPodcastActions(
     context: ModelContext,
     onOpenDetail: @escaping () -> Void,
     onShare: @escaping () -> Void,
-    onUnsubscribe: @escaping () -> Void
+    onUnsubscribe: @escaping () -> Void,
+    onAddToFolder: ((Podcast) -> Void)? = nil,
+    onMoveToFolder: ((Podcast) -> Void)? = nil
 ) -> [QuickActionItem] {
-    order.map { action in
+    order.compactMap { action -> QuickActionItem? in
         switch action {
         case .openDetail:
             return QuickActionItem(label: "Open podcast detail", isDestructive: false) {
@@ -74,6 +76,21 @@ func buildPodcastActions(
         case .share:
             return QuickActionItem(label: "Share podcast", isDestructive: false) {
                 onShare()
+            }
+        case .addToFolder:
+            // Folders phase 2 (#756): opens the shared `FolderPickerView` in
+            // `.add` mode for this single podcast. Omitted (nil) on surfaces that
+            // don't wire folder assignment.
+            guard let onAddToFolder else { return nil }
+            return QuickActionItem(label: action.label, isDestructive: false) {
+                onAddToFolder(podcast)
+            }
+        case .moveToFolder:
+            // Folders phase 2 (#756): opens the shared `FolderPickerView` in
+            // `.move` mode. Same opt-in contract as `.addToFolder`.
+            guard let onMoveToFolder else { return nil }
+            return QuickActionItem(label: action.label, isDestructive: false) {
+                onMoveToFolder(podcast)
             }
         }
     }

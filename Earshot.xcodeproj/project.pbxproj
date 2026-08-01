@@ -148,6 +148,7 @@
 		73AF043B5D5E455076A2338C /* ScaleDiagnosticTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 403AB757E47DF6B4826158AD /* ScaleDiagnosticTests.swift */; };
 		73C0733CADCC0CEDDD8216EF /* FeedbackComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86EC73FB6A8ADB9F91D7F550 /* FeedbackComposer.swift */; };
 		7513D2FF89246256D8904A14 /* EpisodeTimeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0F19AE91ED656786DBA1AC0 /* EpisodeTimeLogicTests.swift */; };
+		766E43220022D03D030550C1 /* FolderPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68FF354A1EB00F982E5CECD9 /* FolderPickerView.swift */; };
 		76CA1D5C34804F82048795F3 /* StoreMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBCA06917D3490C5734BED12 /* StoreMigrationTests.swift */; };
 		7716D65EEDCDBDB4CC11E772 /* NowPlayingScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A434721909D5CCA1BBA8CD0C /* NowPlayingScreen.swift */; };
 		771A59F8BBD8D26583A30433 /* TipJarDecisionLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 389BBE37FAAD999406D28A87 /* TipJarDecisionLogic.swift */; };
@@ -307,6 +308,7 @@
 		F736F4872226E3D2DDDDD76F /* Logger+Earshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D504E12C18259B246B251C7B /* Logger+Earshot.swift */; };
 		F7526DE3800059CE1D77B885 /* EpisodeSearchFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60DDA12DDBBAEE44CEB0527F /* EpisodeSearchFilter.swift */; };
 		F9A44A65F4853F96DA84642C /* QueueRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2780CB0E5357F4C10C7F4754 /* QueueRepository.swift */; };
+		FAE46ABF137FED0E6370B544 /* FolderPickerViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A79303ABA3501C026AD029F4 /* FolderPickerViewTests.swift */; };
 		FB3DFB101BC003B8753BBA88 /* AppearanceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C30468B785FA42002055BEB /* AppearanceSettings.swift */; };
 		FC297320D8BB1E47297E1495 /* FolderDetailLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37610749BFDF2CC9192A1BC3 /* FolderDetailLabel.swift */; };
 		FDB4DDC00C2A23ABC7B17A0A /* AirPlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72268AFC8538ECA1FE0479CB /* AirPlayTests.swift */; };
@@ -461,6 +463,7 @@
 		682B36BB7BE40E963A213FAF /* OPMLImportProgressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMLImportProgressTests.swift; sourceTree = "<group>"; };
 		6853F0BDF24EE6ED3311E2B7 /* QuickActionsRotor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsRotor.swift; sourceTree = "<group>"; };
 		68C1822B403C990C9F0C4303 /* TranscriptFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFormatTests.swift; sourceTree = "<group>"; };
+		68FF354A1EB00F982E5CECD9 /* FolderPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPickerView.swift; sourceTree = "<group>"; };
 		69299B483CD421B7655974FC /* ArtworkCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkCache.swift; sourceTree = "<group>"; };
 		6957506EF32CD52A4F68D4E4 /* AppearanceSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsTests.swift; sourceTree = "<group>"; };
 		6A9F5501C7FE1D92BC8A539E /* OnboardingContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingContent.swift; sourceTree = "<group>"; };
@@ -536,6 +539,7 @@
 		A4DB54C0B93DED983D53DD4B /* OPMLFileImporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMLFileImporterTests.swift; sourceTree = "<group>"; };
 		A621AE99537538C3A0AD021C /* EpisodeRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeRow.swift; sourceTree = "<group>"; };
 		A6C88F8A12481CD8B9986F26 /* FeedbackComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackComposerTests.swift; sourceTree = "<group>"; };
+		A79303ABA3501C026AD029F4 /* FolderPickerViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPickerViewTests.swift; sourceTree = "<group>"; };
 		A85ABED55FD2BFEA32BF1198 /* ChapterRowStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterRowStateTests.swift; sourceTree = "<group>"; };
 		A951F33F168DD2CF36836C6D /* SearchResultPositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultPositionTests.swift; sourceTree = "<group>"; };
 		ABEBC70285DA0D1C6FF8D924 /* TipJarViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipJarViewModelTests.swift; sourceTree = "<group>"; };
@@ -685,6 +689,7 @@
 			isa = PBXGroup;
 			children = (
 				BDC724CA4ACA6B86ADE5CCF6 /* FolderDetailScreen.swift */,
+				68FF354A1EB00F982E5CECD9 /* FolderPickerView.swift */,
 				F67B8AAA16F69CB84C899E27 /* FolderPodcastPickerView.swift */,
 				C75A4D2E9D30DDEF48E91230 /* FoldersScreen.swift */,
 				03715203B50D5DE8AE64CEB5 /* PodcastFolderPickerView.swift */,
@@ -893,6 +898,7 @@
 				23C18264777CD2FA64FC2A58 /* FeedRefreshPolicyTests.swift */,
 				4638BF38BD5D15F30DD349BF /* FolderDetailLabelTests.swift */,
 				2E58EA94F8C5F6FB11D19715 /* FolderLogicTests.swift */,
+				A79303ABA3501C026AD029F4 /* FolderPickerViewTests.swift */,
 				1A11D600A98A1DDDDC3A3379 /* FolderRepositoryTests.swift */,
 				0140FFFD2CE006140D813DBB /* HTTPClientRetryTests.swift */,
 				1D66609E1693F8666E32AB85 /* ID3ChapterParserTests.swift */,
@@ -1732,6 +1738,7 @@
 				A7CE5C257707DC30388A3BC8 /* FolderDetailScreen.swift in Sources */,
 				3569E4DF882AA0744DF03F6B /* FolderLogic.swift in Sources */,
 				01262DE59B46D2A204377F1D /* FolderMembership.swift in Sources */,
+				766E43220022D03D030550C1 /* FolderPickerView.swift in Sources */,
 				8E9B046EC870926B325058F2 /* FolderPodcastPickerView.swift in Sources */,
 				996DE47BD6F4BB678F86590D /* FolderRepository.swift in Sources */,
 				2CBA2F2A7E581EFDA0E64047 /* FoldersScreen.swift in Sources */,
@@ -1896,6 +1903,7 @@
 				ADC44000EF93EA6B3448E8D0 /* FeedbackComposerTests.swift in Sources */,
 				DC2DEAD1499DC1849661C3DB /* FolderDetailLabelTests.swift in Sources */,
 				332A5B28793F887C9CD39822 /* FolderLogicTests.swift in Sources */,
+				FAE46ABF137FED0E6370B544 /* FolderPickerViewTests.swift in Sources */,
 				D8E6CF1EAFB66882C4F6DCB7 /* FolderRepositoryTests.swift in Sources */,
 				A35B5B07638AEA5B1433A686 /* HTTPClientRetryTests.swift in Sources */,
 				4FB5BB30B7E3BE772ABC0BEF /* ID3ChapterParserTests.swift in Sources */,

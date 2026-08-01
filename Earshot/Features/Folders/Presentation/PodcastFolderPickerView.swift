@@ -179,23 +179,7 @@ struct PodcastFolderPickerView: View {
     /// parent/child cycle by an identity-visited set so each folder is emitted at
     /// most once.
     static func orderedHierarchy(from folders: [PodcastFolder]) -> [PodcastFolder] {
-        let roots = folders.filter { $0.parent == nil }
-        var result: [PodcastFolder] = []
-        var visited = Set<ObjectIdentifier>()
-        func visit(_ nodes: [PodcastFolder]) {
-            for node in nodes.sorted(by: Self.siblingOrder) {
-                guard visited.insert(ObjectIdentifier(node)).inserted else { continue }
-                result.append(node)
-                visit(node.children)
-            }
-        }
-        visit(roots)
-        return result
-    }
-
-    private static func siblingOrder(_ lhs: PodcastFolder, _ rhs: PodcastFolder) -> Bool {
-        if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
-        return lhs.name < rhs.name
+        FolderLogic.orderedHierarchy(from: folders)
     }
 
     /// The VoiceOver announcement fired when membership changes, naming the

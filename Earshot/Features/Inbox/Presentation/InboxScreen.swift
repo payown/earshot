@@ -31,6 +31,9 @@ struct InboxScreen: View {
     // the shared `.episodeAudioExport` download-then-share flow.
     @State private var exportEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
+    // The pending "Add to folder" / "Move to folder" Quick Action target (#756).
+    // Non-nil presents the shared `FolderPickerView` for the single episode.
+    @State private var folderPickRequest: FolderPickRequest?
     @State private var confirmingClear = false
     // Inbox multi-select (#595): entering selection mode swaps every row's
     // swipe/rotor actions for a checkbox and replaces the toolbar's Clear
@@ -294,6 +297,7 @@ struct InboxScreen: View {
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
         .episodeAudioExport($exportEpisode)
+        .folderPicker($folderPickRequest)
     }
 
     /// Builds one row, switching it into checkbox mode while selecting (#595).
@@ -449,7 +453,12 @@ struct InboxScreen: View {
             },
             // Rotor "Export audio" (#689): downloads if needed, then shares the
             // local file. Handled by `.episodeAudioExport`.
-            onExport: { exportEpisode = episode }
+            onExport: { exportEpisode = episode },
+            // Rotor "Add to folder" / "Move to folder" (#756): presents the
+            // shared `FolderPickerView` for this single episode. The picker files
+            // it, announces, and dismisses.
+            onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
+            onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
         )
     }
 

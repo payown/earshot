@@ -391,6 +391,45 @@ ship; OPML export/import is the supported way to carry a library over.
   flat sibling since folders nest and a podcast can be in several. The `create()`
   announcement is deferred 0.5 s so it clears the alert-dismissal focus utterance.
   Phase 2 will replace the minimal picker with a fully shared `FolderPickerView`.
+- **Shared "Add/Move to folder" Quick Actions + one reusable `FolderPickerView` (#756, Folders Phase 2, Issue A).**
+  Added `addToFolder`/`moveToFolder` cases to `EpisodeAction` and `PodcastAction`
+  (labels "Add to folder"/"Move to folder"), placed before the destructive
+  `.unfollow`/appended after `.share` respectively, and appended to the default
+  arrays so `QuickActionRepository.resolve()` hands them to existing users too
+  (reorderable/hideable in `QuickActionsSettingsView`). `buildEpisodeActions` and
+  `buildPodcastActions` gained optional `onAddToFolder`/`onMoveToFolder`
+  callbacks and a branch per case; both actions are **omitted** when a surface
+  passes no runner (same optional-callback contract as `onExport`/`onUnfollow`) —
+  `PodcastActionsBuilder` switched `.map` → `.compactMap` to support that.
+  **One reusable picker:** new `Features/Folders/Presentation/FolderPickerView.swift`
+  with `init(episodes: [Episode] = [], podcasts: [Podcast] = [], mode: FolderPickMode)`
+  where `enum FolderPickMode { case add, move }`. Unlike `PodcastFolderPickerView`
+  (a multi-membership *toggle* editor that stays open), this is a single-tap
+  *destination* selector: it shows the nested tree (shared `FolderLogic.orderedHierarchy`,
+  extracted from `PodcastFolderPickerView` so there is one cycle-guarded walk; the
+  old static now forwards to it), each row labelled by full `FolderLogic.pathString`
+  breadcrumb (depth via label, not indentation, no `.isToggle`), plus a "New folder…"
+  alert affordance (`createSubfolder(under: nil)`, flat for now) and a descriptive
+  empty state. On pick it calls the matching `FolderRepository` batch method
+  (`add/moveEpisodes`, `add/movePodcasts` — dispatch extracted to the testable
+  static `FolderPickerView.apply`), dismisses, and announces
+  "Moved 3 episodes to News › Daily" / "Added 1 podcast to News" via `Announcer`,
+  **deferred 0.5 s** so it lands after the sheet-dismiss focus utterance while iOS
+  re-anchors VoiceOver focus to the presenting row. A `Cancel` toolbar button makes
+  it dismissible without a drag gesture. Call sites present it through a one-line
+  `.folderPicker($request)` view modifier (backed by an Identifiable
+  `FolderPickRequest`), mirroring `.episodeAudioExport`. **Wired:** Inbox,
+  podcast `EpisodeListView`, Downloads (episode rows), and Library
+  `SubscriptionsView` (podcast rows). **Gated out:** Search results — those are
+  detached preview episodes for shows not yet subscribed, and folder membership is
+  a store write on a persisted episode (zero-store-write contract, #517), so the
+  folder actions are omitted there (no runner passed), same as `.unfollow`/`.exportAudio`.
+  **Not migrated:** `PodcastSettingsView`/`PodcastFolderPickerView` stay on the
+  Phase-1 toggle picker — that screen edits *multiple* memberships with add+remove
+  and live checkmarks, which the single-destination `FolderPickerView` doesn't
+  express; converting it would regress multi-folder editing. Flagged for a Phase 2
+  cleanup pass if a unified multi/single picker is designed. No multi-select or
+  `.contextMenu` yet (#757/#758, Phase 3).
 - **Folder drill-down: breadcrumb lives in-content, not the nav title (#753).**
   `FolderDetailScreen` gains a Subfolders section above its podcasts; each row is
   a `NavigationLink(value:)` resolving against the `PodcastFolder` destination

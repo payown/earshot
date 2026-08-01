@@ -15,6 +15,9 @@ struct SubscriptionsView: View {
     @State private var showingAdd = false
     @State private var sharingPodcast: Podcast?
     @State private var pendingUnsubscribe: Podcast?
+    // The pending "Add to folder" / "Move to folder" podcast Quick Action target
+    // (#756). Non-nil presents the shared `FolderPickerView` for the single podcast.
+    @State private var folderPickRequest: FolderPickRequest?
     // Gates the sighted-only swipe action below, mirroring Inbox's identical
     // gate: VoiceOver users already reach unfollow through the row's
     // "Unfollow" Quick Action in the rotor (`rotorActions(for:)` below), so
@@ -192,6 +195,7 @@ struct SubscriptionsView: View {
         .sheet(item: $sharingPodcast) { podcast in
             ShareSheet(items: shareItems(for: podcast))
         }
+        .folderPicker($folderPickRequest)
         .confirmationDialog(
             "Unfollow \(pendingUnsubscribe?.title ?? "this podcast")?",
             isPresented: Binding(
@@ -318,7 +322,12 @@ struct SubscriptionsView: View {
             context: context,
             onOpenDetail: {},
             onShare: { sharingPodcast = podcast },
-            onUnsubscribe: { pendingUnsubscribe = podcast }
+            onUnsubscribe: { pendingUnsubscribe = podcast },
+            // Rotor "Add to folder" / "Move to folder" (#756): presents the
+            // shared `FolderPickerView` for this single podcast. The picker files
+            // it, announces, and dismisses.
+            onAddToFolder: { folderPickRequest = .podcast($0, mode: .add) },
+            onMoveToFolder: { folderPickRequest = .podcast($0, mode: .move) }
         )
     }
 

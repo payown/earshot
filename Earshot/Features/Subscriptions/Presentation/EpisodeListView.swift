@@ -18,6 +18,8 @@ struct EpisodeListView: View {
     // the shared `.episodeAudioExport` download-then-share flow.
     @State private var exportEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
+    // The pending "Add to folder" / "Move to folder" Quick Action target (#756).
+    @State private var folderPickRequest: FolderPickRequest?
     @State private var showingPodcastSettings = false
     // The pending "Unfollow this podcast" rotor Quick Action (#572). This is a
     // single-show screen, so unfollow always targets the shown `podcast`; it
@@ -170,7 +172,12 @@ struct EpisodeListView: View {
                                 },
                                 // Rotor "Export audio" (#689): downloads if needed,
                                 // then shares the local file. See `.episodeAudioExport`.
-                                onExport: { exportEpisode = episode }
+                                onExport: { exportEpisode = episode },
+                                // Rotor "Add to folder" / "Move to folder" (#756):
+                                // presents the shared `FolderPickerView` for this
+                                // single episode.
+                                onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
+                                onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
                             )
                         )
                         // Lets the rotor mark-played runner hand VoiceOver focus
@@ -244,6 +251,7 @@ struct EpisodeListView: View {
             ShareSheet(items: shareItems(for: episode))
         }
         .episodeAudioExport($exportEpisode)
+        .folderPicker($folderPickRequest)
         // Podcast-level destructive confirmation for the row's "Unfollow this
         // podcast" Quick Action (#572). Wording copied from InboxScreen so the
         // flow reads identically everywhere it appears.
