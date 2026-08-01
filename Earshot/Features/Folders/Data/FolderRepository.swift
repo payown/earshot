@@ -250,6 +250,164 @@ final class FolderRepository {
         save()
     }
 
+    // MARK: Batch podcast membership (folders phase 2 — #756)
+
+    /// Adds every podcast in `podcasts` to `folder`, appended in the given order.
+    /// Runs as a single transaction (one ``save()``) and is idempotent: podcasts
+    /// already in `folder`, and duplicates within the input, are skipped so no
+    /// second (folder, podcast) row is ever created. Uniqueness is enforced here,
+    /// mirroring the single-item ``add(_:to:)``.
+    func addPodcasts(_ podcasts: [Podcast], to folder: PodcastFolder) {
+        guard !podcasts.isEmpty else { return }
+        var nextOrder = (folder.memberships.map(\.sortOrder).max() ?? -1) + 1
+        // Seed with the folder's current members so both existing memberships and
+        // repeats inside `podcasts` collapse to a single insert.
+        var seen = Set(folder.memberships.compactMap { $0.podcast?.persistentModelID })
+        for podcast in podcasts {
+            guard seen.insert(podcast.persistentModelID).inserted else { continue }
+            context.insert(FolderMembership(folder: folder, podcast: podcast, sortOrder: nextOrder))
+            nextOrder += 1
+        }
+        save()
+    }
+
+    /// Moves every podcast in `podcasts` into `folder`: each is first removed from
+    /// **all** folders it currently belongs to, then appended to `folder` in the
+    /// given order — so afterwards each moved podcast is filed in exactly `folder`.
+    /// (The batch methods take only a target; "current folder context" therefore
+    /// means every folder the podcast is in, matching the multi-select "Move to
+    /// folder" contract in §9.2.) One transaction, idempotent: moving podcasts
+    /// already solely in `folder` leaves them there.
+    func movePodcasts(_ podcasts: [Podcast], to folder: PodcastFolder) {
+        guard !podcasts.isEmpty else { return }
+        let ids = Set(podcasts.map(\.persistentModelID))
+        let all = (try? context.fetch(FetchDescriptor<FolderMembership>())) ?? []
+        for membership in all
+        where membership.podcast.map({ ids.contains($0.persistentModelID) }) == true {
+            context.delete(membership)
+        }
+        // Order after the target folder's surviving members (those NOT being moved).
+        var nextOrder = (all
+            .filter {
+                $0.folder?.persistentModelID == folder.persistentModelID
+                && ($0.podcast.map { !ids.contains($0.persistentModelID) } ?? true)
+            }
+            .map(\.sortOrder).max() ?? -1) + 1
+        var seen = Set<PersistentIdentifier>()
+        for podcast in podcasts {
+            guard seen.insert(podcast.persistentModelID).inserted else { continue }
+            context.insert(FolderMembership(folder: folder, podcast: podcast, sortOrder: nextOrder))
+            nextOrder += 1
+        }
+        save()
+    }
+
+    /// Removes every podcast in `podcasts` from `folder`. One transaction;
+    /// podcasts not in `folder` are ignored. Podcasts themselves are untouched.
+    func removePodcasts(_ podcasts: [Podcast], from folder: PodcastFolder) {
+        guard !podcasts.isEmpty else { return }
+        let ids = Set(podcasts.map(\.persistentModelID))
+        for membership in folder.memberships
+        where membership.podcast.map({ ids.contains($0.persistentModelID) }) == true {
+            context.delete(membership)
+        }
+        save()
+    }
+
+    // MARK: Episode membership (folders phase 2 — #756)
+
+    /// The episodes filed directly in `folder`, in membership order then newest
+    /// first (with title as a final tiebreak) for a stable fallback. Because
+    /// ``EpisodeFolderMembership`` has no inverse collection on ``PodcastFolder``
+    /// (by design — see the model note), these rows are fetched and filtered by
+    /// folder rather than read off a relationship.
+    func episodes(in folder: PodcastFolder) -> [Episode] {
+        episodeMemberships(in: folder)
+            .sorted { lhs, rhs in
+                if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+                let l = lhs.episode?.pubDate, r = rhs.episode?.pubDate
+                if l != r { return FolderLogic.byPubDateDescending(l, r) }
+                return (lhs.episode?.title ?? "") < (rhs.episode?.title ?? "")
+            }
+            .compactMap(\.episode)
+    }
+
+    /// Adds every episode in `episodes` to `folder`, appended in the given order.
+    /// One transaction, idempotent: episodes already filed in `folder`, and
+    /// duplicates within the input, are skipped. Uniqueness of (folder, episode)
+    /// is enforced here, mirroring ``addPodcasts(_:to:)``.
+    func addEpisodes(_ episodes: [Episode], to folder: PodcastFolder) {
+        guard !episodes.isEmpty else { return }
+        let existing = episodeMemberships(in: folder)
+        var nextOrder = (existing.map(\.sortOrder).max() ?? -1) + 1
+        var seen = Set(existing.compactMap { $0.episode?.persistentModelID })
+        for episode in episodes {
+            guard seen.insert(episode.persistentModelID).inserted else { continue }
+            context.insert(EpisodeFolderMembership(folder: folder, episode: episode, sortOrder: nextOrder))
+            nextOrder += 1
+        }
+        save()
+    }
+
+    /// Moves every episode in `episodes` into `folder`: each is first removed from
+    /// all folders it currently belongs to, then appended to `folder`. Afterwards
+    /// each moved episode is filed in exactly `folder`. One transaction, idempotent.
+    func moveEpisodes(_ episodes: [Episode], to folder: PodcastFolder) {
+        guard !episodes.isEmpty else { return }
+        let ids = Set(episodes.map(\.persistentModelID))
+        let all = (try? context.fetch(FetchDescriptor<EpisodeFolderMembership>())) ?? []
+        for membership in all
+        where membership.episode.map({ ids.contains($0.persistentModelID) }) == true {
+            context.delete(membership)
+        }
+        var nextOrder = (all
+            .filter {
+                $0.folder?.persistentModelID == folder.persistentModelID
+                && ($0.episode.map { !ids.contains($0.persistentModelID) } ?? true)
+            }
+            .map(\.sortOrder).max() ?? -1) + 1
+        var seen = Set<PersistentIdentifier>()
+        for episode in episodes {
+            guard seen.insert(episode.persistentModelID).inserted else { continue }
+            context.insert(EpisodeFolderMembership(folder: folder, episode: episode, sortOrder: nextOrder))
+            nextOrder += 1
+        }
+        save()
+    }
+
+    /// Removes every episode in `episodes` from `folder`. One transaction;
+    /// episodes not in `folder` are ignored. Episodes themselves are untouched.
+    func removeEpisodes(_ episodes: [Episode], from folder: PodcastFolder) {
+        guard !episodes.isEmpty else { return }
+        let ids = Set(episodes.map(\.persistentModelID))
+        for membership in episodeMemberships(in: folder)
+        where membership.episode.map({ ids.contains($0.persistentModelID) }) == true {
+            context.delete(membership)
+        }
+        save()
+    }
+
+    /// The folders `episode` is filed in, in ``folders()`` order (sortOrder then
+    /// name). The episode analogue of ``folders(containing:)-(Podcast)``.
+    func folders(containing episode: Episode) -> [PodcastFolder] {
+        let id = episode.persistentModelID
+        let all = (try? context.fetch(FetchDescriptor<EpisodeFolderMembership>())) ?? []
+        let folderIDs = Set(
+            all.filter { $0.episode?.persistentModelID == id }
+                .compactMap { $0.folder?.persistentModelID }
+        )
+        return folders().filter { folderIDs.contains($0.persistentModelID) }
+    }
+
+    /// The ``EpisodeFolderMembership`` rows pointing at `folder`, unsorted. That
+    /// join has no inverse collection on ``PodcastFolder``, so it is resolved by
+    /// fetching and filtering — the same approach as ``removeEpisodeMemberships(forFolders:)``.
+    private func episodeMemberships(in folder: PodcastFolder) -> [EpisodeFolderMembership] {
+        let id = folder.persistentModelID
+        let all = (try? context.fetch(FetchDescriptor<EpisodeFolderMembership>())) ?? []
+        return all.filter { $0.folder?.persistentModelID == id }
+    }
+
     // MARK: Queueing
 
     /// The newest unplayed (`.newEpisode`, still in the inbox) episode for each
@@ -336,6 +494,42 @@ final class FolderRepository {
         toDelete.forEach(context.delete)
         save()
         AppLog.data.info("Removed \(toDelete.count) folder membership(s) for deleted podcast")
+    }
+
+    /// Removes every episode-folder membership for `episode`. Resolves the Phase 1
+    /// `// TODO(folders P2)` marker on ``EpisodeFolderMembership``: that join
+    /// references ``Episode`` one-way (no inverse, so `Episode`'s shape stays out
+    /// of the V5→V6 migration), so SwiftData does not nullify it when an episode is
+    /// deleted — a leftover row would dangle. Call this *before* deleting a single
+    /// episode. There is currently no per-episode delete path in the app (episodes
+    /// only leave the store by cascading from a podcast delete — covered by
+    /// ``removePodcastEpisodesFromAllFolders(_:)`` at unsubscribe); this exists so
+    /// any future prune/retention path that calls `context.delete(episode)` can
+    /// clean up first with a single call. New in folders phase 2 (#756).
+    func removeEpisodeFromAllFolders(_ episode: Episode) {
+        let id = episode.persistentModelID
+        let all = (try? context.fetch(FetchDescriptor<EpisodeFolderMembership>())) ?? []
+        let toDelete = all.filter { $0.episode?.persistentModelID == id }
+        guard !toDelete.isEmpty else { return }
+        toDelete.forEach(context.delete)
+        save()
+        AppLog.data.info("Removed \(toDelete.count) episode folder membership(s) for deleted episode")
+    }
+
+    /// Removes every episode-folder membership for episodes belonging to `podcast`.
+    /// Call this *before* `context.delete(podcast)`: the delete cascades to the
+    /// podcast's episodes, but ``EpisodeFolderMembership`` has no inverse on
+    /// ``Episode`` so those join rows are not cleaned up by the cascade and would
+    /// dangle at deleted episodes. Wired into the unsubscribe choke point alongside
+    /// ``removeFromAllFolders(_:)``. New in folders phase 2 (#756).
+    func removePodcastEpisodesFromAllFolders(_ podcast: Podcast) {
+        let id = podcast.persistentModelID
+        let all = (try? context.fetch(FetchDescriptor<EpisodeFolderMembership>())) ?? []
+        let toDelete = all.filter { $0.episode?.podcast?.persistentModelID == id }
+        guard !toDelete.isEmpty else { return }
+        toDelete.forEach(context.delete)
+        save()
+        AppLog.data.info("Removed \(toDelete.count) episode folder membership(s) for unsubscribed podcast")
     }
 
     // MARK: Internals

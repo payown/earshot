@@ -105,4 +105,32 @@ enum FolderLogic {
         visit(folder, depth: 0)
         return result
     }
+
+    /// Flattens a flat folder set into nested display order: a depth-first walk
+    /// from the top-level roots (`parent == nil`) down through each folder's
+    /// `children`, siblings ordered by `sortOrder` then `name`. Each folder is
+    /// emitted exactly once — bounded against a corrupt parent/child cycle by an
+    /// identity-visited set. Shared by every nested-tree picker (``FolderPickerView``,
+    /// ``PodcastFolderPickerView``) so depth is conveyed by each row's full
+    /// breadcrumb path, not by the flat order alone.
+    static func orderedHierarchy(from folders: [PodcastFolder]) -> [PodcastFolder] {
+        let roots = folders.filter { $0.parent == nil }
+        var result: [PodcastFolder] = []
+        var visited = Set<ObjectIdentifier>()
+        func visit(_ nodes: [PodcastFolder]) {
+            for node in nodes.sorted(by: siblingOrder) {
+                guard visited.insert(ObjectIdentifier(node)).inserted else { continue }
+                result.append(node)
+                visit(node.children)
+            }
+        }
+        visit(roots)
+        return result
+    }
+
+    /// Sibling ordering: `sortOrder` ascending, then `name` as a tiebreak.
+    static func siblingOrder(_ lhs: PodcastFolder, _ rhs: PodcastFolder) -> Bool {
+        if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+        return lhs.name < rhs.name
+    }
 }

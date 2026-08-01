@@ -444,6 +444,12 @@ struct SearchView<HeaderContent: View>: View {
         // Action is omitted from search rows' rotors (#572). Unfollow from
         // search already lives on the result row's Follow toggle (#499), and
         // preview episodes are detached — zero store writes (#517).
+        //
+        // Folder actions (#756) are gated out here for the same reason: these are
+        // detached preview episodes for shows the user hasn't subscribed to yet,
+        // and folder membership is a store write on a persisted episode. Passing
+        // no `onAddToFolder`/`onMoveToFolder` (default nil) omits both from the
+        // rotor — the user subscribes first, then files from Inbox/Library.
         buildEpisodeActions(
             episode: episode, order: quickActions.episodeActions, player: player,
             downloads: downloads, context: context,

@@ -367,6 +367,59 @@ ship; OPML export/import is the supported way to carry a library over.
 
 ## UI Decisions
 
+- **Episode multi-select + batch folder actions (#758, Folders Phase 2).**
+  Reuses the #757 scaffold unchanged (`MultiSelectState`, `MultiSelectBar`,
+  `SelectableRow`, the noun-agnostic `MultiSelectActionLabel` with
+  `itemSingular: "episode"`, and `FolderPickerView`'s `onComplete` hook). Wired
+  into `InboxScreen` and `EpisodeListView`. To render the checkbox rows through
+  the SAME `SelectableRow` component as podcasts (one selection component, one
+  `.isSelected`-not-`.isToggle` semantics), `EpisodeRow`'s visual body was
+  extracted into a reusable `EpisodeRowContent`; the new `EpisodeSelectableRow`
+  feeds that content to `SelectableRow` with an `EpisodeRowLabel`-built spoken
+  name identical to the normal row's. This REPLACED Inbox's bespoke #595
+  selection (which used `EpisodeRow.SelectionState` + `.isToggle` and a single
+  toolbar "Add to Queue"); that path is gone. Bottom bar actions: Add to folder
+  (primary) + Move to folder on both screens, plus the natural, low-risk episode
+  batches — Add to queue on both, and Mark as played on Inbox (triage screen,
+  reusing `InboxRepository.markPlayed`). Deliberately scoped OUT: batch Download
+  (kept bars short; less central than folders/queue), and batch Mark-as-played on
+  `EpisodeListView` (it already has a whole-podcast "Mark all as played"). Focus
+  re-anchor diverges from #757's first-row anchor because Inbox's queue/played
+  batches REMOVE rows: `exitSelection` anchors to the empty state when the batch
+  emptied the inbox, else the stable Select/Done toolbar button (checked against
+  a fresh `InboxRepository().inboxEpisodes()`); `EpisodeListView` anchors to the
+  Select button (folder-file/queue-add never empty a full episode list); folder
+  batches still stagger the focus move to +0.9s past the picker's +0.5s result
+  announcement. Queue/played announcements carry the episode noun ("Added 3
+  episodes to queue") to match the folder path's phrasing (pure
+  `EpisodeBatchLabel`). Single-item rotor "Add/Move to folder" from #756 is
+  preserved on the normal rows — multi-select is additive. earshot-accessibility
+  gate: PASS, no required fixes.
+- **Reusable multi-select scaffold + podcast batch folder actions (#757, Folders Phase 2).**
+  New generic scaffold under `Earshot/Core/UI/`, built so #758 (episode
+  multi-select) drops it in unchanged: `MultiSelectState` (an `@Observable`,
+  UI-free holder over `Set<PersistentIdentifier>` — enter/exit/toggle/count/
+  clear, no announcing or focus so it's fully unit-testable); `MultiSelectBar`
+  (a persistent bottom bar whose primary button label carries the LIVE count and
+  is the count's accessibility source of truth, plus caller-supplied secondary
+  actions — `MultiSelectAction` has a STABLE `id` distinct from its count-
+  carrying title so the `ForEach` doesn't rebuild buttons on every tap; a polite
+  600ms-debounced "N selected" via `.task(id:)`); and `SelectableRow` (leading
+  filled/hollow checkmark glyph + `.isSelected` trait + accent color — never the
+  word "selected" in the label and never color alone; full-row 44pt tap target).
+  Count-carrying labels live in the pure `MultiSelectActionLabel` enum (noun-
+  agnostic: "Add 3 podcasts to folder" / "Add 3 episodes to folder"). Wired into
+  `SubscriptionsView` (Library — Add/Move) and `FolderDetailScreen`'s Podcasts
+  section only (Add/Move/Remove; Remove calls `FolderRepository.removePodcasts`
+  directly, the others reuse the shared `FolderPickerView` batch). A "Select"
+  toolbar entry enters selection mode (announces "Selection mode on", moves
+  `@AccessibilityFocusState` to the first row); "Done" exits (announces off).
+  Batch Add/Move reuse `FolderPickerView`, extended with an additive optional
+  `onComplete` hook (fires only on a real pick, not Cancel) so the screen auto-
+  exits selection mode and re-anchors focus AFTER the mutation (never a removed
+  row); the focus re-anchor is staggered to +0.9s so its row-name utterance
+  doesn't collide with the picker's +0.5s result announcement. The single-item
+  rotor "Add/Move to folder" from #756 is preserved — multi-select is additive.
 - **Podcast settings Folders section + "Add to folder" picker (#754, Folders Phase 1).**
   `PodcastSettingsView` gains a `foldersSection` between Inbox and Notifications:
   it lists the folders this podcast is in (via `FolderRepository.folders(containing:)`),
@@ -391,6 +444,45 @@ ship; OPML export/import is the supported way to carry a library over.
   flat sibling since folders nest and a podcast can be in several. The `create()`
   announcement is deferred 0.5 s so it clears the alert-dismissal focus utterance.
   Phase 2 will replace the minimal picker with a fully shared `FolderPickerView`.
+- **Shared "Add/Move to folder" Quick Actions + one reusable `FolderPickerView` (#756, Folders Phase 2, Issue A).**
+  Added `addToFolder`/`moveToFolder` cases to `EpisodeAction` and `PodcastAction`
+  (labels "Add to folder"/"Move to folder"), placed before the destructive
+  `.unfollow`/appended after `.share` respectively, and appended to the default
+  arrays so `QuickActionRepository.resolve()` hands them to existing users too
+  (reorderable/hideable in `QuickActionsSettingsView`). `buildEpisodeActions` and
+  `buildPodcastActions` gained optional `onAddToFolder`/`onMoveToFolder`
+  callbacks and a branch per case; both actions are **omitted** when a surface
+  passes no runner (same optional-callback contract as `onExport`/`onUnfollow`) —
+  `PodcastActionsBuilder` switched `.map` → `.compactMap` to support that.
+  **One reusable picker:** new `Features/Folders/Presentation/FolderPickerView.swift`
+  with `init(episodes: [Episode] = [], podcasts: [Podcast] = [], mode: FolderPickMode)`
+  where `enum FolderPickMode { case add, move }`. Unlike `PodcastFolderPickerView`
+  (a multi-membership *toggle* editor that stays open), this is a single-tap
+  *destination* selector: it shows the nested tree (shared `FolderLogic.orderedHierarchy`,
+  extracted from `PodcastFolderPickerView` so there is one cycle-guarded walk; the
+  old static now forwards to it), each row labelled by full `FolderLogic.pathString`
+  breadcrumb (depth via label, not indentation, no `.isToggle`), plus a "New folder…"
+  alert affordance (`createSubfolder(under: nil)`, flat for now) and a descriptive
+  empty state. On pick it calls the matching `FolderRepository` batch method
+  (`add/moveEpisodes`, `add/movePodcasts` — dispatch extracted to the testable
+  static `FolderPickerView.apply`), dismisses, and announces
+  "Moved 3 episodes to News › Daily" / "Added 1 podcast to News" via `Announcer`,
+  **deferred 0.5 s** so it lands after the sheet-dismiss focus utterance while iOS
+  re-anchors VoiceOver focus to the presenting row. A `Cancel` toolbar button makes
+  it dismissible without a drag gesture. Call sites present it through a one-line
+  `.folderPicker($request)` view modifier (backed by an Identifiable
+  `FolderPickRequest`), mirroring `.episodeAudioExport`. **Wired:** Inbox,
+  podcast `EpisodeListView`, Downloads (episode rows), and Library
+  `SubscriptionsView` (podcast rows). **Gated out:** Search results — those are
+  detached preview episodes for shows not yet subscribed, and folder membership is
+  a store write on a persisted episode (zero-store-write contract, #517), so the
+  folder actions are omitted there (no runner passed), same as `.unfollow`/`.exportAudio`.
+  **Not migrated:** `PodcastSettingsView`/`PodcastFolderPickerView` stay on the
+  Phase-1 toggle picker — that screen edits *multiple* memberships with add+remove
+  and live checkmarks, which the single-destination `FolderPickerView` doesn't
+  express; converting it would regress multi-folder editing. Flagged for a Phase 2
+  cleanup pass if a unified multi/single picker is designed. No multi-select or
+  `.contextMenu` yet (#757/#758, Phase 3).
 - **Folder drill-down: breadcrumb lives in-content, not the nav title (#753).**
   `FolderDetailScreen` gains a Subfolders section above its podcasts; each row is
   a `NavigationLink(value:)` resolving against the `PodcastFolder` destination

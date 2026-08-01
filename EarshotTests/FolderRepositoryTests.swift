@@ -436,4 +436,232 @@ final class FolderRepositoryTests: XCTestCase {
         XCTAssertEqual(subs.map(\.title), ["ChildOnly", "RootOnly", "Shared"])
         XCTAssertEqual(subs.count, 3, "Shared appears once despite two memberships")
     }
+
+    // MARK: Batch podcast membership (#756)
+
+    func testAddPodcastsBatchIsIdempotentAndOrdered() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let folder = repo.createFolder(name: "F")
+        let p1 = makePodcast(ctx, "One")
+        let p2 = makePodcast(ctx, "Two")
+        let p3 = makePodcast(ctx, "Three")
+        repo.add(p1, to: folder) // pre-existing member
+
+        // Batch includes an existing member (p1) and a duplicate (p2 twice).
+        repo.addPodcasts([p2, p1, p2, p3], to: folder)
+
+        XCTAssertEqual(repo.podcasts(in: folder).map(\.title), ["One", "Two", "Three"])
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 3,
+                       "No duplicate (folder, podcast) rows")
+    }
+
+    func testAddPodcastsBatchIsAtomic() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let folder = repo.createFolder(name: "F")
+        let p1 = makePodcast(ctx, "One")
+        let p2 = makePodcast(ctx, "Two")
+
+        repo.addPodcasts([p1, p2], to: folder)
+
+        // A single save persisted the whole batch: nothing left uncommitted.
+        XCTAssertFalse(ctx.hasChanges)
+        XCTAssertEqual(repo.podcasts(in: folder).count, 2)
+    }
+
+    func testMovePodcastsRefilesIntoTargetOnly() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let a = repo.createFolder(name: "A")
+        let b = repo.createFolder(name: "B")
+        let target = repo.createFolder(name: "Target")
+        let p1 = makePodcast(ctx, "One")
+        let p2 = makePodcast(ctx, "Two")
+        repo.add(p1, to: a)
+        repo.add(p1, to: b) // filed in two folders
+        repo.add(p2, to: a)
+
+        repo.movePodcasts([p1, p2], to: target)
+
+        XCTAssertEqual(Set(repo.folders(containing: p1).map(\.name)), ["Target"])
+        XCTAssertEqual(Set(repo.folders(containing: p2).map(\.name)), ["Target"])
+        XCTAssertTrue(repo.podcasts(in: a).isEmpty)
+        XCTAssertTrue(repo.podcasts(in: b).isEmpty)
+        XCTAssertEqual(repo.podcasts(in: target).map(\.title), ["One", "Two"])
+    }
+
+    func testMovePodcastsIsIdempotent() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let target = repo.createFolder(name: "Target")
+        let p1 = makePodcast(ctx, "One")
+        repo.add(p1, to: target)
+
+        repo.movePodcasts([p1], to: target) // already solely in target
+
+        XCTAssertEqual(repo.podcasts(in: target).map(\.title), ["One"])
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 1)
+    }
+
+    func testRemovePodcastsBatch() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let folder = repo.createFolder(name: "F")
+        let p1 = makePodcast(ctx, "One")
+        let p2 = makePodcast(ctx, "Two")
+        let p3 = makePodcast(ctx, "Three")
+        repo.addPodcasts([p1, p2, p3], to: folder)
+
+        repo.removePodcasts([p1, p3], from: folder)
+
+        XCTAssertEqual(repo.podcasts(in: folder).map(\.title), ["Two"])
+    }
+
+    // MARK: Episode membership (#756)
+
+    func testAddEpisodesBatchIsIdempotentAndOrdered() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let folder = repo.createFolder(name: "F")
+        let podcast = makePodcast(ctx, "Show")
+        let e1 = makeEpisode(ctx, podcast, guid: "e1", pubDate: now)
+        let e2 = makeEpisode(ctx, podcast, guid: "e2", pubDate: now.addingTimeInterval(60))
+        let e3 = makeEpisode(ctx, podcast, guid: "e3", pubDate: now.addingTimeInterval(120))
+
+        repo.addEpisodes([e1], to: folder)
+        repo.addEpisodes([e2, e1, e2, e3], to: folder) // e1 existing, e2 duplicated
+
+        XCTAssertEqual(repo.episodes(in: folder).map(\.guid), ["e1", "e2", "e3"],
+                       "Membership insertion order is preserved, no duplicates")
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).count, 3)
+        XCTAssertFalse(ctx.hasChanges, "Batch committed atomically")
+    }
+
+    func testEpisodesInFallsBackToNewestFirstOnEqualSortOrder() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let folder = repo.createFolder(name: "F")
+        let podcast = makePodcast(ctx, "Show")
+        let older = makeEpisode(ctx, podcast, guid: "older", pubDate: now.addingTimeInterval(-1_000))
+        let newer = makeEpisode(ctx, podcast, guid: "newer", pubDate: now)
+
+        // Same sortOrder for both → the pubDate fallback (newest first) decides.
+        ctx.insert(EpisodeFolderMembership(folder: folder, episode: older, sortOrder: 0))
+        ctx.insert(EpisodeFolderMembership(folder: folder, episode: newer, sortOrder: 0))
+        try ctx.save()
+
+        XCTAssertEqual(repo.episodes(in: folder).map(\.guid), ["newer", "older"])
+    }
+
+    func testMoveEpisodesRefilesIntoTargetOnly() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let a = repo.createFolder(name: "A")
+        let target = repo.createFolder(name: "Target")
+        let podcast = makePodcast(ctx, "Show")
+        let e1 = makeEpisode(ctx, podcast, guid: "e1", pubDate: now)
+        let e2 = makeEpisode(ctx, podcast, guid: "e2", pubDate: now)
+        repo.addEpisodes([e1, e2], to: a)
+
+        repo.moveEpisodes([e1, e2], to: target)
+
+        XCTAssertTrue(repo.episodes(in: a).isEmpty)
+        XCTAssertEqual(repo.episodes(in: target).map(\.guid), ["e1", "e2"])
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).count, 2,
+                       "Move does not leave the old memberships behind")
+    }
+
+    func testRemoveEpisodesBatch() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let folder = repo.createFolder(name: "F")
+        let podcast = makePodcast(ctx, "Show")
+        let e1 = makeEpisode(ctx, podcast, guid: "e1", pubDate: now)
+        let e2 = makeEpisode(ctx, podcast, guid: "e2", pubDate: now)
+        repo.addEpisodes([e1, e2], to: folder)
+
+        repo.removeEpisodes([e1], from: folder)
+
+        XCTAssertEqual(repo.episodes(in: folder).map(\.guid), ["e2"])
+    }
+
+    func testFoldersContainingEpisode() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let a = repo.createFolder(name: "A")
+        let b = repo.createFolder(name: "B")
+        _ = repo.createFolder(name: "C")
+        let podcast = makePodcast(ctx, "Show")
+        let episode = makeEpisode(ctx, podcast, guid: "e1", pubDate: now)
+        repo.addEpisodes([episode], to: a)
+        repo.addEpisodes([episode], to: b)
+
+        // Returned in folders() order (sortOrder), only the two it belongs to.
+        XCTAssertEqual(repo.folders(containing: episode).map(\.name), ["A", "B"])
+    }
+
+    // MARK: Episode membership cleanup (#756)
+
+    func testRemoveEpisodeFromAllFoldersBeforeDeleteLeavesNoDangling() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let a = repo.createFolder(name: "A")
+        let b = repo.createFolder(name: "B")
+        let podcast = makePodcast(ctx, "Show")
+        let drop = makeEpisode(ctx, podcast, guid: "drop", pubDate: now)
+        let keep = makeEpisode(ctx, podcast, guid: "keep", pubDate: now)
+        repo.addEpisodes([drop, keep], to: a)
+        repo.addEpisodes([drop], to: b)
+        try ctx.save()
+
+        repo.removeEpisodeFromAllFolders(drop)
+        ctx.delete(drop)
+        try ctx.save()
+
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).count, 1,
+                       "Only the kept episode's membership remains")
+        XCTAssertEqual(repo.episodes(in: a).map(\.guid), ["keep"])
+        XCTAssertTrue(repo.episodes(in: b).isEmpty)
+    }
+
+    func testRemovePodcastEpisodesFromAllFoldersCleansOnlyThatPodcast() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let folder = repo.createFolder(name: "F")
+        let gone = makePodcast(ctx, "Gone")
+        let stay = makePodcast(ctx, "Stay")
+        let g1 = makeEpisode(ctx, gone, guid: "g1", pubDate: now)
+        let g2 = makeEpisode(ctx, gone, guid: "g2", pubDate: now)
+        let s1 = makeEpisode(ctx, stay, guid: "s1", pubDate: now)
+        repo.addEpisodes([g1, g2, s1], to: folder)
+        try ctx.save()
+
+        repo.removePodcastEpisodesFromAllFolders(gone)
+
+        XCTAssertEqual(repo.episodes(in: folder).map(\.guid), ["s1"],
+                       "Only the removed podcast's episode memberships are cleaned")
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).count, 1)
+    }
+
+    /// End-to-end: unsubscribing a podcast (via the real `SubscriptionRepository`
+    /// choke point) must leave no dangling `EpisodeFolderMembership` rows for its
+    /// episodes. Guards the #756 wiring.
+    func testUnsubscribeRemovesEpisodeFolderMemberships() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let folder = repo.createFolder(name: "F")
+        let podcast = makePodcast(ctx, "Show")
+        let e1 = makeEpisode(ctx, podcast, guid: "e1", pubDate: now)
+        let e2 = makeEpisode(ctx, podcast, guid: "e2", pubDate: now)
+        repo.addEpisodes([e1, e2], to: folder)
+        try ctx.save()
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).count, 2)
+
+        SubscriptionRepository(context: ctx).unsubscribe(podcast)
+
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).count, 0,
+                       "Unsubscribe cleaned the episodes' folder memberships")
+        XCTAssertTrue(repo.episodes(in: folder).isEmpty)
+    }
 }

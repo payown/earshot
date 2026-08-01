@@ -44,7 +44,9 @@ func buildEpisodeActions(
     onBookmarks: @escaping () -> Void,
     onUnfollow: (() -> Void)? = nil,
     onMarkPlayed: ((Bool) -> Void)? = nil,
-    onExport: (() -> Void)? = nil
+    onExport: (() -> Void)? = nil,
+    onAddToFolder: ((Episode) -> Void)? = nil,
+    onMoveToFolder: ((Episode) -> Void)? = nil
 ) -> [QuickActionItem] {
     order.compactMap { action -> QuickActionItem? in
         switch action {
@@ -126,6 +128,22 @@ func buildEpisodeActions(
             guard let onExport, !episode.audioURL.isEmpty else { return nil }
             return QuickActionItem(label: "Export audio", isDestructive: false) {
                 onExport()
+            }
+        case .addToFolder:
+            // Folders phase 2 (#756): opens the shared `FolderPickerView` in
+            // `.add` mode for this single episode. Omitted (nil) on surfaces that
+            // don't file into folders — e.g. the search preview's detached
+            // episodes (no store writes, #517) pass no runner.
+            guard let onAddToFolder else { return nil }
+            return QuickActionItem(label: action.label, isDestructive: false) {
+                onAddToFolder(episode)
+            }
+        case .moveToFolder:
+            // Folders phase 2 (#756): opens the shared `FolderPickerView` in
+            // `.move` mode. Same opt-in contract as `.addToFolder`.
+            guard let onMoveToFolder else { return nil }
+            return QuickActionItem(label: action.label, isDestructive: false) {
+                onMoveToFolder(episode)
             }
         case .unfollow:
             // Podcast-level unfollow from an episode row (#500/#572). Omitted

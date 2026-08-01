@@ -14,9 +14,12 @@ import SwiftData
 /// Because ``episode`` has no inverse, SwiftData maintains no referential
 /// integrity for it: rows must be cleaned up manually before their episode (or
 /// its podcast) is deleted, the same discipline ``FolderMembership`` and
-/// ``ActiveDownload`` follow. This phase only lands the schema; the cleanup hook
-/// is wired later.
-// TODO(folders P2): cleanup on episode delete
+/// ``ActiveDownload`` follow. That cleanup is wired in folders phase 2 (#756):
+/// ``FolderRepository/removePodcastEpisodesFromAllFolders(_:)`` runs at the
+/// unsubscribe choke point before the podcast (and its cascaded episodes) is
+/// deleted, ``FolderRepository/removeEpisodeFromAllFolders(_:)`` covers any
+/// future per-episode delete, and ``FolderRepository`` also drops these rows when
+/// a folder is deleted (no inverse on ``PodcastFolder`` either).
 @Model
 final class EpisodeFolderMembership {
     var folder: PodcastFolder?
