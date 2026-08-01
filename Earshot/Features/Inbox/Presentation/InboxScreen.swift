@@ -35,17 +35,25 @@ struct InboxScreen: View {
     // Non-nil presents the shared `FolderPickerView` for the single episode.
     @State private var folderPickRequest: FolderPickRequest?
     @State private var confirmingClear = false
-    // Inbox multi-select (#595): entering selection mode swaps every row's
-    // swipe/rotor actions for a checkbox and replaces the toolbar's Clear
-    // inbox button with a bulk Add to Queue action. Selection is keyed on
-    // persistent identity, not `Episode` itself, so it survives the
-    // `@Query`-driven row rebuilds that happen as the inbox changes underneath.
-    @State private var isSelecting = false
-    @State private var selectedEpisodeIDs: Set<PersistentIdentifier> = []
-    // Takes VoiceOver focus back to the toolbar's Select button after a bulk
-    // add completes and selection mode exits, mirroring the neighbor-focus
+    // Inbox episode multi-select (#758). Reuses the shared scaffold: `selection`
+    // is the generic ``MultiSelectState`` holder (keyed on persistent identity so
+    // it survives the `@Query`-driven row rebuilds as the inbox changes),
+    // `batchRequest` presents the shared ``FolderPickerView`` for the whole
+    // selection. Entering selection mode swaps every row for a ``SelectableRow``
+    // and shows a bottom ``MultiSelectBar`` with Add/Move to folder plus the
+    // triage-natural Add to queue / Mark as played batches (supersedes the
+    // bespoke #595 single-toolbar-button selection).
+    @State private var selection = MultiSelectState()
+    @State private var batchRequest: FolderPickRequest?
+    // Takes VoiceOver focus back to the toolbar's Select/Done button after a bulk
+    // action completes and selection mode exits, mirroring the neighbor-focus
     // wiring used elsewhere in this screen (`focusEmpty`, `focusedEpisode`).
     @AccessibilityFocusState private var focusSelectButton: Bool
+    // Moves VoiceOver focus onto the list's first row when entering selection
+    // mode. Keyed on the stable PersistentIdentifier and attached to whichever
+    // row variant renders, so focus rides the row across the select-mode toggle
+    // (mirrors SubscriptionsView's podcast multi-select, #757).
+    @AccessibilityFocusState private var focusedRowID: PersistentIdentifier?
     // The podcast a pending "Unfollow this podcast" targets — reached from the
     // trailing swipe (sighted, #500) or the row's `.unfollow` Quick Action in the
     // VoiceOver rotor (#572). Non-nil drives the destructive confirmation dialog.
@@ -113,50 +121,14 @@ struct InboxScreen: View {
                     // Toggling VoiceOver mid-session updates `voiceOverEnabled`
                     // and re-renders these rows — no relaunch needed.
                     ForEach(displayed) { episode in
-                        let row = episodeRow(for: episode)
+                        rowContainer(for: episode)
                             // Lets the rotor mark-played runner hand VoiceOver
                             // focus to this row when its neighbor vanishes (#579).
                             .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
-                        if voiceOverEnabled || isSelecting {
-                            row
-                        } else {
-                            row
-                                // Visible affordance for sighted users to clear a
-                                // finished episode out of the inbox (#546): a
-                                // leading swipe marks it played and dismisses it.
-                                // Leading edge + a constructive green tint keeps it
-                                // distinct from the trailing destructive unfollow
-                                // swipe; a full swipe completes it since the action
-                                // is safe and reversible (the episode stays in the
-                                // podcast). The Label gives it an icon + text
-                                // (never color alone).
-                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    Button {
-                                        markPlayed(episode)
-                                    } label: {
-                                        Label("Mark as played", systemImage: "checkmark.circle")
-                                    }
-                                    .tint(.green)
-                                }
-                                // Unfollow the whole show straight from one of its
-                                // inbox episodes (#500), for sighted users;
-                                // VoiceOver users reach the same flow through the
-                                // `.unfollow` Quick Action in the rotor (#572).
-                                // `allowsFullSwipe` is off so an over-swipe can't
-                                // fast-path a podcast-level delete; every path
-                                // lands on the confirmation below. The Label gives
-                                // the destructive action an icon + text (never
-                                // color alone).
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    if let podcast = episode.podcast {
-                                        Button(role: .destructive) {
-                                            pendingUnfollow = podcast
-                                        } label: {
-                                            Label("Unfollow this podcast", systemImage: "xmark.bin")
-                                        }
-                                    }
-                                }
-                        }
+                            // Same focus id on whichever row variant renders, so
+                            // focus can be moved onto the first row when selection
+                            // mode is entered (#758).
+                            .accessibilityFocused($focusedRowID, equals: episode.persistentModelID)
                     }
                     if displayed.count < visible.count {
                         Button {
@@ -200,6 +172,47 @@ struct InboxScreen: View {
         // (e.g. for back-button context) without duplicating the principal.
         .navigationTitle("Inbox")
         .navigationBarTitleDisplayMode(.inline)
+        // Persistent episode multi-select bar (#758): Add to folder is primary
+        // and its label carries the live count ("Add 3 episodes to folder") — the
+        // accessibility source of truth for the count. Move to folder follows, and
+        // the two triage-natural batches (Add to queue, Mark as played) round it
+        // out. Reuses the shared ``MultiSelectBar`` unchanged from podcast
+        // multi-select.
+        .safeAreaInset(edge: .bottom) {
+            if selection.isSelecting {
+                MultiSelectBar(
+                    count: selection.count,
+                    primary: MultiSelectAction(
+                        id: "add",
+                        title: MultiSelectActionLabel.addToFolder(count: selection.count, itemSingular: "episode"),
+                        systemImage: "folder",
+                        handler: { presentBatch(.add, visible: visible) }
+                    ),
+                    secondary: [
+                        MultiSelectAction(
+                            id: "move",
+                            title: MultiSelectActionLabel.moveToFolder(count: selection.count, itemSingular: "episode"),
+                            systemImage: "folder",
+                            handler: { presentBatch(.move, visible: visible) }
+                        ),
+                        MultiSelectAction(
+                            id: "queue",
+                            title: EpisodeBatchLabel.addToQueue(count: selection.count),
+                            systemImage: "text.badge.plus",
+                            handler: { addSelectedToQueue(visible: visible) }
+                        ),
+                        MultiSelectAction(
+                            id: "played",
+                            title: EpisodeBatchLabel.markPlayed(count: selection.count),
+                            systemImage: "checkmark.circle",
+                            handler: { markSelectedPlayed(visible: visible) }
+                        ),
+                    ],
+                    announcementNoun: "episode"
+                )
+                .transition(.move(edge: .bottom))
+            }
+        }
         // In-place search filter (#457, Part A). The system `.searchable` field
         // is the standard accessible search affordance (labeled, focusable,
         // clearable). The result count is announced on SUBMIT only — never per
@@ -220,41 +233,28 @@ struct InboxScreen: View {
                     .accessibilityLabel(InboxLogic.inboxTitleAccessibilityLabel(count: inbox.count))
                     .accessibilityAddTraits(.isHeader)
             }
-            // Select / Cancel toggles selection mode (#595). Only offered when
-            // there's something to select; hidden while the inbox is empty just
-            // like Clear inbox.
+            // Select / Done toggles selection mode (#758). "Select" enters and
+            // moves VoiceOver focus to the first row; "Done" exits and announces
+            // the change. Only offered when there's something to select; hidden
+            // while the inbox is empty just like Clear inbox. The batch actions
+            // themselves live in the bottom MultiSelectBar, not the toolbar.
             if !inbox.isEmpty {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        if isSelecting {
-                            exitSelectionMode()
-                        } else {
-                            isSelecting = true
+                    if selection.isSelecting {
+                        Button("Done") { exitSelection(announce: true) }
+                            .accessibilityHint("Leaves selection mode")
+                            .accessibilityFocused($focusSelectButton)
+                    } else {
+                        Button {
+                            enterSelection(first: displayed.first)
+                        } label: {
+                            Label("Select", systemImage: "checkmark.circle")
                         }
-                    } label: {
-                        Text(isSelecting ? "Cancel" : "Select")
+                        .accessibilityFocused($focusSelectButton)
                     }
-                    .accessibilityFocused($focusSelectButton)
                 }
             }
-            if isSelecting {
-                // Bulk action lives in the toolbar only (no rotor action): this
-                // is a screen-level action over the whole selection, not a
-                // per-row one, so there's no natural row to hang a rotor action
-                // off of. Disabled (not hidden) when nothing is checked yet, so
-                // VoiceOver users can find it and learn why it's inactive.
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        addSelectedToQueue(visible: visible)
-                    } label: {
-                        Label("Add to Queue", systemImage: "text.badge.plus")
-                    }
-                    .disabled(selectedEpisodeIDs.isEmpty)
-                    .accessibilityValueIfPresent(
-                        selectedEpisodeIDs.isEmpty ? "" : "\(selectedEpisodeIDs.count) selected"
-                    )
-                }
-            } else if !inbox.isEmpty {
+            if !selection.isSelecting && !inbox.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         confirmingClear = true
@@ -298,65 +298,175 @@ struct InboxScreen: View {
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
         .episodeAudioExport($exportEpisode)
         .folderPicker($folderPickRequest)
-    }
-
-    /// Builds one row, switching it into checkbox mode while selecting (#595).
-    /// Broken out of the `ForEach` body so the type checker isn't asked to
-    /// resolve the conditional `selection:` argument inline alongside the
-    /// modifier chain.
-    private func episodeRow(for episode: Episode) -> EpisodeRow {
-        let selectionState: EpisodeRow.SelectionState? = isSelecting
-            ? .init(
-                isSelected: selectedEpisodeIDs.contains(episode.persistentModelID),
-                toggle: { toggleSelection(episode) }
-            )
-            : nil
-        return EpisodeRow(
-            episode: episode,
-            actions: actions(for: episode),
-            includesPodcastName: true,
-            selection: selectionState
-        )
-    }
-
-    private func toggleSelection(_ episode: Episode) {
-        let id = episode.persistentModelID
-        if selectedEpisodeIDs.contains(id) {
-            selectedEpisodeIDs.remove(id)
-        } else {
-            selectedEpisodeIDs.insert(id)
+        // The multi-select batch picker (#758): same shared FolderPickerView, but
+        // it reports completion so we leave selection mode and re-anchor focus
+        // only after a real pick (Cancel keeps the selection for a retry).
+        .sheet(item: $batchRequest) { req in
+            FolderPickerView(episodes: req.episodes, mode: req.mode) {
+                finishBatch()
+            }
         }
     }
 
-    private func exitSelectionMode() {
-        isSelecting = false
-        selectedEpisodeIDs.removeAll()
+    /// Whichever row variant applies: a selectable checkmark row while in
+    /// selection mode (#758, via the shared ``SelectableRow`` scaffold),
+    /// otherwise the normal navigate/rotor + sighted-swipe row.
+    @ViewBuilder
+    private func rowContainer(for episode: Episode) -> some View {
+        if selection.isSelecting {
+            EpisodeSelectableRow(
+                episode: episode,
+                includesPodcastName: true,
+                isSelected: selection.isSelected(episode.persistentModelID),
+                onToggle: { selection.toggle(episode.persistentModelID) }
+            )
+        } else {
+            normalRow(for: episode)
+        }
     }
 
-    /// Adds every checked episode to the end of the queue, in Inbox order
-    /// (filtering `visible` rather than tracking tap order), then exits
-    /// selection mode. The added episodes flip to `.inQueue` and drop out of
-    /// the Inbox on their own (same as the single-row "Add to end of queue"
-    /// Quick Action), so no separate row-removal/focus bookkeeping is needed
-    /// beyond returning focus to the Select button.
-    private func addSelectedToQueue(visible: [Episode]) {
-        let toAdd = visible.filter { selectedEpisodeIDs.contains($0.persistentModelID) }
-        guard !toAdd.isEmpty else { return }
-        QueueRepository(context: context).add(toAdd)
-        Announcer.announce("Added \(toAdd.count) to queue", assertive: true)
-        exitSelectionMode()
-        // Selecting-and-adding everything left in the Inbox is a likely bulk
-        // path, and it empties the inbox: the Select button's ToolbarItem is
-        // only rendered `if !inbox.isEmpty`, so unconditionally refocusing it
-        // would strand VoiceOver on a vanished element. Mirrors the
-        // emptiness check clearInbox/markPlayed/unfollow already do.
+    /// The normal Inbox row: the configurable episode Quick Actions (rotor + tap)
+    /// plus, for sighted users only, the mark-played and unfollow swipes. Selection
+    /// mode swaps this out entirely for ``EpisodeSelectableRow`` (#758).
+    @ViewBuilder
+    private func normalRow(for episode: Episode) -> some View {
+        let row = episodeRow(for: episode)
+        if voiceOverEnabled {
+            row
+        } else {
+            row
+                // Visible affordance for sighted users to clear a finished
+                // episode out of the inbox (#546): a leading swipe marks it
+                // played and dismisses it. Leading edge + a constructive green
+                // tint keeps it distinct from the trailing destructive unfollow
+                // swipe; a full swipe completes it since the action is safe and
+                // reversible (the episode stays in the podcast). The Label gives
+                // it an icon + text (never color alone).
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button {
+                        markPlayed(episode)
+                    } label: {
+                        Label("Mark as played", systemImage: "checkmark.circle")
+                    }
+                    .tint(.green)
+                }
+                // Unfollow the whole show straight from one of its inbox episodes
+                // (#500), for sighted users; VoiceOver users reach the same flow
+                // through the `.unfollow` Quick Action in the rotor (#572).
+                // `allowsFullSwipe` is off so an over-swipe can't fast-path a
+                // podcast-level delete; every path lands on the confirmation. The
+                // Label gives the destructive action an icon + text (never color
+                // alone).
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    if let podcast = episode.podcast {
+                        Button(role: .destructive) {
+                            pendingUnfollow = podcast
+                        } label: {
+                            Label("Unfollow this podcast", systemImage: "xmark.bin")
+                        }
+                    }
+                }
+        }
+    }
+
+    private func episodeRow(for episode: Episode) -> EpisodeRow {
+        EpisodeRow(
+            episode: episode,
+            actions: actions(for: episode),
+            includesPodcastName: true
+        )
+    }
+
+    // MARK: Multi-select (#758)
+
+    /// Enters selection mode: announces it, then moves VoiceOver focus to the
+    /// list's first row so the user lands where they can start selecting. The
+    /// focus move is deferred a beat so the selectable rows exist first (mirrors
+    /// SubscriptionsView's podcast multi-select).
+    private func enterSelection(first: Episode?) {
+        withAnimation(Motion.preferred(.easeInOut(duration: 0.2))) {
+            selection.enter()
+        }
+        Announcer.announce("Selection mode on")
+        let firstID = first?.persistentModelID
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            focusedRowID = firstID
+        }
+    }
+
+    /// Leaves selection mode. `announce` is true for a manual "Done" (which says
+    /// "Selection mode off"); the batch paths pass false because they've already
+    /// announced their result. Re-anchors VoiceOver focus to a stable element,
+    /// never a removed row: the empty state if the inbox is now empty (Add to
+    /// queue / Mark as played remove rows), otherwise the Select/Done toolbar
+    /// button. `focusDelay` lets a folder batch push the focus move past the
+    /// picker's own +0.5s result announcement so the two don't collide.
+    private func exitSelection(announce: Bool, focusDelay: TimeInterval = 0.5) {
+        withAnimation(Motion.preferred(.easeInOut(duration: 0.2))) {
+            selection.exit()
+        }
+        if announce {
+            Announcer.announce("Selection mode off")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + focusDelay) {
             if InboxRepository(context: context).inboxEpisodes().isEmpty {
                 focusEmpty = true
             } else {
                 focusSelectButton = true
             }
         }
+    }
+
+    /// Presents the shared picker for the whole selection. No-op with an empty
+    /// selection (the bar's buttons are already disabled there).
+    private func presentBatch(_ mode: FolderPickMode, visible: [Episode]) {
+        let selected = selectedEpisodes(in: visible)
+        guard !selected.isEmpty else { return }
+        batchRequest = .episodes(selected, mode: mode)
+    }
+
+    /// Called by the batch folder picker once it has applied the add/move. Filing
+    /// into a folder doesn't remove episodes from the inbox, so we leave selection
+    /// mode silently (the picker announced the result) and re-anchor focus,
+    /// staggered past the picker's +0.5s result announcement.
+    private func finishBatch() {
+        exitSelection(announce: false, focusDelay: 0.9)
+    }
+
+    /// The selected episodes, in the current Inbox (search-filtered) order.
+    private func selectedEpisodes(in visible: [Episode]) -> [Episode] {
+        visible.filter { selection.isSelected($0.persistentModelID) }
+    }
+
+    /// Adds every selected episode to the end of the queue, in Inbox order, then
+    /// exits selection mode. The added episodes flip to `.inQueue` and drop out of
+    /// the Inbox on their own (same as the single-row "Add to end of queue" Quick
+    /// Action); `exitSelection` re-anchors focus to the empty state or the Select
+    /// button depending on whether that emptied the inbox.
+    private func addSelectedToQueue(visible: [Episode]) {
+        let toAdd = selectedEpisodes(in: visible)
+        guard !toAdd.isEmpty else { return }
+        QueueRepository(context: context).add(toAdd)
+        // Noun-carrying result ("Added 3 episodes to queue"), matching the folder
+        // batch announcement's phrasing.
+        Announcer.announce("Added \(EpisodeBatchLabel.episodePhrase(toAdd.count)) to queue", assertive: true)
+        exitSelection(announce: false)
+    }
+
+    /// Marks every selected episode played and dismisses them from the inbox via
+    /// the shared ``InboxRepository/markPlayed(_:)`` path (the same one the
+    /// sighted swipe and rotor use), then exits selection mode. The marked
+    /// episodes leave the inbox, so `exitSelection` re-anchors focus off the
+    /// removed rows.
+    private func markSelectedPlayed(visible: [Episode]) {
+        let toMark = selectedEpisodes(in: visible)
+        guard !toMark.isEmpty else { return }
+        let repo = InboxRepository(context: context)
+        for episode in toMark {
+            repo.markPlayed(episode)
+        }
+        Announcer.announce("Marked \(EpisodeBatchLabel.episodePhrase(toMark.count)) as played", assertive: true)
+        exitSelection(announce: false)
     }
 
     private func clearInbox() {
@@ -475,20 +585,5 @@ struct InboxScreen: View {
             return [episode.title, url]
         }
         return [episode.title]
-    }
-}
-
-private extension View {
-    /// Applies `.accessibilityValue` only when there's something to say. An empty
-    /// value string makes VoiceOver speak a stray pause (dead air), so callers
-    /// with no value to communicate must omit the modifier entirely rather than
-    /// set "".
-    @ViewBuilder
-    func accessibilityValueIfPresent(_ value: String) -> some View {
-        if value.isEmpty {
-            self
-        } else {
-            accessibilityValue(value)
-        }
     }
 }

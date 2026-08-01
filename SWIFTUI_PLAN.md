@@ -367,6 +367,34 @@ ship; OPML export/import is the supported way to carry a library over.
 
 ## UI Decisions
 
+- **Episode multi-select + batch folder actions (#758, Folders Phase 2).**
+  Reuses the #757 scaffold unchanged (`MultiSelectState`, `MultiSelectBar`,
+  `SelectableRow`, the noun-agnostic `MultiSelectActionLabel` with
+  `itemSingular: "episode"`, and `FolderPickerView`'s `onComplete` hook). Wired
+  into `InboxScreen` and `EpisodeListView`. To render the checkbox rows through
+  the SAME `SelectableRow` component as podcasts (one selection component, one
+  `.isSelected`-not-`.isToggle` semantics), `EpisodeRow`'s visual body was
+  extracted into a reusable `EpisodeRowContent`; the new `EpisodeSelectableRow`
+  feeds that content to `SelectableRow` with an `EpisodeRowLabel`-built spoken
+  name identical to the normal row's. This REPLACED Inbox's bespoke #595
+  selection (which used `EpisodeRow.SelectionState` + `.isToggle` and a single
+  toolbar "Add to Queue"); that path is gone. Bottom bar actions: Add to folder
+  (primary) + Move to folder on both screens, plus the natural, low-risk episode
+  batches — Add to queue on both, and Mark as played on Inbox (triage screen,
+  reusing `InboxRepository.markPlayed`). Deliberately scoped OUT: batch Download
+  (kept bars short; less central than folders/queue), and batch Mark-as-played on
+  `EpisodeListView` (it already has a whole-podcast "Mark all as played"). Focus
+  re-anchor diverges from #757's first-row anchor because Inbox's queue/played
+  batches REMOVE rows: `exitSelection` anchors to the empty state when the batch
+  emptied the inbox, else the stable Select/Done toolbar button (checked against
+  a fresh `InboxRepository().inboxEpisodes()`); `EpisodeListView` anchors to the
+  Select button (folder-file/queue-add never empty a full episode list); folder
+  batches still stagger the focus move to +0.9s past the picker's +0.5s result
+  announcement. Queue/played announcements carry the episode noun ("Added 3
+  episodes to queue") to match the folder path's phrasing (pure
+  `EpisodeBatchLabel`). Single-item rotor "Add/Move to folder" from #756 is
+  preserved on the normal rows — multi-select is additive. earshot-accessibility
+  gate: PASS, no required fixes.
 - **Reusable multi-select scaffold + podcast batch folder actions (#757, Folders Phase 2).**
   New generic scaffold under `Earshot/Core/UI/`, built so #758 (episode
   multi-select) drops it in unchanged: `MultiSelectState` (an `@Observable`,
