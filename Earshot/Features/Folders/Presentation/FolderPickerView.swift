@@ -38,6 +38,12 @@ struct FolderPickerView: View {
     /// Whether the pick adds membership or relocates.
     let mode: FolderPickMode
 
+    /// Fired after a *successful* pick (or create-and-file) has applied the batch
+    /// — never on Cancel. Multi-select (#757) uses it to auto-exit selection mode
+    /// and re-anchor VoiceOver focus once the folder is chosen. `nil` for the
+    /// single-item Quick Action call sites, which have no selection mode to leave.
+    let onComplete: (() -> Void)?
+
     /// Observed so newly created folders (and folders changed elsewhere) appear
     /// live. The nested tree is rebuilt from this flat list.
     @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
@@ -46,10 +52,16 @@ struct FolderPickerView: View {
     @State private var showingCreate = false
     @State private var newName = ""
 
-    init(episodes: [Episode] = [], podcasts: [Podcast] = [], mode: FolderPickMode) {
+    init(
+        episodes: [Episode] = [],
+        podcasts: [Podcast] = [],
+        mode: FolderPickMode,
+        onComplete: (() -> Void)? = nil
+    ) {
         self.episodes = episodes
         self.podcasts = podcasts
         self.mode = mode
+        self.onComplete = onComplete
     }
 
     private var orderedFolders: [PodcastFolder] {
@@ -184,6 +196,10 @@ struct FolderPickerView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             Announcer.announce(message)
         }
+        // Let a multi-select caller leave selection mode and re-anchor focus now
+        // that the batch has applied. Runs only on a real pick — Cancel dismisses
+        // without calling `perform`, so the selection stays intact for a retry.
+        onComplete?()
     }
 
     // MARK: Repository dispatch (testable)
@@ -273,6 +289,18 @@ struct FolderPickRequest: Identifiable {
 
     static func podcast(_ podcast: Podcast, mode: FolderPickMode) -> FolderPickRequest {
         FolderPickRequest(episodes: [], podcasts: [podcast], mode: mode)
+    }
+
+    /// A multi-select batch of podcasts (#757). Backs the bottom bar's
+    /// "Add/Move N podcasts to folder" — the same picker, just many podcasts.
+    static func podcasts(_ podcasts: [Podcast], mode: FolderPickMode) -> FolderPickRequest {
+        FolderPickRequest(episodes: [], podcasts: podcasts, mode: mode)
+    }
+
+    /// A multi-select batch of episodes (#758 reuse). Present for symmetry so the
+    /// episode multi-select feature has the same batch entry point.
+    static func episodes(_ episodes: [Episode], mode: FolderPickMode) -> FolderPickRequest {
+        FolderPickRequest(episodes: episodes, podcasts: [], mode: mode)
     }
 }
 

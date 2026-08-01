@@ -367,6 +367,31 @@ ship; OPML export/import is the supported way to carry a library over.
 
 ## UI Decisions
 
+- **Reusable multi-select scaffold + podcast batch folder actions (#757, Folders Phase 2).**
+  New generic scaffold under `Earshot/Core/UI/`, built so #758 (episode
+  multi-select) drops it in unchanged: `MultiSelectState` (an `@Observable`,
+  UI-free holder over `Set<PersistentIdentifier>` — enter/exit/toggle/count/
+  clear, no announcing or focus so it's fully unit-testable); `MultiSelectBar`
+  (a persistent bottom bar whose primary button label carries the LIVE count and
+  is the count's accessibility source of truth, plus caller-supplied secondary
+  actions — `MultiSelectAction` has a STABLE `id` distinct from its count-
+  carrying title so the `ForEach` doesn't rebuild buttons on every tap; a polite
+  600ms-debounced "N selected" via `.task(id:)`); and `SelectableRow` (leading
+  filled/hollow checkmark glyph + `.isSelected` trait + accent color — never the
+  word "selected" in the label and never color alone; full-row 44pt tap target).
+  Count-carrying labels live in the pure `MultiSelectActionLabel` enum (noun-
+  agnostic: "Add 3 podcasts to folder" / "Add 3 episodes to folder"). Wired into
+  `SubscriptionsView` (Library — Add/Move) and `FolderDetailScreen`'s Podcasts
+  section only (Add/Move/Remove; Remove calls `FolderRepository.removePodcasts`
+  directly, the others reuse the shared `FolderPickerView` batch). A "Select"
+  toolbar entry enters selection mode (announces "Selection mode on", moves
+  `@AccessibilityFocusState` to the first row); "Done" exits (announces off).
+  Batch Add/Move reuse `FolderPickerView`, extended with an additive optional
+  `onComplete` hook (fires only on a real pick, not Cancel) so the screen auto-
+  exits selection mode and re-anchors focus AFTER the mutation (never a removed
+  row); the focus re-anchor is staggered to +0.9s so its row-name utterance
+  doesn't collide with the picker's +0.5s result announcement. The single-item
+  rotor "Add/Move to folder" from #756 is preserved — multi-select is additive.
 - **Podcast settings Folders section + "Add to folder" picker (#754, Folders Phase 1).**
   `PodcastSettingsView` gains a `foldersSection` between Inbox and Notifications:
   it lists the folders this podcast is in (via `FolderRepository.folders(containing:)`),

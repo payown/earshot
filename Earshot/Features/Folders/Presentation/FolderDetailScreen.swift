@@ -22,6 +22,16 @@ struct FolderDetailScreen: View {
     @State private var showingNewSubfolder = false
     @State private var newSubfolderName = ""
 
+    // Multi-select for this folder's PODCASTS section (#757). Add/Move reuse the
+    // shared `FolderPickerView`; Remove from folder calls the repo directly.
+    // (An Episodes section is #759 — this screen has none yet; keep it easy to
+    // extend by reusing the same `selection`/`MultiSelectBar` scaffold there.)
+    @State private var selection = MultiSelectState()
+    @State private var batchRequest: FolderPickRequest?
+    // Re-anchored after a batch so focus lands on a still-present podcast row,
+    // never one a Move/Remove just took out of this folder.
+    @AccessibilityFocusState private var focusedPodcastID: PersistentIdentifier?
+
     // Re-anchored after a non-drag subfolder move so VoiceOver focus rides the
     // moved row to its new spot instead of being stranded (#753). Keyed on the
     // stable PersistentIdentifier, like FoldersScreen and the Quick Actions list.
@@ -60,8 +70,48 @@ struct FolderDetailScreen: View {
             .navigationTitle(folder.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
+            // Persistent multi-select bar (#757). "Remove from folder" is offered
+            // here (and only here — it's folder-scoped) as the destructive
+            // secondary; Add and Move reuse the shared picker.
+            .safeAreaInset(edge: .bottom) {
+                if selection.isSelecting {
+                    MultiSelectBar(
+                        count: selection.count,
+                        primary: MultiSelectAction(
+                            id: "add",
+                            title: MultiSelectActionLabel.addToFolder(count: selection.count, itemSingular: "podcast"),
+                            systemImage: "folder",
+                            handler: { presentBatch(.add) }
+                        ),
+                        secondary: [
+                            MultiSelectAction(
+                                id: "move",
+                                title: MultiSelectActionLabel.moveToFolder(count: selection.count, itemSingular: "podcast"),
+                                systemImage: "folder",
+                                handler: { presentBatch(.move) }
+                            ),
+                            MultiSelectAction(
+                                id: "remove",
+                                title: MultiSelectActionLabel.removeFromFolder(count: selection.count, itemSingular: "podcast"),
+                                systemImage: "folder.badge.minus",
+                                isDestructive: true,
+                                handler: { removeBatch() }
+                            ),
+                        ],
+                        announcementNoun: "podcast"
+                    )
+                    .transition(.move(edge: .bottom))
+                }
+            }
             .sheet(isPresented: $showingPicker) {
                 FolderPodcastPickerView(folder: folder)
+            }
+            // The multi-select batch picker (#757): reports completion so we leave
+            // selection mode and re-anchor focus only after a real pick.
+            .sheet(item: $batchRequest) { req in
+                FolderPickerView(podcasts: req.podcasts, mode: req.mode) {
+                    finishBatch()
+                }
             }
             .alert("Rename folder", isPresented: $showingRename) {
                 TextField("Folder name", text: $renameText)
@@ -252,7 +302,10 @@ struct FolderDetailScreen: View {
         if !members.isEmpty {
             Section {
                 ForEach(members) { podcast in
-                    row(for: podcast)
+                    podcastRowContainer(for: podcast)
+                        // Focus id on whichever variant renders, so it can be
+                        // re-anchored after a batch (#757).
+                        .accessibilityFocused($focusedPodcastID, equals: podcast.persistentModelID)
                 }
                 .onMove(perform: move)
             } header: {
@@ -267,21 +320,41 @@ struct FolderDetailScreen: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        if !members.isEmpty || !subfolders.isEmpty {
+        if selection.isSelecting {
+            // In selection mode the only toolbar affordance is leaving it; the
+            // batch actions live in the bottom bar. Drag-reorder edit mode and
+            // the other menus are hidden so they can't conflict with tapping to
+            // select.
             ToolbarItem(placement: .topBarTrailing) {
-                EditButton()
+                Button("Done") { exitSelection(announce: true) }
+                    .accessibilityHint("Leaves selection mode")
             }
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                queueFolder()
-            } label: {
-                Label("Add folder to queue", systemImage: "text.badge.plus")
+        } else {
+            if !members.isEmpty || !subfolders.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    EditButton()
+                }
             }
-            .disabled(members.isEmpty)
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            optionsMenu
+            if !members.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        enterSelection()
+                    } label: {
+                        Label("Select podcasts", systemImage: "checkmark.circle")
+                    }
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    queueFolder()
+                } label: {
+                    Label("Add folder to queue", systemImage: "text.badge.plus")
+                }
+                .disabled(members.isEmpty)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                optionsMenu
+            }
         }
     }
 
@@ -333,9 +406,28 @@ struct FolderDetailScreen: View {
         }
     }
 
+    /// Whichever podcast row variant applies: a selectable checkmark row while in
+    /// selection mode (#757), otherwise the normal remove-and-rotor row.
     @ViewBuilder
-    private func row(for podcast: Podcast) -> some View {
-        let base = HStack(spacing: Spacing.md) {
+    private func podcastRowContainer(for podcast: Podcast) -> some View {
+        if selection.isSelecting {
+            SelectableRow(
+                isSelected: selection.isSelected(podcast.persistentModelID),
+                accessibilityLabel: rowLabel(for: podcast),
+                onToggle: { selection.toggle(podcast.persistentModelID) }
+            ) {
+                podcastRowVisual(for: podcast)
+            }
+        } else {
+            row(for: podcast)
+        }
+    }
+
+    /// Just the podcast row's visuals — artwork, title, author. Shared by the
+    /// normal row (which adds the label + "Remove from folder" rotor) and the
+    /// selectable row (which owns its own label + selection trait, #757).
+    private func podcastRowVisual(for podcast: Podcast) -> some View {
+        HStack(spacing: Spacing.md) {
             PodcastArtwork(urlString: podcast.artworkURL)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(podcast.title).font(.headline)
@@ -343,17 +435,28 @@ struct FolderDetailScreen: View {
                     Text(author)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        // Cosmetic truncation only (author is in the row's
+                        // accessibility label); two lines so large Dynamic Type
+                        // isn't clipped to one.
+                        .lineLimit(2)
                 }
             }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(rowLabel(for: podcast))
-        // Routed through the shared helper (#572, #577) so this row's rotor is
-        // owned by the one custom action, like every other rotor in the app.
-        .rotorActions([
-            QuickActionItem(label: "Remove from folder", isDestructive: true) { remove(podcast) },
-        ])
+    }
+
+    @ViewBuilder
+    private func row(for podcast: Podcast) -> some View {
+        // `.ignore` + one explicit label (the same "title, author" a `.combine`
+        // produced) — standardized with SubscriptionsView and SelectableRow so
+        // the scaffold #758 inherits has a single, unambiguous row pattern.
+        let base = podcastRowVisual(for: podcast)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(rowLabel(for: podcast))
+            // Routed through the shared helper (#572, #577) so this row's rotor is
+            // owned by the one custom action, like every other rotor in the app.
+            .rotorActions([
+                QuickActionItem(label: "Remove from folder", isDestructive: true) { remove(podcast) },
+            ])
 
         // The swipe is a sighted-only affordance, attached only when VoiceOver
         // is off: iOS mirrors swipe actions into the VoiceOver rotor, which
@@ -371,6 +474,70 @@ struct FolderDetailScreen: View {
                 }
             }
         }
+    }
+
+    // MARK: Multi-select (#757)
+
+    /// Enters selection mode: announces it and moves VoiceOver focus to the first
+    /// podcast row so the user lands where they can start selecting.
+    private func enterSelection() {
+        withAnimation(Motion.preferred(.easeInOut(duration: 0.2))) {
+            selection.enter()
+        }
+        Announcer.announce("Selection mode on")
+        let firstID = members.first?.persistentModelID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            focusedPodcastID = firstID
+        }
+    }
+
+    /// Leaves selection mode. `announce` is true for a manual "Done"; a batch
+    /// passes false because the picker (or the remove path) already announced its
+    /// result. Re-anchors focus to the first still-present member — computed
+    /// AFTER any Move/Remove, so it never lands on a row that just left.
+    /// `focusDelay` lets the Add/Move batch push the focus utterance past the
+    /// picker's +0.5s result announcement so they don't collide.
+    private func exitSelection(announce: Bool, focusDelay: TimeInterval = 0.5) {
+        withAnimation(Motion.preferred(.easeInOut(duration: 0.2))) {
+            selection.exit()
+        }
+        if announce {
+            Announcer.announce("Selection mode off")
+        }
+        let firstID = members.first?.persistentModelID
+        DispatchQueue.main.asyncAfter(deadline: .now() + focusDelay) {
+            focusedPodcastID = firstID
+        }
+    }
+
+    /// Presents the shared picker for the whole selection. No-op when empty.
+    private func presentBatch(_ mode: FolderPickMode) {
+        let selected = selectedPodcasts()
+        guard !selected.isEmpty else { return }
+        batchRequest = .podcasts(selected, mode: mode)
+    }
+
+    /// The folder-scoped destructive batch: removes the selection from THIS
+    /// folder (the podcasts and their episodes are untouched), announces the
+    /// result, then leaves selection mode.
+    private func removeBatch() {
+        let selected = selectedPodcasts()
+        guard !selected.isEmpty else { return }
+        let count = selected.count
+        repository.removePodcasts(selected, from: folder)
+        Announcer.announce("Removed \(MultiSelectActionLabel.itemPhrase(count, singular: "podcast")) from \(folder.name)")
+        exitSelection(announce: false)
+    }
+
+    /// Called by the batch picker once it has applied the add/move. Staggered
+    /// past the picker's +0.5s result announcement.
+    private func finishBatch() {
+        exitSelection(announce: false, focusDelay: 0.9)
+    }
+
+    /// The selected podcasts, in the folder's display order.
+    private func selectedPodcasts() -> [Podcast] {
+        members.filter { selection.isSelected($0.persistentModelID) }
     }
 
     private func rowLabel(for podcast: Podcast) -> String {
