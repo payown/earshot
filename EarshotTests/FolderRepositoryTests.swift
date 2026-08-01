@@ -586,6 +586,33 @@ final class FolderRepositoryTests: XCTestCase {
         XCTAssertEqual(repo.episodes(in: folder).map(\.guid), ["e2"])
     }
 
+    /// The Episodes-section "Remove from folder" action (#759) drops only the
+    /// `EpisodeFolderMembership` join row — the `Episode` itself, and its podcast,
+    /// are untouched and still fetchable. This pins the contract the folder-detail
+    /// row relies on: removing an episode from a folder is not deleting it.
+    func testRemoveEpisodeFromFolderDropsMembershipNotEpisode() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let folder = repo.createFolder(name: "F")
+        let podcast = makePodcast(ctx, "Show")
+        let e1 = makeEpisode(ctx, podcast, guid: "e1", pubDate: now)
+        let e2 = makeEpisode(ctx, podcast, guid: "e2", pubDate: now.addingTimeInterval(60))
+        repo.addEpisodes([e1, e2], to: folder)
+        try ctx.save()
+
+        repo.removeEpisodes([e1], from: folder)
+
+        // The folder no longer lists e1, but e2's membership stays.
+        XCTAssertEqual(repo.episodes(in: folder).map(\.guid), ["e2"])
+        // Exactly one membership row was deleted, not both.
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).count, 1)
+        // The Episode itself survives — both episodes still exist in the store.
+        let survivingGuids = try ctx.fetch(FetchDescriptor<Episode>()).map(\.guid).sorted()
+        XCTAssertEqual(survivingGuids, ["e1", "e2"], "Removing from a folder never deletes the episode")
+        // e1 simply belongs to no folder now.
+        XCTAssertTrue(repo.folders(containing: e1).isEmpty)
+    }
+
     func testFoldersContainingEpisode() throws {
         let ctx = TestStore.freshContext()
         let repo = FolderRepository(context: ctx)

@@ -68,6 +68,32 @@ final class FolderDetailLabelTests: XCTestCase {
         )
     }
 
+    // MARK: Episodes section (#759) — header, empty state, remove announcement
+
+    func testEpisodesSectionHeaderIsPlainSpokenLabel() {
+        // A real, plain "Episodes" header string — carried into an `.isHeader`
+        // section header on the screen so VoiceOver can reach it by heading.
+        XCTAssertEqual(FolderDetailLabel.episodesSectionHeader, "Episodes")
+    }
+
+    func testEpisodesEmptyStateSpeaksTitleAndHowToAdd() {
+        // Never a blank section: the empty state names the state and says how
+        // episodes get into a folder (they're hand-picked from an episode's
+        // actions, not added on this screen).
+        XCTAssertEqual(FolderDetailLabel.episodesEmptyTitle, "No episodes in this folder")
+        XCTAssertEqual(
+            FolderDetailLabel.episodesEmptyDescription,
+            "Add an episode to this folder from its actions, using Add to folder."
+        )
+    }
+
+    func testRemoveEpisodeAnnouncementNamesEpisodeAndFolder() {
+        XCTAssertEqual(
+            FolderDetailLabel.removeEpisodeAnnouncement(title: "Ep 42", folderName: "News"),
+            "Removed Ep 42 from News"
+        )
+    }
+
     // MARK: Go-up visibility — only when the folder has a parent
 
     func testTopLevelFolderHasNoParentSoGoUpIsHidden() {

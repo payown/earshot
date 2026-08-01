@@ -33,4 +33,33 @@ enum FolderDetailLabel {
     static func moveAnnouncement(name: String, position: Int, count: Int) -> String {
         "Moved \(name) to position \(position) of \(count)"
     }
+
+    // MARK: Episodes section (folders phase 2 — #759)
+
+    /// The header for the Episodes section — the hand-picked episodes filed
+    /// directly in this folder (``EpisodeFolderMembership``). Rendered as a real
+    /// `.isHeader` section header so a VoiceOver user can navigate to it by
+    /// heading, the same way the Subfolders and Podcasts sections read.
+    static let episodesSectionHeader = "Episodes"
+
+    /// The title of the Episodes section's empty state, spoken when the folder
+    /// holds no episodes of its own. A real label — never a blank section — so a
+    /// VoiceOver user hears that the section exists and is simply empty, matching
+    /// the descriptive empty states the rest of the app uses.
+    static let episodesEmptyTitle = "No episodes in this folder"
+
+    /// The Episodes empty-state description: says how episodes get here, since a
+    /// folder's episodes are hand-picked from an episode's actions elsewhere (not
+    /// added on this screen). Paired with ``episodesEmptyTitle`` in one combined
+    /// accessibility element.
+    static let episodesEmptyDescription =
+        "Add an episode to this folder from its actions, using Add to folder."
+
+    /// The announcement posted after a single episode is removed from the folder
+    /// via its "Remove from folder" rotor action. Names the episode and the
+    /// folder so the removal is unambiguous. The episode itself is untouched —
+    /// only its membership in this folder is dropped.
+    static func removeEpisodeAnnouncement(title: String, folderName: String) -> String {
+        "Removed \(title) from \(folderName)"
+    }
 }
