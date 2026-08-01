@@ -367,6 +367,31 @@ ship; OPML export/import is the supported way to carry a library over.
 
 ## UI Decisions
 
+- **Podcast settings Folders section + "Add to folder" picker (#754, Folders Phase 1).**
+  `PodcastSettingsView` gains a `foldersSection` between Inbox and Notifications:
+  it lists the folders this podcast is in (via `FolderRepository.folders(containing:)`),
+  each rendered by its full `FolderLogic.pathString` breadcrumb, or a single
+  "Not in any folder" row when empty, followed by an "Add to folder…" button.
+  The section reads a `@Query` over `PodcastFolder` (Podcast has no inverse to
+  `FolderMembership` — the F2 decision — so it can't observe membership on its
+  own; the query plus body re-eval on sheet dismiss keep it current). The button
+  presents `PodcastFolderPickerView` (new, `Features/Folders/Presentation/`), the
+  inverse of `FolderPodcastPickerView`: it lists all folders **nested** (a
+  depth-first walk from `parent == nil` roots through `children`, cycle-guarded)
+  with each row labelled by its breadcrumb path so depth rides the label, not
+  indentation. Toggling a row writes membership immediately (no Save button,
+  mirroring the sibling) and a "New folder…" row creates a top-level folder
+  (`createSubfolder(under: nil)`) and files the podcast into it on the spot.
+  **A11y adjudication (earshot-accessibility gate):** #754 asked for both
+  `.isToggle` (matching the sibling) AND an explicit "Added to News › Daily"
+  announcement — those collide, because `.isToggle` auto-speaks a generic state
+  word that talks over the informative announcement. Resolution: drop `.isToggle`,
+  keep `.isSelected` (still exposes membership to the rotor) plus the path
+  announcement, which names *which* folder changed — more useful here than the
+  flat sibling since folders nest and a podcast can be in several. The `create()`
+  announcement is deferred 0.5 s so it clears the alert-dismissal focus utterance.
+  Phase 2 will replace the minimal picker with a fully shared `FolderPickerView`.
+
 - **Per-screen search is one shared filter, presentation-only (#457 Part A).**
   Inbox, Queue, and Downloads each get an in-place `.searchable` field backed by
   `EpisodeSearchFilter` (`Core/UI/`), a pure enum: case- and diacritic-insensitive
@@ -1488,6 +1513,37 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
   publish. Debug + Release builds clean under `minimal` strict concurrency.
 
 ## Data Decisions
+
+### Issue #751 — Folders phase 1, SwiftData schema V6
+- **Purely additive, lightweight-inferrable migration (V5→V6).** The whole point
+  of phase 1 is the safest possible schema bump: no attribute is reshaped and
+  nothing non-optional is added, so SwiftData's lightweight inference handles it
+  and no `.custom` stage is needed. Two additions: (a) a new
+  `EpisodeFolderMembership` entity (episode↔folder join, the analogue of
+  `FolderMembership`), and (b) optional self-referential `parent`
+  (`PodcastFolder?`, `.nullify`) + inverse `children` (`[PodcastFolder]`) on
+  `PodcastFolder` for nesting. Every existing folder migrates as top-level
+  (`parent == nil`); the new join table starts empty.
+- **V5 was frozen into a nested snapshot before the live models changed.** V5
+  previously pointed at the live top-level `@Model` types; per the drift-crash
+  discipline (#425), it was copied verbatim into nested `EarshotSchemaV5.*`
+  classes (matching how V4 is frozen) so V5 keeps hashing to exactly what
+  shipped. V6 is now the only versioned schema referencing the live types.
+- **No inverse on `Episode` for the new join (the #701 discipline).**
+  `EpisodeFolderMembership.episode` is deliberately one-way. An
+  `@Relationship(inverse:)` collection on `Episode` would change `Episode`'s
+  shape and put a real library's ~242k episode rows back into the migration's
+  path. Cleanup of orphaned join rows on episode/podcast delete is a later phase
+  (`// TODO(folders P2): cleanup on episode delete`), following the same manual
+  discipline `FolderMembership`/`ActiveDownload` already use.
+- **Migration is a required CI gate.** `StoreMigrationV5toV6Tests` seeds a real
+  on-disk store at frozen V5 (folders, memberships, a podcast with NULL
+  optionals, episodes, a queue item), opens it through the production
+  `StoreMigration.openOrMigrate` path, and asserts nothing throws, folders and
+  memberships survive, `parent` is nil, and both nesting and the new join table
+  work post-migration. `SchemaDriftTests` now guards V6 against the live types
+  and asserts the live graph differs from frozen V5 only by the intentional
+  additions.
 
 ### Issue #635 — Earshot Plus: enforce 10-podcast free tier cap
 - **Pure decision logic, no StoreKit/ModelContext.** `PodcastCapPolicy`

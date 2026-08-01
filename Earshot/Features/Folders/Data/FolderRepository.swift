@@ -1,6 +1,28 @@
 import Foundation
 import SwiftData
 
+/// How a folder delete treats the folders nested beneath it (folders phase 1 —
+/// #752). In BOTH modes podcasts and episodes are never deleted — only the
+/// folder rows and their membership joins go away.
+enum FolderDeleteMode {
+    /// Delete only this folder; lift its immediate children up one level to this
+    /// folder's own parent (its grandparent, or the root when it had no parent).
+    case promoteChildren
+    /// Delete this folder and every folder nested beneath it.
+    case deleteSubtree
+}
+
+/// The outcome of a ``FolderRepository/move(_:under:)`` request. A cycle-forming
+/// move is a no-op that reports ``rejectedCycle`` rather than throwing, so
+/// callers (and the UI) can react without a `try`.
+enum FolderMoveResult: Equatable {
+    /// The move was applied (or the folder was already in the requested spot).
+    case moved
+    /// The move would have nested a folder under itself or a descendant, so it
+    /// was rejected and nothing changed.
+    case rejectedCycle
+}
+
 /// SwiftData-backed folder store: create/rename/delete folders, manage podcast
 /// membership and per-folder ordering, set a per-folder queue age limit, and
 /// queue a folder's latest unplayed episodes. Mirrors the Flutter
@@ -52,6 +74,19 @@ final class FolderRepository {
         }
     }
 
+    /// The folders nested directly under `parent`, or the top-level folders when
+    /// `parent` is nil. Sorted by `sortOrder` then name, matching ``folders()``.
+    /// Folder counts are small (folders, not episodes), so filtering the full
+    /// folder list here is bounded and not a hot path.
+    func childFolders(of parent: PodcastFolder?) -> [PodcastFolder] {
+        let all = folders() // already sorted by sortOrder then name
+        guard let parent else {
+            return all.filter { $0.parent == nil }
+        }
+        let parentID = parent.persistentModelID
+        return all.filter { $0.parent?.persistentModelID == parentID }
+    }
+
     // MARK: Folder lifecycle
 
     @discardableResult
@@ -65,6 +100,21 @@ final class FolderRepository {
         return folder
     }
 
+    /// Creates a folder nested under `parent` (or a top-level folder when
+    /// `parent` is nil). `sortOrder` is assigned per sibling group, so each
+    /// level orders independently. New in folders phase 1 (#752).
+    @discardableResult
+    func createSubfolder(named name: String, under parent: PodcastFolder?) -> PodcastFolder {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextOrder = (childFolders(of: parent).map(\.sortOrder).max() ?? -1) + 1
+        let folder = PodcastFolder(name: trimmed, sortOrder: nextOrder)
+        folder.parent = parent
+        context.insert(folder)
+        save()
+        AppLog.subscriptions.info("Created subfolder: \(trimmed, privacy: .public)")
+        return folder
+    }
+
     func rename(_ folder: PodcastFolder, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -72,11 +122,68 @@ final class FolderRepository {
         save()
     }
 
-    func delete(_ folder: PodcastFolder) {
-        // Membership rows cascade-delete with the folder; podcasts are untouched.
-        context.delete(folder)
+    /// Reparents `folder` under `newParent` (nil moves it to the root), placing
+    /// it at the end of the destination's sibling order. A move that would nest
+    /// `folder` under itself or one of its descendants is **rejected as a no-op**
+    /// (nothing is mutated or saved) and reported via ``FolderMoveResult`` rather
+    /// than thrown — the cycle guard is ``FolderLogic/wouldCreateCycle(moving:under:)``.
+    /// New in folders phase 1 (#752).
+    @discardableResult
+    func move(_ folder: PodcastFolder, under newParent: PodcastFolder?) -> FolderMoveResult {
+        guard !FolderLogic.wouldCreateCycle(moving: folder, under: newParent) else {
+            AppLog.subscriptions.error("Rejected folder move that would create a cycle")
+            return .rejectedCycle
+        }
+        // Compute the destination order before reparenting so `folder` is not yet
+        // counted among its new siblings.
+        let nextOrder = (childFolders(of: newParent).map(\.sortOrder).max() ?? -1) + 1
+        folder.parent = newParent
+        folder.sortOrder = nextOrder
         save()
-        AppLog.subscriptions.info("Deleted folder")
+        return .moved
+    }
+
+    /// Deletes `folder` using the single-argument default of ``FolderDeleteMode/promoteChildren``:
+    /// any immediate children are lifted up to `folder`'s own parent rather than
+    /// being deleted or orphaned to the root. This is the least-surprising
+    /// behavior for the plain call and supersedes the pre-nesting version, which
+    /// simply removed the row (letting `.nullify` orphan children to the root and
+    /// leaving episode-membership joins dangling).
+    func delete(_ folder: PodcastFolder) {
+        delete(folder, mode: .promoteChildren)
+    }
+
+    /// Deletes `folder` honoring `mode`. In BOTH modes podcasts and episodes are
+    /// never deleted — only folder rows and their membership joins. Podcast
+    /// memberships (``FolderMembership``) cascade-delete with each removed folder;
+    /// episode memberships (``EpisodeFolderMembership``) have no inverse on the
+    /// folder, so they are cleaned up explicitly here to avoid dangling rows. Runs
+    /// as a single transaction (one ``save()``). New in folders phase 1 (#752).
+    func delete(_ folder: PodcastFolder, mode: FolderDeleteMode) {
+        switch mode {
+        case .promoteChildren:
+            let grandparent = folder.parent
+            // Append the promoted children after any existing grandparent-level
+            // siblings so sort orders don't collide.
+            let existing = childFolders(of: grandparent)
+                .filter { $0.persistentModelID != folder.persistentModelID }
+            var nextOrder = (existing.map(\.sortOrder).max() ?? -1) + 1
+            for child in childFolders(of: folder) {
+                child.parent = grandparent
+                child.sortOrder = nextOrder
+                nextOrder += 1
+            }
+            removeEpisodeMemberships(forFolders: [folder])
+            context.delete(folder) // FolderMembership rows cascade with it
+        case .deleteSubtree:
+            let subtree = FolderLogic.flattenSubtree(folder)
+            removeEpisodeMemberships(forFolders: subtree)
+            // `children` uses `.nullify`, not cascade, so deleting the root does
+            // not remove descendants — delete every folder in the subtree.
+            for node in subtree { context.delete(node) }
+        }
+        save()
+        AppLog.subscriptions.info("Deleted folder (mode: \(String(describing: mode), privacy: .public))")
     }
 
     /// `nil` clears the limit.
@@ -178,6 +285,39 @@ final class FolderRepository {
             AppLog.player.info("Queued \(episodes.count) episode(s) from folder \(folder.name, privacy: .public)")
         }
         return episodes.count
+    }
+
+    // MARK: Subtree
+
+    /// Every distinct podcast filed anywhere in `folder`'s subtree (the folder
+    /// itself plus all descendants), de-duplicated across folders and sorted by
+    /// title. Intended for later OPML export and folder-wide queueing. New in
+    /// folders phase 1 (#752).
+    func subtreeSubscriptions(of folder: PodcastFolder) -> [Podcast] {
+        var seen = Set<PersistentIdentifier>()
+        var result: [Podcast] = []
+        for node in FolderLogic.flattenSubtree(folder) {
+            for membership in node.memberships {
+                guard let podcast = membership.podcast else { continue }
+                if seen.insert(podcast.persistentModelID).inserted {
+                    result.append(podcast)
+                }
+            }
+        }
+        return result.sorted { $0.title < $1.title }
+    }
+
+    /// Deletes every ``EpisodeFolderMembership`` pointing at any of `folders`.
+    /// That join has no inverse on ``PodcastFolder``, so SwiftData does not
+    /// cascade it when a folder is deleted — these rows would otherwise dangle.
+    private func removeEpisodeMemberships(forFolders folders: [PodcastFolder]) {
+        let ids = Set(folders.map(\.persistentModelID))
+        guard !ids.isEmpty else { return }
+        let all = (try? context.fetch(FetchDescriptor<EpisodeFolderMembership>())) ?? []
+        for membership in all
+        where membership.folder.map({ ids.contains($0.persistentModelID) }) == true {
+            context.delete(membership)
+        }
     }
 
     // MARK: Maintenance

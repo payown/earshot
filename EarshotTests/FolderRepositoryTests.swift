@@ -257,4 +257,183 @@ final class FolderRepositoryTests: XCTestCase {
             )
         )
     }
+
+    // MARK: Nesting — subfolders (#752)
+
+    func testCreateSubfolderSetsParentAndPerSiblingOrder() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+
+        let a = repo.createSubfolder(named: "A", under: root)
+        let b = repo.createSubfolder(named: "B", under: root)
+
+        XCTAssertEqual(a.parent?.persistentModelID, root.persistentModelID)
+        XCTAssertEqual(b.parent?.persistentModelID, root.persistentModelID)
+        // Sibling order restarts within the parent, independent of the root order.
+        XCTAssertEqual(a.sortOrder, 0)
+        XCTAssertEqual(b.sortOrder, 1)
+    }
+
+    func testChildFoldersTopLevelVsNested() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let other = repo.createFolder(name: "Other")
+        let child = repo.createSubfolder(named: "Child", under: root)
+
+        XCTAssertEqual(repo.childFolders(of: nil).map(\.name), ["Root", "Other"])
+        XCTAssertEqual(repo.childFolders(of: root).map(\.name), ["Child"])
+        XCTAssertTrue(repo.childFolders(of: other).isEmpty)
+        XCTAssertTrue(repo.childFolders(of: child).isEmpty)
+    }
+
+    // MARK: Nesting — move + cycle rejection (#752)
+
+    func testMoveReparentsToNewParent() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let a = repo.createFolder(name: "A")
+        let b = repo.createFolder(name: "B")
+        let child = repo.createSubfolder(named: "Child", under: a)
+
+        let result = repo.move(child, under: b)
+
+        XCTAssertEqual(result, .moved)
+        XCTAssertEqual(child.parent?.persistentModelID, b.persistentModelID)
+        XCTAssertEqual(repo.childFolders(of: a).map(\.name), [])
+        XCTAssertEqual(repo.childFolders(of: b).map(\.name), ["Child"])
+    }
+
+    func testMoveToRootClearsParent() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let child = repo.createSubfolder(named: "Child", under: root)
+
+        XCTAssertEqual(repo.move(child, under: nil), .moved)
+        XCTAssertNil(child.parent)
+        XCTAssertEqual(repo.childFolders(of: nil).map(\.name), ["Root", "Child"])
+    }
+
+    func testMoveUnderSelfIsRejectedNoOp() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let child = repo.createSubfolder(named: "Child", under: root)
+
+        let result = repo.move(root, under: root)
+
+        XCTAssertEqual(result, .rejectedCycle)
+        XCTAssertNil(root.parent, "Rejected move must not mutate the folder")
+        XCTAssertEqual(child.parent?.persistentModelID, root.persistentModelID)
+    }
+
+    func testMoveUnderOwnDescendantIsRejectedNoOp() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let mid = repo.createSubfolder(named: "Mid", under: root)
+        let leaf = repo.createSubfolder(named: "Leaf", under: mid)
+
+        let result = repo.move(root, under: leaf)
+
+        XCTAssertEqual(result, .rejectedCycle)
+        XCTAssertNil(root.parent)
+        XCTAssertEqual(mid.parent?.persistentModelID, root.persistentModelID)
+        XCTAssertEqual(leaf.parent?.persistentModelID, mid.persistentModelID)
+    }
+
+    // MARK: Nesting — delete modes preserve podcasts + episodes (#752)
+
+    func testDeletePromoteChildrenLiftsChildrenAndKeepsData() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let mid = repo.createSubfolder(named: "Mid", under: root)
+        let leaf = repo.createSubfolder(named: "Leaf", under: mid)
+
+        let podcast = makePodcast(ctx, "Show")
+        let episode = makeEpisode(ctx, podcast, guid: "e1", pubDate: now)
+        repo.add(podcast, to: mid)
+        ctx.insert(EpisodeFolderMembership(folder: mid, episode: episode, sortOrder: 0))
+        try ctx.save()
+
+        repo.delete(mid, mode: .promoteChildren)
+
+        // Mid is gone; its child Leaf is lifted up to Root (the grandparent).
+        XCTAssertFalse(repo.folders().contains { $0.name == "Mid" })
+        XCTAssertEqual(leaf.parent?.persistentModelID, root.persistentModelID)
+        XCTAssertEqual(repo.childFolders(of: root).map(\.name), ["Leaf"])
+
+        // Podcast and episode survive; only the folder joins are cleaned up.
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 1)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Episode>()).count, 1)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 0)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).count, 0)
+    }
+
+    func testPlainDeleteRoutesToPromoteChildren() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let child = repo.createSubfolder(named: "Child", under: root)
+
+        repo.delete(root) // single-arg default
+
+        // Child is promoted to the root level rather than deleted or orphaned oddly.
+        XCTAssertFalse(repo.folders().contains { $0.name == "Root" })
+        XCTAssertNil(child.parent)
+        XCTAssertEqual(repo.childFolders(of: nil).map(\.name), ["Child"])
+    }
+
+    func testDeleteSubtreeRemovesAllDescendantsButKeepsData() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let keep = repo.createFolder(name: "Keep")
+        let root = repo.createFolder(name: "Root")
+        let mid = repo.createSubfolder(named: "Mid", under: root)
+        let leaf = repo.createSubfolder(named: "Leaf", under: mid)
+
+        let podcast = makePodcast(ctx, "Show")
+        let episode = makeEpisode(ctx, podcast, guid: "e1", pubDate: now)
+        repo.add(podcast, to: leaf)
+        ctx.insert(EpisodeFolderMembership(folder: leaf, episode: episode, sortOrder: 0))
+        try ctx.save()
+
+        repo.delete(root, mode: .deleteSubtree)
+
+        // The whole Root subtree is gone; the unrelated Keep folder remains.
+        XCTAssertEqual(repo.folders().map(\.name), ["Keep"])
+        _ = keep
+
+        // Podcast and episode survive; folder joins are cleaned up.
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 1)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Episode>()).count, 1)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 0)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).count, 0)
+    }
+
+    // MARK: Nesting — subtree subscriptions (#752)
+
+    func testSubtreeSubscriptionsDeduplicatesAcrossSubtree() throws {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let child = repo.createSubfolder(named: "Child", under: root)
+
+        let shared = makePodcast(ctx, "Shared")
+        let rootOnly = makePodcast(ctx, "RootOnly")
+        let childOnly = makePodcast(ctx, "ChildOnly")
+        repo.add(shared, to: root)
+        repo.add(shared, to: child) // same podcast filed in two folders of the subtree
+        repo.add(rootOnly, to: root)
+        repo.add(childOnly, to: child)
+        try ctx.save()
+
+        let subs = repo.subtreeSubscriptions(of: root)
+
+        XCTAssertEqual(subs.map(\.title), ["ChildOnly", "RootOnly", "Shared"])
+        XCTAssertEqual(subs.count, 3, "Shared appears once despite two memberships")
+    }
 }

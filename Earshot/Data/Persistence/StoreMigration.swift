@@ -18,18 +18,20 @@ enum StoreOpenError: Error {
 
 /// Store open + manual V1 migration (issues #355, #425).
 ///
-/// The current schema is ``EarshotSchemaV5`` and the normal open path runs the
-/// ``EarshotMigrationPlan``, which registers four stages: V1→V2 (a `.custom`
-/// no-op marker), then V2→V3, V3→V4 and V4→V5 (all SwiftData-native lightweight
-/// stages, so a V2, V3 or V4 store migrates rather than aborts). V4→V5 adds the
-/// ``ActiveDownload`` entity and nothing else (#701) — `Episode` is untouched, so
-/// a large library's episode rows are never rewritten by it.
+/// The current schema is ``EarshotSchemaV6`` and the normal open path runs the
+/// ``EarshotMigrationPlan``, which registers five stages: V1→V2 (a `.custom`
+/// no-op marker), then V2→V3, V3→V4, V4→V5 and V5→V6 (all SwiftData-native
+/// lightweight stages, so a V2, V3, V4 or V5 store migrates rather than aborts).
+/// V4→V5 adds the ``ActiveDownload`` entity (#701); V5→V6 adds the
+/// ``EpisodeFolderMembership`` entity and optional `parent`/`children` nesting on
+/// ``PodcastFolder`` (#751). Both are additive — `Episode` is untouched, so a
+/// large library's episode rows are never rewritten.
 ///
 /// SwiftData still can't infer the original V1→V2 jump (2 entities become 10,
 /// with new non-optional attributes), so a store still at the original V1 schema
 /// is handled here by a manual export/reimport: read it through
 /// ``EarshotSchemaV1``, snapshot it into plain values, replace the store file,
-/// and reinsert the data as current (V5) objects. This preserves the tester's
+/// and reinsert the data as current (V6) objects. This preserves the tester's
 /// subscriptions, episodes, and played state.
 enum StoreMigration {
 
@@ -74,9 +76,10 @@ enum StoreMigration {
         var isPlayed: Bool
     }
 
-    /// Opens the store at `url` as the current schema (V5) using
-    /// ``EarshotMigrationPlan`` (so a V2 or V3 store is lightweight-migrated
-    /// forward). If that fails, the store is treated as an original (V1) store
+    /// Opens the store at `url` as the current schema (V6) using
+    /// ``EarshotMigrationPlan`` (so a V2, V3, V4 or V5 store is
+    /// lightweight-migrated forward). If that fails, the store is treated as an
+    /// original (V1) store
     /// and migrated manually via export/reimport. On the manual V1 path the
     /// original store is backed up (``ModelContainerFactory/backupStoreFiles(at:)``)
     /// before it is deleted, so a failed fresh-store rebuild can't lose the
@@ -88,9 +91,9 @@ enum StoreMigration {
     /// open error is captured (not swallowed) so the two cases can be told apart.
     @MainActor
     static func openOrMigrate(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV5.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
 
-        // Fresh installs, already-V5 stores, and V2/V3/V4 stores (lightweight)
+        // Fresh installs, already-V6 stores, and V2/V3/V4/V5 stores (lightweight)
         // all open through the migration plan. Capture the failure so a
         // newer-than-app store can be distinguished from real corruption below,
         // rather than silently falling through to the (destructive) V1 path.
@@ -139,7 +142,7 @@ enum StoreMigration {
             configurations: ModelConfiguration(schema: schema, url: url)
         )
         try write(snapshots, into: container.mainContext)
-        AppLog.data.info("Migrated \(snapshots.count) podcast(s) from V1 to V5")
+        AppLog.data.info("Migrated \(snapshots.count) podcast(s) from V1 to V6")
         return container
     }
 
