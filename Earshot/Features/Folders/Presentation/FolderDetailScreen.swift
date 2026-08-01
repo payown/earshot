@@ -11,6 +11,13 @@ import SwiftData
 struct FolderDetailScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    // Episode rows reuse the shared `EpisodeRow` + `buildEpisodeActions` pipeline
+    // (#759), which needs the same environment every other episode surface pulls
+    // in. All present at the app root this screen is pushed under.
+    @Environment(PlayerService.self) private var player
+    @Environment(DownloadManager.self) private var downloads
+    @Environment(QuickActionStore.self) private var quickActions
+    @Environment(SettingsStore.self) private var settings
     @Bindable var folder: PodcastFolder
 
     @State private var showingPicker = false
@@ -21,6 +28,35 @@ struct FolderDetailScreen: View {
     @State private var showingDelete = false
     @State private var showingNewSubfolder = false
     @State private var newSubfolderName = ""
+
+    // Episodes section state (#759). The row Quick Actions ("Open show notes",
+    // "Share", "Export audio", "Add/Move to folder") each just set one of these,
+    // exactly as InboxScreen / EpisodeListView do, then a sheet/modifier below
+    // presents it. `folderPickRequest` drives the shared `.folderPicker` and is
+    // kept separate from the podcasts' `batchRequest` sheet above.
+    @State private var showNotesEpisode: Episode?
+    @State private var sharingEpisode: Episode?
+    @State private var exportEpisode: Episode?
+    @State private var bookmarksEpisode: Episode?
+    @State private var folderPickRequest: FolderPickRequest?
+    // `episodes(in:)` reads a detached `FetchDescriptor` (EpisodeFolderMembership
+    // has no inverse on PodcastFolder, by design), so — unlike `members` /
+    // `subfolders`, which ride tracked relationships — SwiftUI's Observation does
+    // NOT re-render this section when a membership is deleted here. Bumping this
+    // token inside `body`'s dependency graph (read via the `episodes` computed
+    // property) forces the one re-render after an in-screen "Remove from folder".
+    @State private var episodesReloadToken = 0
+    // Re-anchored after a "Remove from folder" so VoiceOver focus lands on the
+    // still-present neighbor row, never the episode that just left this folder.
+    @AccessibilityFocusState private var focusedEpisodeID: PersistentIdentifier?
+    // Focus target for when removing the last episode leaves the Episodes
+    // section empty while the folder still has other content — bound to the
+    // per-section `episodesEmptyState`, a single `.combine`d element. When the
+    // removal instead empties the whole folder, the List collapses to the
+    // ContentUnavailableView and VoiceOver re-orients to it on its own (the row
+    // is gone from the tree), so this stays unbound there — a multi-element
+    // container is not a reliable focus target.
+    @AccessibilityFocusState private var focusEmptyState: Bool
 
     // Multi-select for this folder's PODCASTS section (#757). Add/Move reuse the
     // shared `FolderPickerView`; Remove from folder calls the repo directly.
@@ -63,7 +99,23 @@ struct FolderDetailScreen: View {
         }
     }
 
+    /// The episodes hand-picked into this folder (#759), in membership order.
+    /// Reads `episodesReloadToken` first so a bump forces `body` to re-run and
+    /// re-fetch after an in-screen removal (see the token's declaration note).
+    private var episodes: [Episode] {
+        _ = episodesReloadToken
+        return repository.episodes(in: folder)
+    }
+
     private var isNested: Bool { folder.parent != nil }
+
+    /// True only when the folder holds nothing at all — no subfolders, podcasts,
+    /// or episodes — the one case the whole-screen empty state (with its calls to
+    /// action) replaces the List. A folder with episodes but no podcasts still
+    /// shows the List so its Episodes section is reachable.
+    private var isCompletelyEmpty: Bool {
+        subfolders.isEmpty && members.isEmpty && episodes.isEmpty
+    }
 
     var body: some View {
         content
@@ -144,17 +196,27 @@ struct FolderDetailScreen: View {
             } message: {
                 Text("This removes the folder. Your podcasts and their episodes are kept.")
             }
+            // Episodes-section Quick Action destinations (#759), mirroring the
+            // per-episode sheets InboxScreen / EpisodeListView present. The
+            // `.folderPicker` here drives Add/Move for a single episode and is a
+            // distinct sheet from the podcasts' `batchRequest` above.
+            .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+            .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
+            .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
+            .episodeAudioExport($exportEpisode)
+            .folderPicker($folderPickRequest)
     }
 
     @ViewBuilder
     private var content: some View {
-        if subfolders.isEmpty && members.isEmpty {
+        if isCompletelyEmpty {
             emptyState
         } else {
             List {
                 breadcrumbSection
                 subfoldersSection
                 podcastsSection
+                episodesSection
             }
         }
     }
@@ -185,6 +247,15 @@ struct FolderDetailScreen: View {
                 Button("Go up one level") { goUp() }
             }
         }
+        // No `.accessibilityFocused` here on purpose: a `ContentUnavailableView`
+        // is a multi-element container (heading + action buttons), not a single
+        // focusable element, so binding focus to it is unreliable. It isn't
+        // needed either — when removing a folder's last episode collapses the
+        // List to this state, the removed row leaves the tree entirely (there's
+        // no persisting row container to strand focus on), so VoiceOver
+        // re-orients to this state's heading on its own. The per-section
+        // `episodesEmptyState` — a real `.combine`d single element — is the
+        // focus target for the case where the folder keeps other content.
     }
 
     // MARK: Breadcrumb + go up
@@ -316,6 +387,104 @@ struct FolderDetailScreen: View {
                 ageLimitFooter
             }
         }
+    }
+
+    // MARK: Episodes (#759)
+
+    /// The hand-picked episodes filed directly in this folder. Always carries a
+    /// real `.isHeader` "Episodes" header and a spoken empty state, so the
+    /// section is navigable and self-describing even with nothing in it.
+    ///
+    /// Hidden entirely while podcast multi-select is active — the same way the
+    /// Podcasts section swaps its rows for checkboxes — so nothing here can
+    /// compete with a podcast selection. (Episode multi-select is out of scope;
+    /// #758 owns it in the Inbox / episode list.)
+    @ViewBuilder
+    private var episodesSection: some View {
+        if !selection.isSelecting {
+            Section {
+                if episodes.isEmpty {
+                    episodesEmptyState
+                } else {
+                    ForEach(episodes) { episode in
+                        episodeRow(for: episode)
+                            // Lets "Remove from folder" re-anchor focus onto this
+                            // row when its neighbor is the removal target.
+                            .accessibilityFocused($focusedEpisodeID, equals: episode.persistentModelID)
+                    }
+                }
+            } header: {
+                Text(FolderDetailLabel.episodesSectionHeader)
+                    .accessibilityAddTraits(.isHeader)
+            }
+        }
+    }
+
+    /// The Episodes empty state: a real, combined label — never a blank section —
+    /// telling the user the folder has no episodes and how they get added.
+    private var episodesEmptyState: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(FolderDetailLabel.episodesEmptyTitle)
+                .font(.headline)
+            Text(FolderDetailLabel.episodesEmptyDescription)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, Spacing.xs)
+        .accessibilityElement(children: .combine)
+        // Focus target when a removal empties the section but the folder still
+        // has other content (so the List, and this state, stay on screen).
+        .accessibilityFocused($focusEmptyState)
+    }
+
+    /// One episode row: the shared `EpisodeRow` (title, podcast, played/time, all
+    /// its VoiceOver wording) with the user-configured Quick Actions plus a
+    /// folder-scoped "Remove from folder". `includesPodcastName` is on because a
+    /// folder mixes shows, so each row names its podcast.
+    private func episodeRow(for episode: Episode) -> some View {
+        EpisodeRow(
+            episode: episode,
+            actions: episodeActions(for: episode),
+            includesPodcastName: true
+        )
+    }
+
+    /// The standard episode Quick Actions (in the user's configured order) with a
+    /// destructive "Remove from folder" appended LAST — appended, not inserted,
+    /// so it never displaces `actions.first`, the row's default double-tap and
+    /// primary rotor action. "Unfollow this podcast" and the mark-played focus
+    /// runner are intentionally omitted: a folder's episode row is about the
+    /// episode and its folder membership, and marking played here doesn't remove
+    /// the row (folder membership is independent of played state).
+    private func episodeActions(for episode: Episode) -> [QuickActionItem] {
+        var actions = buildEpisodeActions(
+            episode: episode,
+            order: quickActions.episodeActions,
+            player: player,
+            downloads: downloads,
+            context: context,
+            onShowNotes: { showNotesEpisode = episode },
+            onShare: { sharingEpisode = episode },
+            onBookmarks: { bookmarksEpisode = episode },
+            onExport: { exportEpisode = episode },
+            onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
+            onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
+        )
+        // Guard: only append when there's already at least one action, so the
+        // destructive "Remove from folder" can never become `actions.first` —
+        // which `EpisodeRow` makes the row's default double-tap. Safe today
+        // (`QuickActionStore` only reorders `episodeActions`, never empties it),
+        // but this keeps a future "disable a Quick Action" feature from turning
+        // a blind user's default gesture into a destructive removal.
+        if !actions.isEmpty {
+            actions.append(
+                QuickActionItem(label: "Remove from folder", isDestructive: true) {
+                    removeEpisode(episode)
+                }
+            )
+        }
+        return actions
     }
 
     @ToolbarContentBuilder
@@ -610,6 +779,37 @@ struct FolderDetailScreen: View {
     private func remove(_ podcast: Podcast) {
         repository.remove(podcast, from: folder)
         Announcer.announce("Removed \(podcast.title) from \(folder.name)")
+    }
+
+    /// Drops one episode's membership in this folder (#759). The episode itself
+    /// is untouched — only the `EpisodeFolderMembership` join row goes. Announces
+    /// the result, bumps the reload token so the detached-fetch section re-renders,
+    /// then re-anchors VoiceOver focus: onto the neighbor if one remains, else the
+    /// empty state (per-section, or whole-screen when this was the folder's last
+    /// item) — never the removed row. Neighbor is captured BEFORE the removal,
+    /// while the row is still in the list.
+    private func removeEpisode(_ episode: Episode) {
+        let neighbor = neighborID(of: episode, in: episodes)
+        let title = episode.title
+        repository.removeEpisodes([episode], from: folder)
+        Announcer.announce(
+            FolderDetailLabel.removeEpisodeAnnouncement(title: title, folderName: folder.name)
+        )
+        episodesReloadToken += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if let neighbor {
+                focusedEpisodeID = neighbor
+            } else {
+                focusEmptyState = true
+            }
+        }
+    }
+
+    private func shareItems(for episode: Episode) -> [Any] {
+        if let url = URL(string: episode.audioURL) {
+            return [episode.title, url]
+        }
+        return [episode.title]
     }
 
     private func move(_ offsets: IndexSet, _ destination: Int) {

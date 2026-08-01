@@ -395,6 +395,35 @@ ship; OPML export/import is the supported way to carry a library over.
   `EpisodeBatchLabel`). Single-item rotor "Add/Move to folder" from #756 is
   preserved on the normal rows — multi-select is additive. earshot-accessibility
   gate: PASS, no required fixes.
+- **FolderDetailScreen Episodes section — surface episode membership (#759, Folders Phase 2).**
+  Below Subfolders and Podcasts, a real `.isHeader` "Episodes" section lists the
+  hand-picked episodes a folder holds via `EpisodeFolderMembership`
+  (`FolderRepository.episodes(in:)`). Rows reuse the shared `EpisodeRow`
+  (`includesPodcastName: true` — a folder mixes shows) with actions from the
+  shared `buildEpisodeActions(...)` plus a destructive "Remove from folder"
+  appended LAST (so it never displaces `actions.first`, the row's default
+  double-tap / primary rotor action) — surfaced through `EpisodeRow`'s existing
+  `.quickActionsRotor`. Remove calls `FolderRepository.removeEpisodes([episode],
+  from:)` (drops only the join row; the episode is untouched), announces via the
+  pure `FolderDetailLabel.removeEpisodeAnnouncement`, and re-anchors
+  `@AccessibilityFocusState` to the neighbor captured BEFORE removal (or the empty
+  state when it was the last episode) — never the removed row. Because
+  `episodes(in:)` reads a detached `FetchDescriptor` (EpisodeFolderMembership has
+  no inverse on PodcastFolder, by design), it is NOT observed like `members` /
+  `subfolders`; a `@State` reload token, read inside the `episodes` computed
+  property, forces the one re-render after an in-screen remove. A real spoken
+  empty state (`FolderDetailLabel.episodesEmptyTitle` / `episodesEmptyDescription`,
+  `.combine`d) shows when the folder holds no episodes; the whole-screen
+  ContentUnavailableView is reserved for a completely empty folder (no subfolders,
+  podcasts, or episodes). Coexistence with #757 podcast multi-select: the Episodes
+  section is hidden entirely while podcast-selection mode is active (matching how
+  the Podcasts section swaps to checkbox rows), so nothing competes with a podcast
+  selection. Episode multi-select is out of scope (#758 owns it); "Unfollow this
+  podcast" and the mark-played focus runner are intentionally omitted from the
+  folder episode row (a folder row is about the episode and its membership, and
+  marking played here doesn't remove the row). New pure strings live in
+  `FolderDetailLabel` so the header/empty-state/announcement wording is
+  unit-testable.
 - **Reusable multi-select scaffold + podcast batch folder actions (#757, Folders Phase 2).**
   New generic scaffold under `Earshot/Core/UI/`, built so #758 (episode
   multi-select) drops it in unchanged: `MultiSelectState` (an `@Observable`,
