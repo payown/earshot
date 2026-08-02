@@ -125,6 +125,10 @@ struct SearchView<HeaderContent: View>: View {
     @Query private var podcasts: [Podcast]
     @Query private var episodes: [Episode]
     @Query private var bookmarks: [Bookmark]
+    /// Drives the subscribe-to-folder offer (#764): the picker is only offered when
+    /// this is non-empty (decision F8), so a user with no folders is never
+    /// interrupted by a picker they'd have to populate first.
+    @Query private var folders: [PodcastFolder]
 
     @State private var query = ""
     @State private var directoryState: DirectoryState = .idle
@@ -147,6 +151,10 @@ struct SearchView<HeaderContent: View>: View {
     /// instead of it, since a user who dismisses the paywall without acting
     /// still needs the spoken/visible reason the follow didn't happen.
     @State private var showPaywall = false
+    /// A pending subscribe-to-folder offer (#764). Set to the just-followed podcast
+    /// when the user already has folders; presents the shared ``FolderPickerView``
+    /// in `.add` mode so they can file the new show, or Cancel to skip.
+    @State private var subscribeFolderPick: FolderPickRequest?
 
     private let itunes = ITunesSearchService()
 
@@ -238,6 +246,10 @@ struct SearchView<HeaderContent: View>: View {
         // podcast cap. Dismissible via its own explicit Close button, never
         // drag-only.
         .sheet(isPresented: $showPaywall) { PaywallView() }
+        // Subscribe-to-folder offer (#764): only presented when the user already
+        // has folders (decision F8, gated in `subscribe`). The shared picker files
+        // the new show and announces the result, or Cancel skips.
+        .folderPicker($subscribeFolderPick)
         .overlay { emptyOverlay }
     }
 
@@ -513,8 +525,18 @@ struct SearchView<HeaderContent: View>: View {
     private func subscribe(_ result: PodcastSearchResult) {
         Task {
             do {
-                _ = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(feedURL: result.feedURL)
+                let podcast = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(feedURL: result.feedURL)
                 Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
+                // Offer to file the new show only when folders already exist
+                // (decision F8, #764). The presentation is deferred ~0.6s so the
+                // "Now following" announcement lands before the sheet's
+                // .screenChanged utterance would otherwise preempt it — the
+                // presentation-side mirror of the picker's own 0.5s post-dismiss
+                // deferral. The picker announces its own outcome.
+                if FolderLogic.shouldOfferSubscribeToFolder(existingFolderCount: folders.count) {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    subscribeFolderPick = .podcast(podcast, mode: .add)
+                }
             } catch {
                 AppLog.networking.error("Subscribe from search failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 // Curated, VoiceOver-safe message — never the raw transport

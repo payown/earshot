@@ -77,7 +77,11 @@ struct DataSettingsView: View {
     // MARK: Export
 
     private func makeExportFile() -> ExportFile? {
-        let opml = OPMLDocument.export(podcasts.map { (title: $0.title, feedURL: $0.feedURL) })
+        // Nested export (#764): preserves the user's folder hierarchy as nested
+        // OPML groups, with unfiled podcasts as a flat top-level list, so the
+        // structure round-trips through re-import. The `podcasts` @Query still
+        // gates the button's enabled state above.
+        let opml = FolderRepository(context: context).opmlExportString()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("earshot-subscriptions.opml")
         do {
             try opml.data(using: .utf8)?.write(to: url)
