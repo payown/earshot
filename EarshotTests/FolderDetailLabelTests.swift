@@ -68,6 +68,26 @@ final class FolderDetailLabelTests: XCTestCase {
         )
     }
 
+    // MARK: Folder Inbox + listening actions (#763)
+
+    func testNewEpisodesSectionHasExplicitHeaderAndEmptyDescription() {
+        XCTAssertEqual(FolderDetailLabel.newEpisodesSectionHeader, "New episodes")
+        XCTAssertEqual(FolderDetailLabel.newEpisodesEmptyTitle, "No new episodes")
+        XCTAssertEqual(
+            FolderDetailLabel.newEpisodesEmptyDescription,
+            "New episodes from podcasts in this folder and its subfolders appear here."
+        )
+    }
+
+    func testListeningAnnouncementsCarryCountsAndFolderContext() {
+        XCTAssertEqual(FolderDetailLabel.queueAllAnnouncement(count: 1), "Added 1 episode to the queue")
+        XCTAssertEqual(FolderDetailLabel.queueAllAnnouncement(count: 3), "Added 3 episodes to the queue")
+        XCTAssertEqual(
+            FolderDetailLabel.playAllAnnouncement(count: 2, folderName: "News"),
+            "Playing 2 episodes from News. Added to the queue."
+        )
+    }
+
     // MARK: Episodes section (#759) — header, empty state, remove announcement
 
     func testEpisodesSectionHeaderIsPlainSpokenLabel() {

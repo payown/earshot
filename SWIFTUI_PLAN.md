@@ -1656,6 +1656,31 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 
 ## Data Decisions
 
+### Issue #763 — Folder-scoped Inbox and listening
+- **No schema change.** A folder scope is its de-duplicated subtree of podcasts.
+  SwiftData/Core Data cannot execute a captured-array `contains` across
+  `Episode.podcast` (the optional relationship generates an unsupported SQL
+  subquery), so `InboxQuery.folderUnplayedPredicate(podcastID:)` uses the
+  supported scalar relationship equality once per subtree podcast. The
+  repository merges those store-bounded results newest-first; it never fetches
+  the global library or faults every podcast's inverse episode collection.
+- **Scoped snapshots are event-driven.** The global `@Query` candidates live in
+  a conditional child and are torn down while a folder filter is active. The
+  folder snapshot reloads only when its podcast scope changes, Inbox membership
+  changes, queue membership changes, or the opt-in setting changes—not on the
+  five-second playback-position save that caused #736.
+- **Play/queue all shares one eligibility list.** The folder repository walks
+  subtree subscriptions once, de-duplicates episodes, applies `.newEpisode`,
+  dismissal, queue, and folder-age rules, then sorts newest-first. Queue All is
+  a single batch write; Play All batches the same order and starts its first
+  episode. Nested folders participate and multiply-filed podcasts never duplicate.
+- **Accessibility stays explicit and mutation-safe.** The Inbox's native
+  44-point menu picker is always reachable, including from an empty scope, and
+  names nested choices by full breadcrumb. Folder Detail exposes one real "New
+  episodes" heading with a spoken empty state and a native listening-actions
+  menu. Played/queued rows move VoiceOver focus to a surviving neighbor or the
+  scoped empty state, and result announcements carry the episode count.
+
 ### Issue #751 — Folders phase 1, SwiftData schema V6
 - **Purely additive, lightweight-inferrable migration (V5→V6).** The whole point
   of phase 1 is the safest possible schema bump: no attribute is reshaped and
