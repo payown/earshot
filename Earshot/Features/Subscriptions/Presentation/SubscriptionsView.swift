@@ -289,9 +289,13 @@ struct SubscriptionsView: View {
     /// multi-select — selection mode simply swaps it out (#757).
     @ViewBuilder
     private func normalRow(for podcast: Podcast, readOnlyIDs: Set<PersistentIdentifier>) -> some View {
+        // Resolve once, then hand the identical list to both convenience menu
+        // and guaranteed VoiceOver rotor so the two surfaces cannot drift (#761).
+        let actions = rotorActions(for: podcast)
         let link = NavigationLink(value: podcast) {
-            row(for: podcast, readOnlyIDs: readOnlyIDs)
+            row(for: podcast, readOnlyIDs: readOnlyIDs, actions: actions)
         }
+        .quickActionsContextMenu(actions)
         if voiceOverEnabled {
             link
         } else {
@@ -374,7 +378,11 @@ struct SubscriptionsView: View {
 
     /// The normal row's accessible wrapper: one combined element carrying the
     /// full spoken label and the Quick Actions rotor.
-    private func row(for podcast: Podcast, readOnlyIDs: Set<PersistentIdentifier>) -> some View {
+    private func row(
+        for podcast: Podcast,
+        readOnlyIDs: Set<PersistentIdentifier>,
+        actions: [QuickActionItem]
+    ) -> some View {
         let isReadOnly = readOnlyIDs.contains(podcast.persistentModelID)
         // The complete spoken label is supplied here, so resolving and combining
         // every Text/Image child is redundant. On a real device, rapid VoiceOver
@@ -385,7 +393,7 @@ struct SubscriptionsView: View {
             .accessibilityLabel(rowLabel(for: podcast, isReadOnly: isReadOnly))
             // Rotor order goes through the shared helper, which compensates for
             // the OS emitting `.accessibilityActions` children in reverse (#572).
-            .quickActionsRotor(rotorActions(for: podcast))
+            .quickActionsRotor(actions)
     }
 
     // MARK: Multi-select (#757)

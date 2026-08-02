@@ -55,4 +55,19 @@ final class QuickActionsRotorTests: XCTestCase {
         XCTAssertEqual(declared.first?.label, actions.last?.label)
         XCTAssertEqual(actions.first?.label, "Play now")
     }
+
+    func testContextMenuKeepsConfiguredOrderWithoutRotorCompensation() {
+        let actions = ["Play now", "Download", "Share"].map(item)
+        let declared = QuickActionsContextMenu.declarationOrder(actions)
+        XCTAssertEqual(declared.map(\.label), ["Play now", "Download", "Share"])
+    }
+
+    func testContextMenuOrderPreservesDestructiveMetadata() {
+        let actions = [
+            item("Share"),
+            QuickActionItem(label: "Unfollow", isDestructive: true) {},
+        ]
+        let declared = QuickActionsContextMenu.declarationOrder(actions)
+        XCTAssertEqual(declared.map(\.isDestructive), [false, true])
+    }
 }

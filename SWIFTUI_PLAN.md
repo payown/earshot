@@ -1736,6 +1736,20 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
   reuses its own Cancel (= "not now") and its deferred `Announcer` outcome, so no
   new announcement or dismissal path was added.
 
+### Issue #761 — Quick Action context menus
+- **One resolved action array feeds both surfaces.** `EpisodeRow` passes its
+  existing `buildEpisodeActions` result to both the VoiceOver Actions rotor and
+  the new long-press context menu. Library podcast rows resolve
+  `buildPodcastActions` once and share that exact array the same way; folder
+  podcast rows do likewise with their fixed "Remove from folder" action. This
+  prevents labels, availability, order, and destructive roles from drifting.
+- **The rotor remains the guaranteed accessibility path.** Context menus are a
+  convenience only and do not replace `.accessibilityActions`. Selection-mode
+  rows deliberately omit them so long press never conflicts with selection.
+  Attaching the modifier outside the existing `Button` / `NavigationLink`
+  preserves normal tap activation. Unlike the iOS rotor, context menus render
+  in declaration order, so they must not use the rotor's reversal compensation.
+
 ### Issue #751 — Folders phase 1, SwiftData schema V6
 - **Purely additive, lightweight-inferrable migration (V5→V6).** The whole point
   of phase 1 is the safest possible schema bump: no attribute is reshaped and

@@ -736,6 +736,12 @@ struct FolderDetailScreen: View {
 
     @ViewBuilder
     private func row(for podcast: Podcast) -> some View {
+        // The folder row has one fixed action rather than the configurable
+        // podcast builder. Resolve it once so its rotor and menu remain exact
+        // mirrors, including the destructive role (#761).
+        let actions = [
+            QuickActionItem(label: "Remove from folder", isDestructive: true) { remove(podcast) },
+        ]
         // `.ignore` + one explicit label (the same "title, author" a `.combine`
         // produced) — standardized with SubscriptionsView and SelectableRow so
         // the scaffold #758 inherits has a single, unambiguous row pattern.
@@ -744,9 +750,8 @@ struct FolderDetailScreen: View {
             .accessibilityLabel(rowLabel(for: podcast))
             // Routed through the shared helper (#572, #577) so this row's rotor is
             // owned by the one custom action, like every other rotor in the app.
-            .rotorActions([
-                QuickActionItem(label: "Remove from folder", isDestructive: true) { remove(podcast) },
-            ])
+            .rotorActions(actions)
+            .quickActionsContextMenu(actions)
 
         // The swipe is a sighted-only affordance, attached only when VoiceOver
         // is off: iOS mirrors swipe actions into the VoiceOver rotor, which
