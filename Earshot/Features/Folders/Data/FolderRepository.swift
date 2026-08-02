@@ -281,7 +281,14 @@ final class FolderRepository {
     func movePodcasts(_ podcasts: [Podcast], to folder: PodcastFolder) {
         guard !podcasts.isEmpty else { return }
         let ids = Set(podcasts.map(\.persistentModelID))
-        let all = (try? context.fetch(FetchDescriptor<FolderMembership>())) ?? []
+        // Abort on a fetch failure rather than proceed on an empty set: an empty
+        // fetch would skip the "remove from current folders" step but still insert
+        // the new memberships, leaving the podcast filed in BOTH folders (#F1).
+        let all: [FolderMembership]
+        do { all = try context.fetch(FetchDescriptor<FolderMembership>()) } catch {
+            AppLog.data.error("movePodcasts: membership fetch failed; aborting move: \(error.localizedDescription, privacy: .public)")
+            return
+        }
         for membership in all
         where membership.podcast.map({ ids.contains($0.persistentModelID) }) == true {
             context.delete(membership)
@@ -355,7 +362,13 @@ final class FolderRepository {
     func moveEpisodes(_ episodes: [Episode], to folder: PodcastFolder) {
         guard !episodes.isEmpty else { return }
         let ids = Set(episodes.map(\.persistentModelID))
-        let all = (try? context.fetch(FetchDescriptor<EpisodeFolderMembership>())) ?? []
+        // Abort on fetch failure so a move never degrades into an add that leaves
+        // the episode filed in both its old and new folder (#F1).
+        let all: [EpisodeFolderMembership]
+        do { all = try context.fetch(FetchDescriptor<EpisodeFolderMembership>()) } catch {
+            AppLog.data.error("moveEpisodes: membership fetch failed; aborting move: \(error.localizedDescription, privacy: .public)")
+            return
+        }
         for membership in all
         where membership.episode.map({ ids.contains($0.persistentModelID) }) == true {
             context.delete(membership)
