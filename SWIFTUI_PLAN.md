@@ -1656,6 +1656,43 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 
 ## Data Decisions
 
+### Issue #764 — Folders phase 3, OPML round-trip (nested export + subscribe-to-folder)
+- **Nested export is additive; the flat `export(_:)` stays.** `OPMLDocument` gains
+  value-type `OPMLFeed` / `OPMLFolderNode` and a new
+  `export(folders:unfiled:)` that emits the folder hierarchy as nested `<outline>`
+  groups (a folder's own feeds, then its subfolders, recursively) with unfiled
+  podcasts as a flat top-level list. The old flat `export(_:)` is kept verbatim
+  because `SettingsStoreTests` and `OPMLFileImporterTests` still call it; both
+  share one `document(body:)` envelope so heads/framing are byte-identical.
+  `OPMLDocument` stays Foundation-only (no SwiftData) so the emitter is pure and
+  unit-testable.
+- **The builder lives on `FolderRepository`.** `opmlExportString()` walks
+  `childFolders(of:)` from the roots and maps each folder's direct
+  `podcasts(in:)` onto nodes, appending `unfiledPodcasts()` at top level. It
+  carries a `Set<PersistentIdentifier>` visited guard so a corrupt parent/child
+  cycle can never spin the recursion (mirrors `FolderLogic.flattenSubtree`).
+  Settings → Data "Export podcasts (OPML)" now calls this instead of the flat map;
+  the `@Query podcasts` there still only gates the button's enabled state.
+- **Round-trip contract = each feed re-imports under the folder it is filed
+  DIRECTLY in.** The import path (`OPMLDocument.groups(from:)`) assigns a feed to
+  its nearest enclosing named outline, so a podcast in subfolder Tech (nested under
+  News) round-trips to folder "Tech", not "News". Export→import is therefore stable
+  per-folder; the visual News▸Tech nesting is flattened to leaf-folder groups on
+  re-import, which is the pre-existing import behavior — lossless for feed URL +
+  title. Empty folders emit a valid empty `<outline>` group that simply drops out
+  on re-import (groups() only surfaces folders that hold feeds).
+- **A podcast in several folders is exported once per folder.** OPML has no
+  cross-links; re-import de-dupes by first folder (existing `importOPML` behavior),
+  so no duplicate subscription results.
+- **Subscribe-to-folder is gated on `folderCount > 0` (decision F8).** After a
+  successful follow from the Add/Search flow (`SearchView.subscribe` and
+  `PodcastPreviewView.toggleFollow`), the app presents the existing shared
+  `FolderPickerView` in `.add` mode with the just-followed podcast — but only when
+  the user already has ≥1 folder. The decision is the pure, tested
+  `FolderLogic.shouldOfferSubscribeToFolder(existingFolderCount:)`. The picker
+  reuses its own Cancel (= "not now") and its deferred `Announcer` outcome, so no
+  new announcement or dismissal path was added.
+
 ### Issue #751 — Folders phase 1, SwiftData schema V6
 - **Purely additive, lightweight-inferrable migration (V5→V6).** The whole point
   of phase 1 is the safest possible schema bump: no attribute is reshaped and

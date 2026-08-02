@@ -478,6 +478,42 @@ final class FolderRepository {
         return result.sorted { $0.title < $1.title }
     }
 
+    // MARK: OPML export (folders phase 3 — #764)
+
+    /// Builds the nested OPML 2.0 document that preserves the user's folder
+    /// hierarchy: every top-level folder becomes a group holding the podcasts filed
+    /// directly in it and then its subfolders (recursively), and the unfiled
+    /// podcasts follow as a flat top-level list. A podcast filed in several folders
+    /// appears once under each — OPML has no cross-links, and re-import de-dupes by
+    /// first folder, so this stays lossless for feed URL + title. This is what
+    /// Settings → Data wires to "Export podcasts (OPML)". New in folders phase 3.
+    func opmlExportString() -> String {
+        var visited = Set<PersistentIdentifier>()
+        let roots = childFolders(of: nil).map { node(for: $0, visited: &visited) }
+        let unfiled = unfiledPodcasts().map {
+            OPMLDocument.OPMLFeed(title: $0.title, feedURL: $0.feedURL)
+        }
+        return OPMLDocument.export(folders: roots, unfiled: unfiled)
+    }
+
+    /// Recursively maps `folder` and its subtree onto value-type export nodes. The
+    /// `visited` set guards against a corrupt parent/child cycle ever reaching the
+    /// store: a folder already emitted is not descended into again, so the walk
+    /// terminates (mirrors ``FolderLogic/flattenSubtree(_:)``'s identity guard).
+    private func node(
+        for folder: PodcastFolder,
+        visited: inout Set<PersistentIdentifier>
+    ) -> OPMLDocument.OPMLFolderNode {
+        guard visited.insert(folder.persistentModelID).inserted else {
+            return OPMLDocument.OPMLFolderNode(name: folder.name, feeds: [], children: [])
+        }
+        let feeds = podcasts(in: folder).map {
+            OPMLDocument.OPMLFeed(title: $0.title, feedURL: $0.feedURL)
+        }
+        let children = childFolders(of: folder).map { node(for: $0, visited: &visited) }
+        return OPMLDocument.OPMLFolderNode(name: folder.name, feeds: feeds, children: children)
+    }
+
     /// Deletes every ``EpisodeFolderMembership`` pointing at any of `folders`.
     /// That join has no inverse on ``PodcastFolder``, so SwiftData does not
     /// cascade it when a folder is deleted — these rows would otherwise dangle.

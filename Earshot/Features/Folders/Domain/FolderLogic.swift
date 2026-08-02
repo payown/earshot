@@ -26,6 +26,16 @@ enum FolderLogic {
         }
     }
 
+    // MARK: Subscribe-to-folder (folders phase 3 — #764)
+
+    /// Whether to offer "Add to folder…" right after a successful subscribe
+    /// (decision F8): only when the user already has at least one folder. A user
+    /// with no folders is not interrupted with a picker they'd have to populate
+    /// first — they can file the show later from the Library. New in phase 3.
+    static func shouldOfferSubscribeToFolder(existingFolderCount count: Int) -> Bool {
+        count > 0
+    }
+
     // MARK: Nesting (folders phase 1 — #752)
 
     /// Hard cap on how many parent/child links any traversal will follow before

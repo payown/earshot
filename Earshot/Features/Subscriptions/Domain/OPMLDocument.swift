@@ -11,17 +11,82 @@ enum OPMLDocument {
             let title = escape(podcast.title)
             return "    <outline type=\"rss\" text=\"\(title)\" title=\"\(title)\" xmlUrl=\"\(escape(podcast.feedURL))\"/>"
         }.joined(separator: "\n")
-        return """
+        return document(body: outlines)
+    }
+
+    /// A single podcast feed in the export tree. Value type so export stays free
+    /// of SwiftData; the data layer maps its `Podcast`s onto these.
+    struct OPMLFeed: Equatable {
+        let title: String
+        let feedURL: String
+    }
+
+    /// A folder in the export tree: its display name, the feeds filed **directly**
+    /// in it (not in a subfolder), and its nested subfolders. Recursive so an
+    /// arbitrarily deep folder hierarchy round-trips through nested `<outline>`
+    /// groups. New in folders phase 3 (#764).
+    struct OPMLFolderNode: Equatable {
+        let name: String
+        let feeds: [OPMLFeed]
+        let children: [OPMLFolderNode]
+    }
+
+    /// An OPML 2.0 document that preserves the user's folder hierarchy: each folder
+    /// becomes a group `<outline text="Folder">` containing its own feeds and then
+    /// its subfolders (recursively), and the `unfiled` podcasts are written as a
+    /// flat list at the top level. This is the export the app wires to "Export
+    /// podcasts (OPML)" so a user's structure round-trips (import → export → import
+    /// is stable). Empty folders emit an empty group and simply drop out on
+    /// re-import, since ``groups(from:)`` only surfaces folders that hold feeds.
+    static func export(folders: [OPMLFolderNode], unfiled: [OPMLFeed]) -> String {
+        var lines: [String] = []
+        for folder in folders {
+            lines.append(contentsOf: outlineLines(for: folder, depth: 1))
+        }
+        for feed in unfiled {
+            lines.append(feedLine(for: feed, depth: 1))
+        }
+        return document(body: lines.joined(separator: "\n"))
+    }
+
+    /// Wraps a pre-rendered `<body>` in the shared OPML 2.0 envelope so the flat and
+    /// nested exports produce byte-identical heads and framing.
+    private static func document(body: String) -> String {
+        """
         <?xml version="1.0" encoding="UTF-8"?>
         <opml version="2.0">
           <head>
             <title>Earshot Podcasts</title>
           </head>
           <body>
-        \(outlines)
+        \(body)
           </body>
         </opml>
         """
+    }
+
+    /// Renders a folder group and everything nested inside it. `depth` is measured
+    /// in two-space indent steps below `<body>` (top-level folders sit at depth 1,
+    /// i.e. four spaces, matching the flat export's outline indentation).
+    private static func outlineLines(for folder: OPMLFolderNode, depth: Int) -> [String] {
+        let pad = String(repeating: "  ", count: depth + 1)
+        let name = escape(folder.name)
+        var lines = ["\(pad)<outline text=\"\(name)\" title=\"\(name)\">"]
+        for feed in folder.feeds {
+            lines.append(feedLine(for: feed, depth: depth + 1))
+        }
+        for child in folder.children {
+            lines.append(contentsOf: outlineLines(for: child, depth: depth + 1))
+        }
+        lines.append("\(pad)</outline>")
+        return lines
+    }
+
+    /// Renders one feed outline at the given `depth`.
+    private static func feedLine(for feed: OPMLFeed, depth: Int) -> String {
+        let pad = String(repeating: "  ", count: depth + 1)
+        let title = escape(feed.title)
+        return "\(pad)<outline type=\"rss\" text=\"\(title)\" title=\"\(title)\" xmlUrl=\"\(escape(feed.feedURL))\"/>"
     }
 
     /// Extracts feed URLs (`xmlUrl=`) from an OPML document. Order-preserving and
