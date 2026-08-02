@@ -32,7 +32,14 @@ struct FoldersScreen: View {
             } else {
                 List {
                     ForEach(Array(folders.enumerated()), id: \.element.persistentModelID) { index, folder in
-                        let link = NavigationLink(value: folder) {
+                        // Closure-based push, NOT NavigationLink(value:): the Library
+                        // stack's path is typed `[Podcast]` (RootView.libraryPath), so
+                        // a value-based push of a PodcastFolder can never enter the path
+                        // and silently does nothing. A closure link bypasses the typed
+                        // path — the same mechanism that reaches FoldersScreen itself.
+                        let link = NavigationLink {
+                            FolderDetailScreen(folder: folder)
+                        } label: {
                             row(for: folder)
                         }
                         // The drag handle (`.onMove`) stays for sighted users; these
@@ -106,10 +113,6 @@ struct FoldersScreen: View {
                 }
             }
         }
-        // NOTE: the PodcastFolder navigationDestination now lives at the Library
-        // stack root (SubscriptionsView). Declaring it here — inside a view that
-        // is itself pushed via a closure NavigationLink — failed to register, so
-        // folder rows would not open. Do not re-add it here.
         .alert("New folder", isPresented: $showingCreate) {
             TextField("Folder name", text: $newName)
             Button("Create") { create() }

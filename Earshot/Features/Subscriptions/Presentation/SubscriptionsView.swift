@@ -216,13 +216,6 @@ struct SubscriptionsView: View {
             Text("This removes \(podcast.title) and its episodes. This can't be undone.")
         }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
-        // Folder drill-down destination must live at the Library stack root, not
-        // inside the closure-pushed FoldersScreen — a navigationDestination(for:)
-        // declared in a pushed view fails to register, so the value-based folder
-        // links (FoldersScreen rows + FolderDetailScreen subfolders) resolved to
-        // nothing and double-tap did not navigate. Registered here alongside the
-        // Podcast destination so every PodcastFolder push in this stack resolves.
-        .navigationDestination(for: PodcastFolder.self) { FolderDetailScreen(folder: $0) }
         .task { loadPodcasts() }
         // Confirm the reorder for VoiceOver: the menu dismisses and the list
         // silently re-sorts, so without this the change gives no feedback. Mirrors

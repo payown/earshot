@@ -309,10 +309,13 @@ struct FolderDetailScreen: View {
     }
 
     private func subfolderRow(for child: PodcastFolder, index: Int) -> some View {
-        // The drill-down link resolves against the `PodcastFolder` destination
-        // declared by FoldersScreen at the root of this stack, so tapping pushes
-        // another FolderDetailScreen for the child.
-        let link = NavigationLink(value: child) {
+        // Closure-based push, NOT NavigationLink(value:): the Library stack's path
+        // is typed `[Podcast]` (RootView.libraryPath), so a value-based push of a
+        // PodcastFolder never enters the path. A closure link pushes another
+        // FolderDetailScreen for the child directly.
+        let link = NavigationLink {
+            FolderDetailScreen(folder: child)
+        } label: {
             subfolderRowContent(for: child)
         }
         .accessibilityLabel(
