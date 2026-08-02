@@ -19,6 +19,7 @@ enum SettingsReset {
         deleteAll(Bookmark.self, context)
         deleteAll(PodcastFolder.self, context)
         deleteAll(FolderMembership.self, context)
+        deleteAll(EpisodeFolderMembership.self, context) // one-way to Episode, no cascade (#756)
         deleteAll(RecentlyExpired.self, context)
         deleteAll(QuickActionConfig.self, context)
         deleteAll(AppSetting.self, context)

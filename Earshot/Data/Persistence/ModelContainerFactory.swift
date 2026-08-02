@@ -87,7 +87,7 @@ enum ModelContainerFactory {
     /// Registers the real schema so the (empty) app tree renders normally.
     @MainActor
     private static func inMemoryContainer() -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV5.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
         do {
             let memory = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
             return try ModelContainer(for: schema, configurations: memory)
@@ -149,7 +149,7 @@ enum ModelContainerFactory {
 
     /// An ephemeral in-memory container for tests and previews.
     static func makeInMemory() throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV5.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: config)
     }

@@ -318,4 +318,97 @@ final class PodcastSettingsViewTests: XCTestCase {
         let threeX = PodcastSettingsView.speedOptionsForTesting.first { $0.value == 3.0 }
         XCTAssertNotNil(threeX, "Speed options must include 3.0×")
     }
+
+    // MARK: Folders section (#754)
+    //
+    // The Folders section reads `FolderRepository.folders(containing:)` and
+    // renders each folder by its `FolderLogic.pathString`, or a single
+    // "Not in any folder" row when empty. These tests drive the repo the section
+    // reads from and validate the display strings/labels the section produces.
+
+    func testPodcastNotInAnyFolderShowsEmptyStateLabel() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        let repo = FolderRepository(context: ctx)
+        _ = repo.createFolder(name: "News") // a folder exists, but p isn't in it
+
+        XCTAssertTrue(
+            repo.folders(containing: p).isEmpty,
+            "A podcast added to no folder must report zero containing folders"
+        )
+        XCTAssertEqual(
+            PodcastSettingsView.notInAnyFolderText, "Not in any folder",
+            "The empty-state row must read 'Not in any folder'"
+        )
+    }
+
+    func testFolderRowLabelsUseFullPath() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        let repo = FolderRepository(context: ctx)
+        let news = repo.createFolder(name: "News")
+        let daily = repo.createSubfolder(named: "Daily", under: news)
+        repo.add(p, to: daily)
+
+        let containing = repo.folders(containing: p)
+        XCTAssertEqual(containing.count, 1, "The podcast belongs to exactly one folder")
+        XCTAssertEqual(
+            containing.map { FolderLogic.pathString($0) },
+            ["News › Daily"],
+            "A folder row must be labelled with its full breadcrumb path, not just its name"
+        )
+    }
+
+    func testTogglingMembershipAddsThenRemoves() {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx)
+        let repo = FolderRepository(context: ctx)
+        let folder = repo.createFolder(name: "News")
+
+        XCTAssertTrue(repo.folders(containing: p).isEmpty, "starts in no folder")
+
+        // Toggle on — the picker's add path.
+        repo.add(p, to: folder)
+        XCTAssertEqual(
+            repo.folders(containing: p).map(\.name), ["News"],
+            "Adding membership must place the podcast in the folder immediately"
+        )
+
+        // Toggle off — the picker's remove path.
+        repo.remove(p, from: folder)
+        XCTAssertTrue(
+            repo.folders(containing: p).isEmpty,
+            "Removing membership must take the podcast back out of the folder immediately"
+        )
+    }
+
+    func testMembershipAnnouncementNamesTheFolderPath() {
+        XCTAssertEqual(
+            PodcastFolderPickerView.membershipAnnouncement(added: true, path: "News › Daily"),
+            "Added to News › Daily"
+        )
+        XCTAssertEqual(
+            PodcastFolderPickerView.membershipAnnouncement(added: false, path: "News"),
+            "Removed from News"
+        )
+    }
+
+    func testPickerHierarchyIsDepthFirstParentBeforeChild() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let news = repo.createFolder(name: "News")
+        let daily = repo.createSubfolder(named: "Daily", under: news)
+        let comedy = repo.createFolder(name: "Comedy")
+
+        let ordered = PodcastFolderPickerView.orderedHierarchy(from: repo.folders())
+
+        // Parent appears immediately before its child; siblings keep sortOrder
+        // (News before Comedy).
+        XCTAssertEqual(
+            ordered.map(\.name), ["News", "Daily", "Comedy"],
+            "The picker lists folders nested: a top-level root then its children before the next root"
+        )
+        XCTAssertEqual(daily.parent?.persistentModelID, news.persistentModelID)
+        XCTAssertNil(comedy.parent)
+    }
 }

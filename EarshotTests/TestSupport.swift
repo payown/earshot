@@ -23,6 +23,7 @@ enum TestStore {
         wipe(ctx, Bookmark.self)
         wipe(ctx, PodcastFolder.self)
         wipe(ctx, FolderMembership.self)
+        wipe(ctx, EpisodeFolderMembership.self)
         wipe(ctx, RecentlyExpired.self)
         wipe(ctx, QuickActionConfig.self)
         wipe(ctx, AppSetting.self)

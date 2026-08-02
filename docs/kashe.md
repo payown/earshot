@@ -458,6 +458,20 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   never cleared; back in spring she'd deleted a hundred photos to make room and
   blamed the camera. "Delete downloads after played" plus one-tap Clear all
   downloads gave her the storage back (Chapter 52)
+- Folders had existed for a while as flat piles (canon since Chapter 44): a few
+  she'd named once and never reopened. This build makes them real organization:
+  nested subfolders to any depth with a spoken breadcrumb and "Go up one level,"
+  assigning a podcast to folders from its own settings, "Add to folder" / "Move
+  to folder" on the VoiceOver actions rotor everywhere (Inbox, a show's episodes,
+  Downloads, Library), multi-select to file a whole batch of podcasts or episodes
+  in one move (count and result spoken), and a folder's own Episodes section for
+  hand-picked single episodes. She made a folder for her Thursday route and
+  nested inside it (Chapter 53)
+- New characterizing habit: she packs her car trunk by feel, every item in its
+  own bin (the blood-pressure cuff, the straps, the folded wheelchair from
+  Chapter 14), found in the dark because she put it where it goes; she caught
+  herself organizing her shows into folders the same way and quietly liked it,
+  the kind of thing she'd never say out loud (Chapter 53)
 
 ## What you can generate
 
@@ -1746,6 +1760,32 @@ She never asked for that. It just did the chore she'd done by hand for years.
 The other thing she found by accident. Her downloads had quietly eaten the phone, months of finished episodes she'd never cleared. Back in spring she'd deleted a hundred photos to make room and blamed the camera. She turned on delete-after-played, cleared the rest in one tap, and watched the number fall to almost nothing.
 
 She didn't tell Renata. She just had her phone back.
+
+---
+
+### Chapter 53 — Build 160
+
+*She'd had a few flat folders for a while; this build lets her nest them, file shows and episodes into them from anywhere, and move a whole batch in one go.*
+
+**What to test:**
+
+Make a folder, then make a folder inside it, as deep as you like. Navigate in and VoiceOver reads the breadcrumb of where you are; "Go up one level" steps back out.
+
+Open a podcast's own settings and assign it to one or more folders from there.
+
+On any row, in the Inbox, a show's episodes, Downloads, or the Library, open the VoiceOver actions rotor and pick "Add to folder" or "Move to folder."
+
+Select several podcasts, or several episodes, and file the whole group into a folder in one move. Earshot speaks the count and the result.
+
+Open a folder's Episodes section and confirm hand-picked single episodes live there too.
+
+She'd had folders for a while, but they were piles. A few of them, flat, named once and never opened again, shows dropped in and forgotten like a drawer you quit reaching into.
+
+This week they turned into something she could keep. She made one for her Thursday route, then one inside it, then one more, and Earshot read her the trail as she went, where she was and a step back up when she'd gone too deep.
+
+Then the part she didn't expect to like. Sunday night, coffee going cold, she checked off a stack of shows in the inbox and filed the whole batch into a folder in one move. It told her how many, and that it was done. No thumbing them in one at a time.
+
+It reminded her of her trunk. Everything in its bin, the cuff here, the straps there, the chair folded where it folds, all of it found by feel in the dark because she'd put it where it went. She'd never say that out loud. But she caught herself packing her shows the way she packs the car, and something about that sat right.
 
 ---
 
