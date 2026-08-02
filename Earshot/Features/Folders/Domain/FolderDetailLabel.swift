@@ -34,6 +34,21 @@ enum FolderDetailLabel {
         "Moved \(name) to position \(position) of \(count)"
     }
 
+    // MARK: Folder Inbox + listening actions (folders phase 3 — #763)
+
+    static let newEpisodesSectionHeader = "New episodes"
+    static let newEpisodesEmptyTitle = "No new episodes"
+    static let newEpisodesEmptyDescription =
+        "New episodes from podcasts in this folder and its subfolders appear here."
+
+    static func queueAllAnnouncement(count: Int) -> String {
+        "Added \(count) \(count == 1 ? "episode" : "episodes") to the queue"
+    }
+
+    static func playAllAnnouncement(count: Int, folderName: String) -> String {
+        "Playing \(count) \(count == 1 ? "episode" : "episodes") from \(folderName). Added to the queue."
+    }
+
     // MARK: Episodes section (folders phase 2 — #759)
 
     /// The header for the Episodes section — the hand-picked episodes filed

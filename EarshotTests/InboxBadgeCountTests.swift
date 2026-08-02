@@ -130,6 +130,76 @@ final class InboxBadgeCountTests: XCTestCase {
         XCTAssertFalse(guids.contains("played-2"))
     }
 
+    /// #763: a folder-filtered Inbox must push podcast membership into the store
+    /// query. Only the supplied podcast matches; the usual played/dismissed/excluded
+    /// rules remain intact.
+    func testFolderUnplayedPredicateScopesInStoreAndKeepsInboxRules() throws {
+        let ctx = TestStore.freshContext()
+        let inside = podcast(ctx, "Inside")
+        let outside = podcast(ctx, "Outside")
+        let excluded = podcast(ctx, "Excluded")
+        excluded.inboxExcluded = true
+
+        episode(ctx, "inside-new", podcast: inside)
+        episode(ctx, "inside-played", podcast: inside, played: true)
+        episode(ctx, "outside-new", podcast: outside)
+        episode(ctx, "excluded-new", podcast: excluded)
+        try ctx.save()
+
+        let predicate = InboxQuery.folderUnplayedPredicate(podcastID: inside.persistentModelID)
+        let fetched = try ctx.fetch(FetchDescriptor<Episode>(predicate: predicate))
+        let inbox = InboxRepository(context: ctx).inbox(from: fetched)
+
+        XCTAssertEqual(inbox.map(\.guid), ["inside-new"])
+    }
+
+    func testFolderInboxEmptySubtreeMatchesNothing() throws {
+        let ctx = TestStore.freshContext()
+        let show = podcast(ctx, "Show")
+        episode(ctx, "new", podcast: show)
+        let folder = FolderRepository(context: ctx).createFolder(name: "Empty")
+        try ctx.save()
+
+        XCTAssertTrue(InboxRepository(context: ctx).inboxEpisodes(in: folder).isEmpty)
+    }
+
+    func testFolderInboxIsSubtreeAwareAndHonorsOptInOnly() throws {
+        let ctx = TestStore.freshContext()
+        let included = podcast(ctx, "Included")
+        included.inboxIncluded = true
+        let normal = podcast(ctx, "Normal")
+        let outside = podcast(ctx, "Outside")
+        episode(ctx, "included-new", podcast: included)
+        episode(ctx, "normal-new", podcast: normal)
+        episode(ctx, "outside-new", podcast: outside)
+        let folders = FolderRepository(context: ctx)
+        let root = folders.createFolder(name: "Root")
+        let child = folders.createSubfolder(named: "Child", under: root)
+        folders.add(included, to: child)
+        folders.add(normal, to: root)
+        try ctx.save()
+
+        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.inboxOptInOnly)
+        let inbox = InboxRepository(context: ctx).inboxEpisodes(in: root)
+
+        XCTAssertEqual(inbox.map(\.guid), ["included-new"])
+    }
+
+    func testClearScopedInboxLeavesEpisodesOutsideScopeVisible() {
+        let ctx = TestStore.freshContext()
+        let inside = podcast(ctx, "Inside")
+        let outside = podcast(ctx, "Outside")
+        let insideEpisode = episode(ctx, "inside", podcast: inside)
+        let outsideEpisode = episode(ctx, "outside", podcast: outside)
+        try? ctx.save()
+
+        InboxRepository(context: ctx).clearInbox([insideEpisode])
+
+        XCTAssertTrue(insideEpisode.inboxDismissed)
+        XCTAssertFalse(outsideEpisode.inboxDismissed)
+        XCTAssertEqual(InboxRepository(context: ctx).inboxEpisodes().map(\.guid), ["outside"])
+    }
+
     /// #736: the badge no longer polls the store on every save — it recomputes
     /// only when it receives `.earshotInboxDidChange`. So the inbox-mutating
     /// operations must post it. Clearing the inbox is one such operation.

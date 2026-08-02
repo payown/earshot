@@ -175,7 +175,7 @@ final class FolderRepositoryTests: XCTestCase {
 
     // MARK: Queueing + age limit
 
-    func testAddFolderToQueuePicksNewestUnplayedPerPodcast() {
+    func testAddFolderToQueueAddsAllEligibleEpisodes() {
         let ctx = TestStore.freshContext()
         let repo = FolderRepository(context: ctx)
         let folder = repo.createFolder(name: "F")
@@ -184,16 +184,42 @@ final class FolderRepositoryTests: XCTestCase {
         repo.add(p1, to: folder)
         repo.add(p2, to: folder)
 
-        makeEpisode(ctx, p1, guid: "p1-old", pubDate: now.addingTimeInterval(-86_400))
+        let p1Old = makeEpisode(ctx, p1, guid: "p1-old", pubDate: now.addingTimeInterval(-86_400))
         let p1New = makeEpisode(ctx, p1, guid: "p1-new", pubDate: now)
         makeEpisode(ctx, p1, guid: "p1-played", pubDate: now.addingTimeInterval(86_400), status: .played)
+        let dismissed = makeEpisode(
+            ctx, p1, guid: "p1-dismissed",
+            pubDate: now.addingTimeInterval(120), dismissed: true
+        )
         let p2Ep = makeEpisode(ctx, p2, guid: "p2", pubDate: now.addingTimeInterval(-3_600))
 
         let count = repo.addFolderToQueue(folder, now: now.addingTimeInterval(3_600))
 
-        XCTAssertEqual(count, 2)
+        XCTAssertEqual(count, 3)
+        XCTAssertEqual(p1Old.status, .inQueue)
         XCTAssertEqual(p1New.status, .inQueue)
         XCTAssertEqual(p2Ep.status, .inQueue)
+        XCTAssertEqual(dismissed.status, .newEpisode)
+    }
+
+    func testAddFolderToQueueIncludesNestedFoldersAndDeduplicatesPodcasts() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let child = repo.createSubfolder(named: "Child", under: root)
+        let podcast = makePodcast(ctx, "Nested")
+        repo.add(podcast, to: root)
+        repo.add(podcast, to: child)
+        let older = makeEpisode(ctx, podcast, guid: "older", pubDate: now.addingTimeInterval(-60))
+        let newer = makeEpisode(ctx, podcast, guid: "newer", pubDate: now)
+
+        let eligible = repo.unplayedEpisodesToQueue(in: root, now: now)
+        let count = repo.addFolderToQueue(root, now: now)
+
+        XCTAssertEqual(eligible.map(\.guid), ["newer", "older"])
+        XCTAssertEqual(count, 2, "Each episode queues once even when its podcast is filed twice")
+        XCTAssertEqual(older.status, .inQueue)
+        XCTAssertEqual(newer.status, .inQueue)
     }
 
     func testAgeLimitSkipsStaleEpisodes() {

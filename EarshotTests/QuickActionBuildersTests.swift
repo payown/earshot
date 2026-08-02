@@ -56,6 +56,27 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertTrue(opened)
     }
 
+    func testEpisodeQueueActionsInvokeFocusHookBeforeMutation() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        var calls = 0
+        let items = buildEpisodeActions(
+            episode: episode,
+            order: [.playNow, .addToQueueTop, .addToQueueBottom, .markPlayed],
+            player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx,
+            onShowNotes: {},
+            onShare: {},
+            onBookmarks: {},
+            onWillQueue: { calls += 1 }
+        )
+
+        items.forEach { $0.run() }
+
+        XCTAssertEqual(calls, 3, "Only the three actions that queue an episode invoke the focus hook")
+    }
+
     func testQueueActionsDropAllMovesInNoneMode() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)

@@ -423,35 +423,61 @@ final class FolderRepository {
 
     // MARK: Queueing
 
-    /// The newest unplayed (`.newEpisode`, still in the inbox) episode for each
-    /// podcast in `folder`, gathered newest-first and filtered by the folder's
-    /// queue age limit. This is what "Add folder to queue" enqueues.
-    func latestUnplayedToQueue(in folder: PodcastFolder, now: Date = .now) -> [Episode] {
-        var picks: [Episode] = []
-        for podcast in podcasts(in: folder) {
-            let newest = podcast.episodes
-                .filter { $0.status == .newEpisode && !$0.inboxDismissed }
-                .sorted { FolderLogic.byPubDateDescending($0.pubDate, $1.pubDate) }
-                .first
-            guard let episode = newest,
-                  FolderLogic.passesAgeLimit(
-                      pubDate: episode.pubDate,
-                      ageLimitDays: folder.queueAgeLimitDays,
-                      now: now
-                  )
-            else { continue }
-            picks.append(episode)
+    /// Every new, undismissed episode belonging to a podcast anywhere in
+    /// `folder`'s subtree, newest first and filtered by the folder's queue age
+    /// limit (#763). Podcasts filed more than once in the subtree are
+    /// de-duplicated by ``subtreeSubscriptions(of:)``; episode identity is also
+    /// guarded so corrupt/duplicate relationships can never enqueue twice.
+    ///
+    /// This supersedes the old one-newest-per-direct-podcast behavior: "Play
+    /// all" and "Add all to queue" now mean ALL eligible episodes, including
+    /// those in nested folders. Episodes with no date continue to pass the age
+    /// rule and sort last, matching ``FolderLogic/passesAgeLimit``.
+    func unplayedEpisodesToQueue(in folder: PodcastFolder, now: Date = .now) -> [Episode] {
+        var seen = Set<PersistentIdentifier>()
+        var candidates: [Episode] = []
+        for podcast in subtreeSubscriptions(of: folder) {
+            // Use the same scalar store predicate as the folder Inbox instead of
+            // touching `podcast.episodes`, which can fault a huge inverse
+            // relationship into memory on a large library (#736).
+            let descriptor = FetchDescriptor<Episode>(
+                predicate: InboxQuery.folderUnplayedPredicate(
+                    podcastID: podcast.persistentModelID
+                )
+            )
+            for episode in (try? context.fetch(descriptor)) ?? []
+            where seen.insert(episode.persistentModelID).inserted {
+                candidates.append(episode)
+            }
         }
-        return picks.sorted { FolderLogic.byPubDateDescending($0.pubDate, $1.pubDate) }
+        return candidates
+            .filter { episode in
+                episode.status == .newEpisode &&
+                !episode.inboxDismissed &&
+                episode.queueItem == nil &&
+                FolderLogic.passesAgeLimit(
+                    pubDate: episode.pubDate,
+                    ageLimitDays: folder.queueAgeLimitDays,
+                    now: now
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.pubDate != rhs.pubDate {
+                    return FolderLogic.byPubDateDescending(lhs.pubDate, rhs.pubDate)
+                }
+                if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                return lhs.guid < rhs.guid
+            }
     }
 
-    /// Adds the folder's latest unplayed episodes to the back of the queue,
-    /// honouring the folder's age limit. Returns the number queued.
+    /// Adds ALL eligible episodes in the folder subtree to the back of the queue
+    /// in newest-first order, honoring the folder's age limit (#763). One batch
+    /// repository call performs one queue fetch + compaction regardless of the
+    /// number added. Returns the number queued.
     @discardableResult
     func addFolderToQueue(_ folder: PodcastFolder, now: Date = .now) -> Int {
-        let episodes = latestUnplayedToQueue(in: folder, now: now)
-        let queue = QueueRepository(context: context)
-        for episode in episodes { queue.add(episode) }
+        let episodes = unplayedEpisodesToQueue(in: folder, now: now)
+        QueueRepository(context: context).add(episodes)
         if !episodes.isEmpty {
             AppLog.player.info("Queued \(episodes.count) episode(s) from folder \(folder.name, privacy: .public)")
         }
