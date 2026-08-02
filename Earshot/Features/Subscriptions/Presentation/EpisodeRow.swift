@@ -67,6 +67,10 @@ struct EpisodeRow: View {
         // emitting `.accessibilityActions` children in reverse (#572). The default
         // double-tap and hint above keep the UN-reversed `actions.first`.
         .quickActionsRotor(actions)
+        // Long press is a convenience for sighted users (#761). It receives the
+        // exact same resolved array as the rotor above; the Button's normal tap
+        // remains the first configured action.
+        .quickActionsContextMenu(actions)
     }
 
     private var isNowPlaying: Bool {

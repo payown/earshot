@@ -34,6 +34,15 @@ enum QuickActionsRotor {
     }
 }
 
+/// Context menus do not share the OS rotor's reversed-emission behavior. They
+/// must receive the resolved actions in their original order so the visible
+/// menu exactly matches Settings and the row's default action (#761).
+enum QuickActionsContextMenu {
+    static func declarationOrder<T>(_ actions: [T]) -> [T] {
+        actions
+    }
+}
+
 extension View {
     /// Exposes `actions` as VoiceOver custom actions (the Actions rotor) so the
     /// rotor announces them in the order the array lists them, compensating for
@@ -58,5 +67,26 @@ extension View {
     /// `.accessibilityActions` with a raw `ForEach` (#572).
     func quickActionsRotor(_ actions: [QuickActionItem]) -> some View {
         rotorActions(actions)
+    }
+
+    /// Adds a sighted long-press convenience menu without replacing the row's
+    /// primary tap or its VoiceOver Actions rotor. Callers hand this the SAME
+    /// resolved array they pass to ``quickActionsRotor(_:)`` / ``rotorActions(_:)``
+    /// so labels, availability, destructive roles, and ordering cannot drift.
+    @ViewBuilder
+    func quickActionsContextMenu(_ actions: [QuickActionItem]) -> some View {
+        if actions.isEmpty {
+            self
+        } else {
+            contextMenu {
+                ForEach(QuickActionsContextMenu.declarationOrder(actions)) { action in
+                    Button(role: action.isDestructive ? .destructive : nil) {
+                        action.run()
+                    } label: {
+                        Text(action.label)
+                    }
+                }
+            }
+        }
     }
 }

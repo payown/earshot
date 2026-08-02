@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Quick Actions: press and hold any normal episode row, a Library podcast row,
+  or a podcast inside a folder to open the same actions available from the
+  VoiceOver Actions rotor, in the same configured order. A normal tap still
+  performs the row's existing primary action. (#761)
 - Folders: the folders feature is now complete. You can nest folders inside folders to any depth, and VoiceOver reads a spoken breadcrumb of where you are with a "Go up one level" control to step back out. Assign a podcast to one or more folders straight from its own settings screen. "Add to folder" and "Move to folder" are available everywhere on the VoiceOver actions rotor — in the Inbox, a podcast's episode list, Downloads, and the Library. Multi-select lets you pick many podcasts or many episodes and file the whole group in one move, with the count and result spoken. Folders can also hold hand-picked individual episodes in their own Episodes section. All of it is VoiceOver-first and accessibility-reviewed.
 - Downloads: episodes you add to the queue now download automatically for offline playback, whether they were queued by hand or by auto-queue. It's on by default and respects your "Download on Wi-Fi only" setting, so a queued episode waits for Wi-Fi just like any other download. You can turn it off under Settings, Downloads ("Auto-download queued episodes"). Episodes already downloaded or downloading are left as-is, so nothing downloads twice.
 - Downloads: a new "Delete downloads after played" setting (Settings, Downloads) automatically removes an episode's download once you finish it or mark it played, so storage clears itself as you listen. It's off by default and applies to every show. It covers all the ways an episode gets marked played: finishing playback, the "Mark as played" swipe or action, and "Mark all as played". Only completed downloads are removed, so an in-progress download is never interrupted.
