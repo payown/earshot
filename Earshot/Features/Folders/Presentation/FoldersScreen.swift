@@ -106,7 +106,10 @@ struct FoldersScreen: View {
                 }
             }
         }
-        .navigationDestination(for: PodcastFolder.self) { FolderDetailScreen(folder: $0) }
+        // NOTE: the PodcastFolder navigationDestination now lives at the Library
+        // stack root (SubscriptionsView). Declaring it here — inside a view that
+        // is itself pushed via a closure NavigationLink — failed to register, so
+        // folder rows would not open. Do not re-add it here.
         .alert("New folder", isPresented: $showingCreate) {
             TextField("Folder name", text: $newName)
             Button("Create") { create() }
