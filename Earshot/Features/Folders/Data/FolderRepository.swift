@@ -478,6 +478,30 @@ final class FolderRepository {
         return result.sorted { $0.title < $1.title }
     }
 
+    /// Maps each podcast to the top-level folder whose subtree contains it, for
+    /// subtree-aware queue grouping (#762). A podcast filed in a nested subfolder
+    /// resolves to its top-level ancestor; a podcast filed under several top-level
+    /// folders resolves to the first in ``childFolders(of:)`` order (`sortOrder`
+    /// then name) — deterministic, and one bucket per podcast. Podcasts in no
+    /// folder are absent from the result; callers treat a missing key as
+    /// "Unfiled".
+    ///
+    /// Built from the folder structure only: its cost scales with the number of
+    /// folders and podcast memberships, NOT with the queue or episode count, and
+    /// it is meant to be built ONCE per grouping pass so each episode is a single
+    /// O(1) dictionary lookup rather than an O(folders) walk (performance.md).
+    func rootFolderByPodcast() -> [PersistentIdentifier: PersistentIdentifier] {
+        var map: [PersistentIdentifier: PersistentIdentifier] = [:]
+        for root in childFolders(of: nil) {
+            let rootID = root.persistentModelID
+            for podcast in subtreeSubscriptions(of: root) {
+                let pid = podcast.persistentModelID
+                if map[pid] == nil { map[pid] = rootID }
+            }
+        }
+        return map
+    }
+
     /// Deletes every ``EpisodeFolderMembership`` pointing at any of `folders`.
     /// That join has no inverse on ``PodcastFolder``, so SwiftData does not
     /// cascade it when a folder is deleted — these rows would otherwise dangle.

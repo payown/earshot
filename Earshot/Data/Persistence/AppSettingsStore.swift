@@ -45,6 +45,10 @@ enum SettingsKey {
     /// Global played/unheard filter for the Downloads screen (#641). Not
     /// per-podcast — Downloads spans every show — so it's a single scalar key.
     static let downloadsPlayedFilter = "downloads_played_filter"
+    // Queue grouping mode (#762). Began life as a "Group by podcast" bool and
+    // now stores a ``QueueGrouping`` raw value under the SAME key; the legacy
+    // `"true"`/`"false"` strings are migrated on read by
+    // ``AppSettingsStore/queueGrouping()``.
     static let groupQueueEpisodes = "group_queue_episodes"
     static let showEpisodeNumbers = "show_episode_numbers"
     // Whether playing an episode (the "Play now" default row action) also opens
@@ -168,7 +172,10 @@ enum SettingsDefault {
     /// VoiceOver rotor can turn them off (#515).
     static let chapterNavButtonsVisible = true
     static let inboxOptInOnly = false
-    static let groupQueueEpisodes = false
+    /// The Queue starts ungrouped (a flat play-order list) until the user picks a
+    /// grouping mode (#762). Replaces the old `groupQueueEpisodes = false` bool;
+    /// the legacy stored value is migrated in ``AppSettingsStore/queueGrouping()``.
+    static let queueGrouping: QueueGrouping = .none
     /// Season/episode numbering in rows is OFF by default: most feeds don't set
     /// these, and users who don't care shouldn't have it read out (#452).
     static let showEpisodeNumbers = false
@@ -335,6 +342,30 @@ final class AppSettingsStore {
 
     func setEpisodeSortOrder(_ order: EpisodeSortOrder) {
         setRawValue(order.rawValue, for: SettingsKey.episodeSortOrder)
+    }
+
+    // MARK: Queue grouping (#762)
+
+    /// The Queue's grouping mode, migrating the legacy boolean value stored under
+    /// the same key. The setting shipped as a "Group by podcast" bool (#444);
+    /// existing stores hold `"true"` / `"false"`, which map to
+    /// ``QueueGrouping/podcast`` / ``QueueGrouping/none`` so a user who had
+    /// grouping on is not silently reset. A ``QueueGrouping`` raw value (written
+    /// by ``setQueueGrouping(_:)`` once the user touches the new three-way
+    /// control) parses directly and takes precedence. An unset key returns the
+    /// default (``SettingsDefault/queueGrouping``, `.none`).
+    func queueGrouping() -> QueueGrouping {
+        guard let raw = rawValue(SettingsKey.groupQueueEpisodes) else {
+            return SettingsDefault.queueGrouping
+        }
+        if let mode = QueueGrouping(rawValue: raw) { return mode }
+        // Legacy bool: only the exact "true" grouped the queue (by podcast);
+        // every other legacy value ("false") means no grouping.
+        return (raw as NSString).boolValue ? .podcast : .none
+    }
+
+    func setQueueGrouping(_ mode: QueueGrouping) {
+        setRawValue(mode.rawValue, for: SettingsKey.groupQueueEpisodes)
     }
 
     // MARK: Appearance (#461)

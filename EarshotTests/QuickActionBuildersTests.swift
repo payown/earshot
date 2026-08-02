@@ -88,6 +88,22 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Move up", "Play now", "Move down"])
     }
 
+    func testQueueActionsFolderGroupedModeKeepsSameAccessibleMoveActions() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let items = buildQueueActions(
+            episode: episode,
+            order: [.moveToTop, .moveUp, .playNow, .moveDown, .moveToBottom],
+            moveMode: .groupedByFolder(rootByPodcast: [:]),
+            player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx,
+            onShowNotes: {},
+            onFocus: { _ in }
+        )
+        XCTAssertEqual(items.map(\.label), ["Move up", "Play now", "Move down"])
+    }
+
     func testQueueActionsFlatModeIncludesAllMovesInConfiguredOrder() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)
@@ -457,6 +473,22 @@ final class QuickActionBuildersTests: XCTestCase {
             order.map(\.guid), ["x1", "x2", "x3", "y1", "y2"],
             "Grouped mode must match the grouped-by-podcast order the screen actually renders"
         )
+    }
+
+    func testDisplayedQueueOrder_folderGroupedMode_returnsProvidedFolderOrder() {
+        let ctx = TestStore.freshContext()
+        _ = makeInterleavedShowsQueue(ctx)
+        let repo = QueueRepository(context: ctx)
+        let podcastGroups = repo.groupedQueue()
+        let reversedGroups = Array(podcastGroups.reversed())
+
+        let order = displayedQueueOrder(
+            moveMode: .groupedByFolder(rootByPodcast: [:]),
+            flat: repo.queue(),
+            grouped: reversedGroups
+        )
+
+        XCTAssertEqual(order.map(\.guid), ["y1", "y2", "x1", "x2", "x3"])
     }
 
     /// End-to-end regression for #629: with grouped display, removing X1 (whose

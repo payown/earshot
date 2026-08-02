@@ -914,7 +914,7 @@ final class PlayerService {
     /// boundary settings — except an episode the user explicitly "Play next"-ed
     /// bypasses the group-end stop (#487). Returns nil to STOP.
     ///
-    /// When the Queue screen is displaying episodes grouped by podcast
+    /// When the Queue screen is displaying episodes grouped by podcast or folder
     /// (``SettingsKey/groupQueueEpisodes``), "next" walks that SAME grouped
     /// order (#627 follow-up) — not the raw, possibly interleaved queue order,
     /// which the grouped display never shows the user in the first place.
@@ -943,18 +943,35 @@ final class PlayerService {
         let groupSetting = settings?.bool(
             SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds
         ) ?? SettingsDefault.continueAfterGroupEnds
-        let groupedDisplay = settings?.bool(
-            SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes
-        ) ?? SettingsDefault.groupQueueEpisodes
+        let grouping = settings?.queueGrouping() ?? SettingsDefault.queueGrouping
 
-        let orderedPairs: [(id: PersistentIdentifier, groupKey: PersistentIdentifier?)]
-        if groupedDisplay {
-            let forGrouping = queued.map { (id: $0.persistentModelID, key: $0.podcast?.persistentModelID) }
+        // Group boundaries always use the same key as the Queue display. Folder
+        // mode resolves nested memberships to their top-level folder once, then
+        // each episode is an O(1) lookup; None and Podcast retain podcast
+        // boundaries for the "Continue after group ends" setting.
+        let rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+        if grouping == .folder, let context {
+            rootByPodcast = FolderRepository(context: context).rootFolderByPodcast()
+        } else {
+            rootByPodcast = [:]
+        }
+        let groupKey: (Episode) -> QueueGroup.Kind = { episode in
+            if grouping == .folder, let podcastID = episode.podcast?.persistentModelID {
+                if let rootID = rootByPodcast[podcastID] { return .folder(rootID) }
+                return .unfiled
+            }
+            if let podcastID = episode.podcast?.persistentModelID { return .podcast(podcastID) }
+            return .unfiled
+        }
+
+        let orderedPairs: [(id: PersistentIdentifier, groupKey: QueueGroup.Kind)]
+        if grouping != .none {
+            let forGrouping = queued.map { (id: $0.persistentModelID, key: groupKey($0)) }
             orderedPairs = QueueLogic.group(forGrouping).flatMap { group in
                 group.ids.map { (id: $0, groupKey: group.key) }
             }
         } else {
-            orderedPairs = queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) }
+            orderedPairs = queued.map { (id: $0.persistentModelID, groupKey: groupKey($0)) }
         }
 
         let candidate = PlaybackLogic.nextUpID(
@@ -963,7 +980,7 @@ final class PlayerService {
         return PlaybackLogic.nextUpHonoringBoundaries(
             queue: orderedPairs,
             after: finished.persistentModelID,
-            currentGroupKey: finished.podcast?.persistentModelID,
+            currentGroupKey: groupKey(finished),
             continueAfterEpisode: continueEpisode,
             continueAfterGroupEnds: PlaybackLogic.continueAfterGroupEnds(
                 setting: groupSetting, nextCandidate: candidate, playNextOverrides: playNextOverrides

@@ -84,7 +84,11 @@ struct PlaybackSettingsView: View {
             }
 
             Section("Queue") {
-                Toggle("Group queue by podcast", isOn: $settings.groupQueueEpisodes)
+                Picker("Group queue", selection: $settings.queueGrouping) {
+                    ForEach(QueueGrouping.allCases) { mode in
+                        Text(mode.optionLabel).tag(mode)
+                    }
+                }
             }
         }
         .navigationTitle("Playback")

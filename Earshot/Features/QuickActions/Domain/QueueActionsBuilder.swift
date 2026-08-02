@@ -6,11 +6,24 @@ import SwiftData
 ///   queue position.
 /// - `.grouped`: only Move up / down, swapping within the row's podcast group
 ///   (top/bottom are ambiguous across groups, so they're dropped).
+/// - `.groupedByFolder`: same as `.grouped` but swapping within the row's FOLDER
+///   group (#762), keyed by the subtree-aware `rootByPodcast` map so a row can
+///   move past a different podcast that shares its folder.
 /// - `.none`: no move actions at all.
-enum QueueMoveMode {
+enum QueueMoveMode: Equatable {
     case flat
     case grouped
+    case groupedByFolder(rootByPodcast: [PersistentIdentifier: PersistentIdentifier])
     case none
+
+    /// Whether the mode renders episodes in grouped sections (podcast or folder),
+    /// which drives display-order helpers like ``displayedQueueOrder(moveMode:flat:grouped:)``.
+    var isGrouped: Bool {
+        switch self {
+        case .grouped, .groupedByFolder: return true
+        case .flat, .none: return false
+        }
+    }
 }
 
 /// Builds runnable actions for a queue row in the user's configured `order`.
@@ -103,6 +116,10 @@ func buildQueueActions(
             case .grouped:
                 return QuickActionItem(label: "Move up", isDestructive: false,
                                        run: moved(repo.moveUpWithinGroup, "Moved \(episode.title) up"))
+            case let .groupedByFolder(rootByPodcast):
+                return QuickActionItem(label: "Move up", isDestructive: false,
+                                       run: moved({ repo.moveUpWithinFolderGroup($0, rootByPodcast: rootByPodcast) },
+                                                  "Moved \(episode.title) up"))
             case .none:
                 return nil
             }
@@ -114,6 +131,10 @@ func buildQueueActions(
             case .grouped:
                 return QuickActionItem(label: "Move down", isDestructive: false,
                                        run: moved(repo.moveDownWithinGroup, "Moved \(episode.title) down"))
+            case let .groupedByFolder(rootByPodcast):
+                return QuickActionItem(label: "Move down", isDestructive: false,
+                                       run: moved({ repo.moveDownWithinFolderGroup($0, rootByPodcast: rootByPodcast) },
+                                                  "Moved \(episode.title) down"))
             case .none:
                 return nil
             }
@@ -133,8 +154,8 @@ func neighborID(of episode: Episode, in list: [Episode]) -> PersistentIdentifier
 }
 
 /// The queue order the Queue screen is ACTUALLY rendering right now, matching
-/// `moveMode` exactly — flat, or grouped by podcast with groups flattened in
-/// display order. Feeds ``neighborID(of:in:)`` so VoiceOver focus after a
+/// `moveMode` exactly — flat, grouped by podcast, or grouped by folder with
+/// groups flattened in display order. Feeds ``neighborID(of:in:)`` so VoiceOver focus after a
 /// removal (#457) always lands on the row really adjacent on screen.
 ///
 /// #629: before this existed, the flat queue was used unconditionally
@@ -143,5 +164,5 @@ func neighborID(of episode: Episode, in list: [Episode]) -> PersistentIdentifier
 /// order, code silently used another" class of bug as #627's auto-advance.
 @MainActor
 func displayedQueueOrder(moveMode: QueueMoveMode, flat: [Episode], grouped: [QueueGroup]) -> [Episode] {
-    moveMode == .grouped ? grouped.flatMap(\.episodes) : flat
+    moveMode.isGrouped ? grouped.flatMap(\.episodes) : flat
 }

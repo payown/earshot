@@ -463,9 +463,107 @@ final class QueueRepositoryTests: XCTestCase {
 
         let groups = repo.groupedQueue()
 
-        XCTAssertEqual(groups.map { $0.podcast.title }, ["A", "B"])
+        XCTAssertEqual(groups.map(\.title), ["A", "B"])
+        XCTAssertEqual(groups.compactMap { $0.podcast?.title }, ["A", "B"])
         XCTAssertEqual(groups[0].episodes.map(\.title), ["Ep a1", "Ep a2"])
         XCTAssertEqual(groups[1].episodes.map(\.title), ["Ep b1"])
+    }
+
+    func testGroupedQueueByFolderUsesTopLevelAncestorAndIncludesUnfiled() {
+        let ctx = TestStore.freshContext()
+        let folders = FolderRepository(context: ctx)
+        let news = folders.createFolder(name: "News")
+        let tech = folders.createSubfolder(named: "Tech", under: news)
+        let comedy = folders.createFolder(name: "Comedy")
+        let pa = makePodcast(ctx, "A")
+        let pb = makePodcast(ctx, "B")
+        let pu = makePodcast(ctx, "Unfiled")
+        folders.add(pa, to: tech)
+        folders.add(pb, to: comedy)
+
+        let a1 = makeEpisode(ctx, "a1", podcast: pa)
+        let b1 = makeEpisode(ctx, "b1", podcast: pb)
+        let a2 = makeEpisode(ctx, "a2", podcast: pa)
+        let u1 = makeEpisode(ctx, "u1", podcast: pu)
+        let repo = QueueRepository(context: ctx)
+        [a1, b1, a2, u1].forEach(repo.add)
+
+        let grouping = repo.groupedQueueByFolder()
+
+        XCTAssertEqual(grouping.groups.map(\.title), ["News", "Comedy", "Unfiled"])
+        XCTAssertEqual(grouping.groups[0].episodes.map(\.title), ["Ep a1", "Ep a2"])
+        XCTAssertEqual(grouping.groups[1].episodes.map(\.title), ["Ep b1"])
+        XCTAssertEqual(grouping.groups[2].episodes.map(\.title), ["Ep u1"])
+        XCTAssertEqual(grouping.rootByPodcast[pa.persistentModelID], news.persistentModelID)
+        XCTAssertNil(grouping.rootByPodcast[pu.persistentModelID])
+    }
+
+    func testFolderGroupingUsesFirstTopLevelFolderForMultiplyFiledPodcast() {
+        let ctx = TestStore.freshContext()
+        let folders = FolderRepository(context: ctx)
+        let first = folders.createFolder(name: "First")
+        let second = folders.createFolder(name: "Second")
+        let podcast = makePodcast(ctx, "A")
+        folders.add(podcast, to: second)
+        folders.add(podcast, to: first)
+        let episode = makeEpisode(ctx, "a1", podcast: podcast)
+        let repo = QueueRepository(context: ctx)
+        repo.add(episode)
+
+        let grouping = repo.groupedQueueByFolder()
+
+        XCTAssertEqual(grouping.groups.map(\.title), ["First"])
+        XCTAssertEqual(grouping.rootByPodcast[podcast.persistentModelID], first.persistentModelID)
+    }
+
+    func testMoveWithinFolderGroupCanCrossPodcastBoundary() {
+        let ctx = TestStore.freshContext()
+        let folders = FolderRepository(context: ctx)
+        let shared = folders.createFolder(name: "Shared")
+        let other = folders.createFolder(name: "Other")
+        let pa = makePodcast(ctx, "A")
+        let pb = makePodcast(ctx, "B")
+        let pc = makePodcast(ctx, "C")
+        folders.add(pa, to: shared)
+        folders.add(pb, to: shared)
+        folders.add(pc, to: other)
+        let a = makeEpisode(ctx, "a", podcast: pa)
+        let c = makeEpisode(ctx, "c", podcast: pc)
+        let b = makeEpisode(ctx, "b", podcast: pb)
+        let repo = QueueRepository(context: ctx)
+        [a, c, b].forEach(repo.add)
+        let map = repo.groupedQueueByFolder().rootByPodcast
+
+        XCTAssertTrue(repo.moveDownWithinFolderGroup(a, rootByPodcast: map))
+
+        XCTAssertEqual(titles(repo), ["Ep b", "Ep c", "Ep a"])
+    }
+
+    func testFolderGroupActionsOperateOnWholeFolderAndKeepOtherOrder() {
+        let ctx = TestStore.freshContext()
+        let folders = FolderRepository(context: ctx)
+        let first = folders.createFolder(name: "First")
+        let second = folders.createFolder(name: "Second")
+        let pa = makePodcast(ctx, "A")
+        let pb = makePodcast(ctx, "B")
+        let pc = makePodcast(ctx, "C")
+        folders.add(pa, to: first)
+        folders.add(pb, to: second)
+        folders.add(pc, to: first)
+        let a = makeEpisode(ctx, "a", podcast: pa)
+        let b = makeEpisode(ctx, "b", podcast: pb)
+        let c = makeEpisode(ctx, "c", podcast: pc)
+        let repo = QueueRepository(context: ctx)
+        [a, b, c].forEach(repo.add)
+        let grouping = repo.groupedQueueByFolder()
+        let firstKey = QueueGroup.Kind.folder(first.persistentModelID)
+
+        XCTAssertTrue(repo.moveGroupDown(firstKey, rootByPodcast: grouping.rootByPodcast))
+        XCTAssertEqual(titles(repo), ["Ep b", "Ep a", "Ep c"])
+
+        let front = repo.playGroup(firstKey, rootByPodcast: grouping.rootByPodcast)
+        XCTAssertEqual(front?.title, "Ep a")
+        XCTAssertEqual(titles(repo), ["Ep a", "Ep c", "Ep b"])
     }
 
     func testPlayGroupBringsPodcastEpisodesToFront() {

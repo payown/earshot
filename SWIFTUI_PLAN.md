@@ -1656,6 +1656,24 @@ BackgroundFeedRefresher.swift, PodcastSettingsView.swift, EarshotApp.swift, Root
 
 ## Data Decisions
 
+### Issue #762 — Queue grouping by folder
+- **A value migration, not a schema migration.** The existing
+  `group_queue_episodes` setting keeps its key but now stores `none`, `podcast`,
+  or `folder`. `AppSettingsStore.queueGrouping()` maps the shipped string
+  booleans (`true`/`false`) to `podcast`/`none`, so existing choices survive
+  without touching the SwiftData schema.
+- **One subtree map per grouping pass.** `FolderRepository.rootFolderByPodcast()`
+  resolves every filed podcast to one deterministic top-level folder. Queue
+  display, row moves, group moves, playback ordering, and group-boundary
+  auto-advance all reuse that map instead of walking folder relationships per
+  episode or per action.
+- **Accessibility semantics stay parallel to podcast grouping.** The native
+  three-way `Picker` is named "Group queue"; switching modes is announced once.
+  Each folder header remains one heading element named "[Folder], N episodes"
+  and exposes the existing Play Group, Move Group Up/Down, Sort, and Shuffle
+  rotor actions in the same order. Header focus is keyed by `QueueGroup.Kind`,
+  including a stable `unfiled` key, so reordering never strands VoiceOver.
+
 ### Issue #751 — Folders phase 1, SwiftData schema V6
 - **Purely additive, lightweight-inferrable migration (V5→V6).** The whole point
   of phase 1 is the safest possible schema bump: no attribute is reshaped and

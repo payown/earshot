@@ -253,6 +253,7 @@
 		CA3E5F0D6D2AF976C2915FE3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8F6B5988DC34B2D9EE199ADF /* Assets.xcassets */; };
 		CB3FEFDDF49448736D653994 /* AppearanceSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6957506EF32CD52A4F68D4E4 /* AppearanceSettingsTests.swift */; };
 		CC7A16ED1DC9D6162A5CB09D /* BackgroundFeedRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 584E2B098C7168FC03024400 /* BackgroundFeedRefresher.swift */; };
+		CCD5A41EF58E2CECB1987FAF /* QueueGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0774E9B31F82D27095046449 /* QueueGrouping.swift */; };
 		CD3C1A2F3E77A8D5F0BAD992 /* OnboardingOPMLImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DCB8C22497B68AC497A8046 /* OnboardingOPMLImportTests.swift */; };
 		CD9B7F9761FCFB75AAB67DDC /* OptionStepLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDFB91871F32318649D4749 /* OptionStepLogic.swift */; };
 		D0EAF35C0542B99058B990D8 /* InboxExpirationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21426D34A6272D33878D6A13 /* InboxExpirationServiceTests.swift */; };
@@ -342,6 +343,7 @@
 		03715203B50D5DE8AE64CEB5 /* PodcastFolderPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastFolderPickerView.swift; sourceTree = "<group>"; };
 		044D6ACA2D0B0C41F1170B2A /* DownloadPathsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadPathsTests.swift; sourceTree = "<group>"; };
 		064DC8E32EAD773F3D9DC9F5 /* TipPurchaseSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipPurchaseSource.swift; sourceTree = "<group>"; };
+		0774E9B31F82D27095046449 /* QueueGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueGrouping.swift; sourceTree = "<group>"; };
 		08020597D3A064F49F78DCA0 /* EpisodeListFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeListFilterTests.swift; sourceTree = "<group>"; };
 		0BCA26B22E21066A09DA54E7 /* ExpirationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpirationService.swift; sourceTree = "<group>"; };
 		0BDEE459C0D777CB9F63272B /* PodcastCapPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastCapPolicy.swift; sourceTree = "<group>"; };
@@ -1104,6 +1106,7 @@
 		6DAB824EFE7BC297071AE534 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				0774E9B31F82D27095046449 /* QueueGrouping.swift */,
 				71BD562BB534B0133D9733ED /* QueueLogic.swift */,
 			);
 			path = Domain;
@@ -1818,6 +1821,7 @@
 				BACED0BD92ADFC48635B4E08 /* PrivacySettingsView.swift in Sources */,
 				0675702E99E2C73A84C8083D /* ProductCatalogService.swift in Sources */,
 				937D978ADE376CB4C7C1DCD2 /* QueueActionsBuilder.swift in Sources */,
+				CCD5A41EF58E2CECB1987FAF /* QueueGrouping.swift in Sources */,
 				D2ACE04F1A94DF80EF1D670E /* QueueItem.swift in Sources */,
 				EE76279FA2A9C1C0E53A4F21 /* QueueItemAction.swift in Sources */,
 				EF4531D32B453FFD8667C030 /* QueueLogic.swift in Sources */,
@@ -2046,7 +2050,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 159;
+				CURRENT_PROJECT_VERSION = 160;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -2131,7 +2135,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 159;
+				CURRENT_PROJECT_VERSION = 160;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
