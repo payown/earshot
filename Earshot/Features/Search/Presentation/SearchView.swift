@@ -202,7 +202,14 @@ struct SearchView<HeaderContent: View>: View {
             if scope.showsEpisodes && !matchedEpisodes.isEmpty {
                 Section(header: Text("Episodes").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedEpisodes) { episode in
-                        EpisodeRow(episode: episode, actions: episodeActions(episode))
+                        EpisodeRow(
+                            episode: episode,
+                            deferredActions: availableEpisodeActions(
+                                episode: episode,
+                                order: quickActions.episodeActions
+                            ),
+                            performAction: { action in perform(action, for: episode) }
+                        )
                     }
                 }
             }
@@ -451,7 +458,7 @@ struct SearchView<HeaderContent: View>: View {
         .accessibilityHint("Double tap to play from the bookmarked spot")
     }
 
-    private func episodeActions(_ episode: Episode) -> [QuickActionItem] {
+    private func perform(_ action: EpisodeAction, for episode: Episode) {
         // Deliberately no `onUnfollow` (default nil), so the `.unfollow` Quick
         // Action is omitted from search rows' rotors (#572). Unfollow from
         // search already lives on the result row's Follow toggle (#499), and
@@ -463,11 +470,11 @@ struct SearchView<HeaderContent: View>: View {
         // no `onAddToFolder`/`onMoveToFolder` (default nil) omits both from the
         // rotor — the user subscribes first, then files from Inbox/Library.
         buildEpisodeActions(
-            episode: episode, order: quickActions.episodeActions, player: player,
+            episode: episode, order: [action], player: player,
             downloads: downloads, context: context,
             onShowNotes: { showNotesEpisode = episode }, onShare: { sharingEpisode = episode },
             onBookmarks: { bookmarksEpisode = episode }
-        )
+        ).first?.run()
     }
 
     /// Debounces directory searches: each keystroke cancels the previous in-flight

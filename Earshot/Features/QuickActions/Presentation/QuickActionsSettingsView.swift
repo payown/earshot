@@ -72,7 +72,7 @@ struct QuickActionsSettingsView: View {
                     .rotorActions(
                         QuickActionMoveLogic.targets(index: index, count: actions.count)
                             .map { target in
-                                QuickActionItem(label: target.label, isDestructive: false) {
+                                QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
                                     move(IndexSet(integer: index), target.destinationOffset)
                                     Announcer.announce("Moved \(name) to position \(target.resultingIndex + 1) of \(actions.count)")
                                     focusedActionID = focusID

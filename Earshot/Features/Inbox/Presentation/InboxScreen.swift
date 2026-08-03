@@ -582,16 +582,14 @@ struct InboxScreen: View {
     /// omissions exactly mirror `buildEpisodeActions`; every other action has a
     /// runner on this surface.
     private func availableActions(for episode: Episode) -> [EpisodeAction] {
-        quickActions.episodeActions.filter { action in
-            switch action {
-            case .exportAudio:
-                return !episode.audioURL.isEmpty
-            case .unfollow:
-                return episode.podcast != nil
-            default:
-                return true
-            }
-        }
+        availableEpisodeActions(
+            episode: episode,
+            order: quickActions.episodeActions,
+            supportsUnfollow: true,
+            supportsExport: true,
+            supportsAddToFolder: true,
+            supportsMoveToFolder: true
+        )
     }
 
     /// Resolve only the action the user actually activated. This retains the

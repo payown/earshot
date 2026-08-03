@@ -69,7 +69,7 @@ struct FoldersScreen: View {
                             .rotorActions(
                                 QuickActionMoveLogic.targets(index: index, count: folders.count)
                                     .map { target in
-                                        QuickActionItem(label: target.label, isDestructive: false) {
+                                        QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
                                             move(IndexSet(integer: index), target.destinationOffset)
                                             Announcer.announce(
                                                 "Moved \(folder.name) to position \(target.resultingIndex + 1) of \(folders.count)"
@@ -77,7 +77,7 @@ struct FoldersScreen: View {
                                             focusedFolderID = folder.persistentModelID
                                         }
                                     }
-                                    + [QuickActionItem(label: "Delete folder", isDestructive: true) {
+                                    + [QuickActionItem(id: "deleteFolder", label: "Delete folder", isDestructive: true) {
                                         pendingDelete = folder
                                     }]
                             )

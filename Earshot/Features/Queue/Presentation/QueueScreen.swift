@@ -209,14 +209,14 @@ struct QueueScreen: View {
         _ group: QueueGroup, folderGrouping: QueueFolderGrouping?
     ) -> [QuickActionItem] {
         [
-            QuickActionItem(label: "Play Group", isDestructive: false) {
+            QuickActionItem(id: "playGroup", label: "Play Group", isDestructive: false) {
                 if let episode = playGroup(group, folderGrouping: folderGrouping) {
                     // playFromEpisodeList so Play Group honors #562 (Item 1).
                     player.playFromEpisodeList(episode)
                     Announcer.announce("Playing \(group.title)")
                 }
             },
-            QuickActionItem(label: "Move Group Up", isDestructive: false) {
+            QuickActionItem(id: "moveGroupUp", label: "Move Group Up", isDestructive: false) {
                 // Announce + refocus only on a real move; an edge no-op
                 // (group already first / last) must stay silent.
                 if moveGroupUp(group, folderGrouping: folderGrouping) {
@@ -224,21 +224,21 @@ struct QueueScreen: View {
                     focusedGroup = group.kind
                 }
             },
-            QuickActionItem(label: "Move Group Down", isDestructive: false) {
+            QuickActionItem(id: "moveGroupDown", label: "Move Group Down", isDestructive: false) {
                 if moveGroupDown(group, folderGrouping: folderGrouping) {
                     Announcer.announce("Moved \(group.title) down")
                     focusedGroup = group.kind
                 }
             },
-            QuickActionItem(label: "Sort Newest First", isDestructive: false) {
+            QuickActionItem(id: "sortNewest", label: "Sort Newest First", isDestructive: false) {
                 sortNewest(group, folderGrouping: folderGrouping)
                 Announcer.announce("Sorted newest first")
             },
-            QuickActionItem(label: "Sort Oldest First", isDestructive: false) {
+            QuickActionItem(id: "sortOldest", label: "Sort Oldest First", isDestructive: false) {
                 sortOldest(group, folderGrouping: folderGrouping)
                 Announcer.announce("Sorted oldest first")
             },
-            QuickActionItem(label: "Shuffle Group", isDestructive: false) {
+            QuickActionItem(id: "shuffleGroup", label: "Shuffle Group", isDestructive: false) {
                 shuffleGroup(group, folderGrouping: folderGrouping)
                 Announcer.announce("Shuffled")
             },
@@ -304,29 +304,27 @@ struct QueueScreen: View {
             position: position,
             total: total,
             focusedEpisode: $focusedEpisode,
-            actions: buildQueueActions(
-                episode: episode,
-                order: quickActions.queueActions,
-                moveMode: moveMode,
-                player: player,
-                downloads: downloads,
-                context: context,
-                onShowNotes: { showNotesEpisode = episode },
-                onFocus: { focusedEpisode = $0 },
-                // The queue AS DISPLAYED (#457, #629): with a search active, the
-                // post-remove focus neighbor must be the adjacent VISIBLE row —
-                // a hidden row's id matches no rendered element, so focus would
-                // be dropped. With no search the filter passes the full queue
-                // through unchanged, preserving the original behavior. And with
-                // grouping on, "adjacent" means adjacent in the GROUPED order
-                // actually rendered (#629), not the raw flat queue order.
-                visibleQueue: {
-                    let ordered = displayedQueueOrder(
-                        moveMode: moveMode, flat: repo.queue(), grouped: displayedGroups
-                    )
-                    return EpisodeSearchFilter.filter(ordered, query: searchText)
-                }
-            )
+            actions: availableQueueActions(order: quickActions.queueActions, moveMode: moveMode),
+            performAction: { action in
+                buildQueueActions(
+                    episode: episode,
+                    order: [action],
+                    moveMode: moveMode,
+                    player: player,
+                    downloads: downloads,
+                    context: context,
+                    onShowNotes: { showNotesEpisode = episode },
+                    onFocus: { focusedEpisode = $0 },
+                    // Resolve the displayed order only when removal is activated,
+                    // never while SwiftUI is recycling queue rows.
+                    visibleQueue: {
+                        let ordered = displayedQueueOrder(
+                            moveMode: moveMode, flat: repo.queue(), grouped: displayedGroups
+                        )
+                        return EpisodeSearchFilter.filter(ordered, query: searchText)
+                    }
+                ).first?.run()
+            }
         )
     }
 
@@ -468,7 +466,8 @@ private struct QueueRow: View {
     let position: Int?
     let total: Int?
     @AccessibilityFocusState.Binding var focusedEpisode: PersistentIdentifier?
-    let actions: [QuickActionItem]
+    let actions: [QueueItemAction]
+    let performAction: (QueueItemAction) -> Void
 
     var body: some View {
         let primary = actions.first
@@ -483,7 +482,7 @@ private struct QueueRow: View {
         )
 
         Button {
-            primary?.run()
+            if let primary { performAction(primary) }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.title)
@@ -547,13 +546,13 @@ private struct QueueRow: View {
         // there's something to speak: `.accessibilityValue("")` makes VoiceOver
         // utter a stray pause, so a played/unknown-duration row omits it.
         .accessibilityValueIfPresent(accessibilityValue)
-        .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
+        .accessibilityHint(primary.map { "Double tap to \($0.label(for: episode).lowercased())" } ?? "")
         .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
         // Rotor order goes through the shared helper, which compensates for the
         // OS emitting `.accessibilityActions` children in reverse (#572). The
         // default double-tap and hint above keep the UN-reversed `actions.first`.
-        .quickActionsRotor(actions)
-        .modifier(SightedRowActions(actions: actions))
+        .queueActionsRotor(actions, episode: episode, perform: performAction)
+        .modifier(SightedRowActions(episode: episode, actions: actions, performAction: performAction))
     }
 
     /// True when this row's episode is the one loaded in the player, compared by
@@ -620,7 +619,9 @@ private extension View {
 /// from queue" appearing twice). With VoiceOver running these are redundant, so
 /// they're omitted — leaving `.accessibilityActions` as the single rotor source.
 private struct SightedRowActions: ViewModifier {
-    let actions: [QuickActionItem]
+    let episode: Episode
+    let actions: [QueueItemAction]
+    let performAction: (QueueItemAction) -> Void
     // Tracked by SwiftUI, so toggling VoiceOver while the Queue is on screen
     // re-evaluates and removes/restores the swipe + context actions immediately
     // (reading UIAccessibility.isVoiceOverRunning in body would not invalidate).
@@ -632,14 +633,18 @@ private struct SightedRowActions: ViewModifier {
         } else {
             content
                 .swipeActions(edge: .trailing) {
-                    ForEach(actions.filter(\.isDestructive)) { action in
-                        Button(role: .destructive) { action.run() } label: { Text(action.label) }
+                    ForEach(actions.filter { $0.isDestructive(for: episode) }) { action in
+                        Button(role: .destructive) { performAction(action) } label: {
+                            Text(action.label(for: episode))
+                        }
                     }
                 }
                 .contextMenu {
                     ForEach(actions.dropFirst()) { action in
-                        Button(role: action.isDestructive ? .destructive : nil) { action.run() } label: {
-                            Text(action.label)
+                        Button(role: action.isDestructive(for: episode) ? .destructive : nil) {
+                            performAction(action)
+                        } label: {
+                            Text(action.label(for: episode))
                         }
                     }
                 }

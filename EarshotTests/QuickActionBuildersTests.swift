@@ -63,6 +63,46 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertFalse(EpisodeAction.markPlayed.isDestructive(for: episode))
     }
 
+    func testAvailableEpisodeActionsPreserveOrderAndSurfaceCapabilities() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let order: [EpisodeAction] = [
+            .share, .unfollow, .exportAudio, .addToFolder, .moveToFolder, .playNow,
+        ]
+
+        XCTAssertEqual(
+            availableEpisodeActions(episode: episode, order: order),
+            [.share, .playNow]
+        )
+        XCTAssertEqual(
+            availableEpisodeActions(
+                episode: episode,
+                order: order,
+                supportsUnfollow: true,
+                supportsExport: true,
+                supportsAddToFolder: true,
+                supportsMoveToFolder: true
+            ),
+            order
+        )
+    }
+
+    func testAvailableEpisodeActionsRequireAudioAndPodcast() {
+        let ctx = TestStore.freshContext()
+        let episode = Episode(guid: "detached", title: "Detached", audioURL: "")
+        ctx.insert(episode)
+
+        XCTAssertEqual(
+            availableEpisodeActions(
+                episode: episode,
+                order: [.exportAudio, .unfollow, .share],
+                supportsUnfollow: true,
+                supportsExport: true
+            ),
+            [.share]
+        )
+    }
+
     func testEpisodeBookmarksActionInvokesCallback() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)
@@ -160,6 +200,32 @@ final class QuickActionBuildersTests: XCTestCase {
             onFocus: { _ in }
         )
         XCTAssertEqual(items.map(\.label), ["Move to top", "Play now", "Remove from queue"])
+    }
+
+    func testAvailableQueueActionsMirrorMoveModeWithoutBuildingRunners() {
+        let order: [QueueItemAction] = [
+            .moveToTop, .moveUp, .playNow, .moveDown, .moveToBottom,
+        ]
+        XCTAssertEqual(
+            availableQueueActions(order: order, moveMode: .none),
+            [.playNow]
+        )
+        XCTAssertEqual(
+            availableQueueActions(order: order, moveMode: .grouped),
+            [.moveUp, .playNow, .moveDown]
+        )
+        XCTAssertEqual(availableQueueActions(order: order, moveMode: .flat), order)
+    }
+
+    func testDeferredQueueMetadataMatchesDynamicBuilderMetadata() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        XCTAssertEqual(QueueItemAction.download.label(for: episode), "Download")
+        XCTAssertFalse(QueueItemAction.download.isDestructive(for: episode))
+        episode.downloadStatus = .downloaded
+        XCTAssertEqual(QueueItemAction.download.label(for: episode), "Remove download")
+        XCTAssertTrue(QueueItemAction.download.isDestructive(for: episode))
+        XCTAssertTrue(QueueItemAction.removeFromQueue.isDestructive(for: episode))
     }
 
     // MARK: #572 — configurable Unfollow on episode rows
@@ -1126,6 +1192,28 @@ final class QuickActionBuildersTests: XCTestCase {
         )
         items.first?.run()
         XCTAssertIdentical(received, p)
+    }
+
+    func testDeferredPodcastMetadataMatchesDynamicBuilderLabels() {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/a.xml", title: "Show")
+        ctx.insert(podcast)
+
+        XCTAssertEqual(PodcastAction.toggleNotifications.label(for: podcast), "Turn on notifications")
+        XCTAssertEqual(PodcastAction.toggleAutoQueue.label(for: podcast), "Turn on auto-queue")
+        XCTAssertEqual(PodcastAction.toggleInboxInclude.label(for: podcast), "Add to Inbox")
+        XCTAssertEqual(PodcastAction.toggleInboxExclude.label(for: podcast), "Exclude from Inbox")
+        XCTAssertTrue(PodcastAction.unsubscribe.isDestructive)
+        XCTAssertFalse(PodcastAction.share.isDestructive)
+
+        podcast.notificationEnabled = true
+        podcast.autoQueue = true
+        podcast.inboxIncluded = true
+        podcast.inboxExcluded = true
+        XCTAssertEqual(PodcastAction.toggleNotifications.label(for: podcast), "Turn off notifications")
+        XCTAssertEqual(PodcastAction.toggleAutoQueue.label(for: podcast), "Turn off auto-queue")
+        XCTAssertEqual(PodcastAction.toggleInboxInclude.label(for: podcast), "Remove from Inbox")
+        XCTAssertEqual(PodcastAction.toggleInboxExclude.label(for: podcast), "Include in Inbox")
     }
 
     func testDefaultPodcastActionsIncludeFolderActions() {

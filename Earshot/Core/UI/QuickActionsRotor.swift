@@ -95,12 +95,26 @@ extension View {
     /// UUID and captured closure for every action whenever SwiftUI recycles it.
     func episodeActionsRotor(
         _ actions: [EpisodeAction],
+        supplementalActions: [EpisodeRowSupplementalAction] = [],
         episode: Episode,
-        perform: @escaping (EpisodeAction) -> Void
+        perform: @escaping (EpisodeAction) -> Void,
+        performSupplemental: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
     ) -> some View {
         accessibilityActions {
-            ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
-                Button(action.label(for: episode)) { perform(action) }
+            if QuickActionsRotor.compensatesReversedEmission {
+                ForEach(supplementalActions.reversed()) { action in
+                    Button(action.label) { performSupplemental(action) }
+                }
+                ForEach(actions.reversed()) { action in
+                    Button(action.label(for: episode)) { perform(action) }
+                }
+            } else {
+                ForEach(actions) { action in
+                    Button(action.label(for: episode)) { perform(action) }
+                }
+                ForEach(supplementalActions) { action in
+                    Button(action.label) { performSupplemental(action) }
+                }
             }
         }
     }
@@ -111,10 +125,12 @@ extension View {
     @ViewBuilder
     func episodeActionsContextMenu(
         _ actions: [EpisodeAction],
+        supplementalActions: [EpisodeRowSupplementalAction] = [],
         episode: Episode,
-        perform: @escaping (EpisodeAction) -> Void
+        perform: @escaping (EpisodeAction) -> Void,
+        performSupplemental: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
     ) -> some View {
-        if actions.isEmpty {
+        if actions.isEmpty && supplementalActions.isEmpty {
             self
         } else {
             contextMenu {
@@ -123,6 +139,61 @@ extension View {
                         perform(action)
                     } label: {
                         Text(action.label(for: episode))
+                    }
+                }
+                ForEach(QuickActionsContextMenu.declarationOrder(supplementalActions)) { action in
+                    Button(role: action.isDestructive ? .destructive : nil) {
+                        performSupplemental(action)
+                    } label: {
+                        Text(action.label)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Stable-enum queue variant used by the potentially unbounded Queue list.
+    func queueActionsRotor(
+        _ actions: [QueueItemAction],
+        episode: Episode,
+        perform: @escaping (QueueItemAction) -> Void
+    ) -> some View {
+        accessibilityActions {
+            ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
+                Button(action.label(for: episode)) { perform(action) }
+            }
+        }
+    }
+
+    /// Stable-enum podcast variant used by the Library's large lazy list.
+    func podcastActionsRotor(
+        _ actions: [PodcastAction],
+        podcast: Podcast,
+        perform: @escaping (PodcastAction) -> Void
+    ) -> some View {
+        accessibilityActions {
+            ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
+                Button(action.label(for: podcast)) { perform(action) }
+            }
+        }
+    }
+
+    /// Sighted-only long-press companion for deferred podcast actions.
+    @ViewBuilder
+    func podcastActionsContextMenu(
+        _ actions: [PodcastAction],
+        podcast: Podcast,
+        perform: @escaping (PodcastAction) -> Void
+    ) -> some View {
+        if actions.isEmpty {
+            self
+        } else {
+            contextMenu {
+                ForEach(QuickActionsContextMenu.declarationOrder(actions)) { action in
+                    Button(role: action.isDestructive ? .destructive : nil) {
+                        perform(action)
+                    } label: {
+                        Text(action.label(for: podcast))
                     }
                 }
             }

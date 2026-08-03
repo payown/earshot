@@ -1,5 +1,15 @@
 import SwiftUI
 
+/// A stable, non-configurable action appended by a particular episode surface.
+/// Unlike ``QuickActionItem`` it carries no UUID or runnable closure, so it is
+/// safe to create in a recycled row. The folder detail uses this for its final
+/// destructive "Remove from folder" action.
+struct EpisodeRowSupplementalAction: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let isDestructive: Bool
+}
+
 /// One episode row. The whole row is a single accessibility element: its
 /// primary (double-tap) action is the first configured action, and every
 /// configured action is exposed as a VoiceOver custom action (the Actions
@@ -13,11 +23,6 @@ import SwiftUI
 /// That keeps a single selection component across podcast and episode
 /// multi-select instead of two divergent checkbox implementations.
 struct EpisodeRow: View {
-    private enum ActionSource {
-        case resolved([EpisodeActionItem])
-        case deferred([EpisodeAction], (EpisodeAction) -> Void)
-    }
-
     // Requires SettingsStore in the environment (injected at the app root in
     // EarshotApp). All current call sites render under that root; any future
     // #Preview or detached host must supply `.environment(SettingsStore())` or
@@ -28,8 +33,15 @@ struct EpisodeRow: View {
     // requirement as SettingsStore above: every call site renders under the app
     // root that injects PlayerService.
     @Environment(PlayerService.self) private var player
+    // Context menus are a sighted convenience. SwiftUI also promotes their
+    // buttons into VoiceOver's Actions rotor, duplicating the explicit custom
+    // actions below, so remove the menu while VoiceOver is running (#761).
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     let episode: Episode
-    private let actionSource: ActionSource
+    private let actions: [EpisodeAction]
+    private let supplementalActions: [EpisodeRowSupplementalAction]
+    private let performAction: (EpisodeAction) -> Void
+    private let performSupplementalAction: (EpisodeRowSupplementalAction) -> Void
     /// Whether the row names its podcast, visually and in the VoiceOver label.
     /// True in mixed-show lists (Inbox, Downloads) where the user can't otherwise
     /// tell which show an episode belongs to (#535); false (default) in
@@ -37,48 +49,48 @@ struct EpisodeRow: View {
     /// repeating the show on every row is noise.
     var includesPodcastName = false
 
-    init(
-        episode: Episode,
-        actions: [EpisodeActionItem],
-        includesPodcastName: Bool = false
-    ) {
-        self.episode = episode
-        self.actionSource = .resolved(actions)
-        self.includesPodcastName = includesPodcastName
-    }
-
     /// Defers runnable Quick Action construction until activation. This keeps
     /// large lazy lists cheap to recycle while preserving the configured
     /// double-tap action, VoiceOver rotor, and sighted context menu.
     init(
         episode: Episode,
         deferredActions: [EpisodeAction],
+        supplementalActions: [EpisodeRowSupplementalAction] = [],
         includesPodcastName: Bool = false,
-        performAction: @escaping (EpisodeAction) -> Void
+        performAction: @escaping (EpisodeAction) -> Void,
+        performSupplementalAction: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
     ) {
         self.episode = episode
-        self.actionSource = .deferred(deferredActions, performAction)
+        self.actions = deferredActions
+        self.supplementalActions = supplementalActions
+        self.performAction = performAction
+        self.performSupplementalAction = performSupplementalAction
         self.includesPodcastName = includesPodcastName
     }
 
     @ViewBuilder
     var body: some View {
-        switch actionSource {
-        case .resolved(let actions):
-            let primary = actions.first
-            rowButton(primaryLabel: primary?.label) {
-                primary?.run()
-            }
-            .quickActionsRotor(actions)
-            .quickActionsContextMenu(actions)
-
-        case .deferred(let actions, let perform):
-            let primary = actions.first
-            rowButton(primaryLabel: primary.map { $0.label(for: episode) }) {
-                if let primary { perform(primary) }
-            }
-            .episodeActionsRotor(actions, episode: episode, perform: perform)
-            .episodeActionsContextMenu(actions, episode: episode, perform: perform)
+        let primary = actions.first
+        let base = rowButton(primaryLabel: primary.map { $0.label(for: episode) }) {
+            if let primary { performAction(primary) }
+        }
+        .episodeActionsRotor(
+            actions,
+            supplementalActions: supplementalActions,
+            episode: episode,
+            perform: performAction,
+            performSupplemental: performSupplementalAction
+        )
+        if voiceOverEnabled {
+            base
+        } else {
+            base.episodeActionsContextMenu(
+                actions,
+                supplementalActions: supplementalActions,
+                episode: episode,
+                perform: performAction,
+                performSupplemental: performSupplementalAction
+            )
         }
     }
 

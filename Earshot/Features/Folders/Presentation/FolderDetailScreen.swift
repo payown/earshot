@@ -300,7 +300,7 @@ struct FolderDetailScreen: View {
                     .accessibilityLabel(FolderDetailLabel.breadcrumb(path: FolderLogic.folderPath(folder).map(\.name)))
                     .accessibilityAddTraits(.isHeader)
                     .rotorActions([
-                        QuickActionItem(label: "Go up one level", isDestructive: false) { goUp() },
+                        QuickActionItem(id: "goUp", label: "Go up one level", isDestructive: false) { goUp() },
                     ])
             }
         }
@@ -347,7 +347,7 @@ struct FolderDetailScreen: View {
         .rotorActions(
             QuickActionMoveLogic.targets(index: index, count: subfolders.count)
                 .map { target in
-                    QuickActionItem(label: target.label, isDestructive: false) {
+                    QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
                         moveSubfolders(IndexSet(integer: index), target.destinationOffset)
                         Announcer.announce(
                             FolderDetailLabel.moveAnnouncement(
@@ -428,8 +428,15 @@ struct FolderDetailScreen: View {
                 ForEach(displayed) { episode in
                     EpisodeRow(
                         episode: episode,
-                        actions: newEpisodeActions(for: episode),
-                        includesPodcastName: true
+                        deferredActions: availableEpisodeActions(
+                            episode: episode,
+                            order: quickActions.episodeActions,
+                            supportsExport: true,
+                            supportsAddToFolder: true,
+                            supportsMoveToFolder: true
+                        ),
+                        includesPodcastName: true,
+                        performAction: { action in performNewEpisodeAction(action, for: episode) }
                     )
                     .accessibilityFocused(
                         $focusedNewEpisodeID, equals: episode.persistentModelID
@@ -466,18 +473,28 @@ struct FolderDetailScreen: View {
     /// flips state and move VoiceOver focus after the event-driven snapshot
     /// reloads. Queue actions trigger the same reload through
     /// `.earshotQueueDidChange`.
-    private func newEpisodeActions(for episode: Episode) -> [QuickActionItem] {
+    private func performNewEpisodeAction(_ action: EpisodeAction, for episode: Episode) {
         let focusAfterRemoval = {
             focusAfterNewEpisodeLeaves(episode)
         }
-        return standardEpisodeActions(
-            for: episode,
+        buildEpisodeActions(
+            episode: episode,
+            order: [action],
+            player: player,
+            downloads: downloads,
+            context: context,
+            onShowNotes: { showNotesEpisode = episode },
+            onShare: { sharingEpisode = episode },
+            onBookmarks: { bookmarksEpisode = episode },
             onMarkPlayed: { nowPlayed in
                 guard nowPlayed else { return }
                 focusAfterRemoval()
             },
-            onWillQueue: focusAfterRemoval
-        )
+            onWillQueue: focusAfterRemoval,
+            onExport: { exportEpisode = episode },
+            onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
+            onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
+        ).first?.run()
     }
 
     private func focusAfterNewEpisodeLeaves(_ episode: Episode) {
@@ -545,10 +562,27 @@ struct FolderDetailScreen: View {
     /// folder-scoped "Remove from folder". `includesPodcastName` is on because a
     /// folder mixes shows, so each row names its podcast.
     private func episodeRow(for episode: Episode) -> some View {
-        EpisodeRow(
+        let actions = availableEpisodeActions(
             episode: episode,
-            actions: episodeActions(for: episode),
-            includesPodcastName: true
+            order: quickActions.episodeActions,
+            supportsExport: true,
+            supportsAddToFolder: true,
+            supportsMoveToFolder: true
+        )
+        // Never allow the destructive folder removal to become the primary
+        // double-tap when a future setting can hide every configured action.
+        let supplemental = actions.isEmpty ? [] : [
+            EpisodeRowSupplementalAction(
+                id: "removeFromFolder", label: "Remove from folder", isDestructive: true
+            ),
+        ]
+        return EpisodeRow(
+            episode: episode,
+            deferredActions: actions,
+            supplementalActions: supplemental,
+            includesPodcastName: true,
+            performAction: { action in performStandardEpisodeAction(action, for: episode) },
+            performSupplementalAction: { _ in removeEpisode(episode) }
         )
     }
 
@@ -559,32 +593,15 @@ struct FolderDetailScreen: View {
     /// runner are intentionally omitted: a folder's episode row is about the
     /// episode and its folder membership, and marking played here doesn't remove
     /// the row (folder membership is independent of played state).
-    private func episodeActions(for episode: Episode) -> [QuickActionItem] {
-        var actions = standardEpisodeActions(for: episode)
-        // Guard: only append when there's already at least one action, so the
-        // destructive "Remove from folder" can never become `actions.first` —
-        // which `EpisodeRow` makes the row's default double-tap. Safe today
-        // (`QuickActionStore` only reorders `episodeActions`, never empties it),
-        // but this keeps a future "disable a Quick Action" feature from turning
-        // a blind user's default gesture into a destructive removal.
-        if !actions.isEmpty {
-            actions.append(
-                QuickActionItem(label: "Remove from folder", isDestructive: true) {
-                    removeEpisode(episode)
-                }
-            )
-        }
-        return actions
-    }
-
-    private func standardEpisodeActions(
+    private func performStandardEpisodeAction(
+        _ action: EpisodeAction,
         for episode: Episode,
         onMarkPlayed: ((Bool) -> Void)? = nil,
         onWillQueue: (() -> Void)? = nil
-    ) -> [QuickActionItem] {
+    ) {
         buildEpisodeActions(
             episode: episode,
-            order: quickActions.episodeActions,
+            order: [action],
             player: player,
             downloads: downloads,
             context: context,
@@ -596,7 +613,7 @@ struct FolderDetailScreen: View {
             onExport: { exportEpisode = episode },
             onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
             onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
-        )
+        ).first?.run()
     }
 
     @ToolbarContentBuilder
@@ -740,7 +757,7 @@ struct FolderDetailScreen: View {
         // podcast builder. Resolve it once so its rotor and menu remain exact
         // mirrors, including the destructive role (#761).
         let actions = [
-            QuickActionItem(label: "Remove from folder", isDestructive: true) { remove(podcast) },
+            QuickActionItem(id: "removeFromFolder", label: "Remove from folder", isDestructive: true) { remove(podcast) },
         ]
         // `.ignore` + one explicit label (the same "title, author" a `.combine`
         // produced) — standardized with SubscriptionsView and SelectableRow so
@@ -751,7 +768,6 @@ struct FolderDetailScreen: View {
             // Routed through the shared helper (#572, #577) so this row's rotor is
             // owned by the one custom action, like every other rotor in the app.
             .rotorActions(actions)
-            .quickActionsContextMenu(actions)
 
         // The swipe is a sighted-only affordance, attached only when VoiceOver
         // is off: iOS mirrors swipe actions into the VoiceOver rotor, which
@@ -761,13 +777,15 @@ struct FolderDetailScreen: View {
         if voiceOverEnabled {
             base
         } else {
-            base.swipeActions(edge: .trailing) {
-                Button(role: .destructive) {
-                    remove(podcast)
-                } label: {
-                    Label("Remove", systemImage: "folder.badge.minus")
+            base
+                .quickActionsContextMenu(actions)
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        remove(podcast)
+                    } label: {
+                        Label("Remove", systemImage: "folder.badge.minus")
+                    }
                 }
-            }
         }
     }
 

@@ -26,6 +26,21 @@ enum QueueMoveMode: Equatable {
     }
 }
 
+/// Filters the configured order to the actions meaningful in the current queue
+/// presentation without constructing runnable UUID/closure objects per row.
+func availableQueueActions(order: [QueueItemAction], moveMode: QueueMoveMode) -> [QueueItemAction] {
+    order.filter { action in
+        switch action {
+        case .moveToTop, .moveToBottom:
+            return moveMode == .flat
+        case .moveUp, .moveDown:
+            return moveMode != .none
+        default:
+            return true
+        }
+    }
+}
+
 /// Builds runnable actions for a queue row in the user's configured `order`.
 /// Move/remove run through ``QueueRepository`` and announce the result; `onFocus`
 /// keeps VoiceOver focus oriented after the list re-renders (the moved row, or a

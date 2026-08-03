@@ -289,13 +289,20 @@ struct SubscriptionsView: View {
     /// multi-select — selection mode simply swaps it out (#757).
     @ViewBuilder
     private func normalRow(for podcast: Podcast, readOnlyIDs: Set<PersistentIdentifier>) -> some View {
-        // Resolve once, then hand the identical list to both convenience menu
-        // and guaranteed VoiceOver rotor so the two surfaces cannot drift (#761).
+        // Keep only stable enum identifiers in the row; runnable UUID/closure
+        // objects are constructed for the single action activated by the user.
         let actions = rotorActions(for: podcast)
-        let link = NavigationLink(value: podcast) {
-            row(for: podcast, readOnlyIDs: readOnlyIDs, actions: actions)
+        let performAction = { (action: PodcastAction) in
+            perform(action, for: podcast)
         }
-        .quickActionsContextMenu(actions)
+        let link = NavigationLink(value: podcast) {
+            row(
+                for: podcast,
+                readOnlyIDs: readOnlyIDs,
+                actions: actions,
+                performAction: performAction
+            )
+        }
         if voiceOverEnabled {
             link
         } else {
@@ -306,6 +313,9 @@ struct SubscriptionsView: View {
             // delete to a later, disconnected gesture. `.swipeActions` carries no
             // such assumption, so it's safe to defer.
             link
+                .podcastActionsContextMenu(
+                    actions, podcast: podcast, perform: performAction
+                )
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
                         pendingUnsubscribe = podcast
@@ -381,7 +391,8 @@ struct SubscriptionsView: View {
     private func row(
         for podcast: Podcast,
         readOnlyIDs: Set<PersistentIdentifier>,
-        actions: [QuickActionItem]
+        actions: [PodcastAction],
+        performAction: @escaping (PodcastAction) -> Void
     ) -> some View {
         let isReadOnly = readOnlyIDs.contains(podcast.persistentModelID)
         // The complete spoken label is supplied here, so resolving and combining
@@ -393,7 +404,7 @@ struct SubscriptionsView: View {
             .accessibilityLabel(rowLabel(for: podcast, isReadOnly: isReadOnly))
             // Rotor order goes through the shared helper, which compensates for
             // the OS emitting `.accessibilityActions` children in reverse (#572).
-            .quickActionsRotor(actions)
+            .podcastActionsRotor(actions, podcast: podcast, perform: performAction)
     }
 
     // MARK: Multi-select (#757)
@@ -457,7 +468,16 @@ struct SubscriptionsView: View {
     /// navigation row), so it's excluded from the rotor — never add it here or it
     /// double-navigates. See SWIFTUI_PLAN.md. Unsubscribe is destructive and
     /// routes through a confirmation dialog rather than firing immediately.
-    private func rotorActions(for podcast: Podcast) -> [QuickActionItem] {
+    private func rotorActions(for podcast: Podcast) -> [PodcastAction] {
+        quickActions.podcastActions.filter {
+            guard $0 != .openDetail else { return false }
+            if $0 == .toggleInboxInclude { return settings.inboxOptInOnly }
+            if $0 == .toggleInboxExclude { return !settings.inboxOptInOnly }
+            return true
+        }
+    }
+
+    private func perform(_ action: PodcastAction, for podcast: Podcast) {
         buildPodcastActions(
             podcast: podcast,
             // `.toggleInboxInclude` only does anything in opt-in mode (#668),
@@ -467,12 +487,7 @@ struct SubscriptionsView: View {
             // outside its intended scope. The persisted Quick Action order
             // still lists both — this is a display-time filter, not a
             // stored-order change.
-            order: quickActions.podcastActions.filter {
-                guard $0 != .openDetail else { return false }
-                if $0 == .toggleInboxInclude { return settings.inboxOptInOnly }
-                if $0 == .toggleInboxExclude { return !settings.inboxOptInOnly }
-                return true
-            },
+            order: [action],
             context: context,
             onOpenDetail: {},
             onShare: { sharingPodcast = podcast },
@@ -482,7 +497,7 @@ struct SubscriptionsView: View {
             // it, announces, and dismisses.
             onAddToFolder: { folderPickRequest = .podcast($0, mode: .add) },
             onMoveToFolder: { folderPickRequest = .podcast($0, mode: .move) }
-        )
+        ).first?.run()
     }
 
     /// Shared toggle+save+announce for opting a podcast into/out of the inbox

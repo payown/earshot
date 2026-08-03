@@ -5,15 +5,51 @@ import SwiftData
 /// queue row). The user's configured order drives both the default double-tap
 /// (first) and the VoiceOver Actions rotor order.
 struct QuickActionItem: Identifiable {
-    let id = UUID()
+    let id: String
     let label: String
     let isDestructive: Bool
     let run: () -> Void
+
+    init(
+        id: String = UUID().uuidString,
+        label: String,
+        isDestructive: Bool,
+        run: @escaping () -> Void
+    ) {
+        self.id = id
+        self.label = label
+        self.isDestructive = isDestructive
+        self.run = run
+    }
 }
 
-/// Back-compat alias: episode rows referred to this type before Quick Actions
-/// covered three content sets.
-typealias EpisodeActionItem = QuickActionItem
+/// Resolves only which configured actions this surface can expose, without
+/// constructing UUID-backed runnable items. Large lazy lists keep this stable
+/// enum array in each row and call ``buildEpisodeActions`` for the single action
+/// the user actually activates.
+func availableEpisodeActions(
+    episode: Episode,
+    order: [EpisodeAction],
+    supportsUnfollow: Bool = false,
+    supportsExport: Bool = false,
+    supportsAddToFolder: Bool = false,
+    supportsMoveToFolder: Bool = false
+) -> [EpisodeAction] {
+    order.filter { action in
+        switch action {
+        case .exportAudio:
+            return supportsExport && !episode.audioURL.isEmpty
+        case .addToFolder:
+            return supportsAddToFolder
+        case .moveToFolder:
+            return supportsMoveToFolder
+        case .unfollow:
+            return supportsUnfollow && episode.podcast != nil
+        default:
+            return true
+        }
+    }
+}
 
 /// Builds the runnable actions for `episode` in the user's configured `order`.
 /// The order is preserved exactly. Dynamic labels (Mark as played/unplayed) are

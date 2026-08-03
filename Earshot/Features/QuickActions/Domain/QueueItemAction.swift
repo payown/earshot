@@ -29,6 +29,17 @@ enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
         case .download: return "Download"
         }
     }
+
+    func label(for episode: Episode) -> String {
+        if self == .download, episode.downloadStatus == .downloaded {
+            return "Remove download"
+        }
+        return label
+    }
+
+    func isDestructive(for episode: Episode) -> Bool {
+        self == .removeFromQueue || (self == .download && episode.downloadStatus == .downloaded)
+    }
 }
 
 let defaultQueueItemActions: [QueueItemAction] = [

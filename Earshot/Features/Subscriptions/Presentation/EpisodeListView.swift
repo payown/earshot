@@ -338,45 +338,52 @@ struct EpisodeListView: View {
         } else {
             EpisodeRow(
                 episode: episode,
-                actions: buildEpisodeActions(
+                deferredActions: availableEpisodeActions(
                     episode: episode,
                     order: quickActions.episodeActions,
-                    player: player,
-                    downloads: downloads,
-                    context: context,
-                    onShowNotes: { showNotesEpisode = episode },
-                    onShare: { sharingEpisode = episode },
-                    onBookmarks: { bookmarksEpisode = episode },
-                    // Rotor "Unfollow this podcast" (#572): opens the destructive
-                    // confirmation — activation never unfollows directly.
-                    onUnfollow: { pendingUnfollow = podcast },
-                    // Under the Unheard filter, rotor "Mark as played" removes this
-                    // row (#579). The builder invokes this BEFORE the played flip,
-                    // so the neighbor is captured while the row is still visible;
-                    // focus moves after the list has re-rendered — to the neighbor,
-                    // or the empty-filter state when this was the last unheard
-                    // episode. Under All the row stays put, so no focus management.
-                    onMarkPlayed: { nowPlayed in
-                        guard filter == .unheard, nowPlayed else { return }
-                        let neighbor = neighborID(of: episode, in: filteredSortedEpisodes)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            if let neighbor {
-                                focusedEpisode = neighbor
-                            } else {
-                                focusEmptyFilter = true
-                            }
-                        }
-                    },
-                    // Rotor "Export audio" (#689): downloads if needed, then shares
-                    // the local file. See `.episodeAudioExport`.
-                    onExport: { exportEpisode = episode },
-                    // Rotor "Add to folder" / "Move to folder" (#756): presents the
-                    // shared `FolderPickerView` for this single episode.
-                    onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
-                    onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
-                )
+                    supportsUnfollow: true,
+                    supportsExport: true,
+                    supportsAddToFolder: true,
+                    supportsMoveToFolder: true
+                ),
+                performAction: { action in perform(action, for: episode) }
             )
         }
+    }
+
+    /// Resolves a runnable item only after activation. A single show can contain
+    /// many thousands of episodes, so row recycling must not construct the full
+    /// UUID/closure action set for every visible row.
+    private func perform(_ action: EpisodeAction, for episode: Episode) {
+        buildEpisodeActions(
+            episode: episode,
+            order: [action],
+            player: player,
+            downloads: downloads,
+            context: context,
+            onShowNotes: { showNotesEpisode = episode },
+            onShare: { sharingEpisode = episode },
+            onBookmarks: { bookmarksEpisode = episode },
+            // Rotor "Unfollow this podcast" (#572): opens the destructive
+            // confirmation — activation never unfollows directly.
+            onUnfollow: { pendingUnfollow = podcast },
+            // Under the Unheard filter, rotor "Mark as played" removes this row
+            // (#579). Capture the visible neighbor before the state changes.
+            onMarkPlayed: { nowPlayed in
+                guard filter == .unheard, nowPlayed else { return }
+                let neighbor = neighborID(of: episode, in: filteredSortedEpisodes)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if let neighbor {
+                        focusedEpisode = neighbor
+                    } else {
+                        focusEmptyFilter = true
+                    }
+                }
+            },
+            onExport: { exportEpisode = episode },
+            onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
+            onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
+        ).first?.run()
     }
 
     // MARK: Multi-select (#758)
