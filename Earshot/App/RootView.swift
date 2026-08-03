@@ -191,12 +191,6 @@ struct RootView: View {
         // Native UITabBarItem badge for the Queue episode count (#491): same
         // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
         .background(TabBarBadgeApplier(tabIndex: 1, count: queueBadgeCount))
-        .environment(
-            \.playbackFolderNavigation,
-            PlaybackFolderNavigationAction { folderID in
-                routeToPlaybackFolder(folderID)
-            }
-        )
         // Route a notification tap / action into the Library tab + podcast detail
         // (#72). Reacting on the published intent keeps the delegate decoupled
         // from the view tree.
@@ -353,6 +347,16 @@ struct RootView: View {
             }
             #endif
         }
+        // Keep this outermost so RootView-owned presentations, especially the
+        // automatic Now Playing sheet above, inherit the folder route as well as
+        // the tab content. Placing it directly on TabView hides the origin button
+        // in that sheet because the sheet sees the unavailable default action.
+        .environment(
+            \.playbackFolderNavigation,
+            PlaybackFolderNavigationAction { folderID in
+                routeToPlaybackFolder(folderID)
+            }
+        )
     }
 
     // MARK: Launch tab (#492)
