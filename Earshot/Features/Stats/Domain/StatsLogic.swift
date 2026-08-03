@@ -65,3 +65,11 @@ enum StatsLogic {
         return parts.joined(separator: " ")
     }
 }
+
+/// Spoken confirmation for a folder-scope change. The Picker already supplies
+/// its native role and selected item; this announces only the changed result.
+enum StatsFolderAnnouncement {
+    static func text(scopeName: String, totalSeconds: Int) -> String {
+        "\(scopeName). Total listening \(StatsLogic.spokenDuration(totalSeconds))."
+    }
+}

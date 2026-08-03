@@ -22,6 +22,21 @@ final class StatsTests: XCTestCase {
         return s
     }
 
+    @discardableResult
+    private func makeCompletedEpisode(
+        _ ctx: ModelContext,
+        podcast: Podcast,
+        guid: String,
+        playedAt: Date
+    ) -> Episode {
+        let episode = Episode(guid: guid, title: guid, audioURL: "https://x/\(guid).mp3")
+        episode.podcast = podcast
+        episode.status = .played
+        episode.playedAt = playedAt
+        ctx.insert(episode)
+        return episode
+    }
+
     // MARK: StatsLogic (pure)
 
     func testTimeSavedBySpeed() {
@@ -55,6 +70,13 @@ final class StatsTests: XCTestCase {
         XCTAssertEqual(StatsLogic.currentStreak(sessionDates: dates, now: now, calendar: cal), 0)
     }
 
+    func testFolderAnnouncementNamesScopeAndUpdatedTotalOnce() {
+        XCTAssertEqual(
+            StatsFolderAnnouncement.text(scopeName: "News › Daily", totalSeconds: 3_720),
+            "News › Daily. Total listening 1 hour 2 minutes."
+        )
+    }
+
     // MARK: StatsRepository aggregation
 
     func testAggregatesTotalsTimeSavedAndPerPodcast() {
@@ -72,6 +94,124 @@ final class StatsTests: XCTestCase {
         // Beta (120) sorts before Alpha (90).
         XCTAssertEqual(stats.perPodcast.map(\.podcastTitle), ["Beta", "Alpha"])
         XCTAssertEqual(stats.perPodcast.first?.episodeCount, 1)
+    }
+
+    func testFolderScopeIncludesCurrentSubtreeAndExcludesOutsidePodcast() {
+        let ctx = TestStore.freshContext()
+        let rootPodcast = makePodcast(ctx, "Root Show")
+        let childPodcast = makePodcast(ctx, "Child Show")
+        let outsidePodcast = makePodcast(ctx, "Outside Show")
+        makeSession(ctx, podcast: rootPodcast, seconds: 60, date: now)
+        makeSession(ctx, podcast: childPodcast, seconds: 120, date: now)
+        makeSession(ctx, podcast: outsidePodcast, seconds: 240, date: now)
+        let folders = FolderRepository(context: ctx)
+        let root = folders.createFolder(name: "News")
+        let child = folders.createSubfolder(named: "Daily", under: root)
+        folders.add(rootPodcast, to: root)
+        folders.add(childPodcast, to: child)
+        let scope = Set(folders.subtreeSubscriptions(of: root).map(\.persistentModelID))
+
+        let stats = StatsRepository(context: ctx).stats(
+            for: .allTime,
+            now: now,
+            podcastIDs: scope
+        )
+
+        XCTAssertEqual(stats.totalSeconds, 180)
+        XCTAssertEqual(Set(stats.perPodcast.map(\.podcastTitle)), ["Root Show", "Child Show"])
+    }
+
+    func testPodcastInMultipleFoldersIsCountedOnceWithinFolderScope() {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Shared Show")
+        makeSession(ctx, podcast: podcast, seconds: 90, date: now)
+        let folders = FolderRepository(context: ctx)
+        let root = folders.createFolder(name: "Root")
+        let child = folders.createSubfolder(named: "Child", under: root)
+        folders.add(podcast, to: root)
+        folders.add(podcast, to: child)
+        let scope = Set(folders.subtreeSubscriptions(of: root).map(\.persistentModelID))
+
+        let stats = StatsRepository(context: ctx).stats(
+            for: .allTime,
+            now: now,
+            podcastIDs: scope
+        )
+
+        XCTAssertEqual(scope.count, 1, "Subtree membership is de-duplicated by podcast identity")
+        XCTAssertEqual(stats.totalSeconds, 90)
+        XCTAssertEqual(stats.perPodcast.first?.episodeCount, 1)
+    }
+
+    func testUnfiledScopeIncludesOnlyPodcastsWithNoCurrentFolderMembership() {
+        let ctx = TestStore.freshContext()
+        let filed = makePodcast(ctx, "Filed")
+        let unfiled = makePodcast(ctx, "Unfiled")
+        makeSession(ctx, podcast: filed, seconds: 60, date: now)
+        makeSession(ctx, podcast: unfiled, seconds: 120, date: now)
+        let folders = FolderRepository(context: ctx)
+        let folder = folders.createFolder(name: "News")
+        folders.add(filed, to: folder)
+        let scope = Set(folders.unfiledPodcasts().map(\.persistentModelID))
+
+        let stats = StatsRepository(context: ctx).stats(
+            for: .allTime,
+            now: now,
+            podcastIDs: scope
+        )
+
+        XCTAssertEqual(stats.totalSeconds, 120)
+        XCTAssertEqual(stats.perPodcast.map(\.podcastTitle), ["Unfiled"])
+    }
+
+    func testFolderScopeUsesCurrentMembershipForHistoricalSessions() {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Moving Show")
+        makeSession(ctx, podcast: podcast, seconds: 180, date: now.addingTimeInterval(-30 * 86_400))
+        let folders = FolderRepository(context: ctx)
+        let oldFolder = folders.createFolder(name: "Old")
+        let newFolder = folders.createFolder(name: "New")
+        folders.add(podcast, to: oldFolder)
+        folders.setMemberships(for: podcast, folders: [newFolder])
+
+        let oldScope = Set(folders.subtreeSubscriptions(of: oldFolder).map(\.persistentModelID))
+        let newScope = Set(folders.subtreeSubscriptions(of: newFolder).map(\.persistentModelID))
+
+        XCTAssertEqual(
+            StatsRepository(context: ctx).stats(for: .allTime, now: now, podcastIDs: oldScope),
+            .empty
+        )
+        XCTAssertEqual(
+            StatsRepository(context: ctx).stats(for: .allTime, now: now, podcastIDs: newScope)
+                .totalSeconds,
+            180
+        )
+    }
+
+    func testFolderScopeAppliesToPeriodCompletedEpisodesAndStreak() {
+        let ctx = TestStore.freshContext()
+        let inside = makePodcast(ctx, "Inside")
+        let outside = makePodcast(ctx, "Outside")
+        makeSession(ctx, podcast: inside, seconds: 100, date: now)
+        makeSession(ctx, podcast: inside, seconds: 50, date: now.addingTimeInterval(-40 * 86_400))
+        makeSession(ctx, podcast: outside, seconds: 200, date: now)
+        makeCompletedEpisode(ctx, podcast: inside, guid: "inside", playedAt: now)
+        makeCompletedEpisode(ctx, podcast: outside, guid: "outside", playedAt: now)
+        let folders = FolderRepository(context: ctx)
+        let folder = folders.createFolder(name: "Inside")
+        folders.add(inside, to: folder)
+        let scope = Set(folders.subtreeSubscriptions(of: folder).map(\.persistentModelID))
+
+        let stats = StatsRepository(context: ctx).stats(
+            for: .thisWeek,
+            now: now,
+            includeStreak: true,
+            podcastIDs: scope
+        )
+
+        XCTAssertEqual(stats.totalSeconds, 100, "The old in-scope session is outside This Week")
+        XCTAssertEqual(stats.episodesCompleted, 1, "Outside completed episodes are excluded")
+        XCTAssertEqual(stats.currentStreakDays, 1, "Only in-scope session dates feed the streak")
     }
 
     func testPeriodFiltersOldSessions() {

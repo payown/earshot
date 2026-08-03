@@ -38,11 +38,13 @@
 
 ### 4. Add folder-scoped listening statistics
 
-- [ ] Add All folders plus subtree-aware folder choices to listening statistics.
-- [ ] Aggregate sessions using the podcast's current folder membership, and document that moving a podcast changes how historical sessions are grouped unless a schema-backed historical snapshot is explicitly approved.
-- [ ] Reuse the existing period selector, totals, plain-text presentation, and CSV privacy guarantees.
-- [ ] Handle podcasts in multiple folders without double-counting totals, and keep an Unfiled view for podcasts without membership.
-- [ ] Add unit tests for subtree inclusion, multiple membership, Unfiled, period filtering, and no-double-counting behavior.
+- [x] Add All folders plus subtree-aware folder choices to listening statistics.
+- [x] Aggregate sessions using the podcast's current folder membership, and document that moving a podcast changes how historical sessions are grouped unless a schema-backed historical snapshot is explicitly approved.
+- [x] Reuse the existing period selector, totals, plain-text presentation, and CSV privacy guarantees.
+- [x] Handle podcasts in multiple folders without double-counting totals, and keep an Unfiled view for podcasts without membership.
+- [x] Add unit tests for subtree inclusion, multiple membership, Unfiled, period filtering, and no-double-counting behavior.
+
+Task 4 keeps the selected folder lens in session state and resolves membership live. Moving a podcast therefore moves all of its historical listening between folder views; no historical folder identifier is written into `ListeningSession`. Podcast identity sets de-duplicate shows assigned at multiple levels of the same subtree. The existing CSV export remains an all-history export with the same five fields and no folder identifiers, preserving its established privacy and compatibility contract. Completed-episode aggregation now fetches only rows whose `playedAt` is present instead of materializing the whole Episode table.
 
 ### 5. Integration, accessibility, and performance gate
 

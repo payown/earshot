@@ -1,6 +1,15 @@
 import SwiftUI
 import SwiftData
 
+/// The session-local folder lens for Listening Stats. Identity-only folder
+/// storage lets the screen resolve the live breadcrumb and recover cleanly if a
+/// selected folder is deleted; no settings or schema migration is required.
+enum StatsFolderScope: Hashable {
+    case allFolders
+    case folder(PersistentIdentifier)
+    case unfiled
+}
+
 /// Listening stats: total time, time saved by speed, episodes completed, an
 /// opt-in day streak, and a per-podcast breakdown, with CSV export and
 /// delete-all-history. Reached from Settings. Native `Form`/`List` controls are
@@ -8,8 +17,13 @@ import SwiftData
 struct StatsScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(SettingsStore.self) private var settings
+    // Folder count is small and bounded. The hierarchy provides the same full
+    // breadcrumb choices and ordering used by Inbox and Downloads.
+    @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
+    private var folders: [PodcastFolder]
 
     @State private var period: StatsPeriod = .thisWeek
+    @State private var folderScope: StatsFolderScope = .allFolders
     @State private var stats: ListeningStats = .empty
     @State private var exportFile: StatsCSVFile?
     @State private var confirmingDelete = false
@@ -18,6 +32,8 @@ struct StatsScreen: View {
         @Bindable var settings = settings
         Form {
             Section {
+                folderFilter
+
                 Picker("Period", selection: $period) {
                     ForEach(StatsPeriod.allCases) { Text($0.label).tag($0) }
                 }
@@ -32,7 +48,7 @@ struct StatsScreen: View {
                     ContentUnavailableView {
                         Label("No listening yet", systemImage: "chart.bar")
                     } description: {
-                        Text("Play some episodes and your stats will appear here.")
+                        Text(emptyDescription)
                     }
                 }
             } else {
@@ -88,6 +104,21 @@ struct StatsScreen: View {
             // The numbers below change silently, so confirm the new total.
             Announcer.announce("\(period.label). Total listening \(StatsLogic.spokenDuration(stats.totalSeconds)).")
         }
+        .onChange(of: folderScope) { oldScope, newScope in
+            guard newScope != oldScope else { return }
+            reload()
+            Announcer.announce(
+                StatsFolderAnnouncement.text(
+                    scopeName: selectedScopeName,
+                    totalSeconds: stats.totalSeconds
+                )
+            )
+        }
+        .onChange(of: folders.map(\.persistentModelID)) { _, availableIDs in
+            guard case let .folder(folderID) = folderScope,
+                  !availableIDs.contains(folderID) else { return }
+            folderScope = .allFolders
+        }
         .onChange(of: settings.statsStreaksEnabled) { _, _ in reload() }
         .sheet(item: $exportFile) { file in
             ShareSheet(items: [file.url])
@@ -110,10 +141,71 @@ struct StatsScreen: View {
             .accessibilityLabel("\(title), \(StatsLogic.spokenDuration(seconds))")
     }
 
+    /// Native menu Picker semantics keep one concise VoiceOver stop and a full
+    /// 44-point target. Full paths disambiguate same-named nested folders;
+    /// Unfiled means podcasts with no current membership anywhere.
+    private var folderFilter: some View {
+        Picker(selection: $folderScope) {
+            Text("All folders").tag(StatsFolderScope.allFolders)
+            ForEach(orderedFolders) { folder in
+                Text(FolderLogic.pathString(folder))
+                    .tag(StatsFolderScope.folder(folder.persistentModelID))
+            }
+            Text("Unfiled").tag(StatsFolderScope.unfiled)
+        } label: {
+            Text("Stats: \(selectedScopeName)")
+        }
+        .pickerStyle(.menu)
+        .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget, alignment: .leading)
+        .accessibilityHint("Choose a folder to show listening from its podcasts, including subfolders")
+    }
+
+    private var orderedFolders: [PodcastFolder] {
+        FolderLogic.orderedHierarchy(from: folders)
+    }
+
+    private var selectedScopeName: String {
+        switch folderScope {
+        case .allFolders:
+            return "All folders"
+        case let .folder(folderID):
+            return folders.first { $0.persistentModelID == folderID }
+                .map { FolderLogic.pathString($0) } ?? "All folders"
+        case .unfiled:
+            return "Unfiled"
+        }
+    }
+
+    /// nil means no scope (All folders); an empty set deliberately matches
+    /// nothing, including during the brief render after a selected folder is
+    /// deleted and before the state resets to All folders.
+    private var selectedPodcastIDs: Set<PersistentIdentifier>? {
+        let repository = FolderRepository(context: context)
+        switch folderScope {
+        case .allFolders:
+            return nil
+        case let .folder(folderID):
+            guard let folder = folders.first(where: {
+                $0.persistentModelID == folderID
+            }) else { return [] }
+            return Set(repository.subtreeSubscriptions(of: folder).map(\.persistentModelID))
+        case .unfiled:
+            return Set(repository.unfiledPodcasts().map(\.persistentModelID))
+        }
+    }
+
+    private var emptyDescription: String {
+        if folderScope == .allFolders {
+            return "Play some episodes and your stats will appear here."
+        }
+        return "No listening was recorded for \(selectedScopeName) in \(period.label.lowercased())."
+    }
+
     private func reload() {
         stats = StatsRepository(context: context).stats(
             for: period,
-            includeStreak: settings.statsStreaksEnabled
+            includeStreak: settings.statsStreaksEnabled,
+            podcastIDs: selectedPodcastIDs
         )
     }
 
