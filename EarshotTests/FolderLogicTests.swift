@@ -303,11 +303,6 @@ final class FolderLogicTests: XCTestCase {
         )
         XCTAssertEqual(FolderTreeLabel.toggleAction(isExpanded: false), "Expand folder")
         XCTAssertEqual(FolderTreeLabel.toggleAction(isExpanded: true), "Collapse folder")
-        XCTAssertEqual(FolderTreeLabel.toggleButton(name: "News", isExpanded: false), "Expand News")
-        XCTAssertEqual(
-            FolderTreeLabel.toggleHint(childCount: 2, isExpanded: true),
-            "Hides 2 subfolders from this list."
-        )
         XCTAssertEqual(
             FolderTreeLabel.toggleAnnouncement(name: "News", childCount: 1, isExpanded: true),
             "Expanded News, showing 1 subfolder"

@@ -280,17 +280,6 @@ enum FolderTreeLabel {
         isExpanded ? "Collapse folder" : "Expand folder"
     }
 
-    static func toggleButton(name: String, isExpanded: Bool) -> String {
-        "\(isExpanded ? "Collapse" : "Expand") \(name)"
-    }
-
-    static func toggleHint(childCount: Int, isExpanded: Bool) -> String {
-        let noun = childCount == 1 ? "subfolder" : "subfolders"
-        return isExpanded
-            ? "Hides \(childCount) \(noun) from this list."
-            : "Shows \(childCount) \(noun) in this list."
-    }
-
     static func toggleAnnouncement(name: String, childCount: Int, isExpanded: Bool) -> String {
         let noun = childCount == 1 ? "subfolder" : "subfolders"
         return isExpanded

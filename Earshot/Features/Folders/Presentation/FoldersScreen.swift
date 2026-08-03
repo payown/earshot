@@ -114,15 +114,10 @@ struct FoldersScreen: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(
-                    FolderTreeLabel.toggleButton(name: folder.name, isExpanded: item.isExpanded)
-                )
-                .accessibilityHint(
-                    FolderTreeLabel.toggleHint(
-                        childCount: folder.children.count,
-                        isExpanded: item.isExpanded
-                    )
-                )
+                // The folder row already exposes this command through its
+                // Actions rotor. Keep the visual control touchable without
+                // adding a second VoiceOver flick stop.
+                .accessibilityHidden(true)
             }
         }
 
