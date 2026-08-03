@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Folders Phase 3 complete — listening lens, Queue grouping, context menus, and OPML
+
+- Folders now work throughout listening: filter the Inbox by a folder subtree, review and play or queue a folder's new episodes, group the Queue by folder, and preserve nested folders in OPML exports. New subscriptions can be filed immediately, and episode or podcast rows offer touch context menus that mirror the VoiceOver Actions rotor. Large scrolling lists defer Quick Action work until activation so VoiceOver navigation stays responsive. (#761, #762, #763, #764)
+
 ### Added
+
+- OPML: exporting subscriptions now preserves nested folders, and subscribing from Search or Add Podcast offers to file the new show when folders exist. (#764)
 - Queue: choose no grouping, group by podcast, or group by folder. Folder grouping includes nested subfolders under their top-level folder, keeps unfiled shows together, and gives every folder heading the same VoiceOver Play, Move, Sort, and Shuffle actions as podcast groups. Existing "Group by podcast" choices carry forward automatically. (#762)
 - Folders: filter the Inbox to any folder and its nested subfolders, review the same scoped episodes in a new "New episodes" section on the folder screen, and Play all or Add all to queue. Folder listening actions now include every eligible episode—not just one per podcast—and honor the folder's queue expiration setting, with counts announced for VoiceOver. (#763)
 - Quick Actions: press and hold any normal episode row, a Library podcast row,

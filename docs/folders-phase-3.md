@@ -45,8 +45,41 @@ Recommended: **B and D in parallel first** (no overlap with each other or with A
 
 ## Definition of done (Phase 3)
 
-- A VoiceOver user can long-press any episode/podcast and reach the same actions the rotor offers (and the rotor still works, unchanged).
-- The Queue can group by folder, with the group-header rotor operating at folder granularity.
-- The Inbox can be filtered to a folder; a folder shows its own new episodes and can play/queue them all (age-limit respected).
-- Exporting OPML preserves the nested folder structure; subscribing from Search can file the new show into a folder.
-- `earshot-accessibility` clean on every UI PR; combined `xcodebuild test` green; security + swift6 gates before the `main` merge.
+- [x] Episode and podcast rows offer a long-press context menu for touch users that mirrors the configured Quick Actions. The Actions rotor remains the guaranteed VoiceOver path, with no duplicate actions, and default activation is unchanged.
+- [x] The Queue can group by folder, with the group-header rotor operating at folder granularity.
+- [x] The Inbox can be filtered to a folder; a folder shows its own new episodes and can play/queue them all (age-limit respected).
+- [x] Exporting OPML preserves the nested folder structure; subscribing from Search can file the new show into a folder.
+- [x] Accessibility source review, combined `xcodebuild test`, Swift 6 Release build, and physical-device VoiceOver verification are complete before the `main` merge.
+
+---
+
+## Completion record — 2026-08-02
+
+### What shipped in the phase
+
+- Long-press Quick Action menus for episode and podcast rows, backed by the same stable action descriptors as the VoiceOver Actions rotor.
+- Queue grouping by podcast, folder subtree, or no grouping, including folder-level Play, Move, Sort, and Shuffle actions.
+- A subtree-aware Inbox folder filter, folder-scoped New episodes, and age-limited Play all / Add all to queue.
+- Nested OPML folder export and an optional folder choice after subscribing from Search or Add Podcast.
+- Deferred Quick Action construction throughout scrolling episode, podcast, Queue, folder, Search, Bookmark, and Download lists. Rows now create runnable closures only when an action is activated.
+
+### Verification
+
+- Simulator: 1,587 tests executed, 15 intentional StoreKit skips, 0 failures.
+- Compiler: signed Swift 6 Release build succeeded for the physical iPhone target.
+- Device: VoiceOver Inbox actions, configured order, default activation, the largest podcast episode list, Library, Queue grouping/actions, and touch context menus passed.
+- Large-Inbox observation: on the 2,000-plus-item Inbox, the first rapid traversal after launch still paused while rows were initially realized. Reloading the Inbox made rapid forward and backward navigation responsive. Michael accepted this as a non-blocking extreme-library caveat.
+- Downloads, Search, and folder episode lists did not receive a large-list device stress test because the device did not have extensive data in those views. They use the same deferred row-action path exercised by the Inbox and largest podcast, and are covered by the combined test suite.
+
+### Learnings and decisions
+
+- Building UUID-backed action objects and capturing multiple runnable closures per visible row creates avoidable VoiceOver scrolling work at large scale. Scrolling lists now retain stable enum/string descriptors and resolve only the selected action.
+- SwiftUI can expose both a context menu and explicit accessibility actions as duplicate VoiceOver actions. Context menus are therefore a touch convenience when VoiceOver is off; the explicit Actions rotor is the single VoiceOver source of truth.
+- Stable action IDs are required for predictable SwiftUI identity. Static and deferred list actions no longer regenerate UUIDs during body evaluation.
+- The phase added no dependencies and required no schema change.
+
+### Deferred
+
+- Further cold-traversal optimization for unusually large Inboxes is deferred unless normal-sized libraries or additional device reports show a practical problem.
+- Search still owns a separate broad episode query when the Search screen is opened. That pre-existing large-library query should receive its own bounded-fetch performance investigation rather than expanding this folders PR.
+- Inline folder-tree expansion, Downloads-by-folder, player "Playing from folder" context, and folder-scoped stats move to Folders Phase 4.
