@@ -17,6 +17,14 @@ enum PlaybackOrigin: Equatable {
     }
 }
 
+/// Spoken and visible copy for the one Now Playing origin control. Keeping this
+/// pure makes the concise, non-duplicated label an accessibility regression test.
+enum PlaybackOriginLabel {
+    static func playingFrom(folderPath: String) -> String {
+        "Playing from \(folderPath)"
+    }
+}
+
 /// Events that can change a transient ``PlaybackOrigin``. Keeping the policy
 /// pure prevents an internal auto-advance and a user-selected episode from
 /// accidentally sharing different stale-context behavior.

@@ -212,7 +212,7 @@ struct QueueScreen: View {
             QuickActionItem(id: "playGroup", label: "Play Group", isDestructive: false) {
                 if let episode = playGroup(group, folderGrouping: folderGrouping) {
                     // playFromEpisodeList so Play Group honors #562 (Item 1).
-                    player.playFromEpisodeList(episode)
+                    player.playFromEpisodeList(episode, origin: group.playbackOrigin)
                     Announcer.announce("Playing \(group.title)")
                 }
             },

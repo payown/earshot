@@ -16,6 +16,13 @@ final class PlaybackLogicTests: XCTestCase {
         )
     }
 
+    func testFolderOriginLabelUsesOneConciseFullPath() {
+        XCTAssertEqual(
+            PlaybackOriginLabel.playingFrom(folderPath: "News › Daily"),
+            "Playing from News › Daily"
+        )
+    }
+
     func testStartingFromAnotherFolderReplacesOrigin() {
         let first = PlaybackOrigin.folder(PodcastFolder(name: "News").persistentModelID)
         let second = PlaybackOrigin.folder(PodcastFolder(name: "Comedy").persistentModelID)

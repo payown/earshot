@@ -41,7 +41,7 @@ Before every Queue advance, `PlayerService` will resolve whether the next episod
 - Natural and explicit Queue advances pass `.advanced(nextEpisodeBelongsToOrigin:)`.
 - Every unload/finished-without-next path passes `.stopped`.
 - Launch restore passes `.restoredAfterRelaunch`.
-- Folder deletion posts the identifiers being removed; the player applies `.foldersDeleted(ids)` before the model objects disappear.
+- Folder deletion posts the identifiers removed after the repository persists the transaction; the player immediately applies `.foldersDeleted(ids)`, while Now Playing's live folder lookup independently prevents a stale control from rendering.
 
 The pure transition function and its tests land before this wiring so every call site follows one policy.
 

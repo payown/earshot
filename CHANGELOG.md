@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Now Playing: playback started with Play all from a folder, or Play Group from a folder-grouped Queue, now shows a concise “Playing from” folder path. Activate it to return directly to that folder in Library. The context follows Queue advancement only while playback remains inside that folder tree, and clears on ordinary playback, folder deletion, or relaunch.
 - Downloads: choose All folders or any folder subtree to narrow both downloaded and Recently Expired episodes. The folder filter composes with All/Unheard and search, announces the visible count for VoiceOver, and keeps the live episode query bounded to actual download candidates.
 - Folders: the folder browser now starts with a compact top-level list and lets you expand or collapse nested folders in place. VoiceOver reads each folder's full path and expanded state, offers matching Expand/Collapse Actions rotor commands, and returns focus to the folder after the tree changes. Reordering stays within the folder's current parent, so dragging can never accidentally reparent it.
 - OPML: exporting subscriptions now preserves nested folders, and subscribing from Search or Add Podcast offers to file the new show when folders exist. (#764)

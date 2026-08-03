@@ -88,6 +88,10 @@ struct RootView: View {
     /// Navigation path for the Library tab, so a notification can push a podcast
     /// detail screen onto it (#72).
     @State private var libraryPath: [Podcast] = []
+    /// Item-driven folder destination used by Now Playing's "Playing from"
+    /// route. Kept beside (not inside) the podcast-typed path so existing
+    /// notification and screenshot podcast routing stays unchanged.
+    @State private var libraryFolderDestination: PodcastFolder?
 
     /// Drives the app-background durability anchor for playback position/stats
     /// (#736): the ~5s tick no longer writes to the store, so persist on
@@ -144,6 +148,9 @@ struct RootView: View {
 
             NavigationStack(path: $libraryPath) {
                 SubscriptionsView()
+                    .navigationDestination(item: $libraryFolderDestination) { folder in
+                        FolderDetailScreen(folder: folder)
+                    }
             }
             .modifier(TabChrome())
             .tabItem { Label("Library", systemImage: "books.vertical") }
@@ -184,6 +191,12 @@ struct RootView: View {
         // Native UITabBarItem badge for the Queue episode count (#491): same
         // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
         .background(TabBarBadgeApplier(tabIndex: 1, count: queueBadgeCount))
+        .environment(
+            \.playbackFolderNavigation,
+            PlaybackFolderNavigationAction { folderID in
+                routeToPlaybackFolder(folderID)
+            }
+        )
         // Route a notification tap / action into the Library tab + podcast detail
         // (#72). Reacting on the published intent keeps the delegate decoupled
         // from the view tree.
@@ -343,6 +356,22 @@ struct RootView: View {
     }
 
     // MARK: Launch tab (#492)
+
+    /// Resolves the live folder only when the player requests navigation. The
+    /// Now Playing control already disappears when its query cannot resolve the
+    /// origin; this second guard closes a deletion race during modal dismissal.
+    private func routeToPlaybackFolder(_ folderID: PersistentIdentifier) {
+        guard let folder = FolderRepository(context: modelContext).folders().first(where: {
+            $0.persistentModelID == folderID
+        }) else { return }
+
+        selectedTab = .library
+        libraryPath = []
+        libraryFolderDestination = nil
+        DispatchQueue.main.async {
+            libraryFolderDestination = folder
+        }
+    }
 
     /// The launch tab resolved straight from persisted settings, read
     /// synchronously so the very first render already shows the user's chosen tab

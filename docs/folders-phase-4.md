@@ -30,11 +30,11 @@
 
 ### 3. Carry "Playing from folder" context into the player
 
-- [ ] Introduce a small, non-persistent playback-origin value that can identify a folder without changing the episode or Queue data model.
-- [ ] Set the origin when playback begins from a folder's Play all action or a folder-grouped Queue action, and clear or replace it when playback starts from another source.
-- [ ] Show "Playing from {folder}" in Now Playing with a concise VoiceOver label and a route back to that folder where navigation state permits.
-- [ ] Define how the origin behaves across queue advancement, manual episode changes, relaunch, and folder deletion before implementation.
-- [ ] Add pure state-transition tests so stale folder context cannot follow unrelated playback.
+- [x] Introduce a small, non-persistent playback-origin value that can identify a folder without changing the episode or Queue data model.
+- [x] Set the origin when playback begins from a folder's Play all action or a folder-grouped Queue action, and clear or replace it when playback starts from another source.
+- [x] Show "Playing from {folder}" in Now Playing with a concise VoiceOver label and a route back to that folder where navigation state permits.
+- [x] Define how the origin behaves across queue advancement, manual episode changes, relaunch, and folder deletion before implementation.
+- [x] Add pure state-transition tests so stale folder context cannot follow unrelated playback.
 
 ### 4. Add folder-scoped listening statistics
 

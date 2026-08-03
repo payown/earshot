@@ -59,6 +59,31 @@ final class FolderRepositoryTests: XCTestCase {
         XCTAssertTrue(repo.folders().isEmpty)
     }
 
+    func testDeletingSubtreePostsEveryRemovedFolderID() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let child = repo.createSubfolder(named: "Child", under: root)
+        let expected: Set<PersistentIdentifier> = [
+            root.persistentModelID,
+            child.persistentModelID,
+        ]
+        var postedIDs = Set<PersistentIdentifier>()
+        let token = NotificationCenter.default.addObserver(
+            forName: .earshotFoldersDidDelete,
+            object: nil,
+            queue: nil
+        ) { note in
+            postedIDs = note.userInfo?[FolderRepository.deletedFolderIDsKey]
+                as? Set<PersistentIdentifier> ?? []
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        repo.delete(root, mode: .deleteSubtree)
+
+        XCTAssertEqual(postedIDs, expected)
+    }
+
     func testReorderFoldersPersists() {
         let ctx = TestStore.freshContext()
         let repo = FolderRepository(context: ctx)
