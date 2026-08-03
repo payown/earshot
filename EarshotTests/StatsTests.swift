@@ -71,6 +71,7 @@ final class StatsTests: XCTestCase {
     }
 
     func testFolderAnnouncementNamesScopeAndUpdatedTotalOnce() {
+        XCTAssertEqual(StatsFolderAnnouncement.pickerLabel, "Folder")
         XCTAssertEqual(
             StatsFolderAnnouncement.text(scopeName: "News › Daily", totalSeconds: 3_720),
             "News › Daily. Total listening 1 hour 2 minutes."

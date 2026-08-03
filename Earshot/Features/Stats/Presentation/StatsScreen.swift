@@ -153,7 +153,10 @@ struct StatsScreen: View {
             }
             Text("Unfiled").tag(StatsFolderScope.unfiled)
         } label: {
-            Text("Stats: \(selectedScopeName)")
+            // Picker exposes `selectedScopeName` as its native value. Keep the
+            // fixed name separate so VoiceOver says "Folder, All folders,
+            // pop-up button" rather than announcing All folders twice.
+            Text(StatsFolderAnnouncement.pickerLabel)
         }
         .pickerStyle(.menu)
         .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget, alignment: .leading)
