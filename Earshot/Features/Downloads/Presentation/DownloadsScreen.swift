@@ -290,70 +290,51 @@ struct DownloadsScreen: View {
         rawDownloaded: [Episode],
         rawExpired: [RecentlyExpired]
     ) -> some View {
-        Picker(
-            selection: folderSelection(
-                rawDownloaded: rawDownloaded,
-                rawExpired: rawExpired
-            )
-        ) {
+        Picker(selection: $selectedFolderID) {
             Text("All folders").tag(nil as PersistentIdentifier?)
             ForEach(orderedFolders) { folder in
                 Text(FolderLogic.pathString(folder))
                     .tag(folder.persistentModelID as PersistentIdentifier?)
             }
         } label: {
-            Label(
-                "Downloads: \(selectedFolderName)",
-                systemImage: "line.3.horizontal.decrease.circle"
-            )
+            Text("Downloads: \(selectedFolderName)")
         }
         .pickerStyle(.menu)
         .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget, alignment: .leading)
         .padding(.horizontal, Spacing.md)
-        .accessibilityLabel("Downloads folder filter, \(selectedFolderName)")
         .accessibilityHint("Choose a folder to show episodes from its podcasts, including subfolders")
+        .onChange(of: selectedFolderID) { oldID, newID in
+            guard newID != oldID else { return }
+            searchText = ""
+            let folder = newID.flatMap { id in
+                folders.first { $0.persistentModelID == id }
+            }
+            let podcastIDs = folder.map { selected in
+                Set(
+                    FolderRepository(context: context)
+                        .subtreeSubscriptions(of: selected)
+                        .map(\.persistentModelID)
+                )
+            }
+            let filtered = DownloadsListFilter.apply(
+                downloaded: rawDownloaded,
+                expired: rawExpired,
+                podcastIDs: podcastIDs,
+                playedFilter: playedFilter,
+                searchText: ""
+            )
+            Announcer.announce(
+                DownloadsFilterAnnouncement.folderText(
+                    name: folder.map { FolderLogic.pathString($0) } ?? "All folders",
+                    visibleCount: filtered.visibleDownloaded.count + filtered.visibleExpired.count
+                )
+            )
+        }
         .onChange(of: folders.map(\.persistentModelID)) { _, availableIDs in
             guard let selectedFolderID,
                   !availableIDs.contains(selectedFolderID) else { return }
             self.selectedFolderID = nil
         }
-    }
-
-    private func folderSelection(
-        rawDownloaded: [Episode],
-        rawExpired: [RecentlyExpired]
-    ) -> Binding<PersistentIdentifier?> {
-        Binding(
-            get: { selectedFolderID },
-            set: { newID in
-                guard newID != selectedFolderID else { return }
-                selectedFolderID = newID
-                searchText = ""
-                let folder = newID.flatMap { id in
-                    folders.first { $0.persistentModelID == id }
-                }
-                let podcastIDs = folder.map { selected in
-                    Set(
-                        FolderRepository(context: context)
-                            .subtreeSubscriptions(of: selected)
-                            .map(\.persistentModelID)
-                    )
-                }
-                let filtered = DownloadsListFilter.apply(
-                    downloaded: rawDownloaded,
-                    expired: rawExpired,
-                    podcastIDs: podcastIDs,
-                    playedFilter: playedFilter,
-                    searchText: ""
-                )
-                Announcer.announce(
-                    DownloadsFilterAnnouncement.folderText(
-                        name: folder.map { FolderLogic.pathString($0) } ?? "All folders",
-                        visibleCount: filtered.visibleDownloaded.count + filtered.visibleExpired.count
-                    )
-                )
-            }
-        )
     }
 
     /// Removes every downloaded file and resets download state in one pass. The
