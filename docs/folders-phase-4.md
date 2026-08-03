@@ -14,19 +14,19 @@
 
 ### 1. Inline expand and collapse in the folder browser
 
-- [ ] Replace the top-level-only folder list with a cycle-safe flattened tree built from `FolderLogic.orderedHierarchy` or a focused pure helper.
-- [ ] Add explicit Expand and Collapse controls and Actions rotor entries for folders with children. Do not require disclosure-triangle precision or drag gestures.
-- [ ] Preserve full breadcrumb labels, sibling reorder behavior, create/delete behavior, and deliberate VoiceOver focus after expansion, collapse, move, or deletion.
-- [ ] Persist expansion only if doing so does not add a schema migration; otherwise keep it as session state and document the decision.
-- [ ] Add pure hierarchy/visibility tests and UI-facing accessibility-label tests.
+- [x] Replace the top-level-only folder list with a cycle-safe flattened tree built from `FolderLogic.orderedHierarchy` or a focused pure helper.
+- [x] Add explicit Expand and Collapse controls and Actions rotor entries for folders with children. Do not require disclosure-triangle precision or drag gestures.
+- [x] Preserve full breadcrumb labels, sibling reorder behavior, create/delete behavior, and deliberate VoiceOver focus after expansion, collapse, move, or deletion.
+- [x] Persist expansion only if doing so does not add a schema migration; otherwise keep it as session state and document the decision.
+- [x] Add pure hierarchy/visibility tests and UI-facing accessibility-label tests.
 
 ### 2. Filter Downloads by folder
 
-- [ ] Add All folders plus subtree-aware folder choices to the Downloads screen, following the Inbox folder-filter vocabulary and ordering.
-- [ ] Apply the folder filter to Downloaded episodes and define explicitly whether Recently Expired follows the same filter.
-- [ ] Compose folder, Unheard/All, and text-search filters predictably, with a useful empty state for each combination.
-- [ ] Keep the live SwiftData query bounded by `downloadPath != nil`; folder filtering must not reintroduce a whole-Episode-table load.
-- [ ] Announce filter changes and visible counts without announcing on every keystroke.
+- [x] Add All folders plus subtree-aware folder choices to the Downloads screen, following the Inbox folder-filter vocabulary and ordering.
+- [x] Apply the folder filter to Downloaded episodes and define explicitly whether Recently Expired follows the same filter.
+- [x] Compose folder, Unheard/All, and text-search filters predictably, with a useful empty state for each combination.
+- [x] Keep the live SwiftData query bounded by `downloadPath != nil`; folder filtering must not reintroduce a whole-Episode-table load.
+- [x] Announce filter changes and visible counts without announcing on every keystroke.
 
 ### 3. Carry "Playing from folder" context into the player
 

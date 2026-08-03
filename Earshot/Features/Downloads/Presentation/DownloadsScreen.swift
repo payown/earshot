@@ -32,6 +32,8 @@ struct DownloadsScreen: View {
            sort: \Episode.pubDate, order: .reverse)
     private var downloadCandidates: [Episode]
     @Query private var expiredRows: [RecentlyExpired]
+    @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
+    private var folders: [PodcastFolder]
 
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
@@ -56,6 +58,9 @@ struct DownloadsScreen: View {
     // globally on change. Applies only to the Downloaded section; Recently
     // Expired is unaffected. Reuses the validated ``EpisodeListFilter`` type.
     @State private var playedFilter: EpisodeListFilter = SettingsDefault.downloadsPlayedFilter
+    // Session-local folder scope, matching Inbox: nil means All folders and a
+    // selected folder includes podcasts filed anywhere in its subtree.
+    @State private var selectedFolderID: PersistentIdentifier?
     // Focus targets for the rotor "Mark as played" under the Unheard filter,
     // where the marked download leaves the visible list (#641, mirroring the
     // #579 fix on EpisodeListView): the neighbor row, or the empty-filter state
@@ -66,6 +71,28 @@ struct DownloadsScreen: View {
     private var downloaded: [Episode] {
         downloadCandidates
             .filter { $0.downloadStatus == .downloaded }
+    }
+
+    private var orderedFolders: [PodcastFolder] {
+        FolderLogic.orderedHierarchy(from: folders)
+    }
+
+    private var selectedFolder: PodcastFolder? {
+        guard let selectedFolderID else { return nil }
+        return folders.first { $0.persistentModelID == selectedFolderID }
+    }
+
+    private var selectedFolderName: String {
+        selectedFolder.map { FolderLogic.pathString($0) } ?? "All folders"
+    }
+
+    private var selectedPodcastIDs: Set<PersistentIdentifier>? {
+        guard let selectedFolder else { return nil }
+        return Set(
+            FolderRepository(context: context)
+                .subtreeSubscriptions(of: selectedFolder)
+                .map(\.persistentModelID)
+        )
     }
 
     /// Binding that drives the segmented filter: persists the new value globally
@@ -87,82 +114,94 @@ struct DownloadsScreen: View {
     }
 
     var body: some View {
-        // Compute each source once per body, then narrow both by the search
-        // (#457). The Recently Expired section is searched too — an expired
-        // episode matches on the same fields as a downloaded one — so a search
-        // never silently hides a restorable episode the user is looking for.
-        // With no search active the filters pass everything through unchanged.
-        let allDownloaded = downloaded
-        let allExpired = expiredEntries
+        // Compute each bounded source once, then compose folder scope, the
+        // Downloaded-only played filter, and search in one tested pass. Recently
+        // Expired follows folder scope and search but never the played filter.
+        let rawDownloaded = downloaded
+        let rawExpired = expiredEntries
         let searchActive = EpisodeSearchFilter.isActive(searchText)
-        // Played count over the UNFILTERED downloads — what the played filter
-        // hides — for the toggle announcement and empty-state message (#641).
-        let playedCount = allDownloaded.filter(\.isPlayed).count
-        // Played filter first (#641), then the in-place search (#457).
-        let playedFilteredDownloaded = playedFilter.apply(to: allDownloaded)
-        let visibleDownloaded = EpisodeSearchFilter.filter(playedFilteredDownloaded, query: searchText)
-        let visibleExpired = searchActive
-            ? allExpired.filter { entry in
-                entry.episode.map { EpisodeSearchFilter.matches($0, query: searchText) } ?? false
+        let result = DownloadsListFilter.apply(
+            downloaded: rawDownloaded,
+            expired: rawExpired,
+            podcastIDs: selectedPodcastIDs,
+            playedFilter: playedFilter,
+            searchText: searchText
+        )
+        let visibleCount = result.visibleDownloaded.count + result.visibleExpired.count
+        return VStack(spacing: 0) {
+            if !folders.isEmpty {
+                folderFilter(rawDownloaded: rawDownloaded, rawExpired: rawExpired)
             }
-            : allExpired
-        return Group {
-            if allDownloaded.isEmpty && allExpired.isEmpty {
-                ContentUnavailableView(
-                    "No downloads",
-                    systemImage: "arrow.down.circle",
-                    description: Text("Episodes you download appear here.")
-                )
-            } else if searchActive && visibleDownloaded.isEmpty && visibleExpired.isEmpty {
-                // A search is active (there IS content, it just doesn't match).
-                // Guarded on `searchActive` so the played filter hiding every
-                // download falls through to the list's empty-filter state (#641)
-                // instead of the "no search matches" copy.
-                NoSearchMatchesView(query: searchText)
-            } else {
-                List {
-                    // Played/unheard filter (#641). Only shown when there are
-                    // downloads to filter; it never touches Recently Expired.
-                    if !allDownloaded.isEmpty {
-                        Section {
-                            Picker("Filter downloads", selection: filterSelection(playedCount: playedCount)) {
-                                ForEach(EpisodeListFilter.allCases) { option in
-                                    Text(option.title).tag(option)
+            Group {
+                if rawDownloaded.isEmpty && rawExpired.isEmpty {
+                    ContentUnavailableView(
+                        "No downloads",
+                        systemImage: "arrow.down.circle",
+                        description: Text("Episodes you download appear here.")
+                    )
+                } else if searchActive && visibleCount == 0 {
+                    // Search is last in the composition, so this state can mean
+                    // no match within the selected folder and All/Unheard scope.
+                    NoSearchMatchesView(query: searchText)
+                } else if result.scopedDownloaded.isEmpty && result.scopedExpired.isEmpty {
+                    ContentUnavailableView(
+                        "No downloads in \(selectedFolderName)",
+                        systemImage: "folder",
+                        description: Text(
+                            "Downloaded and recently expired episodes from this folder and its subfolders appear here."
+                        )
+                    )
+                } else {
+                    List {
+                        // Played/unheard filter (#641). Only shown when there are
+                        // downloads to filter; it never touches Recently Expired.
+                        if !result.scopedDownloaded.isEmpty {
+                            Section {
+                                Picker(
+                                    "Filter downloads",
+                                    selection: filterSelection(playedCount: result.playedCount)
+                                ) {
+                                    ForEach(EpisodeListFilter.allCases) { option in
+                                        Text(option.title).tag(option)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .accessibilityLabel("Filter downloads")
+                            }
+                        }
+                        if !result.visibleDownloaded.isEmpty {
+                            Section(header: Text("Downloaded").accessibilityAddTraits(.isHeader)) {
+                                ForEach(result.visibleDownloaded) { episode in
+                                    EpisodeRow(
+                                        episode: episode,
+                                        deferredActions: availableActions(for: episode),
+                                        includesPodcastName: true,
+                                        performAction: { action in
+                                            perform(action, for: episode, in: result.visibleDownloaded)
+                                        }
+                                    )
+                                        // Lets the rotor mark-played runner hand
+                                        // VoiceOver focus to this row when its neighbor
+                                        // vanishes under the Unheard filter (#641).
+                                        .accessibilityFocused(
+                                            $focusedEpisode,
+                                            equals: episode.persistentModelID
+                                        )
                                 }
                             }
-                            .pickerStyle(.segmented)
-                            .accessibilityLabel("Filter downloads")
-                        }
-                    }
-                    if !visibleDownloaded.isEmpty {
-                        Section(header: Text("Downloaded").accessibilityAddTraits(.isHeader)) {
-                            ForEach(visibleDownloaded) { episode in
-                                EpisodeRow(
-                                    episode: episode,
-                                    deferredActions: availableActions(for: episode),
-                                    includesPodcastName: true,
-                                    performAction: { action in
-                                        perform(action, for: episode, in: visibleDownloaded)
-                                    }
-                                )
-                                    // Lets the rotor mark-played runner hand
-                                    // VoiceOver focus to this row when its neighbor
-                                    // vanishes under the Unheard filter (#641).
-                                    .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
+                        } else if !result.scopedDownloaded.isEmpty && !searchActive {
+                            // The played filter hid every download (all played). Show
+                            // a message and a one-tap way back, not a blank list (#641).
+                            Section {
+                                emptyPlayedFilterState(playedCount: result.playedCount)
                             }
                         }
-                    } else if !allDownloaded.isEmpty && !searchActive {
-                        // The played filter hid every download (all played). Show
-                        // a message and a one-tap way back, not a blank list (#641).
-                        Section {
-                            emptyPlayedFilterState(playedCount: playedCount)
-                        }
-                    }
-                    if !visibleExpired.isEmpty {
-                        Section(header: Text("Recently Expired").accessibilityAddTraits(.isHeader)) {
-                            ForEach(visibleExpired) { entry in
-                                if let episode = entry.episode {
-                                    expiredRow(episode, expiredAt: entry.expiredAt)
+                        if !result.visibleExpired.isEmpty {
+                            Section(header: Text("Recently Expired").accessibilityAddTraits(.isHeader)) {
+                                ForEach(result.visibleExpired) { entry in
+                                    if let episode = entry.episode {
+                                        expiredRow(episode, expiredAt: entry.expiredAt)
+                                    }
                                 }
                             }
                         }
@@ -178,7 +217,7 @@ struct DownloadsScreen: View {
         // narrows live as the user types. The count spans both sections.
         .searchable(text: $searchText, prompt: "Search downloads")
         .onSubmit(of: .search) {
-            announceMatches(count: visibleDownloaded.count + visibleExpired.count)
+            announceMatches(count: visibleCount)
         }
         // Load the persisted global played filter on appear (#641). Mirrors the
         // per-podcast episode-list filter load; the default is All (show every
@@ -241,6 +280,80 @@ struct DownloadsScreen: View {
         } message: {
             Text("This removes ^[\(downloaded.count) downloaded episode](inflect: true) from this device. This can't be undone.")
         }
+    }
+
+    /// Always-visible folder scope control, matching the Inbox vocabulary and
+    /// hierarchy order. Keeping it above every empty state lets VoiceOver users
+    /// escape a folder with no downloads. Native menu Picker semantics provide
+    /// a predictable control and the explicit frame preserves a 44-point target.
+    private func folderFilter(
+        rawDownloaded: [Episode],
+        rawExpired: [RecentlyExpired]
+    ) -> some View {
+        Picker(
+            selection: folderSelection(
+                rawDownloaded: rawDownloaded,
+                rawExpired: rawExpired
+            )
+        ) {
+            Text("All folders").tag(nil as PersistentIdentifier?)
+            ForEach(orderedFolders) { folder in
+                Text(FolderLogic.pathString(folder))
+                    .tag(folder.persistentModelID as PersistentIdentifier?)
+            }
+        } label: {
+            Label(
+                "Downloads: \(selectedFolderName)",
+                systemImage: "line.3.horizontal.decrease.circle"
+            )
+        }
+        .pickerStyle(.menu)
+        .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget, alignment: .leading)
+        .padding(.horizontal, Spacing.md)
+        .accessibilityLabel("Downloads folder filter, \(selectedFolderName)")
+        .accessibilityHint("Choose a folder to show episodes from its podcasts, including subfolders")
+        .onChange(of: folders.map(\.persistentModelID)) { _, availableIDs in
+            guard let selectedFolderID,
+                  !availableIDs.contains(selectedFolderID) else { return }
+            self.selectedFolderID = nil
+        }
+    }
+
+    private func folderSelection(
+        rawDownloaded: [Episode],
+        rawExpired: [RecentlyExpired]
+    ) -> Binding<PersistentIdentifier?> {
+        Binding(
+            get: { selectedFolderID },
+            set: { newID in
+                guard newID != selectedFolderID else { return }
+                selectedFolderID = newID
+                searchText = ""
+                let folder = newID.flatMap { id in
+                    folders.first { $0.persistentModelID == id }
+                }
+                let podcastIDs = folder.map { selected in
+                    Set(
+                        FolderRepository(context: context)
+                            .subtreeSubscriptions(of: selected)
+                            .map(\.persistentModelID)
+                    )
+                }
+                let filtered = DownloadsListFilter.apply(
+                    downloaded: rawDownloaded,
+                    expired: rawExpired,
+                    podcastIDs: podcastIDs,
+                    playedFilter: playedFilter,
+                    searchText: ""
+                )
+                Announcer.announce(
+                    DownloadsFilterAnnouncement.folderText(
+                        name: folder.map { FolderLogic.pathString($0) } ?? "All folders",
+                        visibleCount: filtered.visibleDownloaded.count + filtered.visibleExpired.count
+                    )
+                )
+            }
+        )
     }
 
     /// Removes every downloaded file and resets download state in one pass. The
