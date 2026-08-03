@@ -472,6 +472,11 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   Chapter 14), found in the dark because she put it where it goes; she caught
   herself organizing her shows into folders the same way and quietly liked it,
   the kind of thing she'd never say out loud (Chapter 53)
+- Her Thursday-route folder becomes a place she listens from, not just a place
+  she files things: she filters Inbox and Downloads through it, groups its Queue
+  episodes together, hears where playback came from, and checks its listening
+  time afterward. The folder has become the route itself, laid out before she
+  leaves home (Chapter 54)
 
 ## What you can generate
 
@@ -1786,6 +1791,30 @@ This week they turned into something she could keep. She made one for her Thursd
 Then the part she didn't expect to like. Sunday night, coffee going cold, she checked off a stack of shows in the inbox and filed the whole batch into a folder in one move. It told her how many, and that it was done. No thumbing them in one at a time.
 
 It reminded her of her trunk. Everything in its bin, the cuff here, the straps there, the chair folded where it folds, all of it found by feel in the dark because she'd put it where it went. She'd never say that out loud. But she caught herself packing her shows the way she packs the car, and something about that sat right.
+
+---
+
+### Chapter 54 — Build 161
+
+*Her folders stop being places she puts shows and become places she can listen from, carrying the same trail through Inbox, Queue, Downloads, Now Playing, and Stats.*
+
+**What to test:**
+
+With VoiceOver on, expand and collapse nested folders from the Actions rotor. The visual expand control should not add another flick stop, and focus should stay on the folder.
+
+Choose a folder in Inbox, Downloads, and Listening Stats. Each view should include its subfolders, announce the new result once, and let you return to All folders from an empty result.
+
+Group the Queue by folder and try the group actions. Start playback from a folder, confirm Now Playing says "Playing from" that folder and opens it, then start something from Inbox and confirm the folder context clears.
+
+Sunday night used to be a list of lists. Inbox first. Queue next. Downloads after that. She knew which shows belonged to Thursday, but the app didn't. She carried the grouping in her head and rebuilt it on every screen.
+
+Now she picks Thursday Route in the Inbox and the rest falls quiet. The Queue gathers those episodes under one heading. Downloads shows what will still play past the grain elevator. When she starts the first one, the player tells her where it came from and can take her straight back there.
+
+She expands the folder once, then collapses it. VoiceOver stays where she left it. No stray button to step around. The small weekly show is tucked under the route beside the long interview, exactly where she put both of them.
+
+At the end of the week she opens Stats and chooses the same folder. The number isn't impressive and doesn't need to be. It is simply the time between one client's driveway and the next, gathered without her keeping count.
+
+She used to think a folder was where something waited. This one moves with her.
 
 ---
 
