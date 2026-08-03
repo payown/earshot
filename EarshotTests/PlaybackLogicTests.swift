@@ -4,6 +4,106 @@ import XCTest
 /// Unit tests for the pure playback rules. No AVFoundation, no real files.
 final class PlaybackLogicTests: XCTestCase {
 
+    // MARK: Folder playback origin
+
+    func testFolderStartSetsOrigin() {
+        let folder = PodcastFolder(name: "News")
+        let expected = PlaybackOrigin.folder(folder.persistentModelID)
+
+        XCTAssertEqual(
+            PlaybackLogic.playbackOrigin(after: .started(expected), current: nil),
+            expected
+        )
+    }
+
+    func testStartingFromAnotherFolderReplacesOrigin() {
+        let first = PlaybackOrigin.folder(PodcastFolder(name: "News").persistentModelID)
+        let second = PlaybackOrigin.folder(PodcastFolder(name: "Comedy").persistentModelID)
+
+        XCTAssertEqual(
+            PlaybackLogic.playbackOrigin(after: .started(second), current: first),
+            second
+        )
+    }
+
+    func testOrdinaryManualStartClearsFolderOrigin() {
+        let current = PlaybackOrigin.folder(PodcastFolder(name: "News").persistentModelID)
+
+        XCTAssertNil(PlaybackLogic.playbackOrigin(after: .started(nil), current: current))
+    }
+
+    func testAdvanceWithinFolderSubtreeRetainsOrigin() {
+        let current = PlaybackOrigin.folder(PodcastFolder(name: "News").persistentModelID)
+
+        XCTAssertEqual(
+            PlaybackLogic.playbackOrigin(
+                after: .advanced(nextEpisodeBelongsToOrigin: true),
+                current: current
+            ),
+            current
+        )
+    }
+
+    func testAdvanceOutsideFolderSubtreeClearsOrigin() {
+        let current = PlaybackOrigin.folder(PodcastFolder(name: "News").persistentModelID)
+
+        XCTAssertNil(
+            PlaybackLogic.playbackOrigin(
+                after: .advanced(nextEpisodeBelongsToOrigin: false),
+                current: current
+            )
+        )
+    }
+
+    func testContinuingCurrentEpisodeRetainsOrigin() {
+        let current = PlaybackOrigin.folder(PodcastFolder(name: "News").persistentModelID)
+
+        XCTAssertEqual(
+            PlaybackLogic.playbackOrigin(after: .continuedCurrentEpisode, current: current),
+            current
+        )
+    }
+
+    func testStoppingClearsOrigin() {
+        let current = PlaybackOrigin.folder(PodcastFolder(name: "News").persistentModelID)
+
+        XCTAssertNil(PlaybackLogic.playbackOrigin(after: .stopped, current: current))
+    }
+
+    func testRelaunchRestoreDoesNotRestoreOrigin() {
+        let stale = PlaybackOrigin.folder(PodcastFolder(name: "News").persistentModelID)
+
+        XCTAssertNil(
+            PlaybackLogic.playbackOrigin(after: .restoredAfterRelaunch, current: stale)
+        )
+    }
+
+    func testDeletingActiveFolderClearsOrigin() {
+        let activeFolder = PodcastFolder(name: "News")
+        let current = PlaybackOrigin.folder(activeFolder.persistentModelID)
+
+        XCTAssertNil(
+            PlaybackLogic.playbackOrigin(
+                after: .foldersDeleted([activeFolder.persistentModelID]),
+                current: current
+            )
+        )
+    }
+
+    func testDeletingUnrelatedFolderRetainsOrigin() {
+        let activeFolder = PodcastFolder(name: "News")
+        let unrelatedFolder = PodcastFolder(name: "Comedy")
+        let current = PlaybackOrigin.folder(activeFolder.persistentModelID)
+
+        XCTAssertEqual(
+            PlaybackLogic.playbackOrigin(
+                after: .foldersDeleted([unrelatedFolder.persistentModelID]),
+                current: current
+            ),
+            current
+        )
+    }
+
     // MARK: Source resolution
 
     func testResolvesLocalFileWhenDownloadedAndPresent() {

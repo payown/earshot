@@ -1,4 +1,65 @@
 import Foundation
+import SwiftData
+
+/// The transient context that explains where the current playback run began.
+///
+/// Folder origin is deliberately identity-only and in memory. Now Playing
+/// resolves the current folder path from SwiftData, so a rename is reflected
+/// immediately and a deleted folder can never leave stale display text behind.
+/// This value is never written to the episode, Queue, settings, or schema.
+enum PlaybackOrigin: Equatable {
+    case folder(PersistentIdentifier)
+
+    var folderID: PersistentIdentifier {
+        switch self {
+        case let .folder(id): id
+        }
+    }
+}
+
+/// Events that can change a transient ``PlaybackOrigin``. Keeping the policy
+/// pure prevents an internal auto-advance and a user-selected episode from
+/// accidentally sharing different stale-context behavior.
+enum PlaybackOriginEvent: Equatable {
+    /// A deliberate episode start. `nil` means every non-folder source; a folder
+    /// origin replaces any prior folder rather than being inherited.
+    case started(PlaybackOrigin?)
+    /// Queue advancement retains a folder origin only while the next episode's
+    /// podcast still belongs to that folder's subtree.
+    case advanced(nextEpisodeBelongsToOrigin: Bool)
+    /// Pause, resume, seek, buffering, and route changes continue the same item.
+    case continuedCurrentEpisode
+    /// No episode remains loaded.
+    case stopped
+    /// Relaunch restores the last episode but not session-local source context.
+    case restoredAfterRelaunch
+    /// A repository deletion can remove one folder or an entire subtree.
+    case foldersDeleted(Set<PersistentIdentifier>)
+}
+
+extension PlaybackLogic {
+    /// Returns the folder origin after `event`, without reading player, queue, or
+    /// model state. Callers resolve subtree membership before an advance and pass
+    /// the boolean result in, keeping this transition exhaustive and unit-testable.
+    static func playbackOrigin(
+        after event: PlaybackOriginEvent,
+        current: PlaybackOrigin?
+    ) -> PlaybackOrigin? {
+        switch event {
+        case let .started(newOrigin):
+            return newOrigin
+        case let .advanced(nextEpisodeBelongsToOrigin):
+            return nextEpisodeBelongsToOrigin ? current : nil
+        case .continuedCurrentEpisode:
+            return current
+        case .stopped, .restoredAfterRelaunch:
+            return nil
+        case let .foldersDeleted(ids):
+            guard let current, ids.contains(current.folderID) else { return current }
+            return nil
+        }
+    }
+}
 
 /// Pure, view- and AVFoundation-free playback rules. These are factored out of
 /// ``PlayerService`` so they can be unit-tested without starting real audio:
