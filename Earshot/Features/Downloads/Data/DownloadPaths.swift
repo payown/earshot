@@ -18,7 +18,7 @@ enum DownloadTaskKey {
     /// episode has no podcast (defensive; subscribed episodes always do).
     static func key(feedURL: String?, guid: String) -> String {
         guard let feedURL, !feedURL.isEmpty else { return guid }
-        return feedURL + separator + guid
+        return FeedURLIdentity.canonical(feedURL) + separator + guid
     }
 
     /// Splits a stored key at the FIRST separator (guids may themselves contain
@@ -47,7 +47,10 @@ enum DownloadTaskKey {
         let byGUID = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == guid })
         let candidates = (try? context.fetch(byGUID)) ?? []
         guard let feedURL else { return candidates.first }
-        if let match = candidates.first(where: { $0.podcast?.feedURL == feedURL }) {
+        let canonicalFeedURL = FeedURLIdentity.canonical(feedURL)
+        if let match = candidates.first(where: {
+            $0.podcast.map { FeedURLIdentity.canonical($0.feedURL) == canonicalFeedURL } ?? false
+        }) {
             return match
         }
         if candidates.count == 1 { return candidates.first }

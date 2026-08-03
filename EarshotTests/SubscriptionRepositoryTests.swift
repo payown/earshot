@@ -59,6 +59,66 @@ private final class CountingFeedFetcher: FeedFetching, @unchecked Sendable {
     }
 }
 
+/// Holds the first fetch until the test releases it. Used with
+/// ``ConcurrentTaskBarrier`` so both subscribe calls have started before either
+/// can commit its natural-key insert.
+private actor ConcurrentSubscribeFeedFetcher: FeedFetching {
+    private let feed: ParsedFeed
+    private var calls = 0
+    private var fetchStartedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+    init(_ feed: ParsedFeed) { self.feed = feed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        calls += 1
+        if calls == 1 {
+            let waiters = fetchStartedWaiters
+            fetchStartedWaiters.removeAll()
+            for waiter in waiters { waiter.resume() }
+            await withCheckedContinuation { continuation in
+                releaseWaiter = continuation
+            }
+        }
+        return feed
+    }
+
+    func waitUntilFirstFetchStarts() async {
+        guard calls == 0 else { return }
+        await withCheckedContinuation { continuation in
+            fetchStartedWaiters.append(continuation)
+        }
+    }
+
+    func releaseFirstFetch() {
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+
+    func fetchCount() -> Int { calls }
+}
+
+private actor ConcurrentTaskBarrier {
+    private let target: Int
+    private var arrivals = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(target: Int) { self.target = target }
+
+    func arriveAndWait() async {
+        arrivals += 1
+        if arrivals == target {
+            let queued = waiters
+            waiters.removeAll()
+            for waiter in queued { waiter.resume() }
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+}
+
 @MainActor
 final class SubscriptionRepositoryTests: XCTestCase {
 
@@ -136,6 +196,47 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertEqual(first.persistentModelID, second.persistentModelID)
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 1)
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Episode>()).count, 1)
+    }
+
+    func testSubscribeCanonicalizesFeedIdentityAcrossEntryPointVariants() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = CountingFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+
+        let first = try await repo.subscribe(feedURL: " HTTPS://Example.COM:443/feed.xml#one ")
+        let second = try await repo.subscribe(feedURL: "https://example.com/feed.xml")
+
+        XCTAssertEqual(first.persistentModelID, second.persistentModelID)
+        XCTAssertEqual(first.feedURL, "https://example.com/feed.xml")
+        XCTAssertEqual(fetcher.fetchCount, 1)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Podcast>()), 1)
+    }
+
+    func testConcurrentSubscribeConvergesToOneNaturalKey() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = ConcurrentSubscribeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let start = ConcurrentTaskBarrier(target: 2)
+
+        async let first: PersistentIdentifier = { @MainActor in
+            await start.arriveAndWait()
+            return try await repo.subscribe(feedURL: "HTTPS://Example.COM:443/feed.xml#one")
+                .persistentModelID
+        }()
+        async let second: PersistentIdentifier = { @MainActor in
+            await start.arriveAndWait()
+            return try await repo.subscribe(feedURL: "https://example.com/feed.xml")
+                .persistentModelID
+        }()
+        await fetcher.waitUntilFirstFetchStarts()
+        await fetcher.releaseFirstFetch()
+        let resolved = try await [first, second]
+        let fetchCount = await fetcher.fetchCount()
+
+        XCTAssertEqual(fetchCount, 1, "The second writer must recheck after the first commits")
+        XCTAssertEqual(Set(resolved).count, 1)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Podcast>()), 1)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Episode>()), 1)
     }
 
     func testRefreshAddsOnlyNewEpisodesAndSurfacesThemInInbox() async throws {

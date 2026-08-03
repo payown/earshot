@@ -47,6 +47,7 @@ actor FeedRefreshActor {
     /// existing podcast — the actor did no fetch/insert/save and `episodeIDs` is
     /// empty, so the caller skips auto-download (mirroring the old early return).
     struct SubscribeResult: Sendable {
+        let feedURL: String
         let podcastID: PersistentIdentifier
         let episodeIDs: [PersistentIdentifier]
         let alreadySubscribed: Bool
@@ -82,7 +83,7 @@ actor FeedRefreshActor {
         var pendingIndexByApply: [Int: ApplyOutcome] = [:]
 
         func flushPending() {
-            saveIfNeeded()
+            saveIfNeededOrLog()
             for (index, applyOutcome) in pendingIndexByApply {
                 results[index].outcome = applyOutcome.result()
             }
@@ -98,6 +99,9 @@ actor FeedRefreshActor {
             let title = podcast.title
             let url = podcast.feedURL
             do {
+                let repair = try IdentityRepairService(context: modelContext)
+                    .repairEpisodes(in: podcast)
+                if repair.didChange { try modelContext.save() }
                 // The fetch (network I/O) and the synchronous parse inside it both
                 // run on this background actor, never the main thread.
                 let parsed = try await feed.fetch(url)
@@ -137,15 +141,18 @@ actor FeedRefreshActor {
     func refreshOne(
         feedURL: String, feed: FeedFetching, autoQueueEnabled: Bool
     ) async throws -> RefreshOutcome? {
-        var descriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.feedURL == feedURL })
-        descriptor.fetchLimit = 1
-        guard let podcast = (try? modelContext.fetch(descriptor))?.first else { return nil }
-        let parsed = try await feed.fetch(feedURL)
+        let canonical = FeedURLIdentity.canonical(feedURL)
+        guard let podcast = try PodcastIdentityService(context: modelContext)
+            .existing(feedURL: canonical)
+        else { return nil }
+        let repair = try IdentityRepairService(context: modelContext).repairEpisodes(in: podcast)
+        if repair.didChange { try modelContext.save() }
+        let parsed = try await feed.fetch(canonical)
         let applyOutcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
         // Save BEFORE resolving `newEpisodeIDs` — persistentModelID is temporary
         // for a newly-inserted Episode until the context saves (same reason
         // `subscribe(feedURL:feed:inboxSeedCount:)` above saves before `result()`).
-        saveIfNeeded()
+        try saveIfNeeded()
         return applyOutcome.result()
     }
 
@@ -164,14 +171,24 @@ actor FeedRefreshActor {
     /// so the caller re-fetches the inserted episodes by `episodeIDs` on the main
     /// context and enqueues there.
     func subscribe(feedURL: String, feed: FeedFetching, inboxSeedCount: Int) async throws -> SubscribeResult {
-        // Single-feed path: do the core subscribe, persist this one feed's writes,
-        // THEN read the now-permanent identifiers. persistentModelID is temporary
-        // until the context saves; capturing it before the save would yield IDs that
-        // never resolve on the main context (the batched `subscribeAll` saves in
-        // batches but likewise captures IDs only after its saves).
-        let outcome = try await subscribeOne(feedURL: feedURL, feed: feed, inboxSeedCount: inboxSeedCount)
-        saveIfNeeded()
-        return outcome.result()
+        let canonical = FeedURLIdentity.canonical(feedURL)
+        await PodcastIdentityWriteGate.shared.acquire(feedURLs: [canonical])
+        do {
+            let repair = try IdentityRepairService(context: modelContext)
+                .repair(feedURLs: [canonical])
+            if repair.didChange { try modelContext.save() }
+            // Hold the identity gate through the save: another context must not
+            // perform its final existence check while this insert is uncommitted.
+            let outcome = try await subscribeOne(
+                feedURL: canonical, feed: feed, inboxSeedCount: inboxSeedCount
+            )
+            try saveIfNeeded()
+            await PodcastIdentityWriteGate.shared.release(feedURLs: [canonical])
+            return outcome.result()
+        } catch {
+            await PodcastIdentityWriteGate.shared.release(feedURLs: [canonical])
+            throw error
+        }
     }
 
     /// Subscribes to every feed URL in `feedURLs` in ONE background pass, saving in
@@ -202,6 +219,7 @@ actor FeedRefreshActor {
         inboxSeedCount: Int,
         onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
     ) async -> [SubscribeResult] {
+        await PodcastIdentityWriteGate.shared.acquire(feedURLs: feedURLs)
         let total = feedURLs.count
         var results: [SubscribeResult] = []
         var sinceLastSave = 0
@@ -213,8 +231,18 @@ actor FeedRefreshActor {
         // permanent IDs into `results` after each batch save below.
         var pendingIndexByResult: [Int: SubscribeOutcome] = [:]
 
+        do {
+            let repair = try IdentityRepairService(context: modelContext)
+                .repair(feedURLs: feedURLs)
+            if repair.didChange { try modelContext.save() }
+        } catch {
+            AppLog.subscriptions.error(
+                "OPML import: preflight identity repair failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+
         func flushPending() {
-            saveIfNeeded()
+            saveIfNeededOrLog()
             for (index, outcome) in pendingIndexByResult { results[index] = outcome.result() }
             pendingIndexByResult.removeAll()
             sinceLastSave = 0
@@ -232,7 +260,14 @@ actor FeedRefreshActor {
                     // Reserve the slot now (preserves input order) and fill its
                     // permanent IDs at the next save.
                     let index = results.count
-                    results.append(SubscribeResult(podcastID: outcome.podcast.persistentModelID, episodeIDs: [], alreadySubscribed: false))
+                    results.append(
+                        SubscribeResult(
+                            feedURL: outcome.podcast.feedURL,
+                            podcastID: outcome.podcast.persistentModelID,
+                            episodeIDs: [],
+                            alreadySubscribed: false
+                        )
+                    )
                     pendingIndexByResult[index] = outcome
                     sinceLastSave += 1
                     if sinceLastSave >= Self.saveBatchSize { flushPending() }
@@ -250,6 +285,7 @@ actor FeedRefreshActor {
         // badge once, at the end of the whole operation rather than per batch,
         // so it refreshes without polling on every save (#736).
         NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+        await PodcastIdentityWriteGate.shared.release(feedURLs: feedURLs)
         return results
     }
 
@@ -279,6 +315,7 @@ actor FeedRefreshActor {
                 .prefix(Self.autoDownloadIDCap)
                 .map(\.persistentModelID)
             return SubscribeResult(
+                feedURL: podcast.feedURL,
                 podcastID: podcast.persistentModelID,
                 episodeIDs: Array(recentIDs),
                 alreadySubscribed: alreadySubscribed
@@ -290,31 +327,38 @@ actor FeedRefreshActor {
     /// ``subscribeAll(feedURLs:feed:onProgress:)``. Does NOT save — the caller decides
     /// when to save and then reads permanent IDs via ``SubscribeOutcome/result()``.
     private func subscribeOne(feedURL: String, feed: FeedFetching, inboxSeedCount: Int) async throws -> SubscribeOutcome {
-        let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canonical = FeedURLIdentity.canonical(feedURL)
+        let identity = PodcastIdentityService(context: modelContext)
 
         // Idempotency: an existing subscription returns it with no fetch or insert —
         // exactly the old early return. Its ID is already permanent (it was saved
         // before), so `result()` is valid immediately.
-        var existingDescriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.feedURL == trimmed })
-        existingDescriptor.fetchLimit = 1
-        if let existing = (try? modelContext.fetch(existingDescriptor))?.first {
+        if let existing = try identity.existing(feedURL: canonical) {
             return SubscribeOutcome(podcast: existing, episodes: [], alreadySubscribed: true)
         }
 
         // The fetch (network I/O) and the synchronous parse inside it both run on
         // this background actor, never the main thread.
-        let parsed = try await feed.fetch(trimmed)
-        let podcast = Podcast(
-            feedURL: trimmed,
-            title: parsed.title.isEmpty ? "Untitled podcast" : parsed.title,
-            author: parsed.author,
-            podcastDescription: parsed.description,
-            artworkURL: parsed.artworkURL,
-            websiteURL: parsed.websiteURL,
-            language: parsed.language,
-            category: parsed.category
-        )
-        modelContext.insert(podcast)
+        let parsed = try await feed.fetch(canonical)
+
+        // Recheck after the await: another subscribe context may have committed
+        // the same natural key while this actor was fetching the network feed.
+        let resolved = try identity.fetchOrCreate(feedURL: canonical) { canonicalFeedURL in
+            Podcast(
+                feedURL: canonicalFeedURL,
+                title: parsed.title.isEmpty ? "Untitled podcast" : parsed.title,
+                author: parsed.author,
+                podcastDescription: parsed.description,
+                artworkURL: parsed.artworkURL,
+                websiteURL: parsed.websiteURL,
+                language: parsed.language,
+                category: parsed.category
+            )
+        }
+        guard resolved.inserted else {
+            return SubscribeOutcome(podcast: resolved.podcast, episodes: [], alreadySubscribed: true)
+        }
+        let podcast = resolved.podcast
 
         // Restore the user's saved per-podcast inbox cap (if any) onto the fresh
         // Podcast BEFORE inbox seeding, so re-adding a previously-removed podcast
@@ -322,7 +366,7 @@ actor FeedRefreshActor {
         // limit (#548). The cap is keyed by feed URL in the AppSetting store
         // (same pattern as the #489 per-podcast filter), which survives the
         // unsubscribe that deleted the old Podcast row.
-        if let savedCap = storedInboxCap(forFeedURL: trimmed) {
+        if let savedCap = storedInboxCap(forFeedURL: canonical) {
             podcast.inboxMaxEpisodes = savedCap
         }
 
@@ -363,9 +407,7 @@ actor FeedRefreshActor {
     /// defensively, never trusted (#548).
     private func storedInboxCap(forFeedURL feedURL: String) -> Int? {
         let key = SettingsKey.podcastInboxCap(feedURL: feedURL)
-        var descriptor = FetchDescriptor<AppSetting>(predicate: #Predicate { $0.key == key })
-        descriptor.fetchLimit = 1
-        guard let raw = (try? modelContext.fetch(descriptor))?.first?.value,
+        guard let raw = AppSettingIdentity.value(for: key, in: modelContext),
               raw != "null",
               let cap = Int(raw), cap > 0
         else { return nil }
@@ -624,9 +666,7 @@ actor FeedRefreshActor {
     /// playing or the playing episode isn't queued, so the cap never dequeues it.
     private func currentlyPlayingQueueItemID() -> PersistentIdentifier? {
         let key = SettingsKey.lastPlayingEpisodeID
-        var settingDescriptor = FetchDescriptor<AppSetting>(predicate: #Predicate { $0.key == key })
-        settingDescriptor.fetchLimit = 1
-        guard let stored = (try? modelContext.fetch(settingDescriptor))?.first?.value,
+        guard let stored = AppSettingIdentity.value(for: key, in: modelContext),
               !stored.isEmpty else { return nil }
         guard let episode = DownloadTaskKey.episode(matching: stored, in: modelContext) else { return nil }
         return episode.queueItem?.persistentModelID
@@ -642,11 +682,13 @@ actor FeedRefreshActor {
         }
     }
 
-    private func saveIfNeeded() {
+    private func saveIfNeeded() throws {
         guard modelContext.hasChanges else { return }
-        do {
-            try modelContext.save()
-        } catch {
+        try modelContext.save()
+    }
+
+    private func saveIfNeededOrLog() {
+        do { try saveIfNeeded() } catch {
             AppLog.subscriptions.error("Feed refresh save failed: \(error.localizedDescription, privacy: .public)")
         }
     }

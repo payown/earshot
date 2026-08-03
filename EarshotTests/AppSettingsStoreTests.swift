@@ -42,6 +42,47 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.int(SettingsKey.autoDownloadCount, default: 0), 3)
     }
 
+    func testWriteSelfHealsDuplicateRowsAndNewestWriteWins() throws {
+        let context = TestStore.freshContext()
+        context.insert(AppSetting(key: SettingsKey.autoDownloadCount, value: "1"))
+        context.insert(AppSetting(key: SettingsKey.autoDownloadCount, value: "2"))
+
+        AppSettingsStore(context: context).setRawValue("7", for: SettingsKey.autoDownloadCount)
+
+        let rows = try context.fetch(FetchDescriptor<AppSetting>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.value, "7")
+    }
+
+    func testPerPodcastWriteMergesLegacyURLKeyVariants() throws {
+        let context = TestStore.freshContext()
+        context.insert(
+            AppSetting(
+                key: SettingsKey.podcastFilterPrefix + "HTTPS://Example.COM:443/feed.xml#old",
+                value: EpisodeListFilter.all.rawValue
+            )
+        )
+        context.insert(
+            AppSetting(
+                key: SettingsKey.podcastFilterPrefix + "https://example.com/feed.xml",
+                value: EpisodeListFilter.unheard.rawValue
+            )
+        )
+
+        AppSettingsStore(context: context).setEpisodeListFilter(
+            .all,
+            forFeedURL: "https://example.com/feed.xml"
+        )
+
+        let rows = try context.fetch(FetchDescriptor<AppSetting>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(
+            rows.first?.key,
+            SettingsKey.podcastFilterPrefix + "https://example.com/feed.xml"
+        )
+        XCTAssertEqual(rows.first?.value, EpisodeListFilter.all.rawValue)
+    }
+
     func testOptionalIntNullSentinel() throws {
         let store = try makeStore()
         store.setOptionalInt(nil, for: SettingsKey.historyRetentionDays)

@@ -124,8 +124,12 @@ final class SubscriptionRepository {
     /// main-context object.
     @discardableResult
     func subscribe(feedURL: String) async throws -> Podcast {
-        let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let existing = podcast(forFeedURL: trimmed) { return existing }
+        let canonical = FeedURLIdentity.canonical(feedURL)
+        if podcast(forFeedURL: canonical) != nil {
+            let repair = try IdentityRepairService(context: context).repair(feedURLs: [canonical])
+            if repair.didChange { try context.save() }
+            if let repaired = podcast(forFeedURL: canonical) { return repaired }
+        }
 
         // Free-tier podcast cap (#635): block an 11th podcast for a non-Plus
         // user BEFORE the network fetch below, so a blocked add never wastes a
@@ -151,18 +155,20 @@ final class SubscriptionRepository {
         // Hand the fetch/parse/insert/save to the background actor (off the main
         // thread). It returns only Sendable PersistentIdentifiers.
         let actor = FeedRefreshActor(modelContainer: context.container)
-        let result = try await actor.subscribe(feedURL: trimmed, feed: feed, inboxSeedCount: inboxSeedCount)
+        let result = try await actor.subscribe(feedURL: canonical, feed: feed, inboxSeedCount: inboxSeedCount)
 
         // Pull the background context's writes into the main context so the
         // re-fetch below resolves the freshly-inserted podcast and episodes.
         mergeBackgroundWrites()
+        let repair = try IdentityRepairService(context: context).repair(feedURLs: [canonical])
+        if repair.didChange { try context.save() }
 
         // Re-fetch the podcast on the main context by its persistentModelID so the
         // returned object is a valid main-context `Podcast` for callers. If the
         // feed already existed (actor early return) it was caught above, but guard
         // anyway: fall back to a feed-URL lookup so we never return a stale object.
         guard let podcast = self.podcast(forPersistentID: result.podcastID)
-            ?? self.podcast(forFeedURL: trimmed)
+            ?? self.podcast(forFeedURL: canonical)
         else {
             throw SubscriptionError.podcastNotFoundAfterSubscribe
         }
@@ -423,18 +429,26 @@ final class SubscriptionRepository {
         feedURLs: [String],
         onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
     ) async -> BulkSubscribeResult {
-        guard !feedURLs.isEmpty else { return BulkSubscribeResult(outcomes: [], skippedForCap: 0) }
+        var seenFeedURLs: Set<String> = []
+        let canonicalFeedURLs = feedURLs.compactMap { rawValue -> String? in
+            let canonical = FeedURLIdentity.canonical(rawValue)
+            guard !canonical.isEmpty, seenFeedURLs.insert(canonical).inserted else { return nil }
+            return canonical
+        }
+        guard !canonicalFeedURLs.isEmpty else {
+            return BulkSubscribeResult(outcomes: [], skippedForCap: 0)
+        }
 
-        var allowedURLs = feedURLs
+        var allowedURLs = canonicalFeedURLs
         var skippedForCap = 0
         if let isEntitled {
             let currentCount = currentPodcastCountForCapCheck()
             let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
             let allowedCount = PodcastCapPolicy.allowedNewSubscriptions(
-                currentCount: currentCount, requested: feedURLs.count, isEntitled: isEntitled, grandfatheredCount: grandfathered
+                currentCount: currentCount, requested: canonicalFeedURLs.count, isEntitled: isEntitled, grandfatheredCount: grandfathered
             )
-            allowedURLs = Array(feedURLs.prefix(allowedCount))
-            skippedForCap = feedURLs.count - allowedURLs.count
+            allowedURLs = Array(canonicalFeedURLs.prefix(allowedCount))
+            skippedForCap = canonicalFeedURLs.count - allowedURLs.count
         }
         guard !allowedURLs.isEmpty else { return BulkSubscribeResult(outcomes: [], skippedForCap: skippedForCap) }
 
@@ -453,12 +467,22 @@ final class SubscriptionRepository {
         // Reconcile the main context ONCE for the entire batch (the essential fix:
         // this used to run once per feed).
         mergeBackgroundWrites()
+        do {
+            let repair = try IdentityRepairService(context: context).repair(feedURLs: allowedURLs)
+            if repair.didChange { try context.save() }
+        } catch {
+            AppLog.subscriptions.error(
+                "Bulk subscription identity repair failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
 
         // Resolve each result back to a live main-context podcast. A missing
         // persistentID re-fetch is simply skipped (never force-unwrapped).
         var outcomes: [BulkSubscribeOutcome] = []
         for result in results {
-            guard let podcast = self.podcast(forPersistentID: result.podcastID) else { continue }
+            guard let podcast = self.podcast(forPersistentID: result.podcastID)
+                ?? self.podcast(forFeedURL: result.feedURL)
+            else { continue }
             outcomes.append(
                 BulkSubscribeOutcome(
                     feedURL: podcast.feedURL,
@@ -548,9 +572,7 @@ final class SubscriptionRepository {
     }
 
     private func podcast(forFeedURL url: String) -> Podcast? {
-        var descriptor = FetchDescriptor<Podcast>(predicate: #Predicate { $0.feedURL == url })
-        descriptor.fetchLimit = 1
-        return (try? context.fetch(descriptor))?.first
+        try? PodcastIdentityService(context: context).existing(feedURL: url)
     }
 
     /// Resolves a podcast on the MAIN context from an identifier the background

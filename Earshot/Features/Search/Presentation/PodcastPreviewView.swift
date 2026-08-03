@@ -50,7 +50,7 @@ struct PodcastPreviewView: View {
     @State private var showPaywall = false
 
     private var subscribed: Bool {
-        podcasts.contains { $0.feedURL == result.feedURL }
+        podcasts.contains { FeedURLIdentity.matches($0.feedURL, result.feedURL) }
     }
 
     var body: some View {
@@ -245,7 +245,9 @@ struct PodcastPreviewView: View {
     /// user re-entering the view. Subscribe is async (it fetches and seeds the
     /// inbox); unsubscribe is a synchronous local delete.
     private func toggleFollow() {
-        if let existing = podcasts.first(where: { $0.feedURL == result.feedURL }) {
+        if let existing = podcasts.first(where: {
+            FeedURLIdentity.matches($0.feedURL, result.feedURL)
+        }) {
             if SubscriptionRepository(context: context).unsubscribe(existing) {
                 Announcer.announce(FollowToggle.announcement(nowFollowing: false, title: result.title))
             }

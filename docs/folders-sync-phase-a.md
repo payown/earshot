@@ -38,12 +38,17 @@ The five work items below are ordered. Task 1 is a design gate; Tasks 2 and 3 ma
 
 ### 2. Replace unique constraints with deterministic identity services
 
-- [ ] Centralize exact feed-URL canonicalization and podcast fetch-or-create so the main-actor repository, `FeedRefreshActor`, OPML import, Search/Add, and the V1 reimport path share one rule.
-- [ ] Make `AppSettingsStore.setRawValue` fetch-or-create and self-heal duplicate key rows deterministically rather than updating an arbitrary first row.
-- [ ] Add an idempotent, bounded dedup service for podcasts by canonical `feedURL`, settings by `key`, and episodes by `(podcast feedURL, guid)`. Never deduplicate episodes by GUID globally.
-- [ ] Define merge policy in tests before implementation: preserve the newest user state, retain folder/episode memberships, bookmarks, queue placement, history, and podcast settings; never delete downloaded audio or valid relationships as an incidental duplicate cleanup.
-- [ ] Keep launch work bounded. Scan the small Podcast/AppSetting tables for duplicate keys, then inspect Episode rows only for duplicate podcast groups or other narrowly identified candidates; do not materialize the full Episode table on the main actor.
-- [ ] Add concurrency/idempotence tests that simulate repeated subscribe, repeated setting writes, and duplicate rows after the database constraint is gone.
+- [x] Centralize exact feed-URL canonicalization and podcast fetch-or-create so the main-actor repository, `FeedRefreshActor`, OPML import, Search/Add, and the V1 reimport path share one rule.
+- [x] Make `AppSettingsStore.setRawValue` fetch-or-create and self-heal duplicate key rows deterministically rather than updating an arbitrary first row.
+- [x] Add an idempotent, bounded dedup service for podcasts by canonical `feedURL`, settings by `key`, and episodes by `(podcast feedURL, guid)`. Never deduplicate episodes by GUID globally.
+- [x] Define merge policy in tests before implementation: preserve the newest user state, retain folder/episode memberships, bookmarks, queue placement, history, and podcast settings; never delete downloaded audio or valid relationships as an incidental duplicate cleanup.
+- [x] Keep launch work bounded. Scan the small Podcast/AppSetting tables for duplicate keys, then inspect Episode rows only for duplicate podcast groups or other narrowly identified candidates; do not materialize the full Episode table on the main actor.
+- [x] Add concurrency/idempotence tests that simulate repeated subscribe, repeated setting writes, and duplicate rows after the database constraint is gone.
+
+Task 2's implementation and merge policy are recorded in
+`docs/sync-a2-identity.md`. The general repair pass is deliberately invoked by
+Task 3's backed-up, restartable V7/V8 migration rather than added as an
+unprotected destructive V6 launch mutation.
 
 ### 3. Freeze V6 and migrate through the V7 bridge to V8
 

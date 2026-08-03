@@ -107,7 +107,7 @@ enum SettingsKey {
 
     /// The full per-podcast filter key for a given feed URL (#489).
     static func podcastFilter(feedURL: String) -> String {
-        podcastFilterPrefix + feedURL
+        podcastFilterPrefix + FeedURLIdentity.canonical(feedURL)
     }
 
     // Prefix for the per-podcast inbox episode limit. The full key is
@@ -122,7 +122,7 @@ enum SettingsKey {
 
     /// The full per-podcast inbox-cap key for a given feed URL (#548).
     static func podcastInboxCap(feedURL: String) -> String {
-        podcastInboxCapPrefix + feedURL
+        podcastInboxCapPrefix + FeedURLIdentity.canonical(feedURL)
     }
 
     // Persisted Earshot Plus entitlement state (#634). Recomputed from
@@ -227,24 +227,18 @@ final class AppSettingsStore {
     // MARK: Raw access
 
     func rawValue(_ key: String) -> String? {
-        var descriptor = FetchDescriptor<AppSetting>(
-            predicate: #Predicate { $0.key == key }
-        )
-        descriptor.fetchLimit = 1
-        return (try? context.fetch(descriptor))?.first?.value
+        AppSettingIdentity.value(for: key, in: context)
     }
 
     func setRawValue(_ value: String, for key: String) {
-        var descriptor = FetchDescriptor<AppSetting>(
-            predicate: #Predicate { $0.key == key }
-        )
-        descriptor.fetchLimit = 1
-        if let existing = (try? context.fetch(descriptor))?.first {
-            existing.value = value
-        } else {
-            context.insert(AppSetting(key: key, value: value))
+        do {
+            try AppSettingIdentity.setValue(value, for: key, in: context)
+            save()
+        } catch {
+            AppLog.data.error(
+                "Setting write failed for \(key, privacy: .private): \(error.localizedDescription, privacy: .public)"
+            )
         }
-        save()
     }
 
     // MARK: Typed helpers
