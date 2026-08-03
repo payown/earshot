@@ -204,9 +204,10 @@ struct PodcastSettingsView: View {
     }
 
     /// Shown in the Folders section when this podcast belongs to no folder.
-    /// Descriptive text rather than a blank row — the "Add to folder…" button
+    /// Descriptive text rather than a blank row — the "Manage folders…" button
     /// below it is the call to action.
     static let notInAnyFolderText = "Not in any folder"
+    static let manageFoldersButtonLabel = "Manage folders…"
 
     /// The folders this podcast currently belongs to, each rendered by its full
     /// breadcrumb path. Recomputed whenever the body re-evaluates — including
@@ -242,7 +243,7 @@ struct PodcastSettingsView: View {
             Button {
                 showingFolderPicker = true
             } label: {
-                Label("Add to folder…", systemImage: "folder.badge.plus")
+                Label(Self.manageFoldersButtonLabel, systemImage: "folder.badge.plus")
             }
             .accessibilityHint("Opens a list of folders to add or remove this podcast")
         } header: {

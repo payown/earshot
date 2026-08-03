@@ -32,11 +32,11 @@ final class EpisodeMultiSelectTests: XCTestCase {
     // MARK: Folder batch labels carry the episode noun
 
     func testFolderLabelsUseEpisodeNoun() {
-        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 3, itemSingular: "episode"), "Add 3 episodes to folder")
-        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 1, itemSingular: "episode"), "Add 1 episode to folder")
-        XCTAssertEqual(MultiSelectActionLabel.moveToFolder(count: 2, itemSingular: "episode"), "Move 2 episodes to folder")
+        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 3, itemSingular: "episode"), "Add 3 episodes to another folder")
+        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 1, itemSingular: "episode"), "Add 1 episode to another folder")
+        XCTAssertEqual(MultiSelectActionLabel.moveToFolder(count: 2, itemSingular: "episode"), "Move 2 episodes to one folder")
         // Zero-selection reads cleanly (the button is disabled in that state).
-        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 0, itemSingular: "episode"), "Add to folder")
+        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 0, itemSingular: "episode"), "Add to another folder")
     }
 
     func testSelectedCountAnnouncementUsesEpisodeNoun() {

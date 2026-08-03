@@ -10,8 +10,8 @@ enum FolderPickMode: Equatable {
 
 /// The single reusable destination picker for folders (folders phase 2, #756).
 ///
-/// Backs per-episode and per-podcast "Add to folder" / "Move to folder" Quick
-/// Actions everywhere they appear (Inbox, podcast episode lists, Downloads,
+/// Backs per-episode and per-podcast "Add to another folder" / "Move to one
+/// folder" Quick Actions everywhere they appear (Inbox, podcast episode lists, Downloads,
 /// Library) and is designed to also serve multi-select batch moves, subscribe-to-
 /// folder, and OPML import targets as those land. Present it as a sheet with the
 /// ``folderPicker(_:)`` modifier.
@@ -51,6 +51,10 @@ struct FolderPickerView: View {
 
     @State private var showingCreate = false
     @State private var newName = ""
+    /// A move is the only mode that removes existing memberships. Hold its
+    /// destination until the user confirms the exact outcome.
+    @State private var pendingMoveFolder: PodcastFolder?
+    @State private var moveSourcePaths: [String] = []
 
     init(
         episodes: [Episode] = [],
@@ -84,7 +88,7 @@ struct FolderPickerView: View {
                             row(for: folder)
                         }
                     } header: {
-                        Text("Choose a folder")
+                        Text(Self.instruction(mode: mode))
                             .accessibilityAddTraits(.isHeader)
                     }
                 }
@@ -110,10 +114,32 @@ struct FolderPickerView: View {
             }
             .alert("New folder", isPresented: $showingCreate) {
                 TextField("Folder name", text: $newName)
-                Button("Create") { create() }
+                Button(Self.createButtonTitle(mode: mode)) { create() }
                 Button("Cancel", role: .cancel) { newName = "" }
             } message: {
-                Text("Enter a name for the new folder.")
+                Text(Self.newFolderMessage(mode: mode, sourcePaths: moveSourcePaths))
+            }
+            .confirmationDialog(
+                Self.moveConfirmationTitle(
+                    path: pendingMoveFolder.map {
+                        FolderLogic.pathString($0, separator: ", ")
+                    }
+                        ?? "the selected folder"
+                ),
+                isPresented: Binding(
+                    get: { pendingMoveFolder != nil },
+                    set: { if !$0 { clearPendingMove() } }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingMoveFolder
+            ) { folder in
+                Button("Move") { confirmMove(into: folder) }
+                Button("Cancel", role: .cancel) { clearPendingMove() }
+            } message: { folder in
+                Text(Self.moveConfirmationMessage(
+                    sourcePaths: moveSourcePaths,
+                    targetPath: FolderLogic.pathString(folder, separator: ", ")
+                ))
             }
         }
     }
@@ -152,12 +178,22 @@ struct FolderPickerView: View {
     // MARK: Actions
 
     private func pick(_ folder: PodcastFolder) {
+        guard mode == .move else {
+            finishPick(folder)
+            return
+        }
+        moveSourcePaths = currentFolderPaths(excluding: folder)
+        pendingMoveFolder = folder
+    }
+
+    private func finishPick(_ folder: PodcastFolder) {
         perform(into: folder)
         dismiss()
     }
 
     private func startCreate() {
         newName = ""
+        moveSourcePaths = mode == .move ? currentFolderPaths() : []
         showingCreate = true
     }
 
@@ -168,8 +204,48 @@ struct FolderPickerView: View {
         // Phase 1/2 keeps creation flat (top-level). Nested creation from the
         // picker is a later phase — mirrors `PodcastFolderPickerView`.
         let folder = FolderRepository(context: context).createSubfolder(named: trimmed, under: nil)
-        perform(into: folder)
-        dismiss()
+        finishPick(folder)
+    }
+
+    private func confirmMove(into folder: PodcastFolder) {
+        clearPendingMove()
+        finishPick(folder)
+    }
+
+    private func clearPendingMove() {
+        pendingMoveFolder = nil
+        moveSourcePaths = []
+    }
+
+    /// Returns the full paths of every current membership that a move would
+    /// remove. Podcast memberships are available from each folder; episode
+    /// memberships use one join-table fetch. This never scans the much larger
+    /// Episode table.
+    private func currentFolderPaths(excluding target: PodcastFolder? = nil) -> [String] {
+        let podcastIDs = Set(podcasts.map(\.persistentModelID))
+        let episodeIDs = Set(episodes.map(\.persistentModelID))
+        var sourceIDs = Set<PersistentIdentifier>()
+
+        if !podcastIDs.isEmpty {
+            for folder in allFolders where folder.memberships.contains(where: {
+                $0.podcast.map { podcastIDs.contains($0.persistentModelID) } == true
+            }) {
+                sourceIDs.insert(folder.persistentModelID)
+            }
+        }
+
+        if !episodeIDs.isEmpty,
+           let memberships = try? context.fetch(FetchDescriptor<EpisodeFolderMembership>()) {
+            for membership in memberships
+            where membership.episode.map({ episodeIDs.contains($0.persistentModelID) }) == true {
+                if let id = membership.folder?.persistentModelID { sourceIDs.insert(id) }
+            }
+        }
+
+        if let target { sourceIDs.remove(target.persistentModelID) }
+        return orderedFolders
+            .filter { sourceIDs.contains($0.persistentModelID) }
+            .map { FolderLogic.pathString($0, separator: ", ") }
     }
 
     /// Runs the matching batch repository call for the current `mode`, then
@@ -231,17 +307,61 @@ struct FolderPickerView: View {
         "You don't have any folders yet. Create one to file this here."
 
     static func title(mode: FolderPickMode) -> String {
-        mode == .move ? "Move to folder" : "Add to folder"
+        mode == .move ? "Move to one folder" : "Add to another folder"
+    }
+
+    static func instruction(mode: FolderPickMode) -> String {
+        mode == .move
+            ? "Choose one folder. Other folder assignments will be removed."
+            : "Choose a folder. Current folders will be kept."
     }
 
     static func newFolderHint(mode: FolderPickMode) -> String {
         mode == .move
-            ? "Creates a folder and moves the selection into it"
-            : "Creates a folder and adds the selection to it"
+            ? "Creates one folder, removes other folder assignments, and keeps the selection only there"
+            : "Creates a folder and adds the selection while keeping its current folders"
     }
 
     static func rowHint(mode: FolderPickMode) -> String {
-        mode == .move ? "Moves the selection into this folder" : "Adds the selection to this folder"
+        mode == .move
+            ? "Removes the selection from all other folders and keeps it only in this folder"
+            : "Adds the selection to this folder and keeps its current folders"
+    }
+
+    static func createButtonTitle(mode: FolderPickMode) -> String {
+        mode == .move ? "Create and move" : "Create and add"
+    }
+
+    static func newFolderMessage(mode: FolderPickMode, sourcePaths: [String]) -> String {
+        guard mode == .move else {
+            return "Enter a name. Current folders will be kept."
+        }
+        guard !sourcePaths.isEmpty else {
+            return "Enter a name. The selection will be kept only in the new folder."
+        }
+        return "Enter a name. Folder assignments to \(folderList(sourcePaths)) will be removed. The selection will be kept only in the new folder."
+    }
+
+    static func moveConfirmationTitle(path: String) -> String {
+        "Move to \(path)?"
+    }
+
+    static func moveConfirmationMessage(sourcePaths: [String], targetPath: String) -> String {
+        guard !sourcePaths.isEmpty else {
+            return "The selection will be kept only in \(targetPath)."
+        }
+        return "Folder assignments to \(folderList(sourcePaths)) will be removed. The selection will be kept only in \(targetPath)."
+    }
+
+    /// Stable, concise English list copy for VoiceOver. Folder paths themselves
+    /// can contain breadcrumbs, so keep each path intact as one list item.
+    static func folderList(_ paths: [String]) -> String {
+        switch paths.count {
+        case 0: return ""
+        case 1: return paths[0]
+        case 2: return "\(paths[0]) and \(paths[1])"
+        default: return "\(paths.dropLast().joined(separator: ", ")), and \(paths.last!)"
+        }
     }
 
     /// The VoiceOver announcement fired after a pick, naming the count and the
@@ -263,7 +383,7 @@ struct FolderPickerView: View {
         } else {
             noun = itemPhrase(episodeCount, singular: "episode")
         }
-        return "\(verb) \(noun) to \(path)"
+        return "\(verb) \(noun) to \(path)\(mode == .move ? " only" : "")"
     }
 
     /// "1 episode" / "3 episodes" — simple English pluralization for the

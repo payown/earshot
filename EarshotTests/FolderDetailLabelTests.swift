@@ -103,7 +103,7 @@ final class FolderDetailLabelTests: XCTestCase {
         XCTAssertEqual(FolderDetailLabel.episodesEmptyTitle, "No episodes in this folder")
         XCTAssertEqual(
             FolderDetailLabel.episodesEmptyDescription,
-            "Add an episode to this folder from its actions, using Add to folder."
+            "Add an episode to this folder from its actions, using Add to another folder."
         )
     }
 

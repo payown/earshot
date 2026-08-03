@@ -68,7 +68,7 @@ enum FolderDetailLabel {
     /// added on this screen). Paired with ``episodesEmptyTitle`` in one combined
     /// accessibility element.
     static let episodesEmptyDescription =
-        "Add an episode to this folder from its actions, using Add to folder."
+        "Add an episode to this folder from its actions, using Add to another folder."
 
     /// The announcement posted after a single episode is removed from the folder
     /// via its "Remove from folder" rotor action. Names the episode and the
