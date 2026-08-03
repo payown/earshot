@@ -138,9 +138,163 @@ enum FolderLogic {
         return result
     }
 
+    /// The visible portion of an inline folder tree. Top-level folders are
+    /// always emitted; descendants are emitted only while every ancestor on
+    /// their path is expanded. The walk is cycle-safe and limits itself to the
+    /// caller's `folders` snapshot, so a stale relationship cannot pull an
+    /// unrelated model into the list.
+    static func visibleHierarchy(
+        from folders: [PodcastFolder],
+        isExpanded: (PodcastFolder) -> Bool
+    ) -> [FolderTreeItem] {
+        let allowed = Set(folders.map(ObjectIdentifier.init))
+        var result: [FolderTreeItem] = []
+        var visited = Set<ObjectIdentifier>()
+
+        func children(of folder: PodcastFolder) -> [PodcastFolder] {
+            folder.children
+                .filter { allowed.contains(ObjectIdentifier($0)) }
+                .sorted(by: siblingOrder)
+        }
+
+        func visit(_ folder: PodcastFolder, depth: Int) {
+            guard depth < maxDepth else { return }
+            guard visited.insert(ObjectIdentifier(folder)).inserted else { return }
+            let children = children(of: folder)
+            let expanded = !children.isEmpty && isExpanded(folder)
+            result.append(
+                FolderTreeItem(
+                    folder: folder,
+                    depth: depth,
+                    hasChildren: !children.isEmpty,
+                    isExpanded: expanded
+                )
+            )
+            guard expanded else { return }
+            for child in children {
+                visit(child, depth: depth + 1)
+            }
+        }
+
+        // A folder whose parent is absent from this query snapshot is treated as
+        // a root. This keeps it reachable while SwiftData relationships settle.
+        let roots = folders.filter { folder in
+            guard let parent = folder.parent else { return true }
+            return !allowed.contains(ObjectIdentifier(parent))
+        }
+        for root in roots.sorted(by: siblingOrder) {
+            visit(root, depth: 0)
+        }
+
+        // A healthy tree is accounted for above, including descendants hidden by
+        // a collapsed ancestor. If corrupt data contains a closed parent cycle
+        // with no root, expose that rootless island once rather than hiding it.
+        // Do not mistake an ordinary hidden descendant for such an island.
+        func belongsToRootlessCycle(_ folder: PodcastFolder) -> Bool {
+            var chain = Set<ObjectIdentifier>()
+            var current: PodcastFolder? = folder
+            var steps = 0
+            while let node = current, steps < maxDepth {
+                let id = ObjectIdentifier(node)
+                if visited.contains(id) { return false }
+                guard chain.insert(id).inserted else { return true }
+                guard let parent = node.parent,
+                      allowed.contains(ObjectIdentifier(parent)) else {
+                    return false
+                }
+                current = parent
+                steps += 1
+            }
+            return steps >= maxDepth
+        }
+        for orphan in folders.sorted(by: siblingOrder)
+        where !visited.contains(ObjectIdentifier(orphan))
+            && belongsToRootlessCycle(orphan) {
+            visit(orphan, depth: 0)
+        }
+        return result
+    }
+
+    /// Resolves a drag in the flattened visible tree back to the moved folder's
+    /// sibling order. Descendants may sit between sibling rows visually, but a
+    /// drag never changes `parent`; only the relative order of folders with the
+    /// same parent is returned for persistence.
+    static func siblingOrderAfterVisibleMove(
+        _ items: [FolderTreeItem],
+        source: Int,
+        destination: Int
+    ) -> [PodcastFolder]? {
+        guard items.indices.contains(source), (0...items.count).contains(destination) else {
+            return nil
+        }
+        var reordered = items.map(\.folder)
+        let moved = reordered.remove(at: source)
+        let insertion = destination > source ? destination - 1 : destination
+        reordered.insert(moved, at: min(max(0, insertion), reordered.count))
+        let parent = moved.parent
+        return reordered.filter { candidate in
+            switch (candidate.parent, parent) {
+            case (nil, nil): return true
+            case let (lhs?, rhs?): return lhs === rhs
+            default: return false
+            }
+        }
+    }
+
     /// Sibling ordering: `sortOrder` ascending, then `name` as a tiebreak.
     static func siblingOrder(_ lhs: PodcastFolder, _ rhs: PodcastFolder) -> Bool {
         if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
         return lhs.name < rhs.name
+    }
+}
+
+/// Stable presentation facts for one row in the inline folder tree. The model
+/// reference is session-local; SwiftUI identity continues to use the folder's
+/// persistent model identifier.
+struct FolderTreeItem {
+    let folder: PodcastFolder
+    let depth: Int
+    let hasChildren: Bool
+    let isExpanded: Bool
+}
+
+/// Pure VoiceOver wording for the inline folder tree. Hierarchy and state are
+/// spoken explicitly rather than depending on indentation or chevron direction.
+enum FolderTreeLabel {
+    static func row(
+        path: [String],
+        subfolderCount: Int,
+        podcastCount: Int,
+        isExpanded: Bool?,
+        position: Int,
+        total: Int
+    ) -> String {
+        let breadcrumb = FolderDetailLabel.breadcrumb(path: path)
+        let subfolders = "\(subfolderCount) \(subfolderCount == 1 ? "subfolder" : "subfolders")"
+        let podcasts = "\(podcastCount) \(podcastCount == 1 ? "podcast" : "podcasts")"
+        let state = isExpanded.map { $0 ? ", expanded" : ", collapsed" } ?? ""
+        return "\(breadcrumb), \(subfolders), \(podcasts)\(state), folder, position \(position) of \(total)"
+    }
+
+    static func toggleAction(isExpanded: Bool) -> String {
+        isExpanded ? "Collapse folder" : "Expand folder"
+    }
+
+    static func toggleButton(name: String, isExpanded: Bool) -> String {
+        "\(isExpanded ? "Collapse" : "Expand") \(name)"
+    }
+
+    static func toggleHint(childCount: Int, isExpanded: Bool) -> String {
+        let noun = childCount == 1 ? "subfolder" : "subfolders"
+        return isExpanded
+            ? "Hides \(childCount) \(noun) from this list."
+            : "Shows \(childCount) \(noun) in this list."
+    }
+
+    static func toggleAnnouncement(name: String, childCount: Int, isExpanded: Bool) -> String {
+        let noun = childCount == 1 ? "subfolder" : "subfolders"
+        return isExpanded
+            ? "Expanded \(name), showing \(childCount) \(noun)"
+            : "Collapsed \(name), hiding \(childCount) \(noun)"
     }
 }
