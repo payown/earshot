@@ -1,13 +1,13 @@
 # PRD: Folders as a First-Class Citizen in Earshot (SwiftUI)
 
-**Status:** Draft for review
+**Status:** Approved. Manual-folder Phases 1–4 shipped; Sync and Smart Folders pending.
 **Owner:** Michael Babcock, Payown Media LLC
 **Author:** Product / Engineering
-**Last updated:** 2026-07-30
+**Last updated:** 2026-08-03
 **Platform:** iOS/iPadOS only (SwiftUI + SwiftData)
 **Related docs:** `SWIFTUI_PLAN.md`, `.claude/rules/accessibility.md`, `.claude/rules/database-migrations.md`, `.claude/rules/git-workflow.md`
 
-> **This PRD is grounded in the SwiftUI + SwiftData app at the repo root.** It supersedes the earlier Flutter-based `folders.md` (PR #748), which was written against the retired Flutter/drift codebase now in `archive/flutter/`. Every technical reference below points at real Swift types and files as of this draft — confirm against `HEAD` before implementing.
+> **This PRD is grounded in the SwiftUI + SwiftData app at the repo root.** It supersedes the earlier Flutter-based `folders.md` (PR #748), which was written against the retired Flutter/drift codebase now in `archive/flutter/`. Manual-folder Phases 1–4 shipped through PRs #760, #765, and #766; their approved per-phase documents record the exact delivered scope. Confirm remaining technical references against `HEAD` before implementing Sync or Smart Folders.
 
 ---
 
@@ -370,30 +370,37 @@ Per `CLAUDE.md`, run the **`earshot-accessibility`** agent on every PR that touc
 
 **Phase order approved (Michael, 2026-07-30).** iCloud sync is a **committed part of this effort**. Each phase is independently shippable and testable on device.
 
-**Phase 1 — Foundations & per-podcast association.**
+**Phase 1 — Foundations & per-podcast association. Complete.**
 - `PodcastFolder.parent`/`children` + `EpisodeFolderMembership` schema (freeze V5, add V6, `migrateV5toV6` lightweight, migration test).
 - `FolderRepository` nesting methods (cycle guard, path, move) + `FolderLogic` helpers.
 - Folder detail becomes a drill-down of immediate children; breadcrumb; "Go up one level".
 - Folders section in `PodcastSettingsView`.
 - Non-drag reorder for folders and items (rotor "Move up/down", already the `FoldersScreen` pattern).
 
-**Phase 2 — Shared Quick Actions plumbing + multi-select & batch.**
+**Phase 2 — Shared Quick Actions plumbing + multi-select & batch. Complete.**
 - Add `addToFolder`/`moveToFolder` to `EpisodeAction` + `PodcastAction`, extend the builders, build the one reusable `FolderPickerView`, wire the call sites. Lights up "Add/Move to folder" in Inbox, Queue, Downloads, Podcast detail — rotor + context menu.
 - Selection mode + batch bar in the podcast list and folder podcast lists; batch repository methods.
 - Episode membership surfaced: episode selection in Inbox and episode lists; folder detail gains podcasts + episodes sections.
 
-**Phase 3 — Context menu, listening lens, queue/inbox embedding.**
+**Phase 3 — Context menu, listening lens, queue/inbox embedding. Complete.**
 - `.contextMenu` on episode/podcast rows wired to Quick Actions config, rotor parity.
 - **"Group by folder" in the Queue**, reusing `QueueLogic.group` + the group-header rotor.
 - **Folder-scoped inbox** (`InboxQuery` extension) + folder detail new-episodes section; "Add all to queue"/"Play all"; folder queue expiration honored.
 - Nested OPML export for a subtree; subscribe-to-folder on Search/Add.
 
-**Phase 4 — Broader embedding & polish.**
+**Phase 4 — Broader embedding & polish. Complete per `docs/folders-phase-4.md`.**
 - Downloads "by folder"; player "Playing from {folder path}" + add-to-folder; podcast-detail folder chips.
 - Inline expand/collapse tree on the Library root + the display-mode toggle (§7.1).
 - Folder-level inbox include/exclude batch; stats-by-folder; consider inherited playback speed / auto-queue.
 
-**iCloud sync (§16) interleave:** the CloudKit-compatible schema prep (§16.4) is a distinct migration that must land **before** sync turns on, and it changes model constraints (drops `@Attribute(.unique)`, adds defaults). Sequence it as its own migration epoch alongside/after the folder schema so testers run a small number of well-tested migrations, each verified on device. Sync engine + UX (§16.5–16.8) follow once the schema has baked. Smart folders (§17) slot in after episode membership (Phase 2).
+The approved Phase 4 task plan shipped the inline tree, Downloads filter,
+transient playback origin, and folder-scoped Stats. Three ideas from the earlier
+rollout sketch remain deliberately deferred rather than silently treated as
+complete: a drill-down/inline Library display toggle, podcast-detail folder
+chips, and folder-level inbox include/exclude batching. Inherited playback speed
+and auto-queue remain uncommitted considerations.
+
+**Next: Sync Phase A.** The CloudKit-compatible schema prep (§16.4) is a distinct migration that must land **before** sync turns on, and it changes model constraints (drops `@Attribute(.unique)`, adds defaults). Ship it as its own migration epoch after the now-proven folder schema, verify an upgrade from TestFlight build 161 on real data, and let it bake before enabling the CloudKit mirror. Sync engine + UX (§16.5–16.8) follow once the schema has baked. Smart folders (§17) can begin after Sync Phase A so their definitions are CloudKit-compatible from their first schema version.
 
 ---
 
@@ -723,4 +730,4 @@ func movePodcasts(_ podcasts: [Podcast], to folder: PodcastFolder)
 
 ---
 
-*For Michael. Nothing here is built yet. **All decisions are confirmed (2026-07-30):** §14, §16.12, and §17.9, plus the SwiftUI/SwiftData grounding and the switch to SwiftData-native CloudKit sync. **Next step:** keep this as the reference PRD; per-phase docs and GitHub issues are written just-in-time when each phase begins (per `.claude/rules/phase-progression.md`). Per project rules, no work starts on `main`, every UI PR gets an `earshot-accessibility` review first, and every schema change ships its migration test. Scope is iOS/iPadOS only.*
+*For Michael. Manual-folder Phases 1–4 are complete. **All decisions are confirmed (2026-07-30):** §14, §16.12, and §17.9, plus the SwiftUI/SwiftData grounding and the switch to SwiftData-native CloudKit sync. **Next step:** Sync Phase A gets its just-in-time phase document and GitHub issues before implementation. Per project rules, no work starts on `main`, every UI PR gets an accessibility review first, and every schema change ships its migration test. Scope is iOS/iPadOS only.*
