@@ -48,11 +48,19 @@ Task 4 keeps the selected folder lens in session state and resolves membership l
 
 ### 5. Integration, accessibility, and performance gate
 
-- [ ] Run the required SwiftUI accessibility review for every changed view.
+- [x] Run the required SwiftUI accessibility review for every changed view.
 - [ ] Verify VoiceOver focus, labels, values, Actions rotor order, default activation, Dynamic Type, Reduce Motion, and 44-point targets on device.
 - [ ] Test with deep nesting, duplicate podcast membership, an empty folder, a deleted active folder, and a large episode store.
-- [ ] Run the focused tests, the full simulator suite with intentional StoreKit quarantines, and a signed Swift 6 Release device build.
+- [x] Run the focused tests, the full simulator suite with intentional StoreKit quarantines, and a signed Swift 6 Release device build.
 - [ ] Update `CHANGELOG.md`, capture Phase 4 learnings, and device-verify the integration branch before requesting a merge to `main`.
+
+Integration gate status: the changed SwiftUI surfaces passed the code-level
+accessibility review. Focused Phase 4 coverage passed 283 tests with no failures;
+the full simulator suite passed 1,620 tests with 15 intentional skips and no
+failures. A signed Release build succeeded and was installed on the physical
+device. The remaining gate is the short integration checklist below, including
+large Dynamic Type and Reduce Motion verification; do not merge to `main` until
+that device pass is confirmed.
 
 ## Definition of done
 
