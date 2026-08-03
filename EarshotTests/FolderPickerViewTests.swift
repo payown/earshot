@@ -126,7 +126,7 @@ final class FolderPickerViewTests: XCTestCase {
     func testResultAnnouncementMoveEpisodesPlural() {
         XCTAssertEqual(
             FolderPickerView.resultAnnouncement(mode: .move, episodeCount: 3, podcastCount: 0, path: "News › Daily"),
-            "Moved 3 episodes to News › Daily"
+            "Moved 3 episodes to News › Daily only"
         )
     }
 
@@ -147,18 +147,61 @@ final class FolderPickerViewTests: XCTestCase {
     func testResultAnnouncementMovePodcastsPlural() {
         XCTAssertEqual(
             FolderPickerView.resultAnnouncement(mode: .move, episodeCount: 0, podcastCount: 2, path: "Tech"),
-            "Moved 2 podcasts to Tech"
+            "Moved 2 podcasts to Tech only"
         )
     }
 
     // MARK: Copy
 
     func testTitleAndHintsReflectMode() {
-        XCTAssertEqual(FolderPickerView.title(mode: .add), "Add to folder")
-        XCTAssertEqual(FolderPickerView.title(mode: .move), "Move to folder")
-        XCTAssertTrue(FolderPickerView.rowHint(mode: .add).lowercased().contains("adds"))
-        XCTAssertTrue(FolderPickerView.rowHint(mode: .move).lowercased().contains("moves"))
+        XCTAssertEqual(FolderPickerView.title(mode: .add), "Add to another folder")
+        XCTAssertEqual(FolderPickerView.title(mode: .move), "Move to one folder")
+        XCTAssertEqual(
+            FolderPickerView.instruction(mode: .add),
+            "Choose a folder. Current folders will be kept."
+        )
+        XCTAssertEqual(
+            FolderPickerView.instruction(mode: .move),
+            "Choose one folder. Other folder assignments will be removed."
+        )
+        XCTAssertTrue(FolderPickerView.rowHint(mode: .add).contains("keeps"))
+        XCTAssertTrue(FolderPickerView.rowHint(mode: .move).contains("all other folders"))
         XCTAssertFalse(FolderPickerView.emptyStateText.isEmpty)
+    }
+
+    func testMoveConfirmationNamesRemovedFoldersAndExclusiveDestination() {
+        XCTAssertEqual(
+            FolderPickerView.moveConfirmationTitle(path: "Commute"),
+            "Move to Commute?"
+        )
+        XCTAssertEqual(
+            FolderPickerView.moveConfirmationMessage(
+                sourcePaths: ["News", "Favorites"], targetPath: "Commute"
+            ),
+            "Folder assignments to News and Favorites will be removed. The selection will be kept only in Commute."
+        )
+    }
+
+    func testMoveConfirmationWithoutExistingFoldersStillStatesExclusiveResult() {
+        XCTAssertEqual(
+            FolderPickerView.moveConfirmationMessage(sourcePaths: [], targetPath: "Commute"),
+            "The selection will be kept only in Commute."
+        )
+    }
+
+    func testNewFolderCopyExplainsWhetherExistingFoldersRemain() {
+        XCTAssertEqual(FolderPickerView.createButtonTitle(mode: .add), "Create and add")
+        XCTAssertEqual(FolderPickerView.createButtonTitle(mode: .move), "Create and move")
+        XCTAssertEqual(
+            FolderPickerView.newFolderMessage(mode: .add, sourcePaths: ["News"]),
+            "Enter a name. Current folders will be kept."
+        )
+        XCTAssertEqual(
+            FolderPickerView.newFolderMessage(
+                mode: .move, sourcePaths: ["News", "Favorites", "Archive"]
+            ),
+            "Enter a name. Folder assignments to News, Favorites, and Archive will be removed. The selection will be kept only in the new folder."
+        )
     }
 
     // MARK: Request factories

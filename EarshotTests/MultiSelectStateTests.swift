@@ -78,20 +78,20 @@ final class MultiSelectStateTests: XCTestCase {
     // MARK: Batch button labels (the count's accessibility source of truth)
 
     func testAddToFolderLabelCarriesLiveCount() {
-        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 3, itemSingular: "podcast"), "Add 3 podcasts to folder")
-        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 1, itemSingular: "podcast"), "Add 1 podcast to folder")
+        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 3, itemSingular: "podcast"), "Add 3 podcasts to another folder")
+        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 1, itemSingular: "podcast"), "Add 1 podcast to another folder")
         // Zero-selection reads cleanly (the button is disabled in that state).
-        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 0, itemSingular: "podcast"), "Add to folder")
+        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 0, itemSingular: "podcast"), "Add to another folder")
     }
 
     func testMoveAndRemoveLabelsCarryLiveCount() {
-        XCTAssertEqual(MultiSelectActionLabel.moveToFolder(count: 2, itemSingular: "podcast"), "Move 2 podcasts to folder")
+        XCTAssertEqual(MultiSelectActionLabel.moveToFolder(count: 2, itemSingular: "podcast"), "Move 2 podcasts to one folder")
         XCTAssertEqual(MultiSelectActionLabel.removeFromFolder(count: 4, itemSingular: "podcast"), "Remove 4 podcasts from folder")
     }
 
     func testLabelsAreItemNounAgnosticForEpisodeReuse() {
         // #758 reuses the same labels with the "episode" noun.
-        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 3, itemSingular: "episode"), "Add 3 episodes to folder")
+        XCTAssertEqual(MultiSelectActionLabel.addToFolder(count: 3, itemSingular: "episode"), "Add 3 episodes to another folder")
     }
 
     func testSelectedCountAnnouncement() {

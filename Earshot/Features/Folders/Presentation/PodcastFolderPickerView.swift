@@ -68,7 +68,7 @@ struct PodcastFolderPickerView: View {
                     .accessibilityHint("Creates a folder and adds this podcast to it")
                 }
             }
-            .navigationTitle("Add to folder")
+            .navigationTitle(Self.navigationTitleText)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -157,7 +157,7 @@ struct PodcastFolderPickerView: View {
         guard !trimmed.isEmpty else { return }
         let repo = FolderRepository(context: context)
         // Phase 1: new folders are top-level. Immediately file this podcast into
-        // the folder the user just made — they opened "Add to folder" and created
+        // the folder the user just made — they opened "Manage folders" and created
         // one precisely to put this podcast in it.
         let folder = repo.createSubfolder(named: trimmed, under: nil)
         repo.add(podcast, to: folder)
@@ -172,6 +172,8 @@ struct PodcastFolderPickerView: View {
     }
 
     // MARK: Pure helpers (testable)
+
+    static let navigationTitleText = "Manage folders"
 
     /// Flattens the folder set into display order: a depth-first walk from the
     /// top-level roots (`parent == nil`) down through each folder's `children`,

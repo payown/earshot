@@ -393,6 +393,11 @@ final class PodcastSettingsViewTests: XCTestCase {
         )
     }
 
+    func testFolderManagementCopyDescribesTheMultiMembershipEditor() {
+        XCTAssertEqual(PodcastFolderPickerView.navigationTitleText, "Manage folders")
+        XCTAssertEqual(PodcastSettingsView.manageFoldersButtonLabel, "Manage folders…")
+    }
+
     func testPickerHierarchyIsDepthFirstParentBeforeChild() {
         let ctx = TestStore.freshContext()
         let repo = FolderRepository(context: ctx)

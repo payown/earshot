@@ -1074,7 +1074,7 @@ final class QuickActionBuildersTests: XCTestCase {
             context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {},
             onAddToFolder: { _ in }, onMoveToFolder: { _ in }
         )
-        XCTAssertEqual(items.map(\.label), ["Add to folder", "Move to folder"])
+        XCTAssertEqual(items.map(\.label), ["Add to another folder", "Move to one folder"])
     }
 
     func testEpisodeFolderActionsOmittedWhenNoRunners() {
@@ -1162,7 +1162,7 @@ final class QuickActionBuildersTests: XCTestCase {
             onOpenDetail: {}, onShare: {}, onUnsubscribe: {},
             onAddToFolder: { _ in }, onMoveToFolder: { _ in }
         )
-        XCTAssertEqual(items.map(\.label), ["Add to folder", "Move to folder"])
+        XCTAssertEqual(items.map(\.label), ["Add to another folder", "Move to one folder"])
     }
 
     func testPodcastFolderActionsOmittedWhenNoRunners() {

@@ -45,8 +45,8 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
         case .exportAudio: return "Export audio"
         // Folders phase 2 (#756). Activation opens the shared nested folder
         // picker; the actual filing happens when the user chooses a folder.
-        case .addToFolder: return "Add to folder"
-        case .moveToFolder: return "Move to folder"
+        case .addToFolder: return "Add to another folder"
+        case .moveToFolder: return "Move to one folder"
         // Podcast-level, reached from an episode row (#500/#572). Activation
         // opens a confirmation dialog — it never unfollows directly.
         case .unfollow: return "Unfollow this podcast"

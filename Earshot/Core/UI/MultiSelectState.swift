@@ -76,7 +76,7 @@ final class MultiSelectState {
 /// Pure, testable copy for the count-carrying batch action labels. Shared by
 /// podcast multi-select (#757) and episode multi-select (#758) — the caller
 /// passes the item noun ("podcast" / "episode"), so the exact same button reads
-/// "Add 3 podcasts to folder" or "Add 3 episodes to folder".
+/// "Add 3 podcasts to another folder" or "Add 3 episodes to another folder".
 ///
 /// The label is the accessibility source of truth for the running count, so it
 /// must always reflect the live selection; these are called fresh in each render
@@ -88,15 +88,21 @@ enum MultiSelectActionLabel {
         "\(count) \(singular)\(count == 1 ? "" : "s")"
     }
 
-    /// "Add 3 podcasts to folder" (or "Add to folder" when nothing is selected —
-    /// the button is disabled in that state, but its name still reads cleanly).
+    /// "Add 3 podcasts to another folder" (or "Add to another folder" when
+    /// nothing is selected — the button is disabled in that state, but its name
+    /// still reads cleanly).
     static func addToFolder(count: Int, itemSingular: String) -> String {
-        count == 0 ? "Add to folder" : "Add \(itemPhrase(count, singular: itemSingular)) to folder"
+        count == 0
+            ? "Add to another folder"
+            : "Add \(itemPhrase(count, singular: itemSingular)) to another folder"
     }
 
-    /// "Move 3 podcasts to folder".
+    /// "Move 3 podcasts to one folder" — "one" communicates that every other
+    /// folder assignment will be removed.
     static func moveToFolder(count: Int, itemSingular: String) -> String {
-        count == 0 ? "Move to folder" : "Move \(itemPhrase(count, singular: itemSingular)) to folder"
+        count == 0
+            ? "Move to one folder"
+            : "Move \(itemPhrase(count, singular: itemSingular)) to one folder"
     }
 
     /// "Remove 3 podcasts from folder" — the in-folder-only destructive batch.

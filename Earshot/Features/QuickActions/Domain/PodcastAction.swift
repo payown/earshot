@@ -34,8 +34,8 @@ enum PodcastAction: String, CaseIterable, Identifiable, Codable {
         case .share: return "Share podcast"
         // Folders phase 2 (#756). Activation opens the shared nested folder
         // picker; the filing happens when the user chooses a folder.
-        case .addToFolder: return "Add to folder"
-        case .moveToFolder: return "Move to folder"
+        case .addToFolder: return "Add to another folder"
+        case .moveToFolder: return "Move to one folder"
         }
     }
 
