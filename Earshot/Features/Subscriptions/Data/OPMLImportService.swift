@@ -83,11 +83,11 @@ final class OPMLImportService {
         var folderForURL: [String: String] = [:]
         for group in groups {
             for feedURL in group.feedURLs {
-                let trimmed = feedURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { continue }
-                if !orderedURLs.contains(trimmed) { orderedURLs.append(trimmed) }
-                if let folderName = group.folder, folderForURL[trimmed] == nil {
-                    folderForURL[trimmed] = folderName
+                let canonical = FeedURLIdentity.canonical(feedURL)
+                guard !canonical.isEmpty else { continue }
+                if !orderedURLs.contains(canonical) { orderedURLs.append(canonical) }
+                if let folderName = group.folder, folderForURL[canonical] == nil {
+                    folderForURL[canonical] = folderName
                 }
             }
         }

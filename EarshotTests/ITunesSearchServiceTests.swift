@@ -99,6 +99,23 @@ final class ITunesSearchServiceTests: XCTestCase {
         XCTAssertEqual(deduped.count, 2)
     }
 
+    func test_dedupe_usesCanonicalFeedIdentity() {
+        let input = [
+            PodcastSearchResult(
+                id: "first", title: "First", author: nil, artworkURL: nil,
+                feedURL: "HTTPS://Example.COM:443/feed#directory"
+            ),
+            PodcastSearchResult(
+                id: "duplicate", title: "Duplicate", author: nil, artworkURL: nil,
+                feedURL: "https://example.com/feed"
+            ),
+        ]
+
+        let deduped = ITunesSearchService.dedupedByFeedURL(input)
+
+        XCTAssertEqual(deduped.map(\.title), ["First"])
+    }
+
     /// Relevance order is preserved across a dedupe: surviving rows stay in their
     /// original first-seen positions, only later duplicates are removed.
     func test_dedupe_preservesRelevanceOrder() {

@@ -207,4 +207,60 @@ final class StoreMigrationTests: XCTestCase {
         let count = try reopened.mainContext.fetch(FetchDescriptor<Episode>()).count
         XCTAssertEqual(count, 2, "data should persist across reopen")
     }
+
+    func testV1ReimportCanonicalizesAndMergesDuplicateSnapshotIdentity() throws {
+        let context = TestStore.freshContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        let new = Date(timeIntervalSince1970: 1_700_000_000)
+        let snapshots = [
+            StoreMigration.PodcastSnapshot(
+                feedURL: "HTTPS://Example.COM:443/feed.xml#old",
+                title: "Old title",
+                artworkURL: nil,
+                podcastDescription: "Old description",
+                createdAt: old,
+                episodes: [
+                    StoreMigration.EpisodeSnapshot(
+                        guid: "shared", title: "Old episode",
+                        audioURL: "https://example.com/old.mp3",
+                        episodeDescription: nil, pubDate: old, isPlayed: false
+                    ),
+                ]
+            ),
+            StoreMigration.PodcastSnapshot(
+                feedURL: "https://example.com/feed.xml",
+                title: "New title",
+                artworkURL: "https://example.com/art.png",
+                podcastDescription: nil,
+                createdAt: new,
+                episodes: [
+                    StoreMigration.EpisodeSnapshot(
+                        guid: "shared", title: "New episode",
+                        audioURL: "https://example.com/new.mp3",
+                        episodeDescription: "New description", pubDate: new,
+                        isPlayed: true
+                    ),
+                    StoreMigration.EpisodeSnapshot(
+                        guid: "unique", title: "Unique episode",
+                        audioURL: "https://example.com/unique.mp3",
+                        episodeDescription: nil, pubDate: new, isPlayed: false
+                    ),
+                ]
+            ),
+        ]
+
+        try StoreMigration.write(snapshots, into: context)
+
+        let podcasts = try context.fetch(FetchDescriptor<Podcast>())
+        XCTAssertEqual(podcasts.count, 1)
+        XCTAssertEqual(podcasts.first?.feedURL, "https://example.com/feed.xml")
+        XCTAssertEqual(podcasts.first?.title, "New title")
+        XCTAssertEqual(podcasts.first?.createdAt, old)
+        let episodes = try context.fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(episodes.count, 2)
+        let shared = try XCTUnwrap(episodes.first { $0.guid == "shared" })
+        XCTAssertEqual(shared.title, "New episode")
+        XCTAssertEqual(shared.audioURL, "https://example.com/new.mp3")
+        XCTAssertTrue(shared.isPlayed)
+    }
 }

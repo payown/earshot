@@ -21,6 +21,15 @@ final class DownloadTaskKeyTests: XCTestCase {
         XCTAssertEqual(parsed.guid, "ep-42")
     }
 
+    func test_keyCanonicalizesFeedIdentity() {
+        XCTAssertEqual(
+            DownloadTaskKey.key(
+                feedURL: "HTTPS://Example.COM:443/feed#task", guid: "ep-42"
+            ),
+            "https://example.com/feed|ep-42"
+        )
+    }
+
     func test_key_guidContainingSeparator_roundTripsThroughParse() {
         // Real-world guids can contain "|"; URLs can't (not a legal URL
         // character), so splitting at the FIRST separator keeps the guid whole.

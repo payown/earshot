@@ -102,7 +102,9 @@ struct ITunesSearchService: Sendable {
     /// unit-testable without a network round-trip.
     static func dedupedByFeedURL(_ results: [PodcastSearchResult]) -> [PodcastSearchResult] {
         var seen = Set<String>()
-        return results.filter { seen.insert($0.feedURL).inserted }
+        return results.filter {
+            seen.insert(FeedURLIdentity.canonical($0.feedURL)).inserted
+        }
     }
 }
 

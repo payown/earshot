@@ -186,15 +186,42 @@ enum StoreMigration {
     @MainActor
     static func write(_ snapshots: [PodcastSnapshot], into context: ModelContext) throws {
         for snapshot in snapshots {
-            let podcast = Podcast(
-                feedURL: snapshot.feedURL,
-                title: snapshot.title,
-                podcastDescription: snapshot.podcastDescription,
-                artworkURL: snapshot.artworkURL,
-                createdAt: snapshot.createdAt
-            )
-            context.insert(podcast)
+            let resolved = try PodcastIdentityService(context: context).fetchOrCreate(
+                feedURL: snapshot.feedURL
+            ) { canonicalFeedURL in
+                Podcast(
+                    feedURL: canonicalFeedURL,
+                    title: snapshot.title,
+                    podcastDescription: snapshot.podcastDescription,
+                    artworkURL: snapshot.artworkURL,
+                    createdAt: snapshot.createdAt
+                )
+            }
+            let podcast = resolved.podcast
+            if !resolved.inserted {
+                // A V1 store can contain semantically identical URL variants.
+                // Keep the stable oldest row while allowing the newer snapshot's
+                // metadata to fill gaps; user played state is merged per episode.
+                if snapshot.createdAt >= podcast.createdAt, !snapshot.title.isEmpty {
+                    podcast.title = snapshot.title
+                }
+                podcast.podcastDescription = snapshot.podcastDescription
+                    ?? podcast.podcastDescription
+                podcast.artworkURL = snapshot.artworkURL ?? podcast.artworkURL
+                podcast.createdAt = min(podcast.createdAt, snapshot.createdAt)
+            }
             for snap in snapshot.episodes {
+                if let existing = podcast.episodes.first(where: { $0.guid == snap.guid }) {
+                    if snap.isPlayed { existing.isPlayed = true }
+                    if (snap.pubDate ?? .distantPast) >= (existing.pubDate ?? .distantPast) {
+                        if !snap.title.isEmpty { existing.title = snap.title }
+                        if !snap.audioURL.isEmpty { existing.audioURL = snap.audioURL }
+                        existing.episodeDescription = snap.episodeDescription
+                            ?? existing.episodeDescription
+                        existing.pubDate = snap.pubDate ?? existing.pubDate
+                    }
+                    continue
+                }
                 let episode = Episode(
                     guid: snap.guid,
                     title: snap.title,
@@ -212,6 +239,7 @@ enum StoreMigration {
                 context.insert(episode)
             }
         }
+        _ = try IdentityRepairService(context: context).repairAll()
         try context.save()
     }
 }

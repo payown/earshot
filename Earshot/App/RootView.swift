@@ -435,12 +435,8 @@ struct RootView: View {
     private func route(_ intent: NotificationIntent) {
         defer { notificationRouter.clear() }
 
-        let feedURL = intent.feedURL
-        var descriptor = FetchDescriptor<Podcast>(
-            predicate: #Predicate { $0.feedURL == feedURL }
-        )
-        descriptor.fetchLimit = 1
-        guard let podcast = (try? modelContext.fetch(descriptor))?.first else {
+        guard let podcast = try? PodcastIdentityService(context: modelContext)
+            .existing(feedURL: intent.feedURL) else {
             AppLog.notifications.error("Notification routing: podcast not found for feed")
             return
         }

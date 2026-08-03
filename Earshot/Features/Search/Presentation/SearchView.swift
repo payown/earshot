@@ -409,13 +409,15 @@ struct SearchView<HeaderContent: View>: View {
     }
 
     private func isSubscribed(_ result: PodcastSearchResult) -> Bool {
-        podcasts.contains { $0.feedURL == result.feedURL }
+        podcasts.contains { FeedURLIdentity.matches($0.feedURL, result.feedURL) }
     }
 
     /// Routes a directory row's primary tap / Activate: an already-followed show to
     /// the existing episode list, an un-subscribed one to the read-first preview.
     private func openDetail(_ result: PodcastSearchResult) {
-        if let existing = podcasts.first(where: { $0.feedURL == result.feedURL }) {
+        if let existing = podcasts.first(where: {
+            FeedURLIdentity.matches($0.feedURL, result.feedURL)
+        }) {
             directoryNavigation = .subscribed(existing)
         } else {
             directoryNavigation = .preview(result)
@@ -426,7 +428,9 @@ struct SearchView<HeaderContent: View>: View {
     /// reactively, so the row's label, value, and rotor action flip on completion
     /// without the user re-entering the row.
     private func toggleFollow(_ result: PodcastSearchResult) {
-        if let existing = podcasts.first(where: { $0.feedURL == result.feedURL }) {
+        if let existing = podcasts.first(where: {
+            FeedURLIdentity.matches($0.feedURL, result.feedURL)
+        }) {
             if SubscriptionRepository(context: context).unsubscribe(existing) {
                 Announcer.announce(FollowToggle.announcement(nowFollowing: false, title: result.title))
             }
