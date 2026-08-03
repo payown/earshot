@@ -1,6 +1,6 @@
 # Sync A1 storage map
 
-**Status:** Proposed for approval (2026-08-03)
+**Status:** Approved by Michael (2026-08-03)
 
 **Issue:** [#769](https://github.com/payown/earshot/issues/769)
 

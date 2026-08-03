@@ -34,7 +34,7 @@ The five work items below are ordered. Task 1 is a design gate; Tasks 2 and 3 ma
 - [x] Represent device-only episode state by canonical podcast feed URL plus episode GUID, with no cross-store SwiftData relationship.
 - [x] Classify all 46 `AppSetting` keys/prefixes: 30 mirrored and 16 local. Download preferences sync; downloaded files and active-transfer state do not.
 - [x] Prove the proposed 14-model full schema and separate configurations construct with Xcode 26.6, and record optional-to-many/query costs.
-- [ ] Approve the A1 decision record before live model code lands.
+- [x] Approve the A1 decision record before live model code lands (approved by Michael 2026-08-03).
 
 ### 2. Replace unique constraints with deterministic identity services
 
