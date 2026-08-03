@@ -1,6 +1,6 @@
 # Folders — Sync Phase A: CloudKit-ready local schema
 
-**Goal:** Ship and bake a V7 local-store migration whose models are compatible with SwiftData's CloudKit mirror, whose natural-key writes remain idempotent without SwiftData unique constraints, and whose device-only data is explicitly separated from future mirrored data — without enabling iCloud sync yet.
+**Goal:** Ship and bake a CloudKit-ready local-store migration whose models are compatible with SwiftData's CloudKit mirror, whose natural-key writes remain idempotent without SwiftData unique constraints, and whose device-only data is explicitly separated from future mirrored data — without enabling iCloud sync yet. The proposed A1 decision record uses an explicit, restartable V7 bridge preflight followed by a V8 final split so device-local values can move without an unbounded Episode scan; see `docs/sync-a1-storage-map.md`.
 
 **Estimated duration:** 2–3 weeks, part-time.
 
@@ -29,12 +29,12 @@ The five work items below are ordered. Task 1 is a design gate; Tasks 2 and 3 ma
 
 ### 1. Approve the mirrored-versus-local storage map
 
-- [ ] Inventory every V6 model, stored property, relationship, inverse, and delete rule in a checked-in matrix.
-- [ ] Mark each value as future-mirrored or device-only according to `docs/folders.md` §16.2. At minimum, audio bytes, `Episode.downloadPath`, device download progress/status, `ActiveDownload`, caches, logs, and transient UI state stay local.
-- [ ] Decide how device-only state is represented without a cross-store SwiftData relationship. Prefer a local model keyed by the episode natural key over syncing a container-relative path to other devices.
-- [ ] Classify `AppSetting` keys as synced or local. Preserve the PRD decision that download *preferences* sync while downloaded files and active-transfer state do not.
-- [ ] Prove the proposed full schema and per-store schemas can be constructed with Xcode 26.6. Record any call-site or query cost caused by optional to-many relationships, especially on the large Episode graph.
-- [ ] Record the final mapping and migration consequences in this document before model code lands.
+- [x] Inventory every V6 model, stored property, relationship, inverse, and delete rule in a checked-in matrix (`docs/sync-a1-storage-map.md`).
+- [x] Mark each value as future-mirrored or device-only according to `docs/folders.md` §16.2. Audio bytes, local paths/status, refresh bookkeeping, entitlement caches, caches, logs, and transient UI state stay local.
+- [x] Represent device-only episode state by canonical podcast feed URL plus episode GUID, with no cross-store SwiftData relationship.
+- [x] Classify all 46 `AppSetting` keys/prefixes: 30 mirrored and 16 local. Download preferences sync; downloaded files and active-transfer state do not.
+- [x] Prove the proposed 14-model full schema and separate configurations construct with Xcode 26.6, and record optional-to-many/query costs.
+- [ ] Approve the A1 decision record before live model code lands.
 
 ### 2. Replace unique constraints with deterministic identity services
 
@@ -45,10 +45,10 @@ The five work items below are ordered. Task 1 is a design gate; Tasks 2 and 3 ma
 - [ ] Keep launch work bounded. Scan the small Podcast/AppSetting tables for duplicate keys, then inspect Episode rows only for duplicate podcast groups or other narrowly identified candidates; do not materialize the full Episode table on the main actor.
 - [ ] Add concurrency/idempotence tests that simulate repeated subscribe, repeated setting writes, and duplicate rows after the database constraint is gone.
 
-### 3. Freeze V6 and migrate the live models to V7
+### 3. Freeze V6 and migrate through the V7 bridge to V8
 
 - [ ] Freeze the exact shipped V6 graph as nested `EarshotSchemaV6` model types. Never edit V1–V5 or the shipped V6 snapshot after it is frozen.
-- [ ] Introduce `EarshotSchemaV7` as the only version that references live models; append V7 and V6→V7 to `EarshotMigrationPlan`, and point every production/test container at V7.
+- [ ] Introduce additive `EarshotSchemaV7` as a bridge that retains source fields while temporary bridge rows are backfilled, then `EarshotSchemaV8` as the only version that references final live models. `StoreMigration` must explicitly open and close the single-store V7 preflight, idempotently populate and validate the separate V8 local store, and only then open the final split V8 container.
 - [ ] Remove `.unique` from `Podcast.feedURL` and `AppSetting.key` only after Task 2's fetch-or-create and dedup protection is in place.
 - [ ] Give every non-optional attribute a schema-visible default or make it optional when absence is semantically real. Preserve existing initializer behavior and enum fallback semantics.
 - [ ] Make every mirrored relationship optional and ensure every inverse is inferable or explicit. Preserve the manual cleanup invariants for one-way relationships and do not assume CloudKit makes cascade cleanup atomic.
@@ -57,11 +57,11 @@ The five work items below are ordered. Task 1 is a design gate; Tasks 2 and 3 ma
 
 ### 4. Prove migration safety and large-library behavior
 
-- [ ] Add `StoreMigrationV6toV7Tests` that creates a real on-disk frozen-V6 store, opens it through `StoreMigration.openOrMigrate`, and verifies every model and relationship survives.
+- [ ] Add `StoreMigrationV6toV8Tests` that creates a real on-disk frozen-V6 store, opens it through `StoreMigration.openOrMigrate`, traverses the explicit V7 preflight and local-copy validation, and verifies every model and relationship survives in the split V8 stores.
 - [ ] Seed realistic aged data: nested folders, podcast and episode memberships, queue, bookmarks, playback positions, history, nullable legacy values, all download states, local paths, active downloads, and settings.
-- [ ] Verify dedup after migration with deliberate V7 duplicate fixtures, including duplicate podcasts whose episodes, memberships, queue items, and bookmarks must merge without loss.
+- [ ] Verify dedup after migration with deliberate V8 duplicate fixtures, including duplicate podcasts whose episodes, memberships, queue items, and bookmarks must merge without loss.
 - [ ] Exercise the migration on a scale fixture representative of Michael's 242,000-plus episode store. Capture wall time and peak memory; no unbounded main-actor Episode scan or launch watchdog risk is acceptable.
-- [ ] Verify downgrade classification still leaves a newer V7 store untouched and corrupt-store recovery remains user-consented and backed up.
+- [ ] Verify downgrade classification still leaves a newer V8 store untouched and corrupt-store recovery remains user-consented and backed up.
 - [ ] Run focused migration/identity tests, the full simulator suite with the two StoreKit quarantines, and a signed Swift 6 Release build.
 
 ### 5. Upgrade build 161 on device and bake the schema
@@ -82,8 +82,8 @@ The five work items below are ordered. Task 1 is a design gate; Tasks 2 and 3 ma
 
 ## Definition of done
 
-- A build-161 V6 store upgrades in place to V7 on the physical device with no user-data loss and no reinstall.
-- Automated schema inspection proves there are no unique constraints, every future-mirrored relationship is optional with a valid inverse, and every required attribute has a schema-visible default.
+- A build-161 V6 store upgrades in place through the restartable V7 preflight to the split V8 stores on the physical device with no user-data loss and no reinstall.
+- Automated schema inspection proves the V8 final shape has no unique constraints, every future-mirrored relationship is optional with a valid inverse, and every required attribute has a schema-visible default.
 - Repeated podcast/settings/episode writes and an explicit duplicate-repair pass converge to one natural-key record while preserving all related user state.
 - Device-only download state is not part of the future mirrored schema, and downloaded playback still works after migration.
 - The production container explicitly remains local and the built app has no new iCloud capability or sync behavior.
@@ -128,16 +128,16 @@ Implement only Task 1 from docs/folders-sync-phase-a.md. Audit every V6 model an
 Implement Task 2 from docs/folders-sync-phase-a.md after Task 1 is approved. Centralize podcast and setting fetch-or-create behavior, add bounded deterministic duplicate repair, and write merge-policy tests before deleting any duplicate row. Episode identity is podcast feed URL plus GUID; never scan the full Episode table on the main actor.
 ```
 
-**Prompt 3: Implement schema V7**
+**Prompt 3: Implement the V7 bridge and V8 final schema**
 
 ```text
-Implement Task 3 from docs/folders-sync-phase-a.md. Freeze the shipped V6 graph, add V7 and its migration stage, apply the approved local/synced boundary, and add schema-reflection compatibility tests. Keep cloudKitDatabase explicitly .none and do not touch capabilities, entitlements, signing, or UI.
+Implement Task 3 from docs/folders-sync-phase-a.md. Freeze the shipped V6 graph, add the approved additive V7 bridge and V8 final schema, and implement the explicit restartable preflight that validates the separate local store before finalizing V8. Apply the approved local/synced boundary and add schema-reflection compatibility tests. Keep cloudKitDatabase explicitly .none and do not touch capabilities, entitlements, signing, or UI.
 ```
 
 **Prompt 4: Run the migration and scale gate**
 
 ```text
-Implement Task 4 from docs/folders-sync-phase-a.md. Build a real frozen-V6 on-disk fixture, migrate through the production path, test V7 duplicate repair without data loss, and exercise a 242,000-plus-episode scale fixture. Run the focused and full test suites plus a signed Release build; report timings and peak memory.
+Implement Task 4 from docs/folders-sync-phase-a.md. Build a real frozen-V6 on-disk fixture, migrate through the V7 bridge to V8 using the production path, test V8 duplicate repair without data loss, and exercise a 242,000-plus-episode scale fixture. Run the focused and full test suites plus a signed Release build; report timings and peak memory.
 ```
 
 **Prompt 5: Prepare the device upgrade build**
