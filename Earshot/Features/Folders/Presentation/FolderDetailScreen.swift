@@ -876,7 +876,10 @@ struct FolderDetailScreen: View {
             return
         }
         QueueRepository(context: context).add(episodes)
-        player.playFromEpisodeList(first)
+        player.playFromEpisodeList(
+            first,
+            origin: .folder(folder.persistentModelID)
+        )
         Announcer.announce(FolderDetailLabel.playAllAnnouncement(
             count: episodes.count, folderName: folder.name
         ))

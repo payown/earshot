@@ -17,10 +17,11 @@ final class StatsRepository {
     func stats(
         for period: StatsPeriod,
         now: Date = .now,
-        includeStreak: Bool = false
+        includeStreak: Bool = false,
+        podcastIDs: Set<PersistentIdentifier>? = nil
     ) -> ListeningStats {
         let since = period.since(now: now)
-        let sessions = sessionsSince(since)
+        let sessions = sessionsSince(since, podcastIDs: podcastIDs)
 
         var totalSeconds = 0
         var timeSavedSeconds = 0
@@ -31,7 +32,7 @@ final class StatsRepository {
             timeSavedSeconds += StatsLogic.timeSavedBySpeed(
                 durationSeconds: session.durationSeconds, speed: session.speed
             )
-            let title = session.podcast?.title ?? "Unknown Podcast"
+            let title = podcast(for: session)?.title ?? "Unknown Podcast"
             let existing = byPodcast[title] ?? (0, 0)
             byPodcast[title] = (existing.seconds + session.durationSeconds, existing.count + 1)
         }
@@ -41,13 +42,16 @@ final class StatsRepository {
             .sorted { $0.totalSeconds > $1.totalSeconds }
 
         let streak = includeStreak
-            ? StatsLogic.currentStreak(sessionDates: allSessionDates(), now: now)
+            ? StatsLogic.currentStreak(
+                sessionDates: allSessionDates(podcastIDs: podcastIDs),
+                now: now
+            )
             : 0
 
         return ListeningStats(
             totalSeconds: totalSeconds,
             timeSavedSeconds: timeSavedSeconds,
-            episodesCompleted: episodesCompleted(since: since),
+            episodesCompleted: episodesCompleted(since: since, podcastIDs: podcastIDs),
             currentStreakDays: streak,
             perPodcast: perPodcast
         )
@@ -128,23 +132,52 @@ final class StatsRepository {
 
     // MARK: Internals
 
-    private func sessionsSince(_ since: Date?) -> [ListeningSession] {
+    private func sessionsSince(
+        _ since: Date?,
+        podcastIDs: Set<PersistentIdentifier>? = nil
+    ) -> [ListeningSession] {
         let all = (try? context.fetch(FetchDescriptor<ListeningSession>())) ?? []
-        guard let since else { return all }
-        return all.filter { $0.date >= since }
+        return all.filter { session in
+            if let since, session.date < since { return false }
+            guard let podcastIDs else { return true }
+            guard let podcastID = podcast(for: session)?.persistentModelID else { return false }
+            return podcastIDs.contains(podcastID)
+        }
     }
 
-    private func allSessionDates() -> [Date] {
-        ((try? context.fetch(FetchDescriptor<ListeningSession>())) ?? []).map(\.date)
+    private func allSessionDates(
+        podcastIDs: Set<PersistentIdentifier>? = nil
+    ) -> [Date] {
+        sessionsSince(nil, podcastIDs: podcastIDs).map(\.date)
     }
 
-    private func episodesCompleted(since: Date?) -> Int {
-        let played = (try? context.fetch(FetchDescriptor<Episode>())) ?? []
+    private func episodesCompleted(
+        since: Date?,
+        podcastIDs: Set<PersistentIdentifier>? = nil
+    ) -> Int {
+        // Scope the store fetch to completed rows. Large libraries can contain
+        // hundreds of thousands of episodes, while only played rows contribute
+        // to this value; folder filtering remains an inexpensive identity check.
+        let descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.playedAt != nil }
+        )
+        let played = (try? context.fetch(descriptor)) ?? []
         return played.filter { episode in
             guard let playedAt = episode.playedAt else { return false }
             guard let since else { return true }
             return playedAt >= since
+        }.filter { episode in
+            guard let podcastIDs else { return true }
+            guard let podcastID = episode.podcast?.persistentModelID else { return false }
+            return podcastIDs.contains(podcastID)
         }.count
+    }
+
+    /// Resolves the session's current podcast relationship. Normal rows carry
+    /// both references; the episode fallback keeps older/partial rows scoped by
+    /// the podcast they still belong to without storing historical folder data.
+    private func podcast(for session: ListeningSession) -> Podcast? {
+        session.podcast ?? session.episode?.podcast
     }
 
     private static func escapeCSV(_ field: String) -> String {

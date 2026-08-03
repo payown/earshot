@@ -469,6 +469,34 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(groups[1].episodes.map(\.title), ["Ep b1"])
     }
 
+    func testOnlyFolderQueueGroupProducesPlaybackOrigin() {
+        let folder = PodcastFolder(name: "News")
+        let podcast = Podcast(feedURL: "https://x/a.xml", title: "A")
+
+        let folderGroup = QueueGroup(
+            kind: .folder(folder.persistentModelID),
+            title: "News",
+            episodes: [],
+            podcast: nil
+        )
+        let podcastGroup = QueueGroup(
+            kind: .podcast(podcast.persistentModelID),
+            title: "A",
+            episodes: [],
+            podcast: podcast
+        )
+        let unfiledGroup = QueueGroup(
+            kind: .unfiled,
+            title: "Unfiled",
+            episodes: [],
+            podcast: nil
+        )
+
+        XCTAssertEqual(folderGroup.playbackOrigin, .folder(folder.persistentModelID))
+        XCTAssertNil(podcastGroup.playbackOrigin)
+        XCTAssertNil(unfiledGroup.playbackOrigin)
+    }
+
     func testGroupedQueueByFolderUsesTopLevelAncestorAndIncludesUnfiled() {
         let ctx = TestStore.freshContext()
         let folders = FolderRepository(context: ctx)

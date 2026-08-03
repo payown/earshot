@@ -175,4 +175,137 @@ final class FolderLogicTests: XCTestCase {
         XCTAssertEqual(Set(flat.map(\.name)), ["a", "b"])
         XCTAssertEqual(flat.count, 2, "The visited-set stops the cycle; each folder once")
     }
+
+    // MARK: visibleHierarchy
+
+    func testVisibleHierarchyStartsWithSortedRootsCollapsed() {
+        let b = folder("B")
+        b.sortOrder = 1
+        let a = folder("A")
+        a.sortOrder = 0
+        let child = folder("Child")
+        link(child, under: a)
+
+        let visible = FolderLogic.visibleHierarchy(from: [child, b, a]) { _ in false }
+
+        XCTAssertEqual(visible.map { $0.folder.name }, ["A", "B"])
+        XCTAssertEqual(visible.map(\.depth), [0, 0])
+        XCTAssertEqual(visible.map(\.hasChildren), [true, false])
+        XCTAssertEqual(visible.map(\.isExpanded), [false, false])
+    }
+
+    func testVisibleHierarchyOnlyShowsDescendantsOfExpandedAncestors() {
+        let root = folder("Root")
+        let child = folder("Child")
+        let leaf = folder("Leaf")
+        link(child, under: root)
+        link(leaf, under: child)
+
+        let rootOnly = FolderLogic.visibleHierarchy(from: [leaf, child, root]) {
+            $0 === root
+        }
+        XCTAssertEqual(rootOnly.map { $0.folder.name }, ["Root", "Child"])
+        XCTAssertEqual(rootOnly.map(\.depth), [0, 1])
+        XCTAssertEqual(rootOnly.map(\.isExpanded), [true, false])
+
+        let all = FolderLogic.visibleHierarchy(from: [leaf, child, root]) {
+            $0 === root || $0 === child
+        }
+        XCTAssertEqual(all.map { $0.folder.name }, ["Root", "Child", "Leaf"])
+        XCTAssertEqual(all.map(\.depth), [0, 1, 2])
+        XCTAssertEqual(all.map(\.isExpanded), [true, true, false])
+    }
+
+    func testVisibleHierarchySortsSiblingsAtEveryDepth() {
+        let root = folder("Root")
+        let zulu = folder("Zulu")
+        zulu.sortOrder = 1
+        let alpha = folder("Alpha")
+        alpha.sortOrder = 0
+        link(zulu, under: root)
+        link(alpha, under: root)
+
+        let visible = FolderLogic.visibleHierarchy(from: [zulu, root, alpha]) { _ in true }
+
+        XCTAssertEqual(visible.map { $0.folder.name }, ["Root", "Alpha", "Zulu"])
+    }
+
+    func testVisibleHierarchyTerminatesAndExposesCorruptRootlessCycle() {
+        let a = folder("A")
+        let b = folder("B")
+        a.parent = b
+        b.parent = a
+        a.children = [b]
+        b.children = [a]
+
+        let visible = FolderLogic.visibleHierarchy(from: [a, b]) { _ in true }
+
+        XCTAssertEqual(Set(visible.map { $0.folder.name }), ["A", "B"])
+        XCTAssertEqual(visible.count, 2)
+    }
+
+    func testVisibleTreeDragReordersOnlySiblingsWithoutReparenting() throws {
+        let a = folder("A")
+        let a1 = folder("A1")
+        let b = folder("B")
+        let c = folder("C")
+        link(a1, under: a)
+        let visible = FolderLogic.visibleHierarchy(from: [a1, c, a, b]) { $0 === a }
+        XCTAssertEqual(visible.map { $0.folder.name }, ["A", "A1", "B", "C"])
+
+        let rootsAfterMovingAToBottom = try XCTUnwrap(
+            FolderLogic.siblingOrderAfterVisibleMove(
+                visible,
+                source: 0,
+                destination: visible.count
+            )
+        )
+        XCTAssertEqual(rootsAfterMovingAToBottom.map(\.name), ["B", "C", "A"])
+        XCTAssertTrue(a1.parent === a, "A drag must not reparent a child")
+
+        let rootsAfterDroppingBInsideA = try XCTUnwrap(
+            FolderLogic.siblingOrderAfterVisibleMove(
+                visible,
+                source: 2,
+                destination: 1
+            )
+        )
+        XCTAssertEqual(rootsAfterDroppingBInsideA.map(\.name), ["A", "B", "C"])
+        XCTAssertNil(b.parent, "Dropping among descendants must not reparent the root")
+    }
+
+    func testVisibleTreeDragRejectsInvalidIndices() {
+        let only = FolderTreeItem(
+            folder: folder("Only"),
+            depth: 0,
+            hasChildren: false,
+            isExpanded: false
+        )
+        XCTAssertNil(
+            FolderLogic.siblingOrderAfterVisibleMove([only], source: 2, destination: 0)
+        )
+        XCTAssertNil(
+            FolderLogic.siblingOrderAfterVisibleMove([only], source: 0, destination: 2)
+        )
+    }
+
+    func testFolderTreeVoiceOverWordingIncludesHierarchyCountsStateAndPosition() {
+        XCTAssertEqual(
+            FolderTreeLabel.row(
+                path: ["News", "Daily"],
+                subfolderCount: 1,
+                podcastCount: 2,
+                isExpanded: true,
+                position: 2,
+                total: 4
+            ),
+            "Folder path: News, Daily, 1 subfolder, 2 podcasts, expanded, folder, position 2 of 4"
+        )
+        XCTAssertEqual(FolderTreeLabel.toggleAction(isExpanded: false), "Expand folder")
+        XCTAssertEqual(FolderTreeLabel.toggleAction(isExpanded: true), "Collapse folder")
+        XCTAssertEqual(
+            FolderTreeLabel.toggleAnnouncement(name: "News", childCount: 1, isExpanded: true),
+            "Expanded News, showing 1 subfolder"
+        )
+    }
 }

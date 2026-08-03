@@ -1,6 +1,13 @@
 import Foundation
 import SwiftData
 
+extension Notification.Name {
+    /// Posted after FolderRepository persists a folder deletion. The removed
+    /// identifiers let PlayerService clear a matching in-memory playback origin
+    /// without coupling folder data to the player.
+    static let earshotFoldersDidDelete = Notification.Name("earshotFoldersDidDelete")
+}
+
 /// How a folder delete treats the folders nested beneath it (folders phase 1 —
 /// #752). In BOTH modes podcasts and episodes are never deleted — only the
 /// folder rows and their membership joins go away.
@@ -30,6 +37,8 @@ enum FolderMoveResult: Equatable {
 /// here rather than by a DB constraint.
 @MainActor
 final class FolderRepository {
+    nonisolated static let deletedFolderIDsKey = "deletedFolderIDs"
+
     private let context: ModelContext
 
     init(context: ModelContext) {
@@ -160,8 +169,10 @@ final class FolderRepository {
     /// folder, so they are cleaned up explicitly here to avoid dangling rows. Runs
     /// as a single transaction (one ``save()``). New in folders phase 1 (#752).
     func delete(_ folder: PodcastFolder, mode: FolderDeleteMode) {
+        let deletedFolderIDs: Set<PersistentIdentifier>
         switch mode {
         case .promoteChildren:
+            deletedFolderIDs = [folder.persistentModelID]
             let grandparent = folder.parent
             // Append the promoted children after any existing grandparent-level
             // siblings so sort orders don't collide.
@@ -177,12 +188,18 @@ final class FolderRepository {
             context.delete(folder) // FolderMembership rows cascade with it
         case .deleteSubtree:
             let subtree = FolderLogic.flattenSubtree(folder)
+            deletedFolderIDs = Set(subtree.map(\.persistentModelID))
             removeEpisodeMemberships(forFolders: subtree)
             // `children` uses `.nullify`, not cascade, so deleting the root does
             // not remove descendants — delete every folder in the subtree.
             for node in subtree { context.delete(node) }
         }
         save()
+        NotificationCenter.default.post(
+            name: .earshotFoldersDidDelete,
+            object: nil,
+            userInfo: [Self.deletedFolderIDsKey: deletedFolderIDs]
+        )
         AppLog.subscriptions.info("Deleted folder (mode: \(String(describing: mode), privacy: .public))")
     }
 

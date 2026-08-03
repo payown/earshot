@@ -65,3 +65,15 @@ enum StatsLogic {
         return parts.joined(separator: " ")
     }
 }
+
+/// Spoken confirmation for a folder-scope change. The Picker already supplies
+/// its native role and selected item; this announces only the changed result.
+enum StatsFolderAnnouncement {
+    /// Fixed Picker name. The native control supplies its selected value, so the
+    /// label must never interpolate the same value and make VoiceOver repeat it.
+    static let pickerLabel = "Folder"
+
+    static func text(scopeName: String, totalSeconds: Int) -> String {
+        "\(scopeName). Total listening \(StatsLogic.spokenDuration(totalSeconds))."
+    }
+}

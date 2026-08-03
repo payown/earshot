@@ -1,23 +1,29 @@
 import SwiftUI
 import SwiftData
 
-/// Lists the user's folders, with create, drag-reorder, and delete. Tapping a
-/// folder opens its detail. Reachable from the Podcasts tab.
+/// Inline, expandable folder hierarchy with create, sibling reorder, and delete.
+/// Tapping a folder opens its detail; expansion only changes this screen's
+/// session-local presentation and never mutates folder data.
 struct FoldersScreen: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
     private var folders: [PodcastFolder]
 
     @State private var showingCreate = false
     @State private var newName = ""
     @State private var pendingDelete: PodcastFolder?
+    @State private var expandedFolderIDs = Set<PersistentIdentifier>()
     @AccessibilityFocusState private var focusedFolderID: PersistentIdentifier?
-    // Gates the sighted-only swipe action below (#597): rather than lean on
-    // iOS mirroring `.swipeActions` into the rotor — unverified for a row that
-    // already carries a manual `.rotorActions` block — VoiceOver users get an
-    // explicit "Delete folder" rotor action instead, so deletion never depends
-    // on that mirroring behavior at all.
-    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @AccessibilityFocusState private var focusEmptyState: Bool
+
+    private var repository: FolderRepository { FolderRepository(context: context) }
+
+    private var visibleItems: [FolderTreeItem] {
+        FolderLogic.visibleHierarchy(from: folders) { folder in
+            expandedFolderIDs.contains(folder.persistentModelID)
+        }
+    }
 
     var body: some View {
         Group {
@@ -29,74 +35,19 @@ struct FoldersScreen: View {
                 } actions: {
                     Button("Create folder") { startCreate() }
                 }
+                .accessibilityFocused($focusEmptyState)
             } else {
+                let items = visibleItems
                 List {
-                    ForEach(Array(folders.enumerated()), id: \.element.persistentModelID) { index, folder in
-                        // Closure-based push, NOT NavigationLink(value:): the Library
-                        // stack's path is typed `[Podcast]` (RootView.libraryPath), so
-                        // a value-based push of a PodcastFolder can never enter the path
-                        // and silently does nothing. A closure link bypasses the typed
-                        // path — the same mechanism that reaches FoldersScreen itself.
-                        let link = NavigationLink {
-                            FolderDetailScreen(folder: folder)
-                        } label: {
-                            row(for: folder)
-                        }
-                        // The drag handle (`.onMove`) stays for sighted users; these
-                        // rotor move actions are the non-drag alternative every other
-                        // reorderable list in the app already offers (Queue, Quick
-                        // Actions). Same vocabulary, same tested `QuickActionMoveLogic`.
-                        // A "Delete folder" action is appended after the moves (#597):
-                        // deleting used to be the system rotor "Delete" action generated
-                        // by `.onDelete`, which crashed intermittently because that API
-                        // assumes the row is removed synchronously within the same
-                        // gesture's transaction — but the confirmation dialog (#578)
-                        // defers the real delete to a later, disconnected gesture. This
-                        // explicit custom action carries no such assumption, and — unlike
-                        // relying on iOS to mirror the sighted swipe action below into the
-                        // rotor — guarantees VoiceOver users always have a delete path,
-                        // regardless of mirroring behavior for a row that also declares
-                        // this manual `.rotorActions` block.
-                        let rowView = link
-                            .accessibilityLabel(rowLabel(for: folder, index: index, count: folders.count))
-                            .accessibilityHint("Use the actions rotor to move this folder without dragging.")
-                            .accessibilityFocused($focusedFolderID, equals: folder.persistentModelID)
-                            // Routed through the shared helper so the rotor announces
-                            // "Move to top" first — the same order the compensated
-                            // Queue rows use — despite the OS's reversed emission
-                            // (#572, #577). `QuickActionMoveLogic.targets` already
-                            // returns the designed order.
-                            .rotorActions(
-                                QuickActionMoveLogic.targets(index: index, count: folders.count)
-                                    .map { target in
-                                        QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
-                                            move(IndexSet(integer: index), target.destinationOffset)
-                                            Announcer.announce(
-                                                "Moved \(folder.name) to position \(target.resultingIndex + 1) of \(folders.count)"
-                                            )
-                                            focusedFolderID = folder.persistentModelID
-                                        }
-                                    }
-                                    + [QuickActionItem(id: "deleteFolder", label: "Delete folder", isDestructive: true) {
-                                        pendingDelete = folder
-                                    }]
-                            )
-                        if voiceOverEnabled {
-                            rowView
-                        } else {
-                            // Sighted-only swipe (#597): VoiceOver users reach delete
-                            // through the explicit rotor action above instead.
-                            rowView
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button(role: .destructive) {
-                                        pendingDelete = folder
-                                    } label: {
-                                        Label("Delete folder", systemImage: "trash")
-                                    }
-                                }
-                        }
+                    ForEach(Array(items.enumerated()), id: \.element.folder.persistentModelID) { index, item in
+                        folderTreeRow(item, index: index, total: items.count)
                     }
-                    .onMove(perform: move)
+                    // Dragging never reparents a folder. The flattened result is
+                    // reduced back to the dragged folder's sibling group, so
+                    // crossing expanded descendants only changes sibling order.
+                    .onMove { offsets, destination in
+                        moveVisible(offsets, destination: destination, items: items)
+                    }
                 }
             }
         }
@@ -120,8 +71,6 @@ struct FoldersScreen: View {
         } message: {
             Text("Enter a name for the new folder.")
         }
-        // Same wording as FolderDetailScreen's confirmed delete, so both folder
-        // delete paths read identically (#578).
         .confirmationDialog(
             "Delete folder \(pendingDelete?.name ?? "this folder")?",
             isPresented: Binding(
@@ -138,30 +87,173 @@ struct FoldersScreen: View {
         }
     }
 
-    private func row(for folder: PodcastFolder) -> some View {
-        let count = folder.memberships.count
-        // Visual only — the accessible label (with reorder position) is set on the
-        // enclosing NavigationLink so the row is one element carrying the rotor
-        // move actions.
+    @ViewBuilder
+    private func folderTreeRow(_ item: FolderTreeItem, index: Int, total: Int) -> some View {
+        let folder = item.folder
+        let actions = rowActions(for: item)
+        let link = NavigationLink {
+            FolderDetailScreen(folder: folder)
+        } label: {
+            rowContent(for: item)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityLabel(rowLabel(for: item, index: index, total: total))
+        .accessibilityHint(rowHint(for: item))
+        .accessibilityFocused($focusedFolderID, equals: folder.persistentModelID)
+        .rotorActions(actions)
+
+        let row = HStack(spacing: Spacing.sm) {
+            link
+            if item.hasChildren {
+                Button {
+                    toggle(item)
+                } label: {
+                    Image(systemName: item.isExpanded ? "chevron.down.circle" : "chevron.right.circle")
+                        .accessibilityHidden(true)
+                        .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // The folder row already exposes this command through its
+                // Actions rotor. Keep the visual control touchable without
+                // adding a second VoiceOver flick stop.
+                .accessibilityHidden(true)
+            }
+        }
+
+        if voiceOverEnabled {
+            row
+        } else {
+            // VoiceOver receives one explicit action source on the link. Sighted
+            // users get the same stable actions through long-press plus the
+            // existing delete swipe, without duplicating rotor entries.
+            row
+                .quickActionsContextMenu(actions)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        pendingDelete = folder
+                    } label: {
+                        Label("Delete folder", systemImage: "trash")
+                    }
+                }
+        }
+    }
+
+    private func rowContent(for item: FolderTreeItem) -> some View {
+        let folder = item.folder
+        let childCount = folder.children.count
+        let podcastCount = folder.memberships.count
+        // Cap visual indentation so a deeply nested tree remains readable at
+        // large Dynamic Type. VoiceOver receives the complete breadcrumb.
+        let visualDepth = min(item.depth, 4)
         return HStack(spacing: Spacing.md) {
-            Image(systemName: "folder")
+            Image(systemName: item.isExpanded ? "folder.fill" : "folder")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(folder.name).font(.headline)
-                Text("^[\(count) podcast](inflect: true)")
+                Text("^[\(childCount) subfolder](inflect: true), ^[\(podcastCount) podcast](inflect: true)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+        .padding(.leading, CGFloat(visualDepth) * Spacing.lg)
     }
 
-    /// The row's VoiceOver label, including its reorder position so a rotor move
-    /// tells the user what changed — matching `QuickActionsSettingsView`.
-    private func rowLabel(for folder: PodcastFolder, index: Int, count: Int) -> String {
-        let n = folder.memberships.count
-        let podcasts = "\(n) \(n == 1 ? "podcast" : "podcasts")"
-        return "\(folder.name), \(podcasts), position \(index + 1) of \(count)"
+    private func rowLabel(for item: FolderTreeItem, index: Int, total: Int) -> String {
+        FolderTreeLabel.row(
+            path: FolderLogic.folderPath(item.folder).map(\.name),
+            subfolderCount: item.folder.children.count,
+            podcastCount: item.folder.memberships.count,
+            isExpanded: item.hasChildren ? item.isExpanded : nil,
+            position: index + 1,
+            total: total
+        )
+    }
+
+    private func rowHint(for item: FolderTreeItem) -> String {
+        if item.hasChildren {
+            return "Opens this folder. Use the Actions rotor to expand, collapse, move, or delete it without dragging."
+        }
+        return "Opens this folder. Use the Actions rotor to move or delete it without dragging."
+    }
+
+    private func rowActions(for item: FolderTreeItem) -> [QuickActionItem] {
+        let folder = item.folder
+        // Derive siblings from the screen's existing @Query snapshot. Do not
+        // perform a fresh SwiftData fetch for every visible row during body
+        // evaluation.
+        let siblings = siblingFolders(of: folder)
+        guard let siblingIndex = siblings.firstIndex(where: {
+            $0.persistentModelID == folder.persistentModelID
+        }) else {
+            return deleteAction(for: folder)
+        }
+
+        var actions: [QuickActionItem] = []
+        if item.hasChildren {
+            actions.append(
+                QuickActionItem(
+                    id: "toggleChildren",
+                    label: FolderTreeLabel.toggleAction(isExpanded: item.isExpanded),
+                    isDestructive: false
+                ) {
+                    toggle(item)
+                }
+            )
+        }
+        actions += QuickActionMoveLogic.targets(index: siblingIndex, count: siblings.count)
+            .map { target in
+                QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
+                    move(folder, within: siblings, target: target)
+                }
+            }
+        actions += deleteAction(for: folder)
+        return actions
+    }
+
+    private func siblingFolders(of folder: PodcastFolder) -> [PodcastFolder] {
+        let parentID = folder.parent?.persistentModelID
+        return folders
+            .filter { $0.parent?.persistentModelID == parentID }
+            .sorted(by: FolderLogic.siblingOrder)
+    }
+
+    private func deleteAction(for folder: PodcastFolder) -> [QuickActionItem] {
+        [
+            QuickActionItem(
+                id: "deleteFolder",
+                label: "Delete folder",
+                isDestructive: true
+            ) {
+                pendingDelete = folder
+            },
+        ]
+    }
+
+    private func toggle(_ item: FolderTreeItem) {
+        let id = item.folder.persistentModelID
+        let nowExpanded: Bool
+        if expandedFolderIDs.contains(id) {
+            expandedFolderIDs.remove(id)
+            nowExpanded = false
+        } else {
+            expandedFolderIDs.insert(id)
+            nowExpanded = true
+        }
+        Announcer.announce(
+            FolderTreeLabel.toggleAnnouncement(
+                name: item.folder.name,
+                childCount: item.folder.children.count,
+                isExpanded: nowExpanded
+            )
+        )
+        // The disclosure button and any disappearing descendants should never
+        // become a stranded VoiceOver target. Re-anchor on the stable folder row
+        // after SwiftUI applies the visible-tree change.
+        DispatchQueue.main.async {
+            focusedFolderID = id
+        }
     }
 
     private func startCreate() {
@@ -173,21 +265,78 @@ struct FoldersScreen: View {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         newName = ""
         guard !trimmed.isEmpty else { return }
-        let folder = FolderRepository(context: context).createFolder(name: trimmed)
+        let folder = repository.createFolder(name: trimmed)
         Announcer.announce("Created folder \(folder.name)")
+        DispatchQueue.main.async {
+            focusedFolderID = folder.persistentModelID
+        }
     }
 
-    private func move(_ offsets: IndexSet, _ destination: Int) {
-        var reordered = folders
-        reordered.move(fromOffsets: offsets, toOffset: destination)
-        FolderRepository(context: context).reorderFolders(reordered)
+    /// Reorders only the dragged folder's siblings. Moving across visible rows
+    /// from another level never reparents a folder.
+    private func moveVisible(
+        _ offsets: IndexSet,
+        destination: Int,
+        items: [FolderTreeItem]
+    ) {
+        guard offsets.count == 1, let source = offsets.first, items.indices.contains(source) else {
+            return
+        }
+        guard let reorderedSiblings = FolderLogic.siblingOrderAfterVisibleMove(
+            items,
+            source: source,
+            destination: destination
+        ) else { return }
+        repository.reorderFolders(reorderedSiblings)
     }
 
-    /// Runs after the user confirms in the dialog. Keeps the pre-#578
-    /// post-delete announcement so VoiceOver feedback is unchanged.
+    private func move(
+        _ folder: PodcastFolder,
+        within siblings: [PodcastFolder],
+        target: QuickActionMoveTarget
+    ) {
+        guard let index = siblings.firstIndex(where: {
+            $0.persistentModelID == folder.persistentModelID
+        }) else { return }
+        var reordered = siblings
+        reordered.move(fromOffsets: IndexSet(integer: index), toOffset: target.destinationOffset)
+        repository.reorderFolders(reordered)
+        Announcer.announce(
+            FolderDetailLabel.moveAnnouncement(
+                name: folder.name,
+                position: target.resultingIndex + 1,
+                count: siblings.count
+            )
+        )
+        focusedFolderID = folder.persistentModelID
+    }
+
     private func confirmDelete(_ folder: PodcastFolder) {
+        let items = visibleItems
+        let deletedIndex = items.firstIndex(where: {
+            $0.folder.persistentModelID == folder.persistentModelID
+        })
+        let neighborID: PersistentIdentifier? = deletedIndex.flatMap { index in
+            if items.indices.contains(index + 1) {
+                return items[index + 1].folder.persistentModelID
+            }
+            if index > 0 {
+                return items[index - 1].folder.persistentModelID
+            }
+            return nil
+        }
+        let id = folder.persistentModelID
         let name = folder.name
-        FolderRepository(context: context).delete(folder)
+        expandedFolderIDs.remove(id)
+        pendingDelete = nil
+        repository.delete(folder)
         Announcer.announce("Deleted folder \(name)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if let neighborID {
+                focusedFolderID = neighborID
+            } else {
+                focusEmptyState = true
+            }
+        }
     }
 }

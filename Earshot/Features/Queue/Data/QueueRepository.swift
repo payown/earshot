@@ -36,6 +36,16 @@ struct QueueGroup: Identifiable {
 
     var id: Kind { kind }
 
+    /// Only a real folder group creates Playing-from-folder context. Podcast and
+    /// Unfiled groups are ordinary Queue sources and therefore clear any prior
+    /// origin when their Play Group action starts an episode.
+    var playbackOrigin: PlaybackOrigin? {
+        switch kind {
+        case let .folder(folderID): return .folder(folderID)
+        case .podcast, .unfiled: return nil
+        }
+    }
+
     /// The folder-grouping key for `episode` given a subtree-aware map of each
     /// podcast to the top-level folder whose subtree contains it. A podcast in no
     /// folder — or an episode with no podcast — buckets into ``Kind/unfiled``.
