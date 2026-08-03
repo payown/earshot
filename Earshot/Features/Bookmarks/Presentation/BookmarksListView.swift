@@ -107,8 +107,8 @@ struct BookmarksListView: View {
             // before Delete — never the destructive action first — despite the
             // OS's reversed emission (#572, #577).
             .rotorActions([
-                QuickActionItem(label: "Share bookmark", isDestructive: false) { share(bookmark) },
-                QuickActionItem(label: "Delete bookmark", isDestructive: true) { delete(bookmark) },
+                QuickActionItem(id: "shareBookmark", label: "Share bookmark", isDestructive: false) { share(bookmark) },
+                QuickActionItem(id: "deleteBookmark", label: "Delete bookmark", isDestructive: true) { delete(bookmark) },
             ])
 
             // A visible, sighted-only share control. Its 44pt target sits beside

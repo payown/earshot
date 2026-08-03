@@ -22,7 +22,7 @@ final class SettingsStore {
     var launchScreen: LaunchScreen = SettingsDefault.launchScreen { didSet { persist { $0.setLaunchScreen(launchScreen) } } }
     var librarySortOrder: LibrarySortOrder = SettingsDefault.librarySortOrder { didSet { persist { $0.setLibrarySortOrder(librarySortOrder) } } }
     var episodeSortOrder: EpisodeSortOrder = SettingsDefault.episodeSortOrder { didSet { persist { $0.setEpisodeSortOrder(episodeSortOrder) } } }
-    var groupQueueEpisodes: Bool = SettingsDefault.groupQueueEpisodes { didSet { persist { $0.setBool(groupQueueEpisodes, for: SettingsKey.groupQueueEpisodes) } } }
+    var queueGrouping: QueueGrouping = SettingsDefault.queueGrouping { didSet { persist { $0.setQueueGrouping(queueGrouping) } } }
     var showEpisodeNumbers: Bool = SettingsDefault.showEpisodeNumbers { didSet { persist { $0.setBool(showEpisodeNumbers, for: SettingsKey.showEpisodeNumbers) } } }
     var openPlayerOnPlay: Bool = SettingsDefault.openPlayerOnPlay { didSet { persist { $0.setBool(openPlayerOnPlay, for: SettingsKey.openPlayerOnPlay) } } }
 
@@ -71,7 +71,7 @@ final class SettingsStore {
         launchScreen = store.launchScreen()
         librarySortOrder = store.librarySortOrder()
         episodeSortOrder = store.episodeSortOrder()
-        groupQueueEpisodes = store.bool(SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes)
+        queueGrouping = store.queueGrouping()
         showEpisodeNumbers = store.bool(SettingsKey.showEpisodeNumbers, default: SettingsDefault.showEpisodeNumbers)
         openPlayerOnPlay = store.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
         themeOverride = store.themeOverride()

@@ -8,11 +8,59 @@ extension Notification.Name {
     static let earshotQueueDidChange = Notification.Name("earshotQueueDidChange")
 }
 
-/// A podcast and its episodes within the "Group by podcast" queue view.
+/// A section of the grouped Queue view: a run of episodes sharing a group key,
+/// whether that key is a podcast ("Group by podcast", #444) or a top-level
+/// folder ("Group by folder", #762). Generalized from the original
+/// podcast-only shape so the group header + rotor render identically for both
+/// modes — only the ``title`` (and the actions' backing key) differ.
 struct QueueGroup: Identifiable {
-    let podcast: Podcast
+    /// What a group represents, and its stable identity for `ForEach` and
+    /// `@AccessibilityFocusState`. A podcast group carries the podcast's id, a
+    /// folder group its top-level folder's id, and the catch-all group for
+    /// podcasts in no folder a single shared ``unfiled`` case.
+    enum Kind: Hashable {
+        case podcast(PersistentIdentifier)
+        case folder(PersistentIdentifier)
+        case unfiled
+    }
+
+    let kind: Kind
+    /// The spoken + visible group name: the podcast title, the folder name, or
+    /// "Unfiled".
+    let title: String
     let episodes: [Episode]
-    var id: PersistentIdentifier { podcast.persistentModelID }
+    /// The backing podcast for a ``Kind/podcast`` group, used by the podcast
+    /// group actions (Play group, Move group, Sort, Shuffle). Nil for folder and
+    /// Unfiled groups, which drive the identical actions through their group key.
+    let podcast: Podcast?
+
+    var id: Kind { kind }
+
+    /// The folder-grouping key for `episode` given a subtree-aware map of each
+    /// podcast to the top-level folder whose subtree contains it. A podcast in no
+    /// folder — or an episode with no podcast — buckets into ``Kind/unfiled``.
+    static func folderKind(
+        for episode: Episode?,
+        rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> Kind {
+        guard let pid = episode?.podcast?.persistentModelID,
+              let rootID = rootByPodcast[pid] else { return .unfiled }
+        return .folder(rootID)
+    }
+}
+
+/// The result of grouping the queue by folder: the display groups plus the
+/// subtree-aware podcast→folder map that produced them (#762). The map is
+/// carried so the Queue's folder group actions and folder drag-reorder can
+/// re-derive an episode's group key WITHOUT rebuilding it — the bucketing pays
+/// its folder-structure cost once, not once per action.
+struct QueueFolderGrouping {
+    let groups: [QueueGroup]
+    let rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+
+    func key(for episode: Episode?) -> QueueGroup.Kind {
+        QueueGroup.folderKind(for: episode, rootByPodcast: rootByPodcast)
+    }
 }
 
 /// SwiftData-backed play queue. One ``QueueItem`` per episode (idempotent
@@ -59,8 +107,57 @@ final class QueueRepository {
         return QueueLogic.group(items).compactMap { group in
             let eps = group.ids.compactMap { byID[$0] }
             guard let podcast = eps.first?.podcast else { return nil }
-            return QueueGroup(podcast: podcast, episodes: eps)
+            return QueueGroup(
+                kind: .podcast(podcast.persistentModelID),
+                title: podcast.title,
+                episodes: eps,
+                podcast: podcast
+            )
         }
+    }
+
+    /// The queue grouped by top-level folder, subtree-aware (#762). Groups appear
+    /// in first-appearance order; episodes keep queue order within a group even
+    /// when the flat queue interleaves folders. A podcast filed anywhere in a
+    /// folder's subtree buckets under that top-level folder; a podcast in no
+    /// folder — or an episode with no podcast — buckets into a single "Unfiled"
+    /// group (always present when any such episode is queued).
+    ///
+    /// Bucketing is done ONCE: the podcast→folder map is built up front from the
+    /// folder structure — cost scales with folders + memberships, not with queue
+    /// length — then each episode is an O(1) lookup, never an O(queue × folders)
+    /// walk (performance.md). The returned ``QueueFolderGrouping`` carries that
+    /// map so folder group actions reuse it.
+    func groupedQueueByFolder() -> QueueFolderGrouping {
+        let episodes = queue()
+        let byID = Dictionary(uniqueKeysWithValues: episodes.map { ($0.persistentModelID, $0) })
+        let folderRepo = FolderRepository(context: context)
+        let rootByPodcast = folderRepo.rootFolderByPodcast()
+        let namesByFolder = Dictionary(
+            uniqueKeysWithValues: folderRepo.folders().map { ($0.persistentModelID, $0.name) }
+        )
+
+        let items: [(id: PersistentIdentifier, key: QueueGroup.Kind)] = episodes.map {
+            ($0.persistentModelID, QueueGroup.folderKind(for: $0, rootByPodcast: rootByPodcast))
+        }
+        let groups = QueueLogic.group(items).map { group -> QueueGroup in
+            let eps = group.ids.compactMap { byID[$0] }
+            switch group.key {
+            case let .folder(folderID):
+                return QueueGroup(
+                    kind: .folder(folderID),
+                    title: namesByFolder[folderID] ?? "Folder",
+                    episodes: eps,
+                    podcast: nil
+                )
+            case .unfiled:
+                return QueueGroup(kind: .unfiled, title: "Unfiled", episodes: eps, podcast: nil)
+            case .podcast:
+                // Never produced by `folderKind`; present only for exhaustiveness.
+                return QueueGroup(kind: group.key, title: eps.first?.podcast?.title ?? "", episodes: eps, podcast: eps.first?.podcast)
+            }
+        }
+        return QueueFolderGrouping(groups: groups, rootByPodcast: rootByPodcast)
     }
 
     // MARK: Adding (status -> inQueue)
@@ -234,7 +331,7 @@ final class QueueRepository {
     /// (returns false) when it's already first in its group.
     @discardableResult
     func moveUpWithinGroup(_ episode: Episode) -> Bool {
-        reorderWithinGroup(episode) { QueueLogic.moveUpWithinGroup($0, id: $1) }
+        reorderWithinGroup(episode, keyedBy: podcastKey) { QueueLogic.moveUpWithinGroup($0, id: $1) }
     }
 
     /// Swaps `episode` with the next episode in the same podcast group, leaving
@@ -242,7 +339,29 @@ final class QueueRepository {
     /// (returns false) when it's already last in its group.
     @discardableResult
     func moveDownWithinGroup(_ episode: Episode) -> Bool {
-        reorderWithinGroup(episode) { QueueLogic.moveDownWithinGroup($0, id: $1) }
+        reorderWithinGroup(episode, keyedBy: podcastKey) { QueueLogic.moveDownWithinGroup($0, id: $1) }
+    }
+
+    /// Folder-grouped analogue of ``moveUpWithinGroup(_:)`` (#762): swaps
+    /// `episode` with the previous episode in the SAME folder group (which may be
+    /// a different podcast), leaving every other folder group untouched. `rootByPodcast`
+    /// is the subtree-aware map from ``QueueFolderGrouping``. No-op when already
+    /// first in its folder group.
+    @discardableResult
+    func moveUpWithinFolderGroup(
+        _ episode: Episode, rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> Bool {
+        reorderWithinGroup(episode, keyedBy: folderKey(rootByPodcast)) { QueueLogic.moveUpWithinGroup($0, id: $1) }
+    }
+
+    /// Folder-grouped analogue of ``moveDownWithinGroup(_:)`` (#762). See
+    /// ``moveUpWithinFolderGroup(_:rootByPodcast:)``. No-op when already last in
+    /// its folder group.
+    @discardableResult
+    func moveDownWithinFolderGroup(
+        _ episode: Episode, rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> Bool {
+        reorderWithinGroup(episode, keyedBy: folderKey(rootByPodcast)) { QueueLogic.moveDownWithinGroup($0, id: $1) }
     }
 
     // MARK: Group actions (#445)
@@ -252,7 +371,7 @@ final class QueueRepository {
     /// episode now at the front of the group for the caller to start playing.
     @discardableResult
     func playGroup(_ podcast: Podcast) -> Episode? {
-        reorderGroupToFront(podcast) { $0.map(\.persistentModelID) }
+        reorderGroupToFront(matching: memberOf(podcast), order: identityOrder)
     }
 
     /// Reorders the group's episodes newest-first by publish date, then brings
@@ -260,12 +379,7 @@ final class QueueRepository {
     /// the (now front) newest episode for the caller to start playing.
     @discardableResult
     func playNewestFirst(_ podcast: Podcast) -> Episode? {
-        reorderGroupToFront(podcast) { groupItems in
-            QueueLogic.sortedByDate(
-                groupItems.map { (id: $0.persistentModelID, date: $0.episode?.pubDate) },
-                newestFirst: true
-            )
-        }
+        reorderGroupToFront(matching: memberOf(podcast), order: dateOrder(newestFirst: true))
     }
 
     /// Reorders the group's episodes oldest-first by publish date, then brings
@@ -273,12 +387,7 @@ final class QueueRepository {
     /// the (now front) oldest episode for the caller to start playing.
     @discardableResult
     func playOldestFirst(_ podcast: Podcast) -> Episode? {
-        reorderGroupToFront(podcast) { groupItems in
-            QueueLogic.sortedByDate(
-                groupItems.map { (id: $0.persistentModelID, date: $0.episode?.pubDate) },
-                newestFirst: false
-            )
-        }
+        reorderGroupToFront(matching: memberOf(podcast), order: dateOrder(newestFirst: false))
     }
 
     /// Shuffles the group's episodes, then brings the group to the front. Other
@@ -286,10 +395,97 @@ final class QueueRepository {
     /// caller to start playing.
     @discardableResult
     func shuffleGroup(_ podcast: Podcast) -> Episode? {
-        reorderGroupToFront(podcast) { groupItems in
-            var rng = SystemRandomNumberGenerator()
-            return QueueLogic.shuffled(groupItems.map(\.persistentModelID), using: &rng)
+        reorderGroupToFront(matching: memberOf(podcast), order: shuffleOrder)
+    }
+
+    // MARK: Folder group actions (#762)
+
+    /// Folder-grouped analogue of ``playGroup(_:)``: brings the queued episodes
+    /// whose podcasts fall in the folder group identified by `key` to the front
+    /// in queue order. `rootByPodcast` is the subtree-aware map from
+    /// ``QueueFolderGrouping``. Returns the front episode, or nil for an empty
+    /// group. The identical group-header rotor drives this — "Play Group" simply
+    /// plays whichever folder the header names.
+    @discardableResult
+    func playGroup(
+        _ key: QueueGroup.Kind, rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> Episode? {
+        reorderGroupToFront(matching: memberOf(key, rootByPodcast: rootByPodcast), order: identityOrder)
+    }
+
+    /// Folder-grouped analogue of ``playNewestFirst(_:)`` (#762).
+    @discardableResult
+    func playNewestFirst(
+        _ key: QueueGroup.Kind, rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> Episode? {
+        reorderGroupToFront(matching: memberOf(key, rootByPodcast: rootByPodcast), order: dateOrder(newestFirst: true))
+    }
+
+    /// Folder-grouped analogue of ``playOldestFirst(_:)`` (#762).
+    @discardableResult
+    func playOldestFirst(
+        _ key: QueueGroup.Kind, rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> Episode? {
+        reorderGroupToFront(matching: memberOf(key, rootByPodcast: rootByPodcast), order: dateOrder(newestFirst: false))
+    }
+
+    /// Folder-grouped analogue of ``shuffleGroup(_:)`` (#762).
+    @discardableResult
+    func shuffleGroup(
+        _ key: QueueGroup.Kind, rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> Episode? {
+        reorderGroupToFront(matching: memberOf(key, rootByPodcast: rootByPodcast), order: shuffleOrder)
+    }
+
+    // MARK: Group-action ordering + membership helpers
+
+    /// Group episodes brought to the front in their current queue order.
+    private func identityOrder(_ groupItems: [QueueItem]) -> [PersistentIdentifier] {
+        groupItems.map(\.persistentModelID)
+    }
+
+    /// Group episodes ordered by publish date (see ``QueueLogic/sortedByDate``).
+    private func dateOrder(newestFirst: Bool) -> ([QueueItem]) -> [PersistentIdentifier] {
+        { groupItems in
+            QueueLogic.sortedByDate(
+                groupItems.map { (id: $0.persistentModelID, date: $0.episode?.pubDate) },
+                newestFirst: newestFirst
+            )
         }
+    }
+
+    /// Group episodes shuffled through the system RNG.
+    private func shuffleOrder(_ groupItems: [QueueItem]) -> [PersistentIdentifier] {
+        var rng = SystemRandomNumberGenerator()
+        return QueueLogic.shuffled(groupItems.map(\.persistentModelID), using: &rng)
+    }
+
+    /// Membership predicate for a podcast group.
+    private func memberOf(_ podcast: Podcast) -> (QueueItem) -> Bool {
+        { $0.episode?.podcast?.persistentModelID == podcast.persistentModelID }
+    }
+
+    /// Membership predicate for a folder group `key`, keyed the same way the
+    /// folder-grouped display buckets episodes.
+    private func memberOf(
+        _ key: QueueGroup.Kind, rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> (QueueItem) -> Bool {
+        { QueueGroup.folderKind(for: $0.episode, rootByPodcast: rootByPodcast) == key }
+    }
+
+    /// The grouping key for a queue item under "Group by podcast": the podcast id,
+    /// falling back to the item's own id for an episode with no podcast (so it
+    /// forms a singleton group and never swaps with anything).
+    private func podcastKey(_ item: QueueItem) -> PersistentIdentifier {
+        item.episode?.podcast?.persistentModelID ?? item.persistentModelID
+    }
+
+    /// The grouping key for a queue item under "Group by folder", keyed the same
+    /// way the folder-grouped display buckets episodes.
+    private func folderKey(
+        _ rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> (QueueItem) -> QueueGroup.Kind {
+        { QueueGroup.folderKind(for: $0.episode, rootByPodcast: rootByPodcast) }
     }
 
     /// Moves a podcast's whole group up one slot (swapping with the group
@@ -299,7 +495,7 @@ final class QueueRepository {
     /// queued.
     @discardableResult
     func moveGroupUp(_ podcast: Podcast) -> Bool {
-        reorderGroup(podcast) { QueueLogic.moveGroupUp($0, key: $1) }
+        reorderGroup(keyedBy: podcastKey, target: podcast.persistentModelID) { QueueLogic.moveGroupUp($0, key: $1) }
     }
 
     /// Moves a podcast's whole group down one slot (swapping with the group
@@ -308,7 +504,27 @@ final class QueueRepository {
     /// nothing queued.
     @discardableResult
     func moveGroupDown(_ podcast: Podcast) -> Bool {
-        reorderGroup(podcast) { QueueLogic.moveGroupDown($0, key: $1) }
+        reorderGroup(keyedBy: podcastKey, target: podcast.persistentModelID) { QueueLogic.moveGroupDown($0, key: $1) }
+    }
+
+    /// Folder-grouped analogue of ``moveGroupUp(_:)`` (#762): moves the whole
+    /// folder group identified by `key` up one slot, de-interleaving the queue so
+    /// each folder group is contiguous (matching the grouped view). No-op if the
+    /// group is already first or empty.
+    @discardableResult
+    func moveGroupUp(
+        _ key: QueueGroup.Kind, rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> Bool {
+        reorderGroup(keyedBy: folderKey(rootByPodcast), target: key) { QueueLogic.moveGroupUp($0, key: $1) }
+    }
+
+    /// Folder-grouped analogue of ``moveGroupDown(_:)`` (#762). No-op if the
+    /// group is already last or empty.
+    @discardableResult
+    func moveGroupDown(
+        _ key: QueueGroup.Kind, rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+    ) -> Bool {
+        reorderGroup(keyedBy: folderKey(rootByPodcast), target: key) { QueueLogic.moveGroupDown($0, key: $1) }
     }
 
     /// Shared group-action core: collects the podcast's queued items, lets
@@ -319,13 +535,11 @@ final class QueueRepository {
     /// group (the podcast has nothing queued) returns `nil` and makes no change.
     @discardableResult
     private func reorderGroupToFront(
-        _ podcast: Podcast,
+        matching belongs: (QueueItem) -> Bool,
         order: (_ groupItems: [QueueItem]) -> [PersistentIdentifier]
     ) -> Episode? {
         let items = orderedItems()
-        let groupItems = items.filter {
-            $0.episode?.podcast?.persistentModelID == podcast.persistentModelID
-        }
+        let groupItems = items.filter(belongs)
         guard !groupItems.isEmpty else { return nil }
 
         let orderedSubset = order(groupItems)
@@ -439,39 +653,35 @@ final class QueueRepository {
         return applyOrder(op(items.map(\.persistentModelID), id), items: items)
     }
 
-    /// Applies a within-group ``QueueLogic`` op, keyed on each item's podcast id
-    /// (an episode with no podcast keys on its own queue-item id, so it forms a
-    /// singleton group and never swaps with anything). Returns whether the order
-    /// actually changed.
+    /// Applies a within-group ``QueueLogic`` op, keyed by `keyer` (podcast id for
+    /// "Group by podcast"; folder group key for "Group by folder"). An item whose
+    /// key is unique forms a singleton group and never swaps. Returns whether the
+    /// order actually changed. Generic over the key type so both grouping modes
+    /// reuse the exact same reorder path (#762).
     @discardableResult
-    private func reorderWithinGroup(
+    private func reorderWithinGroup<Key: Hashable>(
         _ episode: Episode,
-        _ op: ([(id: PersistentIdentifier, key: PersistentIdentifier)], PersistentIdentifier) -> [PersistentIdentifier]
+        keyedBy keyer: (QueueItem) -> Key,
+        _ op: ([(id: PersistentIdentifier, key: Key)], PersistentIdentifier) -> [PersistentIdentifier]
     ) -> Bool {
         let items = orderedItems()
         guard let id = episode.queueItem?.persistentModelID else { return false }
-        return applyOrder(op(keyedItems(items), id), items: items)
+        let keyed = items.map { (id: $0.persistentModelID, key: keyer($0)) }
+        return applyOrder(op(keyed, id), items: items)
     }
 
-    /// Applies a whole-group ``QueueLogic`` op, keyed on podcast id (see
-    /// ``reorderWithinGroup(_:_:)`` for the orphan fallback). Returns whether the
-    /// order actually changed.
+    /// Applies a whole-group ``QueueLogic`` op, keyed by `keyer` and targeting
+    /// the group `target`. Generic over the key type so podcast and folder
+    /// grouping share one reorder path (#762). Returns whether the order changed.
     @discardableResult
-    private func reorderGroup(
-        _ podcast: Podcast,
-        _ op: ([(id: PersistentIdentifier, key: PersistentIdentifier)], PersistentIdentifier) -> [PersistentIdentifier]
+    private func reorderGroup<Key: Hashable>(
+        keyedBy keyer: (QueueItem) -> Key,
+        target: Key,
+        _ op: ([(id: PersistentIdentifier, key: Key)], Key) -> [PersistentIdentifier]
     ) -> Bool {
         let items = orderedItems()
-        return applyOrder(op(keyedItems(items), podcast.persistentModelID), items: items)
-    }
-
-    /// Pairs each queue item's id with its grouping key (podcast id, falling back
-    /// to the item's own id for an episode with no podcast).
-    private func keyedItems(_ items: [QueueItem]) -> [(id: PersistentIdentifier, key: PersistentIdentifier)] {
-        items.map {
-            (id: $0.persistentModelID,
-             key: $0.episode?.podcast?.persistentModelID ?? $0.persistentModelID)
-        }
+        let keyed = items.map { (id: $0.persistentModelID, key: keyer($0)) }
+        return applyOrder(op(keyed, target), items: items)
     }
 
     /// Persists `orderedIDs` (a permutation of `items`) by recompacting positions,

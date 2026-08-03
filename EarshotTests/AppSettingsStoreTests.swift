@@ -84,42 +84,50 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.inboxDefaultCount(), 0)
     }
 
-    // MARK: Group queue by podcast (#444)
+    // MARK: Queue grouping (#444, #762)
 
-    func testGroupQueueEpisodesDefaultsToFalse() throws {
+    func testQueueGroupingDefaultsToNone() throws {
         let store = try makeStore()
-        XCTAssertEqual(store.bool(SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes), false)
-        XCTAssertEqual(SettingsDefault.groupQueueEpisodes, false)
+        XCTAssertEqual(store.queueGrouping(), .none)
+        XCTAssertEqual(SettingsDefault.queueGrouping, .none)
     }
 
-    func testGroupQueueEpisodesRoundTrips() throws {
+    func testQueueGroupingRoundTripsAllModes() throws {
+        let store = try makeStore()
+        for mode in QueueGrouping.allCases {
+            store.setQueueGrouping(mode)
+            XCTAssertEqual(store.queueGrouping(), mode)
+        }
+    }
+
+    func testQueueGroupingMigratesLegacyBooleanValues() throws {
         let store = try makeStore()
         store.setBool(true, for: SettingsKey.groupQueueEpisodes)
-        XCTAssertEqual(store.bool(SettingsKey.groupQueueEpisodes, default: false), true)
+        XCTAssertEqual(store.queueGrouping(), .podcast)
         store.setBool(false, for: SettingsKey.groupQueueEpisodes)
-        XCTAssertEqual(store.bool(SettingsKey.groupQueueEpisodes, default: true), false)
+        XCTAssertEqual(store.queueGrouping(), .none)
     }
 
-    /// The queue display toggle and the App Settings toggle both flow through
-    /// SettingsStore.groupQueueEpisodes, which must persist and reload from the
+    /// The Queue menu and Playback settings both flow through
+    /// SettingsStore.queueGrouping, which must persist and reload from the
     /// shared key so the choice survives navigation and relaunch.
-    func testSettingsStorePersistsGroupQueueEpisodes() throws {
+    func testSettingsStorePersistsQueueGrouping() throws {
         let context = TestStore.freshContext()
 
         let settings = SettingsStore()
         settings.configure(context: context)
-        XCTAssertEqual(settings.groupQueueEpisodes, false)
+        XCTAssertEqual(settings.queueGrouping, .none)
 
-        settings.groupQueueEpisodes = true
+        settings.queueGrouping = .folder
 
         // A fresh store over the same context (simulating relaunch) reads it back.
         let reloaded = SettingsStore()
         reloaded.configure(context: context)
-        XCTAssertEqual(reloaded.groupQueueEpisodes, true)
+        XCTAssertEqual(reloaded.queueGrouping, .folder)
 
-        // And the raw key matches what the queue toolbar Toggle writes.
+        // And the raw key matches what the Queue and Settings Pickers write.
         let raw = AppSettingsStore(context: context)
-        XCTAssertEqual(raw.bool(SettingsKey.groupQueueEpisodes, default: false), true)
+        XCTAssertEqual(raw.rawValue(SettingsKey.groupQueueEpisodes), QueueGrouping.folder.rawValue)
     }
 
     // MARK: Chapter navigation buttons (#515)

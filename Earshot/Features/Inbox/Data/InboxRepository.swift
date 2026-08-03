@@ -61,6 +61,22 @@ enum InboxQuery {
     static func unplayedPredicate(optInOnly: Bool) -> Predicate<Episode> {
         optInOnly ? optInOnlyUnplayed : normalUnplayed
     }
+
+    /// Store-queryable predicate for one podcast in a folder subtree (#763).
+    /// ``InboxRepository/inboxEpisodes(in:)`` executes this once per
+    /// de-duplicated subtree podcast and merges the small results. SwiftData's
+    /// generated SQL does not support a captured array `contains` across the
+    /// optional Episode→Podcast relationship (it raises an Objective-C exception
+    /// at fetch time), while scalar relationship equality is fully supported.
+    /// This form therefore keeps the global library out of memory safely and
+    /// still removes played + dismissed history in the store.
+    static func folderUnplayedPredicate(podcastID: PersistentIdentifier) -> Predicate<Episode> {
+        return #Predicate<Episode> { episode in
+            episode.podcast?.persistentModelID == podcastID &&
+            episode.playedAt == nil &&
+            episode.inboxDismissed == false
+        }
+    }
 }
 
 /// The inbox is a view over episodes: `status == .newEpisode && !inboxDismissed`
@@ -92,6 +108,38 @@ final class InboxRepository {
             sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
         )
         return ((try? context.fetch(descriptor)) ?? []).filter { $0.status == .newEpisode }
+    }
+
+    /// The folder's own Inbox, subtree-aware and newest first (#763). Each
+    /// de-duplicated podcast is fetched through
+    /// ``InboxQuery/folderUnplayedPredicate(podcastID:)`` so the store applies
+    /// relationship scope + played/dismissed bounds without materializing the
+    /// global library or faulting a podcast's full inverse episode collection.
+    /// The normal/opt-in inclusion policy and exact status check are then applied
+    /// over the already-bounded candidate set.
+    func inboxEpisodes(in folder: PodcastFolder) -> [Episode] {
+        let podcasts = FolderRepository(context: context).subtreeSubscriptions(of: folder)
+        var seen = Set<PersistentIdentifier>()
+        var candidates: [Episode] = []
+        for podcast in podcasts {
+            let descriptor = FetchDescriptor<Episode>(
+                predicate: InboxQuery.folderUnplayedPredicate(
+                    podcastID: podcast.persistentModelID
+                ),
+                sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
+            )
+            for episode in (try? context.fetch(descriptor)) ?? []
+            where seen.insert(episode.persistentModelID).inserted {
+                candidates.append(episode)
+            }
+        }
+        return inbox(from: candidates).sorted { lhs, rhs in
+            if lhs.pubDate != rhs.pubDate {
+                return FolderLogic.byPubDateDescending(lhs.pubDate, rhs.pubDate)
+            }
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+            return lhs.guid < rhs.guid
+        }
     }
 
     /// The inbox membership COUNT, backing the always-mounted tab badge
@@ -135,7 +183,11 @@ final class InboxRepository {
     /// `inboxEpisodes()`.
     func inbox(from candidates: [Episode]) -> [Episode] {
         let optInOnly = settings.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
-        return candidates.filter { $0.status == .newEpisode && !isExcluded($0.podcast, optInOnly: optInOnly) }
+        return candidates.filter {
+            $0.status == .newEpisode &&
+            !$0.inboxDismissed &&
+            !isExcluded($0.podcast, optInOnly: optInOnly)
+        }
     }
 
     /// Applies per-podcast age + count caps across all included podcasts. Safe to
@@ -151,7 +203,13 @@ final class InboxRepository {
 
     /// Hides every current inbox episode.
     func clearInbox() {
-        for episode in inboxEpisodes() { episode.inboxDismissed = true }
+        clearInbox(inboxEpisodes())
+    }
+
+    /// Hides exactly `episodes`, used by a folder-filtered Inbox so "Clear
+    /// inbox" never dismisses episodes outside the visible scope (#763).
+    func clearInbox(_ episodes: [Episode]) {
+        for episode in episodes { episode.inboxDismissed = true }
         save()
     }
 

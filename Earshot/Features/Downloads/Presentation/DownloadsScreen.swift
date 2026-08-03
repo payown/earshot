@@ -137,7 +137,14 @@ struct DownloadsScreen: View {
                     if !visibleDownloaded.isEmpty {
                         Section(header: Text("Downloaded").accessibilityAddTraits(.isHeader)) {
                             ForEach(visibleDownloaded) { episode in
-                                EpisodeRow(episode: episode, actions: actions(for: episode, in: visibleDownloaded), includesPodcastName: true)
+                                EpisodeRow(
+                                    episode: episode,
+                                    deferredActions: availableActions(for: episode),
+                                    includesPodcastName: true,
+                                    performAction: { action in
+                                        perform(action, for: episode, in: visibleDownloaded)
+                                    }
+                                )
                                     // Lets the rotor mark-played runner hand
                                     // VoiceOver focus to this row when its neighbor
                                     // vanishes under the Unheard filter (#641).
@@ -297,9 +304,11 @@ struct DownloadsScreen: View {
         )
         .accessibilityValue(days <= 0 ? "Recently expired, expiring soon" : "Recently expired, \(days) \(days == 1 ? "day" : "days") left to restore")
         .accessibilityHint("Restorable for a limited time")
-        .accessibilityActions {
-            Button("Restore to queue") { restore(episode) }
-        }
+        .rotorActions([
+            QuickActionItem(id: "restoreToQueue", label: "Restore to queue", isDestructive: false) {
+                restore(episode)
+            },
+        ])
     }
 
     /// Whole days remaining in the 7-day restore window.
@@ -313,10 +322,23 @@ struct DownloadsScreen: View {
         Announcer.announce("Restored \(episode.title) to the queue")
     }
 
-    private func actions(for episode: Episode, in visible: [Episode]) -> [QuickActionItem] {
-        buildEpisodeActions(
+    private func availableActions(for episode: Episode) -> [EpisodeAction] {
+        availableEpisodeActions(
             episode: episode,
             order: quickActions.episodeActions,
+            supportsUnfollow: true,
+            supportsExport: true,
+            supportsAddToFolder: true,
+            supportsMoveToFolder: true
+        )
+    }
+
+    /// Builds only the action that was activated, keeping UUIDs and captured
+    /// closures out of the downloaded-row scrolling path.
+    private func perform(_ action: EpisodeAction, for episode: Episode, in visible: [Episode]) {
+        buildEpisodeActions(
+            episode: episode,
+            order: [action],
             player: player,
             downloads: downloads,
             context: context,
@@ -351,7 +373,7 @@ struct DownloadsScreen: View {
             // shared `FolderPickerView` for this single episode.
             onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
             onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
-        )
+        ).first?.run()
     }
 
     /// Unfollows `podcast` via the centralized repository path shared with

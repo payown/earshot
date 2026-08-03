@@ -38,6 +38,24 @@ enum PodcastAction: String, CaseIterable, Identifiable, Codable {
         case .moveToFolder: return "Move to folder"
         }
     }
+
+    func label(for podcast: Podcast) -> String {
+        switch self {
+        case .toggleNotifications:
+            return (podcast.notificationEnabled ?? false)
+                ? "Turn off notifications" : "Turn on notifications"
+        case .toggleAutoQueue:
+            return podcast.autoQueue ? "Turn off auto-queue" : "Turn on auto-queue"
+        case .toggleInboxInclude:
+            return podcast.inboxIncluded ? "Remove from Inbox" : "Add to Inbox"
+        case .toggleInboxExclude:
+            return podcast.inboxExcluded ? "Include in Inbox" : "Exclude from Inbox"
+        default:
+            return label
+        }
+    }
+
+    var isDestructive: Bool { self == .unsubscribe }
 }
 
 let defaultPodcastActions: [PodcastAction] = [

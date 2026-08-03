@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// The play queue. Flat or grouped-by-podcast, with drag reorder for sighted
+/// The play queue. Flat, grouped by podcast, or grouped by folder, with drag reorder for sighted
 /// users and a full set of VoiceOver custom actions so reordering never depends
 /// on a drag gesture. Flat mode offers Move to top / up / down / to bottom over
 /// absolute position. Grouped mode offers Move up / down that reorder within the
@@ -22,7 +22,7 @@ struct QueueScreen: View {
     // queue itself is never touched — rows are hidden from display only.
     @State private var searchText = ""
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
-    @AccessibilityFocusState private var focusedGroup: PersistentIdentifier?
+    @AccessibilityFocusState private var focusedGroup: QueueGroup.Kind?
 
     private var repo: QueueRepository { QueueRepository(context: context) }
     private var episodes: [Episode] { items.compactMap(\.episode) }
@@ -32,16 +32,16 @@ struct QueueScreen: View {
     /// move indices against a partial list would be wrong (#457).
     private var searchActive: Bool { EpisodeSearchFilter.isActive(searchText) }
 
-    /// Drives the grouped-vs-flat display from the persisted
+    /// Drives the three-way display from the persisted
     /// ``SettingsKey/groupQueueEpisodes`` setting, so the choice survives
     /// navigation and relaunch and stays in sync with the App Settings toggle.
     /// Writing through it announces the change for VoiceOver (Flutter parity).
-    private var groupByPodcast: Binding<Bool> {
+    private var queueGrouping: Binding<QueueGrouping> {
         Binding(
-            get: { settings.groupQueueEpisodes },
-            set: { newValue in
-                settings.groupQueueEpisodes = newValue
-                Announcer.announce(newValue ? "Queue grouped by podcast" : "Queue ungrouped")
+            get: { settings.queueGrouping },
+            set: { mode in
+                settings.queueGrouping = mode
+                Announcer.announce(mode.announcement)
             }
         )
     }
@@ -80,10 +80,10 @@ struct QueueScreen: View {
             // flat and grouped modes (a group survives filtering only if one of
             // its episodes matches, so no-match overall means no groups either).
             NoSearchMatchesView(query: searchText)
-        } else if settings.groupQueueEpisodes {
-            groupedList
-        } else {
+        } else if settings.queueGrouping == .none {
             flatList
+        } else {
+            groupedList
         }
     }
 
@@ -114,27 +114,65 @@ struct QueueScreen: View {
 
     // MARK: Grouped
 
+    @ViewBuilder
     private var groupedList: some View {
+        if settings.queueGrouping == .folder {
+            let folderGrouping = repo.groupedQueueByFolder()
+            groupedList(
+                groups: filtered(folderGrouping.groups),
+                moveMode: .groupedByFolder(rootByPodcast: folderGrouping.rootByPodcast),
+                folderGrouping: folderGrouping
+            )
+        } else {
+            groupedList(
+                groups: filtered(repo.groupedQueue()),
+                moveMode: .grouped,
+                folderGrouping: nil
+            )
+        }
+    }
+
+    /// Filters within each group and hides groups the search empties. The
+    /// header count therefore matches the rows VoiceOver will traverse.
+    private func filtered(_ groups: [QueueGroup]) -> [QueueGroup] {
+        groups.compactMap { group in
+            let matching = EpisodeSearchFilter.filter(group.episodes, query: searchText)
+            guard !matching.isEmpty else { return nil }
+            return QueueGroup(
+                kind: group.kind,
+                title: group.title,
+                episodes: matching,
+                podcast: group.podcast
+            )
+        }
+    }
+
+    private func groupedList(
+        groups: [QueueGroup],
+        moveMode: QueueMoveMode,
+        folderGrouping: QueueFolderGrouping?
+    ) -> some View {
         // Filter within each group and hide groups the search empties (#457).
         // The header's "N episodes" count then reflects the visible rows, which
         // is what a VoiceOver user is about to traverse.
-        let groups: [QueueGroup] = repo.groupedQueue().compactMap { group in
-            let matching = EpisodeSearchFilter.filter(group.episodes, query: searchText)
-            guard !matching.isEmpty else { return nil }
-            return QueueGroup(podcast: group.podcast, episodes: matching)
-        }
         return List {
             ForEach(groups) { group in
                 Section {
                     ForEach(group.episodes) { episode in
-                        row(episode, position: nil, total: nil, moveMode: .grouped)
+                        row(
+                            episode,
+                            position: nil,
+                            total: nil,
+                            moveMode: moveMode,
+                            displayedGroups: groups
+                        )
                     }
                     .onMove { from, to in
                         guard !searchActive else { return }
-                        handleGroupedMove(group, from: from, to: to)
+                        handleGroupedMove(group, moveMode: moveMode, from: from, to: to)
                     }
                 } header: {
-                    groupHeader(group)
+                    groupHeader(group, folderGrouping: folderGrouping)
                 }
             }
         }
@@ -149,19 +187,18 @@ struct QueueScreen: View {
     /// one heading node exists (the SwiftUI analogue of the explicit-label +
     /// ExcludeSemantics pattern). Only Play Group starts audio; the three
     /// sort/shuffle actions reorder the group in place without starting playback.
-    private func groupHeader(_ group: QueueGroup) -> some View {
+    private func groupHeader(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) -> some View {
         let count = group.episodes.count
         let countPhrase = count == 1 ? "1 episode" : "\(count) episodes"
-        let podcastID = group.podcast.persistentModelID
 
-        return Text(group.podcast.title)
-            .accessibilityLabel("\(group.podcast.title), \(countPhrase)")
+        return Text(group.title)
+            .accessibilityLabel("\(group.title), \(countPhrase)")
             .accessibilityAddTraits(.isHeader)
-            .accessibilityFocused($focusedGroup, equals: podcastID)
+            .accessibilityFocused($focusedGroup, equals: group.kind)
             // Routed through the shared helper so the rotor announces Play
             // Group first and Shuffle Group last — the designed order — despite
             // the OS's reversed emission (#572, #577).
-            .rotorActions(groupHeaderActions(group, podcastID: podcastID))
+            .rotorActions(groupHeaderActions(group, folderGrouping: folderGrouping))
     }
 
     /// The group header's rotor actions in DESIGNED announce order. Play Group
@@ -169,76 +206,125 @@ struct QueueScreen: View {
     /// (their @discardableResult Episode?, where any, is ignored) — they never
     /// start audio.
     private func groupHeaderActions(
-        _ group: QueueGroup, podcastID: PersistentIdentifier
+        _ group: QueueGroup, folderGrouping: QueueFolderGrouping?
     ) -> [QuickActionItem] {
         [
-            QuickActionItem(label: "Play Group", isDestructive: false) {
-                if let episode = repo.playGroup(group.podcast) {
+            QuickActionItem(id: "playGroup", label: "Play Group", isDestructive: false) {
+                if let episode = playGroup(group, folderGrouping: folderGrouping) {
                     // playFromEpisodeList so Play Group honors #562 (Item 1).
                     player.playFromEpisodeList(episode)
-                    Announcer.announce("Playing \(group.podcast.title)")
+                    Announcer.announce("Playing \(group.title)")
                 }
             },
-            QuickActionItem(label: "Move Group Up", isDestructive: false) {
+            QuickActionItem(id: "moveGroupUp", label: "Move Group Up", isDestructive: false) {
                 // Announce + refocus only on a real move; an edge no-op
                 // (group already first / last) must stay silent.
-                if repo.moveGroupUp(group.podcast) {
-                    Announcer.announce("Moved \(group.podcast.title) up")
-                    focusedGroup = podcastID
+                if moveGroupUp(group, folderGrouping: folderGrouping) {
+                    Announcer.announce("Moved \(group.title) up")
+                    focusedGroup = group.kind
                 }
             },
-            QuickActionItem(label: "Move Group Down", isDestructive: false) {
-                if repo.moveGroupDown(group.podcast) {
-                    Announcer.announce("Moved \(group.podcast.title) down")
-                    focusedGroup = podcastID
+            QuickActionItem(id: "moveGroupDown", label: "Move Group Down", isDestructive: false) {
+                if moveGroupDown(group, folderGrouping: folderGrouping) {
+                    Announcer.announce("Moved \(group.title) down")
+                    focusedGroup = group.kind
                 }
             },
-            QuickActionItem(label: "Sort Newest First", isDestructive: false) {
-                repo.playNewestFirst(group.podcast)
+            QuickActionItem(id: "sortNewest", label: "Sort Newest First", isDestructive: false) {
+                sortNewest(group, folderGrouping: folderGrouping)
                 Announcer.announce("Sorted newest first")
             },
-            QuickActionItem(label: "Sort Oldest First", isDestructive: false) {
-                repo.playOldestFirst(group.podcast)
+            QuickActionItem(id: "sortOldest", label: "Sort Oldest First", isDestructive: false) {
+                sortOldest(group, folderGrouping: folderGrouping)
                 Announcer.announce("Sorted oldest first")
             },
-            QuickActionItem(label: "Shuffle Group", isDestructive: false) {
-                repo.shuffleGroup(group.podcast)
+            QuickActionItem(id: "shuffleGroup", label: "Shuffle Group", isDestructive: false) {
+                shuffleGroup(group, folderGrouping: folderGrouping)
                 Announcer.announce("Shuffled")
             },
         ]
     }
 
+    private func playGroup(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) -> Episode? {
+        if let podcast = group.podcast { return repo.playGroup(podcast) }
+        guard let folderGrouping else { return nil }
+        return repo.playGroup(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+    }
+
+    private func moveGroupUp(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) -> Bool {
+        if let podcast = group.podcast { return repo.moveGroupUp(podcast) }
+        guard let folderGrouping else { return false }
+        return repo.moveGroupUp(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+    }
+
+    private func moveGroupDown(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) -> Bool {
+        if let podcast = group.podcast { return repo.moveGroupDown(podcast) }
+        guard let folderGrouping else { return false }
+        return repo.moveGroupDown(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+    }
+
+    private func sortNewest(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) {
+        if let podcast = group.podcast {
+            repo.playNewestFirst(podcast)
+            return
+        }
+        guard let folderGrouping else { return }
+        repo.playNewestFirst(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+    }
+
+    private func sortOldest(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) {
+        if let podcast = group.podcast {
+            repo.playOldestFirst(podcast)
+            return
+        }
+        guard let folderGrouping else { return }
+        repo.playOldestFirst(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+    }
+
+    private func shuffleGroup(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) {
+        if let podcast = group.podcast {
+            repo.shuffleGroup(podcast)
+            return
+        }
+        guard let folderGrouping else { return }
+        repo.shuffleGroup(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+    }
+
     // MARK: Row
 
-    private func row(_ episode: Episode, position: Int?, total: Int?, moveMode: QueueMoveMode) -> some View {
+    private func row(
+        _ episode: Episode,
+        position: Int?,
+        total: Int?,
+        moveMode: QueueMoveMode,
+        displayedGroups: [QueueGroup] = []
+    ) -> some View {
         QueueRow(
             episode: episode,
             position: position,
             total: total,
             focusedEpisode: $focusedEpisode,
-            actions: buildQueueActions(
-                episode: episode,
-                order: quickActions.queueActions,
-                moveMode: moveMode,
-                player: player,
-                downloads: downloads,
-                context: context,
-                onShowNotes: { showNotesEpisode = episode },
-                onFocus: { focusedEpisode = $0 },
-                // The queue AS DISPLAYED (#457, #629): with a search active, the
-                // post-remove focus neighbor must be the adjacent VISIBLE row —
-                // a hidden row's id matches no rendered element, so focus would
-                // be dropped. With no search the filter passes the full queue
-                // through unchanged, preserving the original behavior. And with
-                // grouping on, "adjacent" means adjacent in the GROUPED order
-                // actually rendered (#629), not the raw flat queue order.
-                visibleQueue: {
-                    let ordered = displayedQueueOrder(
-                        moveMode: moveMode, flat: repo.queue(), grouped: repo.groupedQueue()
-                    )
-                    return EpisodeSearchFilter.filter(ordered, query: searchText)
-                }
-            )
+            actions: availableQueueActions(order: quickActions.queueActions, moveMode: moveMode),
+            performAction: { action in
+                buildQueueActions(
+                    episode: episode,
+                    order: [action],
+                    moveMode: moveMode,
+                    player: player,
+                    downloads: downloads,
+                    context: context,
+                    onShowNotes: { showNotesEpisode = episode },
+                    onFocus: { focusedEpisode = $0 },
+                    // Resolve the displayed order only when removal is activated,
+                    // never while SwiftUI is recycling queue rows.
+                    visibleQueue: {
+                        let ordered = displayedQueueOrder(
+                            moveMode: moveMode, flat: repo.queue(), grouped: displayedGroups
+                        )
+                        return EpisodeSearchFilter.filter(ordered, query: searchText)
+                    }
+                ).first?.run()
+            }
         )
     }
 
@@ -262,8 +348,10 @@ struct QueueScreen: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                Toggle(isOn: groupByPodcast) {
-                    Label("Group by podcast", systemImage: "rectangle.3.group")
+                Picker("Group queue", selection: queueGrouping) {
+                    ForEach(QueueGrouping.allCases) { mode in
+                        Text(mode.optionLabel).tag(mode)
+                    }
                 }
                 if !episodes.isEmpty {
                     Button(role: .destructive) {
@@ -291,7 +379,9 @@ struct QueueScreen: View {
     /// Grouped drag mirrors the existing VoiceOver row actions: a row may move
     /// only within its podcast group. Applying the same repository operation
     /// repeatedly preserves the interleaved flat queue and #444/#445 parity.
-    private func handleGroupedMove(_ group: QueueGroup, from: IndexSet, to: Int) {
+    private func handleGroupedMove(
+        _ group: QueueGroup, moveMode: QueueMoveMode, from: IndexSet, to: Int
+    ) {
         guard let source = from.first, group.episodes.indices.contains(source) else { return }
         let episode = group.episodes[source]
         for direction in GroupedQueueDrag.directions(
@@ -301,9 +391,23 @@ struct QueueScreen: View {
         ) {
             switch direction {
             case .up:
-                repo.moveUpWithinGroup(episode)
+                switch moveMode {
+                case .grouped:
+                    repo.moveUpWithinGroup(episode)
+                case let .groupedByFolder(rootByPodcast):
+                    repo.moveUpWithinFolderGroup(episode, rootByPodcast: rootByPodcast)
+                case .flat, .none:
+                    break
+                }
             case .down:
-                repo.moveDownWithinGroup(episode)
+                switch moveMode {
+                case .grouped:
+                    repo.moveDownWithinGroup(episode)
+                case let .groupedByFolder(rootByPodcast):
+                    repo.moveDownWithinFolderGroup(episode, rootByPodcast: rootByPodcast)
+                case .flat, .none:
+                    break
+                }
             }
         }
         focusedEpisode = episode.persistentModelID
@@ -362,7 +466,8 @@ private struct QueueRow: View {
     let position: Int?
     let total: Int?
     @AccessibilityFocusState.Binding var focusedEpisode: PersistentIdentifier?
-    let actions: [QuickActionItem]
+    let actions: [QueueItemAction]
+    let performAction: (QueueItemAction) -> Void
 
     var body: some View {
         let primary = actions.first
@@ -377,7 +482,7 @@ private struct QueueRow: View {
         )
 
         Button {
-            primary?.run()
+            if let primary { performAction(primary) }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.title)
@@ -441,13 +546,13 @@ private struct QueueRow: View {
         // there's something to speak: `.accessibilityValue("")` makes VoiceOver
         // utter a stray pause, so a played/unknown-duration row omits it.
         .accessibilityValueIfPresent(accessibilityValue)
-        .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
+        .accessibilityHint(primary.map { "Double tap to \($0.label(for: episode).lowercased())" } ?? "")
         .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
         // Rotor order goes through the shared helper, which compensates for the
         // OS emitting `.accessibilityActions` children in reverse (#572). The
         // default double-tap and hint above keep the UN-reversed `actions.first`.
-        .quickActionsRotor(actions)
-        .modifier(SightedRowActions(actions: actions))
+        .queueActionsRotor(actions, episode: episode, perform: performAction)
+        .modifier(SightedRowActions(episode: episode, actions: actions, performAction: performAction))
     }
 
     /// True when this row's episode is the one loaded in the player, compared by
@@ -514,7 +619,9 @@ private extension View {
 /// from queue" appearing twice). With VoiceOver running these are redundant, so
 /// they're omitted — leaving `.accessibilityActions` as the single rotor source.
 private struct SightedRowActions: ViewModifier {
-    let actions: [QuickActionItem]
+    let episode: Episode
+    let actions: [QueueItemAction]
+    let performAction: (QueueItemAction) -> Void
     // Tracked by SwiftUI, so toggling VoiceOver while the Queue is on screen
     // re-evaluates and removes/restores the swipe + context actions immediately
     // (reading UIAccessibility.isVoiceOverRunning in body would not invalidate).
@@ -526,14 +633,18 @@ private struct SightedRowActions: ViewModifier {
         } else {
             content
                 .swipeActions(edge: .trailing) {
-                    ForEach(actions.filter(\.isDestructive)) { action in
-                        Button(role: .destructive) { action.run() } label: { Text(action.label) }
+                    ForEach(actions.filter { $0.isDestructive(for: episode) }) { action in
+                        Button(role: .destructive) { performAction(action) } label: {
+                            Text(action.label(for: episode))
+                        }
                     }
                 }
                 .contextMenu {
                     ForEach(actions.dropFirst()) { action in
-                        Button(role: action.isDestructive ? .destructive : nil) { action.run() } label: {
-                            Text(action.label)
+                        Button(role: action.isDestructive(for: episode) ? .destructive : nil) {
+                            performAction(action)
+                        } label: {
+                            Text(action.label(for: episode))
                         }
                     }
                 }

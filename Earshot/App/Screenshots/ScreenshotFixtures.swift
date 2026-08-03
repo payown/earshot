@@ -208,7 +208,7 @@ enum ScreenshotFixtures {
         settings.setBool(true, for: SettingsKey.onboardingComplete)
         settings.setInt(3, for: SettingsKey.autoDownloadCount)        // "3 most recent"
         settings.setBool(true, for: SettingsKey.wifiOnlyDownloads)
-        settings.setBool(true, for: SettingsKey.groupQueueEpisodes)   // grouped queue shot
+        settings.setQueueGrouping(.podcast)                           // grouped queue shot
         settings.setLaunchScreen(.inbox)
 
         try? context.save()

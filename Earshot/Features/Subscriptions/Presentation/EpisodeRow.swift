@@ -1,5 +1,15 @@
 import SwiftUI
 
+/// A stable, non-configurable action appended by a particular episode surface.
+/// Unlike ``QuickActionItem`` it carries no UUID or runnable closure, so it is
+/// safe to create in a recycled row. The folder detail uses this for its final
+/// destructive "Remove from folder" action.
+struct EpisodeRowSupplementalAction: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let isDestructive: Bool
+}
+
 /// One episode row. The whole row is a single accessibility element: its
 /// primary (double-tap) action is the first configured action, and every
 /// configured action is exposed as a VoiceOver custom action (the Actions
@@ -23,8 +33,15 @@ struct EpisodeRow: View {
     // requirement as SettingsStore above: every call site renders under the app
     // root that injects PlayerService.
     @Environment(PlayerService.self) private var player
+    // Context menus are a sighted convenience. SwiftUI also promotes their
+    // buttons into VoiceOver's Actions rotor, duplicating the explicit custom
+    // actions below, so remove the menu while VoiceOver is running (#761).
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     let episode: Episode
-    let actions: [EpisodeActionItem]
+    private let actions: [EpisodeAction]
+    private let supplementalActions: [EpisodeRowSupplementalAction]
+    private let performAction: (EpisodeAction) -> Void
+    private let performSupplementalAction: (EpisodeRowSupplementalAction) -> Void
     /// Whether the row names its podcast, visually and in the VoiceOver label.
     /// True in mixed-show lists (Inbox, Downloads) where the user can't otherwise
     /// tell which show an episode belongs to (#535); false (default) in
@@ -32,11 +49,57 @@ struct EpisodeRow: View {
     /// repeating the show on every row is noise.
     var includesPodcastName = false
 
+    /// Defers runnable Quick Action construction until activation. This keeps
+    /// large lazy lists cheap to recycle while preserving the configured
+    /// double-tap action, VoiceOver rotor, and sighted context menu.
+    init(
+        episode: Episode,
+        deferredActions: [EpisodeAction],
+        supplementalActions: [EpisodeRowSupplementalAction] = [],
+        includesPodcastName: Bool = false,
+        performAction: @escaping (EpisodeAction) -> Void,
+        performSupplementalAction: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
+    ) {
+        self.episode = episode
+        self.actions = deferredActions
+        self.supplementalActions = supplementalActions
+        self.performAction = performAction
+        self.performSupplementalAction = performSupplementalAction
+        self.includesPodcastName = includesPodcastName
+    }
+
+    @ViewBuilder
     var body: some View {
         let primary = actions.first
+        let base = rowButton(primaryLabel: primary.map { $0.label(for: episode) }) {
+            if let primary { performAction(primary) }
+        }
+        .episodeActionsRotor(
+            actions,
+            supplementalActions: supplementalActions,
+            episode: episode,
+            perform: performAction,
+            performSupplemental: performSupplementalAction
+        )
+        if voiceOverEnabled {
+            base
+        } else {
+            base.episodeActionsContextMenu(
+                actions,
+                supplementalActions: supplementalActions,
+                episode: episode,
+                perform: performAction,
+                performSupplemental: performSupplementalAction
+            )
+        }
+    }
 
+    private func rowButton(
+        primaryLabel: String?,
+        runPrimary: @escaping () -> Void
+    ) -> some View {
         Button {
-            primary?.run()
+            runPrimary()
         } label: {
             EpisodeRowContent(episode: episode, includesPodcastName: includesPodcastName)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -62,11 +125,7 @@ struct EpisodeRow: View {
         // description yields an empty value, and `.accessibilityValue("")` makes
         // VoiceOver speak a stray pause (dead air), so we omit it in that case.
         .accessibilityValueIfPresent(accessibilityValue)
-        .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
-        // Rotor order goes through the shared helper, which compensates for the OS
-        // emitting `.accessibilityActions` children in reverse (#572). The default
-        // double-tap and hint above keep the UN-reversed `actions.first`.
-        .quickActionsRotor(actions)
+        .accessibilityHint(primaryLabel.map { "Double tap to \($0.lowercased())" } ?? "")
     }
 
     private var isNowPlaying: Bool {

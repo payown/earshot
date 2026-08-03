@@ -58,10 +58,17 @@ struct FolderDetailScreen: View {
     // container is not a reliable focus target.
     @AccessibilityFocusState private var focusEmptyState: Bool
 
+    // Folder-scoped Inbox section (#763). The candidate snapshot is owned by
+    // `FolderScopedInboxCandidates`; these states only bound row rendering and
+    // re-anchor VoiceOver when a played/queued episode leaves the section.
+    @State private var displayedNewEpisodeLimit = InboxLogic.displayBatchSize
+    @AccessibilityFocusState private var focusedNewEpisodeID: PersistentIdentifier?
+    @AccessibilityFocusState private var focusNewEpisodesEmpty: Bool
+
     // Multi-select for this folder's PODCASTS section (#757). Add/Move reuse the
     // shared `FolderPickerView`; Remove from folder calls the repo directly.
-    // (An Episodes section is #759 — this screen has none yet; keep it easy to
-    // extend by reusing the same `selection`/`MultiSelectBar` scaffold there.)
+    // New and hand-picked episode sections hide while podcast selection is on so
+    // their actions cannot compete with selection taps (#759, #763).
     @State private var selection = MultiSelectState()
     @State private var batchRequest: FolderPickRequest?
     // Re-anchored after a batch so focus lands on a still-present podcast row,
@@ -216,6 +223,11 @@ struct FolderDetailScreen: View {
                 breadcrumbSection
                 subfoldersSection
                 podcastsSection
+                if !selection.isSelecting {
+                    FolderScopedInboxCandidates(folder: folder) { newEpisodes in
+                        newEpisodesSection(newEpisodes)
+                    }
+                }
                 episodesSection
             }
         }
@@ -288,7 +300,7 @@ struct FolderDetailScreen: View {
                     .accessibilityLabel(FolderDetailLabel.breadcrumb(path: FolderLogic.folderPath(folder).map(\.name)))
                     .accessibilityAddTraits(.isHeader)
                     .rotorActions([
-                        QuickActionItem(label: "Go up one level", isDestructive: false) { goUp() },
+                        QuickActionItem(id: "goUp", label: "Go up one level", isDestructive: false) { goUp() },
                     ])
             }
         }
@@ -335,7 +347,7 @@ struct FolderDetailScreen: View {
         .rotorActions(
             QuickActionMoveLogic.targets(index: index, count: subfolders.count)
                 .map { target in
-                    QuickActionItem(label: target.label, isDestructive: false) {
+                    QuickActionItem(id: target.label, label: target.label, isDestructive: false) {
                         moveSubfolders(IndexSet(integer: index), target.destinationOffset)
                         Announcer.announce(
                             FolderDetailLabel.moveAnnouncement(
@@ -386,8 +398,112 @@ struct FolderDetailScreen: View {
                 if !subfolders.isEmpty {
                     Text("Podcasts")
                 }
-            } footer: {
-                ageLimitFooter
+            }
+        }
+    }
+
+    // MARK: New episodes — folder Inbox (#763)
+
+    /// The folder's subtree-aware Inbox. It is always a real headed section when
+    /// the folder has content, including a combined empty row, so VoiceOver users
+    /// can navigate by heading and learn that the scope currently has no new
+    /// episodes. Rendering is bounded in the same predictable 100-row batches as
+    /// the main Inbox.
+    private func newEpisodesSection(_ newEpisodes: [Episode]) -> some View {
+        let displayed = newEpisodes.prefix(displayedNewEpisodeLimit)
+        return Section {
+            if newEpisodes.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text(FolderDetailLabel.newEpisodesEmptyTitle)
+                        .font(.headline)
+                    Text(FolderDetailLabel.newEpisodesEmptyDescription)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, Spacing.xs)
+                .accessibilityElement(children: .combine)
+                .accessibilityFocused($focusNewEpisodesEmpty)
+            } else {
+                ForEach(displayed) { episode in
+                    EpisodeRow(
+                        episode: episode,
+                        deferredActions: availableEpisodeActions(
+                            episode: episode,
+                            order: quickActions.episodeActions,
+                            supportsExport: true,
+                            supportsAddToFolder: true,
+                            supportsMoveToFolder: true
+                        ),
+                        includesPodcastName: true,
+                        performAction: { action in performNewEpisodeAction(action, for: episode) }
+                    )
+                    .accessibilityFocused(
+                        $focusedNewEpisodeID, equals: episode.persistentModelID
+                    )
+                }
+                if displayed.count < newEpisodes.count {
+                    Button {
+                        displayedNewEpisodeLimit = InboxLogic.nextDisplayLimit(
+                            current: displayedNewEpisodeLimit,
+                            total: newEpisodes.count
+                        )
+                        Announcer.announce(
+                            "Showing \(displayedNewEpisodeLimit) of \(newEpisodes.count) new episodes"
+                        )
+                    } label: {
+                        Label("Show 100 more", systemImage: "chevron.down.circle")
+                    }
+                    .accessibilityLabel("Show 100 more new episodes")
+                    .accessibilityHint(
+                        "Currently showing \(displayed.count) of \(newEpisodes.count) new episodes"
+                    )
+                }
+            }
+        } header: {
+            Text(FolderDetailLabel.newEpisodesSectionHeader)
+                .accessibilityAddTraits(.isHeader)
+        } footer: {
+            ageLimitFooter
+        }
+    }
+
+    /// Standard configured episode actions for the folder Inbox. Marking played
+    /// removes the row, so capture its still-visible neighbor before the builder
+    /// flips state and move VoiceOver focus after the event-driven snapshot
+    /// reloads. Queue actions trigger the same reload through
+    /// `.earshotQueueDidChange`.
+    private func performNewEpisodeAction(_ action: EpisodeAction, for episode: Episode) {
+        let focusAfterRemoval = {
+            focusAfterNewEpisodeLeaves(episode)
+        }
+        buildEpisodeActions(
+            episode: episode,
+            order: [action],
+            player: player,
+            downloads: downloads,
+            context: context,
+            onShowNotes: { showNotesEpisode = episode },
+            onShare: { sharingEpisode = episode },
+            onBookmarks: { bookmarksEpisode = episode },
+            onMarkPlayed: { nowPlayed in
+                guard nowPlayed else { return }
+                focusAfterRemoval()
+            },
+            onWillQueue: focusAfterRemoval,
+            onExport: { exportEpisode = episode },
+            onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
+            onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
+        ).first?.run()
+    }
+
+    private func focusAfterNewEpisodeLeaves(_ episode: Episode) {
+        let neighbor = neighborID(of: episode, in: repositoryInboxEpisodes())
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if let neighbor {
+                focusedNewEpisodeID = neighbor
+            } else {
+                focusNewEpisodesEmpty = true
             }
         }
     }
@@ -446,10 +562,27 @@ struct FolderDetailScreen: View {
     /// folder-scoped "Remove from folder". `includesPodcastName` is on because a
     /// folder mixes shows, so each row names its podcast.
     private func episodeRow(for episode: Episode) -> some View {
-        EpisodeRow(
+        let actions = availableEpisodeActions(
             episode: episode,
-            actions: episodeActions(for: episode),
-            includesPodcastName: true
+            order: quickActions.episodeActions,
+            supportsExport: true,
+            supportsAddToFolder: true,
+            supportsMoveToFolder: true
+        )
+        // Never allow the destructive folder removal to become the primary
+        // double-tap when a future setting can hide every configured action.
+        let supplemental = actions.isEmpty ? [] : [
+            EpisodeRowSupplementalAction(
+                id: "removeFromFolder", label: "Remove from folder", isDestructive: true
+            ),
+        ]
+        return EpisodeRow(
+            episode: episode,
+            deferredActions: actions,
+            supplementalActions: supplemental,
+            includesPodcastName: true,
+            performAction: { action in performStandardEpisodeAction(action, for: episode) },
+            performSupplementalAction: { _ in removeEpisode(episode) }
         )
     }
 
@@ -460,34 +593,27 @@ struct FolderDetailScreen: View {
     /// runner are intentionally omitted: a folder's episode row is about the
     /// episode and its folder membership, and marking played here doesn't remove
     /// the row (folder membership is independent of played state).
-    private func episodeActions(for episode: Episode) -> [QuickActionItem] {
-        var actions = buildEpisodeActions(
+    private func performStandardEpisodeAction(
+        _ action: EpisodeAction,
+        for episode: Episode,
+        onMarkPlayed: ((Bool) -> Void)? = nil,
+        onWillQueue: (() -> Void)? = nil
+    ) {
+        buildEpisodeActions(
             episode: episode,
-            order: quickActions.episodeActions,
+            order: [action],
             player: player,
             downloads: downloads,
             context: context,
             onShowNotes: { showNotesEpisode = episode },
             onShare: { sharingEpisode = episode },
             onBookmarks: { bookmarksEpisode = episode },
+            onMarkPlayed: onMarkPlayed,
+            onWillQueue: onWillQueue,
             onExport: { exportEpisode = episode },
             onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
             onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
-        )
-        // Guard: only append when there's already at least one action, so the
-        // destructive "Remove from folder" can never become `actions.first` —
-        // which `EpisodeRow` makes the row's default double-tap. Safe today
-        // (`QuickActionStore` only reorders `episodeActions`, never empties it),
-        // but this keeps a future "disable a Quick Action" feature from turning
-        // a blind user's default gesture into a destructive removal.
-        if !actions.isEmpty {
-            actions.append(
-                QuickActionItem(label: "Remove from folder", isDestructive: true) {
-                    removeEpisode(episode)
-                }
-            )
-        }
-        return actions
+        ).first?.run()
     }
 
     @ToolbarContentBuilder
@@ -517,12 +643,21 @@ struct FolderDetailScreen: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    queueFolder()
+                Menu {
+                    Button {
+                        playFolder()
+                    } label: {
+                        Label("Play all", systemImage: "play.fill")
+                    }
+                    Button {
+                        queueFolder()
+                    } label: {
+                        Label("Add all to queue", systemImage: "text.badge.plus")
+                    }
                 } label: {
-                    Label("Add folder to queue", systemImage: "text.badge.plus")
+                    Label("Folder listening actions", systemImage: "play.circle")
                 }
-                .disabled(members.isEmpty)
+                .disabled(repository.subtreeSubscriptions(of: folder).isEmpty)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 optionsMenu
@@ -618,6 +753,12 @@ struct FolderDetailScreen: View {
 
     @ViewBuilder
     private func row(for podcast: Podcast) -> some View {
+        // The folder row has one fixed action rather than the configurable
+        // podcast builder. Resolve it once so its rotor and menu remain exact
+        // mirrors, including the destructive role (#761).
+        let actions = [
+            QuickActionItem(id: "removeFromFolder", label: "Remove from folder", isDestructive: true) { remove(podcast) },
+        ]
         // `.ignore` + one explicit label (the same "title, author" a `.combine`
         // produced) — standardized with SubscriptionsView and SelectableRow so
         // the scaffold #758 inherits has a single, unambiguous row pattern.
@@ -626,9 +767,7 @@ struct FolderDetailScreen: View {
             .accessibilityLabel(rowLabel(for: podcast))
             // Routed through the shared helper (#572, #577) so this row's rotor is
             // owned by the one custom action, like every other rotor in the app.
-            .rotorActions([
-                QuickActionItem(label: "Remove from folder", isDestructive: true) { remove(podcast) },
-            ])
+            .rotorActions(actions)
 
         // The swipe is a sighted-only affordance, attached only when VoiceOver
         // is off: iOS mirrors swipe actions into the VoiceOver rotor, which
@@ -638,13 +777,15 @@ struct FolderDetailScreen: View {
         if voiceOverEnabled {
             base
         } else {
-            base.swipeActions(edge: .trailing) {
-                Button(role: .destructive) {
-                    remove(podcast)
-                } label: {
-                    Label("Remove", systemImage: "folder.badge.minus")
+            base
+                .quickActionsContextMenu(actions)
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        remove(podcast)
+                    } label: {
+                        Label("Remove", systemImage: "folder.badge.minus")
+                    }
                 }
-            }
         }
     }
 
@@ -721,12 +862,32 @@ struct FolderDetailScreen: View {
 
     // MARK: Actions
 
+    private func repositoryInboxEpisodes() -> [Episode] {
+        InboxRepository(context: context).inboxEpisodes(in: folder)
+    }
+
+    /// Queues every age-eligible new episode in the folder subtree, then starts
+    /// the first (newest) episode. `playFromEpisodeList` is idempotent after the
+    /// batch add and preserves the user's "open player on play" preference.
+    private func playFolder() {
+        let episodes = repository.unplayedEpisodesToQueue(in: folder)
+        guard let first = episodes.first else {
+            Announcer.announce("No unplayed episodes to play in \(folder.name)")
+            return
+        }
+        QueueRepository(context: context).add(episodes)
+        player.playFromEpisodeList(first)
+        Announcer.announce(FolderDetailLabel.playAllAnnouncement(
+            count: episodes.count, folderName: folder.name
+        ))
+    }
+
     private func queueFolder() {
         let count = repository.addFolderToQueue(folder)
         if count == 0 {
             Announcer.announce("No unplayed episodes to queue in \(folder.name)")
         } else {
-            Announcer.announce("Added \(count) \(count == 1 ? "episode" : "episodes") to the queue")
+            Announcer.announce(FolderDetailLabel.queueAllAnnouncement(count: count))
         }
     }
 

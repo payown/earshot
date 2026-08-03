@@ -725,7 +725,7 @@ final class AdvancedPlaybackTests: XCTestCase {
         let player = PlayerService()
         player.configure(context: ctx)
         let episodes = makeInterleavedShowsQueue(ctx)
-        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.groupQueueEpisodes)
+        AppSettingsStore(context: ctx).setQueueGrouping(.podcast)
 
         player.play(episodes.x2)
         player.markCurrentPlayedAndAdvance()
@@ -754,6 +754,38 @@ final class AdvancedPlaybackTests: XCTestCase {
         )
     }
 
+    func test_markCurrentPlayedAndAdvance_folderGroupedDisplay_followsFolderOrder() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episodes = makeInterleavedShowsQueue(ctx)
+
+        let showZ = Podcast(feedURL: "https://z/feed", title: "Show Z")
+        ctx.insert(showZ)
+        let z1 = Episode(guid: "z1", title: "Z1", audioURL: "https://z/1.mp3")
+        z1.podcast = showZ
+        ctx.insert(z1)
+        QueueRepository(context: ctx).add(z1)
+
+        let folders = FolderRepository(context: ctx)
+        let shared = folders.createFolder(name: "Shared")
+        let other = folders.createFolder(name: "Other")
+        folders.add(episodes.x1.podcast!, to: shared)
+        folders.add(showZ, to: shared)
+        folders.add(episodes.y1.podcast!, to: other)
+        AppSettingsStore(context: ctx).setQueueGrouping(.folder)
+
+        // Raw order after X3 is Z1, so finish X2 instead: raw next is Y2, while
+        // folder display clusters Shared as X1, X2, X3, Z1 and advances to X3.
+        player.play(episodes.x2)
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertEqual(
+            player.nowPlayingEpisodeID, episodes.x3.persistentModelID,
+            "Folder grouping must advance through the same top-level folder section shown in Queue"
+        )
+    }
+
     /// Caught in security review of the grouped-display fix above: "Play Next"
     /// (#487) guarantees an episode plays immediately after `current` by
     /// inserting it right after `current` in the RAW queue. With grouping on,
@@ -766,7 +798,7 @@ final class AdvancedPlaybackTests: XCTestCase {
         let player = PlayerService()
         player.configure(context: ctx)
         let episodes = makeInterleavedShowsQueue(ctx)
-        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.groupQueueEpisodes)
+        AppSettingsStore(context: ctx).setQueueGrouping(.podcast)
 
         // Play-Next a brand new Show Y episode right after X2 -- raw queue
         // becomes X1, Y1, X2, Y3(new), X3, Y2. Grouped order would otherwise
