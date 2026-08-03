@@ -1,5 +1,35 @@
 import SwiftUI
 import AVKit
+import SwiftData
+
+/// Root-provided route from the modal player back into Library folder detail.
+/// A missing handler means the host has no compatible navigation state, in
+/// which case Now Playing omits the control instead of presenting a dead button.
+struct PlaybackFolderNavigationAction: Sendable {
+    private let handler: (@MainActor @Sendable (PersistentIdentifier) -> Void)?
+
+    init(_ handler: (@MainActor @Sendable (PersistentIdentifier) -> Void)? = nil) {
+        self.handler = handler
+    }
+
+    var isAvailable: Bool { handler != nil }
+
+    @MainActor
+    func callAsFunction(_ folderID: PersistentIdentifier) {
+        handler?(folderID)
+    }
+}
+
+private struct PlaybackFolderNavigationKey: EnvironmentKey {
+    static let defaultValue = PlaybackFolderNavigationAction()
+}
+
+extension EnvironmentValues {
+    var playbackFolderNavigation: PlaybackFolderNavigationAction {
+        get { self[PlaybackFolderNavigationKey.self] }
+        set { self[PlaybackFolderNavigationKey.self] = newValue }
+    }
+}
 
 /// Full-screen Now Playing view, presented from the mini player. Adds the in-app
 /// progress scrubber that the compact bar can't carry, plus artwork, title, the
@@ -15,9 +45,12 @@ struct NowPlayingScreen: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(SettingsStore.self) private var settings
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.playbackFolderNavigation) private var openPlaybackFolder
     // Drives the artwork's smaller footprint at accessibility Dynamic Type
     // sizes so the transport and scrubber stay above the fold (#579).
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
+    private var folders: [PodcastFolder]
 
     @State private var showingControls = false
     @State private var showingNotes = false
@@ -249,6 +282,30 @@ struct NowPlayingScreen: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
             }
+            if let folder = playbackOriginFolder, openPlaybackFolder.isAvailable {
+                Button {
+                    open(folder: folder)
+                } label: {
+                    Text(
+                        PlaybackOriginLabel.playingFrom(
+                            folderPath: FolderLogic.pathString(folder)
+                        )
+                    )
+                    .font(.subheadline)
+                    .multilineTextAlignment(.center)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: Spacing.minTouchTarget
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+                // The visible phrase is already the complete concise name. Do
+                // not add a second accessibility label/value that VoiceOver can
+                // append to it (the Downloads picker regression).
+                .accessibilityHint("Opens this folder")
+            }
             // Visible downloaded / streaming indicator for the current episode
             // (#513), the same icon + text treatment the rows use. Hidden from
             // VoiceOver inside the badge; the spoken state rides on the title above.
@@ -257,6 +314,22 @@ struct NowPlayingScreen: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var playbackOriginFolder: PodcastFolder? {
+        guard let folderID = player.playbackOrigin?.folderID else { return nil }
+        return folders.first { $0.persistentModelID == folderID }
+    }
+
+    private func open(folder: PodcastFolder) {
+        let folderID = folder.persistentModelID
+        dismiss()
+        // Let the modal dismissal finish before switching tabs and pushing the
+        // destination, avoiding competing transitions and dropped VoiceOver
+        // screen-change focus.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            openPlaybackFolder(folderID)
+        }
     }
 
     /// The title heading's spoken label: the episode title with the downloaded /

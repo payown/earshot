@@ -64,6 +64,13 @@ final class PlayerService {
     /// auto-advance and resume use `play(_:)` directly and never raise the player.
     var pendingFullPlayerPresentation = false
 
+    /// Session-local source context for the current playback run (folders phase
+    /// 4). Identity-only and never persisted: Now Playing resolves the live
+    /// folder name/path, while every source/advance/stop transition runs through
+    /// ``PlaybackLogic/playbackOrigin(after:current:)`` so stale context cannot
+    /// follow an unrelated episode.
+    private(set) var playbackOrigin: PlaybackOrigin?
+
     /// Identity of the loaded episode, mirrored from ``currentEpisode`` at every
     /// assignment via ``setCurrentEpisode(_:)``. Unlike ``currentEpisode`` (which
     /// is `@ObservationIgnored`, so views never re-render off it), this is an
@@ -100,6 +107,9 @@ final class PlayerService {
     /// Observer for `.earshotWillDeleteEpisodes` (#574): the pre-delete hook
     /// that lets the player release a doomed episode before it is deleted.
     @ObservationIgnored private var deletionObserver: NSObjectProtocol?
+    /// Clears a folder playback origin when its backing folder (or containing
+    /// deleted subtree) is removed through FolderRepository.
+    @ObservationIgnored private var folderDeletionObserver: NSObjectProtocol?
     /// One-shot flag for the deleted-instance guard log (#574) so a tick storm
     /// against a deleted episode doesn't spam the log. Reset on episode load.
     @ObservationIgnored private var didLogDeletedEpisodeGuard = false
@@ -271,7 +281,7 @@ final class PlayerService {
     /// Loads and starts playing an episode. Resumes from the saved position when
     /// the episode is below the played threshold, otherwise starts from the top.
     func play(_ episode: Episode) {
-        play(episode, preparedItem: nil)
+        play(episode, preparedItem: nil, originEvent: .started(nil))
     }
 
     /// Plays `episode` from a user tap on an episode row (the "Play now" default
@@ -286,11 +296,11 @@ final class PlayerService {
     /// for every caller. Kept distinct from ``play(_:)`` so only this deliberate,
     /// user-initiated path queues and can present the player — queue auto-advance,
     /// resume, and jump-to-bookmark never do either.
-    func playFromEpisodeList(_ episode: Episode) {
+    func playFromEpisodeList(_ episode: Episode, origin: PlaybackOrigin? = nil) {
         if let context {
             QueueRepository(context: context).add(episode)
         }
-        play(episode, preparedItem: nil)
+        play(episode, preparedItem: nil, originEvent: .started(origin))
         if settings?.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
             ?? SettingsDefault.openPlayerOnPlay {
             pendingFullPlayerPresentation = true
@@ -319,7 +329,7 @@ final class PlayerService {
     /// Plays `episode` and jumps to an explicit start position. Backs
     /// jump-to-bookmark, where the saved position must be overridden.
     func play(_ episode: Episode, at startSeconds: Double) {
-        play(episode, preparedItem: nil)
+        play(episode, preparedItem: nil, originEvent: .started(nil))
         seek(to: startSeconds)
     }
 
@@ -357,7 +367,12 @@ final class PlayerService {
             artworkURL: artworkURL,
             chapterURL: chapterURL
         )
-        play(episode, preparedItem: nil, transient: true)
+        play(
+            episode,
+            preparedItem: nil,
+            transient: true,
+            originEvent: .started(nil)
+        )
         // The detached episode has no `podcast`, so `play` left the artist empty.
         // Set the show name so the Now Playing bar / lock screen read correctly.
         currentArtist = showTitle
@@ -388,7 +403,12 @@ final class PlayerService {
     /// `episode` is a detached, non-inserted `@Model` and every persistence sink
     /// is gated off while it plays. All real entry points pass the default `false`,
     /// so a normal play after a preview restores full persistence.
-    private func play(_ episode: Episode, preparedItem: AVPlayerItem?, transient: Bool = false) {
+    private func play(
+        _ episode: Episode,
+        preparedItem: AVPlayerItem?,
+        transient: Bool = false,
+        originEvent: PlaybackOriginEvent
+    ) {
         let item: AVPlayerItem
         if let preparedItem {
             item = preparedItem
@@ -405,6 +425,13 @@ final class PlayerService {
 
         // A new episode supersedes any in-flight sleep-timer fade (P1-4).
         cancelFadeIfNeeded()
+
+        // Apply source context only after resolving a playable URL. A failed
+        // start must not clear or replace the origin of audio that remains loaded.
+        playbackOrigin = PlaybackLogic.playbackOrigin(
+            after: originEvent,
+            current: playbackOrigin
+        )
 
         // Persist + record the session of whatever was playing before we swap.
         persistCurrentPosition()
@@ -503,6 +530,10 @@ final class PlayerService {
         lastAutoSkipFromChapterIndex = nil
         isFastForwarding = false
         rateBeforeFastForward = nil
+        playbackOrigin = PlaybackLogic.playbackOrigin(
+            after: .restoredAfterRelaunch,
+            current: playbackOrigin
+        )
 
         setCurrentEpisode(episode)
         currentEpisodeIsTransient = false
@@ -613,6 +644,7 @@ final class PlayerService {
         isFastForwarding = false
         rateBeforeFastForward = nil
         stopAfterCurrentEpisode = false
+        playbackOrigin = PlaybackLogic.playbackOrigin(after: .stopped, current: playbackOrigin)
 
         // Drop every episode-derived reference and observable surface.
         setCurrentEpisode(nil)
@@ -660,6 +692,7 @@ final class PlayerService {
     /// Lighter than ``stopAndUnload`` (no player-item teardown): the item has
     /// already played to its end, and the next ``play`` replaces it anyway.
     private func clearNowPlayingPresentation() {
+        playbackOrigin = PlaybackLogic.playbackOrigin(after: .stopped, current: playbackOrigin)
         setCurrentEpisode(nil)
         currentTitle = nil
         currentArtist = nil
@@ -914,7 +947,7 @@ final class PlayerService {
     /// boundary settings — except an episode the user explicitly "Play next"-ed
     /// bypasses the group-end stop (#487). Returns nil to STOP.
     ///
-    /// When the Queue screen is displaying episodes grouped by podcast
+    /// When the Queue screen is displaying episodes grouped by podcast or folder
     /// (``SettingsKey/groupQueueEpisodes``), "next" walks that SAME grouped
     /// order (#627 follow-up) — not the raw, possibly interleaved queue order,
     /// which the grouped display never shows the user in the first place.
@@ -943,18 +976,35 @@ final class PlayerService {
         let groupSetting = settings?.bool(
             SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds
         ) ?? SettingsDefault.continueAfterGroupEnds
-        let groupedDisplay = settings?.bool(
-            SettingsKey.groupQueueEpisodes, default: SettingsDefault.groupQueueEpisodes
-        ) ?? SettingsDefault.groupQueueEpisodes
+        let grouping = settings?.queueGrouping() ?? SettingsDefault.queueGrouping
 
-        let orderedPairs: [(id: PersistentIdentifier, groupKey: PersistentIdentifier?)]
-        if groupedDisplay {
-            let forGrouping = queued.map { (id: $0.persistentModelID, key: $0.podcast?.persistentModelID) }
+        // Group boundaries always use the same key as the Queue display. Folder
+        // mode resolves nested memberships to their top-level folder once, then
+        // each episode is an O(1) lookup; None and Podcast retain podcast
+        // boundaries for the "Continue after group ends" setting.
+        let rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+        if grouping == .folder, let context {
+            rootByPodcast = FolderRepository(context: context).rootFolderByPodcast()
+        } else {
+            rootByPodcast = [:]
+        }
+        let groupKey: (Episode) -> QueueGroup.Kind = { episode in
+            if grouping == .folder, let podcastID = episode.podcast?.persistentModelID {
+                if let rootID = rootByPodcast[podcastID] { return .folder(rootID) }
+                return .unfiled
+            }
+            if let podcastID = episode.podcast?.persistentModelID { return .podcast(podcastID) }
+            return .unfiled
+        }
+
+        let orderedPairs: [(id: PersistentIdentifier, groupKey: QueueGroup.Kind)]
+        if grouping != .none {
+            let forGrouping = queued.map { (id: $0.persistentModelID, key: groupKey($0)) }
             orderedPairs = QueueLogic.group(forGrouping).flatMap { group in
                 group.ids.map { (id: $0, groupKey: group.key) }
             }
         } else {
-            orderedPairs = queued.map { (id: $0.persistentModelID, groupKey: $0.podcast?.persistentModelID) }
+            orderedPairs = queued.map { (id: $0.persistentModelID, groupKey: groupKey($0)) }
         }
 
         let candidate = PlaybackLogic.nextUpID(
@@ -963,12 +1013,34 @@ final class PlayerService {
         return PlaybackLogic.nextUpHonoringBoundaries(
             queue: orderedPairs,
             after: finished.persistentModelID,
-            currentGroupKey: finished.podcast?.persistentModelID,
+            currentGroupKey: groupKey(finished),
             continueAfterEpisode: continueEpisode,
             continueAfterGroupEnds: PlaybackLogic.continueAfterGroupEnds(
                 setting: groupSetting, nextCandidate: candidate, playNextOverrides: playNextOverrides
             )
         )
+    }
+
+    /// Builds the origin transition for Queue advancement. Folder context only
+    /// survives while the next episode's podcast remains in the live source
+    /// folder subtree; crossing a folder boundary clears it before the episode
+    /// becomes observable in Now Playing.
+    private func playbackOriginAdvanceEvent(to nextEpisode: Episode) -> PlaybackOriginEvent {
+        guard let playbackOrigin,
+              let context,
+              let podcastID = nextEpisode.podcast?.persistentModelID else {
+            return .advanced(nextEpisodeBelongsToOrigin: false)
+        }
+        let repository = FolderRepository(context: context)
+        guard let folder = repository.folders().first(where: {
+            $0.persistentModelID == playbackOrigin.folderID
+        }) else {
+            return .advanced(nextEpisodeBelongsToOrigin: false)
+        }
+        let belongs = repository.subtreeSubscriptions(of: folder).contains {
+            $0.persistentModelID == podcastID
+        }
+        return .advanced(nextEpisodeBelongsToOrigin: belongs)
     }
 
     /// Manual "mark as played" for the loaded episode: marks it played, removes
@@ -1002,7 +1074,11 @@ final class PlayerService {
             ? preloadedItem : nil
         preloadedItem = nil
         preloadedEpisode = nil
-        play(nextEpisode, preparedItem: prepared)
+        play(
+            nextEpisode,
+            preparedItem: prepared,
+            originEvent: playbackOriginAdvanceEvent(to: nextEpisode)
+        )
         Announcer.announce("Now playing \(nextEpisode.title)")
     }
 
@@ -1057,7 +1133,11 @@ final class PlayerService {
             ? preloadedItem : nil
         preloadedItem = nil
         preloadedEpisode = nil
-        play(nextEpisode, preparedItem: prepared)
+        play(
+            nextEpisode,
+            preparedItem: prepared,
+            originEvent: playbackOriginAdvanceEvent(to: nextEpisode)
+        )
         Announcer.announce("Now playing \(nextEpisode.title)")
     }
 
@@ -1725,7 +1805,11 @@ final class PlayerService {
             ? preloadedItem : nil
         preloadedItem = nil
         preloadedEpisode = nil
-        play(nextEpisode, preparedItem: prepared)
+        play(
+            nextEpisode,
+            preparedItem: prepared,
+            originEvent: playbackOriginAdvanceEvent(to: nextEpisode)
+        )
         Announcer.announce("Now playing \(nextEpisode.title)")
     }
 
@@ -1806,6 +1890,21 @@ final class PlayerService {
             let podcastID = note.userInfo?[Self.willDeletePodcastIDKey] as? PersistentIdentifier
             MainActor.assumeIsolated {
                 self?.handleWillDeleteEpisodes(podcastID: podcastID)
+            }
+        }
+        folderDeletionObserver = NotificationCenter.default.addObserver(
+            forName: .earshotFoldersDidDelete,
+            object: nil,
+            queue: nil
+        ) { [weak self] note in
+            guard let ids = note.userInfo?[FolderRepository.deletedFolderIDsKey]
+                    as? Set<PersistentIdentifier> else { return }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.playbackOrigin = PlaybackLogic.playbackOrigin(
+                    after: .foldersDeleted(ids),
+                    current: self.playbackOrigin
+                )
             }
         }
     }

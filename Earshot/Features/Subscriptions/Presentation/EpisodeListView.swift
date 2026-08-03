@@ -18,6 +18,8 @@ struct EpisodeListView: View {
     // the shared `.episodeAudioExport` download-then-share flow.
     @State private var exportEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
+    // The pending "Add to folder" / "Move to folder" Quick Action target (#756).
+    @State private var folderPickRequest: FolderPickRequest?
     @State private var showingPodcastSettings = false
     // The pending "Unfollow this podcast" rotor Quick Action (#572). This is a
     // single-show screen, so unfollow always targets the shown `podcast`; it
@@ -28,6 +30,20 @@ struct EpisodeListView: View {
     // button and the screen-level rotor action so both entry points drive the
     // exact same confirm-then-execute flow instead of duplicating it.
     @State private var confirmingMarkAllPlayed = false
+    // Episode multi-select (#758). `selection` is the shared ``MultiSelectState``
+    // holder (keyed on persistent identity); `batchRequest` presents the shared
+    // ``FolderPickerView`` for the whole selection. Entering selection mode swaps
+    // every episode row for a ``SelectableRow`` and shows a bottom
+    // ``MultiSelectBar`` with Add/Move to folder plus the natural Add-to-queue
+    // batch.
+    @State private var selection = MultiSelectState()
+    @State private var batchRequest: FolderPickRequest?
+    // Moves VoiceOver focus onto the first episode row when entering selection
+    // mode, and to the Select/Done button on exit; keyed on the stable
+    // PersistentIdentifier so focus rides the row across the select-mode toggle
+    // (mirrors SubscriptionsView's podcast multi-select, #757).
+    @AccessibilityFocusState private var focusedRowID: PersistentIdentifier?
+    @AccessibilityFocusState private var focusSelectButton: Bool
 
     // Focus targets for the rotor "Mark as played" under the Unheard filter,
     // where the marked row leaves the visible list (#579): the neighbor row, or
@@ -133,49 +149,14 @@ struct EpisodeListView: View {
             } else {
                 Section {
                     ForEach(filteredSortedEpisodes) { episode in
-                        EpisodeRow(
-                            episode: episode,
-                            actions: buildEpisodeActions(
-                                episode: episode,
-                                order: quickActions.episodeActions,
-                                player: player,
-                                downloads: downloads,
-                                context: context,
-                                onShowNotes: { showNotesEpisode = episode },
-                                onShare: { sharingEpisode = episode },
-                                onBookmarks: { bookmarksEpisode = episode },
-                                // Rotor "Unfollow this podcast" (#572): opens the
-                                // destructive confirmation below — activation
-                                // never unfollows directly.
-                                onUnfollow: { pendingUnfollow = podcast },
-                                // Under the Unheard filter, rotor "Mark as
-                                // played" removes this row (#579). The builder
-                                // invokes this BEFORE the played flip, so the
-                                // neighbor is captured while the row is still
-                                // visible; focus moves after the list has
-                                // re-rendered — to the neighbor, or the
-                                // empty-filter state when this was the last
-                                // unheard episode. Under All the row stays put,
-                                // so no focus management is needed.
-                                onMarkPlayed: { nowPlayed in
-                                    guard filter == .unheard, nowPlayed else { return }
-                                    let neighbor = neighborID(of: episode, in: filteredSortedEpisodes)
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                        if let neighbor {
-                                            focusedEpisode = neighbor
-                                        } else {
-                                            focusEmptyFilter = true
-                                        }
-                                    }
-                                },
-                                // Rotor "Export audio" (#689): downloads if needed,
-                                // then shares the local file. See `.episodeAudioExport`.
-                                onExport: { exportEpisode = episode }
-                            )
-                        )
-                        // Lets the rotor mark-played runner hand VoiceOver focus
-                        // to this row when its neighbor vanishes (#579).
-                        .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
+                        rowContainer(for: episode)
+                            // Lets the rotor mark-played runner hand VoiceOver focus
+                            // to this row when its neighbor vanishes (#579).
+                            .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
+                            // Same focus id on whichever row variant renders, so
+                            // focus can be moved onto the first row when selection
+                            // mode is entered (#758).
+                            .accessibilityFocused($focusedRowID, equals: episode.persistentModelID)
                     }
                 } header: {
                     Text(filter == .unheard
@@ -190,6 +171,40 @@ struct EpisodeListView: View {
         .navigationTitle(podcast.title)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await refresh() }
+        // Persistent episode multi-select bar (#758): Add to folder is primary and
+        // its label carries the live count ("Add 3 episodes to folder") — the
+        // accessibility source of truth for the count. Move to folder follows, and
+        // the natural Add-to-queue batch rounds it out. Reuses the shared
+        // ``MultiSelectBar`` unchanged from podcast multi-select.
+        .safeAreaInset(edge: .bottom) {
+            if selection.isSelecting {
+                MultiSelectBar(
+                    count: selection.count,
+                    primary: MultiSelectAction(
+                        id: "add",
+                        title: MultiSelectActionLabel.addToFolder(count: selection.count, itemSingular: "episode"),
+                        systemImage: "folder",
+                        handler: { presentBatch(.add) }
+                    ),
+                    secondary: [
+                        MultiSelectAction(
+                            id: "move",
+                            title: MultiSelectActionLabel.moveToFolder(count: selection.count, itemSingular: "episode"),
+                            systemImage: "folder",
+                            handler: { presentBatch(.move) }
+                        ),
+                        MultiSelectAction(
+                            id: "queue",
+                            title: EpisodeBatchLabel.addToQueue(count: selection.count),
+                            systemImage: "text.badge.plus",
+                            handler: { addSelectedToQueue() }
+                        ),
+                    ],
+                    announcementNoun: "episode"
+                )
+                .transition(.move(edge: .bottom))
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -234,6 +249,27 @@ struct EpisodeListView: View {
                 .accessibilityLabel("Podcast settings")
                 .accessibilityHint("Opens settings for this podcast")
             }
+            // Enter/leave episode multi-select (#758). "Select" is the entry point
+            // (a real Button, so it's reachable by VoiceOver swipe and rotor);
+            // while selecting it becomes "Done", which exits and announces the
+            // change. Only offered when there are episodes to select. The batch
+            // actions live in the bottom MultiSelectBar.
+            if !filteredSortedEpisodes.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if selection.isSelecting {
+                        Button("Done") { exitSelection(announce: true) }
+                            .accessibilityHint("Leaves selection mode")
+                            .accessibilityFocused($focusSelectButton)
+                    } else {
+                        Button {
+                            enterSelection(first: filteredSortedEpisodes.first)
+                        } label: {
+                            Label("Select episodes", systemImage: "checkmark.circle")
+                        }
+                        .accessibilityFocused($focusSelectButton)
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showingPodcastSettings) {
             PodcastSettingsView(podcast: podcast)
@@ -244,6 +280,15 @@ struct EpisodeListView: View {
             ShareSheet(items: shareItems(for: episode))
         }
         .episodeAudioExport($exportEpisode)
+        .folderPicker($folderPickRequest)
+        // The multi-select batch picker (#758): same shared FolderPickerView, but
+        // it reports completion so we leave selection mode and re-anchor focus
+        // only after a real pick (Cancel keeps the selection for a retry).
+        .sheet(item: $batchRequest) { req in
+            FolderPickerView(episodes: req.episodes, mode: req.mode) {
+                finishBatch()
+            }
+        }
         // Podcast-level destructive confirmation for the row's "Unfollow this
         // podcast" Quick Action (#572). Wording copied from InboxScreen so the
         // flow reads identically everywhere it appears.
@@ -277,6 +322,137 @@ struct EpisodeListView: View {
         } message: {
             Text(markAllPlayedConfirmationMessage)
         }
+    }
+
+    /// Whichever row variant applies: a selectable checkmark row while in
+    /// selection mode (#758, via the shared ``SelectableRow`` scaffold),
+    /// otherwise the normal navigate/rotor row with its full Quick Actions.
+    @ViewBuilder
+    private func rowContainer(for episode: Episode) -> some View {
+        if selection.isSelecting {
+            EpisodeSelectableRow(
+                episode: episode,
+                isSelected: selection.isSelected(episode.persistentModelID),
+                onToggle: { selection.toggle(episode.persistentModelID) }
+            )
+        } else {
+            EpisodeRow(
+                episode: episode,
+                deferredActions: availableEpisodeActions(
+                    episode: episode,
+                    order: quickActions.episodeActions,
+                    supportsUnfollow: true,
+                    supportsExport: true,
+                    supportsAddToFolder: true,
+                    supportsMoveToFolder: true
+                ),
+                performAction: { action in perform(action, for: episode) }
+            )
+        }
+    }
+
+    /// Resolves a runnable item only after activation. A single show can contain
+    /// many thousands of episodes, so row recycling must not construct the full
+    /// UUID/closure action set for every visible row.
+    private func perform(_ action: EpisodeAction, for episode: Episode) {
+        buildEpisodeActions(
+            episode: episode,
+            order: [action],
+            player: player,
+            downloads: downloads,
+            context: context,
+            onShowNotes: { showNotesEpisode = episode },
+            onShare: { sharingEpisode = episode },
+            onBookmarks: { bookmarksEpisode = episode },
+            // Rotor "Unfollow this podcast" (#572): opens the destructive
+            // confirmation — activation never unfollows directly.
+            onUnfollow: { pendingUnfollow = podcast },
+            // Under the Unheard filter, rotor "Mark as played" removes this row
+            // (#579). Capture the visible neighbor before the state changes.
+            onMarkPlayed: { nowPlayed in
+                guard filter == .unheard, nowPlayed else { return }
+                let neighbor = neighborID(of: episode, in: filteredSortedEpisodes)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if let neighbor {
+                        focusedEpisode = neighbor
+                    } else {
+                        focusEmptyFilter = true
+                    }
+                }
+            },
+            onExport: { exportEpisode = episode },
+            onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
+            onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
+        ).first?.run()
+    }
+
+    // MARK: Multi-select (#758)
+
+    /// Enters selection mode: announces it, then moves VoiceOver focus to the
+    /// list's first row so the user lands where they can start selecting. The
+    /// focus move is deferred a beat so the selectable rows exist first (mirrors
+    /// SubscriptionsView's podcast multi-select).
+    private func enterSelection(first: Episode?) {
+        withAnimation(Motion.preferred(.easeInOut(duration: 0.2))) {
+            selection.enter()
+        }
+        Announcer.announce("Selection mode on")
+        let firstID = first?.persistentModelID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            focusedRowID = firstID
+        }
+    }
+
+    /// Leaves selection mode. `announce` is true for a manual "Done" (which says
+    /// "Selection mode off"); the batch paths pass false because they've already
+    /// announced their result. Re-anchors VoiceOver focus to the Select/Done
+    /// button — a stable element that's always present while there are episodes,
+    /// never a row that a batch may have removed. `focusDelay` lets a folder batch
+    /// push the focus move past the picker's own +0.5s result announcement.
+    private func exitSelection(announce: Bool, focusDelay: TimeInterval = 0.5) {
+        withAnimation(Motion.preferred(.easeInOut(duration: 0.2))) {
+            selection.exit()
+        }
+        if announce {
+            Announcer.announce("Selection mode off")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + focusDelay) {
+            focusSelectButton = true
+        }
+    }
+
+    /// Presents the shared picker for the whole selection. No-op with an empty
+    /// selection (the bar's buttons are already disabled there).
+    private func presentBatch(_ mode: FolderPickMode) {
+        let selected = selectedEpisodes()
+        guard !selected.isEmpty else { return }
+        batchRequest = .episodes(selected, mode: mode)
+    }
+
+    /// Called by the batch folder picker once it has applied the add/move. Filing
+    /// into a folder doesn't remove episodes from this list, so we leave selection
+    /// mode silently (the picker announced the result) and re-anchor focus,
+    /// staggered past the picker's +0.5s result announcement.
+    private func finishBatch() {
+        exitSelection(announce: false, focusDelay: 0.9)
+    }
+
+    /// The selected episodes, in the current (filtered, sorted) display order.
+    private func selectedEpisodes() -> [Episode] {
+        filteredSortedEpisodes.filter { selection.isSelected($0.persistentModelID) }
+    }
+
+    /// Adds every selected episode to the end of the queue, in list order, then
+    /// exits selection mode. Reuses the same ``QueueRepository/add(_:)`` batch the
+    /// Inbox bulk-add uses.
+    private func addSelectedToQueue() {
+        let toAdd = selectedEpisodes()
+        guard !toAdd.isEmpty else { return }
+        QueueRepository(context: context).add(toAdd)
+        // Noun-carrying result ("Added 3 episodes to queue"), matching the folder
+        // batch announcement's phrasing.
+        Announcer.announce("Added \(EpisodeBatchLabel.episodePhrase(toAdd.count)) to queue", assertive: true)
+        exitSelection(announce: false)
     }
 
     /// Unfollows the shown podcast via the centralized repository path shared

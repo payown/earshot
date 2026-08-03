@@ -42,6 +42,67 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Mark as unplayed"])
     }
 
+    func testDeferredEpisodeActionLabelsMatchDynamicBuilderLabels() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx, played: true)
+        episode.downloadStatus = .downloaded
+
+        XCTAssertEqual(EpisodeAction.markPlayed.label(for: episode), "Mark as unplayed")
+        XCTAssertEqual(EpisodeAction.download.label(for: episode), "Remove download")
+        XCTAssertEqual(EpisodeAction.share.label(for: episode), "Share")
+    }
+
+    func testDeferredEpisodeActionDestructiveRolesMatchBuilderMetadata() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+
+        XCTAssertFalse(EpisodeAction.download.isDestructive(for: episode))
+        episode.downloadStatus = .downloaded
+        XCTAssertTrue(EpisodeAction.download.isDestructive(for: episode))
+        XCTAssertTrue(EpisodeAction.unfollow.isDestructive(for: episode))
+        XCTAssertFalse(EpisodeAction.markPlayed.isDestructive(for: episode))
+    }
+
+    func testAvailableEpisodeActionsPreserveOrderAndSurfaceCapabilities() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let order: [EpisodeAction] = [
+            .share, .unfollow, .exportAudio, .addToFolder, .moveToFolder, .playNow,
+        ]
+
+        XCTAssertEqual(
+            availableEpisodeActions(episode: episode, order: order),
+            [.share, .playNow]
+        )
+        XCTAssertEqual(
+            availableEpisodeActions(
+                episode: episode,
+                order: order,
+                supportsUnfollow: true,
+                supportsExport: true,
+                supportsAddToFolder: true,
+                supportsMoveToFolder: true
+            ),
+            order
+        )
+    }
+
+    func testAvailableEpisodeActionsRequireAudioAndPodcast() {
+        let ctx = TestStore.freshContext()
+        let episode = Episode(guid: "detached", title: "Detached", audioURL: "")
+        ctx.insert(episode)
+
+        XCTAssertEqual(
+            availableEpisodeActions(
+                episode: episode,
+                order: [.exportAudio, .unfollow, .share],
+                supportsUnfollow: true,
+                supportsExport: true
+            ),
+            [.share]
+        )
+    }
+
     func testEpisodeBookmarksActionInvokesCallback() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)
@@ -54,6 +115,27 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Bookmarks"])
         items.first?.run()
         XCTAssertTrue(opened)
+    }
+
+    func testEpisodeQueueActionsInvokeFocusHookBeforeMutation() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        var calls = 0
+        let items = buildEpisodeActions(
+            episode: episode,
+            order: [.playNow, .addToQueueTop, .addToQueueBottom, .markPlayed],
+            player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx,
+            onShowNotes: {},
+            onShare: {},
+            onBookmarks: {},
+            onWillQueue: { calls += 1 }
+        )
+
+        items.forEach { $0.run() }
+
+        XCTAssertEqual(calls, 3, "Only the three actions that queue an episode invoke the focus hook")
     }
 
     func testQueueActionsDropAllMovesInNoneMode() {
@@ -88,6 +170,22 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Move up", "Play now", "Move down"])
     }
 
+    func testQueueActionsFolderGroupedModeKeepsSameAccessibleMoveActions() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let items = buildQueueActions(
+            episode: episode,
+            order: [.moveToTop, .moveUp, .playNow, .moveDown, .moveToBottom],
+            moveMode: .groupedByFolder(rootByPodcast: [:]),
+            player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx,
+            onShowNotes: {},
+            onFocus: { _ in }
+        )
+        XCTAssertEqual(items.map(\.label), ["Move up", "Play now", "Move down"])
+    }
+
     func testQueueActionsFlatModeIncludesAllMovesInConfiguredOrder() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)
@@ -102,6 +200,32 @@ final class QuickActionBuildersTests: XCTestCase {
             onFocus: { _ in }
         )
         XCTAssertEqual(items.map(\.label), ["Move to top", "Play now", "Remove from queue"])
+    }
+
+    func testAvailableQueueActionsMirrorMoveModeWithoutBuildingRunners() {
+        let order: [QueueItemAction] = [
+            .moveToTop, .moveUp, .playNow, .moveDown, .moveToBottom,
+        ]
+        XCTAssertEqual(
+            availableQueueActions(order: order, moveMode: .none),
+            [.playNow]
+        )
+        XCTAssertEqual(
+            availableQueueActions(order: order, moveMode: .grouped),
+            [.moveUp, .playNow, .moveDown]
+        )
+        XCTAssertEqual(availableQueueActions(order: order, moveMode: .flat), order)
+    }
+
+    func testDeferredQueueMetadataMatchesDynamicBuilderMetadata() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        XCTAssertEqual(QueueItemAction.download.label(for: episode), "Download")
+        XCTAssertFalse(QueueItemAction.download.isDestructive(for: episode))
+        episode.downloadStatus = .downloaded
+        XCTAssertEqual(QueueItemAction.download.label(for: episode), "Remove download")
+        XCTAssertTrue(QueueItemAction.download.isDestructive(for: episode))
+        XCTAssertTrue(QueueItemAction.removeFromQueue.isDestructive(for: episode))
     }
 
     // MARK: #572 — configurable Unfollow on episode rows
@@ -457,6 +581,22 @@ final class QuickActionBuildersTests: XCTestCase {
             order.map(\.guid), ["x1", "x2", "x3", "y1", "y2"],
             "Grouped mode must match the grouped-by-podcast order the screen actually renders"
         )
+    }
+
+    func testDisplayedQueueOrder_folderGroupedMode_returnsProvidedFolderOrder() {
+        let ctx = TestStore.freshContext()
+        _ = makeInterleavedShowsQueue(ctx)
+        let repo = QueueRepository(context: ctx)
+        let podcastGroups = repo.groupedQueue()
+        let reversedGroups = Array(podcastGroups.reversed())
+
+        let order = displayedQueueOrder(
+            moveMode: .groupedByFolder(rootByPodcast: [:]),
+            flat: repo.queue(),
+            grouped: reversedGroups
+        )
+
+        XCTAssertEqual(order.map(\.guid), ["y1", "y2", "x1", "x2", "x3"])
     }
 
     /// End-to-end regression for #629: with grouped display, removing X1 (whose
@@ -921,5 +1061,163 @@ final class QuickActionBuildersTests: XCTestCase {
            let u = EpisodeAction.allCases.firstIndex(of: .unfollow) {
             XCTAssertLessThan(e, u, "declaration order feeds the upgrade append")
         }
+    }
+
+    // MARK: #756 — Add/Move to folder episode actions
+
+    func testEpisodeFolderActionsIncludedWhenRunnersProvided() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let items = buildEpisodeActions(
+            episode: episode, order: [.addToFolder, .moveToFolder], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {},
+            onAddToFolder: { _ in }, onMoveToFolder: { _ in }
+        )
+        XCTAssertEqual(items.map(\.label), ["Add to folder", "Move to folder"])
+    }
+
+    func testEpisodeFolderActionsOmittedWhenNoRunners() {
+        // Same optional-callback contract as onExport/onUnfollow: the detached
+        // search preview passes no folder runners and gets neither action.
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let items = buildEpisodeActions(
+            episode: episode, order: [.addToFolder, .moveToFolder, .share], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {}
+        )
+        XCTAssertEqual(items.map(\.label), ["Share"])
+    }
+
+    func testEpisodeAddToFolderRunnerInvokesCallbackWithEpisode() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        var received: Episode?
+        let items = buildEpisodeActions(
+            episode: episode, order: [.addToFolder], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {},
+            onAddToFolder: { received = $0 }
+        )
+        items.first?.run()
+        XCTAssertIdentical(received, episode)
+    }
+
+    func testEpisodeMoveToFolderRunnerInvokesCallbackWithEpisode() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        var received: Episode?
+        let items = buildEpisodeActions(
+            episode: episode, order: [.moveToFolder], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {},
+            onMoveToFolder: { received = $0 }
+        )
+        items.first?.run()
+        XCTAssertIdentical(received, episode)
+    }
+
+    func testEpisodeFolderActionsAreNonDestructive() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        let items = buildEpisodeActions(
+            episode: episode, order: [.addToFolder, .moveToFolder], player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx, onShowNotes: {}, onShare: {}, onBookmarks: {},
+            onAddToFolder: { _ in }, onMoveToFolder: { _ in }
+        )
+        XCTAssertEqual(items.map(\.isDestructive), [false, false])
+    }
+
+    func testDefaultEpisodeOrderPlacesFolderActionsBeforeUnfollow() {
+        // Destructive unfollow must stay last by default; folder actions sit
+        // before it in both the default order and the enum declaration order
+        // (the latter drives the upgrade append via QuickActionRepository.resolve).
+        for action in [EpisodeAction.addToFolder, .moveToFolder] {
+            XCTAssertTrue(defaultEpisodeActions.contains(action))
+            if let a = defaultEpisodeActions.firstIndex(of: action),
+               let u = defaultEpisodeActions.firstIndex(of: .unfollow) {
+                XCTAssertLessThan(a, u)
+            } else {
+                XCTFail("default order must contain \(action) and unfollow")
+            }
+            if let a = EpisodeAction.allCases.firstIndex(of: action),
+               let u = EpisodeAction.allCases.firstIndex(of: .unfollow) {
+                XCTAssertLessThan(a, u, "declaration order feeds the upgrade append")
+            }
+        }
+    }
+
+    // MARK: #756 — Add/Move to folder podcast actions
+
+    func testPodcastFolderActionsIncludedWhenRunnersProvided() {
+        let ctx = TestStore.freshContext()
+        let p = Podcast(feedURL: "https://x/a.xml", title: "Show")
+        ctx.insert(p)
+        let items = buildPodcastActions(
+            podcast: p,
+            order: [.addToFolder, .moveToFolder],
+            context: ctx,
+            onOpenDetail: {}, onShare: {}, onUnsubscribe: {},
+            onAddToFolder: { _ in }, onMoveToFolder: { _ in }
+        )
+        XCTAssertEqual(items.map(\.label), ["Add to folder", "Move to folder"])
+    }
+
+    func testPodcastFolderActionsOmittedWhenNoRunners() {
+        let ctx = TestStore.freshContext()
+        let p = Podcast(feedURL: "https://x/a.xml", title: "Show")
+        ctx.insert(p)
+        let items = buildPodcastActions(
+            podcast: p,
+            order: [.addToFolder, .moveToFolder, .share],
+            context: ctx,
+            onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+        )
+        XCTAssertEqual(items.map(\.label), ["Share podcast"])
+    }
+
+    func testPodcastAddToFolderRunnerInvokesCallbackWithPodcast() {
+        let ctx = TestStore.freshContext()
+        let p = Podcast(feedURL: "https://x/a.xml", title: "Show")
+        ctx.insert(p)
+        var received: Podcast?
+        let items = buildPodcastActions(
+            podcast: p,
+            order: [.addToFolder],
+            context: ctx,
+            onOpenDetail: {}, onShare: {}, onUnsubscribe: {},
+            onAddToFolder: { received = $0 }
+        )
+        items.first?.run()
+        XCTAssertIdentical(received, p)
+    }
+
+    func testDeferredPodcastMetadataMatchesDynamicBuilderLabels() {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/a.xml", title: "Show")
+        ctx.insert(podcast)
+
+        XCTAssertEqual(PodcastAction.toggleNotifications.label(for: podcast), "Turn on notifications")
+        XCTAssertEqual(PodcastAction.toggleAutoQueue.label(for: podcast), "Turn on auto-queue")
+        XCTAssertEqual(PodcastAction.toggleInboxInclude.label(for: podcast), "Add to Inbox")
+        XCTAssertEqual(PodcastAction.toggleInboxExclude.label(for: podcast), "Exclude from Inbox")
+        XCTAssertTrue(PodcastAction.unsubscribe.isDestructive)
+        XCTAssertFalse(PodcastAction.share.isDestructive)
+
+        podcast.notificationEnabled = true
+        podcast.autoQueue = true
+        podcast.inboxIncluded = true
+        podcast.inboxExcluded = true
+        XCTAssertEqual(PodcastAction.toggleNotifications.label(for: podcast), "Turn off notifications")
+        XCTAssertEqual(PodcastAction.toggleAutoQueue.label(for: podcast), "Turn off auto-queue")
+        XCTAssertEqual(PodcastAction.toggleInboxInclude.label(for: podcast), "Remove from Inbox")
+        XCTAssertEqual(PodcastAction.toggleInboxExclude.label(for: podcast), "Include in Inbox")
+    }
+
+    func testDefaultPodcastActionsIncludeFolderActions() {
+        XCTAssertTrue(defaultPodcastActions.contains(.addToFolder))
+        XCTAssertTrue(defaultPodcastActions.contains(.moveToFolder))
     }
 }

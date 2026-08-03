@@ -16,6 +16,13 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
     case openShowNotes
     case share
     case exportAudio
+    // Folders phase 2 (#756). Non-destructive: `addToFolder` files the episode
+    // into a chosen folder while keeping any existing memberships; `moveToFolder`
+    // relocates it into exactly the chosen folder. Both open the shared
+    // `FolderPickerView`. Placed before `.unfollow` so the destructive action
+    // still defaults last.
+    case addToFolder
+    case moveToFolder
     case unfollow
 
     var id: String { rawValue }
@@ -36,9 +43,41 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
         // saved to Files / AirDropped — distinct from `.share`, which shares the
         // remote link (#689).
         case .exportAudio: return "Export audio"
+        // Folders phase 2 (#756). Activation opens the shared nested folder
+        // picker; the actual filing happens when the user chooses a folder.
+        case .addToFolder: return "Add to folder"
+        case .moveToFolder: return "Move to folder"
         // Podcast-level, reached from an episode row (#500/#572). Activation
         // opens a confirmation dialog — it never unfollows directly.
         case .unfollow: return "Unfollow this podcast"
+        }
+    }
+
+    /// Resolves the small amount of episode-specific presentation without
+    /// constructing a runnable ``QuickActionItem``. Large scrolling surfaces
+    /// use this from their row bodies so List recycling does not eagerly create
+    /// UUIDs and captured closures for every configured action.
+    func label(for episode: Episode) -> String {
+        switch self {
+        case .download:
+            return episode.downloadStatus == .downloaded ? "Remove download" : "Download"
+        case .markPlayed:
+            return episode.isPlayed ? "Mark as unplayed" : "Mark as played"
+        default:
+            return label
+        }
+    }
+
+    /// The role is dynamic for Download: removing an existing download is
+    /// destructive, while starting one is not. Unfollow is always destructive.
+    func isDestructive(for episode: Episode) -> Bool {
+        switch self {
+        case .download:
+            return episode.downloadStatus == .downloaded
+        case .unfollow:
+            return true
+        default:
+            return false
         }
     }
 }
@@ -56,5 +95,10 @@ let defaultEpisodeActions: [EpisodeAction] = [
     .openShowNotes,
     .share,
     .exportAudio,
+    // Folders phase 2 (#756): appended for new users; `QuickActionRepository.resolve()`
+    // appends them for existing users too. Reorderable/hideable in settings. Kept
+    // before `.unfollow` so the destructive action stays last by default.
+    .addToFolder,
+    .moveToFolder,
     .unfollow,
 ]

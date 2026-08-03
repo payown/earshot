@@ -31,6 +31,19 @@ struct PodcastSettingsView: View {
     /// it has genuinely been denied, never for `.notDetermined` (#600, #602).
     @State private var authorizationStatus: UNAuthorizationStatus?
 
+    /// Presents the folder picker sheet. Its edits are written immediately, so
+    /// dismissing it re-evaluates this view's body and the Folders section below
+    /// reads back the podcast's current memberships.
+    @State private var showingFolderPicker = false
+
+    /// Observed so the Folders section reflects folder creates/renames/deletes
+    /// live. `Podcast` has no inverse to `FolderMembership` (the F2 decision), so
+    /// the podcast can't observe membership changes on its own; querying the
+    /// folders here — and re-reading on the sheet's dismissal — keeps the list
+    /// current.
+    @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
+    private var allFolders: [PodcastFolder]
+
     /// Factory for the notification service, injectable so a test can supply a
     /// mock `NotificationScheduling` and assert the permission request fires.
     var makeNotificationService: () -> NotificationService = { NotificationService() }
@@ -115,6 +128,7 @@ struct PodcastSettingsView: View {
                 playbackSection
                 queueSection
                 inboxSection
+                foldersSection
                 notificationsSection
             }
             .navigationTitle("Podcast Settings")
@@ -127,6 +141,9 @@ struct PodcastSettingsView: View {
                     .accessibilityLabel("Done")
                     .accessibilityHint("Closes podcast settings")
                 }
+            }
+            .sheet(isPresented: $showingFolderPicker) {
+                PodcastFolderPickerView(podcast: podcast)
             }
         }
     }
@@ -183,6 +200,56 @@ struct PodcastSettingsView: View {
             } else {
                 Text("New episodes from this podcast appear in the inbox unless you exclude it here.")
             }
+        }
+    }
+
+    /// Shown in the Folders section when this podcast belongs to no folder.
+    /// Descriptive text rather than a blank row — the "Add to folder…" button
+    /// below it is the call to action.
+    static let notInAnyFolderText = "Not in any folder"
+
+    /// The folders this podcast currently belongs to, each rendered by its full
+    /// breadcrumb path. Recomputed whenever the body re-evaluates — including
+    /// when the picker sheet is dismissed after an immediate-write edit.
+    private var containingFolders: [PodcastFolder] {
+        allFolders
+            .filter { folder in
+                folder.memberships.contains {
+                    $0.podcast?.persistentModelID == podcast.persistentModelID
+                }
+            }
+            .sorted { FolderLogic.pathString($0) < FolderLogic.pathString($1) }
+    }
+
+    private var foldersSection: some View {
+        Section {
+            if containingFolders.isEmpty {
+                Text(Self.notInAnyFolderText)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(containingFolders, id: \.persistentModelID) { folder in
+                    let path = FolderLogic.pathString(folder)
+                    Label {
+                        Text(path)
+                    } icon: {
+                        Image(systemName: "folder")
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(path)
+                }
+            }
+            Button {
+                showingFolderPicker = true
+            } label: {
+                Label("Add to folder…", systemImage: "folder.badge.plus")
+            }
+            .accessibilityHint("Opens a list of folders to add or remove this podcast")
+        } header: {
+            Text("Folders")
+                .accessibilityAddTraits(.isHeader)
+        } footer: {
+            Text("Folders group your podcasts. A podcast can be in more than one folder.")
         }
     }
 

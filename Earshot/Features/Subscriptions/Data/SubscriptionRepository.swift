@@ -201,10 +201,12 @@ final class SubscriptionRepository {
         return podcast
     }
 
-    /// Unsubscribes from `podcast`: removes every folder membership first (the
-    /// `FolderMembership` → `Podcast` relationship has no cascade from the podcast
-    /// side, so a leftover row would dangle — see `FolderRepository.removeFromAllFolders`),
-    /// removes its dangling listening sessions (same no-cascade problem, which
+    /// Unsubscribes from `podcast`: removes every folder membership first — both
+    /// the podcast's own (`FolderMembership`) and its episodes'
+    /// (`EpisodeFolderMembership`), neither of which cascades from the podcast side,
+    /// so a leftover row would dangle — see `FolderRepository.removeFromAllFolders`
+    /// and `removePodcastEpisodesFromAllFolders`. Then removes its dangling
+    /// listening sessions (same no-cascade problem, which
     /// would otherwise corrupt stats as "Unknown Podcast" — #377), then deletes the
     /// podcast (its episodes cascade) and saves.
     ///
@@ -231,7 +233,12 @@ final class SubscriptionRepository {
             object: nil,
             userInfo: [PlayerService.willDeletePodcastIDKey: podcast.persistentModelID]
         )
-        FolderRepository(context: context).removeFromAllFolders(podcast)
+        let folders = FolderRepository(context: context)
+        folders.removeFromAllFolders(podcast)
+        // The cascade below deletes this podcast's episodes, but their
+        // EpisodeFolderMembership join rows (one-way to Episode, no inverse) do NOT
+        // cascade — clean them up first or they dangle at deleted episodes (#756).
+        folders.removePodcastEpisodesFromAllFolders(podcast)
         StatsRepository(context: context).removeSessions(for: podcast)
         // ActiveDownload.episode is a one-way reference (no inverse on Episode, so
         // that Episode's shape stays out of the V4→V5 migration — #701), which

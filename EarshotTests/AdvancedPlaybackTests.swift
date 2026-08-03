@@ -25,6 +25,14 @@ final class AdvancedPlaybackTests: XCTestCase {
     private func makeEpisode(_ ctx: ModelContext, guid: String = "ep1") -> Episode {
         let podcast = Podcast(feedURL: "https://x/feed", title: "Show")
         ctx.insert(podcast)
+        return makeEpisode(ctx, guid: guid, podcast: podcast)
+    }
+
+    private func makeEpisode(
+        _ ctx: ModelContext,
+        guid: String,
+        podcast: Podcast
+    ) -> Episode {
         let episode = Episode(guid: guid, title: "Episode", audioURL: "https://x/\(guid).mp3")
         episode.podcast = podcast
         ctx.insert(episode)
@@ -495,6 +503,89 @@ final class AdvancedPlaybackTests: XCTestCase {
         XCTAssertEqual(repo.queue().count, 1)
     }
 
+    // MARK: Folder playback origin
+
+    func test_playFromEpisodeList_folderOrigin_setsAndOrdinaryPlayClearsOrigin() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let folderRepo = FolderRepository(context: ctx)
+        let folder = folderRepo.createFolder(name: "Technology")
+        let folderEpisode = makeEpisode(ctx, guid: "folder")
+        folderRepo.add(folderEpisode.podcast!, to: folder)
+
+        player.playFromEpisodeList(folderEpisode, origin: .folder(folder.persistentModelID))
+
+        XCTAssertEqual(player.playbackOrigin, .folder(folder.persistentModelID))
+
+        let ordinaryEpisode = makeEpisode(ctx, guid: "ordinary")
+        player.play(ordinaryEpisode)
+
+        XCTAssertNil(player.playbackOrigin, "An ordinary deliberate start replaces folder origin")
+    }
+
+    func test_folderOrigin_survivesQueueAdvanceWithinFolderSubtree() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let podcast = Podcast(feedURL: "https://x/inside", title: "Inside")
+        ctx.insert(podcast)
+        let first = makeEpisode(ctx, guid: "inside-1", podcast: podcast)
+        let second = makeEpisode(ctx, guid: "inside-2", podcast: podcast)
+        let folderRepo = FolderRepository(context: ctx)
+        let folder = folderRepo.createFolder(name: "Technology")
+        folderRepo.add(podcast, to: folder)
+        QueueRepository(context: ctx).add([first, second])
+
+        player.playFromEpisodeList(first, origin: .folder(folder.persistentModelID))
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertEqual(player.nowPlayingEpisodeID, second.persistentModelID)
+        XCTAssertEqual(
+            player.playbackOrigin,
+            .folder(folder.persistentModelID),
+            "Advancing within the origin subtree keeps its Now Playing route"
+        )
+    }
+
+    func test_folderOrigin_clearsWhenQueueAdvanceLeavesFolderSubtree() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let insidePodcast = Podcast(feedURL: "https://x/inside", title: "Inside")
+        let outsidePodcast = Podcast(feedURL: "https://x/outside", title: "Outside")
+        ctx.insert(insidePodcast)
+        ctx.insert(outsidePodcast)
+        let first = makeEpisode(ctx, guid: "inside", podcast: insidePodcast)
+        let second = makeEpisode(ctx, guid: "outside", podcast: outsidePodcast)
+        let folderRepo = FolderRepository(context: ctx)
+        let folder = folderRepo.createFolder(name: "Technology")
+        folderRepo.add(insidePodcast, to: folder)
+        QueueRepository(context: ctx).add([first, second])
+
+        player.playFromEpisodeList(first, origin: .folder(folder.persistentModelID))
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertEqual(player.nowPlayingEpisodeID, second.persistentModelID)
+        XCTAssertNil(player.playbackOrigin, "The route must not point at a folder the new show is outside")
+    }
+
+    func test_deletingActiveOriginFolder_clearsPlayerOrigin() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let folderRepo = FolderRepository(context: ctx)
+        let folder = folderRepo.createFolder(name: "Technology")
+        let episode = makeEpisode(ctx, guid: "folder")
+        folderRepo.add(episode.podcast!, to: folder)
+        player.playFromEpisodeList(episode, origin: .folder(folder.persistentModelID))
+        XCTAssertNotNil(player.playbackOrigin)
+
+        folderRepo.delete(folder)
+
+        XCTAssertNil(player.playbackOrigin, "Deleting the active origin removes the stale Now Playing route")
+    }
+
     // MARK: canOverridePerPodcast (#606)
 
     func test_canOverridePerPodcast_noEpisodeLoaded_isFalse() {
@@ -725,7 +816,7 @@ final class AdvancedPlaybackTests: XCTestCase {
         let player = PlayerService()
         player.configure(context: ctx)
         let episodes = makeInterleavedShowsQueue(ctx)
-        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.groupQueueEpisodes)
+        AppSettingsStore(context: ctx).setQueueGrouping(.podcast)
 
         player.play(episodes.x2)
         player.markCurrentPlayedAndAdvance()
@@ -754,6 +845,38 @@ final class AdvancedPlaybackTests: XCTestCase {
         )
     }
 
+    func test_markCurrentPlayedAndAdvance_folderGroupedDisplay_followsFolderOrder() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episodes = makeInterleavedShowsQueue(ctx)
+
+        let showZ = Podcast(feedURL: "https://z/feed", title: "Show Z")
+        ctx.insert(showZ)
+        let z1 = Episode(guid: "z1", title: "Z1", audioURL: "https://z/1.mp3")
+        z1.podcast = showZ
+        ctx.insert(z1)
+        QueueRepository(context: ctx).add(z1)
+
+        let folders = FolderRepository(context: ctx)
+        let shared = folders.createFolder(name: "Shared")
+        let other = folders.createFolder(name: "Other")
+        folders.add(episodes.x1.podcast!, to: shared)
+        folders.add(showZ, to: shared)
+        folders.add(episodes.y1.podcast!, to: other)
+        AppSettingsStore(context: ctx).setQueueGrouping(.folder)
+
+        // Raw order after X3 is Z1, so finish X2 instead: raw next is Y2, while
+        // folder display clusters Shared as X1, X2, X3, Z1 and advances to X3.
+        player.play(episodes.x2)
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertEqual(
+            player.nowPlayingEpisodeID, episodes.x3.persistentModelID,
+            "Folder grouping must advance through the same top-level folder section shown in Queue"
+        )
+    }
+
     /// Caught in security review of the grouped-display fix above: "Play Next"
     /// (#487) guarantees an episode plays immediately after `current` by
     /// inserting it right after `current` in the RAW queue. With grouping on,
@@ -766,7 +889,7 @@ final class AdvancedPlaybackTests: XCTestCase {
         let player = PlayerService()
         player.configure(context: ctx)
         let episodes = makeInterleavedShowsQueue(ctx)
-        AppSettingsStore(context: ctx).setBool(true, for: SettingsKey.groupQueueEpisodes)
+        AppSettingsStore(context: ctx).setQueueGrouping(.podcast)
 
         // Play-Next a brand new Show Y episode right after X2 -- raw queue
         // becomes X1, Y1, X2, Y3(new), X3, Y2. Grouped order would otherwise

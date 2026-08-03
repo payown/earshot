@@ -1,10 +1,27 @@
 import SwiftUI
 
+/// A stable, non-configurable action appended by a particular episode surface.
+/// Unlike ``QuickActionItem`` it carries no UUID or runnable closure, so it is
+/// safe to create in a recycled row. The folder detail uses this for its final
+/// destructive "Remove from folder" action.
+struct EpisodeRowSupplementalAction: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let isDestructive: Bool
+}
+
 /// One episode row. The whole row is a single accessibility element: its
 /// primary (double-tap) action is the first configured action, and every
 /// configured action is exposed as a VoiceOver custom action (the Actions
 /// rotor) in the user's order. Reordering in Settings changes this live — no
 /// relaunch, because the rotor order is just the order we hand SwiftUI here.
+///
+/// Selection mode is NOT handled here anymore: episode multi-select (#758)
+/// swaps this row out for the shared ``SelectableRow`` scaffold (via
+/// ``EpisodeSelectableRow``), which reuses this row's visuals through
+/// ``EpisodeRowContent`` but owns the checkbox, `.isSelected` trait, and toggle.
+/// That keeps a single selection component across podcast and episode
+/// multi-select instead of two divergent checkbox implementations.
 struct EpisodeRow: View {
     // Requires SettingsStore in the environment (injected at the app root in
     // EarshotApp). All current call sites render under that root; any future
@@ -16,58 +33,77 @@ struct EpisodeRow: View {
     // requirement as SettingsStore above: every call site renders under the app
     // root that injects PlayerService.
     @Environment(PlayerService.self) private var player
+    // Context menus are a sighted convenience. SwiftUI also promotes their
+    // buttons into VoiceOver's Actions rotor, duplicating the explicit custom
+    // actions below, so remove the menu while VoiceOver is running (#761).
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     let episode: Episode
-    let actions: [EpisodeActionItem]
+    private let actions: [EpisodeAction]
+    private let supplementalActions: [EpisodeRowSupplementalAction]
+    private let performAction: (EpisodeAction) -> Void
+    private let performSupplementalAction: (EpisodeRowSupplementalAction) -> Void
     /// Whether the row names its podcast, visually and in the VoiceOver label.
     /// True in mixed-show lists (Inbox, Downloads) where the user can't otherwise
     /// tell which show an episode belongs to (#535); false (default) in
     /// single-show lists (a podcast's episode list, the search preview) where
     /// repeating the show on every row is noise.
     var includesPodcastName = false
-    /// Non-nil switches the row into checkbox mode for bulk selection (Inbox
-    /// multi-select, #595): the row's tap toggles selection instead of running
-    /// the primary Quick Action, and the rotor is suppressed since there is
-    /// nothing left to run per-row while selecting.
-    var selection: SelectionState?
 
-    /// Checkbox state and toggle handler for a row in selection mode.
-    struct SelectionState {
-        let isSelected: Bool
-        let toggle: () -> Void
+    /// Defers runnable Quick Action construction until activation. This keeps
+    /// large lazy lists cheap to recycle while preserving the configured
+    /// double-tap action, VoiceOver rotor, and sighted context menu.
+    init(
+        episode: Episode,
+        deferredActions: [EpisodeAction],
+        supplementalActions: [EpisodeRowSupplementalAction] = [],
+        includesPodcastName: Bool = false,
+        performAction: @escaping (EpisodeAction) -> Void,
+        performSupplementalAction: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
+    ) {
+        self.episode = episode
+        self.actions = deferredActions
+        self.supplementalActions = supplementalActions
+        self.performAction = performAction
+        self.performSupplementalAction = performSupplementalAction
+        self.includesPodcastName = includesPodcastName
     }
 
+    @ViewBuilder
     var body: some View {
         let primary = actions.first
-        // Castro-style "X min left" / total length, computed purely from stored
-        // progress (#493). Cheap arithmetic, safe to evaluate per realization.
-        let timeText = EpisodeTimeLogic.visibleText(
-            positionSeconds: episode.positionSeconds,
-            durationSeconds: episode.durationSeconds,
-            isPlayed: episode.isPlayed
+        let base = rowButton(primaryLabel: primary.map { $0.label(for: episode) }) {
+            if let primary { performAction(primary) }
+        }
+        .episodeActionsRotor(
+            actions,
+            supplementalActions: supplementalActions,
+            episode: episode,
+            perform: performAction,
+            performSupplemental: performSupplementalAction
         )
+        if voiceOverEnabled {
+            base
+        } else {
+            base.episodeActionsContextMenu(
+                actions,
+                supplementalActions: supplementalActions,
+                episode: episode,
+                perform: performAction,
+                performSupplemental: performSupplementalAction
+            )
+        }
+    }
 
-        let row = Button {
-            if let selection {
-                selection.toggle()
-            } else {
-                primary?.run()
-            }
+    private func rowButton(
+        primaryLabel: String?,
+        runPrimary: @escaping () -> Void
+    ) -> some View {
+        Button {
+            runPrimary()
         } label: {
-            HStack(spacing: 8) {
-                content(timeText: timeText)
-                if let selection {
-                    Spacer(minLength: 8)
-                    // Checkmark is a second, non-color signal alongside the
-                    // `.isToggle`/`.isSelected` traits below; hidden from
-                    // VoiceOver since the row's single accessibility element
-                    // already speaks selection state.
-                    Image(systemName: selection.isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(selection.isSelected ? Color.accentColor : .secondary)
-                        .accessibilityHidden(true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            EpisodeRowContent(episode: episode, includesPodcastName: includesPodcastName)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         // A Button is already a single accessibility element with the button
@@ -89,103 +125,9 @@ struct EpisodeRow: View {
         // description yields an empty value, and `.accessibilityValue("")` makes
         // VoiceOver speak a stray pause (dead air), so we omit it in that case.
         .accessibilityValueIfPresent(accessibilityValue)
-
-        // Selection mode replaces the hint/rotor with checkbox semantics: no
-        // manual announcement is made anywhere in this row, since `.isToggle`
-        // makes VoiceOver speak the selected/unselected transition itself on
-        // activation (same rule as `FolderPodcastPickerView`'s membership
-        // checkboxes) — a second spoken string here would talk over it.
-        if let selection {
-            row
-                .accessibilityHint(selection.isSelected ? "Removes from selection" : "Adds to selection")
-                .accessibilityAddTraits(selection.isSelected ? [.isToggle, .isSelected] : [.isToggle])
-        } else {
-            row
-                .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
-                // Rotor order goes through the shared helper, which compensates
-                // for the OS emitting `.accessibilityActions` children in
-                // reverse (#572). The default double-tap and hint above keep
-                // the UN-reversed `actions.first`.
-                .quickActionsRotor(actions)
-        }
+        .accessibilityHint(primaryLabel.map { "Double tap to \($0.lowercased())" } ?? "")
     }
 
-    /// The row's visual content (title, podcast name, badges), shared by
-    /// normal and selection-mode rendering.
-    @ViewBuilder
-    private func content(timeText: String?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(episode.title)
-                .font(.body)
-                .multilineTextAlignment(.leading)
-            // Podcast name in mixed-show lists, matching the Queue row's
-            // caption treatment (#535). The explicit accessibilityLabel below
-            // already carries it for VoiceOver.
-            if includesPodcastName, let podcast = episode.podcast?.title,
-               !podcast.isEmpty {
-                Text(podcast)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-            }
-            HStack(spacing: 8) {
-                // Now-playing indicator (Item 2): icon + text, accent-tinted,
-                // never colour alone. Leads the badge row so it reads first
-                // visually, matching the "Now Playing" prefix VoiceOver speaks.
-                // Hidden from VoiceOver here — the row is one element and the
-                // spoken state rides in this row's single accessibilityLabel.
-                if isNowPlaying {
-                    Label("Now Playing", systemImage: "waveform")
-                        .labelStyle(.titleAndIcon)
-                        .font(.caption)
-                        .foregroundStyle(Color.accentColor)
-                        .accessibilityHidden(true)
-                }
-                // Season/episode badge ("S2 · E14"), when the user has opted in
-                // (off by default, #452) and the feed provides numbers. The row
-                // is one accessibility element with an explicit label below, so
-                // this visible Text is not spoken separately — the spoken form is
-                // folded into `accessibilityLabel`.
-                if settings.showEpisodeNumbers,
-                   let numberBadge = EpisodeRowLabel.numberBadge(
-                       season: episode.seasonNumber, episode: episode.episodeNumber
-                   ) {
-                    Text(numberBadge)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if episode.isPlayed {
-                    Label("Played", systemImage: "checkmark.circle.fill")
-                        .labelStyle(.titleAndIcon)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                // Time-left / total length. A played episode keeps just its
-                // Played treatment (timeText is nil); an unknown-duration
-                // episode shows no time artifact (#493).
-                if let timeText {
-                    Text(timeText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let date = episode.pubDate {
-                    Text(date, style: .date)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                // Downloaded / streaming indicator (#513): icon + short text so
-                // the user can tell before choosing Play whether audio is local
-                // or will stream. Hidden from VoiceOver inside the badge — the
-                // spoken state rides in this row's single `accessibilityLabel`.
-                DownloadStateBadge(status: episode.downloadStatus)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// True when this row's episode is the one loaded in the player. Compared by
-    /// persistent identity against the observed ``PlayerService/nowPlayingEpisodeID``
-    /// so the row re-renders as the loaded episode changes (Item 2).
     private var isNowPlaying: Bool {
         player.nowPlayingEpisodeID == episode.persistentModelID
     }
@@ -225,6 +167,107 @@ struct EpisodeRow: View {
             parts.append(summary)
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// The visual body of an episode row — title, optional podcast name, and the
+/// badge line (now-playing, season/episode number, played, time-left, date,
+/// download state). No accessibility label, hint, or rotor of its own: it's a
+/// pure presentation view shared by ``EpisodeRow`` (which wraps it in a Button
+/// that owns the row's single accessibility element and Quick Actions rotor) and
+/// ``EpisodeSelectableRow`` (which wraps it in the shared ``SelectableRow`` that
+/// owns the checkbox and `.isSelected` trait). Every visible badge here is
+/// `.accessibilityHidden(true)` because both wrappers speak the row's state
+/// through one explicit label built from ``EpisodeRowLabel`` — this keeps the
+/// visuals identical across normal and selection modes without duplicating the
+/// spoken state.
+struct EpisodeRowContent: View {
+    @Environment(SettingsStore.self) private var settings
+    @Environment(PlayerService.self) private var player
+    let episode: Episode
+    var includesPodcastName = false
+
+    var body: some View {
+        // Castro-style "X min left" / total length, computed purely from stored
+        // progress (#493). Cheap arithmetic, safe to evaluate per realization.
+        let timeText = EpisodeTimeLogic.visibleText(
+            positionSeconds: episode.positionSeconds,
+            durationSeconds: episode.durationSeconds,
+            isPlayed: episode.isPlayed
+        )
+        VStack(alignment: .leading, spacing: 4) {
+            Text(episode.title)
+                .font(.body)
+                .multilineTextAlignment(.leading)
+            // Podcast name in mixed-show lists, matching the Queue row's
+            // caption treatment (#535). The wrapper's explicit accessibilityLabel
+            // already carries it for VoiceOver.
+            if includesPodcastName, let podcast = episode.podcast?.title,
+               !podcast.isEmpty {
+                Text(podcast)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+            }
+            HStack(spacing: 8) {
+                // Now-playing indicator (Item 2): icon + text, accent-tinted,
+                // never colour alone. Leads the badge row so it reads first
+                // visually, matching the "Now Playing" prefix VoiceOver speaks.
+                // Hidden from VoiceOver here — the row is one element and the
+                // spoken state rides in the wrapper's single accessibilityLabel.
+                if isNowPlaying {
+                    Label("Now Playing", systemImage: "waveform")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityHidden(true)
+                }
+                // Season/episode badge ("S2 · E14"), when the user has opted in
+                // (off by default, #452) and the feed provides numbers. The row
+                // is one accessibility element with an explicit label on the
+                // wrapper, so this visible Text is not spoken separately.
+                if settings.showEpisodeNumbers,
+                   let numberBadge = EpisodeRowLabel.numberBadge(
+                       season: episode.seasonNumber, episode: episode.episodeNumber
+                   ) {
+                    Text(numberBadge)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if episode.isPlayed {
+                    Label("Played", systemImage: "checkmark.circle.fill")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                // Time-left / total length. A played episode keeps just its
+                // Played treatment (timeText is nil); an unknown-duration
+                // episode shows no time artifact (#493).
+                if let timeText {
+                    Text(timeText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let date = episode.pubDate {
+                    Text(date, style: .date)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                // Downloaded / streaming indicator (#513): icon + short text so
+                // the user can tell before choosing Play whether audio is local
+                // or will stream. Hidden from VoiceOver inside the badge — the
+                // spoken state rides in the wrapper's single `accessibilityLabel`.
+                DownloadStateBadge(status: episode.downloadStatus)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// True when this row's episode is the one loaded in the player. Compared by
+    /// persistent identity against the observed ``PlayerService/nowPlayingEpisodeID``
+    /// so the row re-renders as the loaded episode changes (Item 2).
+    private var isNowPlaying: Bool {
+        player.nowPlayingEpisodeID == episode.persistentModelID
     }
 }
 

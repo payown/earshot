@@ -33,7 +33,16 @@ struct PodcastPreviewView: View {
     /// label flips the moment the toggle completes — without re-entering the view.
     @Query private var podcasts: [Podcast]
 
+    /// Drives the subscribe-to-folder offer (#764): the picker is only offered when
+    /// the user already has at least one folder (decision F8).
+    @Query private var folders: [PodcastFolder]
+
     @State private var model = PodcastPreviewModel()
+
+    /// A pending subscribe-to-folder offer (#764). Set to the just-followed podcast
+    /// when folders already exist; presents the shared ``FolderPickerView`` in
+    /// `.add` mode, or Cancel to skip.
+    @State private var subscribeFolderPick: FolderPickRequest?
 
     /// Presents the Earshot Plus paywall (#632) when following this podcast
     /// would hit the free-tier cap. Set from `toggleFollow()`'s catch block,
@@ -75,6 +84,10 @@ struct PodcastPreviewView: View {
         // Earshot Plus paywall (#632), dismissible via its own explicit Close
         // button, never drag-only.
         .sheet(isPresented: $showPaywall) { PaywallView() }
+        // Subscribe-to-folder offer (#764): only presented when folders already
+        // exist (decision F8, gated in `toggleFollow`). The shared picker files the
+        // new show and announces the result, or Cancel skips.
+        .folderPicker($subscribeFolderPick)
         .task { await model.load(feedURL: result.feedURL) }
     }
 
@@ -239,8 +252,18 @@ struct PodcastPreviewView: View {
         } else {
             Task {
                 do {
-                    _ = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(feedURL: result.feedURL)
+                    let podcast = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(feedURL: result.feedURL)
                     Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
+                    // Offer to file the new show only when folders already exist
+                    // (decision F8, #764). The presentation is deferred ~0.6s so the
+                    // "Now following" announcement lands before the sheet's
+                    // .screenChanged utterance would otherwise preempt it — the
+                    // presentation-side mirror of the picker's own 0.5s post-dismiss
+                    // deferral. The picker announces its own outcome.
+                    if FolderLogic.shouldOfferSubscribeToFolder(existingFolderCount: folders.count) {
+                        try? await Task.sleep(for: .milliseconds(600))
+                        subscribeFolderPick = .podcast(podcast, mode: .add)
+                    }
                 } catch {
                     AppLog.networking.error(
                         "Follow from preview failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)"

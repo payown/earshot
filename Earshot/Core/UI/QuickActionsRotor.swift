@@ -34,6 +34,15 @@ enum QuickActionsRotor {
     }
 }
 
+/// Context menus do not share the OS rotor's reversed-emission behavior. They
+/// must receive the resolved actions in their original order so the visible
+/// menu exactly matches Settings and the row's default action (#761).
+enum QuickActionsContextMenu {
+    static func declarationOrder<T>(_ actions: [T]) -> [T] {
+        actions
+    }
+}
+
 extension View {
     /// Exposes `actions` as VoiceOver custom actions (the Actions rotor) so the
     /// rotor announces them in the order the array lists them, compensating for
@@ -58,5 +67,136 @@ extension View {
     /// `.accessibilityActions` with a raw `ForEach` (#572).
     func quickActionsRotor(_ actions: [QuickActionItem]) -> some View {
         rotorActions(actions)
+    }
+
+    /// Adds a sighted long-press convenience menu without replacing the row's
+    /// primary tap or its VoiceOver Actions rotor. Callers hand this the SAME
+    /// resolved array they pass to ``quickActionsRotor(_:)`` / ``rotorActions(_:)``
+    /// so labels, availability, destructive roles, and ordering cannot drift.
+    @ViewBuilder
+    func quickActionsContextMenu(_ actions: [QuickActionItem]) -> some View {
+        if actions.isEmpty {
+            self
+        } else {
+            contextMenu {
+                ForEach(QuickActionsContextMenu.declarationOrder(actions)) { action in
+                    Button(role: action.isDestructive ? .destructive : nil) {
+                        action.run()
+                    } label: {
+                        Text(action.label)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Lightweight episode-action variant for large lazy lists. The row stores
+    /// stable enum identifiers and one shared runner instead of rebuilding a
+    /// UUID and captured closure for every action whenever SwiftUI recycles it.
+    func episodeActionsRotor(
+        _ actions: [EpisodeAction],
+        supplementalActions: [EpisodeRowSupplementalAction] = [],
+        episode: Episode,
+        perform: @escaping (EpisodeAction) -> Void,
+        performSupplemental: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
+    ) -> some View {
+        accessibilityActions {
+            if QuickActionsRotor.compensatesReversedEmission {
+                ForEach(supplementalActions.reversed()) { action in
+                    Button(action.label) { performSupplemental(action) }
+                }
+                ForEach(actions.reversed()) { action in
+                    Button(action.label(for: episode)) { perform(action) }
+                }
+            } else {
+                ForEach(actions) { action in
+                    Button(action.label(for: episode)) { perform(action) }
+                }
+                ForEach(supplementalActions) { action in
+                    Button(action.label) { performSupplemental(action) }
+                }
+            }
+        }
+    }
+
+    /// Sighted long-press companion to ``episodeActionsRotor``. It uses the
+    /// same stable action identifiers and shared runner, while preserving the
+    /// user's configured order and dynamic destructive roles.
+    @ViewBuilder
+    func episodeActionsContextMenu(
+        _ actions: [EpisodeAction],
+        supplementalActions: [EpisodeRowSupplementalAction] = [],
+        episode: Episode,
+        perform: @escaping (EpisodeAction) -> Void,
+        performSupplemental: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
+    ) -> some View {
+        if actions.isEmpty && supplementalActions.isEmpty {
+            self
+        } else {
+            contextMenu {
+                ForEach(QuickActionsContextMenu.declarationOrder(actions)) { action in
+                    Button(role: action.isDestructive(for: episode) ? .destructive : nil) {
+                        perform(action)
+                    } label: {
+                        Text(action.label(for: episode))
+                    }
+                }
+                ForEach(QuickActionsContextMenu.declarationOrder(supplementalActions)) { action in
+                    Button(role: action.isDestructive ? .destructive : nil) {
+                        performSupplemental(action)
+                    } label: {
+                        Text(action.label)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Stable-enum queue variant used by the potentially unbounded Queue list.
+    func queueActionsRotor(
+        _ actions: [QueueItemAction],
+        episode: Episode,
+        perform: @escaping (QueueItemAction) -> Void
+    ) -> some View {
+        accessibilityActions {
+            ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
+                Button(action.label(for: episode)) { perform(action) }
+            }
+        }
+    }
+
+    /// Stable-enum podcast variant used by the Library's large lazy list.
+    func podcastActionsRotor(
+        _ actions: [PodcastAction],
+        podcast: Podcast,
+        perform: @escaping (PodcastAction) -> Void
+    ) -> some View {
+        accessibilityActions {
+            ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
+                Button(action.label(for: podcast)) { perform(action) }
+            }
+        }
+    }
+
+    /// Sighted-only long-press companion for deferred podcast actions.
+    @ViewBuilder
+    func podcastActionsContextMenu(
+        _ actions: [PodcastAction],
+        podcast: Podcast,
+        perform: @escaping (PodcastAction) -> Void
+    ) -> some View {
+        if actions.isEmpty {
+            self
+        } else {
+            contextMenu {
+                ForEach(QuickActionsContextMenu.declarationOrder(actions)) { action in
+                    Button(role: action.isDestructive ? .destructive : nil) {
+                        perform(action)
+                    } label: {
+                        Text(action.label(for: podcast))
+                    }
+                }
+            }
+        }
     }
 }

@@ -98,15 +98,24 @@ See `docs/swiftui-accessibility-audit.md` and the `earshot-accessibility` agent.
 
 ## Deploy to TestFlight
 
-Run the deploy script from the feature branch after the code is committed:
+Two paths, both via `tool/swiftui-testflight.sh` (bumps `CURRENT_PROJECT_VERSION`, commits the bump, regenerates the project, archives, uploads). **Never pre-bump the build number manually.**
+
+**Pre-merge test build (the normal way to get Michael a build to verify).** Cut it from the feature/integration branch so device verification happens *before* merging to `main`:
 
 ```bash
-bash tool/swiftui-testflight.sh --notes "Fix: <brief description of what was fixed>"
+bash tool/swiftui-testflight.sh --test --notes "What to test"      # Internal group
+bash tool/swiftui-testflight.sh --test --both --notes "What to test"  # both groups
 ```
 
-The script bumps `CURRENT_PROJECT_VERSION` in `project.yml`, regenerates the project via xcodegen, archives with `xcodebuild`, and uploads to the Internal Testing Group. **Never pre-bump the build number manually.** Builds go out from the feature branch, not from main; main gets the change after Michael verifies on device and the PR is merged.
+`--test` allows a non-`main` branch and commits the build-number bump to that branch (use a throwaway/integration branch; the bump rides along when you later merge to `main`). Use an **integration branch** (e.g. `test/<feature>`) that combines the related feature branches so Michael tests the whole thing at once.
 
-After upload, tell Michael: the build number, the issue being tested, exact step-by-step device instructions, what correct behavior looks like, and what the broken behavior looked like before.
+**Production release.** From a clean `main` in sync with origin:
+
+```bash
+bash tool/swiftui-testflight.sh --notes "..."   # or --both
+```
+
+After upload, tell Michael: the build number, what's being tested, exact step-by-step device instructions, what correct behavior looks like, and what the broken behavior looked like before.
 
 ## Fix / feature workflow
 
@@ -116,8 +125,8 @@ After upload, tell Michael: the build number, the issue being tested, exact step
 4. Fix only what the issue describes. No scope creep. No new dependencies.
 5. Run `earshot-accessibility` on any UI change before considering it done.
 6. Commit (Conventional Commits), push, open a PR into `main`, assign `@payown`. Keep non-generated changes reviewable (~1,500 lines).
-7. Deploy to TestFlight from the branch; give Michael device test steps.
-8. **Stop and wait.** Do not merge or close the issue until Michael verifies on device.
+7. Cut a **pre-merge test build** from the branch — or, for a batch of related work, from an **integration branch** that combines them — with `tool/swiftui-testflight.sh --test [--both]`. Give Michael exact device test steps.
+8. **Stop and wait.** Do not merge to `main` or close the issue until Michael verifies the test build on device. After he confirms, merge to `main` (the build-number bump rides along).
 
 If a fix did not work, stay on the branch and keep investigating.
 
