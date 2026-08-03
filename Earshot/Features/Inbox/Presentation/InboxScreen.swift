@@ -429,8 +429,9 @@ struct InboxScreen: View {
     private func episodeRow(for episode: Episode) -> EpisodeRow {
         EpisodeRow(
             episode: episode,
-            actions: actions(for: episode),
-            includesPodcastName: true
+            deferredActions: availableActions(for: episode),
+            includesPodcastName: true,
+            performAction: { action in perform(action, for: episode) }
         )
     }
 
@@ -577,39 +578,45 @@ struct InboxScreen: View {
         }
     }
 
-    private func actions(for episode: Episode) -> [QuickActionItem] {
+    /// Keeps only stable enum identifiers in an Inbox row. The two conditional
+    /// omissions exactly mirror `buildEpisodeActions`; every other action has a
+    /// runner on this surface.
+    private func availableActions(for episode: Episode) -> [EpisodeAction] {
+        quickActions.episodeActions.filter { action in
+            switch action {
+            case .exportAudio:
+                return !episode.audioURL.isEmpty
+            case .unfollow:
+                return episode.podcast != nil
+            default:
+                return true
+            }
+        }
+    }
+
+    /// Resolve only the action the user actually activated. This retains the
+    /// established builder as the single execution path without paying its
+    /// UUID/closure cost during every lazy-list row realization.
+    private func perform(_ action: EpisodeAction, for episode: Episode) {
         buildEpisodeActions(
             episode: episode,
-            order: quickActions.episodeActions,
+            order: [action],
             player: player,
             downloads: downloads,
             context: context,
             onShowNotes: { showNotesEpisode = episode },
             onShare: { sharingEpisode = episode },
             onBookmarks: { bookmarksEpisode = episode },
-            // Rotor "Unfollow this podcast" (#572): opens the SAME destructive
-            // confirmation the trailing swipe uses — activation never unfollows
-            // directly.
             onUnfollow: { pendingUnfollow = episode.podcast },
-            // Rotor "Mark as played" removes this row from the inbox (#579).
-            // The builder invokes this BEFORE the played flip, so the neighbor
-            // is captured while the row is still in the list; focus moves after
-            // the list has re-rendered — to the neighbor, or the empty state
-            // when this was the last row (mirrors clearInbox / unfollow).
             onMarkPlayed: { nowPlayed in
                 guard nowPlayed else { return }
                 focusAfterInboxRowLeaves(episode)
             },
             onWillQueue: { focusAfterInboxRowLeaves(episode) },
-            // Rotor "Export audio" (#689): downloads if needed, then shares the
-            // local file. Handled by `.episodeAudioExport`.
             onExport: { exportEpisode = episode },
-            // Rotor "Add to folder" / "Move to folder" (#756): presents the
-            // shared `FolderPickerView` for this single episode. The picker files
-            // it, announces, and dismisses.
             onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
             onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
-        )
+        ).first?.run()
     }
 
     /// Announces the search's match count on submit (#457). Guarded so an empty
@@ -661,14 +668,26 @@ struct InboxScreen: View {
 /// folder filter is active instead of continuing to materialize the global
 /// candidate set behind the scoped UI (#763).
 private struct AllInboxCandidates<Content: View>: View {
-    @Query(filter: InboxQuery.normalUnplayed, sort: \Episode.pubDate, order: .reverse)
-    private var normalCandidates: [Episode]
-    @Query(filter: InboxQuery.optInOnlyUnplayed, sort: \Episode.pubDate, order: .reverse)
-    private var optedInCandidates: [Episode]
+    @Query private var normalCandidates: [Episode]
+    @Query private var optedInCandidates: [Episode]
 
     let content: ([Episode], [Episode]) -> Content
 
     init(@ViewBuilder content: @escaping ([Episode], [Episode]) -> Content) {
+        var normalDescriptor = FetchDescriptor<Episode>(
+            predicate: InboxQuery.normalUnplayed,
+            sortBy: [SortDescriptor(\Episode.pubDate, order: .reverse)]
+        )
+        normalDescriptor.relationshipKeyPathsForPrefetching = [\Episode.podcast]
+        _normalCandidates = Query(normalDescriptor)
+
+        var optedInDescriptor = FetchDescriptor<Episode>(
+            predicate: InboxQuery.optInOnlyUnplayed,
+            sortBy: [SortDescriptor(\Episode.pubDate, order: .reverse)]
+        )
+        optedInDescriptor.relationshipKeyPathsForPrefetching = [\Episode.podcast]
+        _optedInCandidates = Query(optedInDescriptor)
+
         self.content = content
     }
 

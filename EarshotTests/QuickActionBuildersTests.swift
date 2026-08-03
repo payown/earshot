@@ -42,6 +42,27 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Mark as unplayed"])
     }
 
+    func testDeferredEpisodeActionLabelsMatchDynamicBuilderLabels() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx, played: true)
+        episode.downloadStatus = .downloaded
+
+        XCTAssertEqual(EpisodeAction.markPlayed.label(for: episode), "Mark as unplayed")
+        XCTAssertEqual(EpisodeAction.download.label(for: episode), "Remove download")
+        XCTAssertEqual(EpisodeAction.share.label(for: episode), "Share")
+    }
+
+    func testDeferredEpisodeActionDestructiveRolesMatchBuilderMetadata() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+
+        XCTAssertFalse(EpisodeAction.download.isDestructive(for: episode))
+        episode.downloadStatus = .downloaded
+        XCTAssertTrue(EpisodeAction.download.isDestructive(for: episode))
+        XCTAssertTrue(EpisodeAction.unfollow.isDestructive(for: episode))
+        XCTAssertFalse(EpisodeAction.markPlayed.isDestructive(for: episode))
+    }
+
     func testEpisodeBookmarksActionInvokesCallback() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)

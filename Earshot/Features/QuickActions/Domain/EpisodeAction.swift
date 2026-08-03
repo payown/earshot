@@ -52,6 +52,34 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
         case .unfollow: return "Unfollow this podcast"
         }
     }
+
+    /// Resolves the small amount of episode-specific presentation without
+    /// constructing a runnable ``QuickActionItem``. Large scrolling surfaces
+    /// use this from their row bodies so List recycling does not eagerly create
+    /// UUIDs and captured closures for every configured action.
+    func label(for episode: Episode) -> String {
+        switch self {
+        case .download:
+            return episode.downloadStatus == .downloaded ? "Remove download" : "Download"
+        case .markPlayed:
+            return episode.isPlayed ? "Mark as unplayed" : "Mark as played"
+        default:
+            return label
+        }
+    }
+
+    /// The role is dynamic for Download: removing an existing download is
+    /// destructive, while starting one is not. Unfollow is always destructive.
+    func isDestructive(for episode: Episode) -> Bool {
+        switch self {
+        case .download:
+            return episode.downloadStatus == .downloaded
+        case .unfollow:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 // `.unfollow` is deliberately LAST: destructive actions never default early,

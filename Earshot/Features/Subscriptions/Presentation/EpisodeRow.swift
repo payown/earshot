@@ -13,6 +13,11 @@ import SwiftUI
 /// That keeps a single selection component across podcast and episode
 /// multi-select instead of two divergent checkbox implementations.
 struct EpisodeRow: View {
+    private enum ActionSource {
+        case resolved([EpisodeActionItem])
+        case deferred([EpisodeAction], (EpisodeAction) -> Void)
+    }
+
     // Requires SettingsStore in the environment (injected at the app root in
     // EarshotApp). All current call sites render under that root; any future
     // #Preview or detached host must supply `.environment(SettingsStore())` or
@@ -24,7 +29,7 @@ struct EpisodeRow: View {
     // root that injects PlayerService.
     @Environment(PlayerService.self) private var player
     let episode: Episode
-    let actions: [EpisodeActionItem]
+    private let actionSource: ActionSource
     /// Whether the row names its podcast, visually and in the VoiceOver label.
     /// True in mixed-show lists (Inbox, Downloads) where the user can't otherwise
     /// tell which show an episode belongs to (#535); false (default) in
@@ -32,11 +37,57 @@ struct EpisodeRow: View {
     /// repeating the show on every row is noise.
     var includesPodcastName = false
 
-    var body: some View {
-        let primary = actions.first
+    init(
+        episode: Episode,
+        actions: [EpisodeActionItem],
+        includesPodcastName: Bool = false
+    ) {
+        self.episode = episode
+        self.actionSource = .resolved(actions)
+        self.includesPodcastName = includesPodcastName
+    }
 
+    /// Defers runnable Quick Action construction until activation. This keeps
+    /// large lazy lists cheap to recycle while preserving the configured
+    /// double-tap action, VoiceOver rotor, and sighted context menu.
+    init(
+        episode: Episode,
+        deferredActions: [EpisodeAction],
+        includesPodcastName: Bool = false,
+        performAction: @escaping (EpisodeAction) -> Void
+    ) {
+        self.episode = episode
+        self.actionSource = .deferred(deferredActions, performAction)
+        self.includesPodcastName = includesPodcastName
+    }
+
+    @ViewBuilder
+    var body: some View {
+        switch actionSource {
+        case .resolved(let actions):
+            let primary = actions.first
+            rowButton(primaryLabel: primary?.label) {
+                primary?.run()
+            }
+            .quickActionsRotor(actions)
+            .quickActionsContextMenu(actions)
+
+        case .deferred(let actions, let perform):
+            let primary = actions.first
+            rowButton(primaryLabel: primary.map { $0.label(for: episode) }) {
+                if let primary { perform(primary) }
+            }
+            .episodeActionsRotor(actions, episode: episode, perform: perform)
+            .episodeActionsContextMenu(actions, episode: episode, perform: perform)
+        }
+    }
+
+    private func rowButton(
+        primaryLabel: String?,
+        runPrimary: @escaping () -> Void
+    ) -> some View {
         Button {
-            primary?.run()
+            runPrimary()
         } label: {
             EpisodeRowContent(episode: episode, includesPodcastName: includesPodcastName)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -62,15 +113,7 @@ struct EpisodeRow: View {
         // description yields an empty value, and `.accessibilityValue("")` makes
         // VoiceOver speak a stray pause (dead air), so we omit it in that case.
         .accessibilityValueIfPresent(accessibilityValue)
-        .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
-        // Rotor order goes through the shared helper, which compensates for the OS
-        // emitting `.accessibilityActions` children in reverse (#572). The default
-        // double-tap and hint above keep the UN-reversed `actions.first`.
-        .quickActionsRotor(actions)
-        // Long press is a convenience for sighted users (#761). It receives the
-        // exact same resolved array as the rotor above; the Button's normal tap
-        // remains the first configured action.
-        .quickActionsContextMenu(actions)
+        .accessibilityHint(primaryLabel.map { "Double tap to \($0.lowercased())" } ?? "")
     }
 
     private var isNowPlaying: Bool {

@@ -89,4 +89,43 @@ extension View {
             }
         }
     }
+
+    /// Lightweight episode-action variant for large lazy lists. The row stores
+    /// stable enum identifiers and one shared runner instead of rebuilding a
+    /// UUID and captured closure for every action whenever SwiftUI recycles it.
+    func episodeActionsRotor(
+        _ actions: [EpisodeAction],
+        episode: Episode,
+        perform: @escaping (EpisodeAction) -> Void
+    ) -> some View {
+        accessibilityActions {
+            ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
+                Button(action.label(for: episode)) { perform(action) }
+            }
+        }
+    }
+
+    /// Sighted long-press companion to ``episodeActionsRotor``. It uses the
+    /// same stable action identifiers and shared runner, while preserving the
+    /// user's configured order and dynamic destructive roles.
+    @ViewBuilder
+    func episodeActionsContextMenu(
+        _ actions: [EpisodeAction],
+        episode: Episode,
+        perform: @escaping (EpisodeAction) -> Void
+    ) -> some View {
+        if actions.isEmpty {
+            self
+        } else {
+            contextMenu {
+                ForEach(QuickActionsContextMenu.declarationOrder(actions)) { action in
+                    Button(role: action.isDestructive(for: episode) ? .destructive : nil) {
+                        perform(action)
+                    } label: {
+                        Text(action.label(for: episode))
+                    }
+                }
+            }
+        }
+    }
 }
