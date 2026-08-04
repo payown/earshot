@@ -31,6 +31,14 @@ final class FeedRefreshActorTests: XCTestCase {
         )
     }
 
+    private func parsedEpisode(_ guid: String, _ date: Date, audioURL: String) -> ParsedEpisode {
+        ParsedEpisode(
+            guid: guid, title: "Ep \(guid)", audioURL: audioURL,
+            description: nil, pubDate: date, durationSeconds: nil, artworkURL: nil,
+            episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+    }
+
     private func parsedFeed(_ episodes: [ParsedEpisode]) -> ParsedFeed {
         ParsedFeed(
             title: "Show", artworkURL: nil, description: nil, author: "Host",

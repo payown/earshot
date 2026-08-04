@@ -1,6 +1,6 @@
 # Sync A1 storage map
 
-**Status:** Approved by Michael (2026-08-03)
+**Status:** Approved by Michael (2026-08-03), amended for retained-column V9
 
 **Issue:** [#769](https://github.com/payown/earshot/issues/769)
 
@@ -22,7 +22,11 @@ configurations explicitly use `cloudKitDatabase: .none` in Phase A.
 1. Keep the user library graph in the future mirrored configuration.
 2. Move `Podcast.refreshedAt` into a local row keyed by canonical `feedURL`.
 3. Move `Episode.downloadStatus` and `Episode.downloadPath` into one local row
-   keyed by canonical podcast `feedURL` plus episode `guid`.
+   keyed by canonical podcast `feedURL` plus episode `guid`. `LocalEpisodeState`
+   is the sole runtime source of truth. Retain the two old Episode attributes as
+   permanent, unused schema tombstones; do not plan to drop them later unless a
+   deferred lightweight migration has first been proven with supported public
+   APIs.
 4. Retire `ActiveDownload`. Its queryable raw state becomes
    `LocalEpisodeState.downloadStatusRaw`, eliminating both the redundant table
    and its forbidden cross-store relationship to `Episode`.
@@ -85,8 +89,8 @@ enabled for the mirrored configuration.
 | `Episode` | `chapterURL` | optional `String` | Mirrored | Feed metadata; downloaded chapter data is a cache and stays local. |
 | `Episode` | `transcriptURL` | optional `String` | Mirrored | Feed metadata; downloaded transcript data is a cache and stays local. |
 | `Episode` | `status` | required `EpisodeStatus` | Mirrored | Played/unplayed state; retain the semantic type and add a schema-visible default. |
-| `Episode` | `downloadStatus` | required `DownloadStatus` | **Local** | Replace with queryable `LocalEpisodeState.downloadStatusRaw`; never mirror transfer/device file state. |
-| `Episode` | `downloadPath` | optional `String` | **Local** | Move to `LocalEpisodeState.downloadPath`; a container-relative filename is meaningful only on its originating device. |
+| `Episode` | `downloadStatus` | required `DownloadStatus` | **Local runtime; permanent tombstone column** | Runtime state comes only from queryable `LocalEpisodeState.downloadStatusRaw`. Retain the old column unused so Phase A never deliberately drops it. |
+| `Episode` | `downloadPath` | optional `String` | **Local runtime; permanent tombstone column** | Runtime state comes only from `LocalEpisodeState.downloadPath`. Retain the old column unused; its legacy values are not authoritative. |
 | `Episode` | `positionSeconds` | required `Int` | Mirrored | Playback progress; add schema-visible default. |
 | `Episode` | `playedAt` | optional `Date` | Mirrored | User playback state and history semantics. |
 | `Episode` | `inboxDismissed` | required `Bool` | Mirrored | User inbox state; add schema-visible default. |
@@ -278,26 +282,29 @@ migration is not sufficient: the test-only disk probe demonstrated that a
 `didMigrate` callback cannot route copied rows into a second configuration (the
 destination store remained empty).
 
-1. **Open V6→V7 bridge in the original store:** freeze V6 and open the existing
-   store with a bridge-only migration plan and its original single
-   configuration. V7 retains the V6 source fields and `ActiveDownload`, and
-   adds temporary scalar bridge rows. Its custom migration backfills only
-   bounded candidates:
+1. **Read a bounded V6 preflight without changing V6:** open the frozen V6 graph
+   and snapshot only the local candidates:
    - fetch episodes with `downloadPath != nil` using a store predicate;
    - fetch the naturally tiny `ActiveDownload` table for pending/downloading;
    - copy `Podcast.refreshedAt` from the small Podcast table;
    - classify the small AppSetting table into mirrored/local rows.
-2. **Close and populate the separate local store:** read the V7 bridge rows,
-   write idempotent V8 local rows into the device-local store, save, and verify
+   Retain the additive V7 schema solely to resume stores that already reached
+   that preflight in an earlier draft build.
+2. **Close and populate the separate local store:** write idempotent V9 local
+   rows into the device-local store, save, and verify
    expected row counts and values. Record completion only after the destination
    is durable.
-3. **Open the V8 split container:** only after validation, open the full V8
-   container with `FutureMirrored` and `DeviceLocal` configurations. The
-   existing store migrates V7→V8 and removes
-   `Podcast.refreshedAt`, `Episode.downloadStatus`, `Episode.downloadPath`, and
-   `ActiveDownload`; remove unique constraints; add schema-visible defaults and
-   optional inverses. The already-populated local store opens at V8. Keep both
-   configurations explicitly local.
+3. **Open the retained-column V9 split container:** only after validation,
+   finalize `FutureMirrored` and open it with `DeviceLocal`. Remove
+   `Podcast.refreshedAt` and `ActiveDownload`, but preserve Episode's two legacy
+   download columns as unused tombstones. Remove unique constraints; add
+   schema-visible defaults and optional inverses. Keep both configurations
+   explicitly local.
+4. **Advance the installed draft V8 store without replaying V7:** recognize its
+   durable split marker, migrate both V8 files forward to V9, and run the
+   versioned identity repair once. Save repair results first, then save the
+   completion marker separately. Targeted per-podcast repair remains in feed
+   refresh.
 
 Back up the existing store before preflight. A failure during V6→V7 retries the
 bridge migration. A crash or validation failure while copying local data
@@ -310,11 +317,15 @@ pending/downloading comes from `ActiveDownload`; downloaded state comes from a
 valid path and is reconciled against the file system at launch. Migration tests
 must still seed every V6 enum case and assert this normalization explicitly.
 
-This means the baked Phase A store is V8, not the single V7 originally assumed
-by the planning document. The extra bridge version avoids both data loss and an
-unbounded application-level Episode scan. Approval of this A1 record also
-approves updating the remaining Phase A wording from “V7 final” to “V7 bridge,
-V8 final.”
+The baked Phase A target is V9. V8 remains a frozen snapshot only for the one
+device that installed the draft column-dropping build; V7 remains a frozen
+restart point. Neither is a future steady-state schema.
+
+Real-store timing remains a release gate. Retaining the columns prevents a
+deliberate drop/re-add, but it does not guarantee that SwiftData avoids a table
+copy for the other CloudKit relationship changes. The opt-in aged-store test,
+not the freshly constructed scale fixture, decides whether launch-path work is
+safe.
 
 ## Automated construction proof
 
@@ -329,9 +340,9 @@ toolchain that:
 - every future-mirrored relationship is optional, has an inverse, and does not
   use `.deny`;
 - the local schema has no relationships;
-- a real V6 disk store can pause at V7, copy and validate its bridge value in a
-  separately configured V8 local store, and then open as the final V8 split
-  container without losing either side.
+- an untouched V6 disk store can populate and validate a separately configured
+  V9 local store before finalization, and an already-split V8 pair can advance
+  to V9 without replaying the V7 bridge.
 
 The proof intentionally uses `.none` for both configurations. Constructing a
 live `.private` container would require the entitlements and capability changes
@@ -345,8 +356,8 @@ Approval of this record authorizes Tasks 2 and 3 to implement:
 - natural-key local episode and podcast state;
 - the 30 mirrored / 16 local setting classification;
 - retirement of `ActiveDownload` after bridge backfill;
-- an explicit, restartable V7 preflight followed by a V8 final schema in the
-  same Phase A release.
+- a restartable bounded preflight followed by retained-column V9 in the same
+  Phase A release, with frozen V7/V8 resume routes.
 
 It does **not** authorize CloudKit, entitlements, capabilities, schema
 initialization/promotion, sync UX, or two-device behavior.

@@ -89,12 +89,15 @@ enum SyncBridgeBackfill {
     }
 }
 
-/// Restartable V6→V7→V8 split migration plus the manual V1 import retained
-/// for original SwiftUI stores. The original store stays authoritative until
-/// the separate device-local copy has been value-checked and marked durable.
+/// Restartable retained-column V9 split migration plus the manual V1 import
+/// retained for original SwiftUI stores. Shipped V6 is snapshotted without
+/// mutation; an already-staged V7 and the draft device's V8 are also resumable.
+/// The original store stays authoritative until the separate device-local copy
+/// has been value-checked and marked durable.
 enum StoreMigration {
     static let splitCompletionKey = "__earshot_v8_split_complete"
     static let bridgeCompletionKey = "__earshot_v7_bridge_complete"
+    static let identityRepairCompletionKey = "__earshot_identity_repair_v1_complete"
 
     struct PodcastStateSnapshot: Equatable {
         let feedURL: String
@@ -164,9 +167,10 @@ enum StoreMigration {
         var isPlayed: Bool
     }
 
-    /// Opens the current split V8 store or upgrades an older store through the
-    /// bounded V7 bridge. If no versioned schema can open it, the store is
-    /// treated as original V1 and migrated manually. On that path the
+    /// Opens the current split V9 store, advances the draft V8 device store, or
+    /// upgrades an older store through a bounded local-state preflight. If no
+    /// versioned schema can open it, the store is treated as original V1 and
+    /// migrated manually. On that path the
     /// original store is backed up (``ModelContainerFactory/backupStoreFiles(at:)``)
     /// before it is deleted, so a failed fresh-store rebuild can't lose the
     /// tester's only copy of the data (#529).
@@ -180,35 +184,39 @@ enum StoreMigration {
         let localURL = localStoreURL(for: url)
 
         // A durable marker is written only after the separate local store was
-        // value-checked. It therefore authorizes the irreversible V7→V8 step and
+        // value-checked. It therefore authorizes mirrored-store finalization and
         // makes every later launch a direct two-store open.
-        if hasSplitCompletionMarker(at: localURL, beside: url) {
+        if hasSplitCompletionMarker(at: localURL) {
             do {
+                // No-op for V9; advances either an interrupted V7 cutover or
+                // the already-installed draft V8 mirrored store to V9. The
+                // draft V8 wrote the full aggregate model metadata into both
+                // configuration files, so each file is advanced independently.
+                try finalizeMirroredStore(at: url)
+                try finalizeLocalStore(at: localURL)
                 return try finishOpeningFinal(mirroredURL: url, localURL: localURL)
-            } catch let directError {
-                // A crash may leave the marker durable while the original store
-                // is still V7. Complete that one remaining transition, then open.
-                do {
-                    try finalizeMirroredStore(at: url)
-                    return try finishOpeningFinal(mirroredURL: url, localURL: localURL)
-                } catch {
-                    if indicatesNewerStore(error) {
-                        throw StoreOpenError.storeNewerThanApp(underlying: error)
-                    }
-                    throw StoreOpenError.unreadable(underlying: directError)
+            } catch {
+                if indicatesNewerStore(error) {
+                    throw StoreOpenError.storeNewerThanApp(underlying: error)
                 }
+                throw StoreOpenError.unreadable(underlying: error)
             }
         }
 
         if !FileManager.default.fileExists(atPath: url.path) {
             let container = try openFinal(mirroredURL: url, localURL: localURL)
             try LocalAppSettingIdentity.setValue("1", for: splitCompletionKey, in: container.mainContext)
+            // A new empty store has nothing to repair; mark the version complete
+            // so the first ordinary reopen does not run a migration-only pass.
+            try LocalAppSettingIdentity.setValue(
+                "1", for: identityRepairCompletionKey, in: container.mainContext
+            )
             try container.mainContext.save()
             return container
         }
 
         // The original store remains authoritative until the marker above is
-        // durable. Back it up before the additive V7 preflight changes metadata.
+        // durable. Back it up before any preflight or finalization work.
         if FileManager.default.fileExists(atPath: url.path) {
             _ = ModelContainerFactory.backupStoreFiles(at: url)
         }
@@ -216,7 +224,7 @@ enum StoreMigration {
         let bridgeSnapshot: BridgeSnapshot
         do {
             bridgeSnapshot = try readBridge(at: url)
-            AppLog.data.info("V7 bridge preflight completed")
+            AppLog.data.info("Local-state migration preflight completed")
         } catch {
             if indicatesNewerStore(error) {
                 throw StoreOpenError.storeNewerThanApp(underlying: error)
@@ -224,12 +232,12 @@ enum StoreMigration {
             return try migrateV1Store(at: url, localURL: localURL, primaryError: error)
         }
 
-        // Rebuild is safe here: V7 still contains every source value. A crash or
-        // failed validation simply re-enters this path and reconstructs local.
-        try rebuildAndValidateLocal(bridgeSnapshot, at: localURL, beside: url)
-        AppLog.data.info("V8 device-local copy validated")
+        // Rebuild is safe here: V6/V7 still contains every source value. A crash
+        // or failed validation simply re-enters this path and reconstructs local.
+        try rebuildAndValidateLocal(bridgeSnapshot, at: localURL)
+        AppLog.data.info("V9 device-local copy validated")
         try finalizeMirroredStore(at: url)
-        AppLog.data.info("V8 mirrored-store cutover completed")
+        AppLog.data.info("V9 mirrored-store cutover completed")
         return try finishOpeningFinal(mirroredURL: url, localURL: localURL)
     }
 
@@ -259,9 +267,14 @@ enum StoreMigration {
         ModelContainerFactory.removeStoreFiles(at: localURL)
         let container = try openFinal(mirroredURL: url, localURL: localURL)
         try write(snapshots, into: container.mainContext)
+        // `write` saves its repair results. Persist both completion markers only
+        // afterward, in this separate save.
         try LocalAppSettingIdentity.setValue("1", for: splitCompletionKey, in: container.mainContext)
+        try LocalAppSettingIdentity.setValue(
+            "1", for: identityRepairCompletionKey, in: container.mainContext
+        )
         try container.mainContext.save()
-        AppLog.data.info("Migrated \(snapshots.count) podcast(s) from V1 to split V8")
+        AppLog.data.info("Migrated \(snapshots.count) podcast(s) from V1 to split V9")
         return container
     }
 
@@ -277,12 +290,15 @@ enum StoreMigration {
         }
 
         guard (2...6).contains(major) else {
-            if major > 8 { throw CocoaError(.persistentStoreIncompatibleVersionHash) }
+            if major > 9 { throw CocoaError(.persistentStoreIncompatibleVersionHash) }
             guard major == 7 else { throw CocoaError(.fileReadCorruptFile) }
             return try openAndPopulateBridge(at: url)
         }
 
         if major == 6 {
+            return try snapshotV6WithoutMigration(at: url)
+        }
+        if (2...5).contains(major) {
             let schema = Schema(versionedSchema: EarshotSchemaV7.self)
             return try autoreleasepool {
                 let bridge = try ModelContainer(
@@ -296,6 +312,86 @@ enum StoreMigration {
             }
         }
         return try openAndPopulateBridge(at: url)
+    }
+
+    /// Reads the shipped V6 local-only values without first advancing the
+    /// authoritative store to V7. The separate local V9 copy is validated and
+    /// marked before the original store is opened as retained-column V9, so a
+    /// crash before cutover leaves V6 untouched and a crash after the marker
+    /// resumes at finalization.
+    @MainActor
+    private static func snapshotV6WithoutMigration(at url: URL) throws -> BridgeSnapshot {
+        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+        return try autoreleasepool {
+            let container = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(
+                    schema: schema, url: url, cloudKitDatabase: .none
+                )
+            )
+            let context = container.mainContext
+
+            var podcastRows: [String: PodcastStateSnapshot] = [:]
+            for podcast in try context.fetch(FetchDescriptor<EarshotSchemaV5.Podcast>()) {
+                guard let refreshedAt = podcast.refreshedAt else { continue }
+                let feedURL = FeedURLIdentity.canonical(podcast.feedURL)
+                if let existing = podcastRows[feedURL] {
+                    podcastRows[feedURL] = PodcastStateSnapshot(
+                        feedURL: feedURL,
+                        refreshedAt: max(existing.refreshedAt ?? .distantPast, refreshedAt)
+                    )
+                } else {
+                    podcastRows[feedURL] = PodcastStateSnapshot(
+                        feedURL: feedURL, refreshedAt: refreshedAt
+                    )
+                }
+            }
+
+            var episodeRows: [String: EpisodeStateSnapshot] = [:]
+            let downloaded = try context.fetch(FetchDescriptor<EarshotSchemaV5.Episode>(
+                predicate: #Predicate { $0.downloadPath != nil }
+            ))
+            for episode in downloaded {
+                guard let rawFeedURL = episode.podcast?.feedURL,
+                      let path = episode.downloadPath, !path.isEmpty else { continue }
+                let feedURL = FeedURLIdentity.canonical(rawFeedURL)
+                let key = DownloadTaskKey.key(feedURL: feedURL, guid: episode.guid)
+                episodeRows[key] = EpisodeStateSnapshot(
+                    feedURL: feedURL, guid: episode.guid,
+                    statusRaw: DownloadStatus.downloaded.rawValue, path: path
+                )
+            }
+            for transfer in try context.fetch(FetchDescriptor<EarshotSchemaV5.ActiveDownload>()) {
+                guard let episode = transfer.episode,
+                      let rawFeedURL = episode.podcast?.feedURL,
+                      ActiveDownloadState(rawValue: transfer.stateRaw) != nil else { continue }
+                let feedURL = FeedURLIdentity.canonical(rawFeedURL)
+                let key = DownloadTaskKey.key(feedURL: feedURL, guid: episode.guid)
+                if episodeRows[key] == nil {
+                    episodeRows[key] = EpisodeStateSnapshot(
+                        feedURL: feedURL, guid: episode.guid,
+                        statusRaw: transfer.stateRaw, path: nil
+                    )
+                }
+            }
+
+            var seenSettings: Set<String> = []
+            let settings = try context.fetch(FetchDescriptor<EarshotSchemaV5.AppSetting>())
+                .filter {
+                    AppSettingScope.isLocal($0.key)
+                        && seenSettings.insert($0.key).inserted
+                }
+                .map { SettingSnapshot(key: $0.key, value: $0.value) }
+                .sorted { $0.key < $1.key }
+
+            return BridgeSnapshot(
+                podcasts: podcastRows.values.sorted { $0.feedURL < $1.feedURL },
+                episodes: episodeRows.values.sorted {
+                    ($0.feedURL, $0.guid) < ($1.feedURL, $1.guid)
+                },
+                settings: settings
+            )
+        }
     }
 
     @MainActor
@@ -331,14 +427,22 @@ enum StoreMigration {
 
     @MainActor
     private static func rebuildAndValidateLocal(
-        _ expected: BridgeSnapshot, at localURL: URL, beside mirroredURL: URL
+        _ expected: BridgeSnapshot, at localURL: URL
     ) throws {
         ModelContainerFactory.removeStoreFiles(at: localURL)
-        let stagingURL = mirroredURL.deletingLastPathComponent()
-            .appending(path: "earshot-v8-staging-\(UUID().uuidString).store")
-        defer { ModelContainerFactory.removeStoreFiles(at: stagingURL) }
         try autoreleasepool {
-            let container = try openFinal(mirroredURL: stagingURL, localURL: localURL)
+            // SwiftData writes aggregate version metadata into each configured
+            // file. Open the local URL as the sole full-schema configuration so
+            // it gets the same metadata as the later two-store container without
+            // creating and prematurely unlinking an empty staging database.
+            let full = Schema(versionedSchema: EarshotSchemaV9.self)
+            let container = try ModelContainer(
+                for: full,
+                configurations: ModelConfiguration(
+                    "DeviceLocal", schema: full, url: localURL,
+                    cloudKitDatabase: .none
+                )
+            )
             let context = container.mainContext
             for row in expected.podcasts {
                 context.insert(LocalPodcastState(feedURL: row.feedURL, refreshedAt: row.refreshedAt))
@@ -380,26 +484,54 @@ enum StoreMigration {
     }
 
     @MainActor
-    private static func hasSplitCompletionMarker(at localURL: URL, beside mirroredURL: URL) -> Bool {
+    private static func hasSplitCompletionMarker(at localURL: URL) -> Bool {
         guard FileManager.default.fileExists(atPath: localURL.path) else { return false }
-        let stagingURL = mirroredURL.deletingLastPathComponent()
-            .appending(path: "earshot-v8-marker-\(UUID().uuidString).store")
-        defer { ModelContainerFactory.removeStoreFiles(at: stagingURL) }
         return (try? autoreleasepool {
-            let container = try openFinal(mirroredURL: stagingURL, localURL: localURL)
-            return LocalAppSettingIdentity.value(for: splitCompletionKey, in: container.mainContext) == "1"
+            let major = try storeMajorVersion(at: localURL)
+            if major == 8 {
+                // Read the draft marker with the exact frozen V8 graph. Opening
+                // it as V9 here would silently migrate the local file before the
+                // explicit two-file forward route has begun.
+                let full = Schema(versionedSchema: EarshotSchemaV8.self)
+                let container = try ModelContainer(
+                    for: full,
+                    configurations: ModelConfiguration(
+                        "DeviceLocal", schema: full, url: localURL,
+                        cloudKitDatabase: .none
+                    )
+                )
+                let key = splitCompletionKey
+                let rows = try container.mainContext.fetch(
+                    FetchDescriptor<EarshotSchemaV8.LocalAppSetting>(
+                        predicate: #Predicate { $0.key == key }
+                    )
+                )
+                return rows.contains { $0.value == "1" }
+            }
+            guard major == 9 else { return false }
+            let full = Schema(versionedSchema: EarshotSchemaV9.self)
+            let container = try ModelContainer(
+                for: full,
+                configurations: ModelConfiguration(
+                    "DeviceLocal", schema: full, url: localURL,
+                    cloudKitDatabase: .none
+                )
+            )
+            return LocalAppSettingIdentity.value(
+                for: splitCompletionKey, in: container.mainContext
+            ) == "1"
         }) ?? false
     }
 
     @MainActor
     private static func openFinal(mirroredURL: URL, localURL: URL) throws -> ModelContainer {
-        let full = Schema(versionedSchema: EarshotSchemaV8.self)
+        let full = Schema(versionedSchema: EarshotSchemaV9.self)
         let mirrored = ModelConfiguration(
-            "FutureMirrored", schema: Schema(EarshotSchemaV8.mirroredModels),
+            "FutureMirrored", schema: Schema(EarshotSchemaV9.mirroredModels),
             url: mirroredURL, cloudKitDatabase: .none
         )
         let local = ModelConfiguration(
-            "DeviceLocal", schema: Schema(EarshotSchemaV8.localModels),
+            "DeviceLocal", schema: Schema(EarshotSchemaV9.localModels),
             url: localURL, cloudKitDatabase: .none
         )
         return try ModelContainer(for: full, configurations: mirrored, local)
@@ -408,16 +540,78 @@ enum StoreMigration {
     @MainActor
     private static func finalizeMirroredStore(at url: URL) throws {
         try autoreleasepool {
-            let schema = Schema(versionedSchema: EarshotMirroredSchemaV8.self)
-            _ = try ModelContainer(
-                for: schema,
-                migrationPlan: EarshotFinalMigrationPlan.self,
-                configurations: ModelConfiguration(
-                    "FutureMirrored", schema: schema, url: url,
-                    cloudKitDatabase: .none
+            switch try storeMajorVersion(at: url) {
+            case 6:
+                // V6 already has the two Episode tombstone columns. Use the
+                // supported inferred-lightweight route so they are retained and
+                // the otherwise unnecessary staged V6→V7 hop is avoided. Core
+                // Data may still copy the table for the remaining relationship
+                // graph changes; the aged-store performance test measures that.
+                let schema = Schema(versionedSchema: EarshotMirroredSchemaV9.self)
+                _ = try ModelContainer(
+                    for: schema,
+                    configurations: ModelConfiguration(
+                        "FutureMirrored", schema: schema, url: url,
+                        cloudKitDatabase: .none
+                    )
                 )
-            )
+            case 7:
+                let schema = Schema(versionedSchema: EarshotMirroredSchemaV9.self)
+                _ = try ModelContainer(
+                    for: schema,
+                    migrationPlan: EarshotFinalMigrationPlan.self,
+                    configurations: ModelConfiguration(
+                        "FutureMirrored", schema: schema, url: url,
+                        cloudKitDatabase: .none
+                    )
+                )
+            case 8:
+                try migrateFullV8Store(at: url, configurationName: "FutureMirrored")
+            case 9:
+                return
+            default:
+                throw CocoaError(.persistentStoreIncompatibleVersionHash)
+            }
         }
+    }
+
+    @MainActor
+    private static func finalizeLocalStore(at url: URL) throws {
+        switch try storeMajorVersion(at: url) {
+        case 8:
+            try migrateFullV8Store(at: url, configurationName: "DeviceLocal")
+        case 9:
+            return
+        default:
+            throw CocoaError(.persistentStoreIncompatibleVersionHash)
+        }
+    }
+
+    @MainActor
+    private static func migrateFullV8Store(
+        at url: URL, configurationName: String
+    ) throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV9.self)
+        _ = try ModelContainer(
+            for: schema,
+            migrationPlan: EarshotV8ToV9MigrationPlan.self,
+            configurations: ModelConfiguration(
+                configurationName, schema: schema, url: url,
+                cloudKitDatabase: .none
+            )
+        )
+    }
+
+    private static func storeMajorVersion(at url: URL) throws -> Int {
+        let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite, at: url
+        )
+        let identifiers = metadata[NSStoreModelVersionIdentifiersKey] as? [String]
+        guard let identifier = identifiers?.first,
+              let major = Int(identifier.split(separator: ".").first ?? "") else {
+            throw CocoaError(.persistentStoreIncompatibleVersionHash)
+        }
+        return major
     }
 
     @MainActor
@@ -433,8 +627,21 @@ enum StoreMigration {
             container.mainContext.delete(setting)
         }
         try LocalStateStore.hydrate(in: container.mainContext)
-        _ = try IdentityRepairService(context: container.mainContext).repairAll()
-        if container.mainContext.hasChanges { try container.mainContext.save() }
+        if LocalAppSettingIdentity.value(
+            for: identityRepairCompletionKey, in: container.mainContext
+        ) != "1" {
+            _ = try IdentityRepairService(context: container.mainContext).repairAll()
+            // The repair must be durable before the completion marker. If this
+            // save succeeds but the marker save is interrupted, the idempotent
+            // repair safely runs again on the next launch.
+            if container.mainContext.hasChanges { try container.mainContext.save() }
+            try LocalAppSettingIdentity.setValue(
+                "1", for: identityRepairCompletionKey, in: container.mainContext
+            )
+            try container.mainContext.save()
+        } else if container.mainContext.hasChanges {
+            try container.mainContext.save()
+        }
         return container
     }
 

@@ -2,13 +2,13 @@ import XCTest
 import SwiftData
 @testable import Earshot
 
-/// Guards the V8 live graph against an unversioned model edit (#425) and audits
+/// Guards the V9 live graph against an unversioned model edit (#425) and audits
 /// the exact compatibility rules required before the mirrored configuration may
 /// be switched from `.none` to CloudKit in a later phase.
 @MainActor
 final class SchemaDriftTests: XCTestCase {
 
-    /// The live model graph, kept in lockstep with `EarshotSchemaV6.models`.
+    /// The live model graph, kept in lockstep with the final V9 model lists.
     private static let liveModels: [any PersistentModel.Type] = [
         Podcast.self,
         Episode.self,
@@ -47,49 +47,53 @@ final class SchemaDriftTests: XCTestCase {
         return result
     }
 
-    func testLiveAttributesMatchV8() {
-        let frozenV8 = attributeMap(Schema(versionedSchema: EarshotSchemaV8.self))
+    func testLiveAttributesMatchV9() {
+        let frozenV9 = attributeMap(Schema(versionedSchema: EarshotSchemaV9.self))
         let live = attributeMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, frozenV8)
+        XCTAssertEqual(live, frozenV9)
     }
 
-    /// The load-bearing half of the folders-phase-1 design: `Episode` must be
-    /// COMPLETELY untouched, so a real library's ~242k episode rows are never
-    /// rewritten by the migration. ``EpisodeFolderMembership/episode`` is
-    /// deliberately one-way — an `@Relationship(inverse:)` collection on
-    /// `Episode` would change `Episode`'s shape and undo exactly that (#701/#751).
-    func testEpisodeShapeMatchesV8() {
-        let frozenV8 = Schema(versionedSchema: EarshotSchemaV8.self)
+    /// V9 permanently retains the two V6 download attributes as inert schema
+    /// tombstones, while the draft V8 snapshot proves that the already-installed
+    /// device version omitted them. Runtime reads are covered by local-state
+    /// migration tests rather than by these persisted attributes.
+    func testEpisodeShapeMatchesV9() {
+        let frozenV9 = Schema(versionedSchema: EarshotSchemaV9.self)
         let live = Schema(Self.liveModels)
 
-        let frozenAttrs = attributeMap(frozenV8).filter { $0.key.hasPrefix("Episode.") }
+        let frozenAttrs = attributeMap(frozenV9).filter { $0.key.hasPrefix("Episode.") }
         let liveAttrs = attributeMap(live).filter { $0.key.hasPrefix("Episode.") }
         XCTAssertEqual(liveAttrs, frozenAttrs)
-        XCTAssertEqual(relationshipMap(live)["Episode"], relationshipMap(frozenV8)["Episode"])
+        XCTAssertEqual(relationshipMap(live)["Episode"], relationshipMap(frozenV9)["Episode"])
+
+        let v8Attrs = attributeMap(Schema(versionedSchema: EarshotSchemaV8.self))
+            .filter { $0.key.hasPrefix("Episode.") }
+        XCTAssertNil(v8Attrs["Episode.legacyDownloadStatus"])
+        XCTAssertNil(v8Attrs["Episode.legacyDownloadPath"])
+        XCTAssertEqual(liveAttrs["Episode.legacyDownloadStatus"], "false|DownloadStatus")
+        XCTAssertEqual(liveAttrs["Episode.legacyDownloadPath"], "true|Optional<String>")
     }
 
-    /// The V5→V6 relationship delta: `PodcastFolder` gains exactly `parent` and
-    /// `children`, and NO other entity's relationships move.
-    func testLiveRelationshipsMatchV8() {
-        let frozenV8 = relationshipMap(Schema(versionedSchema: EarshotSchemaV8.self))
+    /// The live relationship graph must remain identical to frozen V9.
+    func testLiveRelationshipsMatchV9() {
+        let frozenV9 = relationshipMap(Schema(versionedSchema: EarshotSchemaV9.self))
         let live = relationshipMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, frozenV8)
+        XCTAssertEqual(live, frozenV9)
     }
 
-    /// Guards the lockstep assumption: the live list this test compares against
-    /// must equal what `EarshotSchemaV6` actually registers, by entity name.
-    func testLiveListMatchesV8ModelsList() {
-        let v8Names = Set(Schema(versionedSchema: EarshotSchemaV8.self).entities.map(\.name))
+    /// Guards the lockstep assumption between the live list and frozen V9.
+    func testLiveListMatchesV9ModelsList() {
+        let v9Names = Set(Schema(versionedSchema: EarshotSchemaV9.self).entities.map(\.name))
         let liveNames = Set(Schema(Self.liveModels).entities.map(\.name))
-        XCTAssertEqual(v8Names, liveNames)
+        XCTAssertEqual(v9Names, liveNames)
     }
 
 }
 
 @MainActor
 final class CloudKitSchemaCompatibilityTests: XCTestCase {
-    func testV8MirroredSchemaIsCloudKitCompatible() {
-        for entity in Schema(EarshotSchemaV8.mirroredModels).entities {
+    func testV9MirroredSchemaIsCloudKitCompatible() {
+        for entity in Schema(EarshotSchemaV9.mirroredModels).entities {
             for attribute in entity.attributes {
                 XCTAssertFalse(attribute.options.contains(.unique), "Unique: \(entity.name).\(attribute.name)")
                 XCTAssertTrue(attribute.isOptional || attribute.defaultValue != nil,
@@ -103,8 +107,8 @@ final class CloudKitSchemaCompatibilityTests: XCTestCase {
         }
     }
 
-    func testV8LocalSchemaHasNoRelationshipsAndSplitContainerConstructs() throws {
-        let local = Schema(EarshotSchemaV8.localModels)
+    func testV9LocalSchemaHasNoRelationshipsAndSplitContainerConstructs() throws {
+        let local = Schema(EarshotSchemaV9.localModels)
         XCTAssertTrue(local.entities.allSatisfy { $0.relationships.isEmpty })
         let container = try ModelContainerFactory.makeInMemory()
         XCTAssertEqual(container.configurations.count, 2)

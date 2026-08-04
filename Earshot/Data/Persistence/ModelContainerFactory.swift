@@ -137,13 +137,13 @@ enum ModelContainerFactory {
 
     /// An ephemeral in-memory container for tests and previews.
     static func makeInMemory() throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV8.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV9.self)
         let mirrored = ModelConfiguration(
-            "FutureMirrored", schema: Schema(EarshotSchemaV8.mirroredModels),
+            "FutureMirrored", schema: Schema(EarshotSchemaV9.mirroredModels),
             isStoredInMemoryOnly: true, cloudKitDatabase: .none
         )
         let local = ModelConfiguration(
-            "DeviceLocal", schema: Schema(EarshotSchemaV8.localModels),
+            "DeviceLocal", schema: Schema(EarshotSchemaV9.localModels),
             isStoredInMemoryOnly: true, cloudKitDatabase: .none
         )
         return try ModelContainer(for: schema, configurations: mirrored, local)

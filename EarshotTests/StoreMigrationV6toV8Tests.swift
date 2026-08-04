@@ -1,5 +1,7 @@
 import XCTest
 import SwiftData
+import CoreData
+import SQLite3
 import Darwin
 @testable import Earshot
 @MainActor
@@ -101,6 +103,155 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
     }
 
+    /// Builds the exact two-store V8 shape installed by the draft Phase A
+    /// device build. This exercises the forward route independently of V7.
+    private func seedSplitV8() throws {
+        let full = Schema(versionedSchema: EarshotSchemaV8.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            let container = try ModelContainer(
+                for: full,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored", schema: Schema(EarshotSchemaV8.mirroredModels),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV8.localModels),
+                        url: localURL, cloudKitDatabase: .none
+                    )
+            )
+            let context = container.mainContext
+
+            let podcast = EarshotSchemaV8.Podcast()
+            podcast.feedURL = "https://example.com/feed.xml"
+            podcast.title = "Already Split"
+            podcast.createdAt = Date(timeIntervalSince1970: 1_600_000_000)
+            context.insert(podcast)
+
+            let episode = EarshotSchemaV8.Episode()
+            episode.guid = "downloaded"
+            episode.title = "Downloaded"
+            episode.audioURL = "https://example.com/downloaded.mp3"
+            episode.createdAt = Date(timeIntervalSince1970: 1_600_000_001)
+            episode.podcast = podcast
+            context.insert(episode)
+
+            let podcastState = EarshotSchemaV8.LocalPodcastState()
+            podcastState.feedURL = podcast.feedURL
+            podcastState.refreshedAt = refreshed
+            context.insert(podcastState)
+
+            let episodeState = EarshotSchemaV8.LocalEpisodeState()
+            episodeState.podcastFeedURL = podcast.feedURL
+            episodeState.episodeGUID = episode.guid
+            episodeState.downloadStatusRaw = DownloadStatus.downloaded.rawValue
+            episodeState.downloadPath = "downloaded.mp3"
+            context.insert(episodeState)
+
+            let splitMarker = EarshotSchemaV8.LocalAppSetting()
+            splitMarker.key = StoreMigration.splitCompletionKey
+            splitMarker.value = "1"
+            context.insert(splitMarker)
+            try context.save()
+        }
+    }
+
+    private func storeMajorVersion(at url: URL) throws -> Int? {
+        let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite, at: url
+        )
+        let identifier = (metadata[NSStoreModelVersionIdentifiersKey] as? [String])?.first
+        return identifier.flatMap { Int($0.split(separator: ".").first ?? "") }
+    }
+
+    private func copyStoreSet(from sourceDirectory: URL) throws {
+        let fm = FileManager.default
+        for name in [
+            "default.store", "default.store-wal", "default.store-shm",
+            "earshot-local.store", "earshot-local.store-wal", "earshot-local.store-shm",
+        ] {
+            let source = sourceDirectory.appending(path: name)
+            guard fm.fileExists(atPath: source.path) else { continue }
+            try fm.copyItem(at: source, to: directory.appending(path: name))
+        }
+    }
+
+    private func storeSetSize() throws -> Int64 {
+        var total: Int64 = 0
+        for name in [
+            "default.store", "default.store-wal", "default.store-shm",
+            "earshot-local.store", "earshot-local.store-wal", "earshot-local.store-shm",
+        ] {
+            let url = directory.appending(path: name)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            total += (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        }
+        return total
+    }
+
+    private func integrityCheck(at url: URL) throws -> [String] {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA integrity_check", -1, &statement, nil)
+                == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_finalize(statement) }
+        var rows: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let text = sqlite3_column_text(statement, 0) {
+                rows.append(String(cString: text))
+            }
+        }
+        return rows
+    }
+
+    private struct V8FixtureSnapshot: Equatable {
+        let podcasts: Int
+        let episodes: Int
+        let localPodcastStates: Int
+        let localEpisodeStates: [String]
+    }
+
+    private func readV8FixtureSnapshot() throws -> V8FixtureSnapshot {
+        let full = Schema(versionedSchema: EarshotSchemaV8.self)
+        return try autoreleasepool {
+            let container = try ModelContainer(
+                for: full,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored", schema: Schema(EarshotSchemaV8.mirroredModels),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV8.localModels),
+                        url: StoreMigration.localStoreURL(for: storeURL),
+                        cloudKitDatabase: .none
+                    )
+            )
+            let context = container.mainContext
+            return try V8FixtureSnapshot(
+                podcasts: context.fetchCount(FetchDescriptor<EarshotSchemaV8.Podcast>()),
+                episodes: context.fetchCount(FetchDescriptor<EarshotSchemaV8.Episode>()),
+                localPodcastStates: context.fetchCount(
+                    FetchDescriptor<EarshotSchemaV8.LocalPodcastState>()
+                ),
+                localEpisodeStates: context.fetch(
+                    FetchDescriptor<EarshotSchemaV8.LocalEpisodeState>()
+                ).map {
+                    "\($0.podcastFeedURL)\u{1F}\($0.episodeGUID)\u{1F}"
+                        + "\($0.downloadStatusRaw)\u{1F}\($0.downloadPath ?? "")"
+                }.sorted()
+            )
+        }
+    }
+
     private static func peakResidentMemoryMB() -> Double {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size /
@@ -182,6 +333,154 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(try reopened.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 2)
         XCTAssertEqual(LocalAppSettingIdentity.value(for: StoreMigration.splitCompletionKey,
             in: reopened.mainContext), "1")
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.identityRepairCompletionKey, in: reopened.mainContext
+        ), "1")
+    }
+
+    func testAlreadySplitV8StoreMovesForwardWithoutBridgeReplay() throws {
+        try seedSplitV8()
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 8)
+
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        let context = migrated.mainContext
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocalPodcastState>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocalEpisodeState>()), 1)
+
+        let episode = try XCTUnwrap(try context.fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertEqual(episode.downloadPath, "downloaded.mp3")
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: context
+        ), "1")
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.identityRepairCompletionKey, in: context
+        ), "1")
+        XCTAssertNil(LocalAppSettingIdentity.value(
+            for: StoreMigration.bridgeCompletionKey, in: context
+        ), "The completed V8 split must not replay the original V7 bridge")
+    }
+
+    func testIdentityRepairCompletionMarkerGatesLaterLaunches() throws {
+        try seedV6()
+        try autoreleasepool { _ = try StoreMigration.openOrMigrate(at: storeURL) }
+
+        // Introduce a duplicate only after the migration repair and its marker
+        // are durable. If repairAll incorrectly runs on every open it will merge
+        // this row; a retained pair proves the versioned gate was honored.
+        try autoreleasepool {
+            let container = try StoreMigration.openOrMigrate(at: storeURL)
+            container.mainContext.insert(AppSetting(
+                key: SettingsKey.wifiOnlyDownloads, value: "post-marker-duplicate"
+            ))
+            try container.mainContext.save()
+        }
+
+        let reopened = try StoreMigration.openOrMigrate(at: storeURL)
+        let key = SettingsKey.wifiOnlyDownloads
+        let rows = try reopened.mainContext.fetch(FetchDescriptor<AppSetting>(
+            predicate: #Predicate { $0.key == key }
+        ))
+        XCTAssertEqual(rows.count, 2, "repairAll must not run after its marker is saved")
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.identityRepairCompletionKey, in: reopened.mainContext
+        ), "1")
+    }
+
+    /// Opt-in proof against a disposable copy of the untouched build-161 V6
+    /// backup, not a freshly constructed scale fixture.
+    func testRealBuild161V6FixtureThroughRetainedColumnSchema() throws {
+        let variable = "SYNC_MIGRATION_REAL_V6_DIRECTORY"
+        guard let path = ProcessInfo.processInfo.environment[variable] else {
+            throw XCTSkip("Set TEST_RUNNER_\(variable) to the verified V6 backup directory")
+        }
+        try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+        let beforeBytes = try storeSetSize()
+        let start = DispatchTime.now().uptimeNanoseconds
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
+        let context = migrated.mainContext
+
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 666)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 241_759)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<QueueItem>()), 42)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<ListeningSession>()), 713)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<PodcastFolder>()), 4)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<FolderMembership>()), 5)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<EpisodeFolderMembership>()), 1)
+        let downloadPaths = try context.fetch(FetchDescriptor<LocalEpisodeState>())
+            .filter { $0.downloadPath != nil }
+        XCTAssertEqual(downloadPaths.count, 43)
+        XCTAssertTrue(downloadPaths.allSatisfy { $0.downloadStatus == .downloaded })
+        let internalKeys = [
+            StoreMigration.splitCompletionKey, StoreMigration.identityRepairCompletionKey,
+        ]
+        let settingCount = try context.fetch(FetchDescriptor<AppSetting>()).count
+            + context.fetch(FetchDescriptor<LocalAppSetting>())
+                .filter { !internalKeys.contains($0.key) }.count
+        XCTAssertEqual(settingCount, 16)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
+        XCTAssertEqual(try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"])
+        let afterBytes = try storeSetSize()
+        print(String(format:
+            "REALV6MIGRATION|seconds|%.3f|beforeMB|%.1f|afterMB|%.1f",
+            elapsed, Double(beforeBytes) / 1_048_576, Double(afterBytes) / 1_048_576
+        ))
+        XCTAssertLessThan(
+            elapsed, 15,
+            "Aged-store migration leaves too little margin inside the 20-second launch watchdog"
+        )
+    }
+
+    /// Opt-in proof against a disposable copy of the settled device's existing
+    /// V8 pair. Counts and every local episode-state value must survive exactly;
+    /// the V7 bridge marker must remain absent.
+    func testRealSettledV8FixtureMovesForwardInPlace() throws {
+        let variable = "SYNC_MIGRATION_REAL_V8_DIRECTORY"
+        guard let path = ProcessInfo.processInfo.environment[variable] else {
+            throw XCTSkip("Set TEST_RUNNER_\(variable) to the settled V8 copy directory")
+        }
+        try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+        let source = try readV8FixtureSnapshot()
+        XCTAssertGreaterThan(source.episodes, 240_000)
+        let beforeBytes = try storeSetSize()
+        let start = DispatchTime.now().uptimeNanoseconds
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
+        let context = migrated.mainContext
+        let destination = V8FixtureSnapshot(
+            podcasts: try context.fetchCount(FetchDescriptor<Podcast>()),
+            episodes: try context.fetchCount(FetchDescriptor<Episode>()),
+            localPodcastStates: try context.fetchCount(FetchDescriptor<LocalPodcastState>()),
+            localEpisodeStates: try context.fetch(FetchDescriptor<LocalEpisodeState>()).map {
+                "\($0.podcastFeedURL)\u{1F}\($0.episodeGUID)\u{1F}"
+                    + "\($0.downloadStatusRaw)\u{1F}\($0.downloadPath ?? "")"
+            }.sorted()
+        )
+        XCTAssertEqual(destination, source)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertNil(LocalAppSettingIdentity.value(
+            for: StoreMigration.bridgeCompletionKey, in: context
+        ))
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.identityRepairCompletionKey, in: context
+        ), "1")
+        XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
+        XCTAssertEqual(try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"])
+        let afterBytes = try storeSetSize()
+        print(String(format:
+            "REALV8MIGRATION|seconds|%.3f|beforeMB|%.1f|afterMB|%.1f|episodes|%d",
+            elapsed, Double(beforeBytes) / 1_048_576, Double(afterBytes) / 1_048_576,
+            destination.episodes
+        ))
+        XCTAssertLessThan(
+            elapsed, 15,
+            "Existing-V8 forward migration leaves too little launch-watchdog margin"
+        )
     }
 
     func testRestartFromCompletedV7PreflightFinishesSplit() throws {

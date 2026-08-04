@@ -19,6 +19,16 @@ final class Episode {
     /// Stored as the enum's String raw value. Use ``isPlayed`` for the simple
     /// played/unplayed read used by the episode list and Quick Actions.
     var status: EpisodeStatus = EpisodeStatus.newEpisode
+    /// Permanent schema tombstones retained so a build-161 V6/V7 store never
+    /// has to rewrite the 242k-plus-row Episode table merely to drop two local
+    /// attributes. Runtime code must never read or write these values; download
+    /// state lives exclusively in ``LocalEpisodeState`` and the process-local
+    /// projection below. `originalName` lets the direct V7→V9 route preserve the
+    /// shipped columns while the existing V8→V9 route adds inert defaults.
+    @Attribute(originalName: "downloadStatus")
+    private var legacyDownloadStatus: DownloadStatus = DownloadStatus.none
+    @Attribute(originalName: "downloadPath")
+    private var legacyDownloadPath: String?
     @Transient private var transientDownloadStatus: DownloadStatus = DownloadStatus.none
     /// Downloaded audio file NAME inside Documents/Downloads; when set,
     /// playback uses the file. Stored as a bare name — never an absolute path —

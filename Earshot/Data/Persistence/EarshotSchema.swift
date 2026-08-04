@@ -1441,14 +1441,209 @@ enum EarshotSchemaV7: VersionedSchema {
     }
 }
 
-/// CloudKit-ready final graph. Both configurations remain explicitly local in
-/// Sync Phase A; Sync Phase B may enable only the mirrored configuration.
+/// Frozen snapshot of the first split-store graph installed by the draft Phase
+/// A device build. This version removed Episode's two download columns and is
+/// retained solely so that store can move forward additively to V9. Do not edit
+/// these nested model types.
 enum EarshotSchemaV8: VersionedSchema {
     static let versionIdentifier = Schema.Version(8, 0, 0)
 
     static var models: [any PersistentModel.Type] {
         mirroredModels + localModels
     }
+
+    static let mirroredModels: [any PersistentModel.Type] = [
+        Podcast.self, Episode.self, QueueItem.self, ListeningSession.self, Bookmark.self,
+        PodcastFolder.self, FolderMembership.self, RecentlyExpired.self,
+        QuickActionConfig.self, AppSetting.self, EpisodeFolderMembership.self,
+    ]
+
+    static let localModels: [any PersistentModel.Type] = [
+        LocalPodcastState.self, LocalEpisodeState.self, LocalAppSetting.self,
+    ]
+
+    @Model
+    final class Podcast {
+        var feedURL: String = ""
+        var title: String = ""
+        var author: String?
+        var podcastDescription: String?
+        var artworkURL: String?
+        var websiteURL: String?
+        var language: String?
+        var category: String?
+        var autoQueue: Bool = false
+        var notificationEnabled: Bool?
+        var speedOverride: Double?
+        var trimSilenceOverride: Bool?
+        var introSkipSeconds: Int?
+        var queueAgeLimitDays: Int?
+        var inboxMaxEpisodes: Int?
+        var inboxAgeLimitHours: Int?
+        var inboxExcluded: Bool = false
+        var inboxIncluded: Bool = false
+        var createdAt: Date = Date.distantPast
+        var lastSeenPubDate: Date?
+        @Relationship(deleteRule: .cascade, inverse: \Episode.podcast)
+        var episodes: [Episode]?
+        @Relationship(deleteRule: .nullify, inverse: \ListeningSession.podcast)
+        var listeningSessions: [ListeningSession]?
+        @Relationship(deleteRule: .nullify, inverse: \FolderMembership.podcast)
+        var folderMemberships: [FolderMembership]?
+        init() {}
+    }
+
+    @Model
+    final class Episode {
+        var guid: String = ""
+        var title: String = ""
+        var episodeDescription: String?
+        var audioURL: String = ""
+        var durationSeconds: Int?
+        var pubDate: Date?
+        var artworkURL: String?
+        var episodeNumber: Int?
+        var seasonNumber: Int?
+        var chapterURL: String?
+        var transcriptURL: String?
+        var status: EpisodeStatus = EpisodeStatus.newEpisode
+        var positionSeconds: Int = 0
+        var playedAt: Date?
+        var inboxDismissed: Bool = false
+        var createdAt: Date = Date.distantPast
+        var podcast: Podcast?
+        @Relationship(deleteRule: .cascade, inverse: \QueueItem.episode)
+        var queueItem: QueueItem?
+        @Relationship(deleteRule: .cascade, inverse: \Bookmark.episode)
+        var bookmarks: [Bookmark]?
+        @Relationship(deleteRule: .cascade, inverse: \RecentlyExpired.episode)
+        var recentlyExpired: RecentlyExpired?
+        @Relationship(deleteRule: .nullify, inverse: \ListeningSession.episode)
+        var listeningSessions: [ListeningSession]?
+        @Relationship(deleteRule: .nullify, inverse: \EpisodeFolderMembership.episode)
+        var folderMemberships: [EpisodeFolderMembership]?
+        init() {}
+    }
+
+    @Model
+    final class QueueItem {
+        var episode: Episode?
+        var position: Int = 0
+        var addedAt: Date = Date.distantPast
+        init() {}
+    }
+
+    @Model
+    final class ListeningSession {
+        var episode: Episode?
+        var podcast: Podcast?
+        var durationSeconds: Int = 0
+        var speed: Double = 1.0
+        var date: Date = Date.distantPast
+        init() {}
+    }
+
+    @Model
+    final class Bookmark {
+        var episode: Episode?
+        var positionSeconds: Int = 0
+        var note: String = ""
+        var createdAt: Date = Date.distantPast
+        init() {}
+    }
+
+    @Model
+    final class PodcastFolder {
+        var name: String = ""
+        var sortOrder: Int = 0
+        var queueAgeLimitDays: Int?
+        var createdAt: Date = Date.distantPast
+        @Relationship(deleteRule: .cascade, inverse: \FolderMembership.folder)
+        var memberships: [FolderMembership]?
+        @Relationship(deleteRule: .cascade, inverse: \EpisodeFolderMembership.folder)
+        var episodeMemberships: [EpisodeFolderMembership]?
+        @Relationship(deleteRule: .nullify, inverse: \PodcastFolder.children)
+        var parent: PodcastFolder?
+        @Relationship(deleteRule: .nullify)
+        var children: [PodcastFolder]?
+        init() {}
+    }
+
+    @Model
+    final class FolderMembership {
+        var folder: PodcastFolder?
+        var podcast: Podcast?
+        var sortOrder: Int = 0
+        init() {}
+    }
+
+    @Model
+    final class RecentlyExpired {
+        var episode: Episode?
+        var expiredAt: Date = Date.distantPast
+        init() {}
+    }
+
+    @Model
+    final class QuickActionConfig {
+        var contentType: QuickActionContentType = QuickActionContentType.episode
+        var actionKey: String = ""
+        var sortOrder: Int = 0
+        init() {}
+    }
+
+    @Model
+    final class AppSetting {
+        var key: String = ""
+        var value: String = ""
+        init() {}
+    }
+
+    @Model
+    final class EpisodeFolderMembership {
+        var folder: PodcastFolder?
+        var episode: Episode?
+        var sortOrder: Int = 0
+        init() {}
+    }
+
+    @Model
+    final class LocalPodcastState {
+        var feedURL: String = ""
+        var refreshedAt: Date?
+        init() {}
+    }
+
+    @Model
+    final class LocalEpisodeState {
+        var podcastFeedURL: String = ""
+        var episodeGUID: String = ""
+        var downloadStatusRaw: String = DownloadStatus.none.rawValue
+        var downloadPath: String?
+        init() {}
+    }
+
+    @Model
+    final class LocalAppSetting {
+        var key: String = ""
+        var value: String = ""
+        init() {}
+    }
+}
+
+/// The V8 shape of the original store installed by the first draft device build.
+enum EarshotMirroredSchemaV8: VersionedSchema {
+    static let versionIdentifier = Schema.Version(8, 0, 0)
+    static var models: [any PersistentModel.Type] { EarshotSchemaV8.mirroredModels }
+}
+
+/// CloudKit-ready final graph with permanent, unused Episode download
+/// tombstones. Both configurations remain explicitly local in Sync Phase A;
+/// Sync Phase B may enable only the mirrored configuration.
+enum EarshotSchemaV9: VersionedSchema {
+    static let versionIdentifier = Schema.Version(9, 0, 0)
+
+    static var models: [any PersistentModel.Type] { mirroredModels + localModels }
 
     static let mirroredModels: [any PersistentModel.Type] = [
         Podcast.self, Episode.self, QueueItem.self, ListeningSession.self,
@@ -1462,12 +1657,10 @@ enum EarshotSchemaV8: VersionedSchema {
     ]
 }
 
-/// The V8 shape of the original store during cutover. Its checksum matches the
-/// final `FutureMirrored` configuration; device-local rows already live in the
-/// separately validated store.
-enum EarshotMirroredSchemaV8: VersionedSchema {
-    static let versionIdentifier = Schema.Version(8, 0, 0)
-    static var models: [any PersistentModel.Type] { EarshotSchemaV8.mirroredModels }
+/// The retained-column V9 shape of the original store during cutover.
+enum EarshotMirroredSchemaV9: VersionedSchema {
+    static let versionIdentifier = Schema.Version(9, 0, 0)
+    static var models: [any PersistentModel.Type] { EarshotSchemaV9.mirroredModels }
 }
 
 /// Production preflight from the shipped V6 store. V7 is additive, and the
@@ -1487,15 +1680,27 @@ enum EarshotBridgeMigrationPlan: SchemaMigrationPlan {
     }
 }
 
-/// Final cutover plan used only after the original store has reached V7 and the
-/// separate local copy is validated. Keeping older, pre-local schemas out of
-/// this two-configuration open avoids identical empty per-configuration hashes.
+/// Direct retained-column cutover used after the original store reaches V7 and
+/// the separate local copy is validated. It deliberately skips V8 so the large
+/// Episode table never drops and then re-adds its two legacy columns.
 enum EarshotFinalMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [EarshotSchemaV7.self, EarshotMirroredSchemaV8.self]
+        [EarshotSchemaV7.self, EarshotMirroredSchemaV9.self]
     }
 
     static var stages: [MigrationStage] {
-        [.lightweight(fromVersion: EarshotSchemaV7.self, toVersion: EarshotMirroredSchemaV8.self)]
+        [.lightweight(fromVersion: EarshotSchemaV7.self, toVersion: EarshotMirroredSchemaV9.self)]
+    }
+}
+
+/// Forward-only route for the one device store that already completed the
+/// draft V8 split. Adding the tombstones is additive and must not replay V7.
+enum EarshotV8ToV9MigrationPlan: SchemaMigrationPlan {
+    static var schemas: [any VersionedSchema.Type] {
+        [EarshotSchemaV8.self, EarshotSchemaV9.self]
+    }
+
+    static var stages: [MigrationStage] {
+        [.lightweight(fromVersion: EarshotSchemaV8.self, toVersion: EarshotSchemaV9.self)]
     }
 }
