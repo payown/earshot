@@ -340,6 +340,7 @@ actor FeedRefreshActor {
         // The fetch (network I/O) and the synchronous parse inside it both run on
         // this background actor, never the main thread.
         let parsed = try await feed.fetch(canonical)
+        let parsedEpisodes = Self.deduplicatedEpisodes(parsed.episodes)
 
         // Recheck after the await: another subscribe context may have committed
         // the same natural key while this actor was fetching the network feed.
@@ -372,7 +373,7 @@ actor FeedRefreshActor {
 
         let now = Date.now
         var insertedEpisodes: [Episode] = []
-        for item in parsed.episodes {
+        for item in parsedEpisodes {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
             // Start every episode dismissed; the seed pass below un-dismisses the
@@ -391,9 +392,9 @@ actor FeedRefreshActor {
 
         // Seed the high-water mark to the newest NON-FUTURE pub date so a misdated
         // future episode can't push the mark ahead of real new episodes (#296).
-        podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsed.episodes, now: now) ?? now
+        podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? now
         podcast.refreshedAt = now
-        AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsed.episodes.count) episodes, seeded \(min(inboxSeedCount < 0 ? insertedEpisodes.count : inboxSeedCount, insertedEpisodes.count)) into inbox")
+        AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsedEpisodes.count) episodes, seeded \(min(inboxSeedCount < 0 ? insertedEpisodes.count : inboxSeedCount, insertedEpisodes.count)) into inbox")
 
         return SubscribeOutcome(podcast: podcast, episodes: insertedEpisodes, alreadySubscribed: false)
     }
@@ -476,20 +477,25 @@ actor FeedRefreshActor {
         _ parsed: ParsedFeed, to podcast: Podcast, autoQueueEnabled: Bool
     ) -> ApplyOutcome {
         let now = Date.now
+        // A malformed feed can contain the same natural key more than once in a
+        // single response. Deduplicate before any insert: a snapshot of the
+        // already-persisted GUIDs cannot protect against two new rows in this
+        // same unsaved batch (#778).
+        let parsedEpisodes = Self.deduplicatedEpisodes(parsed.episodes)
 
         // First refresh of a freshly-migrated shell (no episodes AND no mark):
         // backfill the whole catalog pre-dismissed and seed the mark. Guarded on
         // episodes.isEmpty so a normally-subscribed podcast never takes this path.
         if podcast.episodes.isEmpty && podcast.lastSeenPubDate == nil {
-            for item in parsed.episodes {
+            for item in parsedEpisodes {
                 let episode = Self.makeEpisode(from: item)
                 episode.podcast = podcast
                 episode.inboxDismissed = true
                 modelContext.insert(episode)
             }
-            podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsed.episodes, now: now) ?? now
+            podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? now
             podcast.refreshedAt = now
-            AppLog.subscriptions.info("Backfilled \(podcast.title, privacy: .public): \(parsed.episodes.count) episode(s)")
+            AppLog.subscriptions.info("Backfilled \(podcast.title, privacy: .public): \(parsedEpisodes.count) episode(s)")
             // Backfilled/pre-existing catalog episodes must NOT trigger
             // auto-download, matching the existing `wasBackfill` notification gate.
             return ApplyOutcome(refreshOutcome: .backfill, newEpisodes: [])
@@ -513,9 +519,9 @@ actor FeedRefreshActor {
         let existingByGUID = Dictionary(
             podcast.episodes.map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
         )
-        resurfaceRepublished(parsed.episodes, existingByGUID: existingByGUID, now: now)
+        resurfaceRepublished(parsedEpisodes, existingByGUID: existingByGUID, now: now)
 
-        for item in parsed.episodes where !existingGUIDs.contains(item.guid) {
+        for item in parsedEpisodes where !existingGUIDs.contains(item.guid) {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
             let pub = item.pubDate ?? .distantPast
@@ -547,7 +553,7 @@ actor FeedRefreshActor {
 
         // Advance the mark to the newest non-future pub date; never retreat, never
         // to a future date (#296).
-        podcast.lastSeenPubDate = max(mark, Self.latestNonFuturePubDate(parsed.episodes, now: now) ?? mark)
+        podcast.lastSeenPubDate = max(mark, Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? mark)
         podcast.refreshedAt = now
 
         // Enroll auto-queue episodes on this same background context, replicating
@@ -571,6 +577,46 @@ actor FeedRefreshActor {
             refreshOutcome: RefreshOutcome(added: added, wasBackfill: false, newestNewEpisodeGUID: newestNewGUID),
             newEpisodes: newEpisodes
         )
+    }
+
+    /// Collapses duplicate natural keys inside one parsed response before the
+    /// actor creates any `Episode` objects. Prefer the newest publication date;
+    /// for equal dates, use a complete stable payload signature so reversing the
+    /// feed's item order still selects the same row.
+    private static func deduplicatedEpisodes(_ episodes: [ParsedEpisode]) -> [ParsedEpisode] {
+        var order: [String] = []
+        var winnerByGUID: [String: ParsedEpisode] = [:]
+        for episode in episodes {
+            guard let current = winnerByGUID[episode.guid] else {
+                order.append(episode.guid)
+                winnerByGUID[episode.guid] = episode
+                continue
+            }
+            let candidateDate = episode.pubDate ?? .distantPast
+            let currentDate = current.pubDate ?? .distantPast
+            if candidateDate > currentDate
+                || (candidateDate == currentDate
+                    && stableSignature(for: episode) < stableSignature(for: current)) {
+                winnerByGUID[episode.guid] = episode
+            }
+        }
+        return order.compactMap { winnerByGUID[$0] }
+    }
+
+    private static func stableSignature(for episode: ParsedEpisode) -> String {
+        let separator = "\u{1F}"
+        return [
+            episode.audioURL,
+            episode.title,
+            episode.description ?? "",
+            episode.artworkURL ?? "",
+            episode.durationSeconds.map(String.init) ?? "",
+            episode.episodeNumber.map(String.init) ?? "",
+            episode.seasonNumber.map(String.init) ?? "",
+            episode.chapterURL ?? "",
+            episode.transcriptURL ?? "",
+            episode.episodeType ?? "",
+        ].joined(separator: separator)
     }
 
     /// Re-surfaces an existing episode to the inbox when its podcast republishes

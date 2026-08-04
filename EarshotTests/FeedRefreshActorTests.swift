@@ -21,9 +21,11 @@ final class FeedRefreshActorTests: XCTestCase {
     private let d2 = Date(timeIntervalSince1970: 1_700_100_000)
     private let d3 = Date(timeIntervalSince1970: 1_700_200_000)
 
-    private func parsedEpisode(_ guid: String, _ date: Date) -> ParsedEpisode {
+    private func parsedEpisode(
+        _ guid: String, _ date: Date, audioURL: String? = nil
+    ) -> ParsedEpisode {
         ParsedEpisode(
-            guid: guid, title: "Ep \(guid)", audioURL: "https://x/\(guid).mp3",
+            guid: guid, title: "Ep \(guid)", audioURL: audioURL ?? "https://x/\(guid).mp3",
             description: nil, pubDate: date, durationSeconds: nil, artworkURL: nil,
             episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
         )
@@ -92,6 +94,37 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).count, 2, "No duplicate rows")
     }
 
+    /// Regression for #778: two entries with the same GUID in one response must
+    /// be collapsed before either unsaved row is inserted. Reversing their feed
+    /// order selects the same canonical payload.
+    func testActorRefreshDeduplicatesGUIDWithinSingleResponse() async throws {
+        func refresh(with items: [ParsedEpisode]) async throws -> (Int, String) {
+            let container = cleanContainer()
+            let seedContext = ModelContext(container)
+            seedContext.insert(Podcast(
+                feedURL: "https://x/feed.xml", title: "Show", lastSeenPubDate: d1
+            ))
+            try seedContext.save()
+
+            let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+                feedURL: "https://x/feed.xml", feed: FakeFeed(parsedFeed(items)),
+                autoQueueEnabled: false
+            )
+            let stored = try episodes(container)
+            return (try XCTUnwrap(outcome).added, try XCTUnwrap(stored.first).audioURL)
+        }
+
+        let a = parsedEpisode("duplicate", d2, audioURL: "https://x/z.mp3")
+        let b = parsedEpisode("duplicate", d2, audioURL: "https://x/a.mp3")
+        let forward = try await refresh(with: [a, b])
+        let reversed = try await refresh(with: [b, a])
+
+        XCTAssertEqual(forward.0, 1)
+        XCTAssertEqual(reversed.0, 1)
+        XCTAssertEqual(forward.1, "https://x/a.mp3")
+        XCTAssertEqual(reversed.1, forward.1, "Winner must not depend on feed item order")
+    }
+
     /// A freshly-migrated shell (no episodes, no mark) backfills its whole catalog
     /// pre-dismissed and is flagged as a backfill (never notifies).
     func testActorBackfillsMigratedShellPreDismissed() async throws {
@@ -110,6 +143,28 @@ final class FeedRefreshActorTests: XCTestCase {
         let stored = try episodes(container)
         XCTAssertEqual(stored.count, 2)
         XCTAssertTrue(stored.allSatisfy { $0.inboxDismissed }, "Backlog pre-dismissed")
+    }
+
+    /// #778 covers migrated shells as well: their first full-catalog backfill
+    /// must not persist duplicate GUIDs from one malformed feed response.
+    func testActorBackfillDeduplicatesGUIDWithinSingleResponse() async throws {
+        let container = cleanContainer()
+        let seedContext = ModelContext(container)
+        seedContext.insert(Podcast(feedURL: "https://x/feed.xml", title: "Shell"))
+        try seedContext.save()
+
+        let first = parsedEpisode("duplicate", d1, audioURL: "https://x/old.mp3")
+        let newer = parsedEpisode("duplicate", d2, audioURL: "https://x/newer.mp3")
+        let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: "https://x/feed.xml", feed: FakeFeed(parsedFeed([first, newer])),
+            autoQueueEnabled: false
+        )
+
+        let stored = try episodes(container)
+        XCTAssertTrue(outcome?.wasBackfill == true)
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored.first?.guid, "duplicate")
+        XCTAssertEqual(stored.first?.audioURL, "https://x/newer.mp3")
     }
 
     // MARK: subscribe (off the caller's context)
@@ -140,6 +195,27 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertTrue(podcast.episodes.allSatisfy { $0.inboxDismissed }, "Seed 0 dismisses the whole backlog")
         XCTAssertEqual(podcast.lastSeenPubDate, d2, "Mark seeded to newest pub date")
         XCTAssertNotNil(podcast.refreshedAt)
+    }
+
+    /// #778 also covers the fresh-subscription path that produced the historical
+    /// Glenn Beck duplicates: one response GUID persists exactly one row.
+    func testActorSubscribeDeduplicatesGUIDWithinSingleResponse() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let first = parsedEpisode("duplicate", d1, audioURL: "https://x/z.mp3")
+        let newer = parsedEpisode("duplicate", d2, audioURL: "https://x/newer.mp3")
+
+        let result = try await actor.subscribe(
+            feedURL: "https://x/feed.xml",
+            feed: FakeFeed(parsedFeed([first, newer])),
+            inboxSeedCount: 0
+        )
+
+        let stored = try episodes(container)
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored.first?.guid, "duplicate")
+        XCTAssertEqual(stored.first?.audioURL, "https://x/newer.mp3")
+        XCTAssertEqual(result.episodeIDs.count, 1)
     }
 
     /// Subscribing with a seed count of N keeps the newest N non-future episodes in
