@@ -80,9 +80,12 @@ final class StoreRecoveryTests: XCTestCase {
     func testBenignNewerStoreIsNeverDeleted() throws {
         try seedNewerStore()
         XCTAssertTrue(storeExists())
+        let before = try Data(contentsOf: storeURL)
 
-        _ = ModelContainerFactory.load(at: storeURL)
+        let load = ModelContainerFactory.load(at: storeURL)
+        XCTAssertEqual(load.recovery, .storeNewerThanApp)
         XCTAssertTrue(storeExists(), "opening a newer store must never delete it")
+        XCTAssertEqual(try Data(contentsOf: storeURL), before, "downgrade detection must not rewrite the store")
     }
 
     // MARK: Corrupt store

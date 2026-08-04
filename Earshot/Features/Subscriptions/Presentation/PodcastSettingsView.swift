@@ -215,7 +215,7 @@ struct PodcastSettingsView: View {
     private var containingFolders: [PodcastFolder] {
         allFolders
             .filter { folder in
-                folder.memberships.contains {
+                (folder.memberships ?? []).contains {
                     $0.podcast?.persistentModelID == podcast.persistentModelID
                 }
             }

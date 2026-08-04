@@ -8,7 +8,7 @@ import SwiftData
 /// nothing about migrations, so this builds a store at the *frozen V3 schema*
 /// with realistic data — including a Podcast that predates the new
 /// `introSkipSeconds` attribute — then opens it through the production path
-/// (`StoreMigration.openOrMigrate`, which runs `EarshotMigrationPlan`) and
+/// (`StoreMigration.openOrMigrate`) and
 /// asserts the upgrade completes without aborting, preserves all data, and reads
 /// back `introSkipSeconds` as nil for every pre-existing row.
 @MainActor
@@ -99,8 +99,7 @@ final class StoreMigrationV3toV4Tests: XCTestCase {
     func testV3StoreMigratesToV4PreservingData() throws {
         try seedV3Store()
 
-        // Migrate via the production path (runs EarshotMigrationPlan, V3->V4
-        // lightweight). This must NOT abort/throw on the new-attribute path.
+        // Migrate via the production path; the added optional field must not throw.
         let v4 = try StoreMigration.openOrMigrate(at: storeURL)
         let ctx = v4.mainContext
 
@@ -138,7 +137,7 @@ final class StoreMigrationV3toV4Tests: XCTestCase {
 
     /// After migrating, the store must reopen cleanly as V4 (no second
     /// migration, data still present).
-    func testMigratedStoreReopensAsV4() throws {
+    func testMigratedStoreReopensAsV8() throws {
         try seedV3Store()
 
         try autoreleasepool {

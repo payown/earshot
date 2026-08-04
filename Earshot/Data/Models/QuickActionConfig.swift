@@ -7,10 +7,10 @@ import SwiftData
 @Model
 final class QuickActionConfig {
     /// Stored as the enum's String raw value.
-    var contentType: QuickActionContentType
+    var contentType: QuickActionContentType = QuickActionContentType.episode
     /// The action identity, e.g. an `EpisodeAction.rawValue`.
-    var actionKey: String
-    var sortOrder: Int
+    var actionKey: String = ""
+    var sortOrder: Int = 0
 
     init(contentType: QuickActionContentType, actionKey: String, sortOrder: Int) {
         self.contentType = contentType

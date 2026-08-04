@@ -5,13 +5,15 @@ import SwiftData
 /// `podcast_folders` table.
 @Model
 final class PodcastFolder {
-    var name: String
-    var sortOrder: Int
+    var name: String = ""
+    var sortOrder: Int = 0
     var queueAgeLimitDays: Int?
-    var createdAt: Date
+    var createdAt: Date = Date.distantPast
 
     @Relationship(deleteRule: .cascade, inverse: \FolderMembership.folder)
-    var memberships: [FolderMembership]
+    var memberships: [FolderMembership]?
+    @Relationship(deleteRule: .cascade, inverse: \EpisodeFolderMembership.folder)
+    var episodeMemberships: [EpisodeFolderMembership]?
 
     /// The parent folder this folder nests under, or nil for a top-level folder
     /// (schema V6, folders phase 1 — #751). Optional and self-referential so the
@@ -25,7 +27,7 @@ final class PodcastFolder {
     /// The folders nested directly under this one (inverse of ``parent``).
     /// Defaults to empty; nesting UI arrives in a later phase.
     @Relationship(deleteRule: .nullify)
-    var children: [PodcastFolder]
+    var children: [PodcastFolder]?
 
     init(
         name: String,
@@ -38,6 +40,7 @@ final class PodcastFolder {
         self.queueAgeLimitDays = queueAgeLimitDays
         self.createdAt = createdAt
         self.memberships = []
+        self.episodeMemberships = []
         self.parent = nil
         self.children = []
     }

@@ -61,7 +61,7 @@ struct EpisodeListView: View {
     /// default ``EpisodeSortOrder/latestFirst`` which preserves the pre-existing
     /// newest-first order). The filter is applied on top of this (#459).
     private var sortedEpisodes: [Episode] {
-        settings.episodeSortOrder.sorted(podcast.episodes)
+        settings.episodeSortOrder.sorted(podcast.episodes ?? [])
     }
 
     /// The visible set: the active filter applied to the sorted episodes.

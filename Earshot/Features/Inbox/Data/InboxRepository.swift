@@ -229,7 +229,7 @@ final class InboxRepository {
     // MARK: Internals
 
     private func applyForPodcast(_ podcast: Podcast, now: Date) {
-        let candidates = podcast.episodes
+        let candidates = (podcast.episodes ?? [])
             .filter { $0.status == .newEpisode && !$0.inboxDismissed }
             .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
 

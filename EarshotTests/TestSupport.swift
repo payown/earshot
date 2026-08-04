@@ -15,6 +15,7 @@ enum TestStore {
     /// Returns the shared context after removing all persisted objects, so each
     /// test starts from an empty store.
     static func freshContext() -> ModelContext {
+        LocalRuntimeState.shared.clear()
         let ctx = container.mainContext
         wipe(ctx, Podcast.self)
         wipe(ctx, Episode.self)
@@ -27,7 +28,9 @@ enum TestStore {
         wipe(ctx, RecentlyExpired.self)
         wipe(ctx, QuickActionConfig.self)
         wipe(ctx, AppSetting.self)
-        wipe(ctx, ActiveDownload.self)
+        wipe(ctx, LocalPodcastState.self)
+        wipe(ctx, LocalEpisodeState.self)
+        wipe(ctx, LocalAppSetting.self)
         try? ctx.save()
         return ctx
     }

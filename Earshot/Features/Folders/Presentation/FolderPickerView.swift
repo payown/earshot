@@ -227,7 +227,7 @@ struct FolderPickerView: View {
         var sourceIDs = Set<PersistentIdentifier>()
 
         if !podcastIDs.isEmpty {
-            for folder in allFolders where folder.memberships.contains(where: {
+            for folder in allFolders where (folder.memberships ?? []).contains(where: {
                 $0.podcast.map { podcastIDs.contains($0.persistentModelID) } == true
             }) {
                 sourceIDs.insert(folder.persistentModelID)

@@ -152,9 +152,9 @@ final class SubscriptionRepositoryTests: XCTestCase {
 
         let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
 
-        XCTAssertEqual(podcast.episodes.count, 2)
+        XCTAssertEqual(podcast.episodes?.count, 2)
         // Both episodes are within the default seed (3), so both are in the inbox.
-        XCTAssertTrue(podcast.episodes.allSatisfy { !$0.inboxDismissed && $0.status == .newEpisode })
+        XCTAssertTrue((podcast.episodes ?? []).allSatisfy { !$0.inboxDismissed && $0.status == .newEpisode })
         XCTAssertEqual(InboxRepository(context: ctx).inboxEpisodes().count, 2)
         XCTAssertEqual(podcast.lastSeenPubDate, d2)
         XCTAssertEqual(podcast.author, "Host")
@@ -249,8 +249,8 @@ final class SubscriptionRepositoryTests: XCTestCase {
         fetcher.feed = feed([episode("a", d1), episode("b", d2), episode("c", d3)])
         try await repo.refresh(podcast)
 
-        XCTAssertEqual(podcast.episodes.count, 3)
-        let c = try XCTUnwrap(podcast.episodes.first { $0.guid == "c" })
+        XCTAssertEqual(podcast.episodes?.count, 3)
+        let c = try XCTUnwrap(podcast.episodes?.first { $0.guid == "c" })
         XCTAssertFalse(c.inboxDismissed) // newer than the mark -> inbox
         XCTAssertEqual(podcast.lastSeenPubDate, d3)
     }
@@ -262,7 +262,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
 
         try await repo.refresh(podcast)
-        XCTAssertEqual(podcast.episodes.count, 1)
+        XCTAssertEqual(podcast.episodes?.count, 1)
     }
 
     func testFirstRefreshBackfillsMigratedShellPreDismissed() async throws {
@@ -276,8 +276,8 @@ final class SubscriptionRepositoryTests: XCTestCase {
 
         try await repo.refresh(shell)
 
-        XCTAssertEqual(shell.episodes.count, 2)
-        XCTAssertTrue(shell.episodes.allSatisfy { $0.inboxDismissed }) // backlog pre-dismissed
+        XCTAssertEqual(shell.episodes?.count, 2)
+        XCTAssertTrue((shell.episodes ?? []).allSatisfy { $0.inboxDismissed }) // backlog pre-dismissed
         XCTAssertEqual(shell.lastSeenPubDate, d2)
         XCTAssertEqual(InboxRepository(context: ctx).inboxEpisodes().count, 0) // inbox starts empty
     }
@@ -368,7 +368,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
 
         // Should complete without error; no downloads fired.
         let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
-        XCTAssertEqual(podcast.episodes.count, 2)
+        XCTAssertEqual(podcast.episodes?.count, 2)
     }
 
     // MARK: Auto-download on refresh (#639)
@@ -416,7 +416,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
         fetcher.feed = feed([episode("a", d1), episode("b", d2)])
         _ = try await repo.refresh(podcast)
 
-        let b = try XCTUnwrap(podcast.episodes.first { $0.guid == "b" })
+        let b = try XCTUnwrap(podcast.episodes?.first { $0.guid == "b" })
         XCTAssertEqual(b.status, .inQueue, "b is auto-queued")
         XCTAssertEqual(
             fakeDownloader.downloaded.map(\.guid), ["b"],
@@ -479,8 +479,8 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let repo = SubscriptionRepository(context: ctx, feed: fetcher)
         let one = try await repo.subscribe(feedURL: "https://x/one.xml")
         let two = try await repo.subscribe(feedURL: "https://x/two.xml")
-        XCTAssertEqual(one.episodes.count, 1)
-        XCTAssertEqual(two.episodes.count, 1)
+        XCTAssertEqual(one.episodes?.count, 1)
+        XCTAssertEqual(two.episodes?.count, 1)
 
         // Both feeds gain a newer episode "b"; refreshAll passes both podcast IDs
         // to mergeBackgroundWrites as affectedPodcastIDs.
@@ -489,10 +489,10 @@ final class SubscriptionRepositoryTests: XCTestCase {
 
         // The new episode is visible on the HELD Podcast objects — the scoped
         // per-podcast re-fault worked without materializing the whole Episode table.
-        XCTAssertEqual(one.episodes.count, 2)
-        XCTAssertEqual(two.episodes.count, 2)
-        XCTAssertTrue(one.episodes.contains { $0.guid == "b" })
-        XCTAssertTrue(two.episodes.contains { $0.guid == "b" })
+        XCTAssertEqual(one.episodes?.count, 2)
+        XCTAssertEqual(two.episodes?.count, 2)
+        XCTAssertTrue(one.episodes?.contains { $0.guid == "b" } == true)
+        XCTAssertTrue(two.episodes?.contains { $0.guid == "b" } == true)
     }
 
     /// `autoDownloadCount == 0` means auto-download is off. This must hold on the
@@ -581,7 +581,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
 
         XCTAssertEqual(outcome.newEpisodeIDs.count, 2, "Both b and c are genuinely new")
         let resolvedGUIDs = Set(outcome.newEpisodeIDs.compactMap { id in
-            podcast.episodes.first { $0.persistentModelID == id }?.guid
+            podcast.episodes?.first { $0.persistentModelID == id }?.guid
         })
         XCTAssertEqual(resolvedGUIDs, ["b", "c"], "Every ID must resolve to the correct main-context episode")
     }
@@ -617,7 +617,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
         fetcher.feed = feed([episode("a", d1), episode("b", d2)])
         try await repo.refresh(podcast)
 
-        let b = try XCTUnwrap(podcast.episodes.first { $0.guid == "b" })
+        let b = try XCTUnwrap(podcast.episodes?.first { $0.guid == "b" })
         // Should be in queue, not inbox.
         XCTAssertEqual(b.status, .inQueue)
         XCTAssertTrue(b.inboxDismissed) // kept out of inbox
@@ -637,7 +637,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
         fetcher.feed = feed([episode("a", d1), episode("b", d2)])
         try await repo.refresh(podcast)
 
-        let b = try XCTUnwrap(podcast.episodes.first { $0.guid == "b" })
+        let b = try XCTUnwrap(podcast.episodes?.first { $0.guid == "b" })
         // Should be in inbox, not queue.
         XCTAssertEqual(b.status, .newEpisode)
         XCTAssertFalse(b.inboxDismissed)
@@ -657,7 +657,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
         fetcher.feed = feed([episode("a", d1), episode("b", d2)])
         try await repo.refresh(podcast)
 
-        let b = try XCTUnwrap(podcast.episodes.first { $0.guid == "b" })
+        let b = try XCTUnwrap(podcast.episodes?.first { $0.guid == "b" })
         // Falls back to inbox because queue was not provided.
         XCTAssertEqual(b.status, .newEpisode)
         XCTAssertFalse(b.inboxDismissed)
@@ -677,7 +677,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
         fetcher.feed = feed([episode("a", d1), episode("old", d0)])
         try await repo.refresh(podcast)
 
-        let old = try XCTUnwrap(podcast.episodes.first { $0.guid == "old" })
+        let old = try XCTUnwrap(podcast.episodes?.first { $0.guid == "old" })
         // Old episodes are pre-dismissed into inbox, not auto-queued.
         XCTAssertEqual(old.status, .newEpisode)
         XCTAssertTrue(old.inboxDismissed) // dismissed, not queued
@@ -1166,8 +1166,8 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let overCap = podcasts[11] // rank 11 — beyond the limit, read-only
 
         await repo.autoDownloadRecent(episodeIDsPerPodcast: [
-            inCap.episodes.map(\.persistentModelID),
-            overCap.episodes.map(\.persistentModelID),
+            (inCap.episodes ?? []).map(\.persistentModelID),
+            (overCap.episodes ?? []).map(\.persistentModelID),
         ])
 
         let downloadedGUIDs = Set(fakeDownloader.downloaded.map(\.guid))

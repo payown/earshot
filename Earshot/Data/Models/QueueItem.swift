@@ -7,8 +7,8 @@ import SwiftData
 final class QueueItem {
     var episode: Episode?
     /// Ordering key. Can go negative for front-insert; compacted periodically.
-    var position: Int
-    var addedAt: Date
+    var position: Int = 0
+    var addedAt: Date = Date.distantPast
 
     init(episode: Episode? = nil, position: Int, addedAt: Date = .now) {
         self.episode = episode

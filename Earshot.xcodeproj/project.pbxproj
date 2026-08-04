@@ -175,6 +175,7 @@
 		86AE4FF0E28426B3DEE4825B /* FeedRefreshActorQueueCapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 559FA1CACE197EB46AC47170 /* FeedRefreshActorQueueCapTests.swift */; };
 		87CC6044B462001318E2253B /* ID3TagFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6065C232A19FD1A5A024AAB /* ID3TagFetcher.swift */; };
 		87D55A542BD1471B1F6DCA83 /* EpisodeRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A621AE99537538C3A0AD021C /* EpisodeRow.swift */; };
+		8BF559C87CEDFDB9969EF3EB /* StoreMigrationV6toV8Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010397285AF42CF34A4098B5 /* StoreMigrationV6toV8Tests.swift */; };
 		8CD550A4FE85E9B86BC5E4CC /* PaywallLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6341126CAC45FBD1D5536F65 /* PaywallLogicTests.swift */; };
 		8D1495183FF1B6F4CE5FB696 /* MultiSelectStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE3131BB99C691E49C5FD0BF /* MultiSelectStateTests.swift */; };
 		8D9E9D1D6DFBA5A966686091 /* DownloadsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88C59BDCD41E5E02F5CF44E3 /* DownloadsSettingsView.swift */; };
@@ -228,6 +229,7 @@
 		B3F50CB656FEE95546017680 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 12C01B02A39EC9D1F2D40E13 /* PrivacyInfo.xcprivacy */; };
 		B420A9580D5A5606098C51CD /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE41691F0E4E9DEF6111C5CA /* AboutView.swift */; };
 		B485218BA32829A9DC997E32 /* FeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1908FA7002380BE2E52E7F8A /* FeedService.swift */; };
+		B5BDA997A7A521EFA326BE42 /* LocalState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D39D22FC661987D9B87331 /* LocalState.swift */; };
 		B77016B49167013804A83D5D /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446E3CD362BA5EC597F7DF75 /* TranscriptView.swift */; };
 		B976F875CA2E076695C9B30B /* StatsPeriod.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA719A9EE6C298B619478083 /* StatsPeriod.swift */; };
 		BA2FEB2E6D8058574743F17E /* TabBarBadgeApplier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B3BE83021D9D2D3FBC6E08B /* TabBarBadgeApplier.swift */; };
@@ -341,6 +343,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		010397285AF42CF34A4098B5 /* StoreMigrationV6toV8Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreMigrationV6toV8Tests.swift; sourceTree = "<group>"; };
 		0140FFFD2CE006140D813DBB /* HTTPClientRetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPClientRetryTests.swift; sourceTree = "<group>"; };
 		0211EBB7D7E3070090F1A781 /* ConfigurationMissingProduct.storekit */ = {isa = PBXFileReference; path = ConfigurationMissingProduct.storekit; sourceTree = "<group>"; };
 		02A02D971B095CF5F43CDFD4 /* PodcastSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastSettingsView.swift; sourceTree = "<group>"; };
@@ -434,6 +437,7 @@
 		46500BE41B67940E468A98FA /* RetryPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetryPolicyTests.swift; sourceTree = "<group>"; };
 		4728275D0F503536DAC8C87F /* QueueLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueLogicTests.swift; sourceTree = "<group>"; };
 		478105CB6C9A1309975A07A1 /* Episode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Episode.swift; sourceTree = "<group>"; };
+		47D39D22FC661987D9B87331 /* LocalState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalState.swift; sourceTree = "<group>"; };
 		4815697742D078E6B5CF9962 /* OnboardingTipsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTipsTests.swift; sourceTree = "<group>"; };
 		4936B28AE733CDBC3C66FA97 /* FeedRefreshPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedRefreshPolicy.swift; sourceTree = "<group>"; };
 		4A620DD9E59E963067557733 /* QuickActionMoveLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionMoveLogic.swift; sourceTree = "<group>"; };
@@ -775,6 +779,7 @@
 				DC01C22C2A3CCC029B3808FB /* EpisodeFolderMembership.swift */,
 				17A60E43D00F2AEB85499BCA /* FolderMembership.swift */,
 				4C882FAEA23E70A49123D92E /* ListeningSession.swift */,
+				47D39D22FC661987D9B87331 /* LocalState.swift */,
 				F0E82F35CB949845DE1189C9 /* ModelEnums.swift */,
 				7CF61D55C48D468680AB681C /* Podcast.swift */,
 				B20EED9B85C78529A51C7C70 /* PodcastFolder.swift */,
@@ -986,6 +991,7 @@
 				C57098ADD143BE0710A2708A /* StoreMigrationV3toV4Tests.swift */,
 				850D2718D82E8A132E609B2D /* StoreMigrationV4toV5Tests.swift */,
 				4B7D9683A52666F8F40AEF70 /* StoreMigrationV5toV6Tests.swift */,
+				010397285AF42CF34A4098B5 /* StoreMigrationV6toV8Tests.swift */,
 				6F1CD87FCFA2AADE99280F54 /* StoreRecoveryTests.swift */,
 				C00465B4E6791980D38E120C /* SubscribeErrorMessageTests.swift */,
 				9CCBE4AE43F4BE56415F15CA /* SubscriptionRepositoryTests.swift */,
@@ -1790,6 +1796,7 @@
 				186179FEC6DF06C0B08AECB9 /* InboxSettingsView.swift in Sources */,
 				9C2E75E2A60C8669922D7B29 /* LibrarySort.swift in Sources */,
 				32BF15D8A033A13EA5B4F6C3 /* ListeningSession.swift in Sources */,
+				B5BDA997A7A521EFA326BE42 /* LocalState.swift in Sources */,
 				F736F4872226E3D2DDDDD76F /* Logger+Earshot.swift in Sources */,
 				D5C89FEE68669F3EC90C8CBA /* MailComposeView.swift in Sources */,
 				EE9986D2EC3F6DE5E32BDBE8 /* ModelContainerFactory.swift in Sources */,
@@ -2007,6 +2014,7 @@
 				241D56FB5DF51ECB2555D8D4 /* StoreMigrationV3toV4Tests.swift in Sources */,
 				40CC041239253992776B0D33 /* StoreMigrationV4toV5Tests.swift in Sources */,
 				06694E7BE6BE607B50C21A18 /* StoreMigrationV5toV6Tests.swift in Sources */,
+				8BF559C87CEDFDB9969EF3EB /* StoreMigrationV6toV8Tests.swift in Sources */,
 				A80AECD0F8C13E66B363ADC8 /* StoreRecoveryTests.swift in Sources */,
 				4AAAB4730C11F316C3858650 /* SubscribeErrorMessageTests.swift in Sources */,
 				12FF5569EF0035E8169F9C7B /* SubscriptionRepositoryTests.swift in Sources */,

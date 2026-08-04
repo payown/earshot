@@ -9,7 +9,7 @@ import SwiftData
 /// *frozen V5 schema* with realistic aged data — several folders, folder
 /// memberships, a podcast with its nullable fields left unset, episodes and queue
 /// items — then opens it through the production path
-/// (`StoreMigration.openOrMigrate`, which runs `EarshotMigrationPlan`) and asserts
+/// (`StoreMigration.openOrMigrate`) and asserts
 /// the upgrade completes without aborting and preserves everything.
 ///
 /// The risk this test exists to catch: V5→V6 adds the ``EpisodeFolderMembership``
@@ -20,7 +20,7 @@ import SwiftData
 /// assertions are on the VALUES that survive, plus proof the new nesting and the
 /// new join table actually work on the migrated store.
 @MainActor
-final class StoreMigrationV5toV6Tests: XCTestCase {
+final class AgedV5StoreMigrationTests: XCTestCase {
 
     nonisolated(unsafe) private var dir: URL!
     nonisolated(unsafe) private var storeURL: URL!
@@ -114,129 +114,56 @@ final class StoreMigrationV5toV6Tests: XCTestCase {
         }
     }
 
-    /// The core assertion: a real V5 store migrates without throwing, and every
-    /// folder + membership survives with its values intact and its brand-new
-    /// `parent` reading back as nil (top-level).
-    func testV5StoreMigratesToV6PreservingFoldersAndMemberships() throws {
-        try seedV5Store()
-
-        let v6 = try StoreMigration.openOrMigrate(at: storeURL)
-        let ctx = v6.mainContext
-
-        let folders = try ctx.fetch(
-            FetchDescriptor<PodcastFolder>(sortBy: [SortDescriptor(\.sortOrder)])
-        )
-        XCTAssertEqual(folders.map(\.name), ["News", "Tech", "Empty"],
-                       "folders were dropped, reordered, or duplicated by the migration")
-        XCTAssertEqual(folders.first { $0.name == "Tech" }?.queueAgeLimitDays, 14,
-                       "pre-existing folder field lost across V5→V6")
-
-        // The new self-referential relationship must default to nil/empty for
-        // every migrated folder — no backfill, no nesting yet.
-        for folder in folders {
-            XCTAssertNil(folder.parent, "\(folder.name) should migrate as top-level (parent == nil)")
-            XCTAssertTrue(folder.children.isEmpty, "\(folder.name) should have no children after migration")
-        }
-
-        let memberships = try ctx.fetch(FetchDescriptor<FolderMembership>())
-        XCTAssertEqual(memberships.count, 3, "folder memberships were lost across the migration")
-
-        let tech = folders.first { $0.name == "Tech" }
-        XCTAssertEqual(tech?.memberships.count, 2, "Tech folder lost a membership")
-        let techFeeds = Set((tech?.memberships ?? []).compactMap { $0.podcast?.feedURL })
-        XCTAssertEqual(techFeeds, ["https://ex.com/one.xml", "https://ex.com/two.xml"])
-        XCTAssertTrue(folders.first { $0.name == "Empty" }?.memberships.isEmpty ?? false)
-    }
-
-    /// Non-folder data must ride through the migration untouched too.
-    func testV5StoreMigrationPreservesPodcastsEpisodesAndQueue() throws {
-        try seedV5Store()
-
-        let v6 = try StoreMigration.openOrMigrate(at: storeURL)
-        let ctx = v6.mainContext
-
-        let podcasts = try ctx.fetch(
-            FetchDescriptor<Podcast>(sortBy: [SortDescriptor(\.feedURL)])
-        )
-        XCTAssertEqual(podcasts.count, 2)
-        XCTAssertEqual(podcasts[0].speedOverride, 1.5, "per-podcast override survives")
-        XCTAssertEqual(podcasts[0].introSkipSeconds, 30, "introSkipSeconds survives")
-        // The second podcast's nullable fields must still read as nil.
-        XCTAssertNil(podcasts[1].author, "NULL optional preserved")
-        XCTAssertNil(podcasts[1].speedOverride, "NULL optional preserved")
-
-        let episodes = try ctx.fetch(FetchDescriptor<Episode>())
-        XCTAssertEqual(episodes.count, 2)
-        XCTAssertEqual(episodes.first { $0.guid == "ep-1" }?.podcast?.feedURL,
-                       "https://ex.com/one.xml", "episode lost its podcast relationship")
-        XCTAssertEqual(try ctx.fetch(FetchDescriptor<QueueItem>()).count, 1)
-    }
-
-    /// The new `EpisodeFolderMembership` entity must exist, start EMPTY, and
-    /// accept writes on the migrated store. An empty table is the correct
-    /// post-migration state — no episode is filed into a folder across an upgrade.
-    func testEpisodeFolderMembershipIsUsableAfterMigration() throws {
-        try seedV5Store()
-
-        let v6 = try StoreMigration.openOrMigrate(at: storeURL)
-        let ctx = v6.mainContext
-
-        var joins = try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>())
-        XCTAssertTrue(joins.isEmpty,
-                      "EpisodeFolderMembership must start empty; found \(joins.count) row(s)")
-
-        guard let episode = try ctx.fetch(FetchDescriptor<Episode>())
-            .first(where: { $0.guid == "ep-1" }),
-            let folder = try ctx.fetch(FetchDescriptor<PodcastFolder>())
-                .first(where: { $0.name == "News" }) else {
-            return XCTFail("seeded episode/folder missing after migration")
-        }
-
-        ctx.insert(EpisodeFolderMembership(folder: folder, episode: episode, sortOrder: 0))
-        try ctx.save()
-
-        joins = try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>())
-        XCTAssertEqual(joins.count, 1)
-        XCTAssertEqual(joins.first?.episode?.guid, "ep-1")
-        XCTAssertEqual(joins.first?.folder?.name, "News")
-    }
-
-    /// The new self-referential nesting must actually work on the migrated store:
-    /// setting `parent` files a folder under another and shows up in `children`.
-    func testFolderNestingWorksAfterMigration() throws {
-        try seedV5Store()
-
-        let v6 = try StoreMigration.openOrMigrate(at: storeURL)
-        let ctx = v6.mainContext
-
-        let folders = try ctx.fetch(FetchDescriptor<PodcastFolder>())
-        guard let news = folders.first(where: { $0.name == "News" }),
-              let tech = folders.first(where: { $0.name == "Tech" }) else {
-            return XCTFail("seeded folders missing after migration")
-        }
-
-        tech.parent = news
-        try ctx.save()
-
-        XCTAssertEqual(tech.parent?.name, "News")
-        XCTAssertEqual(news.children.map(\.name), ["Tech"],
-                       "inverse children collection did not reflect the new parent")
-    }
-
-    /// After migrating, the store must reopen cleanly as V6 (no second migration,
-    /// folders and memberships still present).
-    func testMigratedStoreReopensAsV6() throws {
+    func testV5StoreMigratesToV8AndReopensWithItsGraphIntact() throws {
         try seedV5Store()
 
         try autoreleasepool {
-            _ = try StoreMigration.openOrMigrate(at: storeURL)
+            let container = try StoreMigration.openOrMigrate(at: storeURL)
+            let ctx = container.mainContext
+            let folders = try ctx.fetch(
+                FetchDescriptor<PodcastFolder>(sortBy: [SortDescriptor(\.sortOrder)])
+            )
+            XCTAssertEqual(folders.map(\.name), ["News", "Tech", "Empty"])
+            XCTAssertEqual(folders[1].queueAgeLimitDays, 14)
+            XCTAssertTrue(folders.allSatisfy { $0.parent == nil && ($0.children?.isEmpty ?? true) })
+
+            let memberships = try ctx.fetch(FetchDescriptor<FolderMembership>())
+            XCTAssertEqual(memberships.count, 3)
+            XCTAssertEqual(Set((folders[1].memberships ?? []).compactMap { $0.podcast?.feedURL }),
+                           ["https://ex.com/one.xml", "https://ex.com/two.xml"])
+
+            let podcasts = try ctx.fetch(
+                FetchDescriptor<Podcast>(sortBy: [SortDescriptor(\.feedURL)])
+            )
+            XCTAssertEqual(podcasts.count, 2)
+            XCTAssertEqual(podcasts[0].speedOverride, 1.5)
+            XCTAssertEqual(podcasts[0].introSkipSeconds, 30)
+            XCTAssertNil(podcasts[1].author)
+            XCTAssertNil(podcasts[1].speedOverride)
+
+            let episodes = try ctx.fetch(FetchDescriptor<Episode>())
+            XCTAssertEqual(episodes.count, 2)
+            XCTAssertEqual(episodes.first { $0.guid == "ep-1" }?.podcast?.feedURL,
+                           "https://ex.com/one.xml")
+            XCTAssertEqual(try ctx.fetch(FetchDescriptor<QueueItem>()).count, 1)
+            XCTAssertTrue(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).isEmpty)
+
+            guard let episode = episodes.first(where: { $0.guid == "ep-1" }),
+                  let news = folders.first(where: { $0.name == "News" }),
+                  let tech = folders.first(where: { $0.name == "Tech" }) else {
+                return XCTFail("seeded graph missing after migration")
+            }
+            ctx.insert(EpisodeFolderMembership(folder: news, episode: episode))
+            tech.parent = news
+            try ctx.save()
+            XCTAssertEqual(tech.parent?.name, "News")
+            XCTAssertEqual((news.children ?? []).map(\.name), ["Tech"])
         }
 
         let reopened = try StoreMigration.openOrMigrate(at: storeURL)
         let ctx = reopened.mainContext
-        XCTAssertEqual(try ctx.fetch(FetchDescriptor<PodcastFolder>()).count, 3,
-                       "folders should persist across reopen")
-        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 3,
-                       "memberships should persist across reopen")
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<PodcastFolder>()).count, 3)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 3)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<EpisodeFolderMembership>()).count, 1)
     }
 }

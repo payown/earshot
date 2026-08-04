@@ -1309,9 +1309,9 @@ enum EarshotSchemaV5: VersionedSchema {
     }
 }
 
-/// Version 6 — the **current** schema, and the only versioned schema that
-/// references the live top-level `@Model` types. V1-V5 are frozen nested
-/// snapshots.
+/// Version 6 — the frozen graph shipped in TestFlight build 161. Unchanged V5
+/// model types are reused verbatim; only the three V6 folder types are nested
+/// here because those are the exact entities V5→V6 changed.
 ///
 /// V5→V6 (#751, folders phase 1) is purely additive and adds exactly two
 /// lightweight-inferrable things:
@@ -1331,107 +1331,171 @@ enum EarshotSchemaV6: VersionedSchema {
 
     static var models: [any PersistentModel.Type] {
         [
-            Podcast.self,
-            Episode.self,
-            QueueItem.self,
-            ListeningSession.self,
-            Bookmark.self,
+            EarshotSchemaV5.Podcast.self,
+            EarshotSchemaV5.Episode.self,
+            EarshotSchemaV5.QueueItem.self,
+            EarshotSchemaV5.ListeningSession.self,
+            EarshotSchemaV5.Bookmark.self,
             PodcastFolder.self,
             FolderMembership.self,
-            RecentlyExpired.self,
-            QuickActionConfig.self,
-            AppSetting.self,
-            ActiveDownload.self,
+            EarshotSchemaV5.RecentlyExpired.self,
+            EarshotSchemaV5.QuickActionConfig.self,
+            EarshotSchemaV5.AppSetting.self,
+            EarshotSchemaV5.ActiveDownload.self,
             EpisodeFolderMembership.self,
         ]
     }
+
+    @Model
+    final class PodcastFolder {
+        var name: String
+        var sortOrder: Int
+        var queueAgeLimitDays: Int?
+        var createdAt: Date
+        @Relationship(deleteRule: .cascade, inverse: \EarshotSchemaV6.FolderMembership.folder)
+        var memberships: [EarshotSchemaV6.FolderMembership]
+        @Relationship(deleteRule: .nullify, inverse: \EarshotSchemaV6.PodcastFolder.children)
+        var parent: EarshotSchemaV6.PodcastFolder?
+        @Relationship(deleteRule: .nullify)
+        var children: [EarshotSchemaV6.PodcastFolder]
+
+        init(name: String, sortOrder: Int = 0, queueAgeLimitDays: Int? = nil, createdAt: Date = .now) {
+            self.name = name
+            self.sortOrder = sortOrder
+            self.queueAgeLimitDays = queueAgeLimitDays
+            self.createdAt = createdAt
+            self.memberships = []
+            self.parent = nil
+            self.children = []
+        }
+    }
+
+    @Model
+    final class FolderMembership {
+        var folder: EarshotSchemaV6.PodcastFolder?
+        var podcast: EarshotSchemaV5.Podcast?
+        var sortOrder: Int
+
+        init(folder: EarshotSchemaV6.PodcastFolder? = nil, podcast: EarshotSchemaV5.Podcast? = nil, sortOrder: Int = 0) {
+            self.folder = folder
+            self.podcast = podcast
+            self.sortOrder = sortOrder
+        }
+    }
+
+    @Model
+    final class EpisodeFolderMembership {
+        var folder: EarshotSchemaV6.PodcastFolder?
+        var episode: EarshotSchemaV5.Episode?
+        var sortOrder: Int
+
+        init(folder: EarshotSchemaV6.PodcastFolder? = nil, episode: EarshotSchemaV5.Episode? = nil, sortOrder: Int = 0) {
+            self.folder = folder
+            self.episode = episode
+            self.sortOrder = sortOrder
+        }
+    }
 }
 
-/// The ordered migration plan for the Earshot store.
-///
-/// Five stages:
-///   - **V1→V2** is a `.custom` stage. SwiftData cannot infer it (2 entities
-///     become 10, with new non-optional attributes), so the heavy lifting stays
-///     in ``StoreMigration`` (manual export/reimport). The plan's custom stage
-///     willMigrate is a no-op marker: the real V1 path is handled by
-///     ``StoreMigration/openOrMigrate(at:)`` before the plan ever runs, so this
-///     stage only exists to keep the version chain complete and never throws.
-///   - **V2→V3** is `.lightweight`: `notificationEnabled` becomes optional.
-///   - **V3→V4** is `.lightweight`: adds `introSkipSeconds` (#456).
-///   - **V4→V5** is `.lightweight`: adds the ``ActiveDownload`` entity (#701).
-///   - **V5→V6** is `.lightweight`: adds the ``EpisodeFolderMembership`` entity
-///     and optional self-referential `parent`/`children` relationships on
-///     ``PodcastFolder`` (#751).
-///
-/// Every schema in `schemas` must hash differently: SwiftData validates a plan by
-/// checksumming each one, and two that hash alike abort every migrating store
-/// open with `NSInvalidArgumentException: Duplicate version checksums detected`.
-/// V5 adds an entity the frozen V4 snapshot does not have, and V6 adds another
-/// entity plus new relationships the frozen V5 snapshot does not have, so every
-/// version is checksum-distinct and safe to register.
-enum EarshotMigrationPlan: SchemaMigrationPlan {
+/// Additive single-store bridge. It retains every V6 source field and adds only
+/// scalar rows that can be copied into the separate device-local V8 store.
+enum EarshotSchemaV7: VersionedSchema {
+    static let versionIdentifier = Schema.Version(7, 0, 0)
+
+    static var models: [any PersistentModel.Type] {
+        EarshotSchemaV6.models + [LocalPodcastState.self, LocalEpisodeState.self, LocalAppSetting.self]
+    }
+
+    @Model
+    final class LocalPodcastState {
+        var feedURL: String = ""
+        var refreshedAt: Date?
+        init(feedURL: String = "", refreshedAt: Date? = nil) {
+            self.feedURL = feedURL
+            self.refreshedAt = refreshedAt
+        }
+    }
+
+    @Model
+    final class LocalEpisodeState {
+        var podcastFeedURL: String = ""
+        var episodeGUID: String = ""
+        var downloadStatusRaw: String = DownloadStatus.none.rawValue
+        var downloadPath: String?
+        init(podcastFeedURL: String = "", episodeGUID: String = "", downloadStatusRaw: String = DownloadStatus.none.rawValue, downloadPath: String? = nil) {
+            self.podcastFeedURL = podcastFeedURL
+            self.episodeGUID = episodeGUID
+            self.downloadStatusRaw = downloadStatusRaw
+            self.downloadPath = downloadPath
+        }
+    }
+
+    @Model
+    final class LocalAppSetting {
+        var key: String = ""
+        var value: String = ""
+        init(key: String = "", value: String = "") {
+            self.key = key
+            self.value = value
+        }
+    }
+}
+
+/// CloudKit-ready final graph. Both configurations remain explicitly local in
+/// Sync Phase A; Sync Phase B may enable only the mirrored configuration.
+enum EarshotSchemaV8: VersionedSchema {
+    static let versionIdentifier = Schema.Version(8, 0, 0)
+
+    static var models: [any PersistentModel.Type] {
+        mirroredModels + localModels
+    }
+
+    static let mirroredModels: [any PersistentModel.Type] = [
+        Podcast.self, Episode.self, QueueItem.self, ListeningSession.self,
+        Bookmark.self, PodcastFolder.self, FolderMembership.self,
+        RecentlyExpired.self, QuickActionConfig.self, AppSetting.self,
+        EpisodeFolderMembership.self,
+    ]
+
+    static let localModels: [any PersistentModel.Type] = [
+        LocalPodcastState.self, LocalEpisodeState.self, LocalAppSetting.self,
+    ]
+}
+
+/// The V8 shape of the original store during cutover. Its checksum matches the
+/// final `FutureMirrored` configuration; device-local rows already live in the
+/// separately validated store.
+enum EarshotMirroredSchemaV8: VersionedSchema {
+    static let versionIdentifier = Schema.Version(8, 0, 0)
+    static var models: [any PersistentModel.Type] { EarshotSchemaV8.mirroredModels }
+}
+
+/// Production preflight from the shipped V6 store. V7 is additive, and the
+/// callback commits its bridge rows and completion marker in one transaction.
+enum EarshotBridgeMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [EarshotSchemaV1.self, EarshotSchemaV2.self, EarshotSchemaV3.self,
-         EarshotSchemaV4.self, EarshotSchemaV5.self, EarshotSchemaV6.self]
+        [EarshotSchemaV6.self, EarshotSchemaV7.self]
     }
 
     static var stages: [MigrationStage] {
-        [migrateV1toV2, migrateV2toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6]
+        [.custom(
+            fromVersion: EarshotSchemaV6.self,
+            toVersion: EarshotSchemaV7.self,
+            willMigrate: nil,
+            didMigrate: { try SyncBridgeBackfill.populate(in: $0) }
+        )]
+    }
+}
+
+/// Final cutover plan used only after the original store has reached V7 and the
+/// separate local copy is validated. Keeping older, pre-local schemas out of
+/// this two-configuration open avoids identical empty per-configuration hashes.
+enum EarshotFinalMigrationPlan: SchemaMigrationPlan {
+    static var schemas: [any VersionedSchema.Type] {
+        [EarshotSchemaV7.self, EarshotMirroredSchemaV8.self]
     }
 
-    /// Marker stage. The real V1→V2 transform is the manual export/reimport in
-    /// ``StoreMigration`` (a V1 store is never opened directly as V4 with this
-    /// plan), so this stage does no work and cannot fail.
-    static let migrateV1toV2 = MigrationStage.custom(
-        fromVersion: EarshotSchemaV1.self,
-        toVersion: EarshotSchemaV2.self,
-        willMigrate: nil,
-        didMigrate: nil
-    )
-
-    /// `Podcast.notificationEnabled` goes from `Bool` to `Bool?`. Making an
-    /// attribute optional is a standard lightweight change; existing rows keep
-    /// their stored value and the model coalesces nil to false on read.
-    static let migrateV2toV3 = MigrationStage.lightweight(
-        fromVersion: EarshotSchemaV2.self,
-        toVersion: EarshotSchemaV3.self
-    )
-
-    /// Adds `Podcast.introSkipSeconds: Int?` (#456). A new optional attribute
-    /// defaults to nil for every existing row — no per-podcast intro skip until
-    /// the user configures one.
-    static let migrateV3toV4 = MigrationStage.lightweight(
-        fromVersion: EarshotSchemaV3.self,
-        toVersion: EarshotSchemaV4.self
-    )
-
-    /// Adds the ``ActiveDownload`` entity (#701). A brand-new entity is exactly
-    /// what lightweight inference handles best: it creates an empty table and
-    /// touches no existing row. `Episode` is deliberately NOT reshaped, so the
-    /// 241,979 episode rows on a real library are never rewritten.
-    ///
-    /// An empty `ActiveDownload` table is the CORRECT post-migration state — no
-    /// download is in flight across an app update — so there is nothing to
-    /// backfill. Verified end to end by `StoreMigrationV4toV5Tests`, which
-    /// migrates a real on-disk V4 store and asserts every `downloadStatus` value
-    /// survives intact.
-    static let migrateV4toV5 = MigrationStage.lightweight(
-        fromVersion: EarshotSchemaV4.self,
-        toVersion: EarshotSchemaV5.self
-    )
-
-    /// Adds the ``EpisodeFolderMembership`` entity and the optional
-    /// self-referential `parent`/`children` relationships on ``PodcastFolder``
-    /// (#751, folders phase 1). Both changes are additive: a brand-new entity is
-    /// exactly what lightweight inference handles best (an empty table, no
-    /// existing row touched), and new OPTIONAL relationships default to
-    /// nil/empty for every existing row — no non-optional attribute is added and
-    /// no column is reshaped. Every existing folder reads back as top-level
-    /// (`parent == nil`) with no backfill, and `Episode` is deliberately left
-    /// with no inverse for the new join, so a large library's episode rows are
-    /// never rewritten. Verified end to end by `StoreMigrationV5toV6Tests`.
-    static let migrateV5toV6 = MigrationStage.lightweight(
-        fromVersion: EarshotSchemaV5.self,
-        toVersion: EarshotSchemaV6.self
-    )
+    static var stages: [MigrationStage] {
+        [.lightweight(fromVersion: EarshotSchemaV7.self, toVersion: EarshotMirroredSchemaV8.self)]
+    }
 }

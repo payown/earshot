@@ -393,7 +393,7 @@ actor FeedRefreshActor {
         // Seed the high-water mark to the newest NON-FUTURE pub date so a misdated
         // future episode can't push the mark ahead of real new episodes (#296).
         podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? now
-        podcast.refreshedAt = now
+        LocalStateStore.setRefreshedAt(now, on: podcast, in: modelContext)
         AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsedEpisodes.count) episodes, seeded \(min(inboxSeedCount < 0 ? insertedEpisodes.count : inboxSeedCount, insertedEpisodes.count)) into inbox")
 
         return SubscribeOutcome(podcast: podcast, episodes: insertedEpisodes, alreadySubscribed: false)
@@ -486,7 +486,7 @@ actor FeedRefreshActor {
         // First refresh of a freshly-migrated shell (no episodes AND no mark):
         // backfill the whole catalog pre-dismissed and seed the mark. Guarded on
         // episodes.isEmpty so a normally-subscribed podcast never takes this path.
-        if podcast.episodes.isEmpty && podcast.lastSeenPubDate == nil {
+        if (podcast.episodes?.isEmpty ?? true) && podcast.lastSeenPubDate == nil {
             for item in parsedEpisodes {
                 let episode = Self.makeEpisode(from: item)
                 episode.podcast = podcast
@@ -494,14 +494,14 @@ actor FeedRefreshActor {
                 modelContext.insert(episode)
             }
             podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? now
-            podcast.refreshedAt = now
+            LocalStateStore.setRefreshedAt(now, on: podcast, in: modelContext)
             AppLog.subscriptions.info("Backfilled \(podcast.title, privacy: .public): \(parsedEpisodes.count) episode(s)")
             // Backfilled/pre-existing catalog episodes must NOT trigger
             // auto-download, matching the existing `wasBackfill` notification gate.
             return ApplyOutcome(refreshOutcome: .backfill, newEpisodes: [])
         }
 
-        let existingGUIDs = Set(podcast.episodes.map(\.guid))
+        let existingGUIDs = Set((podcast.episodes ?? []).map(\.guid))
         // Clamp an already-future mark back to now so a previously-poisoned mark
         // can't keep real new episodes out of the inbox (#296).
         let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
@@ -517,7 +517,7 @@ actor FeedRefreshActor {
         // Lookup by guid for the republish pass below (#397), built once instead
         // of a per-item linear scan.
         let existingByGUID = Dictionary(
-            podcast.episodes.map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
+            (podcast.episodes ?? []).map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
         )
         resurfaceRepublished(parsedEpisodes, existingByGUID: existingByGUID, now: now)
 
@@ -554,7 +554,7 @@ actor FeedRefreshActor {
         // Advance the mark to the newest non-future pub date; never retreat, never
         // to a future date (#296).
         podcast.lastSeenPubDate = max(mark, Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? mark)
-        podcast.refreshedAt = now
+        LocalStateStore.setRefreshedAt(now, on: podcast, in: modelContext)
 
         // Enroll auto-queue episodes on this same background context, replicating
         // the minimal QueueRepository.add() enqueue (the real QueueRepository is
@@ -712,7 +712,7 @@ actor FeedRefreshActor {
     /// playing or the playing episode isn't queued, so the cap never dequeues it.
     private func currentlyPlayingQueueItemID() -> PersistentIdentifier? {
         let key = SettingsKey.lastPlayingEpisodeID
-        guard let stored = AppSettingIdentity.value(for: key, in: modelContext),
+        guard let stored = LocalAppSettingIdentity.value(for: key, in: modelContext),
               !stored.isEmpty else { return nil }
         guard let episode = DownloadTaskKey.episode(matching: stored, in: modelContext) else { return nil }
         return episode.queueItem?.persistentModelID

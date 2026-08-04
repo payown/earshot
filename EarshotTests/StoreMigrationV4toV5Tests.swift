@@ -7,9 +7,8 @@ import SwiftData
 /// `.claude/rules/database-migrations.md` rule 2 / the SwiftUI section's required
 /// CI gate). A fresh `onCreate` proves nothing about migrations, so this builds a
 /// store at the *frozen V4 schema* with realistic data, then opens it through the
-/// production path (`StoreMigration.openOrMigrate`, which runs
-/// `EarshotMigrationPlan`) and asserts the upgrade completes without aborting and
-/// preserves everything.
+/// production path (`StoreMigration.openOrMigrate`) and asserts the upgrade
+/// completes without aborting and preserves recoverable state.
 ///
 /// The risk this test exists to catch: V4→V5 adds the ``ActiveDownload`` entity,
 /// and a store carrying 241,979 episodes runs this migration on first launch. If
@@ -135,7 +134,7 @@ final class StoreMigrationV4toV5Tests: XCTestCase {
     /// migrates, and every `downloadStatus` value comes back INTACT. `Episode` is
     /// not reshaped by V4→V5, so nothing should be able to touch these values —
     /// this proves it.
-    func testV4StoreMigratesToV5PreservingEveryDownloadStatus() throws {
+    func testV4StoreMigratesToV8NormalizingStaleTransferStates() throws {
         try seedV4Store()
 
         let v5 = try StoreMigration.openOrMigrate(at: storeURL)
@@ -145,12 +144,16 @@ final class StoreMigrationV4toV5Tests: XCTestCase {
         XCTAssertEqual(episodes.count, Self.downloadCases.count + 2,
                        "migration dropped or duplicated episode rows")
 
-        for (guid, expected) in Self.downloadCases {
+        for (guid, source) in Self.downloadCases {
             guard let ep = episodes.first(where: { $0.guid == guid }) else {
                 return XCTFail("episode \(guid) did not survive the migration")
             }
+            // V4 had no durable transfer table. Only a completed file can be
+            // trusted after relaunch; stale pending/downloading/failed flags
+            // normalize to none because no resumable task exists.
+            let expected: DownloadStatus = source == .downloaded ? .downloaded : .none
             XCTAssertEqual(ep.downloadStatus, expected,
-                           "\(guid): downloadStatus was not preserved across V4→V5")
+                           "\(guid): downloadStatus was not normalized safely")
         }
 
         // The downloaded row keeps its path; the others keep their NULL.
@@ -170,16 +173,17 @@ final class StoreMigrationV4toV5Tests: XCTestCase {
         let v5 = try StoreMigration.openOrMigrate(at: storeURL)
         let ctx = v5.mainContext
 
-        let rows = try ctx.fetch(FetchDescriptor<ActiveDownload>())
-        XCTAssertTrue(rows.isEmpty,
-                      "ActiveDownload must start empty after migration; found \(rows.count) row(s)")
+        let rows = try ctx.fetch(FetchDescriptor<LocalEpisodeState>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.episodeGUID, "ep-downloaded")
+        XCTAssertEqual(rows.first?.downloadStatus, .downloaded)
 
         // And the plain-String predicate this table exists for must actually run
         // against the migrated store (a Codable-enum predicate throws; this must
         // not).
         let downloading = ActiveDownloadState.downloading.rawValue
         let found = try ctx.fetch(
-            FetchDescriptor<ActiveDownload>(predicate: #Predicate { $0.stateRaw == downloading })
+            FetchDescriptor<LocalEpisodeState>(predicate: #Predicate { $0.downloadStatusRaw == downloading })
         )
         XCTAssertTrue(found.isEmpty)
     }
@@ -198,10 +202,10 @@ final class StoreMigrationV4toV5Tests: XCTestCase {
         ActiveDownload.setDownloadStatus(.downloading, on: episode, in: ctx)
         try ctx.save()
 
-        let rows = try ctx.fetch(FetchDescriptor<ActiveDownload>())
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows.first?.state, .downloading)
-        XCTAssertEqual(rows.first?.episode?.guid, "ep-none")
+        let rows = try ctx.fetch(FetchDescriptor<LocalEpisodeState>())
+        XCTAssertEqual(rows.count, 2)
+        let written = rows.first { $0.episodeGUID == "ep-none" }
+        XCTAssertEqual(written?.downloadStatus, .downloading)
         XCTAssertEqual(episode.downloadStatus, .downloading)
     }
 
@@ -233,7 +237,7 @@ final class StoreMigrationV4toV5Tests: XCTestCase {
 
     /// After migrating, the store must reopen cleanly as V5 (no second migration,
     /// data still present, download states still intact).
-    func testMigratedStoreReopensAsV5() throws {
+    func testMigratedStoreReopensAsV8() throws {
         try seedV4Store()
 
         try autoreleasepool {
@@ -246,7 +250,7 @@ final class StoreMigrationV4toV5Tests: XCTestCase {
         XCTAssertEqual(episodes.count, Self.downloadCases.count + 2,
                        "data should persist across reopen")
         XCTAssertEqual(episodes.first { $0.guid == "ep-downloading" }?.downloadStatus,
-                       .downloading, "download state survives a reopen too")
-        XCTAssertTrue(try ctx.fetch(FetchDescriptor<ActiveDownload>()).isEmpty)
+                       DownloadStatus.none, "stale transfer state remains normalized on reopen")
+        XCTAssertFalse(try ctx.fetch(FetchDescriptor<LocalEpisodeState>()).isEmpty)
     }
 }

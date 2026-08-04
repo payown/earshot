@@ -150,6 +150,34 @@ enum SettingsKey {
     static let grandfatheredPodcastCount = "grandfathered_podcast_count"
 }
 
+enum AppSettingScope {
+    private static let mirroredKeys: Set<String> = [
+        SettingsKey.autoDownloadCount, SettingsKey.historyRetentionDays,
+        SettingsKey.downloadRetentionDays, SettingsKey.voiceEnhanceEnabled,
+        SettingsKey.globalSpeed, SettingsKey.skipForwardSeconds,
+        SettingsKey.skipBackSeconds, SettingsKey.chapterNavButtonsVisible,
+        SettingsKey.inboxOptInOnly, SettingsKey.wifiOnlyDownloads,
+        SettingsKey.deleteDownloadAfterPlayed, SettingsKey.autoDownloadQueued,
+        SettingsKey.downloadsPlayedFilter, SettingsKey.groupQueueEpisodes,
+        SettingsKey.showEpisodeNumbers, SettingsKey.openPlayerOnPlay,
+        SettingsKey.continueAfterEpisode, SettingsKey.continueAfterGroupEnds,
+        SettingsKey.defaultLaunchScreen, SettingsKey.librarySortOrder,
+        SettingsKey.episodeSortOrder, SettingsKey.statsStreaksEnabled,
+        SettingsKey.inboxDefaultCount, SettingsKey.themeOverride,
+        SettingsKey.accentColor, SettingsKey.layoutDensity,
+        SettingsKey.podcastCapGatingIntroduced, SettingsKey.grandfatheredPodcastCount,
+    ]
+
+    static func isLocal(_ key: String) -> Bool {
+        let canonical = AppSettingIdentity.canonicalKey(key)
+        if canonical.hasPrefix(SettingsKey.podcastFilterPrefix)
+            || canonical.hasPrefix(SettingsKey.podcastInboxCapPrefix) {
+            return false
+        }
+        return !mirroredKeys.contains(canonical)
+    }
+}
+
 /// Documented defaults for settings not yet written by the user.
 enum SettingsDefault {
     static let autoDownloadCount = 3
@@ -227,12 +255,19 @@ final class AppSettingsStore {
     // MARK: Raw access
 
     func rawValue(_ key: String) -> String? {
-        AppSettingIdentity.value(for: key, in: context)
+        if AppSettingScope.isLocal(key) {
+            return LocalAppSettingIdentity.value(for: key, in: context)
+        }
+        return AppSettingIdentity.value(for: key, in: context)
     }
 
     func setRawValue(_ value: String, for key: String) {
         do {
-            try AppSettingIdentity.setValue(value, for: key, in: context)
+            if AppSettingScope.isLocal(key) {
+                try LocalAppSettingIdentity.setValue(value, for: key, in: context)
+            } else {
+                try AppSettingIdentity.setValue(value, for: key, in: context)
+            }
             save()
         } catch {
             AppLog.data.error(

@@ -160,6 +160,27 @@ enum AppSettingIdentity {
     }
 }
 
+enum LocalAppSettingIdentity {
+    static func rows(for key: String, in context: ModelContext) throws -> [LocalAppSetting] {
+        try context.fetch(
+            FetchDescriptor<LocalAppSetting>(predicate: #Predicate { $0.key == key })
+        ).sorted { stableID($0) < stableID($1) }
+    }
+
+    static func value(for key: String, in context: ModelContext) -> String? {
+        try? rows(for: key, in: context).first?.value
+    }
+
+    static func setValue(_ value: String, for key: String, in context: ModelContext) throws {
+        let matches = try rows(for: key, in: context)
+        let survivor = matches.first ?? LocalAppSetting(key: key, value: value)
+        if matches.isEmpty { context.insert(survivor) }
+        survivor.key = key
+        survivor.value = value
+        for duplicate in matches.dropFirst() { context.delete(duplicate) }
+    }
+}
+
 struct IdentityRepairReport: Equatable {
     var podcastsInspected = 0
     var settingsInspected = 0
@@ -277,7 +298,7 @@ struct IdentityRepairService {
             }
         }
 
-        let episodes = group.flatMap(\.episodes)
+        let episodes = group.flatMap { $0.episodes ?? [] }
         report.episodesInspected += episodes.count
         try repairEpisodeGroups(episodes, survivorPodcast: survivor, report: &report)
 
@@ -290,6 +311,7 @@ struct IdentityRepairService {
             report.podcastsRemoved += 1
         }
         survivor.feedURL = canonicalFeedURL
+        LocalStateStore.setRefreshedAt(survivor.refreshedAt, on: survivor, in: context)
     }
 
     private func repairEpisodeGroups(
@@ -341,7 +363,7 @@ struct IdentityRepairService {
         }
 
         for duplicate in ordered.dropFirst() {
-            for bookmark in duplicate.bookmarks {
+            for bookmark in duplicate.bookmarks ?? [] {
                 bookmark.episode = survivor
                 report.relationshipsRetargeted += 1
             }
@@ -378,15 +400,6 @@ struct IdentityRepairService {
         )
         for membership in memberships {
             membership.episode = survivor
-            report.relationshipsRetargeted += 1
-        }
-        let activeDownloads = try context.fetch(
-            FetchDescriptor<ActiveDownload>(
-                predicate: #Predicate { $0.episode?.persistentModelID == duplicateID }
-            )
-        )
-        for activeDownload in activeDownloads {
-            activeDownload.episode = survivor
             report.relationshipsRetargeted += 1
         }
     }

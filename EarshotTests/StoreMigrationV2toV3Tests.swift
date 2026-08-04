@@ -8,7 +8,7 @@ import SwiftData
 /// nothing about migrations, so this builds a store at the *frozen V2 schema*
 /// with realistic data — including a Podcast whose `notificationEnabled` is the
 /// non-optional V2 Bool — then opens it through the production path
-/// (`StoreMigration.openOrMigrate`, which runs `EarshotMigrationPlan`) and
+/// (`StoreMigration.openOrMigrate`) and
 /// asserts the upgrade completes without aborting and preserves all data.
 @MainActor
 final class StoreMigrationV2toV3Tests: XCTestCase {
@@ -105,8 +105,7 @@ final class StoreMigrationV2toV3Tests: XCTestCase {
     func testV2StoreMigratesToV3PreservingData() throws {
         try seedV2Store()
 
-        // Migrate via the production path (runs EarshotMigrationPlan, V2->V3
-        // lightweight). This must NOT abort/throw on the missing-optional path.
+        // Migrate via the production path; nullable legacy data must not throw.
         let v3 = try StoreMigration.openOrMigrate(at: storeURL)
         let ctx = v3.mainContext
 
@@ -157,7 +156,7 @@ final class StoreMigrationV2toV3Tests: XCTestCase {
 
     /// After migrating, the store must reopen cleanly as V3 (no second
     /// migration, data still present).
-    func testMigratedStoreReopensAsV3() throws {
+    func testMigratedStoreReopensAsV8() throws {
         try seedV2Store()
 
         try autoreleasepool {

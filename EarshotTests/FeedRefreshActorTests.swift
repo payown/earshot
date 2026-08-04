@@ -191,8 +191,8 @@ final class FeedRefreshActorTests: XCTestCase {
         let podcast = try XCTUnwrap(podcasts.first)
         XCTAssertEqual(podcast.title, "Show")
         XCTAssertEqual(podcast.author, "Host")
-        XCTAssertEqual(podcast.episodes.count, 2)
-        XCTAssertTrue(podcast.episodes.allSatisfy { $0.inboxDismissed }, "Seed 0 dismisses the whole backlog")
+        XCTAssertEqual(podcast.episodes?.count, 2)
+        XCTAssertTrue((podcast.episodes ?? []).allSatisfy { $0.inboxDismissed }, "Seed 0 dismisses the whole backlog")
         XCTAssertEqual(podcast.lastSeenPubDate, d2, "Mark seeded to newest pub date")
         XCTAssertNotNil(podcast.refreshedAt)
     }

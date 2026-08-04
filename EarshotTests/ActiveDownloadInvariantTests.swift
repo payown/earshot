@@ -4,8 +4,8 @@ import SwiftData
 
 /// The invariant that makes the bounded launch-path scans trustworthy (#701):
 ///
-/// > An ``ActiveDownload`` row exists **if and only if** its episode's
-/// > `downloadStatus` is `.pending` or `.downloading`.
+/// > Every non-`.none` device download state has exactly one scalar local row;
+/// > pending/downloading remain directly queryable for launch reconciliation.
 ///
 /// If the two can diverge, an episode stuck at `.downloading` with no row is
 /// invisible to `reconcileStuckDownloads()` and spins forever — issue #544
@@ -19,11 +19,10 @@ import SwiftData
 @MainActor
 final class ActiveDownloadInvariantTests: XCTestCase {
 
-    /// The whole table. Tiny by design (bounded by in-flight user action), which
-    /// is what lets the launch path query it instead of the 242k-row Episode
-    /// table.
-    private func rows(in context: ModelContext) -> [ActiveDownload] {
-        (try? context.fetch(FetchDescriptor<ActiveDownload>())) ?? []
+    /// The whole local table. It is bounded by device download activity rather
+    /// than by the full mirrored Episode library.
+    private func rows(in context: ModelContext) -> [LocalEpisodeState] {
+        (try? context.fetch(FetchDescriptor<LocalEpisodeState>())) ?? []
     }
 
     /// Asserts the invariant holds for `episode` across the whole table.
@@ -31,21 +30,28 @@ final class ActiveDownloadInvariantTests: XCTestCase {
         _ episode: Episode, in context: ModelContext,
         _ message: String, line: UInt = #line
     ) {
-        let mine = rows(in: context).filter {
-            $0.episode?.persistentModelID == episode.persistentModelID
+        let key = LocalStateStore.key(for: episode)
+        let mine = rows(in: context).filter { row in
+            key.map {
+                row.episodeGUID == $0.guid
+                    && FeedURLIdentity.canonical(row.podcastFeedURL) == $0.feedURL
+            } ?? false
         }
         switch episode.downloadStatus {
         case .pending, .downloading:
             XCTAssertEqual(mine.count, 1,
                            "\(message): exactly one row must exist at \(episode.downloadStatus)",
                            line: line)
-            XCTAssertEqual(mine.first?.stateRaw, episode.downloadStatus.rawValue,
+            XCTAssertEqual(mine.first?.downloadStatusRaw, episode.downloadStatus.rawValue,
                            "\(message): row state must match downloadStatus", line: line)
-        case .none, .downloaded, .failed:
+        case .none:
             XCTAssertTrue(mine.isEmpty,
                           "\(message): no row may survive terminal state "
                               + "\(episode.downloadStatus); found \(mine.count)",
                           line: line)
+        case .downloaded, .failed:
+            XCTAssertEqual(mine.count, 1, "\(message): terminal device state must persist", line: line)
+            XCTAssertEqual(mine.first?.downloadStatusRaw, episode.downloadStatus.rawValue, line: line)
         }
     }
 
@@ -61,7 +67,7 @@ final class ActiveDownloadInvariantTests: XCTestCase {
 
     // MARK: The three lifecycles
 
-    func test_lifecycle_startToComplete_leavesNoRow() throws {
+    func test_lifecycle_startToComplete_persistsTerminalLocalState() throws {
         let context = TestStore.freshContext()
         let episode = makeEpisode(context)
 
@@ -72,10 +78,10 @@ final class ActiveDownloadInvariantTests: XCTestCase {
         ActiveDownload.setDownloadStatus(.downloaded, on: episode, in: context)
         try context.save()
         assertInvariant(episode, in: context, "after complete")
-        XCTAssertTrue(rows(in: context).isEmpty)
+        XCTAssertEqual(rows(in: context).first?.downloadStatus, .downloaded)
     }
 
-    func test_lifecycle_startToFail_leavesNoRow() throws {
+    func test_lifecycle_startToFail_persistsTerminalLocalState() throws {
         let context = TestStore.freshContext()
         let episode = makeEpisode(context)
 
@@ -86,7 +92,7 @@ final class ActiveDownloadInvariantTests: XCTestCase {
         ActiveDownload.setDownloadStatus(.failed, on: episode, in: context)
         try context.save()
         assertInvariant(episode, in: context, "after fail")
-        XCTAssertTrue(rows(in: context).isEmpty)
+        XCTAssertEqual(rows(in: context).first?.downloadStatus, .failed)
     }
 
     func test_lifecycle_startToRemove_leavesNoRow() throws {
@@ -172,8 +178,11 @@ final class ActiveDownloadInvariantTests: XCTestCase {
         try context.save()
         assertInvariant(a, in: context, "a done")
         assertInvariant(b, in: context, "b untouched by a completing")
-        XCTAssertEqual(rows(in: context).count, 1)
-        XCTAssertEqual(rows(in: context).first?.episode?.guid, "inv-b")
+        let active = rows(in: context).filter {
+            $0.downloadStatus == .pending || $0.downloadStatus == .downloading
+        }
+        XCTAssertEqual(active.count, 1)
+        XCTAssertEqual(active.first?.episodeGUID, "inv-b")
     }
 
     // MARK: Removal of the episode itself
@@ -212,7 +221,7 @@ final class ActiveDownloadInvariantTests: XCTestCase {
 
         _ = SubscriptionRepository(context: context).unsubscribe(doomedPodcast)
 
-        XCTAssertEqual(rows(in: context).map { $0.episode?.guid }, ["inv-keeper"])
+        XCTAssertEqual(rows(in: context).map(\.episodeGUID), ["inv-keeper"])
         assertInvariant(keeper, in: context, "keeper still in flight")
     }
 }

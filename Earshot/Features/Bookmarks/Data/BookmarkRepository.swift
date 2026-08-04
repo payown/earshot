@@ -14,7 +14,7 @@ final class BookmarkRepository {
 
     /// An episode's bookmarks, earliest position first.
     func bookmarks(for episode: Episode) -> [Bookmark] {
-        episode.bookmarks.sorted { $0.positionSeconds < $1.positionSeconds }
+        (episode.bookmarks ?? []).sorted { $0.positionSeconds < $1.positionSeconds }
     }
 
     /// Adds a bookmark at `positionSeconds` (clamped to >= 0). The note is

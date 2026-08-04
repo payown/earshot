@@ -128,16 +128,25 @@ enum ModelContainerFactory {
     @discardableResult
     static func resetCorruptStore(at url: URL) -> URL? {
         let backup = backupStoreFiles(at: url)
+        _ = backupStoreFiles(at: StoreMigration.localStoreURL(for: url))
         removeStoreFiles(at: url)
+        removeStoreFiles(at: StoreMigration.localStoreURL(for: url))
         AppLog.data.info("Reset local data after backup; a fresh store will be created on next launch")
         return backup
     }
 
     /// An ephemeral in-memory container for tests and previews.
     static func makeInMemory() throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-        return try ModelContainer(for: schema, configurations: config)
+        let schema = Schema(versionedSchema: EarshotSchemaV8.self)
+        let mirrored = ModelConfiguration(
+            "FutureMirrored", schema: Schema(EarshotSchemaV8.mirroredModels),
+            isStoredInMemoryOnly: true, cloudKitDatabase: .none
+        )
+        let local = ModelConfiguration(
+            "DeviceLocal", schema: Schema(EarshotSchemaV8.localModels),
+            isStoredInMemoryOnly: true, cloudKitDatabase: .none
+        )
+        return try ModelContainer(for: schema, configurations: mirrored, local)
     }
 
     /// A container registering only a throwaway model, used by the app when it

@@ -16,24 +16,112 @@ enum StoreOpenError: Error {
     case unreadable(underlying: Error)
 }
 
-/// Store open + manual V1 migration (issues #355, #425).
-///
-/// The current schema is ``EarshotSchemaV6`` and the normal open path runs the
-/// ``EarshotMigrationPlan``, which registers five stages: V1→V2 (a `.custom`
-/// no-op marker), then V2→V3, V3→V4, V4→V5 and V5→V6 (all SwiftData-native
-/// lightweight stages, so a V2, V3, V4 or V5 store migrates rather than aborts).
-/// V4→V5 adds the ``ActiveDownload`` entity (#701); V5→V6 adds the
-/// ``EpisodeFolderMembership`` entity and optional `parent`/`children` nesting on
-/// ``PodcastFolder`` (#751). Both are additive — `Episode` is untouched, so a
-/// large library's episode rows are never rewritten.
-///
-/// SwiftData still can't infer the original V1→V2 jump (2 entities become 10,
-/// with new non-optional attributes), so a store still at the original V1 schema
-/// is handled here by a manual export/reimport: read it through
-/// ``EarshotSchemaV1``, snapshot it into plain values, replace the store file,
-/// and reinsert the data as current (V6) objects. This preserves the tester's
-/// subscriptions, episodes, and played state.
+enum SyncBridgeBackfill {
+    static func populate(in context: ModelContext) throws {
+        let marker = StoreMigration.bridgeCompletionKey
+        let existingMarkers = try context.fetch(
+            FetchDescriptor<EarshotSchemaV7.LocalAppSetting>(
+                predicate: #Predicate { $0.key == marker }
+            )
+        )
+        if !existingMarkers.isEmpty { return }
+
+        let podcasts = try context.fetch(FetchDescriptor<EarshotSchemaV5.Podcast>())
+        var podcastRows: [String: EarshotSchemaV7.LocalPodcastState] = [:]
+        for podcast in podcasts {
+            guard let refreshedAt = podcast.refreshedAt else { continue }
+            let key = FeedURLIdentity.canonical(podcast.feedURL)
+            if let existing = podcastRows[key] {
+                existing.refreshedAt = max(existing.refreshedAt ?? .distantPast, refreshedAt)
+            } else {
+                let row = EarshotSchemaV7.LocalPodcastState(feedURL: key, refreshedAt: refreshedAt)
+                context.insert(row)
+                podcastRows[key] = row
+            }
+        }
+
+        var episodeRows: [String: EarshotSchemaV7.LocalEpisodeState] = [:]
+        let downloaded = try context.fetch(
+            FetchDescriptor<EarshotSchemaV5.Episode>(
+                predicate: #Predicate { $0.downloadPath != nil }
+            )
+        )
+        for episode in downloaded {
+            guard let feedURL = episode.podcast?.feedURL,
+                  let path = episode.downloadPath, !path.isEmpty else { continue }
+            let feed = FeedURLIdentity.canonical(feedURL)
+            let key = DownloadTaskKey.key(feedURL: feed, guid: episode.guid)
+            let row = EarshotSchemaV7.LocalEpisodeState(
+                podcastFeedURL: feed,
+                episodeGUID: episode.guid,
+                downloadStatusRaw: DownloadStatus.downloaded.rawValue,
+                downloadPath: path
+            )
+            context.insert(row)
+            episodeRows[key] = row
+        }
+
+        let active = try context.fetch(FetchDescriptor<EarshotSchemaV5.ActiveDownload>())
+        for transfer in active {
+            guard let episode = transfer.episode,
+                  let feedURL = episode.podcast?.feedURL,
+                  ActiveDownloadState(rawValue: transfer.stateRaw) != nil else { continue }
+            let feed = FeedURLIdentity.canonical(feedURL)
+            let key = DownloadTaskKey.key(feedURL: feed, guid: episode.guid)
+            if episodeRows[key] == nil {
+                let row = EarshotSchemaV7.LocalEpisodeState(
+                    podcastFeedURL: feed,
+                    episodeGUID: episode.guid,
+                    downloadStatusRaw: transfer.stateRaw
+                )
+                context.insert(row)
+                episodeRows[key] = row
+            }
+        }
+
+        var localSettings: Set<String> = []
+        for setting in try context.fetch(FetchDescriptor<EarshotSchemaV5.AppSetting>())
+        where AppSettingScope.isLocal(setting.key) && localSettings.insert(setting.key).inserted {
+            context.insert(EarshotSchemaV7.LocalAppSetting(key: setting.key, value: setting.value))
+        }
+        context.insert(EarshotSchemaV7.LocalAppSetting(key: marker, value: "1"))
+        try context.save()
+    }
+}
+
+/// Restartable V6→V7→V8 split migration plus the manual V1 import retained
+/// for original SwiftUI stores. The original store stays authoritative until
+/// the separate device-local copy has been value-checked and marked durable.
 enum StoreMigration {
+    static let splitCompletionKey = "__earshot_v8_split_complete"
+    static let bridgeCompletionKey = "__earshot_v7_bridge_complete"
+
+    struct PodcastStateSnapshot: Equatable {
+        let feedURL: String
+        let refreshedAt: Date?
+    }
+
+    struct EpisodeStateSnapshot: Equatable {
+        let feedURL: String
+        let guid: String
+        let statusRaw: String
+        let path: String?
+    }
+
+    struct SettingSnapshot: Equatable {
+        let key: String
+        let value: String
+    }
+
+    struct BridgeSnapshot: Equatable {
+        let podcasts: [PodcastStateSnapshot]
+        let episodes: [EpisodeStateSnapshot]
+        let settings: [SettingSnapshot]
+    }
+
+    static func localStoreURL(for mirroredURL: URL) -> URL {
+        mirroredURL.deletingLastPathComponent().appending(path: "earshot-local.store")
+    }
 
     /// True when `error` (or anything in its underlying-error chain) indicates
     /// the store was written by a newer schema than this build can open. SwiftData
@@ -76,11 +164,9 @@ enum StoreMigration {
         var isPlayed: Bool
     }
 
-    /// Opens the store at `url` as the current schema (V6) using
-    /// ``EarshotMigrationPlan`` (so a V2, V3, V4 or V5 store is
-    /// lightweight-migrated forward). If that fails, the store is treated as an
-    /// original (V1) store
-    /// and migrated manually via export/reimport. On the manual V1 path the
+    /// Opens the current split V8 store or upgrades an older store through the
+    /// bounded V7 bridge. If no versioned schema can open it, the store is
+    /// treated as original V1 and migrated manually. On that path the
     /// original store is backed up (``ModelContainerFactory/backupStoreFiles(at:)``)
     /// before it is deleted, so a failed fresh-store rebuild can't lose the
     /// tester's only copy of the data (#529).
@@ -91,32 +177,66 @@ enum StoreMigration {
     /// open error is captured (not swallowed) so the two cases can be told apart.
     @MainActor
     static func openOrMigrate(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+        let localURL = localStoreURL(for: url)
 
-        // Fresh installs, already-V6 stores, and V2/V3/V4/V5 stores (lightweight)
-        // all open through the migration plan. Capture the failure so a
-        // newer-than-app store can be distinguished from real corruption below,
-        // rather than silently falling through to the (destructive) V1 path.
-        let primaryError: Error
+        // A durable marker is written only after the separate local store was
+        // value-checked. It therefore authorizes the irreversible V7→V8 step and
+        // makes every later launch a direct two-store open.
+        if hasSplitCompletionMarker(at: localURL, beside: url) {
+            do {
+                return try finishOpeningFinal(mirroredURL: url, localURL: localURL)
+            } catch let directError {
+                // A crash may leave the marker durable while the original store
+                // is still V7. Complete that one remaining transition, then open.
+                do {
+                    try finalizeMirroredStore(at: url)
+                    return try finishOpeningFinal(mirroredURL: url, localURL: localURL)
+                } catch {
+                    if indicatesNewerStore(error) {
+                        throw StoreOpenError.storeNewerThanApp(underlying: error)
+                    }
+                    throw StoreOpenError.unreadable(underlying: directError)
+                }
+            }
+        }
+
+        if !FileManager.default.fileExists(atPath: url.path) {
+            let container = try openFinal(mirroredURL: url, localURL: localURL)
+            try LocalAppSettingIdentity.setValue("1", for: splitCompletionKey, in: container.mainContext)
+            try container.mainContext.save()
+            return container
+        }
+
+        // The original store remains authoritative until the marker above is
+        // durable. Back it up before the additive V7 preflight changes metadata.
+        if FileManager.default.fileExists(atPath: url.path) {
+            _ = ModelContainerFactory.backupStoreFiles(at: url)
+        }
+
+        let bridgeSnapshot: BridgeSnapshot
         do {
-            return try ModelContainer(
-                for: schema,
-                migrationPlan: EarshotMigrationPlan.self,
-                configurations: ModelConfiguration(schema: schema, url: url)
-            )
+            bridgeSnapshot = try readBridge(at: url)
+            AppLog.data.info("V7 bridge preflight completed")
         } catch {
-            primaryError = error
+            if indicatesNewerStore(error) {
+                throw StoreOpenError.storeNewerThanApp(underlying: error)
+            }
+            return try migrateV1Store(at: url, localURL: localURL, primaryError: error)
         }
 
-        // A store newer than this build never gets the V1 treatment (a V1 read
-        // would fail and mislead) and must never be deleted — surface it.
-        if indicatesNewerStore(primaryError) {
-            throw StoreOpenError.storeNewerThanApp(underlying: primaryError)
-        }
+        // Rebuild is safe here: V7 still contains every source value. A crash or
+        // failed validation simply re-enters this path and reconstructs local.
+        try rebuildAndValidateLocal(bridgeSnapshot, at: localURL, beside: url)
+        AppLog.data.info("V8 device-local copy validated")
+        try finalizeMirroredStore(at: url)
+        AppLog.data.info("V8 mirrored-store cutover completed")
+        return try finishOpeningFinal(mirroredURL: url, localURL: localURL)
+    }
 
-        // Otherwise try to treat it as an original (V1) store and migrate it
-        // manually. If it reads as V1, migrate; if not, it is genuinely
-        // unreadable — report that WITHOUT touching the file.
+    @MainActor
+    private static func migrateV1Store(
+        at url: URL, localURL: URL, primaryError: Error
+    ) throws -> ModelContainer {
         let snapshots: [PodcastSnapshot]
         do {
             snapshots = try readV1(at: url)
@@ -136,13 +256,185 @@ enum StoreMigration {
             AppLog.data.info("No V1 store backup made before replacement (store may have been empty or absent)")
         }
         ModelContainerFactory.removeStoreFiles(at: url)
-        let container = try ModelContainer(
-            for: schema,
-            migrationPlan: EarshotMigrationPlan.self,
-            configurations: ModelConfiguration(schema: schema, url: url)
-        )
+        ModelContainerFactory.removeStoreFiles(at: localURL)
+        let container = try openFinal(mirroredURL: url, localURL: localURL)
         try write(snapshots, into: container.mainContext)
-        AppLog.data.info("Migrated \(snapshots.count) podcast(s) from V1 to V6")
+        try LocalAppSettingIdentity.setValue("1", for: splitCompletionKey, in: container.mainContext)
+        try container.mainContext.save()
+        AppLog.data.info("Migrated \(snapshots.count) podcast(s) from V1 to split V8")
+        return container
+    }
+
+    @MainActor
+    private static func readBridge(at url: URL) throws -> BridgeSnapshot {
+        let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite, at: url
+        )
+        let identifiers = metadata[NSStoreModelVersionIdentifiersKey] as? [String]
+        guard let identifier = identifiers?.first,
+              let major = Int(identifier.split(separator: ".").first ?? "") else {
+            throw CocoaError(.persistentStoreIncompatibleVersionHash)
+        }
+
+        guard (2...6).contains(major) else {
+            if major > 8 { throw CocoaError(.persistentStoreIncompatibleVersionHash) }
+            guard major == 7 else { throw CocoaError(.fileReadCorruptFile) }
+            return try openAndPopulateBridge(at: url)
+        }
+
+        if major == 6 {
+            let schema = Schema(versionedSchema: EarshotSchemaV7.self)
+            return try autoreleasepool {
+                let bridge = try ModelContainer(
+                    for: schema,
+                    migrationPlan: EarshotBridgeMigrationPlan.self,
+                    configurations: ModelConfiguration(
+                        schema: schema, url: url, cloudKitDatabase: .none
+                    )
+                )
+                return try snapshotBridge(bridge.mainContext)
+            }
+        }
+        return try openAndPopulateBridge(at: url)
+    }
+
+    @MainActor
+    private static func openAndPopulateBridge(at url: URL) throws -> BridgeSnapshot {
+        let schema = Schema(versionedSchema: EarshotSchemaV7.self)
+        return try autoreleasepool {
+            let bridge = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(
+                    schema: schema, url: url, cloudKitDatabase: .none
+                )
+            )
+            try SyncBridgeBackfill.populate(in: bridge.mainContext)
+            return try snapshotBridge(bridge.mainContext)
+        }
+    }
+
+    @MainActor
+    private static func snapshotBridge(_ context: ModelContext) throws -> BridgeSnapshot {
+        BridgeSnapshot(
+            podcasts: try context.fetch(FetchDescriptor<EarshotSchemaV7.LocalPodcastState>())
+                .map { PodcastStateSnapshot(feedURL: $0.feedURL, refreshedAt: $0.refreshedAt) }
+                .sorted { $0.feedURL < $1.feedURL },
+            episodes: try context.fetch(FetchDescriptor<EarshotSchemaV7.LocalEpisodeState>())
+                .map { EpisodeStateSnapshot(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID, statusRaw: $0.downloadStatusRaw, path: $0.downloadPath) }
+                .sorted { ($0.feedURL, $0.guid) < ($1.feedURL, $1.guid) },
+            settings: try context.fetch(FetchDescriptor<EarshotSchemaV7.LocalAppSetting>())
+                .filter { $0.key != bridgeCompletionKey }
+                .map { SettingSnapshot(key: $0.key, value: $0.value) }
+                .sorted { $0.key < $1.key }
+        )
+    }
+
+    @MainActor
+    private static func rebuildAndValidateLocal(
+        _ expected: BridgeSnapshot, at localURL: URL, beside mirroredURL: URL
+    ) throws {
+        ModelContainerFactory.removeStoreFiles(at: localURL)
+        let stagingURL = mirroredURL.deletingLastPathComponent()
+            .appending(path: "earshot-v8-staging-\(UUID().uuidString).store")
+        defer { ModelContainerFactory.removeStoreFiles(at: stagingURL) }
+        try autoreleasepool {
+            let container = try openFinal(mirroredURL: stagingURL, localURL: localURL)
+            let context = container.mainContext
+            for row in expected.podcasts {
+                context.insert(LocalPodcastState(feedURL: row.feedURL, refreshedAt: row.refreshedAt))
+            }
+            for row in expected.episodes {
+                context.insert(LocalEpisodeState(
+                    podcastFeedURL: row.feedURL,
+                    episodeGUID: row.guid,
+                    downloadStatus: DownloadStatus(rawValue: row.statusRaw) ?? .none,
+                    downloadPath: row.path
+                ))
+            }
+            for row in expected.settings {
+                context.insert(LocalAppSetting(key: row.key, value: row.value))
+            }
+            try context.save()
+            guard try localSnapshot(in: context) == expected else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            try LocalAppSettingIdentity.setValue("1", for: splitCompletionKey, in: context)
+            try context.save()
+        }
+    }
+
+    @MainActor
+    private static func localSnapshot(in context: ModelContext) throws -> BridgeSnapshot {
+        BridgeSnapshot(
+            podcasts: try context.fetch(FetchDescriptor<LocalPodcastState>())
+                .map { PodcastStateSnapshot(feedURL: $0.feedURL, refreshedAt: $0.refreshedAt) }
+                .sorted { $0.feedURL < $1.feedURL },
+            episodes: try context.fetch(FetchDescriptor<LocalEpisodeState>())
+                .map { EpisodeStateSnapshot(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID, statusRaw: $0.downloadStatusRaw, path: $0.downloadPath) }
+                .sorted { ($0.feedURL, $0.guid) < ($1.feedURL, $1.guid) },
+            settings: try context.fetch(FetchDescriptor<LocalAppSetting>())
+                .filter { $0.key != splitCompletionKey }
+                .map { SettingSnapshot(key: $0.key, value: $0.value) }
+                .sorted { $0.key < $1.key }
+        )
+    }
+
+    @MainActor
+    private static func hasSplitCompletionMarker(at localURL: URL, beside mirroredURL: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: localURL.path) else { return false }
+        let stagingURL = mirroredURL.deletingLastPathComponent()
+            .appending(path: "earshot-v8-marker-\(UUID().uuidString).store")
+        defer { ModelContainerFactory.removeStoreFiles(at: stagingURL) }
+        return (try? autoreleasepool {
+            let container = try openFinal(mirroredURL: stagingURL, localURL: localURL)
+            return LocalAppSettingIdentity.value(for: splitCompletionKey, in: container.mainContext) == "1"
+        }) ?? false
+    }
+
+    @MainActor
+    private static func openFinal(mirroredURL: URL, localURL: URL) throws -> ModelContainer {
+        let full = Schema(versionedSchema: EarshotSchemaV8.self)
+        let mirrored = ModelConfiguration(
+            "FutureMirrored", schema: Schema(EarshotSchemaV8.mirroredModels),
+            url: mirroredURL, cloudKitDatabase: .none
+        )
+        let local = ModelConfiguration(
+            "DeviceLocal", schema: Schema(EarshotSchemaV8.localModels),
+            url: localURL, cloudKitDatabase: .none
+        )
+        return try ModelContainer(for: full, configurations: mirrored, local)
+    }
+
+    @MainActor
+    private static func finalizeMirroredStore(at url: URL) throws {
+        try autoreleasepool {
+            let schema = Schema(versionedSchema: EarshotMirroredSchemaV8.self)
+            _ = try ModelContainer(
+                for: schema,
+                migrationPlan: EarshotFinalMigrationPlan.self,
+                configurations: ModelConfiguration(
+                    "FutureMirrored", schema: schema, url: url,
+                    cloudKitDatabase: .none
+                )
+            )
+        }
+    }
+
+    @MainActor
+    private static func finishOpeningFinal(
+        mirroredURL: URL, localURL: URL
+    ) throws -> ModelContainer {
+        let container = try openFinal(mirroredURL: mirroredURL, localURL: localURL)
+        // V7's AppSetting table contained both scopes. The local values are now
+        // durably validated in LocalAppSetting, so remove their mirrored copies
+        // before any future CloudKit configuration can see them.
+        for setting in try container.mainContext.fetch(FetchDescriptor<AppSetting>())
+        where AppSettingScope.isLocal(setting.key) {
+            container.mainContext.delete(setting)
+        }
+        try LocalStateStore.hydrate(in: container.mainContext)
+        _ = try IdentityRepairService(context: container.mainContext).repairAll()
+        if container.mainContext.hasChanges { try container.mainContext.save() }
         return container
     }
 
@@ -211,7 +503,7 @@ enum StoreMigration {
                 podcast.createdAt = min(podcast.createdAt, snapshot.createdAt)
             }
             for snap in snapshot.episodes {
-                if let existing = podcast.episodes.first(where: { $0.guid == snap.guid }) {
+                if let existing = podcast.episodes?.first(where: { $0.guid == snap.guid }) {
                     if snap.isPlayed { existing.isPlayed = true }
                     if (snap.pubDate ?? .distantPast) >= (existing.pubDate ?? .distantPast) {
                         if !snap.title.isEmpty { existing.title = snap.title }

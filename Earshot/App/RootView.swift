@@ -474,7 +474,7 @@ struct RootView: View {
 
     /// Finds an episode by guid within a podcast's loaded episodes.
     private func episode(guid: String, in podcast: Podcast) -> Episode? {
-        podcast.episodes.first { $0.guid == guid }
+        podcast.episodes?.first { $0.guid == guid }
     }
 }
 

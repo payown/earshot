@@ -174,7 +174,7 @@ final class IdentityRepairServiceTests: XCTestCase {
         XCTAssertEqual(episodeMemberships.first?.episode?.persistentModelID, merged.persistentModelID)
         XCTAssertEqual(episodeMemberships.first?.sortOrder, 2)
         XCTAssertEqual(try context.fetch(FetchDescriptor<RecentlyExpired>()).first?.episode?.persistentModelID, merged.persistentModelID)
-        XCTAssertTrue(try context.fetch(FetchDescriptor<ActiveDownload>()).isEmpty)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<LocalEpisodeState>()).count, 1)
 
         XCTAssertEqual(first.podcastsRemoved, 1)
         XCTAssertEqual(first.episodesRemoved, 1)
@@ -252,7 +252,7 @@ final class IdentityRepairServiceTests: XCTestCase {
 
         XCTAssertEqual(report.episodesInspected, 2)
         XCTAssertEqual(report.episodesRemoved, 1)
-        XCTAssertEqual(podcast.episodes.count, 1)
-        XCTAssertEqual(otherPodcast.episodes.count, 2)
+        XCTAssertEqual(podcast.episodes?.count, 1)
+        XCTAssertEqual(otherPodcast.episodes?.count, 2)
     }
 }

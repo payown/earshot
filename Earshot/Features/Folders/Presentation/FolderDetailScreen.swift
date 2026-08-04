@@ -100,7 +100,7 @@ struct FolderDetailScreen: View {
         // through `folder.memberships`: a bare repository fetch wouldn't be
         // observed, so the row would announce "Moved…" while the list stayed put.
         // Sorted by `sortOrder` then name to match `FolderRepository.childFolders(of:)`.
-        folder.children.sorted { lhs, rhs in
+        (folder.children ?? []).sorted { lhs, rhs in
             if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
             return lhs.name < rhs.name
         }
@@ -333,8 +333,8 @@ struct FolderDetailScreen: View {
         .accessibilityLabel(
             FolderDetailLabel.subfolderRow(
                 name: child.name,
-                subfolderCount: child.children.count,
-                podcastCount: child.memberships.count
+                subfolderCount: child.children?.count ?? 0,
+                podcastCount: child.memberships?.count ?? 0
             )
         )
         .accessibilityHint("Use the actions rotor to move this subfolder without dragging.")
@@ -374,7 +374,7 @@ struct FolderDetailScreen: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(child.name).font(.headline)
-                Text("^[\(child.children.count) subfolder](inflect: true), ^[\(child.memberships.count) podcast](inflect: true)")
+                Text("^[\(child.children?.count ?? 0) subfolder](inflect: true), ^[\(child.memberships?.count ?? 0) podcast](inflect: true)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
