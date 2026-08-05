@@ -141,8 +141,8 @@ struct FoldersScreen: View {
 
     private func rowContent(for item: FolderTreeItem) -> some View {
         let folder = item.folder
-        let childCount = folder.children.count
-        let podcastCount = folder.memberships.count
+        let childCount = folder.children?.count ?? 0
+        let podcastCount = folder.memberships?.count ?? 0
         // Cap visual indentation so a deeply nested tree remains readable at
         // large Dynamic Type. VoiceOver receives the complete breadcrumb.
         let visualDepth = min(item.depth, 4)
@@ -163,8 +163,8 @@ struct FoldersScreen: View {
     private func rowLabel(for item: FolderTreeItem, index: Int, total: Int) -> String {
         FolderTreeLabel.row(
             path: FolderLogic.folderPath(item.folder).map(\.name),
-            subfolderCount: item.folder.children.count,
-            podcastCount: item.folder.memberships.count,
+            subfolderCount: item.folder.children?.count ?? 0,
+            podcastCount: item.folder.memberships?.count ?? 0,
             isExpanded: item.hasChildren ? item.isExpanded : nil,
             position: index + 1,
             total: total
@@ -244,7 +244,7 @@ struct FoldersScreen: View {
         Announcer.announce(
             FolderTreeLabel.toggleAnnouncement(
                 name: item.folder.name,
-                childCount: item.folder.children.count,
+                childCount: item.folder.children?.count ?? 0,
                 isExpanded: nowExpanded
             )
         )

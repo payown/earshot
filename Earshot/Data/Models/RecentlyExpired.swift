@@ -6,7 +6,7 @@ import SwiftData
 @Model
 final class RecentlyExpired {
     var episode: Episode?
-    var expiredAt: Date
+    var expiredAt: Date = Date.distantPast
 
     init(episode: Episode? = nil, expiredAt: Date = .now) {
         self.episode = episode

@@ -108,7 +108,7 @@ enum FolderLogic {
             guard depth < maxDepth else { return }
             guard visited.insert(ObjectIdentifier(node)).inserted else { return }
             result.append(node)
-            for child in node.children {
+            for child in node.children ?? [] {
                 visit(child, depth: depth + 1)
             }
         }
@@ -131,7 +131,7 @@ enum FolderLogic {
             for node in nodes.sorted(by: siblingOrder) {
                 guard visited.insert(ObjectIdentifier(node)).inserted else { continue }
                 result.append(node)
-                visit(node.children)
+                visit(node.children ?? [])
             }
         }
         visit(roots)
@@ -152,7 +152,7 @@ enum FolderLogic {
         var visited = Set<ObjectIdentifier>()
 
         func children(of folder: PodcastFolder) -> [PodcastFolder] {
-            folder.children
+            (folder.children ?? [])
                 .filter { allowed.contains(ObjectIdentifier($0)) }
                 .sorted(by: siblingOrder)
         }

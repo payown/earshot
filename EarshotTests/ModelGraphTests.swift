@@ -20,9 +20,9 @@ final class ModelGraphTests: XCTestCase {
 
         let podcasts = try context.fetch(FetchDescriptor<Podcast>())
         XCTAssertEqual(podcasts.count, 1)
-        XCTAssertEqual(podcasts[0].episodes.count, 1)
-        XCTAssertEqual(podcasts[0].episodes[0].title, "Ep 1")
-        XCTAssertEqual(podcasts[0].episodes[0].podcast?.title, "Show")
+        XCTAssertEqual(podcasts[0].episodes?.count, 1)
+        XCTAssertEqual(podcasts[0].episodes?.first?.title, "Ep 1")
+        XCTAssertEqual(podcasts[0].episodes?.first?.podcast?.title, "Show")
     }
 
     func testDeletingPodcastCascadesToEpisodes() throws {

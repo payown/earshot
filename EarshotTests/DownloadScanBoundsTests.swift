@@ -8,7 +8,7 @@ import SwiftData
 /// `DownloadManager` used to fetch the ENTIRE `Episode` table on the main actor at
 /// three points on the launch path and filter in memory. On a real 241,979-row
 /// library that is a scene-create watchdog kill (0x8BADF00D). The scans now query
-/// the tiny `ActiveDownload` table (pending / downloading) or a bounded
+/// the bounded `LocalEpisodeState` table (pending / downloading) or a bounded
 /// `downloadPath != nil` predicate (path healing). These tests pin down that the
 /// narrower queries still select the same rows the in-memory filters used to.
 @MainActor
@@ -33,8 +33,14 @@ final class DownloadScanBoundsTests: XCTestCase {
         return episode
     }
 
-    private func rows(in context: ModelContext) -> [ActiveDownload] {
-        (try? context.fetch(FetchDescriptor<ActiveDownload>())) ?? []
+    private func rows(in context: ModelContext) -> [LocalEpisodeState] {
+        (try? context.fetch(FetchDescriptor<LocalEpisodeState>())) ?? []
+    }
+
+    private func activeRows(in context: ModelContext) -> [LocalEpisodeState] {
+        rows(in: context).filter {
+            $0.downloadStatus == .pending || $0.downloadStatus == .downloading
+        }
     }
 
     // MARK: startPendingDownloads
@@ -52,7 +58,7 @@ final class DownloadScanBoundsTests: XCTestCase {
         ActiveDownload.setDownloadStatus(.pending, on: pending, in: context)
         ActiveDownload.setDownloadStatus(.downloaded, on: done, in: context)
         try context.save()
-        XCTAssertEqual(rows(in: context).count, 1, "only the pending episode is tracked")
+        XCTAssertEqual(activeRows(in: context).count, 1, "only the pending episode is active")
 
         let manager = makeManager(context)
         await manager.startPendingDownloads()
@@ -63,8 +69,9 @@ final class DownloadScanBoundsTests: XCTestCase {
         XCTAssertEqual(idle.downloadStatus, DownloadStatus.none, "untracked row untouched")
         XCTAssertEqual(done.downloadStatus, .downloaded, "downloaded row untouched")
 
-        // .failed is terminal, so the row is gone: the invariant held throughout.
-        XCTAssertTrue(rows(in: context).isEmpty)
+        XCTAssertTrue(activeRows(in: context).isEmpty)
+        XCTAssertEqual(rows(in: context).first { $0.episodeGUID == pending.guid }?.downloadStatus,
+                       .failed, "terminal failure remains device-local")
     }
 
     /// No pending rows: the scan short-circuits and touches nothing.
@@ -79,7 +86,7 @@ final class DownloadScanBoundsTests: XCTestCase {
         await manager.startPendingDownloads()
 
         XCTAssertEqual(done.downloadStatus, .downloaded)
-        XCTAssertTrue(rows(in: context).isEmpty)
+        XCTAssertTrue(activeRows(in: context).isEmpty)
     }
 
     // MARK: reconcileStuckDownloads
@@ -104,8 +111,9 @@ final class DownloadScanBoundsTests: XCTestCase {
 
         XCTAssertEqual(stuck.downloadStatus, .failed,
                        "an orphaned .downloading episode must not hang forever (#544)")
-        XCTAssertTrue(rows(in: context).isEmpty,
-                      "the row must go with the terminal state")
+        XCTAssertTrue(activeRows(in: context).isEmpty,
+                      "the row must leave the active-state query")
+        XCTAssertEqual(rows(in: context).first?.downloadStatus, .failed)
     }
 
     /// Episodes NOT tracked as downloading are invisible to the scan, whatever
@@ -128,7 +136,7 @@ final class DownloadScanBoundsTests: XCTestCase {
         XCTAssertEqual(idle.downloadStatus, DownloadStatus.none)
         XCTAssertEqual(pending.downloadStatus, .pending,
                        "a Wi-Fi-gated episode is not a stuck download")
-        XCTAssertEqual(rows(in: context).count, 1, "the pending row survives")
+        XCTAssertEqual(activeRows(in: context).count, 1, "the pending row survives")
     }
 
     // MARK: Downloads tab + reconcileDownloadPaths
@@ -151,19 +159,26 @@ final class DownloadScanBoundsTests: XCTestCase {
             guid: "dl-history", title: "History", audioURL: "https://h/h.mp3",
             downloadStatus: DownloadStatus.none, downloadPath: nil
         )
+        let podcast = Podcast(feedURL: "https://h/feed.xml", title: "Show")
+        context.insert(podcast)
+        downloaded.podcast = podcast
+        inProgressWithPath.podcast = podcast
+        historical.podcast = podcast
         context.insert(downloaded)
         context.insert(inProgressWithPath)
         context.insert(historical)
+        ActiveDownload.setDownloadStatus(.downloaded, on: downloaded, in: context)
+        ActiveDownload.setDownloadStatus(.downloading, on: inProgressWithPath, in: context)
         try context.save()
 
         let candidates = try context.fetch(
-            FetchDescriptor<Episode>(predicate: DownloadListQuery.hasPath)
+            FetchDescriptor<LocalEpisodeState>(predicate: DownloadListQuery.hasPath)
         )
 
-        XCTAssertEqual(Set(candidates.map(\.guid)), ["dl-downloaded", "dl-progress"])
-        XCTAssertFalse(candidates.contains { $0.guid == historical.guid },
+        XCTAssertEqual(Set(candidates.map(\.episodeGUID)), ["dl-downloaded", "dl-progress"])
+        XCTAssertFalse(candidates.contains { $0.episodeGUID == historical.guid },
                        "the historical backlog must never materialize for Downloads")
-        XCTAssertEqual(candidates.filter { $0.downloadStatus == .downloaded }.map(\.guid),
+        XCTAssertEqual(candidates.filter { $0.downloadStatus == .downloaded }.map(\.episodeGUID),
                        [downloaded.guid],
                        "the existing terminal-state guard still determines visible rows")
     }
@@ -185,9 +200,17 @@ final class DownloadScanBoundsTests: XCTestCase {
         // A row with NO path is out of the query's scope entirely.
         let noPath = Episode(guid: "rp-c", title: "C", audioURL: "https://h/c.mp3",
                              downloadStatus: DownloadStatus.none, downloadPath: nil)
+        let podcast = Podcast(feedURL: "https://h/reconcile.xml", title: "Reconcile")
+        context.insert(podcast)
+        missingA.podcast = podcast
+        missingB.podcast = podcast
+        noPath.podcast = podcast
         context.insert(missingA)
         context.insert(missingB)
         context.insert(noPath)
+        ActiveDownload.setDownloadStatus(.downloaded, on: missingA, in: context)
+        ActiveDownload.setDownloadStatus(.downloaded, on: missingB, in: context)
+        try context.save()
         let manager = makeManager(context)
 
         await manager.reconcileDownloadPaths()

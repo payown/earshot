@@ -96,7 +96,7 @@ final class StatsRepository {
     @discardableResult
     func removeSessions(for podcast: Podcast) -> Int {
         let podcastID = podcast.persistentModelID
-        let episodeIDs = Set(podcast.episodes.map(\.persistentModelID))
+        let episodeIDs = Set((podcast.episodes ?? []).map(\.persistentModelID))
         let all = (try? context.fetch(FetchDescriptor<ListeningSession>())) ?? []
         let toDelete = all.filter { session in
             if session.podcast?.persistentModelID == podcastID { return true }

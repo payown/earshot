@@ -85,7 +85,7 @@ struct DownloadsSettingsView: View {
     /// Recomputes the downloaded-episode count with a bounded SQL COUNT — no
     /// object materialization, so it's safe on a large library.
     private func refreshDownloadCount() async {
-        let descriptor = FetchDescriptor<Episode>(predicate: DownloadListQuery.hasPath)
+        let descriptor = FetchDescriptor<LocalEpisodeState>(predicate: DownloadListQuery.hasPath)
         downloadCount = (try? context.fetchCount(descriptor)) ?? 0
     }
 

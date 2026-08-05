@@ -8,7 +8,7 @@ import SwiftData
 final class FolderMembership {
     var folder: PodcastFolder?
     var podcast: Podcast?
-    var sortOrder: Int
+    var sortOrder: Int = 0
 
     init(folder: PodcastFolder? = nil, podcast: Podcast? = nil, sortOrder: Int = 0) {
         self.folder = folder

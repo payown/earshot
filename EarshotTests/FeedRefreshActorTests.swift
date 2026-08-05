@@ -31,6 +31,14 @@ final class FeedRefreshActorTests: XCTestCase {
         )
     }
 
+    private func parsedEpisode(_ guid: String, _ date: Date, audioURL: String) -> ParsedEpisode {
+        ParsedEpisode(
+            guid: guid, title: "Ep \(guid)", audioURL: audioURL,
+            description: nil, pubDate: date, durationSeconds: nil, artworkURL: nil,
+            episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+    }
+
     private func parsedFeed(_ episodes: [ParsedEpisode]) -> ParsedFeed {
         ParsedFeed(
             title: "Show", artworkURL: nil, description: nil, author: "Host",
@@ -191,8 +199,8 @@ final class FeedRefreshActorTests: XCTestCase {
         let podcast = try XCTUnwrap(podcasts.first)
         XCTAssertEqual(podcast.title, "Show")
         XCTAssertEqual(podcast.author, "Host")
-        XCTAssertEqual(podcast.episodes.count, 2)
-        XCTAssertTrue(podcast.episodes.allSatisfy { $0.inboxDismissed }, "Seed 0 dismisses the whole backlog")
+        XCTAssertEqual(podcast.episodes?.count, 2)
+        XCTAssertTrue((podcast.episodes ?? []).allSatisfy { $0.inboxDismissed }, "Seed 0 dismisses the whole backlog")
         XCTAssertEqual(podcast.lastSeenPubDate, d2, "Mark seeded to newest pub date")
         XCTAssertNotNil(podcast.refreshedAt)
     }

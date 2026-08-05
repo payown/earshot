@@ -307,51 +307,28 @@ final class DownloadManager {
         state: ActiveDownloadState, in context: ModelContext
     ) async -> [Episode] {
         save()
-        let ids = await Self.activeDownloadIDs(state: state, in: context.container)
-        guard !ids.isEmpty else { return [] }
-
-        var episodes: [Episode] = []
-        for id in ids {
-            guard let row = Self.activeDownload(forPersistentID: id, in: context) else { continue }
-            if let episode = row.episode {
-                episodes.append(episode)
-            } else {
-                context.delete(row)
-            }
-        }
-        return episodes
+        let keys = await Self.activeDownloadKeys(state: state, in: context.container)
+        let matches = (try? LocalStateStore.episodes(matching: keys, in: context)) ?? [:]
+        return keys.compactMap { matches[$0] }
     }
 
     /// Persistent IDs of the ``ActiveDownload`` rows in `state`, fetched off the
     /// main actor on a throwaway context (#701). A plain-`String` predicate on
     /// `stateRaw` is the whole reason this table exists: `Episode.downloadStatus`
     /// is a Codable enum SwiftData refuses in a `#Predicate`.
-    private static func activeDownloadIDs(
+    private static func activeDownloadKeys(
         state: ActiveDownloadState, in container: ModelContainer
-    ) async -> [PersistentIdentifier] {
+    ) async -> [EpisodeLocalKey] {
         let raw = state.rawValue
         return await Task.detached(priority: .utility) {
             let scan = ModelContext(container)
-            let descriptor = FetchDescriptor<ActiveDownload>(
-                predicate: #Predicate { $0.stateRaw == raw }
+            let descriptor = FetchDescriptor<LocalEpisodeState>(
+                predicate: #Predicate { $0.downloadStatusRaw == raw }
             )
-            return ((try? scan.fetch(descriptor)) ?? []).map(\.persistentModelID)
+            return ((try? scan.fetch(descriptor)) ?? []).map {
+                EpisodeLocalKey(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID)
+            }
         }.value
-    }
-
-    /// Resolves an ``ActiveDownload`` on `context` from an identifier a
-    /// background context returned. Uses a predicate fetch (not
-    /// `ModelContext.model(for:)`, which traps on a missing ID) so a row deleted
-    /// in the meantime returns nil rather than crashing — mirroring the resolver
-    /// pattern in `SubscriptionRepository`.
-    private static func activeDownload(
-        forPersistentID id: PersistentIdentifier, in context: ModelContext
-    ) -> ActiveDownload? {
-        var descriptor = FetchDescriptor<ActiveDownload>(
-            predicate: #Predicate { $0.persistentModelID == id }
-        )
-        descriptor.fetchLimit = 1
-        return (try? context.fetch(descriptor))?.first
     }
 
     /// Removes a downloaded file and resets the episode's download state. The
@@ -483,7 +460,7 @@ final class DownloadManager {
             }
             if FileManager.default.fileExists(atPath: resolved.path) {
                 if episode.downloadPath != name {
-                    episode.downloadPath = name
+                    LocalStateStore.setDownloadPath(name, on: episode, in: context)
                     rewritten += 1
                 }
             } else {
@@ -504,27 +481,17 @@ final class DownloadManager {
     private func episodesWithDownloadPath(in context: ModelContext) async -> [Episode] {
         save()
         let container = context.container
-        let ids = await Task.detached(priority: .utility) {
+        let keys = await Task.detached(priority: .utility) {
             let scan = ModelContext(container)
-            let descriptor = FetchDescriptor<Episode>(
+            let descriptor = FetchDescriptor<LocalEpisodeState>(
                 predicate: #Predicate { $0.downloadPath != nil }
             )
-            return ((try? scan.fetch(descriptor)) ?? []).map(\.persistentModelID)
+            return ((try? scan.fetch(descriptor)) ?? []).map {
+                EpisodeLocalKey(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID)
+            }
         }.value
-        return ids.compactMap { Self.episode(forPersistentID: $0, in: context) }
-    }
-
-    /// Resolves an ``Episode`` on `context` from an identifier a background
-    /// context returned. Predicate fetch, not `ModelContext.model(for:)` (which
-    /// traps on a missing ID), so a vanished row returns nil.
-    private static func episode(
-        forPersistentID id: PersistentIdentifier, in context: ModelContext
-    ) -> Episode? {
-        var descriptor = FetchDescriptor<Episode>(
-            predicate: #Predicate { $0.persistentModelID == id }
-        )
-        descriptor.fetchLimit = 1
-        return (try? context.fetch(descriptor))?.first
+        let matches = (try? LocalStateStore.episodes(matching: keys, in: context)) ?? [:]
+        return keys.compactMap { matches[$0] }
     }
 
     // MARK: Terminal events (delegate → main actor → SwiftData)

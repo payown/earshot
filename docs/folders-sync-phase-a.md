@@ -1,6 +1,6 @@
 # Folders — Sync Phase A: CloudKit-ready local schema
 
-**Goal:** Ship and bake a CloudKit-ready local-store migration whose models are compatible with SwiftData's CloudKit mirror, whose natural-key writes remain idempotent without SwiftData unique constraints, and whose device-only data is explicitly separated from future mirrored data — without enabling iCloud sync yet. The proposed A1 decision record uses an explicit, restartable V7 bridge preflight followed by a V8 final split so device-local values can move without an unbounded Episode scan; see `docs/sync-a1-storage-map.md`.
+**Goal:** Ship and bake a CloudKit-ready local-store migration whose models are compatible with SwiftData's CloudKit mirror, whose natural-key writes remain idempotent without SwiftData unique constraints, and whose device-only data is explicitly separated from future mirrored data — without enabling iCloud sync yet. The amended A1 decision targets retained-column V9, keeps V7/V8 as frozen resume points, and makes `LocalEpisodeState` the sole runtime download-state source; see `docs/sync-a1-storage-map.md`.
 
 **Estimated duration:** 2–3 weeks, part-time.
 
@@ -8,7 +8,12 @@
 
 ## Prerequisites
 
-- TestFlight build 161 is the upgrade baseline. It writes `EarshotSchemaV6` and contains the completed manual-folder Phases 1–4.
+- Schema V6 is the supported migration floor. App Store build 157 was Earshot's
+  first public build and shipped V6; V1–V5 existed only in TestFlight and on
+  development devices. Those older routes are deliberately unsupported and
+  surface a backed-up reset with OPML re-import guidance instead of attempting
+  a partial migration. TestFlight build 161 is the Phase A device-test baseline;
+  it also writes `EarshotSchemaV6` and contains the completed manual-folder Phases 1–4.
 - Work begins from current `main` in a linked worktree. The existing V6 model graph is frozen before any live `@Model` changes.
 - Follow `.claude/rules/database-migrations.md` exactly. A fresh-store test is not a migration test.
 - Keep `cloudKitDatabase: .none`. Do not add iCloud entitlements, CloudKit capabilities, remote-notification background modes, schema initialization, sync UX, or a feature flag in Phase A. Those belong to Sync Phase B/C and require separate sign-off under `AGENTS.md`.
@@ -47,27 +52,60 @@ The five work items below are ordered. Task 1 is a design gate; Tasks 2 and 3 ma
 
 Task 2's implementation and merge policy are recorded in
 `docs/sync-a2-identity.md`. The general repair pass is deliberately invoked by
-Task 3's backed-up, restartable V7/V8 migration rather than added as an
+Task 3's backed-up, restartable migration rather than added as an
 unprotected destructive V6 launch mutation.
 
-### 3. Freeze V6 and migrate through the V7 bridge to V8
+### 3. Freeze V6 and migrate to retained-column V9
 
-- [ ] Freeze the exact shipped V6 graph as nested `EarshotSchemaV6` model types. Never edit V1–V5 or the shipped V6 snapshot after it is frozen.
-- [ ] Introduce additive `EarshotSchemaV7` as a bridge that retains source fields while temporary bridge rows are backfilled, then `EarshotSchemaV8` as the only version that references final live models. `StoreMigration` must explicitly open and close the single-store V7 preflight, idempotently populate and validate the separate V8 local store, and only then open the final split V8 container.
-- [ ] Remove `.unique` from `Podcast.feedURL` and `AppSetting.key` only after Task 2's fetch-or-create and dedup protection is in place.
-- [ ] Give every non-optional attribute a schema-visible default or make it optional when absence is semantically real. Preserve existing initializer behavior and enum fallback semantics.
-- [ ] Make every mirrored relationship optional and ensure every inverse is inferable or explicit. Preserve the manual cleanup invariants for one-way relationships and do not assume CloudKit makes cascade cleanup atomic.
-- [ ] Implement the approved local/synced model boundary from Task 1. Keep the production configuration explicitly local (`cloudKitDatabase: .none`) for the entire phase.
-- [ ] Update `SchemaDriftTests` and add a `CloudKitSchemaCompatibilityTests` audit that fails for a unique attribute, a required relationship, a missing required inverse, or a non-optional attribute with no schema default.
+- [x] Freeze the exact shipped V6 graph as nested `EarshotSchemaV6` model types. Never edit V1–V5 or the shipped V6 snapshot after it is frozen.
+- [x] Retain frozen V7 and the installed draft V8 as resume schemas, then add V9 as the only version that references final live models. Untouched V6 is read through a bounded, non-mutating preflight; the separate V9 local store is populated and validated before mirrored finalization. The draft V8 pair advances without replaying V7.
+- [x] Keep Episode's two legacy download attributes as permanent unused tombstones. `LocalEpisodeState` remains the sole runtime source of download status/path, and the columns are never scheduled for removal without a supported public-API proof.
+- [x] Gate `IdentityRepairService.repairAll` with a versioned local completion marker. Save repair results first and the marker separately; retain targeted per-podcast repair in feed refresh.
+- [x] Remove `.unique` from `Podcast.feedURL` and `AppSetting.key` only after Task 2's fetch-or-create and dedup protection is in place.
+- [x] Give every non-optional attribute a schema-visible default or make it optional when absence is semantically real. Preserve existing initializer behavior and enum fallback semantics.
+- [x] Make every mirrored relationship optional and ensure every inverse is inferable or explicit. Preserve the manual cleanup invariants for one-way relationships and do not assume CloudKit makes cascade cleanup atomic.
+- [x] Implement the approved local/synced model boundary from Task 1. Keep the production configuration explicitly local (`cloudKitDatabase: .none`) for the entire phase.
+- [x] Update `SchemaDriftTests` and add a `CloudKitSchemaCompatibilityTests` audit that fails for a unique attribute, a required relationship, a missing required inverse, or a non-optional attribute with no schema default.
 
 ### 4. Prove migration safety and large-library behavior
 
-- [ ] Add `StoreMigrationV6toV8Tests` that creates a real on-disk frozen-V6 store, opens it through `StoreMigration.openOrMigrate`, traverses the explicit V7 preflight and local-copy validation, and verifies every model and relationship survives in the split V8 stores.
-- [ ] Seed realistic aged data: nested folders, podcast and episode memberships, queue, bookmarks, playback positions, history, nullable legacy values, all download states, local paths, active downloads, and settings.
-- [ ] Verify dedup after migration with deliberate V8 duplicate fixtures, including duplicate podcasts whose episodes, memberships, queue items, and bookmarks must merge without loss.
-- [ ] Exercise the migration on a scale fixture representative of Michael's 242,000-plus episode store. Capture wall time and peak memory; no unbounded main-actor Episode scan or launch watchdog risk is acceptable.
-- [ ] Verify downgrade classification still leaves a newer V8 store untouched and corrupt-store recovery remains user-consented and backed up.
-- [ ] Run focused migration/identity tests, the full simulator suite with the two StoreKit quarantines, and a signed Swift 6 Release build.
+- [x] Add on-disk migration tests for both an untouched frozen-V6 store and an already-split V8 pair, including local-copy validation, no V7 replay for V8, and graph/state preservation in V9.
+- [x] Seed realistic aged data: nested folders, podcast and episode memberships, queue, bookmarks, playback positions, history, nullable legacy values, all download states, local paths, active downloads, and settings.
+- [x] Verify dedup after migration with deliberate V8 duplicate fixtures, including duplicate podcasts whose episodes, memberships, queue items, and bookmarks must merge without loss.
+- [ ] Pass the aged 405 MB build-161 performance gate. The fixture must be a disposable copy of the real indexed/related store, capture wall time and file growth, and leave substantial margin inside the launch watchdog.
+- [x] Verify downgrade classification still leaves a newer V8 store untouched and corrupt-store recovery remains user-consented and backed up.
+- [ ] Re-run the full simulator suite and signed Swift 6 Release build after the retained-column V9 route passes its aged-store performance gate.
+
+Task 4 verification (2026-08-03): 242,500 episodes migrated in 2.623 seconds with
+390 MB process peak RSS (including fixture construction); 1,625 simulator tests
+passed with 4 intentional skips, and the signed Swift 6 Release build succeeded.
+
+That fresh-fixture performance result is superseded as a release gate. The
+first physical-device migration hit watchdog `0x8BADF00D` during post-save
+vacuum, then resumed successfully on the next launch. The retained-column V9
+prototype preserves all baseline data, but its final disposable real-V6 run
+took 22.1 seconds and grew the active store set from 405.4 to 783.4 MB; the
+15-second safety-margin assertion therefore fails. Task 5 remains unchecked.
+
+Follow-up profiling (2026-08-04) corrected the synthetic fixture so all 242,500
+episodes are related across 666 podcasts, with representative folder, queue,
+history, bookmark, download, and active-transfer edges. That migration took
+3.024 seconds on the simulator (up from the earlier 1.538-second orphan-heavy
+fixture), with only 14 MB of migration-time RSS growth. It still understates the
+aged device because the freshly created SQLite file has none of the real store's
+allocation history, persistent-history volume, fragmentation, or vacuum debt.
+
+A disposable copy of the preserved 408.6 MB device V6 store took 9.583 seconds
+on the simulator and grew to 783.4 MB. Stage timings were: mirrored-store
+migration 3.733 seconds, V6 preflight 2.637 seconds (2.468 seconds in the indexed
+download-path fetch), and final open/hydrate/repair 3.100 seconds (2.518 seconds
+opening the final two-store container). Core Data checkpointed 102,662 pages
+during mirrored migration and reported post-save incremental vacuum with
+101,707 freelist pages during finalization. On device that same final-save path
+was still in `sqlite3_step` → `copyRawIntegerRowsForSQL` →
+`_performPostSaveTasks:andForceFullVacuum` when the 20-second launch watchdog
+terminated the app. Moving this work off the launch watchdog path remains a PR
+blocker; the migration algorithm is not approved for implementation changes yet.
 
 ### 5. Upgrade build 161 on device and bake the schema
 
@@ -87,8 +125,8 @@ unprotected destructive V6 launch mutation.
 
 ## Definition of done
 
-- A build-161 V6 store upgrades in place through the restartable V7 preflight to the split V8 stores on the physical device with no user-data loss and no reinstall.
-- Automated schema inspection proves the V8 final shape has no unique constraints, every future-mirrored relationship is optional with a valid inverse, and every required attribute has a schema-visible default.
+- A build-161 V6 store upgrades in place through the restartable bounded preflight to split V9 on the physical device with no user-data loss and no reinstall.
+- Automated schema inspection proves the V9 final shape has no unique constraints, every future-mirrored relationship is optional with a valid inverse, and every required attribute has a schema-visible default.
 - Repeated podcast/settings/episode writes and an explicit duplicate-repair pass converge to one natural-key record while preserving all related user state.
 - Device-only download state is not part of the future mirrored schema, and downloaded playback still works after migration.
 - The production container explicitly remains local and the built app has no new iCloud capability or sync behavior.

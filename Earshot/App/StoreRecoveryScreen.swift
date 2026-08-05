@@ -4,10 +4,13 @@ import SwiftUI
 /// of the main UI. Replaces the old silent reset-on-failure with an explicit,
 /// accessible recovery flow so data is never destroyed without consent (#529).
 ///
-/// Two cases:
+/// Three cases:
 ///   - ``StoreRecoveryState/storeNewerThanApp`` — the store belongs to a newer
 ///     build. Purely informational; the store is left intact and the only path
 ///     forward is updating the app. No destructive action is offered.
+///   - ``StoreRecoveryState/storePredatesSupportedSchema`` — the store predates
+///     the first public schema. Offers a backed-up reset and points to OPML
+///     re-import as the subscription recovery path.
 ///   - ``StoreRecoveryState/corruptStore`` — the store is unreadable. Offers an
 ///     explicit "Reset local data" action that backs the files up first, then
 ///     asks the user to relaunch.
@@ -71,7 +74,7 @@ struct StoreRecoveryScreen: View {
             // Informational only — nothing safe to do in-app but update.
             EmptyView()
 
-        case .corruptStore:
+        case .storePredatesSupportedSchema, .corruptStore:
             if didReset {
                 Text(resetDoneMessage)
                     .font(.callout)
@@ -87,16 +90,16 @@ struct StoreRecoveryScreen: View {
                         .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
                 }
                 .buttonStyle(.borderedProminent)
-                .accessibilityHint("Backs up the unreadable data, then clears it so Earshot can start fresh")
+                .accessibilityHint(resetHint)
                 .confirmationDialog(
-                    "Reset local data?",
+                    resetConfirmationTitle,
                     isPresented: $confirmingReset,
                     titleVisibility: .visible
                 ) {
                     Button("Reset local data", role: .destructive) { reset() }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("A backup copy is saved to this device first. You'll then reopen Earshot to start fresh.")
+                    Text(resetConfirmationMessage)
                 }
             }
         }
@@ -122,6 +125,7 @@ struct StoreRecoveryScreen: View {
     private var iconName: String {
         switch state {
         case .storeNewerThanApp: return "arrow.down.circle"
+        case .storePredatesSupportedSchema: return "externaldrive.badge.exclamationmark"
         case .corruptStore: return "exclamationmark.triangle"
         }
     }
@@ -129,6 +133,7 @@ struct StoreRecoveryScreen: View {
     private var title: String {
         switch state {
         case .storeNewerThanApp: return "Update Earshot"
+        case .storePredatesSupportedSchema: return "Older library can't be opened"
         case .corruptStore: return "Couldn't open your data"
         }
     }
@@ -137,12 +142,42 @@ struct StoreRecoveryScreen: View {
         switch state {
         case .storeNewerThanApp:
             return "This version of Earshot is older than the data saved on your device. Update to the latest build to open your library. Your podcasts and history are safe and untouched."
+        case .storePredatesSupportedSchema:
+            return "This library was created by a pre-release version of Earshot and is too old to upgrade.\n\nYou can reset it and re-import your subscriptions from an OPML backup. Listening history, queue, and bookmarks can't be restored that way."
         case .corruptStore:
             return "Earshot couldn't read the data saved on this device. You can reset it to start fresh. A backup copy is saved first, so nothing is lost permanently."
         }
     }
 
+    private var resetHint: String {
+        switch state {
+        case .storePredatesSupportedSchema:
+            return "Backs up the old library, then clears it so you can re-import an OPML file after reopening Earshot"
+        case .corruptStore:
+            return "Backs up the unreadable data, then clears it so Earshot can start fresh"
+        case .storeNewerThanApp:
+            return ""
+        }
+    }
+
+    private var resetConfirmationTitle: String {
+        state == .storePredatesSupportedSchema ? "Reset old library?" : "Reset local data?"
+    }
+
+    private var resetConfirmationMessage: String {
+        if state == .storePredatesSupportedSchema {
+            return "A backup copy is saved to this device first. After you reopen Earshot, re-import your subscriptions from an OPML file."
+        }
+        return "A backup copy is saved to this device first. You'll then reopen Earshot to start fresh."
+    }
+
     private var resetDoneMessage: String {
+        if state == .storePredatesSupportedSchema {
+            if let backupName {
+                return "The old local library was reset. A backup was saved as \(backupName). Force-quit and reopen Earshot, then import your OPML file."
+            }
+            return "The old local library was reset. Force-quit and reopen Earshot, then import your OPML file."
+        }
         if let backupName {
             return "Local data was reset. A backup was saved as \(backupName). Force-quit Earshot and reopen it to start fresh."
         }

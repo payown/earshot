@@ -6,9 +6,9 @@ import SwiftData
 @Model
 final class Bookmark {
     var episode: Episode?
-    var positionSeconds: Int
-    var note: String
-    var createdAt: Date
+    var positionSeconds: Int = 0
+    var note: String = ""
+    var createdAt: Date = Date.distantPast
 
     init(
         episode: Episode? = nil,

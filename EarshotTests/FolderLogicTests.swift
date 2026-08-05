@@ -15,7 +15,7 @@ final class FolderLogicTests: XCTestCase {
     /// traversal (up via `parent`, down via `children`) sees a consistent tree.
     private func link(_ child: PodcastFolder, under parent: PodcastFolder) {
         child.parent = parent
-        parent.children.append(child)
+        parent.children = (parent.children ?? []) + [child]
     }
 
     // MARK: isDescendant

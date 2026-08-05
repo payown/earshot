@@ -61,7 +61,7 @@ struct FolderPodcastPickerView: View {
     }
 
     private func isMember(_ podcast: Podcast) -> Bool {
-        folder.memberships.contains { $0.podcast?.persistentModelID == podcast.persistentModelID }
+        (folder.memberships ?? []).contains { $0.podcast?.persistentModelID == podcast.persistentModelID }
     }
 
     private func toggle(_ podcast: Podcast) {

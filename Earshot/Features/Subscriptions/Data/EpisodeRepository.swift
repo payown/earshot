@@ -42,7 +42,7 @@ final class EpisodeRepository {
     /// played individually would.
     @discardableResult
     func markAllPlayed(in podcast: Podcast) -> Int {
-        let unplayed = podcast.episodes.filter { !$0.isPlayed }
+        let unplayed = (podcast.episodes ?? []).filter { !$0.isPlayed }
         guard !unplayed.isEmpty else { return 0 }
 
         // Gate the "delete downloads after played" setting once for the whole

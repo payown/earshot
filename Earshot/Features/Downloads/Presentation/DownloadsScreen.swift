@@ -9,8 +9,8 @@ import SwiftData
 /// after this bound so an in-progress row that has written a destination path
 /// cannot appear prematurely. (#701)
 enum DownloadListQuery {
-    static var hasPath: Predicate<Episode> {
-        #Predicate<Episode> { $0.downloadPath != nil }
+    static var hasPath: Predicate<LocalEpisodeState> {
+        #Predicate<LocalEpisodeState> { $0.downloadPath != nil }
     }
 }
 
@@ -28,9 +28,8 @@ struct DownloadsScreen: View {
     // to find ~200 downloads. A valid completed download has a path; this stored
     // String is queryable even though the Codable `downloadStatus` enum is not.
     // Keep the status check below as the final invariant guard. (#701)
-    @Query(filter: DownloadListQuery.hasPath,
-           sort: \Episode.pubDate, order: .reverse)
-    private var downloadCandidates: [Episode]
+    @Query(filter: DownloadListQuery.hasPath)
+    private var downloadCandidates: [LocalEpisodeState]
     @Query private var expiredRows: [RecentlyExpired]
     @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
     private var folders: [PodcastFolder]
@@ -69,8 +68,12 @@ struct DownloadsScreen: View {
     @AccessibilityFocusState private var focusEmptyFilter: Bool
 
     private var downloaded: [Episode] {
-        downloadCandidates
+        let keys = downloadCandidates
             .filter { $0.downloadStatus == .downloaded }
+            .map { EpisodeLocalKey(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID) }
+        let matches = (try? LocalStateStore.episodes(matching: keys, in: context)) ?? [:]
+        return keys.compactMap { matches[$0] }
+            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
     }
 
     private var orderedFolders: [PodcastFolder] {

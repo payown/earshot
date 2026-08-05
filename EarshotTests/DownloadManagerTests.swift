@@ -17,6 +17,24 @@ final class DownloadManagerTests: XCTestCase {
         return manager
     }
 
+    /// Seeds the mirrored episode plus its device-local download row, matching
+    /// the split-store state that bulk download operations query in production.
+    private func persistLocalDownloadState(
+        for episodes: [Episode], in context: ModelContext
+    ) throws {
+        let podcast = Podcast(
+            feedURL: "https://downloads.test/\(UUID().uuidString)",
+            title: "Download tests"
+        )
+        context.insert(podcast)
+        for episode in episodes {
+            episode.podcast = podcast
+            context.insert(episode)
+            LocalStateStore.persist(episode, in: context)
+        }
+        try context.save()
+    }
+
     /// Writes a real fixture file into the CURRENT `Documents/Downloads`
     /// directory (the one `DownloadPaths.resolveLocalURL` resolves against) and
     /// schedules its removal so tests never leak files across runs.
@@ -116,8 +134,7 @@ final class DownloadManagerTests: XCTestCase {
         // An idle (never-downloaded) episode must be left completely alone.
         let idle = Episode(guid: "c3", title: "Idle", audioURL: "https://h/i.mp3",
                            downloadStatus: DownloadStatus.none)
-        context.insert(a)
-        context.insert(b)
+        try persistLocalDownloadState(for: [a, b], in: context)
         context.insert(idle)
         let manager = makeManager(context)
 
@@ -159,7 +176,7 @@ final class DownloadManagerTests: XCTestCase {
 
         let episode = Episode(guid: "c5", title: "Legacy", audioURL: "https://h/a.mp3",
                               downloadStatus: .downloaded, downloadPath: legacyPath)
-        context.insert(episode)
+        try persistLocalDownloadState(for: [episode], in: context)
         let manager = makeManager(context)
 
         let removed = await manager.clearAllDownloads()
@@ -290,7 +307,7 @@ final class DownloadManagerTests: XCTestCase {
 
         let episode = Episode(guid: "r1", title: "Healable", audioURL: "https://h/a.mp3",
                               downloadStatus: .downloaded, downloadPath: legacyPath)
-        context.insert(episode)
+        try persistLocalDownloadState(for: [episode], in: context)
         let manager = makeManager(context)
 
         await manager.reconcileDownloadPaths()
@@ -300,12 +317,12 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path), "Healing never deletes the file")
     }
 
-    func test_reconcileDownloadPaths_downloadedWithMissingFile_resetsToNone() async {
+    func test_reconcileDownloadPaths_downloadedWithMissingFile_resetsToNone() async throws {
         let context = TestStore.freshContext()
         let episode = Episode(guid: "r2", title: "Gone", audioURL: "https://h/a.mp3",
                               downloadStatus: .downloaded,
                               downloadPath: "earshot-test-definitely-missing-\(UUID().uuidString).mp3")
-        context.insert(episode)
+        try persistLocalDownloadState(for: [episode], in: context)
         let manager = makeManager(context)
 
         await manager.reconcileDownloadPaths()
@@ -315,14 +332,14 @@ final class DownloadManagerTests: XCTestCase {
                        "A downloaded row whose file is gone becomes re-downloadable")
     }
 
-    func test_reconcileDownloadPaths_downloadedWithEmptyPath_resetsToNone() async {
+    func test_reconcileDownloadPaths_downloadedWithEmptyPath_resetsToNone() async throws {
         // An empty-string path is still non-nil, so the bounded
         // `downloadPath != nil` query (#701) still finds it and the reset branch
         // still fires.
         let context = TestStore.freshContext()
         let emptyPath = Episode(guid: "r4", title: "Empty path", audioURL: "https://h/b.mp3",
                                 downloadStatus: .downloaded, downloadPath: "")
-        context.insert(emptyPath)
+        try persistLocalDownloadState(for: [emptyPath], in: context)
         let manager = makeManager(context)
 
         await manager.reconcileDownloadPaths()
@@ -331,7 +348,7 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(emptyPath.downloadStatus, DownloadStatus.none)
     }
 
-    func test_reconcileDownloadPaths_downloadedWithNilPath_isLeftAlone() async {
+    func test_reconcileDownloadPaths_downloadedWithNilPath_isLeftAlone() async throws {
         // Documented, approved narrowing (#701). Reconciliation is now bounded by
         // `downloadPath != nil`, because `downloadStatus` is a Codable enum
         // SwiftData refuses in a #Predicate and the old whole-Episode-table fetch
@@ -344,7 +361,7 @@ final class DownloadManagerTests: XCTestCase {
         let context = TestStore.freshContext()
         let nilPath = Episode(guid: "r3", title: "Nil path", audioURL: "https://h/a.mp3",
                               downloadStatus: .downloaded, downloadPath: nil)
-        context.insert(nilPath)
+        try persistLocalDownloadState(for: [nilPath], in: context)
         let manager = makeManager(context)
 
         await manager.reconcileDownloadPaths()
@@ -361,7 +378,7 @@ final class DownloadManagerTests: XCTestCase {
 
         let episode = Episode(guid: "r5", title: "Healthy", audioURL: "https://h/a.mp3",
                               downloadStatus: .downloaded, downloadPath: name)
-        context.insert(episode)
+        try persistLocalDownloadState(for: [episode], in: context)
         let manager = makeManager(context)
 
         await manager.reconcileDownloadPaths()
@@ -382,8 +399,7 @@ final class DownloadManagerTests: XCTestCase {
         let missing = Episode(guid: "r7", title: "Gone", audioURL: "https://h/b.mp3",
                               downloadStatus: .downloaded,
                               downloadPath: "earshot-test-missing-\(UUID().uuidString).mp3")
-        context.insert(healable)
-        context.insert(missing)
+        try persistLocalDownloadState(for: [healable, missing], in: context)
         let manager = makeManager(context)
 
         await manager.reconcileDownloadPaths()

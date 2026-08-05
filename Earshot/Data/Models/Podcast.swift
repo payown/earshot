@@ -4,8 +4,8 @@ import SwiftData
 /// A subscribed podcast feed. Mirrors the Flutter drift `podcasts` table.
 @Model
 final class Podcast {
-    @Attribute(.unique) var feedURL: String
-    var title: String
+    var feedURL: String = ""
+    var title: String = ""
     var author: String?
     var podcastDescription: String?
     var artworkURL: String?
@@ -14,7 +14,7 @@ final class Podcast {
     var category: String?
 
     // Content-flow settings
-    var autoQueue: Bool
+    var autoQueue: Bool = false
     /// nil = off. Optional so V2→V3 is a SwiftData-native lightweight migration
     /// (a non-optional Bool here would make SwiftData abort the store open on
     /// upgrade — issue #425). Every reader coalesces nil to false; see callers.
@@ -32,17 +32,28 @@ final class Podcast {
     var queueAgeLimitDays: Int?
     var inboxMaxEpisodes: Int?
     var inboxAgeLimitHours: Int?
-    var inboxExcluded: Bool
-    var inboxIncluded: Bool
+    var inboxExcluded: Bool = false
+    var inboxIncluded: Bool = false
 
-    var createdAt: Date
-    var refreshedAt: Date?
+    var createdAt: Date = Date.distantPast
+    @Transient private var transientRefreshedAt: Date?
+    var refreshedAt: Date? {
+        get { LocalRuntimeState.shared.refreshedAt(feedURL: feedURL) ?? transientRefreshedAt }
+        set {
+            transientRefreshedAt = newValue
+            LocalRuntimeState.shared.setRefreshedAt(newValue, feedURL: feedURL)
+        }
+    }
     /// Inbox high-water mark: episodes at or before this pubDate are pre-dismissed
     /// so a backlog doesn't flood the inbox on subscribe/refresh.
     var lastSeenPubDate: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \Episode.podcast)
-    var episodes: [Episode]
+    var episodes: [Episode]?
+    @Relationship(deleteRule: .nullify, inverse: \ListeningSession.podcast)
+    var listeningSessions: [ListeningSession]?
+    @Relationship(deleteRule: .nullify, inverse: \FolderMembership.podcast)
+    var folderMemberships: [FolderMembership]?
 
     init(
         feedURL: String,
@@ -88,8 +99,10 @@ final class Podcast {
         self.inboxExcluded = inboxExcluded
         self.inboxIncluded = inboxIncluded
         self.createdAt = createdAt
-        self.refreshedAt = refreshedAt
+        self.transientRefreshedAt = refreshedAt
         self.lastSeenPubDate = lastSeenPubDate
         self.episodes = []
+        self.listeningSessions = []
+        self.folderMemberships = []
     }
 }

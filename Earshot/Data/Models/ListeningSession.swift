@@ -7,9 +7,9 @@ import SwiftData
 final class ListeningSession {
     var episode: Episode?
     var podcast: Podcast?
-    var durationSeconds: Int
-    var speed: Double
-    var date: Date
+    var durationSeconds: Int = 0
+    var speed: Double = 1.0
+    var date: Date = Date.distantPast
 
     init(
         episode: Episode? = nil,

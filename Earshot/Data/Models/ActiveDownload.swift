@@ -1,25 +1,10 @@
 import Foundation
 import SwiftData
 
-/// Which of the two IN-FLIGHT download states an ``ActiveDownload`` row records.
-///
-/// Deliberately NOT stored on the model. SwiftData refuses a `Codable` enum in a
-/// `#Predicate` ("Unsupported Predicate: Captured/constant values of type
-/// 'DownloadStatus' are not supported"), and reaching for `.rawValue` on a stored
-/// enum is an uncatchable `fatalError` ("Failed to validate
-/// \Episode.downloadStatus.rawValue"). ``ActiveDownload/stateRaw`` stores the raw
-/// String — the only form a predicate can actually use — and this type is purely
-/// a computed accessor over it (#701).
 enum ActiveDownloadState: String, CaseIterable {
     case pending
     case downloading
 
-    /// The active state matching `status`, or nil when `status` is terminal
-    /// (`.none` / `.downloaded` / `.failed`) and therefore has no row at all.
-    ///
-    /// The switch is exhaustive on purpose: a new ``DownloadStatus`` case must
-    /// force a deliberate decision here rather than silently defaulting to
-    /// "not active" and re-opening the #544 stuck-download hole.
     init?(_ status: DownloadStatus) {
         switch status {
         case .pending: self = .pending
@@ -29,134 +14,225 @@ enum ActiveDownloadState: String, CaseIterable {
     }
 }
 
-/// The authoritative record of download work that is IN FLIGHT — an episode
-/// parked on the Wi-Fi gate (`.pending`) or actually transferring
-/// (`.downloading`). New entity in schema V5 (#701).
-///
-/// **Why this exists.** ``DownloadManager`` used to find those episodes by
-/// fetching the ENTIRE `Episode` table on the main actor and filtering in
-/// memory, at three points on the launch path. `Episode.downloadStatus` cannot
-/// be queried at all: it is a `Codable` enum, which SwiftData rejects in a
-/// `#Predicate`, and reshaping it into a raw `String` is not
-/// lightweight-inferrable (134110 "missing attribute values on mandatory
-/// destination attribute") — a `.custom` stage cannot rescue that, because
-/// custom only brackets the inferred migration. On a real 241,979-row library
-/// the whole-table walk is a scene-create watchdog kill (0x8BADF00D; 38.4s of
-/// user CPU in `swift_arrayDestroy` -> `Episode.__deallocating_deinit`). This
-/// table carries the same information in a form that IS queryable, and it is
-/// naturally tiny — bounded by user action, measured at ZERO rows on the
-/// affected device at launch.
-///
-/// **Why the V4→V5 migration is safe.** Adding a brand-new entity is
-/// lightweight-inferrable and leaves `Episode`'s shape completely untouched, so
-/// the 242k episode rows are never rewritten and carry no migration risk. An
-/// EMPTY table is the semantically correct state immediately after the upgrade —
-/// no download is in flight across an app update — so there is no backfill.
-///
-/// **The invariant that makes it trustworthy.** A row exists if and only if its
-/// episode is at `.pending` or `.downloading`. Every write of
-/// `Episode.downloadStatus` goes through ``setDownloadStatus(_:on:in:)``, which
-/// updates the episode and this table in the same `ModelContext` save. If the
-/// two could diverge, an episode stuck at `.downloading` with no row would be
-/// invisible to reconciliation and spin forever — issue #544 returning.
-///
-/// **The `episode` reference is deliberately ONE-WAY.** An
-/// `@Relationship(inverse:)` collection on `Episode` would change `Episode`'s
-/// shape and put the 242k rows straight back into the migration's path. The cost
-/// is that SwiftData maintains no referential integrity for a relationship with
-/// no inverse, so rows must be dropped explicitly BEFORE their episode is
-/// deleted — see ``removeRows(forEpisodesOf:in:)``, which unsubscribe calls
-/// ahead of its cascade delete.
-@Model
-final class ActiveDownload {
-    /// The episode whose download is in flight. One-way (no inverse on
-    /// `Episode`) — see the note on the type.
-    var episode: Episode?
+struct EpisodeLocalKey: Hashable, Sendable {
+    let feedURL: String
+    let guid: String
 
-    /// ``ActiveDownloadState`` as its raw String. Stored as a plain `String`,
-    /// never as the enum, because only a plain String is usable in a
-    /// `#Predicate` — which is the entire point of this table (#701). Read it
-    /// through ``state``; write it through ``setDownloadStatus(_:on:in:)``.
-    var stateRaw: String
-
-    /// Type-safe read of ``stateRaw``. nil only for a value this build does not
-    /// know (i.e. a store written by a newer build).
-    var state: ActiveDownloadState? { ActiveDownloadState(rawValue: stateRaw) }
-
-    init(episode: Episode? = nil, state: ActiveDownloadState) {
-        self.episode = episode
-        self.stateRaw = state.rawValue
+    init(feedURL: String, guid: String) {
+        self.feedURL = FeedURLIdentity.canonical(feedURL)
+        self.guid = guid
     }
 }
 
-extension ActiveDownload {
+/// Scalar-keyed access to per-device state. Local rows never relate to mirrored
+/// models, so a future CloudKit configuration cannot upload paths or transfers.
+enum LocalStateStore {
+    static func key(for episode: Episode) -> EpisodeLocalKey? {
+        guard let feedURL = episode.podcast?.feedURL else { return nil }
+        return EpisodeLocalKey(feedURL: feedURL, guid: episode.guid)
+    }
 
-    /// The ONE way to write `Episode.downloadStatus` (#701). Sets the status and
-    /// brings the episode's ``ActiveDownload`` row into step in the same
-    /// `ModelContext`, so the two land in a single save and cannot diverge.
-    ///
-    /// Writing `episode.downloadStatus` directly anywhere else breaks the
-    /// invariant this table depends on. Callers still own the save — this only
-    /// stages both changes on `context`.
+    static func episodeRows(for key: EpisodeLocalKey, in context: ModelContext) -> [LocalEpisodeState] {
+        let guid = key.guid
+        return ((try? context.fetch(
+            FetchDescriptor<LocalEpisodeState>(predicate: #Predicate { $0.episodeGUID == guid })
+        )) ?? []).filter { FeedURLIdentity.canonical($0.podcastFeedURL) == key.feedURL }
+    }
+
+    static func episode(matching key: EpisodeLocalKey, in context: ModelContext) -> Episode? {
+        try? episodes(matching: [key], in: context)[key]
+    }
+
+    /// Resolves a bounded local-state result set with one mirrored-store query,
+    /// then applies the composite natural key in memory. This is the list-screen
+    /// path; it must not issue one SwiftData fetch per download row.
+    static func episodes(
+        matching keys: [EpisodeLocalKey], in context: ModelContext
+    ) throws -> [EpisodeLocalKey: Episode] {
+        guard !keys.isEmpty else { return [:] }
+        let requested = Set(keys)
+        let guids = Array(Set(keys.map(\.guid)))
+        let candidates = try context.fetch(
+            FetchDescriptor<Episode>(predicate: #Predicate { guids.contains($0.guid) })
+        ).sorted { stableLocalID($0) < stableLocalID($1) }
+        var result: [EpisodeLocalKey: Episode] = [:]
+        for episode in candidates {
+            guard let key = key(for: episode), requested.contains(key), result[key] == nil else {
+                continue
+            }
+            result[key] = episode
+        }
+        return result
+    }
+
     static func setDownloadStatus(
         _ status: DownloadStatus, on episode: Episode, in context: ModelContext
     ) {
         episode.downloadStatus = status
-        sync(episode, in: context)
+        persist(episode, in: context)
     }
 
-    /// Reconciles `episode`'s row(s) with its CURRENT `downloadStatus`:
-    /// insert/update while the status is active, delete once it is terminal.
-    /// Idempotent, and self-healing against duplicate rows.
-    private static func sync(_ episode: Episode, in context: ModelContext) {
-        let existing = rows(for: episode, in: context)
-        guard let state = ActiveDownloadState(episode.downloadStatus) else {
-            // Terminal status (.none / .downloaded / .failed): the work is over,
-            // so the row must go — leaving one would make reconciliation chase
-            // an episode that is no longer downloading.
-            for row in existing { context.delete(row) }
-            return
-        }
-        guard let row = existing.first else {
-            context.insert(ActiveDownload(episode: episode, state: state))
-            return
-        }
-        row.stateRaw = state.rawValue
-        // Duplicates cannot arise through this API, but dropping them is free
-        // and a duplicate would double-report the episode to reconciliation.
-        for extra in existing.dropFirst() { context.delete(extra) }
+    static func setDownloadPath(
+        _ path: String?, on episode: Episode, in context: ModelContext
+    ) {
+        episode.downloadPath = path
+        persist(episode, in: context)
     }
 
-    /// Every row pointing at `episode`.
-    ///
-    /// Keyed on the episode's persistent identity rather than its guid, because
-    /// guids are not unique across podcasts (#576). The predicate compares a
-    /// `PersistentIdentifier` through a to-one relationship, mirroring the
-    /// established pattern in `SubscriptionRepository.mergeBackgroundWrites`.
-    static func rows(for episode: Episode, in context: ModelContext) -> [ActiveDownload] {
-        let id = episode.persistentModelID
-        let descriptor = FetchDescriptor<ActiveDownload>(
-            predicate: #Predicate { $0.episode?.persistentModelID == id }
+    static func persist(_ episode: Episode, in context: ModelContext) {
+        guard let key = key(for: episode) else { return }
+        let rows = episodeRows(for: key, in: context)
+        if episode.downloadStatus == .none && episode.downloadPath == nil {
+            LocalRuntimeState.shared.removeEpisode(episode.persistentModelID)
+            for row in rows { context.delete(row) }
+            return
+        }
+        let row = rows.first ?? LocalEpisodeState(
+            podcastFeedURL: key.feedURL,
+            episodeGUID: key.guid
         )
-        return (try? context.fetch(descriptor)) ?? []
+        if rows.isEmpty { context.insert(row) }
+        row.podcastFeedURL = key.feedURL
+        row.episodeGUID = key.guid
+        row.downloadStatus = episode.downloadStatus
+        row.downloadPath = episode.downloadPath
+        for duplicate in rows.dropFirst() { context.delete(duplicate) }
     }
 
-    /// Drops every row belonging to an episode of `podcast`. Unsubscribe must
-    /// call this BEFORE `context.delete(podcast)`: the cascade deletes the
-    /// podcast's episodes, and because ``episode`` has no inverse SwiftData will
-    /// not nullify the references pointing at them, leaving rows that dangle at
-    /// deleted rows.
-    ///
-    /// Fetches the whole table on purpose. Unlike `Episode` — the 242k-row table
-    /// this whole design exists to stop scanning — `ActiveDownload` is bounded by
-    /// in-flight user action (tens of rows at the very most), so a full fetch is
-    /// cheap and keeps the traversal in Swift rather than in a two-level
-    /// optional-chained predicate.
+    static func setRefreshedAt(_ date: Date?, on podcast: Podcast, in context: ModelContext) {
+        podcast.refreshedAt = date
+        let feed = FeedURLIdentity.canonical(podcast.feedURL)
+        let rows = ((try? context.fetch(
+            FetchDescriptor<LocalPodcastState>(predicate: #Predicate { $0.feedURL == feed })
+        )) ?? []).sorted { stableLocalID($0) < stableLocalID($1) }
+        if date == nil {
+            for row in rows { context.delete(row) }
+            return
+        }
+        let row = rows.first ?? LocalPodcastState(feedURL: feed)
+        if rows.isEmpty { context.insert(row) }
+        row.feedURL = feed
+        row.refreshedAt = date
+        for duplicate in rows.dropFirst() { context.delete(duplicate) }
+    }
+
+    /// Collapses scalar-key duplicates deterministically before hydration. These
+    /// tables are intentionally bounded by device-local activity, and no repair
+    /// fetch touches the full Episode table.
+    static func repair(in context: ModelContext) throws {
+        let podcastGroups = Dictionary(
+            grouping: try context.fetch(FetchDescriptor<LocalPodcastState>())
+        ) { FeedURLIdentity.canonical($0.feedURL) }
+        for (feed, group) in podcastGroups {
+            let ordered = group.sorted { stableLocalID($0) < stableLocalID($1) }
+            guard let survivor = ordered.first else { continue }
+            survivor.feedURL = feed
+            survivor.refreshedAt = group.compactMap(\.refreshedAt).max()
+            for duplicate in ordered.dropFirst() { context.delete(duplicate) }
+        }
+
+        let episodeGroups = Dictionary(
+            grouping: try context.fetch(FetchDescriptor<LocalEpisodeState>())
+        ) { EpisodeLocalKey(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID) }
+        for (key, group) in episodeGroups {
+            let ordered = group.sorted { stableLocalID($0) < stableLocalID($1) }
+            guard let survivor = ordered.first else { continue }
+            let downloaded = DownloadPaths.preferredExistingDownload(
+                from: group.filter { $0.downloadStatus == .downloaded },
+                storedValue: \LocalEpisodeState.downloadPath,
+                stableID: stableLocalID
+            )
+            let preferred = ordered.filter { $0.downloadStatus != .downloaded }.max {
+                let left = localDownloadRank($0.downloadStatus)
+                let right = localDownloadRank($1.downloadStatus)
+                return left == right
+                    ? stableLocalID($0) > stableLocalID($1)
+                    : left < right
+            }
+            survivor.podcastFeedURL = key.feedURL
+            survivor.episodeGUID = key.guid
+            survivor.downloadStatus = downloaded == nil
+                ? (preferred?.downloadStatus ?? .none)
+                : .downloaded
+            survivor.downloadPath = downloaded?.downloadPath
+            for duplicate in ordered.dropFirst() { context.delete(duplicate) }
+        }
+
+        let settingGroups = Dictionary(
+            grouping: try context.fetch(FetchDescriptor<LocalAppSetting>()), by: \.key
+        )
+        for group in settingGroups.values {
+            let ordered = group.sorted { stableLocalID($0) < stableLocalID($1) }
+            for duplicate in ordered.dropFirst() { context.delete(duplicate) }
+        }
+    }
+
+    /// Hydrates only rows represented in the small local tables. Mirrored rows
+    /// are fetched once per model type, never once per local row.
+    static func hydrate(in context: ModelContext) throws {
+        LocalRuntimeState.shared.clear()
+        try repair(in: context)
+
+        let podcastStates = Dictionary(
+            uniqueKeysWithValues: try context.fetch(FetchDescriptor<LocalPodcastState>())
+                .map { (FeedURLIdentity.canonical($0.feedURL), $0) }
+        )
+        for podcast in try context.fetch(FetchDescriptor<Podcast>()) {
+            podcast.refreshedAt = podcastStates[FeedURLIdentity.canonical(podcast.feedURL)]?.refreshedAt
+        }
+
+        let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
+        let keys = rows.map { EpisodeLocalKey(feedURL: $0.podcastFeedURL, guid: $0.episodeGUID) }
+        let matches = try episodes(matching: keys, in: context)
+        for (row, key) in zip(rows, keys) {
+            guard let episode = matches[key] else { continue }
+            episode.downloadStatus = row.downloadStatus
+            episode.downloadPath = row.downloadPath
+        }
+    }
+
     static func removeRows(forEpisodesOf podcast: Podcast, in context: ModelContext) {
-        let id = podcast.persistentModelID
-        let all = (try? context.fetch(FetchDescriptor<ActiveDownload>())) ?? []
-        for row in all where row.episode?.podcast?.persistentModelID == id {
+        let feed = FeedURLIdentity.canonical(podcast.feedURL)
+        for row in (try? context.fetch(FetchDescriptor<LocalEpisodeState>())) ?? []
+        where FeedURLIdentity.canonical(row.podcastFeedURL) == feed {
             context.delete(row)
         }
+        for row in (try? context.fetch(FetchDescriptor<LocalPodcastState>())) ?? []
+        where FeedURLIdentity.canonical(row.feedURL) == feed {
+            context.delete(row)
+        }
+    }
+}
+
+/// Compatibility name retained for existing download call sites. V8 contains no
+/// `ActiveDownload` model; active work is queried from `LocalEpisodeState`.
+enum ActiveDownload {
+    static func setDownloadStatus(
+        _ status: DownloadStatus, on episode: Episode, in context: ModelContext
+    ) {
+        LocalStateStore.setDownloadStatus(status, on: episode, in: context)
+    }
+
+    static func rows(for episode: Episode, in context: ModelContext) -> [LocalEpisodeState] {
+        guard let key = LocalStateStore.key(for: episode) else { return [] }
+        return LocalStateStore.episodeRows(for: key, in: context)
+    }
+
+    static func removeRows(forEpisodesOf podcast: Podcast, in context: ModelContext) {
+        LocalStateStore.removeRows(forEpisodesOf: podcast, in: context)
+    }
+}
+
+private func stableLocalID<T: PersistentModel>(_ model: T) -> String {
+    String(describing: model.persistentModelID)
+}
+
+private func localDownloadRank(_ status: DownloadStatus) -> Int {
+    switch status {
+    case .none: 0
+    case .failed: 1
+    case .pending: 2
+    case .downloading: 3
+    case .downloaded: 4
     }
 }

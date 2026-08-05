@@ -137,7 +137,7 @@ final class FolderRepositoryTests: XCTestCase {
         repo.add(p2, to: folder)
         repo.add(p1, to: folder) // duplicate — no-op
 
-        XCTAssertEqual(folder.memberships.count, 2)
+        XCTAssertEqual(folder.memberships?.count, 2)
         XCTAssertEqual(repo.podcasts(in: folder).map(\.title), ["One", "Two"])
     }
 

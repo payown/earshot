@@ -4,8 +4,8 @@ import SwiftData
 /// The original on-disk schema (commit `e75643c`): only `Podcast` + `Episode`,
 /// where `Episode` stores `isPlayed` and has **no** `createdAt`. Frozen here
 /// verbatim so SwiftData can recognise stores written by early TestFlight/dev
-/// builds and migrate them forward to the current schema (``EarshotSchemaV2``)
-/// without losing the tester's subscriptions and episodes.
+/// builds. V1 is now retained only as an immutable fixture for proving that the
+/// V6 migration floor rejects pre-public stores cleanly and without mutation.
 ///
 /// These model types are intentionally nested and distinct from the current
 /// top-level `Podcast`/`Episode`. SwiftData keys an entity off its class name

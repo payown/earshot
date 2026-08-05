@@ -174,7 +174,7 @@ final class IdentityRepairServiceTests: XCTestCase {
         XCTAssertEqual(episodeMemberships.first?.episode?.persistentModelID, merged.persistentModelID)
         XCTAssertEqual(episodeMemberships.first?.sortOrder, 2)
         XCTAssertEqual(try context.fetch(FetchDescriptor<RecentlyExpired>()).first?.episode?.persistentModelID, merged.persistentModelID)
-        XCTAssertTrue(try context.fetch(FetchDescriptor<ActiveDownload>()).isEmpty)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<LocalEpisodeState>()).count, 1)
 
         XCTAssertEqual(first.podcastsRemoved, 1)
         XCTAssertEqual(first.episodesRemoved, 1)
@@ -203,6 +203,43 @@ final class IdentityRepairServiceTests: XCTestCase {
 
         XCTAssertEqual(report.episodesRemoved, 0)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 2)
+    }
+
+    func testLocalStateRepairPrefersExistingDownloadAndClearsMissingPath() throws {
+        let existingName = "repair-existing-\(UUID()).mp3"
+        let missingName = "repair-missing-\(UUID()).mp3"
+        let existingURL = try DownloadPaths.downloadsDirectory()
+            .appendingPathComponent(existingName)
+        try Data("audio".utf8).write(to: existingURL)
+        defer { try? FileManager.default.removeItem(at: existingURL) }
+
+        let context = TestStore.freshContext()
+        context.insert(LocalEpisodeState(
+            podcastFeedURL: "https://example.com/feed", episodeGUID: "existing",
+            downloadStatus: .downloaded, downloadPath: missingName
+        ))
+        context.insert(LocalEpisodeState(
+            podcastFeedURL: "https://example.com/feed", episodeGUID: "existing",
+            downloadStatus: .downloaded, downloadPath: existingName
+        ))
+        context.insert(LocalEpisodeState(
+            podcastFeedURL: "https://example.com/feed", episodeGUID: "missing",
+            downloadStatus: .downloaded, downloadPath: missingName
+        ))
+        try context.save()
+
+        try LocalStateStore.repair(in: context)
+        try context.save()
+
+        let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
+        let existing = try XCTUnwrap(rows.first { $0.episodeGUID == "existing" })
+        XCTAssertEqual(rows.filter { $0.episodeGUID == "existing" }.count, 1)
+        XCTAssertEqual(existing.downloadStatus, .downloaded)
+        XCTAssertEqual(existing.downloadPath, existingName)
+
+        let missing = try XCTUnwrap(rows.first { $0.episodeGUID == "missing" })
+        XCTAssertEqual(missing.downloadStatus, DownloadStatus.none)
+        XCTAssertNil(missing.downloadPath)
     }
 
     func testLaunchRepairDoesNotInspectEpisodesForUniquePodcastGroups() throws {
@@ -252,7 +289,7 @@ final class IdentityRepairServiceTests: XCTestCase {
 
         XCTAssertEqual(report.episodesInspected, 2)
         XCTAssertEqual(report.episodesRemoved, 1)
-        XCTAssertEqual(podcast.episodes.count, 1)
-        XCTAssertEqual(otherPodcast.episodes.count, 2)
+        XCTAssertEqual(podcast.episodes?.count, 1)
+        XCTAssertEqual(otherPodcast.episodes?.count, 2)
     }
 }

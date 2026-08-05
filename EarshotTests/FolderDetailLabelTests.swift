@@ -191,7 +191,7 @@ final class FolderDetailLabelTests: XCTestCase {
 
         // The screen's `subfolders` computed: sort the tracked relationship.
         func screenOrder() -> [String] {
-            parent.children
+            (parent.children ?? [])
                 .sorted { lhs, rhs in
                     lhs.sortOrder != rhs.sortOrder ? lhs.sortOrder < rhs.sortOrder : lhs.name < rhs.name
                 }
