@@ -57,6 +57,17 @@ private actor MigrationCompletionState {
     }
 }
 
+/// Test-only reproduction of build 162's invalid lightweight V8-to-V9 stage.
+private enum Build162V8ToV9TestPlan: SchemaMigrationPlan {
+    static var schemas: [any VersionedSchema.Type] {
+        [EarshotSchemaV8.self, EarshotSchemaV9.self]
+    }
+
+    static var stages: [MigrationStage] {
+        [.lightweight(fromVersion: EarshotSchemaV8.self, toVersion: EarshotSchemaV9.self)]
+    }
+}
+
 @MainActor
 final class StoreMigrationV6toV8Tests: XCTestCase {
     nonisolated(unsafe) private var directory: URL!
@@ -251,6 +262,12 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             episode.podcast = podcast
             context.insert(episode)
 
+            let queueItem = EarshotSchemaV8.QueueItem()
+            queueItem.episode = episode
+            queueItem.position = 4
+            queueItem.addedAt = Date(timeIntervalSince1970: 1_600_000_002)
+            context.insert(queueItem)
+
             let podcastState = EarshotSchemaV8.LocalPodcastState()
             podcastState.feedURL = podcast.feedURL
             podcastState.refreshedAt = refreshed
@@ -268,6 +285,45 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             splitMarker.value = "1"
             context.insert(splitMarker)
             try context.save()
+        }
+    }
+
+    private func reproduceBuild162V9Migration() throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV9.self)
+        let stores: [(name: String, url: URL)] = [
+            ("FutureMirrored", storeURL),
+            ("DeviceLocal", StoreMigration.localStoreURL(for: storeURL)),
+        ]
+        for (name, url) in stores {
+            try autoreleasepool {
+                _ = try ModelContainer(
+                    for: schema,
+                    migrationPlan: Build162V8ToV9TestPlan.self,
+                    configurations: ModelConfiguration(
+                        name, schema: schema, url: url, cloudKitDatabase: .none
+                    )
+                )
+            }
+        }
+    }
+
+    private func materializeV6FixtureDownloads() throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+        let storedPaths: [String] = try autoreleasepool {
+            let container = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+            return try container.mainContext.fetch(FetchDescriptor<EarshotSchemaV5.Episode>())
+                .compactMap(\.downloadPath)
+        }
+        let downloads = try DownloadPaths.downloadsDirectory()
+        for storedPath in storedPaths {
+            guard let name = DownloadPaths.storedFileName(storedPath) else { continue }
+            let destination = downloads.appending(path: name)
+            guard !FileManager.default.fileExists(atPath: destination.path) else { continue }
+            try Data("fixture audio".utf8).write(to: destination)
+            downloadArtifacts.append(destination)
         }
     }
 
@@ -303,6 +359,40 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             total += (attributes[.size] as? NSNumber)?.int64Value ?? 0
         }
         return total
+    }
+
+    private func sqliteScalar(at url: URL, sql: String) throws -> Int64 {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return sqlite3_column_int64(statement, 0)
+    }
+
+    private func assertEpisodeSaveSurvivesReopen(
+        _ container: ModelContainer, marker: String = UUID().uuidString
+    ) throws {
+        var firstEpisode = FetchDescriptor<Episode>()
+        firstEpisode.fetchLimit = 1
+        let episode = try XCTUnwrap(try container.mainContext.fetch(firstEpisode).first)
+        episode.title = marker
+        try container.mainContext.save()
+
+        let reopened = try StoreMigration.openOrMigrate(at: storeURL)
+        var savedEpisode = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.title == marker }
+        )
+        savedEpisode.fetchLimit = 1
+        XCTAssertEqual(try reopened.mainContext.fetch(savedEpisode).first?.title, marker)
     }
 
     private func integrityCheck(at url: URL) throws -> [String] {
@@ -480,6 +570,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             try migrated.mainContext.fetchCount(FetchDescriptor<Episode>()),
             5_000
         )
+        try assertEpisodeSaveSurvivesReopen(migrated)
     }
 
     func testMigrationPrefersDuplicateDownloadWhoseFileExists() throws {
@@ -533,6 +624,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(survivor.downloadStatus, .downloaded)
         XCTAssertEqual(survivor.downloadPath, existingName)
         XCTAssertEqual(survivor.localAudioURL, existingURL)
+        try assertEpisodeSaveSurvivesReopen(migrated)
     }
 
     func testMigratedSplitStoreReopensIdempotently() throws {
@@ -546,6 +638,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(LocalAppSettingIdentity.value(
             for: StoreMigration.identityRepairCompletionKey, in: reopened.mainContext
         ), "1")
+        try assertEpisodeSaveSurvivesReopen(reopened)
     }
 
     func testAlreadySplitV8StoreMovesForwardWithoutBridgeReplay() throws {
@@ -554,7 +647,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
 
         let migrated = try StoreMigration.openOrMigrate(at: storeURL)
         let context = migrated.mainContext
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 1)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 1)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocalPodcastState>()), 1)
@@ -572,6 +665,53 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertNil(LocalAppSettingIdentity.value(
             for: StoreMigration.bridgeCompletionKey, in: context
         ), "The completed V8 split must not replay the original V7 bridge")
+        try assertEpisodeSaveSurvivesReopen(
+            migrated, marker: "Saved after V8 to V10 migration"
+        )
+    }
+
+    func testAlreadySplitV8QueueItemRelationshipSaveSurvivesMigration() throws {
+        try seedSplitV8()
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        let queueItem = try XCTUnwrap(
+            try migrated.mainContext.fetch(FetchDescriptor<QueueItem>()).first
+        )
+        XCTAssertEqual(queueItem.episode?.guid, "downloaded")
+        queueItem.position = 17
+        try migrated.mainContext.save()
+
+        let reopened = try StoreMigration.openOrMigrate(at: storeURL)
+        let saved = try XCTUnwrap(
+            try reopened.mainContext.fetch(FetchDescriptor<QueueItem>()).first
+        )
+        XCTAssertEqual(saved.position, 17)
+        XCTAssertEqual(saved.episode?.guid, "downloaded")
+    }
+
+    func testBuild162V9NullTombstoneStoreMovesToV10AndSaves() throws {
+        try seedSplitV8()
+        try reproduceBuild162V9Migration()
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertEqual(
+            try sqliteScalar(
+                at: storeURL,
+                sql: "SELECT COUNT(*) FROM ZEPISODE WHERE ZLEGACYDOWNLOADSTATUS IS NULL"
+            ),
+            1
+        )
+
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
+        XCTAssertEqual(
+            try sqliteScalar(
+                at: storeURL,
+                sql: "SELECT COUNT(*) FROM ZEPISODE WHERE ZLEGACYDOWNLOADSTATUS IS NULL"
+            ),
+            1
+        )
+        try assertEpisodeSaveSurvivesReopen(
+            migrated, marker: "Saved after synthetic build-162 V9 repair"
+        )
     }
 
     func testIdentityRepairCompletionMarkerGatesLaterLaunches() throws {
@@ -608,6 +748,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             throw XCTSkip("Set TEST_RUNNER_\(variable) to the verified V6 backup directory")
         }
         try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+        try materializeV6FixtureDownloads()
         let beforeBytes = try storeSetSize()
         let start = DispatchTime.now().uptimeNanoseconds
         let migrated = try await StoreMigrationEngine().openOrMigrate(at: storeURL)
@@ -632,7 +773,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             + context.fetch(FetchDescriptor<LocalAppSetting>())
                 .filter { !internalKeys.contains($0.key) }.count
         XCTAssertEqual(settingCount, 16)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
         XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
         XCTAssertEqual(try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"])
         let afterBytes = try storeSetSize()
@@ -644,6 +785,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             elapsed, 15,
             "Aged-store migration leaves too little margin inside the 20-second launch watchdog"
         )
+        try assertEpisodeSaveSurvivesReopen(migrated)
     }
 
     /// Opt-in proof against a disposable copy of the settled device's existing
@@ -672,7 +814,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             }.sorted()
         )
         XCTAssertEqual(destination, source)
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
         XCTAssertNil(LocalAppSettingIdentity.value(
             for: StoreMigration.bridgeCompletionKey, in: context
         ))
@@ -690,6 +832,70 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertLessThan(
             elapsed, 15,
             "Existing-V8 forward migration leaves too little launch-watchdog margin"
+        )
+        try assertEpisodeSaveSurvivesReopen(migrated)
+    }
+
+    /// Opt-in regression proof against a disposable copy of the build-162 V9
+    /// store whose required tombstone is NULL on every existing Episode row.
+    func testRealBuild162V9NullTombstoneFixtureMigratesAndSaves() throws {
+        let variable = "SYNC_MIGRATION_REAL_V9_DIRECTORY"
+        guard let path = ProcessInfo.processInfo.environment[variable] else {
+            throw XCTSkip("Set TEST_RUNNER_\(variable) to the preserved build-162 V9 directory")
+        }
+        try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 9)
+        XCTAssertEqual(
+            try sqliteScalar(
+                at: storeURL,
+                sql: "SELECT COUNT(*) FROM ZEPISODE WHERE ZLEGACYDOWNLOADSTATUS IS NULL"
+            ),
+            242_169
+        )
+
+        let beforeBytes = try storeSetSize()
+        let options = XCTMeasureOptions()
+        options.iterationCount = 1
+        var migrationResult: Result<ModelContainer, Error>?
+        var elapsed = 0.0
+        measure(metrics: [XCTStorageMetric()], options: options) {
+            let start = DispatchTime.now().uptimeNanoseconds
+            migrationResult = Result { try StoreMigration.openOrMigrate(at: storeURL) }
+            elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
+        }
+        let migrated = try XCTUnwrap(migrationResult).get()
+        let afterBytes = try storeSetSize()
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 10)
+        XCTAssertEqual(
+            try migrated.mainContext.fetchCount(FetchDescriptor<Episode>()), 242_169
+        )
+        XCTAssertEqual(
+            try sqliteScalar(
+                at: storeURL,
+                sql: "SELECT COUNT(*) FROM ZEPISODE WHERE ZLEGACYDOWNLOADSTATUS IS NULL"
+            ),
+            242_169,
+            "V9 to V10 should relax nullability, not backfill the Episode table"
+        )
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: migrated.mainContext
+        ), "1")
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.identityRepairCompletionKey, in: migrated.mainContext
+        ), "1")
+        XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
+        XCTAssertEqual(try integrityCheck(at: localURL), ["ok"])
+        print(String(format:
+            "REALV9MIGRATION|seconds|%.3f|beforeBytes|%lld|afterBytes|%lld|episodes|%d",
+            elapsed, beforeBytes, afterBytes, 242_169
+        ))
+
+        try assertEpisodeSaveSurvivesReopen(
+            migrated, marker: "Saved after build-162 V9 null repair"
         )
     }
 
@@ -710,6 +916,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(try resumed.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 2)
         XCTAssertEqual(LocalAppSettingIdentity.value(for: StoreMigration.splitCompletionKey,
             in: resumed.mainContext), "1")
+        try assertEpisodeSaveSurvivesReopen(resumed)
     }
 
     func testRestartAfterInjectedBridgeMarkerFailureRecoversCleanly() throws {
@@ -791,11 +998,12 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             ),
             "1"
         )
-        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
         XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
         XCTAssertEqual(
             try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"]
         )
+        try assertEpisodeSaveSurvivesReopen(container)
     }
 
     func testScaleMigrationProfile() throws {
@@ -830,5 +1038,6 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             migrationRSSGrowth, 500,
             "migration added enough resident memory to approach known device jetsam territory"
         )
+        try assertEpisodeSaveSurvivesReopen(migrated)
     }
 }
