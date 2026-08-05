@@ -8,7 +8,12 @@
 
 ## Prerequisites
 
-- TestFlight build 161 is the upgrade baseline. It writes `EarshotSchemaV6` and contains the completed manual-folder Phases 1–4.
+- Schema V6 is the supported migration floor. App Store build 157 was Earshot's
+  first public build and shipped V6; V1–V5 existed only in TestFlight and on
+  development devices. Those older routes are deliberately unsupported and
+  surface a backed-up reset with OPML re-import guidance instead of attempting
+  a partial migration. TestFlight build 161 is the Phase A device-test baseline;
+  it also writes `EarshotSchemaV6` and contains the completed manual-folder Phases 1–4.
 - Work begins from current `main` in a linked worktree. The existing V6 model graph is frozen before any live `@Model` changes.
 - Follow `.claude/rules/database-migrations.md` exactly. A fresh-store test is not a migration test.
 - Keep `cloudKitDatabase: .none`. Do not add iCloud entitlements, CloudKit capabilities, remote-notification background modes, schema initialization, sync UX, or a feature flag in Phase A. Those belong to Sync Phase B/C and require separate sign-off under `AGENTS.md`.
@@ -81,6 +86,26 @@ vacuum, then resumed successfully on the next launch. The retained-column V9
 prototype preserves all baseline data, but its final disposable real-V6 run
 took 22.1 seconds and grew the active store set from 405.4 to 783.4 MB; the
 15-second safety-margin assertion therefore fails. Task 5 remains unchecked.
+
+Follow-up profiling (2026-08-04) corrected the synthetic fixture so all 242,500
+episodes are related across 666 podcasts, with representative folder, queue,
+history, bookmark, download, and active-transfer edges. That migration took
+3.024 seconds on the simulator (up from the earlier 1.538-second orphan-heavy
+fixture), with only 14 MB of migration-time RSS growth. It still understates the
+aged device because the freshly created SQLite file has none of the real store's
+allocation history, persistent-history volume, fragmentation, or vacuum debt.
+
+A disposable copy of the preserved 408.6 MB device V6 store took 9.583 seconds
+on the simulator and grew to 783.4 MB. Stage timings were: mirrored-store
+migration 3.733 seconds, V6 preflight 2.637 seconds (2.468 seconds in the indexed
+download-path fetch), and final open/hydrate/repair 3.100 seconds (2.518 seconds
+opening the final two-store container). Core Data checkpointed 102,662 pages
+during mirrored migration and reported post-save incremental vacuum with
+101,707 freelist pages during finalization. On device that same final-save path
+was still in `sqlite3_step` → `copyRawIntegerRowsForSQL` →
+`_performPostSaveTasks:andForceFullVacuum` when the 20-second launch watchdog
+terminated the app. Moving this work off the launch watchdog path remains a PR
+blocker; the migration algorithm is not approved for implementation changes yet.
 
 ### 5. Upgrade build 161 on device and bake the schema
 
