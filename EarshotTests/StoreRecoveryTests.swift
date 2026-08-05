@@ -83,7 +83,10 @@ final class StoreRecoveryTests: XCTestCase {
         let before = try Data(contentsOf: storeURL)
 
         let load = ModelContainerFactory.load(at: storeURL)
-        XCTAssertEqual(load.recovery, .storeNewerThanApp)
+        guard case .recovery(let recovery) = load else {
+            return XCTFail("a newer store must return recovery without a container")
+        }
+        XCTAssertEqual(recovery, .storeNewerThanApp)
         XCTAssertTrue(storeExists(), "opening a newer store must never delete it")
         XCTAssertEqual(try Data(contentsOf: storeURL), before, "downgrade detection must not rewrite the store")
     }

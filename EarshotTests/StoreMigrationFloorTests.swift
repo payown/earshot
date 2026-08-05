@@ -90,7 +90,10 @@ final class StoreMigrationFloorTests: XCTestCase {
 
         let load = ModelContainerFactory.load(at: storeURL)
 
-        XCTAssertEqual(load.recovery, .storePredatesSupportedSchema)
+        guard case .recovery(let recovery) = load else {
+            return XCTFail("a pre-V6 store must return recovery without a container")
+        }
+        XCTAssertEqual(recovery, .storePredatesSupportedSchema)
         XCTAssertEqual(try storedMajorVersion(), majorVersion)
         XCTAssertEqual(
             try Data(contentsOf: storeURL), before,
