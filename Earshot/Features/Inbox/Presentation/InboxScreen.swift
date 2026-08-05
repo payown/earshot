@@ -5,6 +5,7 @@ import SwiftData
 /// Quick Actions (rotor + default tap). "Clear inbox" dismisses everything
 /// currently shown.
 struct InboxScreen: View {
+    @Environment(AppRuntime.self) private var runtime
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
@@ -65,6 +66,7 @@ struct InboxScreen: View {
     // "Mark as played" removes the focused row from the inbox (#579). Mirrors
     // the Queue's neighbor-focus wiring.
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
+    @AccessibilityFocusState private var focusLaunchHeading: Bool
     // Tracked by SwiftUI, so toggling VoiceOver while the Inbox is on screen
     // re-renders the rows and attaches/removes the swipe actions immediately —
     // no relaunch. (Reading UIAccessibility.isVoiceOverRunning in body would
@@ -234,6 +236,10 @@ struct InboxScreen: View {
         // the user asks for the tally when they want it (the list itself
         // updates live as they type).
         .searchable(text: $searchText, prompt: "Search inbox")
+        .onAppear { requestLaunchHeadingFocus() }
+        .onChange(of: runtime.launchFocusRequest) { _, _ in
+            requestLaunchHeadingFocus()
+        }
         .onChange(of: searchText) { _, _ in displayedEpisodeLimit = InboxLogic.displayBatchSize }
         .onSubmit(of: .search) { announceMatches(count: visible.count) }
         .toolbar {
@@ -246,6 +252,7 @@ struct InboxScreen: View {
                     .font(.headline)
                     .accessibilityLabel(InboxLogic.inboxTitleAccessibilityLabel(count: inbox.count))
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($focusLaunchHeading)
             }
             // Select / Done toggles selection mode (#758). "Select" enters and
             // moves VoiceOver focus to the first row; "Done" exits and announces
@@ -651,6 +658,11 @@ struct InboxScreen: View {
                 focusEmpty = true
             }
         }
+    }
+
+    private func requestLaunchHeadingFocus() {
+        guard runtime.consumeLaunchFocus(.inbox) else { return }
+        DispatchQueue.main.async { focusLaunchHeading = true }
     }
 
     private func shareItems(for episode: Episode) -> [Any] {

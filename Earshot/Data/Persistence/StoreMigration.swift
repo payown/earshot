@@ -41,6 +41,32 @@ enum StoreMigrationProgress: Int, CaseIterable, Sendable, Equatable {
 
     /// Final two-store open, local-state hydration, saves, and identity repair.
     case openingAndRepairing
+
+    var announcement: String {
+        switch self {
+        case .preparingAndValidating:
+            return "Preparing Earshot. Step 1 of 3. Preparing your library data."
+        case .migratingMirroredStore:
+            return "Preparing Earshot. Step 2 of 3. Reorganizing your episodes."
+        case .openingAndRepairing:
+            return "Preparing Earshot. Step 3 of 3. Finishing preparation."
+        }
+    }
+
+    var heartbeat: String {
+        "Earshot is still preparing your library. Step \(rawValue + 1) of 3."
+    }
+
+    var statusValue: String {
+        switch self {
+        case .preparingAndValidating:
+            return "Step 1 of 3. Preparing your library data."
+        case .migratingMirroredStore:
+            return "Step 2 of 3. Reorganizing your episodes."
+        case .openingAndRepairing:
+            return "Step 3 of 3. Finishing preparation."
+        }
+    }
 }
 
 /// Off-main execution boundary for the synchronous SwiftData migration work.

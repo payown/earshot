@@ -5,7 +5,7 @@ import UIKit
 import UserNotifications
 
 /// The root data lifecycle. The data-bound view tree exists only in ``ready``;
-/// recovery and the future asynchronous preparation state carry no temporary
+/// recovery and asynchronous preparation states carry no temporary
 /// container that could accidentally bind `@Query` or a long-lived service to
 /// the wrong store (#781).
 enum AppLaunchPhase {
@@ -19,6 +19,46 @@ enum RootServiceActivationStatus: Equatable {
     case inProgress
     case completed
 }
+
+/// The one heading that should receive VoiceOver focus after launch leaves the
+/// preparation or recovery UI. Requests are consumed once by the destination
+/// view without changing any existing label or trait.
+enum LaunchFocusDestination: Equatable {
+    case inbox
+    case queue
+    case library
+    case downloads
+    case onboarding
+    case recovery
+}
+
+@MainActor
+protocol LaunchAnnouncing: AnyObject {
+    var isVoiceOverRunning: Bool { get }
+    func announce(_ message: String, assertive: Bool)
+    func announceCompletion(_ message: String, timeout: Duration) async
+}
+
+@MainActor
+private final class SystemLaunchAnnouncer: LaunchAnnouncing {
+    static let shared = SystemLaunchAnnouncer()
+
+    var isVoiceOverRunning: Bool { UIAccessibility.isVoiceOverRunning }
+
+    func announce(_ message: String, assertive: Bool) {
+        Announcer.announce(message, assertive: assertive)
+    }
+
+    func announceCompletion(_ message: String, timeout: Duration) async {
+        await Announcer.announceAndWaitForCompletion(message, timeout: timeout)
+    }
+}
+
+typealias StoreLaunchOperation = @MainActor (
+    _ progress: @escaping @MainActor (StoreMigrationProgress) -> Void
+) async -> StoreLoad
+
+typealias LaunchSleepOperation = @Sendable (Duration) async throws -> Void
 
 /// Owns process-lifetime services and the container-dependent launch phase.
 /// Keeping these together makes the order explicit: bind process-wide download
@@ -61,25 +101,361 @@ final class AppRuntime {
 
     private(set) var phase: AppLaunchPhase = .unavailable
     private(set) var pendingIncomingFileURL: URL?
+    private(set) var launchProgress: StoreMigrationProgress?
+    private(set) var showsLaunchPreparation: Bool
+    private(set) var launchFocusRequest: LaunchFocusDestination?
+    private(set) var launchAttemptCount = 0
 
     private let mode: Mode
+    private let launchOperation: StoreLaunchOperation
+    private let launchAnnouncer: any LaunchAnnouncing
+    private let launchSleep: LaunchSleepOperation
     private var generation = 0
     private var processServicesStarted = false
     private var entitlementContainer: ModelContainer?
     private var boundRootServicesContainer: ModelContainer?
     private var rootServiceActivationState: RootServiceActivationState = .notStarted
+    private var launchTask: Task<Void, Never>?
+    private var launchAttemptID: UUID?
+    private var pendingStoreLoad: StoreLoad?
+    private var heartbeatTask: Task<Void, Never>?
+    private var pendingAnnouncementTask: Task<Void, Never>?
+    private var pendingAnnouncementID: UUID?
+    private var progressRevision = 0
+    private var isSceneActive = true
+    private var isSceneBackgrounded = false
+    private var sceneActivityRevision = 0
+    private var wasBackgroundedDuringLaunch = false
+    private var isPresentingLaunchResult = false
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
-    init(load: StoreLoad? = nil, mode: Mode) {
+    init(
+        load: StoreLoad? = nil,
+        mode: Mode,
+        showsLaunchPreparation: Bool? = nil,
+        launchOperation: StoreLaunchOperation? = nil,
+        launchAnnouncer: (any LaunchAnnouncing)? = nil,
+        launchSleep: @escaping LaunchSleepOperation = { duration in
+            try await Task.sleep(for: duration)
+        }
+    ) {
         self.mode = mode
+        self.showsLaunchPreparation = showsLaunchPreparation
+            ?? (mode == .normal && ModelContainerFactory.hasExistingStoreFiles)
+        self.launchOperation = launchOperation ?? Self.productionLaunch
+        self.launchAnnouncer = launchAnnouncer ?? SystemLaunchAnnouncer.shared
+        self.launchSleep = launchSleep
         let router = NotificationRouter()
         notificationRouter = router
         notificationDelegate = NotificationDelegate(router: router)
         if let load { install(load) }
     }
 
-    /// Installs a completed store load. The production path is still synchronous
-    /// in PR 1; the explicit unavailable -> ready/recovery transition is the seam
-    /// PRs 2 and 3 will drive asynchronously without rebuilding this lifecycle.
+    private static func productionLaunch(
+        progress: @escaping @MainActor (StoreMigrationProgress) -> Void
+    ) async -> StoreLoad {
+        let engine = StoreMigrationEngine()
+        let progressTask = Task { @MainActor in
+            for await update in engine.progressUpdates {
+                progress(update)
+            }
+        }
+        let load = await ModelContainerFactory.makeShared(using: engine)
+        await progressTask.value
+        return load
+    }
+
+    /// Starts the shared launch path once. The unstructured task is owned by the
+    /// process-lifetime runtime rather than a SwiftUI `.task`, so view removal,
+    /// backgrounding, or reconstruction cannot create a second migration.
+    func startLaunchIfNeeded() {
+        guard case .unavailable = phase, launchTask == nil else { return }
+
+        launchAttemptCount += 1
+        let attemptID = UUID()
+        launchAttemptID = attemptID
+        pendingStoreLoad = nil
+        progressRevision = 0
+        launchProgress = nil
+        wasBackgroundedDuringLaunch = isSceneBackgrounded
+        if showsLaunchPreparation {
+            startHeartbeat(after: Self.firstHeartbeatDelay, attemptID: attemptID)
+        }
+        if isSceneBackgrounded {
+            beginLaunchBackgroundTaskIfNeeded()
+        }
+
+        let operation = launchOperation
+        launchTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let load = await operation { [weak self] progress in
+                self?.receive(progress, attemptID: attemptID)
+            }
+            await self.finishLaunch(load, attemptID: attemptID)
+        }
+    }
+
+    /// Re-enters exactly the same asynchronous launch path in-process after an
+    /// operational migration failure. Other recovery states remain terminal and
+    /// never gain a retry or destructive side effect.
+    func retryLaunch() {
+        guard case .recovery(.migrationFailed) = phase, launchTask == nil else { return }
+        cancelAnnouncementWork()
+        launchFocusRequest = nil
+        showsLaunchPreparation = true
+        phase = .unavailable
+        // StorePreparationScreen starts the attempt only after its initial
+        // status has appeared and received the one stable focus request.
+    }
+
+    /// Scene state gates announcements and terminal focus. Migration ownership
+    /// never moves: background execution is requested only as a finite best-effort
+    /// optimization, and expiration does not cancel or restart the migration.
+    func updateLaunchScenePhase(_ scenePhase: ScenePhase) {
+        let becomingActive = scenePhase == .active
+        isSceneActive = becomingActive
+        isSceneBackgrounded = scenePhase == .background
+        sceneActivityRevision += 1
+
+        if !becomingActive {
+            cancelAnnouncementWork()
+            if scenePhase == .background, launchTask != nil {
+                wasBackgroundedDuringLaunch = true
+                beginLaunchBackgroundTaskIfNeeded()
+            }
+            return
+        }
+
+        endLaunchBackgroundTask()
+        if isPresentingLaunchResult { return }
+        if let pendingStoreLoad, let attemptID = launchAttemptID {
+            self.pendingStoreLoad = nil
+            Task { @MainActor [weak self] in
+                await self?.presentLaunchResult(pendingStoreLoad, attemptID: attemptID)
+            }
+            return
+        }
+
+        guard let attemptID = launchAttemptID,
+              launchTask != nil,
+              case .unavailable = phase,
+              showsLaunchPreparation else { return }
+
+        if wasBackgroundedDuringLaunch {
+            wasBackgroundedDuringLaunch = false
+            queueAnnouncement(
+                currentForegroundAnnouncement,
+                progressRevision: progressRevision,
+                attemptID: attemptID
+            )
+        }
+        startHeartbeat(after: Self.subsequentHeartbeatDelay, attemptID: attemptID)
+    }
+
+    func consumeLaunchFocus(_ destination: LaunchFocusDestination) -> Bool {
+        guard launchFocusRequest == destination else { return false }
+        launchFocusRequest = nil
+        return true
+    }
+
+    var preparationStatusValue: String {
+        launchProgress?.statusValue ?? Self.initialPreparationValue
+    }
+
+    var preparationStep: Int {
+        launchProgress.map { $0.rawValue + 1 } ?? 0
+    }
+
+    static let preparationAccessibilityLabel = "Preparing Earshot"
+    static let initialPreparationValue = "Checking your library. Keep the app open."
+    static let initialPreparationStatus =
+        "\(preparationAccessibilityLabel). \(initialPreparationValue)"
+    static let firstHeartbeatDelay: Duration = .seconds(5)
+    static let subsequentHeartbeatDelay: Duration = .seconds(8)
+
+    private func receive(_ progress: StoreMigrationProgress, attemptID: UUID) {
+        guard launchAttemptID == attemptID, case .unavailable = phase else { return }
+        launchProgress = progress
+        progressRevision += 1
+        guard showsLaunchPreparation, isSceneActive else { return }
+        queueAnnouncement(
+            progress.announcement,
+            progressRevision: progressRevision,
+            attemptID: attemptID
+        )
+    }
+
+    private func finishLaunch(_ load: StoreLoad, attemptID: UUID) async {
+        guard launchAttemptID == attemptID else { return }
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        endLaunchBackgroundTask()
+        guard isSceneActive else {
+            pendingStoreLoad = load
+            return
+        }
+        await presentLaunchResult(load, attemptID: attemptID)
+    }
+
+    private func presentLaunchResult(_ load: StoreLoad, attemptID: UUID) async {
+        guard launchAttemptID == attemptID else { return }
+        cancelAnnouncementWork()
+
+        if case .ready(let container) = load, showsLaunchPreparation {
+            while launchAnnouncer.isVoiceOverRunning {
+                guard isSceneActive else {
+                    pendingStoreLoad = load
+                    return
+                }
+                let activeRevision = sceneActivityRevision
+                isPresentingLaunchResult = true
+                await launchAnnouncer.announceCompletion(
+                    "Earshot is ready.", timeout: .seconds(4)
+                )
+                isPresentingLaunchResult = false
+                guard isSceneActive else {
+                    pendingStoreLoad = load
+                    return
+                }
+                // Any inactive/background/active cycle may have interrupted the
+                // utterance even if the app is active again now. Repeat it rather
+                // than removing the screen on a possibly truncated completion.
+                if sceneActivityRevision == activeRevision { break }
+            }
+            launchFocusRequest = Self.focusDestination(for: container)
+        } else if case .ready(let container) = load {
+            // Fresh install: no preparation UI or completion announcement was
+            // presented, but onboarding still receives the normal one-shot focus.
+            launchFocusRequest = Self.focusDestination(for: container)
+        } else {
+            launchFocusRequest = .recovery
+        }
+
+        launchTask = nil
+        launchAttemptID = nil
+        pendingStoreLoad = nil
+        install(load)
+    }
+
+    private static func focusDestination(for container: ModelContainer) -> LaunchFocusDestination {
+        let store = AppSettingsStore(context: container.mainContext)
+        guard store.bool(
+            SettingsKey.onboardingComplete,
+            default: SettingsDefault.onboardingComplete
+        ) else { return .onboarding }
+
+        switch RootTab(launchScreen: store.launchScreen()) {
+        case .inbox: return .inbox
+        case .queue: return .queue
+        case .library: return .library
+        case .downloads: return .downloads
+        case .settings: return .inbox
+        }
+    }
+
+    private var currentForegroundAnnouncement: String {
+        launchProgress?.announcement ?? "Earshot is still checking your library."
+    }
+
+    private func startHeartbeat(after firstDelay: Duration, attemptID: UUID) {
+        heartbeatTask?.cancel()
+        heartbeatTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var delay = firstDelay
+            while !Task.isCancelled {
+                do {
+                    try await launchSleep(delay)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled,
+                      launchAttemptID == attemptID,
+                      isSceneActive,
+                      case .unavailable = phase else { return }
+
+                // Snapshot the exact stage. `queueAnnouncement` checks this token
+                // again immediately before posting, so a heartbeat superseded by
+                // a progress update can never enter Announcer's polite queue.
+                let revision = progressRevision
+                let message = launchProgress?.heartbeat
+                    ?? "Earshot is still checking your library."
+                queueAnnouncement(
+                    message,
+                    progressRevision: revision,
+                    attemptID: attemptID
+                )
+                delay = Self.subsequentHeartbeatDelay
+            }
+        }
+    }
+
+    private func queueAnnouncement(
+        _ message: String,
+        progressRevision: Int,
+        attemptID: UUID
+    ) {
+        guard showsLaunchPreparation, isSceneActive else { return }
+        pendingAnnouncementTask?.cancel()
+        let deliveryID = UUID()
+        pendingAnnouncementID = deliveryID
+        pendingAnnouncementTask = Task { @MainActor [weak self] in
+            // Coalesce progress events delivered together before posting into
+            // VoiceOver's own polite queue.
+            await Task.yield()
+            await Task.yield()
+            guard let self,
+                  !Task.isCancelled,
+                  self.pendingAnnouncementID == deliveryID,
+                  self.launchAttemptID == attemptID,
+                  Self.announcementIsCurrent(
+                    candidateRevision: progressRevision,
+                    currentRevision: self.progressRevision,
+                    isSceneActive: self.isSceneActive
+                  ),
+                  case .unavailable = self.phase else { return }
+            self.launchAnnouncer.announce(message, assertive: false)
+            if self.pendingAnnouncementID == deliveryID {
+                self.pendingAnnouncementID = nil
+                self.pendingAnnouncementTask = nil
+            }
+        }
+    }
+
+    static func announcementIsCurrent(
+        candidateRevision: Int,
+        currentRevision: Int,
+        isSceneActive: Bool
+    ) -> Bool {
+        isSceneActive && candidateRevision == currentRevision
+    }
+
+    private func cancelAnnouncementWork() {
+        pendingAnnouncementTask?.cancel()
+        pendingAnnouncementTask = nil
+        pendingAnnouncementID = nil
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+    }
+
+    private func beginLaunchBackgroundTaskIfNeeded() {
+        guard mode == .normal, backgroundTaskID == .invalid else { return }
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(
+            withName: "Finish library preparation"
+        ) { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.endLaunchBackgroundTask()
+            }
+        }
+    }
+
+    private func endLaunchBackgroundTask() {
+        guard backgroundTaskID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        backgroundTaskID = .invalid
+    }
+
+    /// Installs a completed asynchronous store load. No data-bound view is built
+    /// until this transition publishes the final container.
     func install(_ load: StoreLoad) {
         switch load {
         case .ready(let container):
@@ -106,8 +482,8 @@ final class AppRuntime {
     var shouldRunBackgroundServices: Bool { mode == .normal }
 
     /// Registers the notification delegate/categories once, independently of
-    /// store readiness. A future preparation screen can therefore retain a
-    /// notification action until RootView is available to resolve it.
+    /// store readiness. The preparation screen can therefore retain a notification
+    /// action until RootView is available to resolve it.
     func activateProcessServices() async {
         guard mode != .testHost, !processServicesStarted else { return }
         processServicesStarted = true
@@ -309,7 +685,7 @@ struct EarshotApp: App {
             ))
         } else {
             _runtime = State(initialValue: AppRuntime(
-                load: ModelContainerFactory.makeShared(), mode: .normal
+                mode: .normal
             ))
         }
     }
@@ -330,10 +706,17 @@ struct EarshotApp: App {
             Group {
                 switch runtime.phase {
                 case .unavailable:
-                    // Production cannot enter this state until PR 3 installs the
-                    // approved preparation screen. It exists now so container
-                    // ownership can change later without another root refactor.
-                    Color.clear
+                    if runtime.showsLaunchPreparation {
+                        StorePreparationScreen()
+                    } else {
+                        // A genuine fresh install has no migration. Avoid a
+                        // fraction-of-a-second focus stop and truncated status;
+                        // create the empty store asynchronously behind a silent,
+                        // non-accessible launch-colored placeholder.
+                        Color(uiColor: .systemBackground)
+                            .accessibilityHidden(true)
+                            .task { runtime.startLaunchIfNeeded() }
+                    }
                 case .recovery(let state):
                     // Recovery has no ModelContainer. The screen performs only
                     // explicit file-level recovery and must never bind to a fake
@@ -382,6 +765,7 @@ struct EarshotApp: App {
         // so returning to the app surfaces new episodes immediately rather than
         // waiting on an opportunistic BGAppRefreshTask (#470). Skipped under tests.
         .onChange(of: scenePhase) { _, phase in
+            runtime.updateLaunchScenePhase(phase)
             guard runtime.shouldRunBackgroundServices else { return }
             switch phase {
             case .background:

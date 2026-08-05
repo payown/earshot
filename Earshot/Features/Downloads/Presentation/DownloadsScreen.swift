@@ -17,6 +17,7 @@ enum DownloadListQuery {
 /// Downloads: everything downloaded, plus Recently Expired (episodes auto-removed
 /// from the queue, restorable for 7 days before their files are deleted).
 struct DownloadsScreen: View {
+    @Environment(AppRuntime.self) private var runtime
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
@@ -66,6 +67,7 @@ struct DownloadsScreen: View {
     // when the last unheard download was just marked.
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusEmptyFilter: Bool
+    @AccessibilityFocusState private var focusLaunchHeading: Bool
 
     private var downloaded: [Episode] {
         let keys = downloadCandidates
@@ -219,6 +221,10 @@ struct DownloadsScreen: View {
         // never per keystroke, never while the field is empty — while the list
         // narrows live as the user types. The count spans both sections.
         .searchable(text: $searchText, prompt: "Search downloads")
+        .onAppear { requestLaunchHeadingFocus() }
+        .onChange(of: runtime.launchFocusRequest) { _, _ in
+            requestLaunchHeadingFocus()
+        }
         .onSubmit(of: .search) {
             announceMatches(count: visibleCount)
         }
@@ -233,6 +239,7 @@ struct DownloadsScreen: View {
                 Text("Downloads")
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($focusLaunchHeading)
             }
             // Quick one-tap way to reclaim storage. Disabled (not hidden) when
             // there's nothing downloaded, so its position stays stable for
@@ -492,6 +499,11 @@ struct DownloadsScreen: View {
     private func announceMatches(count: Int) {
         guard EpisodeSearchFilter.isActive(searchText) else { return }
         Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: count))
+    }
+
+    private func requestLaunchHeadingFocus() {
+        guard runtime.consumeLaunchFocus(.downloads) else { return }
+        DispatchQueue.main.async { focusLaunchHeading = true }
     }
 
     private func shareItems(for episode: Episode) -> [Any] {

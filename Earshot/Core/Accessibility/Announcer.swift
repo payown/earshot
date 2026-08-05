@@ -19,6 +19,22 @@ enum Announcer {
         UIAccessibility.post(notification: .announcement, argument: attributed)
     }
 
+    /// Posts an assertive announcement and waits until VoiceOver reports that it
+    /// finished. The timeout is deliberately a fallback, not the normal path:
+    /// a four-second default leaves room for a slow speech rate before a launch
+    /// screen is removed from underneath the utterance (#781).
+    @MainActor
+    static func announceAndWaitForCompletion(
+        _ message: String,
+        timeout: Duration = .seconds(4)
+    ) async {
+        guard !message.isEmpty, UIAccessibility.isVoiceOverRunning else { return }
+        let waiter = AnnouncementCompletionWaiter(message: message)
+        await waiter.wait(timeout: timeout) {
+            announce(message, assertive: true)
+        }
+    }
+
     /// Builds the attribute dictionary for an announcement. Pure and testable —
     /// the `UIAccessibility.post` side effect can't be unit-tested, but the
     /// attribute wiring (queue behavior + pinned language, #688) can.
@@ -58,5 +74,62 @@ enum Announcer {
     static var localeBCP47: String? {
         let tag = Locale.current.identifier(.bcp47)
         return tag.isEmpty ? nil : tag
+    }
+}
+
+/// Bridges UIKit's callback notification into one bounded async wait. Kept
+/// private to ``Announcer``'s file so launch code never observes UIKit directly.
+@MainActor
+private final class AnnouncementCompletionWaiter {
+    private let message: String
+    private var observer: NSObjectProtocol?
+    private var timeoutTask: Task<Void, Never>?
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(message: String) {
+        self.message = message
+    }
+
+    func wait(timeout: Duration, post: () -> Void) async {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            observer = NotificationCenter.default.addObserver(
+                forName: UIAccessibility.announcementDidFinishNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                let value = notification.userInfo?[
+                    UIAccessibility.announcementStringValueUserInfoKey
+                ]
+                let finishedMessage = (value as? String)
+                    ?? (value as? NSAttributedString)?.string
+                Task { @MainActor [weak self] in
+                    self?.received(finishedMessage)
+                }
+            }
+            timeoutTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: timeout)
+                guard !Task.isCancelled else { return }
+                self?.finish()
+            }
+            post()
+        }
+    }
+
+    private func received(_ finishedMessage: String?) {
+        guard finishedMessage == message else { return }
+        finish()
+    }
+
+    private func finish() {
+        guard let continuation else { return }
+        self.continuation = nil
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+            self.observer = nil
+        }
+        continuation.resume()
     }
 }
