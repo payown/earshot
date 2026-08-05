@@ -68,20 +68,30 @@ final class DownloadManager {
     /// while the app was suspended. Call once at launch (not under tests).
     static func activate(container: ModelContainer) {
         self.container = container
-        delegate.onFinished = { taskKey, fileURL in
-            Task { @MainActor in complete(taskKey: taskKey, fileURL: fileURL) }
+        delegate.installTerminalHandler { event in
+            Task { @MainActor in handle(event) }
         }
-        delegate.onFailed = { taskKey in
-            Task { @MainActor in fail(taskKey: taskKey) }
-        }
-        delegate.onEventsFinished = {
+        installEventsFinishedHandler()
+        _ = session
+    }
+
+    /// Reconnects a system-launched background session without requiring the
+    /// store to be ready. Terminal events are journaled by the delegate and
+    /// replayed when ``activate(container:)`` installs the final container.
+    static func reconnectBackgroundSession(completionHandler: @escaping () -> Void) {
+        backgroundCompletionHandler = completionHandler
+        installEventsFinishedHandler()
+        _ = session
+    }
+
+    private static func installEventsFinishedHandler() {
+        delegate.installEventsFinishedHandler {
             Task { @MainActor in
                 let handler = backgroundCompletionHandler
                 backgroundCompletionHandler = nil
                 handler?()
             }
         }
-        _ = session
     }
 
     func configure(context: ModelContext) {
@@ -131,9 +141,9 @@ final class DownloadManager {
 
     /// Starts downloading `episode`'s audio on the background session. No-op when
     /// already downloaded; sets `downloadStatus = .pending` and returns when
-    /// blocked by the Wi-Fi gate. Completion is handled by the session delegate
-    /// (``complete(guid:fileURL:)`` / ``fail(guid:)``), so this returns as soon as
-    /// the task is enqueued — the transfer then survives app suspension.
+    /// blocked by the Wi-Fi gate. Completion is handled by the session delegate's
+    /// durable terminal-event journal, so this returns as soon as the task is
+    /// enqueued — the transfer survives app suspension and store preparation.
     func download(_ episode: Episode) async {
         guard let context else { return }
         guard episode.downloadStatus != .downloaded else { return }
@@ -519,7 +529,17 @@ final class DownloadManager {
 
     // MARK: Terminal events (delegate → main actor → SwiftData)
 
-    private static func complete(taskKey: String, fileURL: URL) {
+    private static func handle(_ event: PendingDownloadTerminalEvent) {
+        defer { delegate.acknowledge(event) }
+        switch event.outcome {
+        case .finished(let fileName):
+            complete(taskKey: event.taskKey, fileName: fileName)
+        case .failed:
+            fail(taskKey: event.taskKey)
+        }
+    }
+
+    private static func complete(taskKey: String, fileName: String) {
         // Wake downloadAndWait callers first, unconditionally, so a failed
         // episode lookup can't leave a continuation parked until its timeout.
         // Resumption only SCHEDULES the waiter — it runs after this function
@@ -530,7 +550,7 @@ final class DownloadManager {
         // Store only the file NAME: iOS relocates the app container on every
         // app update, so an absolute path goes stale (#575). Reads resolve the
         // name against the current container via `Episode.localAudioURL`.
-        episode.downloadPath = fileURL.lastPathComponent
+        episode.downloadPath = fileName
         // Terminal: this also drops the ActiveDownload row, in the same save
         // (#701).
         ActiveDownload.setDownloadStatus(.downloaded, on: episode, in: context)

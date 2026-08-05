@@ -471,3 +471,51 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(idle.downloadStatus, DownloadStatus.none)
     }
 }
+
+/// The URL-session delegate can run before the launch coordinator has a store.
+/// These tests keep its compact terminal-event journal restartable without
+/// creating a real background transfer.
+final class DownloadEventJournalTests: XCTestCase {
+    nonisolated(unsafe) private var directory: URL!
+    nonisolated(unsafe) private var journalURL: URL!
+
+    override func setUpWithError() throws {
+        directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(
+                "download-event-journal-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        journalURL = directory.appendingPathComponent("events.json")
+    }
+
+    override func tearDownWithError() throws {
+        if let directory { try? FileManager.default.removeItem(at: directory) }
+    }
+
+    func testEventsPersistAcrossJournalRecreationUntilAcknowledged() {
+        let journal = DownloadEventJournal(url: journalURL)
+        let finished = journal.record(
+            taskKey: "feed|episode-1",
+            outcome: .finished(fileName: "episode-1.mp3")
+        )
+        let failed = journal.record(
+            taskKey: "feed|episode-2", outcome: .failed
+        )
+
+        XCTAssertEqual(
+            DownloadEventJournal(url: journalURL).pendingEvents(),
+            [finished, failed]
+        )
+
+        journal.acknowledge(finished.id)
+        XCTAssertEqual(
+            DownloadEventJournal(url: journalURL).pendingEvents(), [failed]
+        )
+
+        journal.acknowledge(failed.id)
+        XCTAssertTrue(
+            DownloadEventJournal(url: journalURL).pendingEvents().isEmpty
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+}
