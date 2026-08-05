@@ -367,7 +367,18 @@ enum StoreMigration {
                 let downloaded = try context.fetch(FetchDescriptor<EarshotSchemaV5.Episode>(
                     predicate: #Predicate { $0.downloadPath != nil }
                 ))
-                for episode in downloaded {
+                let downloadedGroups = Dictionary(grouping: downloaded) { episode in
+                    let feedURL = episode.podcast.map {
+                        FeedURLIdentity.canonical($0.feedURL)
+                    }
+                    return DownloadTaskKey.key(feedURL: feedURL, guid: episode.guid)
+                }
+                for group in downloadedGroups.values {
+                    guard let episode = DownloadPaths.preferredExistingDownload(
+                        from: group,
+                        storedValue: \EarshotSchemaV5.Episode.downloadPath,
+                        stableID: { String(describing: $0.persistentModelID) }
+                    ) else { continue }
                     guard let rawFeedURL = episode.podcast?.feedURL,
                           let path = episode.downloadPath, !path.isEmpty else { continue }
                     let feedURL = FeedURLIdentity.canonical(rawFeedURL)

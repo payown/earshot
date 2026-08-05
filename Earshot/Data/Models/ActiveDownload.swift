@@ -137,16 +137,24 @@ enum LocalStateStore {
         for (key, group) in episodeGroups {
             let ordered = group.sorted { stableLocalID($0) < stableLocalID($1) }
             guard let survivor = ordered.first else { continue }
-            let downloaded = group.first {
-                $0.downloadStatus == .downloaded && $0.downloadPath?.isEmpty == false
+            let downloaded = DownloadPaths.preferredExistingDownload(
+                from: group.filter { $0.downloadStatus == .downloaded },
+                storedValue: \LocalEpisodeState.downloadPath,
+                stableID: stableLocalID
+            )
+            let preferred = ordered.filter { $0.downloadStatus != .downloaded }.max {
+                let left = localDownloadRank($0.downloadStatus)
+                let right = localDownloadRank($1.downloadStatus)
+                return left == right
+                    ? stableLocalID($0) > stableLocalID($1)
+                    : left < right
             }
-            let preferred = downloaded ?? group.max {
-                localDownloadRank($0.downloadStatus) < localDownloadRank($1.downloadStatus)
-            } ?? survivor
             survivor.podcastFeedURL = key.feedURL
             survivor.episodeGUID = key.guid
-            survivor.downloadStatus = downloaded == nil ? preferred.downloadStatus : .downloaded
-            survivor.downloadPath = downloaded?.downloadPath ?? preferred.downloadPath
+            survivor.downloadStatus = downloaded == nil
+                ? (preferred?.downloadStatus ?? .none)
+                : .downloaded
+            survivor.downloadPath = downloaded?.downloadPath
             for duplicate in ordered.dropFirst() { context.delete(duplicate) }
         }
 

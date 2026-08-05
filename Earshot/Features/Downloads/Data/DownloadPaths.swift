@@ -65,6 +65,12 @@ enum DownloadTaskKey {
 /// off-main ``DownloadSessionDelegate`` can compute the same destination the
 /// manager would (both key off the episode guid + source extension).
 enum DownloadPaths {
+    private struct ExistingCandidate<Value> {
+        let value: Value
+        let modificationDate: Date
+        let stableID: String
+    }
+
     /// The `Documents/Downloads` directory, created if missing.
     static func downloadsDirectory() throws -> URL {
         let dir = try FileManager.default
@@ -110,6 +116,37 @@ enum DownloadPaths {
         guard let name = storedFileName(storedValue),
               let directory = try? downloadsDirectory() else { return nil }
         return directory.appendingPathComponent(name)
+    }
+
+    /// Selects a stored download deterministically, ignoring paths that do not
+    /// resolve to a file in the current app container. Modification time is the
+    /// only recency signal shared by migrated Episode rows and scalar local-state
+    /// rows; persistent ID provides a stable final tie-break.
+    static func preferredExistingDownload<Value>(
+        from values: [Value],
+        storedValue: (Value) -> String?,
+        stableID: (Value) -> String
+    ) -> Value? {
+        values.compactMap { value -> ExistingCandidate<Value>? in
+            guard let url = resolveLocalURL(storedValue: storedValue(value)) else { return nil }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else { return nil }
+            let modificationDate = (try? url.resourceValues(
+                forKeys: [.contentModificationDateKey]
+            ).contentModificationDate) ?? .distantPast
+            return ExistingCandidate(
+                value: value,
+                modificationDate: modificationDate,
+                stableID: stableID(value)
+            )
+        }.max {
+            if $0.modificationDate != $1.modificationDate {
+                return $0.modificationDate < $1.modificationDate
+            }
+            // `max(by:)` keeps the lexicographically smaller ID preferred.
+            return $0.stableID > $1.stableID
+        }?.value
     }
 }
 

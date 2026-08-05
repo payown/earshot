@@ -53,8 +53,14 @@ private final class MigrationMemorySampler: @unchecked Sendable {
 final class StoreMigrationV6toV8Tests: XCTestCase {
     nonisolated(unsafe) private var directory: URL!
     nonisolated(unsafe) private var storeURL: URL!
+    nonisolated(unsafe) private var downloadArtifacts: [URL] = []
+    nonisolated(unsafe) private var fixtureDownloadName = ""
+    nonisolated(unsafe) private var scaleDownloadPrefix = ""
     private let refreshed = Date(timeIntervalSince1970: 1_700_000_000)
     override func setUpWithError() throws {
+        downloadArtifacts = []
+        fixtureDownloadName = "migration-fixture-\(UUID()).mp3"
+        scaleDownloadPrefix = "migration-scale-\(UUID())"
         directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(
             "migration-v6v8-\(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -62,10 +68,20 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
     }
     override func tearDownWithError() throws {
         StoreMigration.injectedFailurePoint = nil
+        for url in downloadArtifacts { try? FileManager.default.removeItem(at: url) }
         try? FileManager.default.removeItem(at: directory)
     }
 
+    @discardableResult
+    private func createDownloadFile(named name: String) throws -> URL {
+        let url = try DownloadPaths.downloadsDirectory().appendingPathComponent(name)
+        try Data("audio".utf8).write(to: url)
+        downloadArtifacts.append(url)
+        return url
+    }
+
     private func seedV6() throws {
+        try createDownloadFile(named: fixtureDownloadName)
         let schema = Schema(versionedSchema: EarshotSchemaV6.self)
         let container = try ModelContainer(for: schema, configurations:
             ModelConfiguration(schema: schema, url: storeURL))
@@ -77,7 +93,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         context.insert(podcast)
         let downloaded = EarshotSchemaV5.Episode(
             guid: "downloaded", title: "Downloaded", audioURL: "https://example.com/d.mp3",
-            downloadStatus: .downloaded, downloadPath: "downloaded.mp3", positionSeconds: 37
+            downloadStatus: .downloaded, downloadPath: fixtureDownloadName, positionSeconds: 37
         )
         let pending = EarshotSchemaV5.Episode(
             guid: "pending", title: "Pending", audioURL: "https://example.com/p.mp3",
@@ -113,6 +129,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
     }
 
     private func seedScaleV6(episodeCount: Int) throws {
+        for index in 0..<min(43, episodeCount) {
+            try createDownloadFile(named: "\(scaleDownloadPrefix)-\(index).mp3")
+        }
         let schema = Schema(versionedSchema: EarshotSchemaV6.self)
         let podcastCount = min(666, max(1, episodeCount))
         try autoreleasepool {
@@ -160,7 +179,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
                         guid: "scale-\(index)", title: "Episode \(index)",
                         audioURL: "https://scale.example/\(index).mp3",
                         downloadStatus: downloaded ? .downloaded : (pending ? .pending : .none),
-                        downloadPath: downloaded ? "scale-\(index).mp3" : nil,
+                        downloadPath: downloaded ? "\(scaleDownloadPrefix)-\(index).mp3" : nil,
                         positionSeconds: index < 713 ? index % 300 : 0
                     )
                     let podcast = podcasts[index % podcastCount]
@@ -192,6 +211,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
     /// Builds the exact two-store V8 shape installed by the draft Phase A
     /// device build. This exercises the forward route independently of V7.
     private func seedSplitV8() throws {
+        try createDownloadFile(named: fixtureDownloadName)
         let full = Schema(versionedSchema: EarshotSchemaV8.self)
         let localURL = StoreMigration.localStoreURL(for: storeURL)
         try autoreleasepool {
@@ -232,7 +252,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             episodeState.podcastFeedURL = podcast.feedURL
             episodeState.episodeGUID = episode.guid
             episodeState.downloadStatusRaw = DownloadStatus.downloaded.rawValue
-            episodeState.downloadPath = "downloaded.mp3"
+            episodeState.downloadPath = fixtureDownloadName
             context.insert(episodeState)
 
             let splitMarker = EarshotSchemaV8.LocalAppSetting()
@@ -362,7 +382,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         let episodes = Dictionary(uniqueKeysWithValues: try context
             .fetch(FetchDescriptor<Episode>()).map { ($0.guid, $0) })
         XCTAssertEqual(episodes["downloaded"]?.downloadStatus, .downloaded)
-        XCTAssertEqual(episodes["downloaded"]?.downloadPath, "downloaded.mp3")
+        XCTAssertEqual(episodes["downloaded"]?.downloadPath, fixtureDownloadName)
         XCTAssertEqual(episodes["downloaded"]?.positionSeconds, 37)
         XCTAssertEqual(episodes["pending"]?.downloadStatus, .pending)
         XCTAssertEqual(episodes["failed"]?.downloadStatus, DownloadStatus.none)
@@ -411,6 +431,59 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
                        ["Keep", "Also keep"])
     }
 
+    func testMigrationPrefersDuplicateDownloadWhoseFileExists() throws {
+        let existingName = "migration-existing-\(UUID()).mp3"
+        let missingName = "migration-missing-\(UUID()).mp3"
+        let existingURL = try createDownloadFile(named: existingName)
+
+        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+        try autoreleasepool {
+            let container = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+            let context = container.mainContext
+            let olderPodcast = EarshotSchemaV5.Podcast(
+                feedURL: "HTTPS://Duplicates.Example:443/feed#old", title: "Older",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+            )
+            let newerPodcast = EarshotSchemaV5.Podcast(
+                feedURL: "https://duplicates.example/feed", title: "Newer",
+                createdAt: Date(timeIntervalSince1970: 1_800_000_000)
+            )
+            context.insert(olderPodcast)
+            context.insert(newerPodcast)
+
+            let existing = EarshotSchemaV5.Episode(
+                guid: "duplicate", title: "Existing", audioURL: "https://example.com/old.mp3",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_000),
+                downloadStatus: .downloaded, downloadPath: existingName,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+            )
+            existing.podcast = olderPodcast
+            context.insert(existing)
+
+            let missing = EarshotSchemaV5.Episode(
+                guid: "duplicate", title: "Missing", audioURL: "https://example.com/new.mp3",
+                pubDate: Date(timeIntervalSince1970: 1_800_000_000),
+                downloadStatus: .downloaded, downloadPath: missingName,
+                createdAt: Date(timeIntervalSince1970: 1_800_000_000)
+            )
+            missing.podcast = newerPodcast
+            context.insert(missing)
+            try context.save()
+        }
+
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        let episodes = try migrated.mainContext.fetch(FetchDescriptor<Episode>())
+            .filter { $0.guid == "duplicate" }
+        let survivor = try XCTUnwrap(episodes.first)
+        XCTAssertEqual(episodes.count, 1)
+        XCTAssertEqual(survivor.downloadStatus, .downloaded)
+        XCTAssertEqual(survivor.downloadPath, existingName)
+        XCTAssertEqual(survivor.localAudioURL, existingURL)
+    }
+
     func testMigratedSplitStoreReopensIdempotently() throws {
         try seedV6()
         try autoreleasepool { _ = try StoreMigration.openOrMigrate(at: storeURL) }
@@ -438,7 +511,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
 
         let episode = try XCTUnwrap(try context.fetch(FetchDescriptor<Episode>()).first)
         XCTAssertEqual(episode.downloadStatus, .downloaded)
-        XCTAssertEqual(episode.downloadPath, "downloaded.mp3")
+        XCTAssertEqual(episode.downloadPath, fixtureDownloadName)
         XCTAssertEqual(LocalAppSettingIdentity.value(
             for: StoreMigration.splitCompletionKey, in: context
         ), "1")
