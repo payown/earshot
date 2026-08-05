@@ -74,6 +74,27 @@ final class StoreRecoveryTests: XCTestCase {
         XCTAssertFalse(StoreMigration.indicatesNewerStore(corrupt))
     }
 
+    func testOperationalFailuresRemainDistinctFromUnreadableStoreErrors() {
+        let outOfSpace = NSError(
+            domain: NSCocoaErrorDomain,
+            code: NSFileWriteOutOfSpaceError
+        )
+        XCTAssertTrue(StoreMigration.indicatesOperationalFailure(outOfSpace))
+
+        let sqliteFull = NSError(domain: NSSQLiteErrorDomain, code: 13)
+        let wrapped = NSError(
+            domain: "SwiftDataError",
+            code: 1,
+            userInfo: [NSUnderlyingErrorKey: sqliteFull]
+        )
+        XCTAssertTrue(StoreMigration.indicatesOperationalFailure(wrapped))
+
+        let corrupt = NSError(domain: NSSQLiteErrorDomain, code: 11)
+        let notADatabase = NSError(domain: NSSQLiteErrorDomain, code: 26)
+        XCTAssertFalse(StoreMigration.indicatesOperationalFailure(corrupt))
+        XCTAssertFalse(StoreMigration.indicatesOperationalFailure(notADatabase))
+    }
+
     /// A benign forward schema (an added entity) is lightweight-reversible, so it
     /// opens rather than throwing — but the guarantee that still matters is that
     /// the store on disk is never deleted by opening it with an older build.

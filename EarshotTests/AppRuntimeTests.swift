@@ -83,6 +83,17 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertEqual(state, .corruptStore)
     }
 
+    func testOperationalMigrationFailureDoesNotBecomeRecovery() {
+        let runtime = AppRuntime(mode: .testHost)
+
+        runtime.install(.migrationFailed)
+
+        XCTAssertNil(runtime.readyContainer)
+        guard case .unavailable = runtime.phase else {
+            return XCTFail("operational failure must remain distinct from recovery")
+        }
+    }
+
     func testCancelledActivationReturnsToNotStartedAndNextRootRetries() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         let runtime = AppRuntime(load: .ready(container), mode: .testHost)
