@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 /// everyone (PRD 6). The "Add your first podcast" page hosts Search/Add/Import,
 /// and the final "Start Listening" is gated on having at least one subscription.
 struct OnboardingView: View {
+    @Environment(AppRuntime.self) private var runtime
     @Environment(SettingsStore.self) private var settings
     @Environment(\.modelContext) private var context
     @Environment(OPMLImportProgress.self) private var importProgress
@@ -53,6 +54,10 @@ struct OnboardingView: View {
             allowedContentTypes: [UTType(filenameExtension: "opml") ?? .xml, .xml]
         ) { result in
             handleImport(result)
+        }
+        .onAppear { requestLaunchHeadingFocus() }
+        .onChange(of: runtime.launchFocusRequest) { _, _ in
+            requestLaunchHeadingFocus()
         }
     }
 
@@ -194,6 +199,11 @@ struct OnboardingView: View {
         settings.onboardingComplete = true
         Announcer.announce("Onboarding complete. Welcome to Earshot.")
         dismiss()
+    }
+
+    private func requestLaunchHeadingFocus() {
+        guard runtime.consumeLaunchFocus(.onboarding) else { return }
+        DispatchQueue.main.async { focusedPage = pageIndex }
     }
 }
 

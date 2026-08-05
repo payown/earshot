@@ -9,6 +9,7 @@ import SwiftData
 /// dropped), and the group heading exposes Play Group, Move Group Up / Down,
 /// Sort Newest First, Sort Oldest First, and Shuffle Group in the actions rotor.
 struct QueueScreen: View {
+    @Environment(AppRuntime.self) private var runtime
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
@@ -23,6 +24,7 @@ struct QueueScreen: View {
     @State private var searchText = ""
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusedGroup: QueueGroup.Kind?
+    @AccessibilityFocusState private var focusLaunchHeading: Bool
 
     private var repo: QueueRepository { QueueRepository(context: context) }
     private var episodes: [Episode] { items.compactMap(\.episode) }
@@ -65,6 +67,10 @@ struct QueueScreen: View {
             .onSubmit(of: .search) { announceMatches() }
             .toolbar { toolbar }
             .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+            .onAppear { requestLaunchHeadingFocus() }
+            .onChange(of: runtime.launchFocusRequest) { _, _ in
+                requestLaunchHeadingFocus()
+            }
     }
 
     @ViewBuilder
@@ -339,6 +345,7 @@ struct QueueScreen: View {
             Text("Queue")
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($focusLaunchHeading)
         }
         // Edit (drag reorder) is hidden while a search is active, matching the
         // suspended `.onMove` — reordering a partial view of the queue would
@@ -422,6 +429,11 @@ struct QueueScreen: View {
         guard searchActive else { return }
         let count = EpisodeSearchFilter.filter(episodes, query: searchText).count
         Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: count))
+    }
+
+    private func requestLaunchHeadingFocus() {
+        guard runtime.consumeLaunchFocus(.queue) else { return }
+        DispatchQueue.main.async { focusLaunchHeading = true }
     }
 
 }

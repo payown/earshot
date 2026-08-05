@@ -6,8 +6,8 @@ import SwiftUI
 ///
 /// Four cases:
 ///   - ``StoreRecoveryState/migrationFailed`` — migration stopped for an
-///     operational reason. Purely informational; reopening retries against the
-///     intact library, and no destructive action is offered.
+///     operational reason. Offers an in-process retry against the intact library;
+///     no destructive action is offered.
 ///   - ``StoreRecoveryState/storeNewerThanApp`` — the store belongs to a newer
 ///     build. Purely informational; the store is left intact and the only path
 ///     forward is updating the app. No destructive action is offered.
@@ -20,6 +20,10 @@ import SwiftUI
 struct StoreRecoveryScreen: View {
     let state: StoreRecoveryState
 
+    static let retryLabel = "Try preparing again"
+    static let retryHint = "Checks your library again without closing Earshot."
+
+    @Environment(AppRuntime.self) private var runtime
     @State private var confirmingReset = false
     @State private var didReset = false
     @State private var backupName: String?
@@ -64,6 +68,7 @@ struct StoreRecoveryScreen: View {
             // here, so land focus on the heading explicitly rather than announcing
             // the title — an announce would double-read the header once focus
             // arrives. Delay mirrors InboxScreen's focus-request timing.
+            _ = runtime.consumeLaunchFocus(.recovery)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { focusedHeader = true }
         }
     }
@@ -72,7 +77,14 @@ struct StoreRecoveryScreen: View {
 
     @ViewBuilder
     private var actions: some View {
-        if offersReset {
+        if offersRetry {
+            Button(Self.retryLabel) {
+                runtime.retryLaunch()
+            }
+            .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
+            .buttonStyle(.borderedProminent)
+            .accessibilityHint(Self.retryHint)
+        } else if offersReset {
             if didReset {
                 Text(resetDoneMessage)
                     .font(.callout)
@@ -114,6 +126,8 @@ struct StoreRecoveryScreen: View {
         }
     }
 
+    var offersRetry: Bool { state == .migrationFailed }
+
     private func reset() {
         let backup = ModelContainerFactory.resetCorruptStore(at: ModelContainerFactory.storeURL)
         backupName = backup?.lastPathComponent
@@ -152,7 +166,7 @@ struct StoreRecoveryScreen: View {
     var message: String {
         switch state {
         case .migrationFailed:
-            return "Your library is safe and untouched. This usually means your device is low on storage. Free up some space, then quit Earshot from the App Switcher and open it again to try."
+            return "Your library is safe and untouched. This usually means your device is low on storage. Free up some space, then try preparing again."
         case .storeNewerThanApp:
             return "This version of Earshot is older than the data saved on your device. Update to the latest build to open your library. Your podcasts and history are safe and untouched."
         case .storePredatesSupportedSchema:

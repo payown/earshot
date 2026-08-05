@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct SubscriptionsView: View {
+    @Environment(AppRuntime.self) private var runtime
     @Environment(\.modelContext) private var context
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(SettingsStore.self) private var settings
@@ -28,6 +29,7 @@ struct SubscriptionsView: View {
     // normal row variant, keyed on the stable PersistentIdentifier, so focus
     // rides the row across the select-mode toggle.
     @AccessibilityFocusState private var focusedRowID: PersistentIdentifier?
+    @AccessibilityFocusState private var focusLaunchHeading: Bool
     // Gates the sighted-only swipe action below, mirroring Inbox's identical
     // gate: VoiceOver users already reach unfollow through the row's
     // "Unfollow" Quick Action in the rotor (`rotorActions(for:)` below), so
@@ -121,11 +123,16 @@ struct SubscriptionsView: View {
         // the heading trait. The plain `navigationTitle` keeps back-button identity.
         .navigationTitle("Library")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { requestLaunchHeadingFocus() }
+        .onChange(of: runtime.launchFocusRequest) { _, _ in
+            requestLaunchHeadingFocus()
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Text("Library")
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($focusLaunchHeading)
             }
             ToolbarItem(placement: .topBarLeading) {
                 // Scoped to the user's OWN content — subscribed podcasts, episodes,
@@ -584,5 +591,10 @@ struct SubscriptionsView: View {
         ]
         podcasts = (try? context.fetch(descriptor)) ?? []
         hasLoadedPodcasts = true
+    }
+
+    private func requestLaunchHeadingFocus() {
+        guard runtime.consumeLaunchFocus(.library) else { return }
+        DispatchQueue.main.async { focusLaunchHeading = true }
     }
 }

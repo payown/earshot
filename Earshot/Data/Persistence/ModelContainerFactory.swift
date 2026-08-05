@@ -60,12 +60,62 @@ enum ModelContainerFactory {
         URL.applicationSupportDirectory.appending(path: "default.store")
     }
 
+    /// Whether this device already has any file from the primary store set.
+    /// A genuine fresh install can skip the preparation UI entirely: creating
+    /// an empty V9 store is asynchronous but is not a migration, so briefly
+    /// focusing a progress screen would add noise before onboarding (#781).
+    static var hasExistingStoreFiles: Bool {
+        hasStoreFiles(at: storeURL)
+    }
+
+    static func hasStoreFiles(at url: URL) -> Bool {
+        let fm = FileManager.default
+        let storeURLs = [url, StoreMigration.localStoreURL(for: url)]
+        return storeURLs.contains { candidateURL in
+            ["", "-wal", "-shm", "-journal"].contains { suffix in
+                let file = candidateURL.deletingPathExtension()
+                    .appendingPathExtension("store" + suffix)
+                return fm.fileExists(atPath: file.path)
+            }
+        }
+    }
+
     /// The production load: opens the shared store, or returns the recovery state
     /// the UI must surface without constructing a fallback container. Never
     /// deletes data.
     @MainActor
     static func makeShared() -> StoreLoad {
         load(at: storeURL)
+    }
+
+    /// Production asynchronous load. The actor-owned migration engine keeps all
+    /// synchronous SwiftData/Core Data work off the main actor while preserving
+    /// the same failure classification as ``load(at:)``. Progress is consumed by
+    /// the launch coordinator through the engine's `AsyncStream`.
+    static func makeShared(using engine: StoreMigrationEngine) async -> StoreLoad {
+        do {
+            return .ready(try await engine.openOrMigrate(at: storeURL))
+        } catch StoreMigrationFailure.operational(let underlying) {
+            AppLog.data.error(
+                "Store migration could not complete; leaving data intact for retry: \(underlying.localizedDescription, privacy: .public)"
+            )
+            return .migrationFailed
+        } catch StoreOpenError.storeNewerThanApp(let underlying) {
+            AppLog.data.error(
+                "Store is newer than this build; leaving it intact and asking the user to update: \(underlying.localizedDescription, privacy: .public)"
+            )
+            return .recovery(.storeNewerThanApp)
+        } catch StoreOpenError.storePredatesSupportedSchema(let majorVersion) {
+            AppLog.data.error(
+                "Store schema V\(majorVersion) predates the supported V6 floor; leaving it intact pending user-consented reset"
+            )
+            return .recovery(.storePredatesSupportedSchema)
+        } catch {
+            AppLog.data.error(
+                "Store is unreadable; leaving it intact pending user-consented reset: \(error.localizedDescription, privacy: .public)"
+            )
+            return .recovery(.corruptStore)
+        }
     }
 
     /// Opens the store at `url`, classifying any failure into a recovery state
