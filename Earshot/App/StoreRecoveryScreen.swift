@@ -4,7 +4,10 @@ import SwiftUI
 /// of the main UI. Replaces the old silent reset-on-failure with an explicit,
 /// accessible recovery flow so data is never destroyed without consent (#529).
 ///
-/// Three cases:
+/// Four cases:
+///   - ``StoreRecoveryState/migrationFailed`` — migration stopped for an
+///     operational reason. Purely informational; reopening retries against the
+///     intact library, and no destructive action is offered.
 ///   - ``StoreRecoveryState/storeNewerThanApp`` — the store belongs to a newer
 ///     build. Purely informational; the store is left intact and the only path
 ///     forward is updating the app. No destructive action is offered.
@@ -69,12 +72,7 @@ struct StoreRecoveryScreen: View {
 
     @ViewBuilder
     private var actions: some View {
-        switch state {
-        case .storeNewerThanApp:
-            // Informational only — nothing safe to do in-app but update.
-            EmptyView()
-
-        case .storePredatesSupportedSchema, .corruptStore:
+        if offersReset {
             if didReset {
                 Text(resetDoneMessage)
                     .font(.callout)
@@ -105,6 +103,17 @@ struct StoreRecoveryScreen: View {
         }
     }
 
+    /// The exact gate used by ``actions``. Operational and downgrade failures
+    /// are informational only and must never expose destructive recovery.
+    var offersReset: Bool {
+        switch state {
+        case .migrationFailed, .storeNewerThanApp:
+            return false
+        case .storePredatesSupportedSchema, .corruptStore:
+            return true
+        }
+    }
+
     private func reset() {
         let backup = ModelContainerFactory.resetCorruptStore(at: ModelContainerFactory.storeURL)
         backupName = backup?.lastPathComponent
@@ -124,22 +133,26 @@ struct StoreRecoveryScreen: View {
 
     private var iconName: String {
         switch state {
+        case .migrationFailed: return "externaldrive.badge.exclamationmark"
         case .storeNewerThanApp: return "arrow.down.circle"
         case .storePredatesSupportedSchema: return "externaldrive.badge.exclamationmark"
         case .corruptStore: return "exclamationmark.triangle"
         }
     }
 
-    private var title: String {
+    var title: String {
         switch state {
+        case .migrationFailed: return "Earshot couldn't finish preparing your library"
         case .storeNewerThanApp: return "Update Earshot"
         case .storePredatesSupportedSchema: return "Older library can't be opened"
         case .corruptStore: return "Couldn't open your data"
         }
     }
 
-    private var message: String {
+    var message: String {
         switch state {
+        case .migrationFailed:
+            return "Your library is safe and untouched. This usually means your device is low on storage. Free up some space, then quit Earshot from the App Switcher and open it again to try."
         case .storeNewerThanApp:
             return "This version of Earshot is older than the data saved on your device. Update to the latest build to open your library. Your podcasts and history are safe and untouched."
         case .storePredatesSupportedSchema:
@@ -155,7 +168,7 @@ struct StoreRecoveryScreen: View {
             return "Backs up the old library, then clears it so you can re-import an OPML file after reopening Earshot"
         case .corruptStore:
             return "Backs up the unreadable data, then clears it so Earshot can start fresh"
-        case .storeNewerThanApp:
+        case .migrationFailed, .storeNewerThanApp:
             return ""
         }
     }

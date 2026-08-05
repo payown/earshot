@@ -742,7 +742,6 @@ enum StoreMigration {
             NSFileWriteUnsupportedSchemeError,
             NSFileWriteOutOfSpaceError,
             NSFileWriteVolumeReadOnlyError,
-            NSUserCancelledError,
         ]
         let posixCodes = Set([EACCES, EAGAIN, EBUSY, EDQUOT, EINTR, EIO, EMFILE,
                               ENFILE, ENOSPC, ETIMEDOUT].map(Int.init))

@@ -92,10 +92,7 @@ final class AppRuntime {
             generation += 1
             phase = .ready(container: container, generation: generation)
         case .migrationFailed:
-            // The accessible preparation screen will render this failure in its
-            // own PR. Until then, keep the data-bound root unavailable and never
-            // misroute an operational failure into corrupt-store recovery.
-            phase = .unavailable
+            phase = .recovery(.migrationFailed)
         case .recovery(let state):
             phase = .recovery(state)
         }

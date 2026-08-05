@@ -5,6 +5,10 @@ import SwiftData
 /// the UI (``StoreRecoveryScreen``) instead of ever silently destroying data
 /// (issue #529).
 enum StoreRecoveryState: Equatable {
+    /// Migration stopped for an operational reason such as low storage. The
+    /// library remains intact and retryable, so destructive reset is never offered.
+    case migrationFailed
+
     /// The on-disk store was written by a NEWER build than this one. The store is
     /// left completely untouched and the recovery screen asks the user to update.
     /// Resetting here is NOT offered — it would destroy still-good data.

@@ -83,15 +83,24 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertEqual(state, .corruptStore)
     }
 
-    func testOperationalMigrationFailureDoesNotBecomeRecovery() {
+    func testOperationalMigrationFailureRendersNonDestructiveRecoveryScreen() {
         let runtime = AppRuntime(mode: .testHost)
 
         runtime.install(.migrationFailed)
 
         XCTAssertNil(runtime.readyContainer)
-        guard case .unavailable = runtime.phase else {
-            return XCTFail("operational failure must remain distinct from recovery")
+        guard case .recovery(let state) = runtime.phase else {
+            return XCTFail("operational failure must render the recovery screen")
         }
+        XCTAssertEqual(state, .migrationFailed)
+
+        let screen = StoreRecoveryScreen(state: state)
+        XCTAssertEqual(screen.title, "Earshot couldn't finish preparing your library")
+        XCTAssertEqual(
+            screen.message,
+            "Your library is safe and untouched. This usually means your device is low on storage. Free up some space, then quit Earshot from the App Switcher and open it again to try."
+        )
+        XCTAssertFalse(screen.offersReset, "operational failure must never offer a reset")
     }
 
     func testCancelledActivationReturnsToNotStartedAndNextRootRetries() async throws {
