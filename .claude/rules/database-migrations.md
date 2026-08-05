@@ -39,6 +39,10 @@ surface in the app.
    used for V1→V2). New attributes that can be optional, and new `@Model` types,
    migrate lightweight.
 
+   A non-optional property with a Swift default added in a lightweight stage
+   will be NULL on every existing row, and any save will abort when SwiftData
+   snapshots that invalid object graph.
+
 4. **Test the upgrade path, not just fresh creation.** A stage that works on an
    empty store can throw on real aged data (large tables, NULLs in older rows,
    orphaned relationships). Add/extend a migration test in `EarshotTests` that
