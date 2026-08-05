@@ -14,12 +14,10 @@ import SwiftData
 /// disk. When the live models change, freeze a NEW version (see ``EarshotSchemaV3``
 /// and the drift-detection test) rather than editing this snapshot.
 ///
-/// V1→V2 is **not** a lightweight migration: it turns 2 entities into 10 and
-/// adds many non-optional attributes. SwiftData's lightweight migration cannot
-/// add a non-optional attribute (it does not honour Swift property defaults as
-/// store defaults — verified in `StoreMigrationTests`), so the upgrade is done
-/// as a manual export/reimport in ``StoreMigration`` rather than via a
-/// `MigrationStage.lightweight`.
+/// V1–V5 are now retained only as immutable fixtures for the explicit V6
+/// migration-floor guard. Build 157 was the first public App Store build and
+/// shipped V6; these earlier schemas were TestFlight-only and have no production
+/// migration route.
 enum EarshotSchemaV2: VersionedSchema {
     static let versionIdentifier = Schema.Version(2, 0, 0)
 

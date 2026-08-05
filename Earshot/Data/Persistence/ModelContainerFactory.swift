@@ -10,6 +10,10 @@ enum StoreRecoveryState: Equatable {
     /// Resetting here is NOT offered — it would destroy still-good data.
     case storeNewerThanApp
 
+    /// The store predates V6, Earshot's first public App Store schema. It is
+    /// preserved until the user explicitly chooses the backed-up reset path.
+    case storePredatesSupportedSchema
+
     /// The store could not be opened as any known schema (genuine corruption). The
     /// recovery screen offers an explicit, user-consented "Reset local data"
     /// action — which backs the files up first.
@@ -32,7 +36,8 @@ enum StoreLoad {
 /// migration bug and its SwiftData reincarnation — see issues #355 / #529 and
 /// `.claude/rules/database-migrations.md`):
 ///
-///   1. Open the persistent store, migrating V1→V2→V3 as needed (preserves data).
+///   1. Open a V6-or-newer persistent store through the restartable split migration.
+///      Pre-V6 stores are preserved and surfaced with OPML recovery guidance.
 ///   2. If the store is NEWER than this build (a downgrade), leave it completely
 ///      untouched and ask the user to update the app. Never delete a store this
 ///      build simply can't read yet.
@@ -60,9 +65,9 @@ enum ModelContainerFactory {
     /// can drive it against a temporary store.
     @MainActor
     static func load(at url: URL) -> StoreLoad {
-        // 1. Normal path — open as the current schema (V3) through the migration
-        //    plan: a V2 store is lightweight-migrated, and an original (V1) store
-        //    is manually export/reimported (see StoreMigration), preserving data.
+        // 1. Normal path — open the current split store or migrate from the
+        //    supported V6 floor. StoreMigration classifies unsupported pre-V6
+        //    data separately from corruption and newer-than-app downgrades.
         do {
             let container = try StoreMigration.openOrMigrate(at: url)
             return .ready(container)
@@ -73,6 +78,11 @@ enum ModelContainerFactory {
                 "Store is newer than this build; leaving it intact and asking the user to update: \(underlying.localizedDescription, privacy: .public)"
             )
             return .recovery(.storeNewerThanApp)
+        } catch StoreOpenError.storePredatesSupportedSchema(let majorVersion) {
+            AppLog.data.error(
+                "Store schema V\(majorVersion) predates the supported V6 floor; leaving it intact pending user-consented reset"
+            )
+            return .recovery(.storePredatesSupportedSchema)
         } catch {
             // 3. Genuine corruption — surface an explicit, user-consented reset
             //    (which backs up before deleting). No silent wipe here before the
@@ -163,7 +173,7 @@ enum ModelContainerFactory {
     }
 
     /// Deletes the SQLite store at `url` and its sidecar files. Used by
-    /// reset-on-failure and by the manual V1→V2 migration before recreating.
+    /// user-consented recovery and restartable local-store reconstruction.
     static func removeStoreFiles(at url: URL) {
         let fm = FileManager.default
         for suffix in ["", "-wal", "-shm", "-journal"] {
