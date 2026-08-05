@@ -49,6 +49,14 @@ private final class MigrationMemorySampler: @unchecked Sendable {
     }
 }
 
+private actor MigrationCompletionState {
+    private(set) var isFinished = false
+
+    func markFinished() {
+        isFinished = true
+    }
+}
+
 @MainActor
 final class StoreMigrationV6toV8Tests: XCTestCase {
     nonisolated(unsafe) private var directory: URL!
@@ -431,6 +439,49 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
                        ["Keep", "Also keep"])
     }
 
+    func testMigrationEngineReportsStagesWhileMainActorRemainsResponsive() async throws {
+        try seedScaleV6(episodeCount: 5_000)
+        let engine = StoreMigrationEngine()
+        let completion = MigrationCompletionState()
+
+        let migration = Task { () throws -> ModelContainer in
+            do {
+                let container = try await engine.openOrMigrate(at: storeURL)
+                await completion.markFinished()
+                return container
+            } catch {
+                await completion.markFinished()
+                throw error
+            }
+        }
+
+        var iterator = engine.progressUpdates.makeAsyncIterator()
+        let first = await iterator.next()
+        XCTAssertEqual(first, .preparingAndValidating)
+        var migrationFinished = await completion.isFinished
+        XCTAssertFalse(migrationFinished)
+
+        var heartbeat = 0
+        await Task.yield()
+        heartbeat += 1
+        XCTAssertEqual(heartbeat, 1)
+        migrationFinished = await completion.isFinished
+        XCTAssertFalse(
+            migrationFinished,
+            "main-actor work must run while the engine is still migrating"
+        )
+
+        var stages = first.map { [$0] } ?? []
+        while let stage = await iterator.next() { stages.append(stage) }
+        let migrated = try await migration.value
+
+        XCTAssertEqual(stages, StoreMigrationProgress.allCases)
+        XCTAssertEqual(
+            try migrated.mainContext.fetchCount(FetchDescriptor<Episode>()),
+            5_000
+        )
+    }
+
     func testMigrationPrefersDuplicateDownloadWhoseFileExists() throws {
         let existingName = "migration-existing-\(UUID()).mp3"
         let missingName = "migration-missing-\(UUID()).mp3"
@@ -551,7 +602,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
 
     /// Opt-in proof against a disposable copy of the untouched build-161 V6
     /// backup, not a freshly constructed scale fixture.
-    func testRealBuild161V6FixtureThroughRetainedColumnSchema() throws {
+    func testRealBuild161V6FixtureThroughRetainedColumnSchema() async throws {
         let variable = "SYNC_MIGRATION_REAL_V6_DIRECTORY"
         guard let path = ProcessInfo.processInfo.environment[variable] else {
             throw XCTSkip("Set TEST_RUNNER_\(variable) to the verified V6 backup directory")
@@ -559,7 +610,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
         let beforeBytes = try storeSetSize()
         let start = DispatchTime.now().uptimeNanoseconds
-        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        let migrated = try await StoreMigrationEngine().openOrMigrate(at: storeURL)
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
         let context = migrated.mainContext
 

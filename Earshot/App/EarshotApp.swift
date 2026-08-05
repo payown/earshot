@@ -91,6 +91,8 @@ final class AppRuntime {
             }
             generation += 1
             phase = .ready(container: container, generation: generation)
+        case .migrationFailed:
+            phase = .recovery(.migrationFailed)
         case .recovery(let state):
             phase = .recovery(state)
         }
