@@ -14,6 +14,12 @@ enum AppLaunchPhase {
     case recovery(StoreRecoveryState)
 }
 
+enum RootServiceActivationStatus: Equatable {
+    case notStarted
+    case inProgress
+    case completed
+}
+
 /// Owns process-lifetime services and the container-dependent launch phase.
 /// Keeping these together makes the order explicit: bind process-wide download
 /// delivery first, then publish a ready container, and configure every remaining
@@ -21,6 +27,22 @@ enum AppLaunchPhase {
 @MainActor
 @Observable
 final class AppRuntime {
+    private enum RootServiceActivationResult: Sendable {
+        case completed
+        case cancelled
+        case failed
+    }
+
+    private enum RootServiceActivationState {
+        case notStarted
+        case inProgress(
+            container: ModelContainer,
+            id: UUID,
+            task: Task<RootServiceActivationResult, Never>
+        )
+        case completed(container: ModelContainer)
+    }
+
     enum Mode: Equatable {
         case normal
         case screenshot
@@ -44,7 +66,8 @@ final class AppRuntime {
     private var generation = 0
     private var processServicesStarted = false
     private var entitlementContainer: ModelContainer?
-    private var rootServicesContainer: ModelContainer?
+    private var boundRootServicesContainer: ModelContainer?
+    private var rootServiceActivationState: RootServiceActivationState = .notStarted
 
     init(load: StoreLoad? = nil, mode: Mode) {
         self.mode = mode
@@ -101,17 +124,134 @@ final class AppRuntime {
         await entitlements.resync()
     }
 
-    /// Claims the one-time, store-backed RootView service setup. View-local state
-    /// still initializes on every RootView instance, but observers, monitors,
-    /// repairs, expiration, and playback restoration bind only once.
-    func claimRootServiceActivation(for container: ModelContainer) -> Bool {
-        if rootServicesContainer === container { return false }
-        guard rootServicesContainer == nil else {
-            AppLog.data.error("Refused to rebind root services to a second model container")
-            return false
+    var rootServiceActivationStatus: RootServiceActivationStatus {
+        switch rootServiceActivationState {
+        case .notStarted: .notStarted
+        case .inProgress: .inProgress
+        case .completed: .completed
         }
-        rootServicesContainer = container
-        return true
+    }
+
+    /// Runs the store-backed launch setup exactly once to completion. A second
+    /// RootView arriving during setup awaits the same task. If the owning
+    /// RootView is cancelled, the shared task is cancelled, state returns to
+    /// `notStarted`, and another root can retry before reading launch settings.
+    func activateRootServices(
+        for container: ModelContainer,
+        operation: @escaping @MainActor @Sendable () async throws -> Void
+    ) async -> Bool {
+        while true {
+            let activationID: UUID
+            let activationTask: Task<RootServiceActivationResult, Never>
+            let ownsActivation: Bool
+
+            switch rootServiceActivationState {
+            case .notStarted:
+                if let boundRootServicesContainer,
+                   boundRootServicesContainer !== container {
+                    AppLog.data.error(
+                        "Refused to activate root services for a second model container"
+                    )
+                    return false
+                }
+                activationID = UUID()
+                activationTask = Task { @MainActor in
+                    do {
+                        try Task.checkCancellation()
+                        try await operation()
+                        return .completed
+                    } catch is CancellationError {
+                        return .cancelled
+                    } catch {
+                        AppLog.data.error(
+                            "Root service activation failed: \(error.localizedDescription, privacy: .public)"
+                        )
+                        return .failed
+                    }
+                }
+                rootServiceActivationState = .inProgress(
+                    container: container,
+                    id: activationID,
+                    task: activationTask
+                )
+                ownsActivation = true
+
+            case let .inProgress(activeContainer, id, task):
+                guard activeContainer === container else {
+                    AppLog.data.error(
+                        "Refused to await root services for a second model container"
+                    )
+                    return false
+                }
+                activationID = id
+                activationTask = task
+                ownsActivation = false
+
+            case .completed(let activeContainer):
+                guard activeContainer === container else {
+                    AppLog.data.error(
+                        "Refused to rebind root services to a second model container"
+                    )
+                    return false
+                }
+                return true
+            }
+
+            let result = await withTaskCancellationHandler {
+                await activationTask.value
+            } onCancel: {
+                if ownsActivation { activationTask.cancel() }
+            }
+            finishRootServiceActivation(
+                id: activationID,
+                result: result
+            )
+
+            switch result {
+            case .completed:
+                return !Task.isCancelled
+            case .cancelled:
+                if Task.isCancelled { return false }
+                // A waiting root becomes the retry owner after the prior owner
+                // was cancelled and reset the state to `notStarted`.
+                continue
+            case .failed:
+                return false
+            }
+        }
+    }
+
+    /// Keeps non-idempotent observer/session wiring from being repeated when an
+    /// activation retry follows cancellation during an awaited repair step.
+    func bindRootServicesIfNeeded(
+        to container: ModelContainer,
+        operation: () -> Void
+    ) {
+        if boundRootServicesContainer === container { return }
+        guard boundRootServicesContainer == nil else {
+            AppLog.data.error(
+                "Refused to bind root services to a second model container"
+            )
+            return
+        }
+        operation()
+        boundRootServicesContainer = container
+    }
+
+    private func finishRootServiceActivation(
+        id: UUID,
+        result: RootServiceActivationResult
+    ) {
+        guard case let .inProgress(container, currentID, _) = rootServiceActivationState,
+              currentID == id else { return }
+        switch result {
+        case .completed:
+            rootServiceActivationState = .completed(container: container)
+        case .cancelled:
+            rootServiceActivationState = .notStarted
+        case .failed:
+            rootServiceActivationState = .notStarted
+        }
     }
 
     /// Captures an externally handed OPML/XML URL even when RootView is absent.

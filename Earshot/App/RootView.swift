@@ -283,25 +283,27 @@ struct RootView: View {
             player.updateRemoteSkipIntervals()
         }
         .task {
-            let shouldActivateStoreServices = runtime.claimRootServiceActivation(
+            let activationCompleted = await runtime.activateRootServices(
                 for: modelContext.container
-            )
-            if shouldActivateStoreServices {
-                #if DEBUG
-                // App Store screenshot capture (#643): seed the in-memory store
-                // before configure/restore work below reads it. DEBUG + launch-arg
-                // only; a normal launch never enters this branch.
-                if ScreenshotHarness.isSeeding {
-                    ScreenshotFixtures.seed(into: modelContext)
+            ) {
+                runtime.bindRootServicesIfNeeded(to: modelContext.container) {
+                    #if DEBUG
+                    // App Store screenshot capture (#643): seed the in-memory
+                    // store before configure/restore work reads it.
+                    if ScreenshotHarness.isSeeding {
+                        ScreenshotFixtures.seed(into: modelContext)
+                    }
+                    #endif
+                    player.configure(context: modelContext)
+                    quickActions.configure(context: modelContext)
+                    downloads.configure(context: modelContext)
                 }
-                #endif
-                // Bind every store-backed service to the final container once.
-                player.configure(context: modelContext)
-                quickActions.configure(context: modelContext)
-                downloads.configure(context: modelContext)
                 // Repair interrupted downloads before resolving local files.
+                try Task.checkCancellation()
                 await downloads.reconcileStuckDownloads()
+                try Task.checkCancellation()
                 await downloads.reconcileDownloadPaths()
+                try Task.checkCancellation()
                 settings.configure(context: modelContext)
                 // Snapshot the existing library before any subscribe/import action.
                 let capSettings = AppSettingsStore(context: modelContext)
@@ -317,6 +319,10 @@ struct RootView: View {
                 )
                 PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
             }
+            // No root may seed navigation/onboarding state until the shared
+            // activation has completed. A cancelled owner returns here; a second
+            // root waits for that owner or performs the retry itself.
+            guard activationCompleted else { return }
             // Seed this RootView's launch tab after settings are available. This
             // is view-local state, so it must also run if SwiftUI recreates the
             // root after process services have already been activated.
