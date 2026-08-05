@@ -26,6 +26,28 @@ struct PendingDownloadTerminalEvent: Codable, Equatable, Sendable {
 /// acknowledged only after DownloadManager has attempted their idempotent store
 /// update, so a kill between delivery and container readiness replays safely.
 final class DownloadEventJournal: @unchecked Sendable {
+    private struct PersistedJournal: Codable {
+        let version: Int
+        let events: [PendingDownloadTerminalEvent]
+    }
+
+    private struct VersionHeader: Decodable {
+        let version: Int
+    }
+
+    private enum LoadError: LocalizedError {
+        case unsupportedVersion(Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .unsupportedVersion(let version):
+                "Unsupported download event journal version \(version)"
+            }
+        }
+    }
+
+    private static let currentVersion = 1
+
     static let shared = DownloadEventJournal(
         url: URL.applicationSupportDirectory
             .appending(path: "pending-download-events.json")
@@ -37,13 +59,20 @@ final class DownloadEventJournal: @unchecked Sendable {
 
     init(url: URL) {
         self.url = url
-        if let data = try? Data(contentsOf: url),
-           let decoded = try? JSONDecoder().decode(
-               [PendingDownloadTerminalEvent].self, from: data
-           ) {
-            events = decoded
-        } else {
-            events = []
+        events = []
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            let header = try decoder.decode(VersionHeader.self, from: data)
+            guard header.version == Self.currentVersion else {
+                throw LoadError.unsupportedVersion(header.version)
+            }
+            events = try decoder.decode(PersistedJournal.self, from: data).events
+        } catch {
+            AppLog.networking.error(
+                "Could not decode pending download event journal; pending events were not loaded: \(error.localizedDescription, privacy: .public)"
+            )
         }
     }
 
@@ -82,7 +111,10 @@ final class DownloadEventJournal: @unchecked Sendable {
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            let data = try JSONEncoder().encode(events)
+            let data = try JSONEncoder().encode(PersistedJournal(
+                version: Self.currentVersion,
+                events: events
+            ))
             try data.write(to: url, options: .atomic)
         } catch {
             AppLog.networking.error(

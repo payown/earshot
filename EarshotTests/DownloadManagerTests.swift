@@ -485,6 +485,10 @@ final class DownloadEventJournalTests: XCTestCase {
                 "download-event-journal-\(UUID().uuidString)",
                 isDirectory: true
             )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
         journalURL = directory.appendingPathComponent("events.json")
     }
 
@@ -517,5 +521,47 @@ final class DownloadEventJournalTests: XCTestCase {
             DownloadEventJournal(url: journalURL).pendingEvents().isEmpty
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+
+    func testPersistedJournalIncludesFormatVersion() throws {
+        let journal = DownloadEventJournal(url: journalURL)
+        journal.record(taskKey: "feed|episode", outcome: .failed)
+
+        let data = try Data(contentsOf: journalURL)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(object["version"] as? Int, 1)
+        XCTAssertNotNil(object["events"] as? [Any])
+    }
+
+    func testUnsupportedJournalVersionDoesNotDecodeEvents() throws {
+        let journal = DownloadEventJournal(url: journalURL)
+        journal.record(taskKey: "feed|episode", outcome: .failed)
+
+        let data = try Data(contentsOf: journalURL)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        object["version"] = 2
+        try JSONSerialization.data(withJSONObject: object).write(
+            to: journalURL,
+            options: .atomic
+        )
+
+        XCTAssertTrue(
+            DownloadEventJournal(url: journalURL).pendingEvents().isEmpty
+        )
+    }
+
+    func testMalformedCurrentJournalVersionDoesNotDecodeEvents() throws {
+        let malformed = Data(
+            #"{"version":1,"events":"not-an-event-array"}"#.utf8
+        )
+        try malformed.write(to: journalURL, options: .atomic)
+
+        XCTAssertTrue(
+            DownloadEventJournal(url: journalURL).pendingEvents().isEmpty
+        )
     }
 }
