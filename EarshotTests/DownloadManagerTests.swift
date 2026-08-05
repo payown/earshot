@@ -471,3 +471,97 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(idle.downloadStatus, DownloadStatus.none)
     }
 }
+
+/// The URL-session delegate can run before the launch coordinator has a store.
+/// These tests keep its compact terminal-event journal restartable without
+/// creating a real background transfer.
+final class DownloadEventJournalTests: XCTestCase {
+    nonisolated(unsafe) private var directory: URL!
+    nonisolated(unsafe) private var journalURL: URL!
+
+    override func setUpWithError() throws {
+        directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(
+                "download-event-journal-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        journalURL = directory.appendingPathComponent("events.json")
+    }
+
+    override func tearDownWithError() throws {
+        if let directory { try? FileManager.default.removeItem(at: directory) }
+    }
+
+    func testEventsPersistAcrossJournalRecreationUntilAcknowledged() {
+        let journal = DownloadEventJournal(url: journalURL)
+        let finished = journal.record(
+            taskKey: "feed|episode-1",
+            outcome: .finished(fileName: "episode-1.mp3")
+        )
+        let failed = journal.record(
+            taskKey: "feed|episode-2", outcome: .failed
+        )
+
+        XCTAssertEqual(
+            DownloadEventJournal(url: journalURL).pendingEvents(),
+            [finished, failed]
+        )
+
+        journal.acknowledge(finished.id)
+        XCTAssertEqual(
+            DownloadEventJournal(url: journalURL).pendingEvents(), [failed]
+        )
+
+        journal.acknowledge(failed.id)
+        XCTAssertTrue(
+            DownloadEventJournal(url: journalURL).pendingEvents().isEmpty
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+
+    func testPersistedJournalIncludesFormatVersion() throws {
+        let journal = DownloadEventJournal(url: journalURL)
+        journal.record(taskKey: "feed|episode", outcome: .failed)
+
+        let data = try Data(contentsOf: journalURL)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(object["version"] as? Int, 1)
+        XCTAssertNotNil(object["events"] as? [Any])
+    }
+
+    func testUnsupportedJournalVersionDoesNotDecodeEvents() throws {
+        let journal = DownloadEventJournal(url: journalURL)
+        journal.record(taskKey: "feed|episode", outcome: .failed)
+
+        let data = try Data(contentsOf: journalURL)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        object["version"] = 2
+        try JSONSerialization.data(withJSONObject: object).write(
+            to: journalURL,
+            options: .atomic
+        )
+
+        XCTAssertTrue(
+            DownloadEventJournal(url: journalURL).pendingEvents().isEmpty
+        )
+    }
+
+    func testMalformedCurrentJournalVersionDoesNotDecodeEvents() throws {
+        let malformed = Data(
+            #"{"version":1,"events":"not-an-event-array"}"#.utf8
+        )
+        try malformed.write(to: journalURL, options: .atomic)
+
+        XCTAssertTrue(
+            DownloadEventJournal(url: journalURL).pendingEvents().isEmpty
+        )
+    }
+}

@@ -6,22 +6,23 @@ import SwiftData
 /// (issue #529).
 enum StoreRecoveryState: Equatable {
     /// The on-disk store was written by a NEWER build than this one. The store is
-    /// left completely untouched; the app runs on a temporary in-memory store and
-    /// asks the user to update. Resetting here is NOT offered — it would destroy
-    /// still-good data.
+    /// left completely untouched and the recovery screen asks the user to update.
+    /// Resetting here is NOT offered — it would destroy still-good data.
     case storeNewerThanApp
 
-    /// The store could not be opened as any known schema (genuine corruption).
-    /// The app runs on a temporary in-memory store and offers an explicit,
-    /// user-consented "Reset local data" action — which backs the files up first.
+    /// The store could not be opened as any known schema (genuine corruption). The
+    /// recovery screen offers an explicit, user-consented "Reset local data"
+    /// action — which backs the files up first.
     case corruptStore
 }
 
-/// The result of a launch-time store open: the container the app runs on, plus
-/// any recovery condition the UI must surface.
-struct StoreLoad {
-    let container: ModelContainer
-    let recovery: StoreRecoveryState?
+/// The result of a launch-time store open. Recovery deliberately carries no
+/// fallback container: ``StoreRecoveryScreen`` does not use SwiftData, and the
+/// app must never construct its data-bound root against a temporary store before
+/// installing the real one (#781).
+enum StoreLoad {
+    case ready(ModelContainer)
+    case recovery(StoreRecoveryState)
 }
 
 /// Builds the app's `ModelContainer` from the versioned schema and migration
@@ -33,12 +34,11 @@ struct StoreLoad {
 ///
 ///   1. Open the persistent store, migrating V1→V2→V3 as needed (preserves data).
 ///   2. If the store is NEWER than this build (a downgrade), leave it completely
-///      untouched, run on a temporary in-memory store, and ask the user to update
-///      the app. Never delete a store this build simply can't read yet.
-///   3. If the store is genuinely unreadable (corruption), run on a temporary
-///      in-memory store and surface an explicit, user-consented reset — which
-///      backs the files up before deleting anything. No silent wipe before
-///      `runApp`.
+///      untouched and ask the user to update the app. Never delete a store this
+///      build simply can't read yet.
+///   3. If the store is genuinely unreadable (corruption), surface an explicit,
+///      user-consented reset — which backs the files up before deleting anything.
+///      No silent wipe before the root UI appears.
 enum ModelContainerFactory {
 
     /// The persistent store location. This is SwiftData's default path, named
@@ -47,8 +47,9 @@ enum ModelContainerFactory {
         URL.applicationSupportDirectory.appending(path: "default.store")
     }
 
-    /// The production load: opens the shared store, or returns a safe in-memory
-    /// container plus the recovery state the UI must surface. Never deletes data.
+    /// The production load: opens the shared store, or returns the recovery state
+    /// the UI must surface without constructing a fallback container. Never
+    /// deletes data.
     @MainActor
     static func makeShared() -> StoreLoad {
         load(at: storeURL)
@@ -64,37 +65,22 @@ enum ModelContainerFactory {
         //    is manually export/reimported (see StoreMigration), preserving data.
         do {
             let container = try StoreMigration.openOrMigrate(at: url)
-            return StoreLoad(container: container, recovery: nil)
+            return .ready(container)
         } catch StoreOpenError.storeNewerThanApp(let underlying) {
             // 2. Downgrade — the store is NEWER than this build. Never touch it;
-            //    run in-memory and tell the user to update the app.
+            //    show recovery and tell the user to update the app.
             AppLog.data.error(
                 "Store is newer than this build; leaving it intact and asking the user to update: \(underlying.localizedDescription, privacy: .public)"
             )
-            return StoreLoad(container: inMemoryContainer(), recovery: .storeNewerThanApp)
+            return .recovery(.storeNewerThanApp)
         } catch {
-            // 3. Genuine corruption — run in-memory and surface an explicit,
-            //    user-consented reset (which backs up before deleting). No silent
-            //    wipe here before `runApp`.
+            // 3. Genuine corruption — surface an explicit, user-consented reset
+            //    (which backs up before deleting). No silent wipe here before the
+            //    recovery UI appears.
             AppLog.data.error(
                 "Store is unreadable; leaving it intact pending user-consented reset: \(error.localizedDescription, privacy: .public)"
             )
-            return StoreLoad(container: inMemoryContainer(), recovery: .corruptStore)
-        }
-    }
-
-    /// An in-memory container the app runs on while a recovery screen is shown.
-    /// Registers the real schema so the (empty) app tree renders normally.
-    @MainActor
-    private static func inMemoryContainer() -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
-        do {
-            let memory = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-            return try ModelContainer(for: schema, configurations: memory)
-        } catch {
-            // An in-memory container should never fail to build; if it does,
-            // there is nothing left to fall back to.
-            fatalError("Failed to build in-memory fallback container: \(error)")
+            return .recovery(.corruptStore)
         }
     }
 

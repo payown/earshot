@@ -2,7 +2,7 @@
 
 ## Toolchain and project generation
 
-- Required toolchain: Xcode 26.6, Apple Swift 6.3.3, and XcodeGen 2.45.4.
+- Required toolchain: Xcode 26.6, Apple Swift 6.3.3, and XcodeGen 2.46.0.
 - The app uses Swift 6 language mode with complete strict concurrency and targets iOS 18.0.
 - `project.yml` (repo root) is the project source of truth. After changing it, run `xcodegen` from the repo root and commit the regenerated project.
 - There are no third-party Swift dependencies.

@@ -60,6 +60,7 @@ private struct InboxTabBadge: View {
 
 struct RootView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppRuntime.self) private var runtime
     @Environment(PlayerService.self) private var player
     @Environment(QuickActionStore.self) private var quickActions
     @Environment(DownloadManager.self) private var downloads
@@ -197,6 +198,12 @@ struct RootView: View {
         .onChange(of: notificationRouter.pendingIntent) { _, intent in
             if let intent { route(intent) }
         }
+        // The app host owns Open-in routing so a file handed to Earshot before
+        // the data-bound root exists is retained. Consume it once this final
+        // container's RootView is ready (#781).
+        .onChange(of: runtime.pendingIncomingFileURL) { _, url in
+            if url != nil { handlePendingIncomingFile() }
+        }
         // Re-assert the native Inbox badge after a tab switch: SwiftUI can rebuild
         // the tab-bar items on selection change and transiently drop a manually
         // set `badgeValue`. Cheap and idempotent.
@@ -259,15 +266,6 @@ struct RootView: View {
                 .interactiveDismissDisabled(true)
                 .presentationDetents([.medium])
         }
-        // Share-sheet / "Open in Earshot" for .opml files exported by feed
-        // readers. RootView is always in the tree (onboarding is a cover on top),
-        // so the import runs and announces its count whether the user is
-        // mid-onboarding or on the main tabs — the file is never silently dropped.
-        // Routed through the shared importer so it uses the app's main container
-        // context, exactly as Settings' in-app picker does.
-        .onOpenURL { url in
-            handleIncomingFile(url)
-        }
         // Re-apply audio settings mid-playback when they change (#352).
         .onChange(of: settings.globalSpeed) { _, _ in
             player.reapplyRate()
@@ -285,49 +283,52 @@ struct RootView: View {
             player.updateRemoteSkipIntervals()
         }
         .task {
-            #if DEBUG
-            // App Store screenshot capture (#643): seed the in-memory store from
-            // fixtures before any of the configure/restore work below reads it.
-            // This task is main-actor isolated, so the settings writes in the
-            // seeder (AppSettingsStore is @MainActor) are safe here. DEBUG +
-            // launch-arg only; a normal launch never enters this branch.
-            if ScreenshotHarness.isSeeding {
-                ScreenshotFixtures.seed(into: modelContext)
+            let activationCompleted = await runtime.activateRootServices(
+                for: modelContext.container
+            ) {
+                runtime.bindRootServicesIfNeeded(to: modelContext.container) {
+                    #if DEBUG
+                    // App Store screenshot capture (#643): seed the in-memory
+                    // store before configure/restore work reads it.
+                    if ScreenshotHarness.isSeeding {
+                        ScreenshotFixtures.seed(into: modelContext)
+                    }
+                    #endif
+                    player.configure(context: modelContext)
+                    quickActions.configure(context: modelContext)
+                    downloads.configure(context: modelContext)
+                }
+                // Repair interrupted downloads before resolving local files.
+                try Task.checkCancellation()
+                await downloads.reconcileStuckDownloads()
+                try Task.checkCancellation()
+                await downloads.reconcileDownloadPaths()
+                try Task.checkCancellation()
+                settings.configure(context: modelContext)
+                // Snapshot the existing library before any subscribe/import action.
+                let capSettings = AppSettingsStore(context: modelContext)
+                let currentPodcastCount =
+                    (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0
+                capSettings.introducePodcastCapGatingIfNeeded(
+                    currentPodcastCount: currentPodcastCount
+                )
+                tips.configure(context: modelContext)
+                ExpirationService(context: modelContext).runExpiration()
+                StatsRepository(context: modelContext).applyRetention(
+                    days: settings.historyRetentionDays
+                )
+                PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
             }
-            #endif
-            // Wire persistence and restore the last episode (paused) on launch.
-            // Done here, not in a view body's computed work, so the context is
-            // injected exactly once.
-            player.configure(context: modelContext)
-            quickActions.configure(context: modelContext)
-            downloads.configure(context: modelContext)
-            // Reset downloads left stuck at .downloading by a kill mid-transfer,
-            // so they don't hang forever; in-flight background tasks are kept (#544).
-            await downloads.reconcileStuckDownloads()
-            // Rewrite legacy absolute download paths to bare file names and reset
-            // episodes whose file is gone, BEFORE anything resolves a local file
-            // this launch (#575). iOS moves the app container on every update.
-            await downloads.reconcileDownloadPaths()
-            settings.configure(context: modelContext)
-            // One-time free-tier podcast cap grandfathering snapshot (#635): must
-            // run before any subscribe action can occur (including an onboarding
-            // OPML import below), so it's placed right after settings load and
-            // before showOnboarding is set.
-            let capSettings = AppSettingsStore(context: modelContext)
-            let currentPodcastCount = (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0
-            capSettings.introducePodcastCapGatingIfNeeded(currentPodcastCount: currentPodcastCount)
-            // Seed the launch tab from the now-loaded preference exactly once, so
-            // the saved Launch screen choice is honored on cold launch (#492).
-            // Only applies while the user hasn't already navigated; it never
-            // re-asserts on later settings loads, leaving mid-session tab
-            // switching and notification routing to Library intact.
+            // No root may seed navigation/onboarding state until the shared
+            // activation has completed. A cancelled owner returns here; a second
+            // root waits for that owner or performs the retry itself.
+            guard activationCompleted else { return }
+            // Seed this RootView's launch tab after settings are available. This
+            // is view-local state, so it must also run if SwiftUI recreates the
+            // root after process services have already been activated.
             if selectedTab == nil {
                 selectedTab = RootTab(launchScreen: settings.launchScreen)
             }
-            tips.configure(context: modelContext)
-            ExpirationService(context: modelContext).runExpiration()
-            StatsRepository(context: modelContext).applyRetention(days: settings.historyRetentionDays)
-            PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
             // Show onboarding on first launch (after settings load so we don't
             // flash). The Flutter→SwiftUI launch import that used to run here was
             // removed with the rest of the abandoned migration feature (#580) —
@@ -346,6 +347,11 @@ struct RootView: View {
                 )
             }
             #endif
+            // Notification actions and Open-in URLs can arrive before RootView
+            // exists. Consume already-pending work after every store-backed
+            // service has been configured against this final container.
+            if let intent = notificationRouter.pendingIntent { route(intent) }
+            handlePendingIncomingFile()
         }
         // Keep this outermost so RootView-owned presentations, especially the
         // automatic Now Playing sheet above, inherit the folder route as well as
@@ -411,6 +417,11 @@ struct RootView: View {
     }
 
     // MARK: Incoming OPML file (share sheet / Open in)
+
+    private func handlePendingIncomingFile() {
+        guard let url = runtime.takePendingIncomingFile() else { return }
+        handleIncomingFile(url)
+    }
 
     /// Handles a file handed to Earshot via the share sheet or "Open in". Only
     /// acts on `.opml`/`.xml` file URLs (the document types we registered);

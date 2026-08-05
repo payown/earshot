@@ -92,7 +92,10 @@ final class StoreRecoveryTests: XCTestCase {
         try Data([0x00, 0x01, 0x02, 0x03, 0xFF]).write(to: storeURL)
 
         let load = ModelContainerFactory.load(at: storeURL)
-        XCTAssertEqual(load.recovery, .corruptStore)
+        guard case .recovery(let recovery) = load else {
+            return XCTFail("corrupt data must return recovery without a container")
+        }
+        XCTAssertEqual(recovery, .corruptStore)
         XCTAssertTrue(storeExists(), "load() must not wipe without user consent")
     }
 
