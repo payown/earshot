@@ -47,6 +47,31 @@ private actor ActivationGate {
     }
 }
 
+@MainActor
+private final class RecordingLaunchAnnouncer: LaunchAnnouncing {
+    var isVoiceOverRunning: Bool
+    private(set) var announcements: [(message: String, assertive: Bool)] = []
+    private(set) var completions: [(message: String, timeout: Duration)] = []
+    private let completionGate: ActivationGate?
+
+    init(
+        isVoiceOverRunning: Bool = true,
+        completionGate: ActivationGate? = nil
+    ) {
+        self.isVoiceOverRunning = isVoiceOverRunning
+        self.completionGate = completionGate
+    }
+
+    func announce(_ message: String, assertive: Bool) {
+        announcements.append((message, assertive))
+    }
+
+    func announceCompletion(_ message: String, timeout: Duration) async {
+        completions.append((message, timeout))
+        await completionGate?.waitUntilReleased()
+    }
+}
+
 /// Guards the #781 root-container seam without changing production launch yet.
 /// A data-bound root is created only from `.ready`; unavailable and recovery
 /// carry no fallback container, and process-lifetime services claim one final
@@ -98,9 +123,318 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertEqual(screen.title, "Earshot couldn't finish preparing your library")
         XCTAssertEqual(
             screen.message,
-            "Your library is safe and untouched. This usually means your device is low on storage. Free up some space, then quit Earshot from the App Switcher and open it again to try."
+            "Your library is safe and untouched. This usually means your device is low on storage. Free up some space, then try preparing again."
         )
         XCTAssertFalse(screen.offersReset, "operational failure must never offer a reset")
+        XCTAssertTrue(screen.offersRetry)
+        XCTAssertEqual(StoreRecoveryScreen.retryLabel, "Try preparing again")
+        XCTAssertEqual(
+            StoreRecoveryScreen.retryHint,
+            "Checks your library again without closing Earshot."
+        )
+    }
+
+    func testRapidProgressCoalescesToNewestAnnouncement() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        AppSettingsStore(context: container.mainContext).setBool(
+            true, for: SettingsKey.onboardingComplete
+        )
+        let gate = ActivationGate()
+        let announcer = RecordingLaunchAnnouncer()
+        let runtime = AppRuntime(
+            mode: .testHost,
+            showsLaunchPreparation: true,
+            launchOperation: { progress in
+                progress(.preparingAndValidating)
+                progress(.migratingMirroredStore)
+                progress(.openingAndRepairing)
+                await gate.waitUntilReleased()
+                return .ready(container)
+            },
+            launchAnnouncer: announcer
+        )
+
+        runtime.startLaunchIfNeeded()
+        await gate.waitUntilStarted()
+        await settleTasks()
+
+        XCTAssertEqual(announcer.announcements.map(\.message), [
+            StoreMigrationProgress.openingAndRepairing.announcement,
+        ])
+        XCTAssertTrue(announcer.announcements.allSatisfy { !$0.assertive })
+        await gate.release()
+        await waitUntil { runtime.readyContainer != nil }
+    }
+
+    func testBackgroundSuppressesAnnouncementsAndForegroundAnnouncesCurrentStageOnce() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let gate = ActivationGate()
+        let announcer = RecordingLaunchAnnouncer(isVoiceOverRunning: false)
+        let runtime = AppRuntime(
+            mode: .testHost,
+            showsLaunchPreparation: true,
+            launchOperation: { progress in
+                progress(.migratingMirroredStore)
+                await gate.waitUntilReleased()
+                return .ready(container)
+            },
+            launchAnnouncer: announcer
+        )
+
+        runtime.startLaunchIfNeeded()
+        runtime.updateLaunchScenePhase(.background)
+        await gate.waitUntilStarted()
+        await settleTasks()
+        XCTAssertTrue(announcer.announcements.isEmpty)
+
+        runtime.updateLaunchScenePhase(.active)
+        await settleTasks()
+        XCTAssertEqual(announcer.announcements.map(\.message), [
+            StoreMigrationProgress.migratingMirroredStore.announcement,
+        ])
+
+        await gate.release()
+        await waitUntil { runtime.readyContainer != nil }
+    }
+
+    func testStaleCheckingHeartbeatIsRejectedAfterStageAdvances() {
+        XCTAssertFalse(AppRuntime.announcementIsCurrent(
+            candidateRevision: 0,
+            currentRevision: 1,
+            isSceneActive: true
+        ))
+        XCTAssertTrue(AppRuntime.announcementIsCurrent(
+            candidateRevision: 1,
+            currentRevision: 1,
+            isSceneActive: true
+        ))
+        XCTAssertFalse(AppRuntime.announcementIsCurrent(
+            candidateRevision: 1,
+            currentRevision: 1,
+            isSceneActive: false
+        ))
+    }
+
+    func testPreparationCopyAndHeartbeatCadenceMatchApprovedDesign() {
+        XCTAssertEqual(
+            AppRuntime.initialPreparationStatus,
+            "Preparing Earshot. Checking your library. Keep the app open."
+        )
+        XCTAssertEqual(AppRuntime.firstHeartbeatDelay, .seconds(5))
+        XCTAssertEqual(AppRuntime.subsequentHeartbeatDelay, .seconds(8))
+        XCTAssertEqual(StoreMigrationProgress.preparingAndValidating.announcement,
+                       "Preparing Earshot. Step 1 of 3. Preparing your library data.")
+        XCTAssertEqual(StoreMigrationProgress.migratingMirroredStore.announcement,
+                       "Preparing Earshot. Step 2 of 3. Reorganizing your episodes.")
+        XCTAssertEqual(StoreMigrationProgress.openingAndRepairing.announcement,
+                       "Preparing Earshot. Step 3 of 3. Finishing preparation.")
+        XCTAssertEqual(StoreMigrationProgress.migratingMirroredStore.heartbeat,
+                       "Earshot is still preparing your library. Step 2 of 3.")
+    }
+
+    func testRepeatedStartRequestsKeepOneMigrationTask() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let gate = ActivationGate()
+        var attempts = 0
+        let runtime = AppRuntime(
+            mode: .testHost,
+            showsLaunchPreparation: true,
+            launchOperation: { _ in
+                attempts += 1
+                await gate.waitUntilReleased()
+                return .ready(container)
+            },
+            launchAnnouncer: RecordingLaunchAnnouncer(isVoiceOverRunning: false)
+        )
+
+        runtime.startLaunchIfNeeded()
+        runtime.startLaunchIfNeeded()
+        runtime.startLaunchIfNeeded()
+        await gate.waitUntilStarted()
+
+        XCTAssertEqual(attempts, 1)
+        XCTAssertEqual(runtime.launchAttemptCount, 1)
+        await gate.release()
+        await waitUntil { runtime.readyContainer != nil }
+    }
+
+    func testMigrationFailureRetryRerunsLaunchPathInProcess() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        var attempts = 0
+        let runtime = AppRuntime(
+            mode: .testHost,
+            showsLaunchPreparation: true,
+            launchOperation: { _ in
+                attempts += 1
+                return attempts == 1 ? .migrationFailed : .ready(container)
+            },
+            launchAnnouncer: RecordingLaunchAnnouncer(isVoiceOverRunning: false)
+        )
+
+        runtime.startLaunchIfNeeded()
+        await waitUntil {
+            if case .recovery(.migrationFailed) = runtime.phase { return true }
+            return false
+        }
+        XCTAssertEqual(runtime.launchFocusRequest, .recovery)
+
+        runtime.retryLaunch()
+        runtime.startLaunchIfNeeded() // StorePreparationScreen's post-focus handoff.
+        await waitUntil { runtime.readyContainer != nil }
+
+        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(runtime.launchAttemptCount, 2)
+    }
+
+    func testCompletionRequestsSavedDestinationHeadings() async throws {
+        let cases: [(LaunchScreen, LaunchFocusDestination)] = [
+            (.inbox, .inbox),
+            (.queue, .queue),
+            (.library, .library),
+            (.downloads, .downloads),
+        ]
+
+        for (launchScreen, expectedFocus) in cases {
+            let container = try ModelContainerFactory.makeInMemory()
+            let settings = AppSettingsStore(context: container.mainContext)
+            settings.setBool(true, for: SettingsKey.onboardingComplete)
+            settings.setLaunchScreen(launchScreen)
+            let runtime = AppRuntime(
+                mode: .testHost,
+                showsLaunchPreparation: true,
+                launchOperation: { _ in .ready(container) },
+                launchAnnouncer: RecordingLaunchAnnouncer(isVoiceOverRunning: false)
+            )
+
+            runtime.startLaunchIfNeeded()
+            await waitUntil { runtime.readyContainer != nil }
+            XCTAssertEqual(runtime.launchFocusRequest, expectedFocus)
+            XCTAssertTrue(runtime.consumeLaunchFocus(expectedFocus))
+            XCTAssertNil(runtime.launchFocusRequest)
+        }
+    }
+
+    func testFreshInstallSkipsPreparationAnnouncementsAndFocusesOnboarding() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let announcer = RecordingLaunchAnnouncer()
+        let runtime = AppRuntime(
+            mode: .testHost,
+            showsLaunchPreparation: false,
+            launchOperation: { progress in
+                progress(.openingAndRepairing)
+                return .ready(container)
+            },
+            launchAnnouncer: announcer
+        )
+
+        runtime.startLaunchIfNeeded()
+        await waitUntil { runtime.readyContainer != nil }
+
+        XCTAssertFalse(runtime.showsLaunchPreparation)
+        XCTAssertTrue(announcer.announcements.isEmpty)
+        XCTAssertTrue(announcer.completions.isEmpty)
+        XCTAssertEqual(runtime.launchFocusRequest, .onboarding)
+    }
+
+    func testFreshInstallProbeRequiresNoPrimaryOrLocalStoreFiles() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "EarshotFreshInstall-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storeURL = directory.appending(path: "default.store")
+
+        XCTAssertFalse(ModelContainerFactory.hasStoreFiles(at: storeURL))
+        XCTAssertTrue(FileManager.default.createFile(atPath: storeURL.path, contents: Data()))
+        XCTAssertTrue(ModelContainerFactory.hasStoreFiles(at: storeURL))
+
+        try FileManager.default.removeItem(at: storeURL)
+        let localWAL = StoreMigration.localStoreURL(for: storeURL)
+            .deletingPathExtension()
+            .appendingPathExtension("store-wal")
+        XCTAssertTrue(FileManager.default.createFile(atPath: localWAL.path, contents: Data()))
+        XCTAssertTrue(ModelContainerFactory.hasStoreFiles(at: storeURL))
+    }
+
+    func testCompletionAnnouncementUsesFourSecondFallback() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        AppSettingsStore(context: container.mainContext).setBool(
+            true, for: SettingsKey.onboardingComplete
+        )
+        let announcer = RecordingLaunchAnnouncer()
+        let runtime = AppRuntime(
+            mode: .testHost,
+            showsLaunchPreparation: true,
+            launchOperation: { _ in .ready(container) },
+            launchAnnouncer: announcer
+        )
+
+        runtime.startLaunchIfNeeded()
+        await waitUntil { runtime.readyContainer != nil }
+
+        XCTAssertEqual(announcer.completions.count, 1)
+        XCTAssertEqual(announcer.completions.first?.message, "Earshot is ready.")
+        XCTAssertEqual(announcer.completions.first?.timeout, .seconds(4))
+    }
+
+    func testCompletionAnnouncementAndFocusWaitForForeground() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let settings = AppSettingsStore(context: container.mainContext)
+        settings.setBool(true, for: SettingsKey.onboardingComplete)
+        settings.setLaunchScreen(.queue)
+        let gate = ActivationGate()
+        let announcer = RecordingLaunchAnnouncer()
+        let runtime = AppRuntime(
+            mode: .testHost,
+            showsLaunchPreparation: true,
+            launchOperation: { _ in
+                await gate.waitUntilReleased()
+                return .ready(container)
+            },
+            launchAnnouncer: announcer
+        )
+
+        runtime.startLaunchIfNeeded()
+        await gate.waitUntilStarted()
+        runtime.updateLaunchScenePhase(.background)
+        await gate.release()
+        await settleTasks()
+
+        XCTAssertNil(runtime.readyContainer)
+        XCTAssertNil(runtime.launchFocusRequest)
+        XCTAssertTrue(announcer.completions.isEmpty)
+
+        runtime.updateLaunchScenePhase(.active)
+        await waitUntil { runtime.readyContainer != nil }
+        XCTAssertEqual(announcer.completions.map(\.message), ["Earshot is ready."])
+        XCTAssertEqual(runtime.launchFocusRequest, .queue)
+    }
+
+    func testInterruptedCompletionRepeatsAfterReturningActiveWithoutProgressSpeech() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let settings = AppSettingsStore(context: container.mainContext)
+        settings.setBool(true, for: SettingsKey.onboardingComplete)
+        settings.setLaunchScreen(.library)
+        let completionGate = ActivationGate()
+        let announcer = RecordingLaunchAnnouncer(completionGate: completionGate)
+        let runtime = AppRuntime(
+            mode: .testHost,
+            showsLaunchPreparation: true,
+            launchOperation: { _ in .ready(container) },
+            launchAnnouncer: announcer
+        )
+
+        runtime.startLaunchIfNeeded()
+        await completionGate.waitUntilStarted()
+        runtime.updateLaunchScenePhase(.background)
+        runtime.updateLaunchScenePhase(.active)
+        await completionGate.release()
+        await waitUntil { runtime.readyContainer != nil }
+
+        XCTAssertEqual(announcer.completions.map(\.message), [
+            "Earshot is ready.", "Earshot is ready.",
+        ])
+        XCTAssertTrue(announcer.announcements.isEmpty)
+        XCTAssertEqual(runtime.launchFocusRequest, .library)
     }
 
     func testCancelledActivationReturnsToNotStartedAndNextRootRetries() async throws {
@@ -210,5 +544,21 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.pendingIncomingFileURL, opml)
         XCTAssertEqual(runtime.takePendingIncomingFile(), opml)
         XCTAssertNil(runtime.pendingIncomingFileURL)
+    }
+
+    private func settleTasks() async {
+        for _ in 0..<20 { await Task.yield() }
+    }
+
+    private func waitUntil(
+        _ condition: @MainActor () -> Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<200 {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        XCTFail("Timed out waiting for launch state", file: file, line: line)
     }
 }
