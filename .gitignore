@@ -94,3 +94,4 @@ buildServer.json
 
 # App Store screenshot capture output (#643) — generated PNGs, not source
 scripts/screenshots/output/
+tmp_logs/
