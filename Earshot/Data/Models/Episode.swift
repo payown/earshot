@@ -23,10 +23,11 @@ final class Episode {
     /// has to rewrite the 242k-plus-row Episode table merely to drop two local
     /// attributes. Runtime code must never read or write these values; download
     /// state lives exclusively in ``LocalEpisodeState`` and the process-local
-    /// projection below. `originalName` lets the direct V7→V9 route preserve the
-    /// shipped columns while the existing V8→V9 route adds inert defaults.
+    /// projection below. `originalName` lets the direct V7→V10 route preserve the
+    /// shipped columns while V8→V10 adds nullable tombstones without inventing
+    /// values for existing rows.
     @Attribute(originalName: "downloadStatus")
-    private var legacyDownloadStatus: DownloadStatus = DownloadStatus.none
+    private var legacyDownloadStatus: DownloadStatus?
     @Attribute(originalName: "downloadPath")
     private var legacyDownloadPath: String?
     @Transient private var transientDownloadStatus: DownloadStatus = DownloadStatus.none

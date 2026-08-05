@@ -2,13 +2,13 @@ import XCTest
 import SwiftData
 @testable import Earshot
 
-/// Guards the V9 live graph against an unversioned model edit (#425) and audits
+/// Guards the V10 live graph against an unversioned model edit (#425) and audits
 /// the exact compatibility rules required before the mirrored configuration may
 /// be switched from `.none` to CloudKit in a later phase.
 @MainActor
 final class SchemaDriftTests: XCTestCase {
 
-    /// The live model graph, kept in lockstep with the final V9 model lists.
+    /// The live model graph, kept in lockstep with the final V10 model lists.
     private static let liveModels: [any PersistentModel.Type] = [
         Podcast.self,
         Episode.self,
@@ -47,21 +47,29 @@ final class SchemaDriftTests: XCTestCase {
         return result
     }
 
-    func testLiveAttributesMatchV9() {
-        let frozenV9 = attributeMap(Schema(versionedSchema: EarshotSchemaV9.self))
+    func testLiveAttributesMatchV10() {
+        let frozenV10 = attributeMap(Schema(versionedSchema: EarshotSchemaV10.self))
         let live = attributeMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, frozenV9)
+        XCTAssertEqual(live, frozenV10)
     }
 
-    /// V9 permanently retains the two V6 download attributes as inert schema
+    /// V10 permanently retains the two V6 download attributes as inert schema
     /// tombstones, while the draft V8 snapshot proves that the already-installed
     /// device version omitted them. Runtime reads are covered by local-state
     /// migration tests rather than by these persisted attributes.
-    func testEpisodeShapeMatchesV9() {
+    func testEpisodeShapeMatchesV10AndFreezesV9Bug() {
         let frozenV9 = Schema(versionedSchema: EarshotSchemaV9.self)
+        let frozenV10 = Schema(versionedSchema: EarshotSchemaV10.self)
         let live = Schema(Self.liveModels)
 
-        let frozenAttrs = attributeMap(frozenV9).filter { $0.key.hasPrefix("Episode.") }
+        var v9AllAttrs = attributeMap(frozenV9)
+        var v10AllAttrs = attributeMap(frozenV10)
+        let v9Status = v9AllAttrs.removeValue(forKey: "Episode.legacyDownloadStatus")
+        let v10Status = v10AllAttrs.removeValue(forKey: "Episode.legacyDownloadStatus")
+        XCTAssertEqual(v9AllAttrs, v10AllAttrs, "V9 must remain the exact build-162 graph")
+        XCTAssertEqual(relationshipMap(frozenV9), relationshipMap(frozenV10))
+
+        let frozenAttrs = attributeMap(frozenV10).filter { $0.key.hasPrefix("Episode.") }
         let liveAttrs = attributeMap(live).filter { $0.key.hasPrefix("Episode.") }
         XCTAssertEqual(liveAttrs, frozenAttrs)
         XCTAssertEqual(relationshipMap(live)["Episode"], relationshipMap(frozenV9)["Episode"])
@@ -70,30 +78,32 @@ final class SchemaDriftTests: XCTestCase {
             .filter { $0.key.hasPrefix("Episode.") }
         XCTAssertNil(v8Attrs["Episode.legacyDownloadStatus"])
         XCTAssertNil(v8Attrs["Episode.legacyDownloadPath"])
-        XCTAssertEqual(liveAttrs["Episode.legacyDownloadStatus"], "false|DownloadStatus")
+        XCTAssertEqual(v9Status, "false|DownloadStatus")
+        XCTAssertEqual(v10Status, "true|Optional<DownloadStatus>")
+        XCTAssertEqual(liveAttrs["Episode.legacyDownloadStatus"], v10Status)
         XCTAssertEqual(liveAttrs["Episode.legacyDownloadPath"], "true|Optional<String>")
     }
 
-    /// The live relationship graph must remain identical to frozen V9.
-    func testLiveRelationshipsMatchV9() {
-        let frozenV9 = relationshipMap(Schema(versionedSchema: EarshotSchemaV9.self))
+    /// The live relationship graph must remain identical to frozen V10.
+    func testLiveRelationshipsMatchV10() {
+        let frozenV10 = relationshipMap(Schema(versionedSchema: EarshotSchemaV10.self))
         let live = relationshipMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, frozenV9)
+        XCTAssertEqual(live, frozenV10)
     }
 
-    /// Guards the lockstep assumption between the live list and frozen V9.
-    func testLiveListMatchesV9ModelsList() {
-        let v9Names = Set(Schema(versionedSchema: EarshotSchemaV9.self).entities.map(\.name))
+    /// Guards the lockstep assumption between the live list and frozen V10.
+    func testLiveListMatchesV10ModelsList() {
+        let v10Names = Set(Schema(versionedSchema: EarshotSchemaV10.self).entities.map(\.name))
         let liveNames = Set(Schema(Self.liveModels).entities.map(\.name))
-        XCTAssertEqual(v9Names, liveNames)
+        XCTAssertEqual(v10Names, liveNames)
     }
 
 }
 
 @MainActor
 final class CloudKitSchemaCompatibilityTests: XCTestCase {
-    func testV9MirroredSchemaIsCloudKitCompatible() {
-        for entity in Schema(EarshotSchemaV9.mirroredModels).entities {
+    func testV10MirroredSchemaIsCloudKitCompatible() {
+        for entity in Schema(EarshotSchemaV10.mirroredModels).entities {
             for attribute in entity.attributes {
                 XCTAssertFalse(attribute.options.contains(.unique), "Unique: \(entity.name).\(attribute.name)")
                 XCTAssertTrue(attribute.isOptional || attribute.defaultValue != nil,
@@ -107,8 +117,8 @@ final class CloudKitSchemaCompatibilityTests: XCTestCase {
         }
     }
 
-    func testV9LocalSchemaHasNoRelationshipsAndSplitContainerConstructs() throws {
-        let local = Schema(EarshotSchemaV9.localModels)
+    func testV10LocalSchemaHasNoRelationshipsAndSplitContainerConstructs() throws {
+        let local = Schema(EarshotSchemaV10.localModels)
         XCTAssertTrue(local.entities.allSatisfy { $0.relationships.isEmpty })
         let container = try ModelContainerFactory.makeInMemory()
         XCTAssertEqual(container.configurations.count, 2)
@@ -622,5 +632,40 @@ final class SyncStorageTopologyTests: XCTestCase {
         XCTAssertEqual(localRows.count, 1)
         XCTAssertEqual(localRows.first?.key, "episode-key")
         XCTAssertEqual(localRows.first?.deviceValue, "device-only-path.mp3")
+        let migratedItem = try XCTUnwrap(
+            try container.mainContext.fetch(
+                FetchDescriptor<SyncSplitPrototypeV8.Item>()
+            ).first
+        )
+        migratedItem.key = "episode-key-saved"
+        localRows[0].deviceValue = "device-only-path-saved.mp3"
+        try container.mainContext.save()
+
+        let reopened = try ModelContainer(
+            for: fullSchema,
+            configurations:
+                ModelConfiguration(
+                    "FutureMirrored",
+                    schema: mirroredSchema,
+                    url: mirroredURL,
+                    cloudKitDatabase: .none
+                ),
+                ModelConfiguration(
+                    "DeviceLocal",
+                    schema: localSchema,
+                    url: localURL,
+                    cloudKitDatabase: .none
+                )
+        )
+        XCTAssertEqual(
+            try reopened.mainContext.fetch(FetchDescriptor<SyncSplitPrototypeV8.Item>())
+                .first?.key,
+            "episode-key-saved"
+        )
+        XCTAssertEqual(
+            try reopened.mainContext.fetch(FetchDescriptor<SyncSplitPrototypeV8.LocalState>())
+                .first?.deviceValue,
+            "device-only-path-saved.mp3"
+        )
     }
 }

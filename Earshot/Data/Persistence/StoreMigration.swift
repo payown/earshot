@@ -164,7 +164,7 @@ enum SyncBridgeBackfill {
     }
 }
 
-/// Restartable retained-column V9 split migration from the supported V6 floor.
+/// Restartable retained-column V10 split migration from the supported V6 floor.
 /// Shipped V6 is snapshotted without mutation; an already-staged V7 and the
 /// draft device's V8 are also resumable. The original store stays authoritative
 /// until the separate device-local copy has been value-checked and marked durable.
@@ -268,7 +268,7 @@ enum StoreMigration {
         return false
     }
 
-    /// Opens the current split V9 store, advances the draft V8 device store, or
+    /// Opens the current split V10 store, advances draft V8/build-162 V9 stores, or
     /// upgrades a supported V6/V7 store through a bounded local-state preflight.
     /// Stores older than V6 are rejected without mutation; build 157 was the
     /// first public App Store build and shipped V6, so earlier schemas were
@@ -292,8 +292,8 @@ enum StoreMigration {
         }) {
             progress(.migratingMirroredStore)
             do {
-                // No-op for V9; advances either an interrupted V7 cutover or
-                // the already-installed draft V8 mirrored store to V9. The
+                // No-op for V10; advances either an interrupted V7 cutover, the
+                // already-installed draft V8 store, or build-162 V9. The
                 // draft V8 wrote the full aggregate model metadata into both
                 // configuration files, so each file is advanced independently.
                 try profiled("resume-mirrored-finalization") {
@@ -376,7 +376,7 @@ enum StoreMigration {
         } catch {
             throw StoreMigrationFailure.operational(underlying: error)
         }
-        AppLog.data.info("V9 device-local copy validated")
+        AppLog.data.info("V10 device-local copy validated")
         progress(.migratingMirroredStore)
         do {
             try profiled("mirrored-store-migration") {
@@ -388,7 +388,7 @@ enum StoreMigration {
             }
             throw StoreMigrationFailure.operational(underlying: error)
         }
-        AppLog.data.info("V9 mirrored-store cutover completed")
+        AppLog.data.info("V10 mirrored-store cutover completed")
         progress(.openingAndRepairing)
         do {
             return try profiled("final-open-hydrate-and-repair") {
@@ -430,8 +430,8 @@ enum StoreMigration {
     }
 
     /// Reads the shipped V6 local-only values without first advancing the
-    /// authoritative store to V7. The separate local V9 copy is validated and
-    /// marked before the original store is opened as retained-column V9, so a
+    /// authoritative store to V7. The separate local V10 copy is validated and
+    /// marked before the original store is opened as retained-column V10, so a
     /// crash before cutover leaves V6 untouched and a crash after the marker
     /// resumes at finalization.
     private static func snapshotV6WithoutMigration(at url: URL) throws -> BridgeSnapshot {
@@ -576,7 +576,7 @@ enum StoreMigration {
             // file. Open the local URL as the sole full-schema configuration so
             // it gets the same metadata as the later two-store container without
             // creating and prematurely unlinking an empty staging database.
-            let full = Schema(versionedSchema: EarshotSchemaV9.self)
+            let full = Schema(versionedSchema: EarshotSchemaV10.self)
             let container = try ModelContainer(
                 for: full,
                 configurations: ModelConfiguration(
@@ -631,7 +631,7 @@ enum StoreMigration {
             let major = try storeMajorVersion(at: localURL)
             if major == 8 {
                 // Read the draft marker with the exact frozen V8 graph. Opening
-                // it as V9 here would silently migrate the local file before the
+                // it as a newer schema here would silently migrate the local file before the
                 // explicit two-file forward route has begun.
                 let full = Schema(versionedSchema: EarshotSchemaV8.self)
                 let container = try ModelContainer(
@@ -650,8 +650,26 @@ enum StoreMigration {
                 )
                 return rows.contains { $0.value == "1" }
             }
-            guard major == 9 else { return false }
-            let full = Schema(versionedSchema: EarshotSchemaV9.self)
+            if major == 9 {
+                let full = Schema(versionedSchema: EarshotSchemaV9.self)
+                let container = try ModelContainer(
+                    for: full,
+                    configurations: ModelConfiguration(
+                        "DeviceLocal", schema: full, url: localURL,
+                        cloudKitDatabase: .none
+                    )
+                )
+                let key = splitCompletionKey
+                let context = ModelContext(container)
+                let rows = try context.fetch(
+                    FetchDescriptor<EarshotSchemaV9.LocalAppSetting>(
+                        predicate: #Predicate { $0.key == key }
+                    )
+                )
+                return rows.contains { $0.value == "1" }
+            }
+            guard major == 10 else { return false }
+            let full = Schema(versionedSchema: EarshotSchemaV10.self)
             let container = try ModelContainer(
                 for: full,
                 configurations: ModelConfiguration(
@@ -659,19 +677,20 @@ enum StoreMigration {
                     cloudKitDatabase: .none
                 )
             )
-            let context = ModelContext(container)
-            return LocalAppSettingIdentity.value(for: splitCompletionKey, in: context) == "1"
+            return LocalAppSettingIdentity.value(
+                for: splitCompletionKey, in: ModelContext(container)
+            ) == "1"
         }) ?? false
     }
 
     private static func openFinal(mirroredURL: URL, localURL: URL) throws -> ModelContainer {
-        let full = Schema(versionedSchema: EarshotSchemaV9.self)
+        let full = Schema(versionedSchema: EarshotSchemaV10.self)
         let mirrored = ModelConfiguration(
-            "FutureMirrored", schema: Schema(EarshotSchemaV9.mirroredModels),
+            "FutureMirrored", schema: Schema(EarshotSchemaV10.mirroredModels),
             url: mirroredURL, cloudKitDatabase: .none
         )
         let local = ModelConfiguration(
-            "DeviceLocal", schema: Schema(EarshotSchemaV9.localModels),
+            "DeviceLocal", schema: Schema(EarshotSchemaV10.localModels),
             url: localURL, cloudKitDatabase: .none
         )
         return try ModelContainer(for: full, configurations: mirrored, local)
@@ -686,7 +705,7 @@ enum StoreMigration {
                 // the otherwise unnecessary staged V6→V7 hop is avoided. Core
                 // Data may still copy the table for the remaining relationship
                 // graph changes; the aged-store performance test measures that.
-                let schema = Schema(versionedSchema: EarshotMirroredSchemaV9.self)
+                let schema = Schema(versionedSchema: EarshotMirroredSchemaV10.self)
                 _ = try ModelContainer(
                     for: schema,
                     configurations: ModelConfiguration(
@@ -695,7 +714,7 @@ enum StoreMigration {
                     )
                 )
             case 7:
-                let schema = Schema(versionedSchema: EarshotMirroredSchemaV9.self)
+                let schema = Schema(versionedSchema: EarshotMirroredSchemaV10.self)
                 _ = try ModelContainer(
                     for: schema,
                     migrationPlan: EarshotFinalMigrationPlan.self,
@@ -707,6 +726,8 @@ enum StoreMigration {
             case 8:
                 try migrateFullV8Store(at: url, configurationName: "FutureMirrored")
             case 9:
+                try migrateMirroredV9Store(at: url)
+            case 10:
                 return
             default:
                 throw CocoaError(.persistentStoreIncompatibleVersionHash)
@@ -719,6 +740,8 @@ enum StoreMigration {
         case 8:
             try migrateFullV8Store(at: url, configurationName: "DeviceLocal")
         case 9:
+            try migrateFullV9Store(at: url, configurationName: "DeviceLocal")
+        case 10:
             return
         default:
             throw CocoaError(.persistentStoreIncompatibleVersionHash)
@@ -728,14 +751,46 @@ enum StoreMigration {
     private static func migrateFullV8Store(
         at url: URL, configurationName: String
     ) throws {
-        let schema = Schema(versionedSchema: EarshotSchemaV9.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV10.self)
         _ = try ModelContainer(
             for: schema,
-            migrationPlan: EarshotV8ToV9MigrationPlan.self,
+            migrationPlan: EarshotV8ToV10MigrationPlan.self,
             configurations: ModelConfiguration(
                 configurationName, schema: schema, url: url,
                 cloudKitDatabase: .none
             )
+        )
+    }
+
+    private static func migrateFullV9Store(
+        at url: URL, configurationName: String
+    ) throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV10.self)
+        _ = try ModelContainer(
+            for: schema,
+            migrationPlan: EarshotV9ToV10MigrationPlan.self,
+            configurations: ModelConfiguration(
+                configurationName, schema: schema, url: url,
+                cloudKitDatabase: .none
+            )
+        )
+    }
+
+    private static func migrateMirroredV9Store(at url: URL) throws {
+        // Required-to-optional nullability has the same Core Data entity
+        // checksum, so a staged plan rejects V9/V10 as duplicate versions and
+        // Core Data already considers the physical schema compatible. Use its
+        // supported metadata API to record the completed V10 transition; the
+        // final V10 open immediately afterward performs the compatibility
+        // check without opening this large store twice. No table copy or
+        // Episode backfill is involved.
+        var metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite, at: url
+        )
+        metadata[NSStoreModelVersionIdentifiersKey] = ["10.0.0"]
+        try NSPersistentStoreCoordinator.setMetadata(
+            metadata, forPersistentStoreOfType: NSSQLiteStoreType,
+            at: url, options: nil
         )
     }
 

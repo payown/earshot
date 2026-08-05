@@ -62,7 +62,7 @@ enum ModelContainerFactory {
 
     /// Whether this device already has any file from the primary store set.
     /// A genuine fresh install can skip the preparation UI entirely: creating
-    /// an empty V9 store is asynchronous but is not a migration, so briefly
+    /// an empty V10 store is asynchronous but is not a migration, so briefly
     /// focusing a progress screen would add noise before onboarding (#781).
     static var hasExistingStoreFiles: Bool {
         hasStoreFiles(at: storeURL)
@@ -210,13 +210,13 @@ enum ModelContainerFactory {
 
     /// An ephemeral in-memory container for tests and previews.
     static func makeInMemory() throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV9.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV10.self)
         let mirrored = ModelConfiguration(
-            "FutureMirrored", schema: Schema(EarshotSchemaV9.mirroredModels),
+            "FutureMirrored", schema: Schema(EarshotSchemaV10.mirroredModels),
             isStoredInMemoryOnly: true, cloudKitDatabase: .none
         )
         let local = ModelConfiguration(
-            "DeviceLocal", schema: Schema(EarshotSchemaV9.localModels),
+            "DeviceLocal", schema: Schema(EarshotSchemaV10.localModels),
             isStoredInMemoryOnly: true, cloudKitDatabase: .none
         )
         return try ModelContainer(for: schema, configurations: mirrored, local)
