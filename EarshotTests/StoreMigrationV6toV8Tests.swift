@@ -4,6 +4,51 @@ import CoreData
 import SQLite3
 import Darwin
 @testable import Earshot
+
+private final class MigrationMemorySampler: @unchecked Sendable {
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "media.payown.earshot.migration-memory")
+    private var timer: DispatchSourceTimer?
+    private var maximumMB: Double = 0
+
+    func start() -> Double {
+        let baseline = Self.currentResidentMemoryMB()
+        maximumMB = baseline
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(5))
+        timer.setEventHandler { [weak self] in self?.sample() }
+        self.timer = timer
+        timer.resume()
+        return baseline
+    }
+
+    func stop() -> Double {
+        timer?.cancel()
+        timer = nil
+        queue.sync {}
+        sample()
+        return lock.withLock { maximumMB }
+    }
+
+    private func sample() {
+        let current = Self.currentResidentMemoryMB()
+        lock.withLock { maximumMB = max(maximumMB, current) }
+    }
+
+    private static func currentResidentMemoryMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? Double(info.resident_size) / 1_048_576 : -1
+    }
+}
+
 @MainActor
 final class StoreMigrationV6toV8Tests: XCTestCase {
     nonisolated(unsafe) private var directory: URL!
@@ -15,7 +60,10 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         storeURL = directory.appendingPathComponent("default.store")
     }
-    override func tearDownWithError() throws { try? FileManager.default.removeItem(at: directory) }
+    override func tearDownWithError() throws {
+        StoreMigration.injectedFailurePoint = nil
+        try? FileManager.default.removeItem(at: directory)
+    }
 
     private func seedV6() throws {
         let schema = Schema(versionedSchema: EarshotSchemaV6.self)
@@ -66,13 +114,34 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
 
     private func seedScaleV6(episodeCount: Int) throws {
         let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+        let podcastCount = min(666, max(1, episodeCount))
         try autoreleasepool {
             let container = try ModelContainer(for: schema, configurations:
                 ModelConfiguration(schema: schema, url: storeURL))
-            container.mainContext.insert(EarshotSchemaV5.Podcast(
-                feedURL: "https://scale.example/feed", title: "Scale Show", refreshedAt: refreshed
-            ))
-            try container.mainContext.save()
+            let context = container.mainContext
+            var podcasts: [EarshotSchemaV5.Podcast] = []
+            for index in 0..<podcastCount {
+                let podcast = EarshotSchemaV5.Podcast(
+                    feedURL: String(format: "https://scale.example/%04d/feed", index),
+                    title: "Scale Show \(index)", refreshedAt: refreshed
+                )
+                context.insert(podcast)
+                podcasts.append(podcast)
+            }
+
+            let root = EarshotSchemaV6.PodcastFolder(name: "Scale Root", sortOrder: 0)
+            let child = EarshotSchemaV6.PodcastFolder(name: "Scale Child", sortOrder: 1)
+            child.parent = root
+            context.insert(root)
+            context.insert(child)
+            for (index, podcast) in podcasts.prefix(5).enumerated() {
+                context.insert(EarshotSchemaV6.FolderMembership(
+                    folder: index.isMultiple(of: 2) ? root : child,
+                    podcast: podcast,
+                    sortOrder: index
+                ))
+            }
+            try context.save()
         }
         let batchSize = 10_000
         for start in stride(from: 0, to: episodeCount, by: batchSize) {
@@ -80,22 +149,39 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
                 let container = try ModelContainer(for: schema, configurations:
                     ModelConfiguration(schema: schema, url: storeURL))
                 let context = container.mainContext
-                let podcast = try XCTUnwrap(
-                    try context.fetch(FetchDescriptor<EarshotSchemaV5.Podcast>()).first
-                )
+                let podcasts = try context.fetch(FetchDescriptor<EarshotSchemaV5.Podcast>(
+                    sortBy: [SortDescriptor(\.feedURL)]
+                ))
+                XCTAssertEqual(podcasts.count, podcastCount)
                 for index in start..<min(start + batchSize, episodeCount) {
-                    let downloaded = index == 0
-                    let pending = index == 1
+                    let downloaded = index < 43
+                    let pending = index == 43
                     let episode = EarshotSchemaV5.Episode(
                         guid: "scale-\(index)", title: "Episode \(index)",
                         audioURL: "https://scale.example/\(index).mp3",
                         downloadStatus: downloaded ? .downloaded : (pending ? .pending : .none),
-                        downloadPath: downloaded ? "scale-0.mp3" : nil
+                        downloadPath: downloaded ? "scale-\(index).mp3" : nil,
+                        positionSeconds: index < 713 ? index % 300 : 0
                     )
-                    if index < 100 { episode.podcast = podcast }
+                    let podcast = podcasts[index % podcastCount]
+                    episode.podcast = podcast
                     context.insert(episode)
                     if pending {
                         context.insert(EarshotSchemaV5.ActiveDownload(episode: episode, state: .pending))
+                    }
+                    if index < 42 {
+                        context.insert(EarshotSchemaV5.QueueItem(episode: episode, position: index))
+                    }
+                    if index < 713 {
+                        context.insert(EarshotSchemaV5.ListeningSession(
+                            episode: episode, podcast: podcast,
+                            durationSeconds: 60, date: refreshed
+                        ))
+                    }
+                    if index < 10 {
+                        context.insert(EarshotSchemaV5.Bookmark(
+                            episode: episode, positionSeconds: index, note: "Scale \(index)"
+                        ))
                     }
                 }
                 try context.save()
@@ -502,6 +588,92 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             in: resumed.mainContext), "1")
     }
 
+    func testRestartAfterInjectedBridgeMarkerFailureRecoversCleanly() throws {
+        try seedV6()
+        StoreMigration.injectedFailurePoint = .afterBridgeMarker
+        XCTAssertThrowsError(try autoreleasepool {
+            let schema = Schema(versionedSchema: EarshotSchemaV7.self)
+            _ = try ModelContainer(
+                for: schema,
+                migrationPlan: EarshotBridgeMigrationPlan.self,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+        })
+        StoreMigration.injectedFailurePoint = nil
+
+        let recovered = try StoreMigration.openOrMigrate(at: storeURL)
+        try assertRecoveredFixture(recovered)
+    }
+
+    func testRestartBeforeSplitMarkerRecoversCleanly() throws {
+        try assertRestartRecovery(at: .beforeSplitMarker)
+    }
+
+    func testRestartAfterSplitMarkerRecoversCleanly() throws {
+        try assertRestartRecovery(at: .afterSplitMarker)
+    }
+
+    func testRestartBeforeIdentityRepairMarkerRecoversCleanly() throws {
+        try assertRestartRecovery(at: .beforeIdentityRepairMarker)
+    }
+
+    func testRestartAfterIdentityRepairMarkerRecoversCleanly() throws {
+        try assertRestartRecovery(at: .afterIdentityRepairMarker)
+    }
+
+    private func assertRestartRecovery(
+        at point: StoreMigration.InjectedFailurePoint
+    ) throws {
+        try seedV6()
+        StoreMigration.injectedFailurePoint = point
+        XCTAssertThrowsError(try autoreleasepool {
+            _ = try StoreMigration.openOrMigrate(at: storeURL)
+        }) { error in
+            XCTAssertEqual(
+                error as? StoreMigration.InjectedMigrationFailure,
+                .init(point: point)
+            )
+        }
+
+        // A real force-quit clears process memory before the next launch.
+        StoreMigration.injectedFailurePoint = nil
+        let recovered = try StoreMigration.openOrMigrate(at: storeURL)
+        try assertRecoveredFixture(recovered)
+
+        // The recovered result itself must be a stable next-launch state.
+        let reopened = try StoreMigration.openOrMigrate(at: storeURL)
+        try assertRecoveredFixture(reopened)
+    }
+
+    private func assertRecoveredFixture(_ container: ModelContainer) throws {
+        let context = container.mainContext
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 3)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Bookmark>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<ListeningSession>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<FolderMembership>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<EpisodeFolderMembership>()), 1)
+        XCTAssertEqual(Set(try context.fetch(FetchDescriptor<LocalEpisodeState>()).map(\.episodeGUID)), [
+            "downloaded", "pending",
+        ])
+        XCTAssertEqual(
+            LocalAppSettingIdentity.value(for: StoreMigration.splitCompletionKey, in: context),
+            "1"
+        )
+        XCTAssertEqual(
+            LocalAppSettingIdentity.value(
+                for: StoreMigration.identityRepairCompletionKey, in: context
+            ),
+            "1"
+        )
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
+        XCTAssertEqual(
+            try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"]
+        )
+    }
+
     func testScaleMigrationProfile() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["RUN_SYNC_MIGRATION_SCALE"] != nil,
@@ -510,15 +682,29 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         let count = Int(ProcessInfo.processInfo.environment["SYNC_MIGRATION_EPISODES"] ?? "")
             ?? 242_500
         try seedScaleV6(episodeCount: count)
+        let memorySampler = MigrationMemorySampler()
+        let baselineRSS = memorySampler.start()
         let start = DispatchTime.now().uptimeNanoseconds
         let migrated = try StoreMigration.openOrMigrate(at: storeURL)
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
-        let peak = Self.peakResidentMemoryMB()
+        let migrationPeakRSS = memorySampler.stop()
+        let migrationRSSGrowth = max(0, migrationPeakRSS - baselineRSS)
+        let processPeakRSS = Self.peakResidentMemoryMB()
         XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<Episode>()), count)
-        XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 2)
-        print(String(format: "SYNCMIGRATION|episodes|%d|migrationMs|%.0f|peakRssMB|%.0f",
-                     count, elapsed, peak))
+        XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<Podcast>()), 666)
+        XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.podcast != nil }
+        )), count)
+        XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 44)
+        print(String(format:
+            "SYNCMIGRATION|podcasts|%d|episodes|%d|relatedEpisodes|%d|migrationMs|%.0f|baselineRssMB|%.0f|migrationPeakRssMB|%.0f|migrationRssGrowthMB|%.0f|processPeakIncludingSeedMB|%.0f",
+            666, count, count, elapsed, baselineRSS, migrationPeakRSS,
+            migrationRSSGrowth, processPeakRSS
+        ))
         XCTAssertLessThan(elapsed, 20_000, "migration entered launch-watchdog territory")
-        XCTAssertLessThan(peak, 500, "migration peak approaches known device jetsam territory")
+        XCTAssertLessThan(
+            migrationRSSGrowth, 500,
+            "migration added enough resident memory to approach known device jetsam territory"
+        )
     }
 }
