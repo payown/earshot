@@ -20,6 +20,50 @@ enum StoreOpenError: Error {
     case unreadable(underlying: Error)
 }
 
+/// A migration could not complete for an operational reason after the source
+/// store was proven readable. This must never be treated as permission to offer
+/// corrupt-store recovery: retrying after storage or file-system conditions
+/// improve is the safe outcome.
+enum StoreMigrationFailure: Error {
+    case operational(underlying: Error)
+}
+
+/// Coarse, durable migration boundaries suitable for user-facing progress. The
+/// engine intentionally reports stages rather than percentages because Core Data
+/// migration and SQLite vacuum work do not expose truthful row-level progress.
+enum StoreMigrationProgress: Int, CaseIterable, Sendable, Equatable {
+    /// Preflight, authoritative-store backup, local-state reconstruction, and
+    /// validation of the separately configured local store.
+    case preparingAndValidating
+
+    /// Migration of the authoritative mirrored store to the final schema.
+    case migratingMirroredStore
+
+    /// Final two-store open, local-state hydration, saves, and identity repair.
+    case openingAndRepairing
+}
+
+/// Off-main execution boundary for the synchronous SwiftData migration work.
+/// A main-actor observer can consume ``progressUpdates`` with `for await`; the
+/// persistence engine has no dependency on UI or accessibility APIs.
+actor StoreMigrationEngine {
+    nonisolated let progressUpdates: AsyncStream<StoreMigrationProgress>
+    private let progressContinuation: AsyncStream<StoreMigrationProgress>.Continuation
+
+    init() {
+        let stream = AsyncStream<StoreMigrationProgress>.makeStream()
+        progressUpdates = stream.stream
+        progressContinuation = stream.continuation
+    }
+
+    func openOrMigrate(at url: URL) throws -> ModelContainer {
+        defer { progressContinuation.finish() }
+        return try StoreMigration.openOrMigrate(at: url) { progress in
+            progressContinuation.yield(progress)
+        }
+    }
+}
+
 enum SyncBridgeBackfill {
     static func populate(in context: ModelContext) throws {
         let marker = StoreMigration.bridgeCompletionKey
@@ -132,7 +176,6 @@ enum StoreMigration {
 
     /// Emits opt-in stage timings for the migration scale/profile test. Normal
     /// launches do not print these diagnostics.
-    @MainActor
     private static func profiled<T>(
         _ stage: String, operation: () throws -> T
     ) rethrows -> T {
@@ -205,12 +248,14 @@ enum StoreMigration {
     /// first public App Store build and shipped V6, so earlier schemas were
     /// TestFlight-only and are deliberately outside the supported migration floor.
     ///
-    /// Throws ``StoreOpenError`` if the store can be opened as neither: a store
-    /// written by a newer app is ``StoreOpenError/storeNewerThanApp`` (must not
-    /// be destroyed), anything else is ``StoreOpenError/unreadable``. The primary
-    /// open error is captured (not swallowed) so the two cases can be told apart.
-    @MainActor
-    static func openOrMigrate(at url: URL) throws -> ModelContainer {
+    /// Throws ``StoreOpenError`` when the source is unsupported or genuinely
+    /// unreadable. Once source readability or a durable split marker is proven,
+    /// later file and migration errors are ``StoreMigrationFailure/operational``
+    /// so they cannot be conflated with corrupt-store recovery.
+    static func openOrMigrate(
+        at url: URL,
+        progress: (StoreMigrationProgress) -> Void = { _ in }
+    ) throws -> ModelContainer {
         let localURL = localStoreURL(for: url)
 
         // A durable marker is written only after the separate local store was
@@ -219,6 +264,7 @@ enum StoreMigration {
         if profiled("split-marker-probe", operation: {
             hasSplitCompletionMarker(at: localURL)
         }) {
+            progress(.migratingMirroredStore)
             do {
                 // No-op for V9; advances either an interrupted V7 cutover or
                 // the already-installed draft V8 mirrored store to V9. The
@@ -230,29 +276,41 @@ enum StoreMigration {
                 try profiled("resume-local-finalization") {
                     try finalizeLocalStore(at: localURL)
                 }
+                progress(.openingAndRepairing)
                 return try profiled("resume-final-open") {
                     try finishOpeningFinal(mirroredURL: url, localURL: localURL)
                 }
+            } catch let failure as InjectedMigrationFailure {
+                throw failure
             } catch {
                 if indicatesNewerStore(error) {
                     throw StoreOpenError.storeNewerThanApp(underlying: error)
                 }
-                throw StoreOpenError.unreadable(underlying: error)
+                throw StoreMigrationFailure.operational(underlying: error)
             }
         }
 
         if !FileManager.default.fileExists(atPath: url.path) {
-            let container = try openFinal(mirroredURL: url, localURL: localURL)
-            try LocalAppSettingIdentity.setValue("1", for: splitCompletionKey, in: container.mainContext)
-            // A new empty store has nothing to repair; mark the version complete
-            // so the first ordinary reopen does not run a migration-only pass.
-            try LocalAppSettingIdentity.setValue(
-                "1", for: identityRepairCompletionKey, in: container.mainContext
-            )
-            try container.mainContext.save()
-            return container
+            progress(.openingAndRepairing)
+            do {
+                let container = try openFinal(mirroredURL: url, localURL: localURL)
+                let context = ModelContext(container)
+                try LocalAppSettingIdentity.setValue(
+                    "1", for: splitCompletionKey, in: context
+                )
+                // A new empty store has nothing to repair; mark the version complete
+                // so the first ordinary reopen does not run a migration-only pass.
+                try LocalAppSettingIdentity.setValue(
+                    "1", for: identityRepairCompletionKey, in: context
+                )
+                try context.save()
+                return container
+            } catch {
+                throw StoreMigrationFailure.operational(underlying: error)
+            }
         }
 
+        progress(.preparingAndValidating)
         // The original store remains authoritative until the marker above is
         // durable. Back it up before any preflight or finalization work.
         if FileManager.default.fileExists(atPath: url.path) {
@@ -267,31 +325,56 @@ enum StoreMigration {
                 try readBridge(at: url)
             }
             AppLog.data.info("Local-state migration preflight completed")
+        } catch let failure as InjectedMigrationFailure {
+            throw failure
         } catch let error as StoreOpenError {
             throw error
         } catch {
             if indicatesNewerStore(error) {
                 throw StoreOpenError.storeNewerThanApp(underlying: error)
             }
+            if indicatesOperationalFailure(error) {
+                throw StoreMigrationFailure.operational(underlying: error)
+            }
             throw StoreOpenError.unreadable(underlying: error)
         }
 
         // Rebuild is safe here: V6/V7 still contains every source value. A crash
         // or failed validation simply re-enters this path and reconstructs local.
-        try profiled("local-store-rebuild-and-validation") {
-            try rebuildAndValidateLocal(bridgeSnapshot, at: localURL)
+        do {
+            try profiled("local-store-rebuild-and-validation") {
+                try rebuildAndValidateLocal(bridgeSnapshot, at: localURL)
+            }
+        } catch let failure as InjectedMigrationFailure {
+            throw failure
+        } catch {
+            throw StoreMigrationFailure.operational(underlying: error)
         }
         AppLog.data.info("V9 device-local copy validated")
-        try profiled("mirrored-store-migration") {
-            try finalizeMirroredStore(at: url)
+        progress(.migratingMirroredStore)
+        do {
+            try profiled("mirrored-store-migration") {
+                try finalizeMirroredStore(at: url)
+            }
+        } catch {
+            if indicatesNewerStore(error) {
+                throw StoreOpenError.storeNewerThanApp(underlying: error)
+            }
+            throw StoreMigrationFailure.operational(underlying: error)
         }
         AppLog.data.info("V9 mirrored-store cutover completed")
-        return try profiled("final-open-hydrate-and-repair") {
-            try finishOpeningFinal(mirroredURL: url, localURL: localURL)
+        progress(.openingAndRepairing)
+        do {
+            return try profiled("final-open-hydrate-and-repair") {
+                try finishOpeningFinal(mirroredURL: url, localURL: localURL)
+            }
+        } catch let failure as InjectedMigrationFailure {
+            throw failure
+        } catch {
+            throw StoreMigrationFailure.operational(underlying: error)
         }
     }
 
-    @MainActor
     private static func readBridge(at url: URL) throws -> BridgeSnapshot {
         let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
             type: .sqlite, at: url
@@ -325,7 +408,6 @@ enum StoreMigration {
     /// marked before the original store is opened as retained-column V9, so a
     /// crash before cutover leaves V6 untouched and a crash after the marker
     /// resumes at finalization.
-    @MainActor
     private static func snapshotV6WithoutMigration(at url: URL) throws -> BridgeSnapshot {
         let schema = Schema(versionedSchema: EarshotSchemaV6.self)
         return try autoreleasepool {
@@ -337,7 +419,7 @@ enum StoreMigration {
                     )
                 )
             }
-            let context = container.mainContext
+            let context = ModelContext(container)
 
             let podcastRows: [String: PodcastStateSnapshot] = try profiled(
                 "v6-preflight-podcast-scan"
@@ -429,7 +511,6 @@ enum StoreMigration {
         }
     }
 
-    @MainActor
     private static func openAndPopulateBridge(at url: URL) throws -> BridgeSnapshot {
         let schema = Schema(versionedSchema: EarshotSchemaV7.self)
         return try autoreleasepool {
@@ -439,12 +520,12 @@ enum StoreMigration {
                     schema: schema, url: url, cloudKitDatabase: .none
                 )
             )
-            try SyncBridgeBackfill.populate(in: bridge.mainContext)
-            return try snapshotBridge(bridge.mainContext)
+            let context = ModelContext(bridge)
+            try SyncBridgeBackfill.populate(in: context)
+            return try snapshotBridge(context)
         }
     }
 
-    @MainActor
     private static func snapshotBridge(_ context: ModelContext) throws -> BridgeSnapshot {
         BridgeSnapshot(
             podcasts: try context.fetch(FetchDescriptor<EarshotSchemaV7.LocalPodcastState>())
@@ -460,7 +541,6 @@ enum StoreMigration {
         )
     }
 
-    @MainActor
     private static func rebuildAndValidateLocal(
         _ expected: BridgeSnapshot, at localURL: URL
     ) throws {
@@ -478,7 +558,7 @@ enum StoreMigration {
                     cloudKitDatabase: .none
                 )
             )
-            let context = container.mainContext
+            let context = ModelContext(container)
             for row in expected.podcasts {
                 context.insert(LocalPodcastState(feedURL: row.feedURL, refreshedAt: row.refreshedAt))
             }
@@ -504,7 +584,6 @@ enum StoreMigration {
         }
     }
 
-    @MainActor
     private static func localSnapshot(in context: ModelContext) throws -> BridgeSnapshot {
         BridgeSnapshot(
             podcasts: try context.fetch(FetchDescriptor<LocalPodcastState>())
@@ -520,7 +599,6 @@ enum StoreMigration {
         )
     }
 
-    @MainActor
     private static func hasSplitCompletionMarker(at localURL: URL) -> Bool {
         guard FileManager.default.fileExists(atPath: localURL.path) else { return false }
         return (try? autoreleasepool {
@@ -538,7 +616,8 @@ enum StoreMigration {
                     )
                 )
                 let key = splitCompletionKey
-                let rows = try container.mainContext.fetch(
+                let context = ModelContext(container)
+                let rows = try context.fetch(
                     FetchDescriptor<EarshotSchemaV8.LocalAppSetting>(
                         predicate: #Predicate { $0.key == key }
                     )
@@ -554,13 +633,11 @@ enum StoreMigration {
                     cloudKitDatabase: .none
                 )
             )
-            return LocalAppSettingIdentity.value(
-                for: splitCompletionKey, in: container.mainContext
-            ) == "1"
+            let context = ModelContext(container)
+            return LocalAppSettingIdentity.value(for: splitCompletionKey, in: context) == "1"
         }) ?? false
     }
 
-    @MainActor
     private static func openFinal(mirroredURL: URL, localURL: URL) throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV9.self)
         let mirrored = ModelConfiguration(
@@ -574,7 +651,6 @@ enum StoreMigration {
         return try ModelContainer(for: full, configurations: mirrored, local)
     }
 
-    @MainActor
     private static func finalizeMirroredStore(at url: URL) throws {
         try autoreleasepool {
             switch try storeMajorVersion(at: url) {
@@ -612,7 +688,6 @@ enum StoreMigration {
         }
     }
 
-    @MainActor
     private static func finalizeLocalStore(at url: URL) throws {
         switch try storeMajorVersion(at: url) {
         case 8:
@@ -624,7 +699,6 @@ enum StoreMigration {
         }
     }
 
-    @MainActor
     private static func migrateFullV8Store(
         at url: URL, configurationName: String
     ) throws {
@@ -651,49 +725,90 @@ enum StoreMigration {
         return major
     }
 
-    @MainActor
+    /// Recognizes transient file-system/database conditions while leaving actual
+    /// SQLite corruption (`SQLITE_CORRUPT`/`SQLITE_NOTADB`) on the recovery path.
+    /// The full underlying-error chain is inspected because SwiftData and Core
+    /// Data commonly wrap the actionable POSIX or SQLite error.
+    static func indicatesOperationalFailure(_ error: Error) -> Bool {
+        let cocoaCodes: Set<Int> = [
+            NSFileReadUnknownError,
+            NSFileReadNoPermissionError,
+            NSFileReadTooLargeError,
+            NSFileWriteUnknownError,
+            NSFileWriteNoPermissionError,
+            NSFileWriteInvalidFileNameError,
+            NSFileWriteFileExistsError,
+            NSFileWriteInapplicableStringEncodingError,
+            NSFileWriteUnsupportedSchemeError,
+            NSFileWriteOutOfSpaceError,
+            NSFileWriteVolumeReadOnlyError,
+            NSUserCancelledError,
+        ]
+        let posixCodes = Set([EACCES, EAGAIN, EBUSY, EDQUOT, EINTR, EIO, EMFILE,
+                              ENFILE, ENOSPC, ETIMEDOUT].map(Int.init))
+        // Primary SQLite result codes. Extended result codes retain the primary
+        // code in their low byte.
+        let sqliteCodes: Set<Int> = [5, 6, 8, 9, 10, 13, 14, 15]
+
+        var current: NSError? = error as NSError
+        while let ns = current {
+            if ns.domain == NSCocoaErrorDomain && cocoaCodes.contains(ns.code) {
+                return true
+            }
+            if ns.domain == NSPOSIXErrorDomain && posixCodes.contains(ns.code) {
+                return true
+            }
+            if ns.domain == NSSQLiteErrorDomain && sqliteCodes.contains(ns.code & 0xFF) {
+                return true
+            }
+            current = ns.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
+    }
+
     private static func finishOpeningFinal(
         mirroredURL: URL, localURL: URL
     ) throws -> ModelContainer {
         let container = try profiled("final-two-store-open") {
             try openFinal(mirroredURL: mirroredURL, localURL: localURL)
         }
+        let context = ModelContext(container)
         // V7's AppSetting table contained both scopes. The local values are now
         // durably validated in LocalAppSetting, so remove their mirrored copies
         // before any future CloudKit configuration can see them.
         try profiled("final-local-setting-cleanup") {
-            for setting in try container.mainContext.fetch(FetchDescriptor<AppSetting>())
+            for setting in try context.fetch(FetchDescriptor<AppSetting>())
             where AppSettingScope.isLocal(setting.key) {
-                container.mainContext.delete(setting)
+                context.delete(setting)
             }
         }
         try profiled("final-local-state-hydration") {
-            try LocalStateStore.hydrate(in: container.mainContext)
+            try LocalStateStore.hydrate(in: context)
         }
         if LocalAppSettingIdentity.value(
-            for: identityRepairCompletionKey, in: container.mainContext
+            for: identityRepairCompletionKey, in: context
         ) != "1" {
             _ = try profiled("final-identity-repair") {
-                try IdentityRepairService(context: container.mainContext).repairAll()
+                try IdentityRepairService(context: context).repairAll()
             }
             // The repair must be durable before the completion marker. If this
             // save succeeds but the marker save is interrupted, the idempotent
             // repair safely runs again on the next launch.
-            if container.mainContext.hasChanges {
+            if context.hasChanges {
                 try profiled("final-repair-and-hydration-save") {
-                    try container.mainContext.save()
+                    try context.save()
                 }
             }
             try failIfInjected(at: .beforeIdentityRepairMarker)
             try profiled("final-identity-marker-save") {
                 try LocalAppSettingIdentity.setValue(
-                    "1", for: identityRepairCompletionKey, in: container.mainContext
+                    "1", for: identityRepairCompletionKey, in: context
                 )
-                try container.mainContext.save()
+                try context.save()
             }
             try failIfInjected(at: .afterIdentityRepairMarker)
-        } else if container.mainContext.hasChanges {
-            try container.mainContext.save()
+        } else if context.hasChanges {
+            try context.save()
         }
         return container
     }

@@ -26,6 +26,10 @@ enum StoreRecoveryState: Equatable {
 /// installing the real one (#781).
 enum StoreLoad {
     case ready(ModelContainer)
+    /// The source store was readable, but migration could not complete because
+    /// of an operational condition. This is intentionally not recovery: no
+    /// destructive reset should be offered for storage or file-operation errors.
+    case migrationFailed
     case recovery(StoreRecoveryState)
 }
 
@@ -71,6 +75,11 @@ enum ModelContainerFactory {
         do {
             let container = try StoreMigration.openOrMigrate(at: url)
             return .ready(container)
+        } catch StoreMigrationFailure.operational(let underlying) {
+            AppLog.data.error(
+                "Store migration could not complete; leaving data intact for retry: \(underlying.localizedDescription, privacy: .public)"
+            )
+            return .migrationFailed
         } catch StoreOpenError.storeNewerThanApp(let underlying) {
             // 2. Downgrade — the store is NEWER than this build. Never touch it;
             //    show recovery and tell the user to update the app.
