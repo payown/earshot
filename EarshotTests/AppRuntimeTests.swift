@@ -123,7 +123,7 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertEqual(screen.title, "Earshot couldn't finish preparing your library")
         XCTAssertEqual(
             screen.message,
-            "Your library is safe and untouched. This usually means your device is low on storage. Free up some space, then try preparing again."
+            "Preparation stopped before Earshot could open your library. Your current library files have not been deleted."
         )
         XCTAssertFalse(screen.offersReset, "operational failure must never offer a reset")
         XCTAssertTrue(screen.offersRetry)
@@ -132,6 +132,48 @@ final class AppRuntimeTests: XCTestCase {
             StoreRecoveryScreen.retryHint,
             "Checks your library again without closing Earshot."
         )
+    }
+
+    func testMigrationRecoveryBackupCopyMatchesApprovedVoiceOverReview() {
+        let backup = MigrationBackupDescriptor(
+            id: UUID(),
+            directoryURL: URL(fileURLWithPath: "/tmp/approved-copy"),
+            createdAt: Date(timeIntervalSince1970: 1_785_895_200),
+            sourceSchemaMajor: 6,
+            targetSchemaMajor: 10,
+            sourceStoreIdentifier: "fixture",
+            byteCount: 630 * 1_048_576,
+            format: .verifiedSnapshot,
+            successfulTargetOpenCount: 0
+        )
+        let screen = StoreRecoveryScreen(state: .migrationFailed, backup: backup)
+
+        XCTAssertEqual(
+            screen.message,
+            "Preparation stopped before Earshot could open your library. A backup from just before preparation is available."
+        )
+        XCTAssertTrue(
+            screen.restoreConfirmationMessage.hasPrefix(
+                "This replaces your library with the backup saved on "
+            )
+        )
+        XCTAssertTrue(
+            screen.restoreConfirmationMessage.hasSuffix(
+                ", just before preparation started. Earshot will keep the current files until the backup is verified."
+            )
+        )
+        XCTAssertFalse(screen.restoreConfirmationMessage.contains("Anything saved"))
+    }
+
+    func testBackupUnavailableCopyPromisesNoMigrationStarted() {
+        let screen = StoreRecoveryScreen(state: .backupUnavailable)
+        XCTAssertEqual(screen.title, "Earshot needs more storage")
+        XCTAssertEqual(
+            screen.message,
+            "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Free up storage, then try again."
+        )
+        XCTAssertTrue(screen.offersRetry)
+        XCTAssertFalse(screen.offersReset)
     }
 
     func testRapidProgressCoalescesToNewestAnnouncement() async throws {

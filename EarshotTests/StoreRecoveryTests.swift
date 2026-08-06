@@ -20,11 +20,32 @@ final class StoreRecoveryTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        MigrationBackupManager.injectedRestoreFailureAfterQuarantine = false
         if let dir { try? FileManager.default.removeItem(at: dir) }
     }
 
     private func storeExists() -> Bool {
         FileManager.default.fileExists(atPath: storeURL.path)
+    }
+
+    private func seedV6RecoveryStore() throws {
+        try autoreleasepool {
+            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+            let container = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+            let podcast = EarshotSchemaV5.Podcast(
+                feedURL: "https://backup.example/feed", title: "Backup Fixture"
+            )
+            let episode = EarshotSchemaV5.Episode(
+                guid: "kept", title: "Kept Episode", audioURL: "https://backup.example/1.mp3"
+            )
+            episode.podcast = podcast
+            container.mainContext.insert(podcast)
+            container.mainContext.insert(episode)
+            try container.mainContext.save()
+        }
     }
 
     /// Writes a store at a schema NEWER than the app's current V4 (an extra
@@ -148,6 +169,155 @@ final class StoreRecoveryTests: XCTestCase {
         )
         XCTAssertFalse(storeExists(), "the original store is removed after backup")
         XCTAssertFalse(fm.fileExists(atPath: wal.path), "sidecars are removed after backup")
+    }
+
+    // MARK: Verified migration backup and restore
+
+    func testVerifiedSnapshotRestoresV6AndQuarantinesPartialSplitFiles() throws {
+        try seedV6RecoveryStore()
+        let backup = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
+        XCTAssertEqual(backup.sourceSchemaMajor, 6)
+        XCTAssertEqual(backup.targetSchemaMajor, 10)
+        XCTAssertEqual(backup.format, .verifiedSnapshot)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: backup.directoryURL.appending(path: "manifest.json").path
+            )
+        )
+
+        ModelContainerFactory.removeStoreFiles(at: storeURL)
+        try Data([0xFF, 0x00]).write(to: storeURL)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try Data([0xAA]).write(to: localURL)
+
+        try MigrationBackupManager.restore(backup, at: storeURL)
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: localURL.path),
+            "a partial local store must not be merged into the restored source"
+        )
+        try autoreleasepool {
+            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+            let restored = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+            XCTAssertEqual(
+                try restored.mainContext.fetchCount(FetchDescriptor<EarshotSchemaV5.Podcast>()), 1
+            )
+            XCTAssertEqual(
+                try restored.mainContext.fetchCount(FetchDescriptor<EarshotSchemaV5.Episode>()), 1
+            )
+        }
+        XCTAssertNotNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))
+    }
+
+    func testLegacyTimestampedBackupAlreadyOnDeviceCanBeRestored() throws {
+        try seedV6RecoveryStore()
+        let legacyDirectory = try XCTUnwrap(ModelContainerFactory.backupStoreFiles(at: storeURL))
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: legacyDirectory.appending(path: "manifest.json").path
+            )
+        )
+        ModelContainerFactory.removeStoreFiles(at: storeURL)
+        try Data([0x00, 0x01, 0xFF]).write(to: storeURL)
+
+        let legacy = try XCTUnwrap(MigrationBackupManager.latestRestorableBackup(at: storeURL))
+        XCTAssertEqual(legacy.format, .legacyStoreSet)
+        try MigrationBackupManager.restore(legacy, at: storeURL)
+
+        try autoreleasepool {
+            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+            let restored = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+            XCTAssertEqual(
+                try restored.mainContext.fetchCount(FetchDescriptor<EarshotSchemaV5.Episode>()), 1
+            )
+        }
+    }
+
+    func testFailedRestoreRollsBackEveryCurrentStoreFile() throws {
+        try seedV6RecoveryStore()
+        let backup = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
+
+        try autoreleasepool {
+            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+            let container = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+            container.mainContext.insert(EarshotSchemaV5.Podcast(
+                feedURL: "https://current.example/feed", title: "Current Fixture"
+            ))
+            try container.mainContext.save()
+        }
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        let partialLocal = Data([0xA1, 0xB2, 0xC3])
+        try partialLocal.write(to: localURL)
+
+        MigrationBackupManager.injectedRestoreFailureAfterQuarantine = true
+        XCTAssertThrowsError(try MigrationBackupManager.restore(backup, at: storeURL))
+        MigrationBackupManager.injectedRestoreFailureAfterQuarantine = false
+
+        XCTAssertEqual(try Data(contentsOf: localURL), partialLocal)
+        try autoreleasepool {
+            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+            let current = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+            XCTAssertEqual(
+                try current.mainContext.fetchCount(FetchDescriptor<EarshotSchemaV5.Podcast>()), 2,
+                "a failed restore must put the complete pre-restore store set back"
+            )
+        }
+        XCTAssertNotNil(MigrationBackupManager.latestRestorableBackup(at: storeURL))
+    }
+
+    func testIncompleteLegacyBackupIsNeverOffered() throws {
+        let directory = MigrationBackupManager.backupRoot(for: storeURL)
+            .appending(path: "partial", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data([0x00, 0x01]).write(to: directory.appending(path: "default.store"))
+        XCTAssertNil(MigrationBackupManager.latestRestorableBackup(at: storeURL))
+    }
+
+    func testVerifiedBackupSurvivesMigrationAndIsRemovedAfterIndependentReopen() throws {
+        try seedV6RecoveryStore()
+        _ = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
+
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+        XCTAssertNotNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))
+
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+        XCTAssertNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))
+    }
+
+    func testLegacyMigrationBackupUsesSameTwoOpenRetentionPolicy() throws {
+        try seedV6RecoveryStore()
+        let legacyDirectory = try XCTUnwrap(ModelContainerFactory.backupStoreFiles(at: storeURL))
+
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyDirectory.path))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: legacyDirectory.appending(path: "migration-retention.json").path
+        ))
+
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyDirectory.path))
+    }
+
+    func testUnreadableResetBackupIsNotRetiredAsAMigrationBackup() throws {
+        try Data([0x00, 0x01, 0x02, 0x03, 0xFF]).write(to: storeURL)
+        let resetBackup = try XCTUnwrap(ModelContainerFactory.backupStoreFiles(at: storeURL))
+
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: resetBackup.path))
     }
 }
 
