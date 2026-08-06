@@ -860,6 +860,311 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try assertEpisodeSaveSurvivesReopen(reopened)
     }
 
+    func testInterruptedFreshV10CreationResumesWithoutPreparationAndSaves() throws {
+        StoreMigration.injectedFailurePoint = .beforeFreshStoreMarkers
+        XCTAssertThrowsError(try StoreMigration.openOrMigrate(at: storeURL)) { error in
+            XCTAssertEqual(
+                error as? StoreMigration.InjectedMigrationFailure,
+                .init(point: .beforeFreshStoreMarkers)
+            )
+        }
+        StoreMigration.injectedFailurePoint = nil
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
+        XCTAssertEqual(
+            try storeMajorVersion(at: StoreMigration.localStoreURL(for: storeURL)), 10
+        )
+        var progress: [StoreMigrationProgress] = []
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }
+
+        XCTAssertTrue(progress.isEmpty, "an interrupted fresh store is not a migration")
+        XCTAssertEqual(try resumed.mainContext.fetchCount(FetchDescriptor<Podcast>()), 0)
+        XCTAssertEqual(try resumed.mainContext.fetchCount(FetchDescriptor<Episode>()), 0)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.identityRepairCompletionKey, in: resumed.mainContext
+        ), "1")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: MigrationBackupManager.backupRoot(for: storeURL).path
+        ))
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testNonemptyUnmarkedV10NeverUsesFreshStoreResume() throws {
+        StoreMigration.injectedFailurePoint = .beforeFreshStoreMarkers
+        XCTAssertThrowsError(try StoreMigration.openOrMigrate(at: storeURL))
+        StoreMigration.injectedFailurePoint = nil
+
+        try autoreleasepool {
+            let full = Schema(versionedSchema: EarshotSchemaV10.self)
+            let container = try ModelContainer(
+                for: full,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored", schema: Schema(EarshotSchemaV10.mirroredModels),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV10.localModels),
+                        url: StoreMigration.localStoreURL(for: storeURL),
+                        cloudKitDatabase: .none
+                    )
+            )
+            container.mainContext.insert(Podcast(
+                feedURL: "https://must-not-reset.example/feed", title: "Keep Me"
+            ))
+            try container.mainContext.save()
+        }
+
+        var progress: [StoreMigrationProgress] = []
+        XCTAssertThrowsError(try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }) { error in
+            guard case StoreOpenError.unreadable = error else {
+                return XCTFail("expected nondestructive recovery, got \(error)")
+            }
+        }
+        XCTAssertTrue(progress.isEmpty, "an unmarked V10 store is not a migration")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: MigrationBackupManager.backupRoot(for: storeURL).path
+        ))
+
+        let full = Schema(versionedSchema: EarshotSchemaV10.self)
+        let preserved = try ModelContainer(
+            for: full,
+            configurations:
+                ModelConfiguration(
+                    "FutureMirrored", schema: Schema(EarshotSchemaV10.mirroredModels),
+                    url: storeURL, cloudKitDatabase: .none
+                ),
+                ModelConfiguration(
+                    "DeviceLocal", schema: Schema(EarshotSchemaV10.localModels),
+                    url: StoreMigration.localStoreURL(for: storeURL),
+                    cloudKitDatabase: .none
+                )
+        )
+        XCTAssertEqual(
+            try preserved.mainContext.fetch(FetchDescriptor<Podcast>()).map(\.title),
+            ["Keep Me"]
+        )
+        XCTAssertNil(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: preserved.mainContext
+        ))
+    }
+
+    func testInterruptedFreshV10WithOnlyMirroredFileResumesAndSaves() throws {
+        let schema = Schema(versionedSchema: EarshotMirroredSchemaV10.self)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(
+                    "FutureMirrored", schema: schema, url: storeURL,
+                    cloudKitDatabase: .none
+                )
+            )
+        }
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: StoreMigration.localStoreURL(for: storeURL).path
+        ))
+
+        var progress: [StoreMigrationProgress] = []
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }
+
+        XCTAssertTrue(progress.isEmpty)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testInterruptedFreshV10WithOnlyLocalFileResumesAndSaves() throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV10.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(
+                    "DeviceLocal", schema: schema, url: localURL,
+                    cloudKitDatabase: .none
+                )
+            )
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storeURL.path))
+
+        var progress: [StoreMigrationProgress] = []
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }
+
+        XCTAssertTrue(progress.isEmpty)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testInterruptedFreshV9WithOnlyMirroredFileMovesForwardAndSaves() throws {
+        let schema = Schema(versionedSchema: EarshotMirroredSchemaV9.self)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(
+                    "FutureMirrored", schema: schema, url: storeURL,
+                    cloudKitDatabase: .none
+                )
+            )
+        }
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: StoreMigration.localStoreURL(for: storeURL).path
+        ))
+
+        var progress: [StoreMigrationProgress] = []
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }
+
+        XCTAssertTrue(progress.isEmpty)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testInterruptedFreshV9WithOnlyLocalFileMovesForwardAndSaves() throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV9.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(
+                    "DeviceLocal", schema: Schema(EarshotSchemaV9.localModels),
+                    url: localURL, cloudKitDatabase: .none
+                )
+            )
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storeURL.path))
+
+        var progress: [StoreMigrationProgress] = []
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }
+
+        XCTAssertTrue(progress.isEmpty)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 10)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testOrphanedStoreSidecarNeverEntersMigrationPreparation() throws {
+        let walURL = storeURL.deletingPathExtension()
+            .appendingPathExtension("store-wal")
+        let residue = Data("preserve orphaned sqlite residue".utf8)
+        try residue.write(to: walURL)
+
+        var progress: [StoreMigrationProgress] = []
+        XCTAssertThrowsError(try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }) { error in
+            guard case StoreOpenError.unreadable = error else {
+                return XCTFail("expected nondestructive recovery, got \(error)")
+            }
+        }
+
+        XCTAssertTrue(progress.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: walURL), residue)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: MigrationBackupManager.backupRoot(for: storeURL).path
+        ))
+    }
+
+    func testInterruptedFreshV9CreationMovesForwardWithoutPreparationAndSaves() throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV9.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: schema,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored", schema: Schema(EarshotSchemaV9.mirroredModels),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV9.localModels),
+                        url: localURL, cloudKitDatabase: .none
+                    )
+            )
+        }
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 9)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 9)
+
+        var progress: [StoreMigrationProgress] = []
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }
+
+        XCTAssertTrue(progress.isEmpty, "an interrupted fresh V9 store is not a migration")
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 10)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: MigrationBackupManager.backupRoot(for: storeURL).path
+        ))
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
+    func testInterruptedFreshV9FinalizationResumesMixedV10V9PairAndSaves() throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV9.self)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        try autoreleasepool {
+            _ = try ModelContainer(
+                for: schema,
+                configurations:
+                    ModelConfiguration(
+                        "FutureMirrored", schema: Schema(EarshotSchemaV9.mirroredModels),
+                        url: storeURL, cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV9.localModels),
+                        url: localURL, cloudKitDatabase: .none
+                    )
+            )
+        }
+        StoreMigration.injectedFailurePoint = .afterFreshV9MirroredFinalization
+        XCTAssertThrowsError(try StoreMigration.openOrMigrate(at: storeURL)) { error in
+            XCTAssertEqual(
+                error as? StoreMigration.InjectedMigrationFailure,
+                .init(point: .afterFreshV9MirroredFinalization)
+            )
+        }
+        StoreMigration.injectedFailurePoint = nil
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 9)
+
+        var progress: [StoreMigrationProgress] = []
+        let resumed = try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }
+
+        XCTAssertTrue(progress.isEmpty)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
+        XCTAssertEqual(try storeMajorVersion(at: localURL), 10)
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: resumed.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(resumed)
+    }
+
     func testAlreadySplitV8StoreMovesForwardWithoutBridgeReplay() throws {
         try seedSplitV8()
         XCTAssertEqual(try storeMajorVersion(at: storeURL), 8)
