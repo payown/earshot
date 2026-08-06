@@ -167,18 +167,17 @@ enum LocalStateStore {
         }
     }
 
-    /// Hydrates only rows represented in the small local tables. Mirrored rows
-    /// are fetched once per model type, never once per local row.
-    static func hydrate(in context: ModelContext) throws {
+    /// Projects only rows represented in the small local tables into transient
+    /// runtime state. Migration completion also repairs those bounded tables;
+    /// an ordinary V10 reopen trusts their durable invariants and does no repair.
+    static func hydrate(in context: ModelContext, repairing: Bool = true) throws {
         LocalRuntimeState.shared.clear()
-        try repair(in: context)
+        if repairing { try repair(in: context) }
 
-        let podcastStates = Dictionary(
-            uniqueKeysWithValues: try context.fetch(FetchDescriptor<LocalPodcastState>())
-                .map { (FeedURLIdentity.canonical($0.feedURL), $0) }
-        )
-        for podcast in try context.fetch(FetchDescriptor<Podcast>()) {
-            podcast.refreshedAt = podcastStates[FeedURLIdentity.canonical(podcast.feedURL)]?.refreshedAt
+        for row in try context.fetch(FetchDescriptor<LocalPodcastState>()) {
+            LocalRuntimeState.shared.setRefreshedAt(
+                row.refreshedAt, feedURL: row.feedURL
+            )
         }
 
         let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())

@@ -177,6 +177,7 @@ enum StoreMigration {
     static let identityRepairCompletionKey = "__earshot_identity_repair_v1_complete"
 
     enum InjectedFailurePoint: String, CaseIterable {
+        case beforeCompletedFinalOpen
         case afterBridgeMarker
         case beforeSplitMarker
         case afterSplitMarker
@@ -302,6 +303,40 @@ enum StoreMigration {
             throw StoreMigrationFailure.operational(underlying: error)
         }
         let localURL = localStoreURL(for: url)
+
+        // A settled V10 launch needs one final two-store open and the bounded
+        // projection of device-local rows. Read-only metadata classification
+        // comes first so an older store can never be opened as V10 without the
+        // migration safety gate below.
+        if FileManager.default.fileExists(atPath: url.path),
+           FileManager.default.fileExists(atPath: localURL.path),
+           (try? storeMajorVersion(at: url)) == MigrationBackupManager.targetSchemaMajor,
+           (try? storeMajorVersion(at: localURL)) == MigrationBackupManager.targetSchemaMajor {
+            do {
+                let container = try profiled("completed-final-open") {
+                    try failIfInjected(at: .beforeCompletedFinalOpen)
+                    return try openFinal(mirroredURL: url, localURL: localURL)
+                }
+                let context = ModelContext(container)
+                if LocalAppSettingIdentity.value(for: splitCompletionKey, in: context) == "1",
+                   LocalAppSettingIdentity.value(
+                    for: identityRepairCompletionKey, in: context
+                   ) == "1" {
+                    try profiled("completed-local-state-projection") {
+                        try LocalStateStore.hydrate(in: context, repairing: false)
+                    }
+                    return container
+                }
+            } catch {
+                if indicatesNewerStore(error) {
+                    throw StoreOpenError.storeNewerThanApp(underlying: error)
+                }
+                if hasSplitCompletionMarker(at: localURL) {
+                    throw StoreMigrationFailure.operational(underlying: error)
+                }
+                throw StoreOpenError.unreadable(underlying: error)
+            }
+        }
 
         // A durable marker is written only after the separate local store was
         // value-checked. It therefore authorizes mirrored-store finalization and

@@ -696,6 +696,26 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try assertEpisodeSaveSurvivesReopen(reopened)
     }
 
+    func testCompletedV10FinalOpenFailureRemainsNonDestructive() throws {
+        try seedV6()
+        try autoreleasepool { _ = try StoreMigration.openOrMigrate(at: storeURL) }
+        StoreMigration.injectedFailurePoint = .beforeCompletedFinalOpen
+
+        XCTAssertThrowsError(try StoreMigration.openOrMigrate(at: storeURL)) { error in
+            guard case StoreMigrationFailure.operational(let underlying) = error else {
+                return XCTFail("Expected an operational retry, got \(error)")
+            }
+            XCTAssertEqual(
+                underlying as? StoreMigration.InjectedMigrationFailure,
+                .init(point: .beforeCompletedFinalOpen)
+            )
+        }
+        StoreMigration.injectedFailurePoint = nil
+
+        let reopened = try StoreMigration.openOrMigrate(at: storeURL)
+        try assertEpisodeSaveSurvivesReopen(reopened)
+    }
+
     func testAlreadySplitV8StoreMovesForwardWithoutBridgeReplay() throws {
         try seedSplitV8()
         XCTAssertEqual(try storeMajorVersion(at: storeURL), 8)
