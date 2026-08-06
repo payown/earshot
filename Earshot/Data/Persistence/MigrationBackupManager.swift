@@ -31,11 +31,12 @@ enum MigrationBackupError: Error, Equatable, Sendable {
 /// manifest is written last so a partial copy is never considered a backup.
 enum MigrationBackupManager {
     static let targetSchemaMajor = 10
-    static let initialFreeSpaceMultiplier = 3.25
-    static let retainedBackupFreeSpaceMultiplier = 2.25
+    static let initialFreeSpaceMultiplier = 4.5
+    static let retainedBackupFreeSpaceMultiplier = 3.5
     #if DEBUG
     nonisolated(unsafe) static var injectedRestoreFailureAfterQuarantine = false
     nonisolated(unsafe) static var injectedQuarantineCleanupFailure = false
+    nonisolated(unsafe) static var injectedAvailableBytes: Int64?
     #endif
     private static let manifestName = "manifest.json"
     private static let snapshotName = "default.store"
@@ -95,11 +96,11 @@ enum MigrationBackupManager {
     static func latestRecordedBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
         verifiedBackups(at: storeURL).first
     }
-    /// A verified snapshot is a hard prerequisite. The measured V6-to-V10 peak
-    /// used 3.015 times the source set in additional blocks: 1.000 snapshot,
-    /// 0.987 final-store growth, 1.028 WAL/sidecars, and about 0.001 local store.
-    /// 3.25 times preserves a bounded margin before the first snapshot, while a
-    /// retained snapshot means only the migration working set still needs to fit.
+    /// A verified snapshot is a hard prerequisite. Repeated migrations of the
+    /// preserved 405.4 MiB build-161 store measured as high as 4.249x the source in peak
+    /// additional blocks under Xcode 26.6. Require 4.5x before creating the
+    /// snapshot. A retained snapshot already occupies one source-sized copy, so a
+    /// 3.5x free-space requirement covers the remaining migration working set.
     static func prepareVerifiedBackup(
         at storeURL: URL,
         targetSchemaMajor: Int = targetSchemaMajor
@@ -582,6 +583,9 @@ enum MigrationBackupManager {
         }
     }
     static func availableBytes(at url: URL) throws -> Int64 {
+        #if DEBUG
+        if let injectedAvailableBytes { return injectedAvailableBytes }
+        #endif
         var statistics = statfs()
         guard statfs(url.path, &statistics) == 0 else {
             throw POSIXError(.init(rawValue: errno) ?? .EIO)
