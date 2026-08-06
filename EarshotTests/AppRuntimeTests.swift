@@ -122,6 +122,61 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertEqual(state, .corruptStore)
     }
 
+    func testUnsupportedSchemaPublishesVerifiedBackupWithFirstRecoveryScreen() {
+        let backup = MigrationBackupDescriptor(
+            id: UUID(),
+            directoryURL: URL(fileURLWithPath: "/tmp/v4-recovery-backup"),
+            createdAt: Date(timeIntervalSince1970: 1_786_000_000),
+            sourceSchemaMajor: 4,
+            targetSchemaMajor: 10,
+            sourceStoreIdentifier: "unsupported-fixture",
+            byteCount: 42_000_000,
+            format: .verifiedSnapshot,
+            successfulTargetOpenCount: 0
+        )
+        let runtime = AppRuntime(
+            load: .recovery(.storePredatesSupportedSchema(backup: backup)),
+            mode: .normal
+        )
+
+        XCTAssertEqual(runtime.recoveryBackup, backup)
+        guard case .recovery(let state) = runtime.phase else {
+            return XCTFail("unsupported schema must render recovery")
+        }
+        XCTAssertTrue(state.isUnsupportedSchema)
+        XCTAssertEqual(state.recoveryBackup, backup)
+
+        let screen = StoreRecoveryScreen(state: state, backup: runtime.recoveryBackup)
+        XCTAssertEqual(screen.title, "Older library can't be opened")
+        XCTAssertEqual(
+            screen.message,
+            "This version of your library cannot be opened by Earshot, and no compatible upgrade is currently planned. Your library is unchanged and a verified safety backup is available."
+        )
+        XCTAssertTrue(screen.offersReset)
+        XCTAssertEqual(screen.resetConfirmationTitle, "Erase your entire library?")
+        XCTAssertEqual(
+            screen.resetConfirmationMessage,
+            "This permanently removes your subscriptions, episodes, folders, Queue, listening history, playback positions, bookmarks, and download records from Earshot. Your verified safety backup will remain on this device for possible support-assisted recovery.\n\nYou can re-import subscriptions from an OPML file, but the other data will not return."
+        )
+        XCTAssertTrue(
+            screen.restoreConfirmationMessage.contains(
+                "The restored library still cannot be opened by Earshot."
+            )
+        )
+    }
+
+    func testUnsupportedSchemaWithoutVerifiedBackupCannotOfferErasure() {
+        let screen = StoreRecoveryScreen(
+            state: .storePredatesSupportedSchema(backup: nil)
+        )
+
+        XCTAssertFalse(screen.offersReset)
+        XCTAssertEqual(
+            screen.message,
+            "Earshot cannot open this older version of your library and could not verify a safety backup. Your library has not been changed. Close Earshot to preserve the files."
+        )
+    }
+
     func testOperationalMigrationFailureRendersNonDestructiveRecoveryScreen() {
         let runtime = AppRuntime(mode: .testHost)
 

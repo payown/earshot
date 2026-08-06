@@ -14,11 +14,10 @@ import SwiftUI
 ///     build. Purely informational; the store is left intact and the only path
 ///     forward is updating the app. No destructive action is offered.
 ///   - ``StoreRecoveryState/storePredatesSupportedSchema`` — the store predates
-///     the first public schema. Offers a backed-up reset and points to OPML
-///     re-import as the subscription recovery path.
-///   - ``StoreRecoveryState/corruptStore`` — the store is unreadable. Offers an
-///     explicit "Reset local data" action that backs the files up first, then
-///     asks the user to relaunch.
+///     the public migration floor. Offers restore and erasure only while a
+///     verified safety snapshot is available.
+///   - ``StoreRecoveryState/corruptStore`` — the store is unreadable. Erasure is
+///     likewise unavailable without a verified, restorable snapshot.
 struct StoreRecoveryScreen: View {
     let state: StoreRecoveryState
     let backup: MigrationBackupDescriptor?
@@ -38,7 +37,6 @@ struct StoreRecoveryScreen: View {
     @State private var confirmingRestore = false
     @State private var confirmingDownloadRemoval = false
     @State private var didReset = false
-    @State private var backupName: String?
     /// Lands VoiceOver on the heading at launch. This screen replaces the main UI
     /// as the WindowGroup root, where auto-focus is unreliable, so focus is
     /// requested explicitly (matches the InboxScreen empty-state pattern).
@@ -185,16 +183,23 @@ struct StoreRecoveryScreen: View {
             ProgressView()
                 .accessibilityHidden(true)
         case .restored:
-            Button(Self.retryLabel) {
-                runtime.retryLaunch()
+            if state.isUnsupportedSchema {
+                resetAction
+            } else {
+                Button(Self.retryLabel) {
+                    runtime.retryLaunch()
+                }
+                .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
+                .buttonStyle(.borderedProminent)
+                .accessibilityHint(Self.retryHint)
             }
-            .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
-            .buttonStyle(.borderedProminent)
-            .accessibilityHint(Self.retryHint)
         case .failed:
             restoreButton(label: "Try restoring again")
             if offersRetry {
                 retryButton
+            }
+            if offersReset {
+                resetAction
             }
         case .idle:
             if offersRetry {
@@ -202,7 +207,8 @@ struct StoreRecoveryScreen: View {
             }
             if backup != nil {
                 restoreButton(label: "Restore library backup")
-            } else if offersReset {
+            }
+            if offersReset {
                 resetAction
             }
         }
@@ -320,17 +326,16 @@ struct StoreRecoveryScreen: View {
                 Button(role: .destructive) {
                     confirmingReset = true
                 } label: {
-                    Text("Reset local data")
+                    Text("Erase entire library and start over")
                         .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
                 }
                 .buttonStyle(.borderedProminent)
-                .accessibilityHint(resetHint)
                 .confirmationDialog(
                     resetConfirmationTitle,
                     isPresented: $confirmingReset,
                     titleVisibility: .visible
                 ) {
-                    Button("Reset local data", role: .destructive) { reset() }
+                    Button("Erase entire library", role: .destructive) { reset() }
                     Button("Cancel", role: .cancel) {}
                 } message: {
                     Text(resetConfirmationMessage)
@@ -339,14 +344,15 @@ struct StoreRecoveryScreen: View {
         }
     }
 
-    /// The exact gate used by ``actions``. Operational and downgrade failures
-    /// are informational only and must never expose destructive recovery.
+    /// The exact gate used by ``actions``. No recovery condition exposes
+    /// destructive recovery unless a validated backup was supplied with the
+    /// screen; the action revalidates that backup again before deleting files.
     var offersReset: Bool {
         switch state {
         case .migrationFailed, .backupUnavailable, .storeNewerThanApp:
             return false
         case .storePredatesSupportedSchema, .corruptStore:
-            return true
+            return backup != nil
         }
     }
 
@@ -355,9 +361,19 @@ struct StoreRecoveryScreen: View {
     }
 
     private func reset() {
-        let backup = ModelContainerFactory.resetCorruptStore(at: ModelContainerFactory.storeURL)
-        backupName = backup?.lastPathComponent
-        didReset = true
+        guard let backup else { return }
+        do {
+            _ = try ModelContainerFactory.eraseLibrary(
+                at: ModelContainerFactory.storeURL,
+                preserving: backup
+            )
+            didReset = true
+        } catch {
+            AppLog.data.error(
+                "Library erasure was blocked because its safety backup could not be revalidated or store files could not be removed: \(error.localizedDescription, privacy: .public)"
+            )
+            return
+        }
         // The Reset button just left the tree, so VoiceOver focus would be
         // orphaned at the top of the screen. Move it to the result text — which
         // carries the "force-quit and reopen" instruction the user must act on —
@@ -411,12 +427,15 @@ struct StoreRecoveryScreen: View {
         case .storeNewerThanApp:
             return "This version of Earshot is older than the data saved on your device. Update to the latest build to open your library. Your podcasts and history are safe and untouched."
         case .storePredatesSupportedSchema:
-            return "This library was created by a pre-release version of Earshot and is too old to upgrade.\n\nYou can reset it and re-import your subscriptions from an OPML backup. Listening history, queue, and bookmarks can't be restored that way."
+            if backup != nil {
+                return "This version of your library cannot be opened by Earshot, and no compatible upgrade is currently planned. Your library is unchanged and a verified safety backup is available."
+            }
+            return "Earshot cannot open this older version of your library and could not verify a safety backup. Your library has not been changed. Close Earshot to preserve the files."
         case .corruptStore:
             if backup != nil {
                 return "Earshot couldn't read the current library files. A backup from just before preparation is available."
             }
-            return "Earshot couldn't read the data saved on this device. You can reset it to start fresh. A copy of the unreadable files is kept for possible support-assisted recovery."
+            return "Earshot couldn't read the data saved on this device, and a safety backup could not be verified. Your library has not been changed. Close Earshot to preserve the files."
         }
     }
 
@@ -491,39 +510,16 @@ struct StoreRecoveryScreen: View {
         }
     }
 
-    private var resetHint: String {
-        switch state {
-        case .storePredatesSupportedSchema:
-            return "Backs up the old library, then clears it so you can re-import an OPML file after reopening Earshot"
-        case .corruptStore:
-            return "Backs up the unreadable data, then clears it so Earshot can start fresh"
-        case .migrationFailed, .backupUnavailable, .storeNewerThanApp:
-            return ""
-        }
+    var resetConfirmationTitle: String {
+        "Erase your entire library?"
     }
 
-    private var resetConfirmationTitle: String {
-        state == .storePredatesSupportedSchema ? "Reset old library?" : "Reset local data?"
-    }
-
-    private var resetConfirmationMessage: String {
-        if state == .storePredatesSupportedSchema {
-            return "A backup copy is saved to this device first. After you reopen Earshot, re-import your subscriptions from an OPML file."
-        }
-        return "A backup copy is saved to this device first. You'll then reopen Earshot to start fresh."
+    var resetConfirmationMessage: String {
+        "This permanently removes your subscriptions, episodes, folders, Queue, listening history, playback positions, bookmarks, and download records from Earshot. Your verified safety backup will remain on this device for possible support-assisted recovery.\n\nYou can re-import subscriptions from an OPML file, but the other data will not return."
     }
 
     private var resetDoneMessage: String {
-        if state == .storePredatesSupportedSchema {
-            if let backupName {
-                return "The old local library was reset. A backup was saved as \(backupName). Force-quit and reopen Earshot, then import your OPML file."
-            }
-            return "The old local library was reset. Force-quit and reopen Earshot, then import your OPML file."
-        }
-        if let backupName {
-            return "Local data was reset. A backup was saved as \(backupName). Force-quit Earshot and reopen it to start fresh."
-        }
-        return "Local data was reset. Force-quit Earshot and reopen it to start fresh."
+        "The library was erased. A verified safety backup remains on this device for possible support-assisted recovery. Force-quit and reopen Earshot, then import your OPML file."
     }
 
     private var isRestoreResult: Bool {
@@ -547,6 +543,9 @@ struct StoreRecoveryScreen: View {
         case .restoring:
             return "Checking and restoring your backup. Keep Earshot open."
         case .restored:
+            if state.isUnsupportedSchema {
+                return "Your verified backup was restored. Earshot still cannot open this older library, and no compatible upgrade is currently planned. Close Earshot to preserve the library for possible support-assisted recovery. To use Earshot now, erase the entire library and re-import your subscriptions from an OPML file."
+            }
             return "Your library is back to the state saved before preparation. Free up storage before trying preparation again."
         case .failed:
             return "Your current library files were not changed, and the backup is still available. Free up storage and try restoring again."
@@ -561,6 +560,9 @@ struct StoreRecoveryScreen: View {
     var restoreConfirmationMessage: String {
         guard let backup else { return "" }
         let date = backup.createdAt.formatted(date: .long, time: .shortened)
+        if state.isUnsupportedSchema {
+            return "This replaces the current library files with the verified backup saved on \(date). The restored library still cannot be opened by Earshot."
+        }
         return "This replaces your library with the backup saved on \(date), just before preparation started. Earshot will keep the current files until the backup is verified."
     }
 }

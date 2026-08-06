@@ -5,7 +5,8 @@ import SwiftData
 
 /// Guards the #529 safety contract: a store this build can't open is NEVER
 /// silently deleted. A newer-than-app store is left completely intact; a genuinely
-/// corrupt store is only reset with a backup made first. These run against a real
+/// unreadable store can only be erased while a verified backup is retained. These
+/// run against a real
 /// on-disk store in a temp directory, the way a device upgrade/downgrade does.
 @MainActor
 final class StoreRecoveryTests: XCTestCase {
@@ -22,6 +23,8 @@ final class StoreRecoveryTests: XCTestCase {
     override func tearDownWithError() throws {
         MigrationBackupManager.injectedRestoreFailureAfterQuarantine = false
         MigrationBackupManager.injectedQuarantineCleanupFailure = false
+        MigrationBackupManager.injectedEraseFailureAfterMoveCount = nil
+        MigrationBackupManager.injectedEraseRollbackFailure = false
         if let dir { try? FileManager.default.removeItem(at: dir) }
     }
 
@@ -175,28 +178,73 @@ final class StoreRecoveryTests: XCTestCase {
         XCTAssertTrue(storeExists(), "load() must not wipe without user consent")
     }
 
-    /// The core #529 backup guarantee: reset produces a backup copy BEFORE the
-    /// original files are removed.
-    func testResetCorruptStoreBacksUpBeforeWiping() throws {
-        try Data([0x00, 0x01, 0x02, 0x03, 0xFF]).write(to: storeURL)
-        // A sidecar file should be backed up too.
+    /// The destructive recovery gate revalidates a complete snapshot and keeps
+    /// it after every live store file is removed.
+    func testEraseLibraryRequiresAndRetainsVerifiedBackup() throws {
+        try seedV6RecoveryStore()
+        let backup = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
         let wal = storeURL.deletingPathExtension().appendingPathExtension("store-wal")
         try Data([0xAA]).write(to: wal)
 
-        let backup = ModelContainerFactory.resetCorruptStore(at: storeURL)
+        let retained = try ModelContainerFactory.eraseLibrary(
+            at: storeURL, preserving: backup
+        )
 
-        let backupDir = try XCTUnwrap(backup, "reset must return a backup location")
         let fm = FileManager.default
         XCTAssertTrue(
-            fm.fileExists(atPath: backupDir.appending(path: "default.store").path),
-            "the store must be copied into the backup before deletion"
-        )
-        XCTAssertTrue(
-            fm.fileExists(atPath: backupDir.appending(path: "default.store-wal").path),
-            "sidecar files must be backed up too"
+            fm.fileExists(atPath: retained.appending(path: "default.store").path),
+            "the verified snapshot must remain after erasure"
         )
         XCTAssertFalse(storeExists(), "the original store is removed after backup")
         XCTAssertFalse(fm.fileExists(atPath: wal.path), "sidecars are removed after backup")
+        XCTAssertNotNil(MigrationBackupManager.latestRestorableBackup(at: storeURL))
+    }
+
+    func testDamagedBackupBlocksErasureWithoutChangingLiveStore() throws {
+        try seedV6RecoveryStore()
+        let backup = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
+        let before = try Data(contentsOf: storeURL)
+        try Data([0x00, 0x01]).write(
+            to: backup.directoryURL.appending(path: "default.store")
+        )
+
+        XCTAssertThrowsError(try ModelContainerFactory.eraseLibrary(
+            at: storeURL, preserving: backup
+        ))
+
+        XCTAssertTrue(storeExists())
+        XCTAssertEqual(try Data(contentsOf: storeURL), before)
+    }
+
+    func testInterruptedErasureRestoresLiveStoreOnNextLaunch() throws {
+        try seedV6RecoveryStore()
+        let backup = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        let localBytes = Data([0xA1, 0xB2, 0xC3])
+        try localBytes.write(to: localURL)
+        MigrationBackupManager.injectedEraseFailureAfterMoveCount = 1
+        MigrationBackupManager.injectedEraseRollbackFailure = true
+
+        XCTAssertThrowsError(try ModelContainerFactory.eraseLibrary(
+            at: storeURL, preserving: backup
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: MigrationBackupManager.backupRoot(for: storeURL)
+                .appending(path: "erase-transaction.json").path
+        ))
+
+        MigrationBackupManager.injectedEraseFailureAfterMoveCount = nil
+        MigrationBackupManager.injectedEraseRollbackFailure = false
+        try MigrationBackupManager.recoverInterruptedErasure(at: storeURL)
+
+        XCTAssertEqual(try podcastCount(), 1)
+        XCTAssertEqual(try episodeCount(), 1)
+        XCTAssertEqual(try Data(contentsOf: localURL), localBytes)
+        XCTAssertNotNil(MigrationBackupManager.latestRestorableBackup(at: storeURL))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: MigrationBackupManager.backupRoot(for: storeURL)
+                .appending(path: "erase-transaction.json").path
+        ))
     }
 
     // MARK: Verified migration backup and restore

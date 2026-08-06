@@ -629,9 +629,11 @@ final class AppRuntime {
                 recoveryStorageState = nil
             }
             if mode == .normal {
-                recoveryBackup = MigrationBackupManager.latestRecordedBackup(
-                    at: ModelContainerFactory.storeURL
-                )
+                // Unsupported-schema recovery carries a fully validated
+                // descriptor. Other recovery states begin without one and let
+                // `discoverRecoveryBackupIfNeeded()` perform the integrity check
+                // before any restore or erase action becomes visible.
+                recoveryBackup = state.recoveryBackup
             }
             phase = .recovery(state)
         }
