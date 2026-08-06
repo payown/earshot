@@ -18,6 +18,14 @@ The history below was reconstructed on 2026-08-06 from two independent sources:
 Build-number bump commits alone are not treated as proof of an upload. For
 example, build 158 exists in Git but does not exist in App Store Connect.
 
+Build 165 is a local device-verification build only. It was never uploaded
+to App Store Connect and reached no distribution channel. It is the first
+build produced from corrected source at or after
+fb45ede5f939cd18eeb5291a20e038bcda507911, and exists to give the phone a
+pre-launch identity distinguishing it from the stale build-164 binary that
+displayed the incorrect pre-V6 floor guard. Fresh stores: SwiftData V10.
+Supported migration sources: V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
