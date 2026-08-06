@@ -229,10 +229,15 @@ struct StoreRecoveryScreen: View {
                 case .some(.complete):
                     checkAvailableSpaceButton
                 case nil:
-                    if let bytes = storage.downloadBytes, bytes > 0 {
-                        deleteDownloadedAudioButton(label: "Delete downloaded audio")
+                    if let bytes = storage.downloadBytes {
+                        if bytes > 0 {
+                            deleteDownloadedAudioButton(label: "Delete downloaded audio")
+                        } else {
+                            checkAvailableSpaceButton
+                        }
                     } else {
-                        checkAvailableSpaceButton
+                        ProgressView()
+                            .accessibilityHidden(true)
                     }
                 }
             }

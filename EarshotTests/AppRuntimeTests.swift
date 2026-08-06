@@ -390,6 +390,42 @@ final class AppRuntimeTests: XCTestCase {
         )
     }
 
+    func testOverlappingCapacityCheckCannotEraseDeletionResult() async {
+        let gate = ActivationGate()
+        let runtime = AppRuntime(
+            load: .recovery(.backupUnavailable(
+                requiredFreeSpaceBytes: 3_000_000_000,
+                availableFreeSpaceBytes: 1_000_000_000
+            )),
+            mode: .testHost,
+            launchAnnouncer: RecordingLaunchAnnouncer(isVoiceOverRunning: false),
+            recoveryDownloadRemoval: {
+                RecoveryDownloadRemovalResult(
+                    freedBytes: 400_000_000,
+                    availableBytes: 1_400_000_000,
+                    remainingDownloadBytes: 100_000_000,
+                    failedItemCount: 1
+                )
+            },
+            recoveryCapacity: {
+                await gate.waitUntilReleased()
+                return 1_500_000_000
+            }
+        )
+
+        let check = Task { @MainActor in
+            await runtime.checkRecoveryStorage(manual: true)
+        }
+        await gate.waitUntilStarted()
+        await runtime.removeRecoveryDownloads()
+        await gate.release()
+        await check.value
+
+        XCTAssertEqual(runtime.recoveryStorageState?.freedBytes, 400_000_000)
+        XCTAssertEqual(runtime.recoveryStorageState?.deletionOutcome, .partial)
+        XCTAssertEqual(runtime.recoveryStorageState?.availableBytes, 1_500_000_000)
+    }
+
     func testRapidProgressCoalescesToNewestAnnouncement() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         AppSettingsStore(context: container.mainContext).setBool(

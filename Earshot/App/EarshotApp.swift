@@ -638,9 +638,11 @@ final class AppRuntime {
     }
 
     func loadRecoveryDownloadUsageIfNeeded() async {
-        guard !recoveryUsageLoaded, var storage = recoveryStorageState else { return }
+        guard !recoveryUsageLoaded, recoveryStorageState != nil else { return }
         recoveryUsageLoaded = true
-        storage.downloadBytes = await recoveryDownloadUsage()
+        let bytes = await recoveryDownloadUsage()
+        guard var storage = recoveryStorageState else { return }
+        storage.downloadBytes = bytes
         recoveryStorageState = storage
     }
 
@@ -671,11 +673,13 @@ final class AppRuntime {
     }
 
     func checkRecoveryStorage(manual: Bool) async {
-        guard var storage = recoveryStorageState, !recoveryCheckInProgress else { return }
+        guard recoveryStorageState != nil, !recoveryCheckInProgress else { return }
         recoveryCheckInProgress = true
         defer { recoveryCheckInProgress = false }
         do {
-            storage.availableBytes = try await recoveryCapacity()
+            let available = try await recoveryCapacity()
+            guard var storage = recoveryStorageState else { return }
+            storage.availableBytes = available
             recoveryStorageState = storage
             let remaining = StoreRecoveryScreen.formattedStorageRequirement(
                 bytes: storage.remainingBytes
