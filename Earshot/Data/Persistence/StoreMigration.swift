@@ -8,9 +8,9 @@ import SwiftData
 /// - ``storeNewerThanApp``: the on-disk store was written by a NEWER schema than
 ///   this build knows how to open — a downgrade. The store is intact and must
 ///   never be destroyed; the user just needs a newer app.
-/// - ``storePredatesSupportedSchema``: the store predates the first public
-///   schema. It is left intact so the recovery UI can offer a backed-up reset
-///   and OPML re-import rather than attempting an unsupported migration.
+/// - ``storePredatesSupportedSchema``: the store predates the supported public
+///   V5 floor. It is left intact so verified backup recovery remains available
+///   rather than attempting an unsupported migration.
 /// - ``unreadable``: the store could be opened as neither the current schema nor
 ///   a supported versioned schema — genuine corruption. Only this case is a
 ///   candidate for a (backed-up, user-consented) reset.
@@ -167,10 +167,11 @@ enum SyncBridgeBackfill {
     }
 }
 
-/// Restartable retained-column V10 split migration from the supported V6 floor.
-/// Shipped V6 is snapshotted without mutation; an already-staged V7 and the
-/// draft device's V8 are also resumable. The original store stays authoritative
-/// until the separate device-local copy has been value-checked and marked durable.
+/// Restartable retained-column V10 split migration from the supported V5 floor.
+/// App Store V5 and TestFlight V6 are snapshotted without mutation; an
+/// already-staged V7 and the draft device's V8 are also resumable. The original
+/// store stays authoritative until the separate device-local copy has been
+/// value-checked and marked durable.
 enum StoreMigration {
     static let splitCompletionKey = "__earshot_v8_split_complete"
     static let bridgeCompletionKey = "__earshot_v7_bridge_complete"
@@ -286,10 +287,10 @@ enum StoreMigration {
     }
 
     /// Opens the current split V10 store, advances draft V8/build-162 V9 stores, or
-    /// upgrades a supported V6/V7 store through a bounded local-state preflight.
-    /// Stores older than V6 are rejected without mutation; build 157 was the
-    /// first public App Store build and shipped V6, so earlier schemas were
-    /// TestFlight-only and are deliberately outside the supported migration floor.
+    /// upgrades a supported V5/V6/V7 store through a bounded local-state preflight.
+    /// V5 is the evidence-backed production floor: public App Store build 155
+    /// created V5, while TestFlight build 161 created V6. Earlier SwiftData
+    /// schemas were TestFlight-only and remain outside the supported floor.
     ///
     /// Throws ``StoreOpenError`` when the source is unsupported or genuinely
     /// unreadable. Once source readability or a durable split marker is proven,
@@ -300,6 +301,7 @@ enum StoreMigration {
         progress: (StoreMigrationProgress) -> Void = { _ in }
     ) throws -> ModelContainer {
         do {
+            try MigrationBackupManager.recoverInterruptedErasure(at: url)
             try MigrationBackupManager.recoverInterruptedRestore(at: url)
         } catch {
             throw StoreMigrationFailure.operational(underlying: error)
@@ -549,7 +551,7 @@ enum StoreMigration {
 
         let bridgeSnapshot: BridgeSnapshot
         do {
-            bridgeSnapshot = try profiled("v6-local-state-preflight") {
+            bridgeSnapshot = try profiled("pre-split-local-state-preflight") {
                 try readBridge(at: url)
             }
             AppLog.data.info("Local-state migration preflight completed")
@@ -614,14 +616,16 @@ enum StoreMigration {
         }
 
         switch major {
-        case 1...5:
-            // Build 157 was Earshot's first public App Store build and shipped
-            // schema V6. V1–V5 existed only on TestFlight and personal devices,
-            // so their migration routes are intentionally removed rather than
-            // left partially supported.
+        case 1...4:
             throw StoreOpenError.storePredatesSupportedSchema(majorVersion: major)
+        case 5:
+            return try snapshotPreSplitWithoutMigration(
+                at: url, version: EarshotSchemaV5.self
+            )
         case 6:
-            return try snapshotV6WithoutMigration(at: url)
+            return try snapshotPreSplitWithoutMigration(
+                at: url, version: EarshotSchemaV6.self
+            )
         case 7:
             return try openAndPopulateBridge(at: url)
         case 10...:
@@ -631,13 +635,15 @@ enum StoreMigration {
         }
     }
 
-    /// Reads the shipped V6 local-only values without first advancing the
-    /// authoritative store to V7. The separate local V10 copy is validated and
-    /// marked before the original store is opened as retained-column V10, so a
-    /// crash before cutover leaves V6 untouched and a crash after the marker
+    /// Reads build 155 V5 or build 161 V6 local-only values without advancing
+    /// the authoritative store. The separate local V10 copy is validated and
+    /// marked before the original is migrated to retained-column V10, so a crash
+    /// before cutover leaves the source untouched and a crash after the marker
     /// resumes at finalization.
-    private static func snapshotV6WithoutMigration(at url: URL) throws -> BridgeSnapshot {
-        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+    private static func snapshotPreSplitWithoutMigration(
+        at url: URL, version: any VersionedSchema.Type
+    ) throws -> BridgeSnapshot {
+        let schema = Schema(versionedSchema: version)
         return try autoreleasepool {
             let container = try profiled("v6-preflight-container-open") {
                 try ModelContainer(
@@ -1052,6 +1058,21 @@ enum StoreMigration {
     private static func finalizeMirroredStore(at url: URL) throws {
         try autoreleasepool {
             switch try storeMajorVersion(at: url) {
+            case 5:
+                // V5 differs from V6 only by the additive episode-folder join
+                // and optional folder hierarchy. Let Core Data infer that
+                // lightweight addition together with the same retained-column
+                // V10 cutover proven for V6. A combined SwiftData staged plan is
+                // invalid for this configuration-specific store because its
+                // full-graph version checksums do not match the mirrored subset.
+                let schema = Schema(versionedSchema: EarshotMirroredSchemaV10.self)
+                _ = try ModelContainer(
+                    for: schema,
+                    configurations: ModelConfiguration(
+                        "FutureMirrored", schema: schema, url: url,
+                        cloudKitDatabase: .none
+                    )
+                )
             case 6:
                 // V6 already has the two Episode tombstone columns. Use the
                 // supported inferred-lightweight route so they are retained and

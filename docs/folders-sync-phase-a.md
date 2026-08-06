@@ -8,12 +8,11 @@
 
 ## Prerequisites
 
-- Schema V6 is the supported migration floor. App Store build 157 was Earshot's
-  first public build and shipped V6; V1–V5 existed only in TestFlight and on
-  development devices. Those older routes are deliberately unsupported and
-  surface a backed-up reset with OPML re-import guidance instead of attempting
-  a partial migration. TestFlight build 161 is the Phase A device-test baseline;
-  it also writes `EarshotSchemaV6` and contains the completed manual-folder Phases 1–4.
+- Schema V5 is the supported migration floor. App Store Connect and the shipped
+  source establish that public build 155 created V5 stores. TestFlight build 161
+  created V6 stores. See `docs/release-schema-history.md` for the evidence ledger;
+  V1–V4 are outside the supported upgrade path. Build 161 remains the Phase A
+  TestFlight baseline and contains the completed manual-folder Phases 1–4.
 - Work begins from current `main` in a linked worktree. The existing V6 model graph is frozen before any live `@Model` changes.
 - Follow `.claude/rules/database-migrations.md` exactly. A fresh-store test is not a migration test.
 - Keep `cloudKitDatabase: .none`. Do not add iCloud entitlements, CloudKit capabilities, remote-notification background modes, schema initialization, sync UX, or a feature flag in Phase A. Those belong to Sync Phase B/C and require separate sign-off under `AGENTS.md`.

@@ -18,17 +18,28 @@ enum StoreRecoveryState: Equatable {
     /// Resetting here is NOT offered — it would destroy still-good data.
     case storeNewerThanApp
 
-    /// The store predates V6, Earshot's first public App Store schema. It is
-    /// preserved until the user explicitly chooses the backed-up reset path.
-    case storePredatesSupportedSchema
+    /// The store predates V5, Earshot's first public App Store schema. It is
+    /// preserved until the user explicitly chooses recovery. Erasure is offered
+    /// only when this carries a verified, restorable snapshot.
+    case storePredatesSupportedSchema(backup: MigrationBackupDescriptor?)
 
-    /// The store could not be opened as any known schema (genuine corruption). The
-    /// recovery screen offers an explicit, user-consented "Reset local data"
-    /// action — which backs the files up first.
+    /// The store could not be opened as any known schema (genuine corruption).
+    /// Destructive recovery remains unavailable unless a previously verified,
+    /// restorable snapshot exists.
     case corruptStore
 
     var isBackupUnavailable: Bool {
         if case .backupUnavailable = self { return true }
+        return false
+    }
+
+    var recoveryBackup: MigrationBackupDescriptor? {
+        if case .storePredatesSupportedSchema(let backup) = self { return backup }
+        return nil
+    }
+
+    var isUnsupportedSchema: Bool {
+        if case .storePredatesSupportedSchema = self { return true }
         return false
     }
 }
@@ -53,8 +64,8 @@ enum StoreLoad {
 /// migration bug and its SwiftData reincarnation — see issues #355 / #529 and
 /// `.claude/rules/database-migrations.md`):
 ///
-///   1. Open a V6-or-newer persistent store through the restartable split migration.
-///      Pre-V6 stores are preserved and surfaced with OPML recovery guidance.
+///   1. Open a V5-or-newer persistent store through the restartable split migration.
+///      Pre-V5 stores are preserved and surfaced with explicit recovery.
 ///   2. If the store is NEWER than this build (a downgrade), leave it completely
 ///      untouched and ask the user to update the app. Never delete a store this
 ///      build simply can't read yet.
@@ -128,9 +139,12 @@ enum ModelContainerFactory {
             return .recovery(.storeNewerThanApp)
         } catch StoreOpenError.storePredatesSupportedSchema(let majorVersion) {
             AppLog.data.error(
-                "Store schema V\(majorVersion) predates the supported V6 floor; leaving it intact pending user-consented reset"
+                "Store schema V\(majorVersion) predates the supported V5 floor; leaving it intact pending user-consented recovery"
             )
-            return .recovery(.storePredatesSupportedSchema)
+            let backup = await Task.detached {
+                MigrationBackupManager.latestRestorableBackup(at: storeURL)
+            }.value
+            return .recovery(.storePredatesSupportedSchema(backup: backup))
         } catch {
             AppLog.data.error(
                 "Store is unreadable; leaving it intact pending user-consented reset: \(error.localizedDescription, privacy: .public)"
@@ -145,7 +159,7 @@ enum ModelContainerFactory {
     @MainActor
     static func load(at url: URL) -> StoreLoad {
         // 1. Normal path — open the current split store or migrate from the
-        //    supported V6 floor. StoreMigration classifies unsupported pre-V6
+        //    supported V5 floor. StoreMigration classifies unsupported pre-V5
         //    data separately from corruption and newer-than-app downgrades.
         do {
             let container = try StoreMigration.openOrMigrate(at: url)
@@ -175,9 +189,11 @@ enum ModelContainerFactory {
             return .recovery(.storeNewerThanApp)
         } catch StoreOpenError.storePredatesSupportedSchema(let majorVersion) {
             AppLog.data.error(
-                "Store schema V\(majorVersion) predates the supported V6 floor; leaving it intact pending user-consented reset"
+                "Store schema V\(majorVersion) predates the supported V5 floor; leaving it intact pending user-consented recovery"
             )
-            return .recovery(.storePredatesSupportedSchema)
+            return .recovery(.storePredatesSupportedSchema(
+                backup: MigrationBackupManager.latestRestorableBackup(at: url)
+            ))
         } catch {
             // 3. Genuine corruption — surface an explicit, user-consented reset
             //    (which backs up before deleting). No silent wipe here before the
@@ -197,10 +213,11 @@ enum ModelContainerFactory {
         return (requiredBytes, availableBytes)
     }
 
-    /// Copies the store and its sidecar files to a timestamped backup directory in
-    /// Application Support, returning the backup directory (or `nil` if there was
-    /// nothing to copy or the copy failed). A wipe must always be recoverable
-    /// (#529), so this is called immediately before any destructive reset.
+    /// Copies legacy store files to a timestamped directory. This exists only so
+    /// backups made by older builds remain discoverable; it is intentionally not
+    /// a destructive-recovery prerequisite because individual file copies can
+    /// fail. New erasure uses a validated snapshot from
+    /// ``MigrationBackupManager`` instead.
     @discardableResult
     static func backupStoreFiles(at url: URL) -> URL? {
         let fm = FileManager.default
@@ -235,17 +252,19 @@ enum ModelContainerFactory {
         return nil
     }
 
-    /// User-consented recovery for a corrupt store: backs the files up, then
-    /// deletes them so the next launch starts fresh. Returns the backup location
-    /// (if any) for messaging. Never called without explicit user action (#529).
+    /// User-consented erasure. The offered snapshot is revalidated immediately
+    /// before deletion and retained afterward. A missing, partial, unrelated, or
+    /// damaged backup fails closed without removing any store file.
     @discardableResult
-    static func resetCorruptStore(at url: URL) -> URL? {
-        let backup = backupStoreFiles(at: url)
-        _ = backupStoreFiles(at: StoreMigration.localStoreURL(for: url))
-        removeStoreFiles(at: url)
-        removeStoreFiles(at: StoreMigration.localStoreURL(for: url))
-        AppLog.data.info("Reset local data after backup; a fresh store will be created on next launch")
-        return backup
+    static func eraseLibrary(
+        at url: URL,
+        preserving backup: MigrationBackupDescriptor
+    ) throws -> URL {
+        try MigrationBackupManager.eraseLibrary(at: url, preserving: backup)
+        AppLog.data.info(
+            "Erased the library after revalidating its retained safety backup; a fresh store will be created on next launch"
+        )
+        return backup.directoryURL
     }
 
     /// An ephemeral in-memory container for tests and previews.
@@ -285,6 +304,7 @@ enum ModelContainerFactory {
             try? fm.removeItem(at: file)
         }
     }
+
 }
 
 /// A trivial model used only as the test-host's container schema. Intentionally

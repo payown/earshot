@@ -36,11 +36,14 @@ enum MigrationBackupManager {
     #if DEBUG
     nonisolated(unsafe) static var injectedRestoreFailureAfterQuarantine = false
     nonisolated(unsafe) static var injectedQuarantineCleanupFailure = false
+    nonisolated(unsafe) static var injectedEraseFailureAfterMoveCount: Int?
+    nonisolated(unsafe) static var injectedEraseRollbackFailure = false
     nonisolated(unsafe) static var injectedAvailableBytes: Int64?
     #endif
     private static let manifestName = "manifest.json"
     private static let snapshotName = "default.store"
     private static let restoreJournalName = "restore-transaction.json"
+    private static let eraseJournalName = "erase-transaction.json"
     private static let legacyRetentionName = "migration-retention.json"
     private static let storeSuffixes = ["", "-wal", "-shm", "-journal"]
     private struct Manifest: Codable, Sendable {
@@ -63,6 +66,15 @@ enum MigrationBackupManager {
         let quarantineDirectoryName: String
         let phase: Phase
         let originalFileNames: [String]
+    }
+    private struct EraseJournal: Codable, Sendable {
+        enum Phase: String, Codable, Sendable {
+            case moving
+            case committed
+        }
+        let backupDirectoryName: String
+        let quarantineDirectoryName: String
+        let phase: Phase
     }
     private struct LegacyRetention: Codable, Sendable {
         var successfulTargetOpenCount: Int
@@ -96,6 +108,26 @@ enum MigrationBackupManager {
     static func latestRecordedBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
         verifiedBackups(at: storeURL).first
     }
+
+    /// Revalidates the exact backup offered by recovery immediately before any
+    /// destructive action. The directory must belong to this store's backup
+    /// root, the snapshot must still pass SQLite integrity and identity checks,
+    /// and a readable live store must have the same persistent-store identity.
+    static func validateForDestructiveRecovery(
+        _ backup: MigrationBackupDescriptor,
+        at storeURL: URL
+    ) throws {
+        let expectedRoot = backupRoot(for: storeURL).standardizedFileURL
+        guard backup.directoryURL.deletingLastPathComponent().standardizedFileURL
+                == expectedRoot,
+              try validate(backup) else {
+            throw MigrationBackupError.snapshotInvalid
+        }
+        if let liveIdentity = try? sourceIdentity(at: storeURL),
+           liveIdentity.identifier != backup.sourceStoreIdentifier {
+            throw MigrationBackupError.snapshotInvalid
+        }
+    }
     /// A verified snapshot is a hard prerequisite. Repeated migrations of the
     /// preserved 405.4 MiB build-161 store measured as high as 4.249x the source in peak
     /// additional blocks under Xcode 26.6. Require 4.5x before creating the
@@ -105,6 +137,7 @@ enum MigrationBackupManager {
         at storeURL: URL,
         targetSchemaMajor: Int = targetSchemaMajor
     ) throws -> MigrationBackupDescriptor {
+        try recoverInterruptedErasure(at: storeURL)
         try recoverInterruptedRestore(at: storeURL)
         let source = try sourceIdentity(at: storeURL)
         let sourceBytes = try storeSetByteCount(at: storeURL)
@@ -189,6 +222,7 @@ enum MigrationBackupManager {
         _ = try prepareVerifiedBackup(at: storeURL)
     }
     static func restore(_ backup: MigrationBackupDescriptor, at storeURL: URL) throws {
+        try recoverInterruptedErasure(at: storeURL)
         try recoverInterruptedRestore(at: storeURL)
         guard try validate(backup) else { throw MigrationBackupError.snapshotInvalid }
         let root = backupRoot(for: storeURL)
@@ -252,6 +286,88 @@ enum MigrationBackupManager {
         // Validation is the commit point. Cleanup must never enter rollback.
         finishValidatedRestore(quarantine: quarantine, journalURL: journalURL)
     }
+
+    /// Moves every live store file out of the active paths before committing
+    /// erasure. A force-quit before the commit marker restores the files on next
+    /// launch; a force-quit afterward finishes quarantine cleanup. The verified
+    /// snapshot is never moved or deleted.
+    static func eraseLibrary(
+        at storeURL: URL,
+        preserving backup: MigrationBackupDescriptor
+    ) throws {
+        try recoverInterruptedErasure(at: storeURL)
+        try recoverInterruptedRestore(at: storeURL)
+        try validateForDestructiveRecovery(backup, at: storeURL)
+
+        let root = backupRoot(for: storeURL)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let quarantineName = "erase-quarantine-\(UUID().uuidString)"
+        let quarantine = root.appending(path: quarantineName, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: quarantine, withIntermediateDirectories: false)
+        let journalURL = root.appending(path: eraseJournalName)
+        var journal = EraseJournal(
+            backupDirectoryName: backup.directoryURL.lastPathComponent,
+            quarantineDirectoryName: quarantineName,
+            phase: .moving
+        )
+        try writeJSON(journal, to: journalURL)
+
+        do {
+            #if DEBUG
+            let failureAfterMoves = injectedEraseFailureAfterMoveCount
+            #else
+            let failureAfterMoves: Int? = nil
+            #endif
+            try moveLiveStoreSet(
+                at: storeURL,
+                to: quarantine,
+                failureAfterMoves: failureAfterMoves
+            )
+            try validateForDestructiveRecovery(backup, at: storeURL)
+            journal = EraseJournal(
+                backupDirectoryName: journal.backupDirectoryName,
+                quarantineDirectoryName: journal.quarantineDirectoryName,
+                phase: .committed
+            )
+            try writeJSON(journal, to: journalURL)
+        } catch {
+            do {
+                #if DEBUG
+                if injectedEraseRollbackFailure {
+                    throw MigrationBackupError.restoreFailed(
+                        "Injected erase rollback failure"
+                    )
+                }
+                #endif
+                try restoreQuarantinedStoreSet(from: quarantine, to: storeURL)
+                try FileManager.default.removeItem(at: journalURL)
+            } catch {
+                // Leave the moving journal in place. Launch recovery retries the
+                // rollback before opening either store.
+            }
+            throw error
+        }
+        finishCommittedErasure(quarantine: quarantine, journalURL: journalURL)
+    }
+
+    /// Completes or rolls back an erasure interrupted by process termination.
+    static func recoverInterruptedErasure(at storeURL: URL) throws {
+        let root = backupRoot(for: storeURL)
+        let journalURL = root.appending(path: eraseJournalName)
+        guard FileManager.default.fileExists(atPath: journalURL.path) else { return }
+        let journal: EraseJournal = try readJSON(from: journalURL)
+        let quarantine = root.appending(
+            path: journal.quarantineDirectoryName, directoryHint: .isDirectory
+        )
+        switch journal.phase {
+        case .moving:
+            try restoreQuarantinedStoreSet(from: quarantine, to: storeURL)
+            try FileManager.default.removeItem(at: journalURL)
+        case .committed:
+            finishCommittedErasure(quarantine: quarantine, journalURL: journalURL)
+        }
+    }
+
     /// Completes a valid interrupted restore or reinstalls its quarantined store.
     static func recoverInterruptedRestore(at storeURL: URL) throws {
         let root = backupRoot(for: storeURL)
@@ -431,12 +547,35 @@ enum MigrationBackupManager {
             )
         }
     }
-    private static func moveLiveStoreSet(at storeURL: URL, to quarantine: URL) throws {
+    private static func finishCommittedErasure(quarantine: URL, journalURL: URL) {
+        do {
+            if FileManager.default.fileExists(atPath: quarantine.path) {
+                try FileManager.default.removeItem(at: quarantine)
+            }
+            try FileManager.default.removeItem(at: journalURL)
+        } catch {
+            AppLog.data.error(
+                "Committed library-erasure cleanup will be retried: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+    private static func moveLiveStoreSet(
+        at storeURL: URL,
+        to quarantine: URL,
+        failureAfterMoves: Int? = nil
+    ) throws {
+        var moved = 0
         for fileURL in liveStoreFiles(at: storeURL) {
             try FileManager.default.moveItem(
                 at: fileURL,
                 to: quarantine.appending(path: fileURL.lastPathComponent)
             )
+            moved += 1
+            if moved == failureAfterMoves {
+                throw MigrationBackupError.restoreFailed(
+                    "Injected erase failure after \(moved) move(s)"
+                )
+            }
         }
     }
     private static func restoreQuarantinedStoreSet(

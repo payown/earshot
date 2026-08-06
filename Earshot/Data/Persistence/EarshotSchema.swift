@@ -14,10 +14,10 @@ import SwiftData
 /// disk. When the live models change, freeze a NEW version (see ``EarshotSchemaV3``
 /// and the drift-detection test) rather than editing this snapshot.
 ///
-/// V1–V5 are now retained only as immutable fixtures for the explicit V6
-/// migration-floor guard. Build 157 was the first public App Store build and
-/// shipped V6; these earlier schemas were TestFlight-only and have no production
-/// migration route.
+/// V1–V4 are retained as immutable fixtures below the supported migration floor.
+/// V5 is also immutable, but it is a production source schema: public App Store
+/// build 155 created V5 stores. The evidence-backed release ledger lives in
+/// `docs/release-schema-history.md`.
 enum EarshotSchemaV2: VersionedSchema {
     static let versionIdentifier = Schema.Version(2, 0, 0)
 
