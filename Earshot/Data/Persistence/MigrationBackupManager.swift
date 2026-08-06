@@ -581,7 +581,7 @@ enum MigrationBackupManager {
             )
         }
     }
-    private static func availableBytes(at url: URL) throws -> Int64 {
+    static func availableBytes(at url: URL) throws -> Int64 {
         var statistics = statfs()
         guard statfs(url.path, &statistics) == 0 else {
             throw POSIXError(.init(rawValue: errno) ?? .EIO)

@@ -580,4 +580,18 @@ final class DownloadEventJournalTests: XCTestCase {
             DownloadEventJournal(url: journalURL).pendingEvents().isEmpty
         )
     }
+
+    func testRecoveryHandlerDoesNotQueuePersistedEventReplay() {
+        let journal = DownloadEventJournal(url: journalURL)
+        journal.record(taskKey: "feed|episode", outcome: .failed)
+        let delegate = DownloadSessionDelegate(journal: journal)
+        nonisolated(unsafe) var handled = 0
+
+        delegate.installTerminalHandler(replayingPendingEvents: false) { _ in
+            handled += 1
+        }
+
+        XCTAssertEqual(handled, 0)
+        XCTAssertEqual(journal.pendingEvents().count, 1)
+    }
 }
