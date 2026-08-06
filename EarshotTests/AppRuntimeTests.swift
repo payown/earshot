@@ -166,14 +166,30 @@ final class AppRuntimeTests: XCTestCase {
     }
 
     func testBackupUnavailableCopyPromisesNoMigrationStarted() {
-        let screen = StoreRecoveryScreen(state: .backupUnavailable)
+        let screen = StoreRecoveryScreen(state: .backupUnavailable(
+            requiredFreeSpaceBytes: 2_147_000_001
+        ))
         XCTAssertEqual(screen.title, "Earshot needs more storage")
         XCTAssertEqual(
             screen.message,
-            "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Free up storage, then try again."
+            "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Earshot needs about 2.2 GB free to prepare your library safely. Free up space, then try again."
         )
         XCTAssertTrue(screen.offersRetry)
         XCTAssertFalse(screen.offersReset)
+    }
+
+    func testStorageRequirementAlwaysRoundsUp() {
+        let locale = Locale(identifier: "en_US")
+        XCTAssertEqual(
+            StoreRecoveryScreen.formattedStorageRequirement(
+                bytes: 2_000_000_000, locale: locale
+            ), "2 GB"
+        )
+        XCTAssertEqual(
+            StoreRecoveryScreen.formattedStorageRequirement(
+                bytes: 2_000_000_001, locale: locale
+            ), "2.1 GB"
+        )
     }
 
     func testRapidProgressCoalescesToNewestAnnouncement() async throws {

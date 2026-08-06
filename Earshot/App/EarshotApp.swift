@@ -219,7 +219,7 @@ final class AppRuntime {
     func retryLaunch() {
         guard case .recovery(let recoveryState) = phase,
               recoveryState == .migrationFailed
-                || recoveryState == .backupUnavailable
+                || recoveryState.isBackupUnavailable
                 || backupRestorePhase == .restored,
               launchTask == nil else { return }
         cancelAnnouncementWork()
@@ -563,13 +563,6 @@ final class AppRuntime {
                 )
             }
             phase = .recovery(.migrationFailed)
-        case .backupUnavailable:
-            if mode == .normal {
-                recoveryBackup = MigrationBackupManager.latestRecordedBackup(
-                    at: ModelContainerFactory.storeURL
-                )
-            }
-            phase = .recovery(.backupUnavailable)
         case .recovery(let state):
             if mode == .normal {
                 recoveryBackup = MigrationBackupManager.latestRecordedBackup(

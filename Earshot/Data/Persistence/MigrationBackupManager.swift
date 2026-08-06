@@ -8,7 +8,6 @@ struct MigrationBackupDescriptor: Equatable, Sendable, Identifiable {
         case verifiedSnapshot
         case legacyStoreSet
     }
-
     let id: UUID
     let directoryURL: URL
     let createdAt: Date
@@ -28,24 +27,20 @@ enum MigrationBackupError: Error, Equatable, Sendable {
     case restoreFailed(String)
 }
 
-/// Creates, catalogs, restores, and retires the safety snapshot that protects a
-/// user's authoritative store during schema migration. A completed manifest is
-/// written last, so an interrupted or partial copy is never considered a backup.
+/// Creates, catalogs, restores, and retires migration safety snapshots. A
+/// manifest is written last so a partial copy is never considered a backup.
 enum MigrationBackupManager {
     static let targetSchemaMajor = 10
     static let initialFreeSpaceMultiplier = 3.25
     static let retainedBackupFreeSpaceMultiplier = 2.25
-
     #if DEBUG
     nonisolated(unsafe) static var injectedRestoreFailureAfterQuarantine = false
     #endif
-
     private static let manifestName = "manifest.json"
     private static let snapshotName = "default.store"
     private static let restoreJournalName = "restore-transaction.json"
     private static let legacyRetentionName = "migration-retention.json"
     private static let storeSuffixes = ["", "-wal", "-shm", "-journal"]
-
     private struct Manifest: Codable, Sendable {
         let formatVersion: Int
         let id: UUID
@@ -56,32 +51,26 @@ enum MigrationBackupManager {
         let byteCount: Int64
         var successfulTargetOpenCount: Int
     }
-
     private struct RestoreJournal: Codable, Sendable {
         enum Phase: String, Codable, Sendable {
             case quarantining
             case installing
             case validating
         }
-
         let backupDirectoryName: String
         let quarantineDirectoryName: String
         let phase: Phase
         let originalFileNames: [String]
     }
-
     private struct LegacyRetention: Codable, Sendable {
         var successfulTargetOpenCount: Int
     }
-
     static func backupRoot(for storeURL: URL) -> URL {
         storeURL.deletingLastPathComponent()
             .appending(path: "store-backups", directoryHint: .isDirectory)
     }
 
-    /// Returns the newest restorable pre-migration backup. New verified snapshots
-    /// are preferred. Timestamped legacy store sets remain discoverable so the
-    /// backups already present on devices have a path back.
+    /// Returns the newest verified snapshot or restorable pre-manifest backup.
     static func latestRestorableBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
         let root = backupRoot(for: storeURL)
         guard let directories = try? FileManager.default.contentsOfDirectory(
@@ -89,7 +78,6 @@ enum MigrationBackupManager {
             includingPropertiesForKeys: [.creationDateKey, .isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) else { return nil }
-
         let candidates = directories.compactMap { directory -> MigrationBackupDescriptor? in
             guard (try? directory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             else { return nil }
@@ -103,17 +91,16 @@ enum MigrationBackupManager {
         return candidates.max { $0.createdAt < $1.createdAt }
     }
 
-    /// Manifest-only lookup for the immediate failure presentation. Restore
-    /// always performs full metadata and integrity validation before touching the
-    /// working files.
+    /// Manifest-only lookup; restore performs full validation before file changes.
     static func latestRecordedBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
         verifiedBackups(at: storeURL).first
     }
 
     /// A verified snapshot is a hard prerequisite. The measured V6-to-V10 peak
-    /// used 2.967 times the source set in additional blocks; 3.25 times leaves a
-    /// bounded margin before the first snapshot, while a retained snapshot means
-    /// only the migration working set still needs to fit.
+    /// used 3.015 times the source set in additional blocks: 1.000 snapshot,
+    /// 0.987 final-store growth, 1.028 WAL/sidecars, and about 0.001 local store.
+    /// 3.25 times preserves a bounded margin before the first snapshot, while a
+    /// retained snapshot means only the migration working set still needs to fit.
     static func prepareVerifiedBackup(
         at storeURL: URL,
         targetSchemaMajor: Int = targetSchemaMajor
@@ -121,7 +108,6 @@ enum MigrationBackupManager {
         try recoverInterruptedRestore(at: storeURL)
         let source = try sourceIdentity(at: storeURL)
         let sourceBytes = try storeSetByteCount(at: storeURL)
-
         if let retained = verifiedBackups(at: storeURL).first(where: {
             $0.sourceStoreIdentifier == source.identifier
                 && $0.sourceSchemaMajor == source.major
@@ -136,12 +122,10 @@ enum MigrationBackupManager {
             )
             return retained
         }
-
         try requireFreeSpace(
             at: storeURL,
             bytes: requiredBytes(for: sourceBytes, multiplier: initialFreeSpaceMultiplier)
         )
-
         let root = backupRoot(for: storeURL)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try excludeFromSystemBackup(root)
@@ -207,7 +191,6 @@ enum MigrationBackupManager {
     static func restore(_ backup: MigrationBackupDescriptor, at storeURL: URL) throws {
         try recoverInterruptedRestore(at: storeURL)
         guard try validate(backup) else { throw MigrationBackupError.snapshotInvalid }
-
         let root = backupRoot(for: storeURL)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let quarantineName = "restore-quarantine-\(UUID().uuidString)"
@@ -270,9 +253,7 @@ enum MigrationBackupManager {
         }
     }
 
-    /// Resolves a force-quit during restore before any store open is attempted.
-    /// A valid installed backup wins; otherwise the quarantined working set is
-    /// moved back into place.
+    /// Completes a valid interrupted restore or reinstalls its quarantined store.
     static func recoverInterruptedRestore(at storeURL: URL) throws {
         let root = backupRoot(for: storeURL)
         let journalURL = root.appending(path: restoreJournalName)
@@ -297,7 +278,6 @@ enum MigrationBackupManager {
             try FileManager.default.removeItem(at: journalURL)
             return
         }
-
         try rollBackRestore(journal, from: quarantine, to: storeURL)
         try FileManager.default.removeItem(at: journalURL)
     }
@@ -326,7 +306,6 @@ enum MigrationBackupManager {
     }
 
     // MARK: - Catalog
-
     private static func verifiedBackups(at storeURL: URL) -> [MigrationBackupDescriptor] {
         let root = backupRoot(for: storeURL)
         let directories = (try? FileManager.default.contentsOfDirectory(
@@ -409,10 +388,8 @@ enum MigrationBackupManager {
         }
     }
 
-    /// Build 163's timestamped backups predate manifests. A cheap metadata probe
-    /// distinguishes valid V6–V9 migration backups from corrupt/reset artifacts;
-    /// the small sidecar then gives them the same two-successful-opens retention
-    /// policy without running a 630 MB integrity check during an ordinary launch.
+    /// Gives valid build-163 V6–V9 backups manifest-equivalent retention without
+    /// a whole-store integrity check during ordinary launch.
     private static func noteSuccessfulLegacyTargetOpen(at storeURL: URL) {
         let root = backupRoot(for: storeURL)
         let directories = (try? FileManager.default.contentsOfDirectory(
@@ -445,7 +422,6 @@ enum MigrationBackupManager {
     }
 
     // MARK: - Restore transaction
-
     private static func moveLiveStoreSet(at storeURL: URL, to quarantine: URL) throws {
         for fileURL in liveStoreFiles(at: storeURL) {
             try FileManager.default.moveItem(
@@ -511,7 +487,6 @@ enum MigrationBackupManager {
     }
 
     // MARK: - Snapshot and validation
-
     private static func createSQLiteSnapshot(from sourceURL: URL, to destinationURL: URL) throws {
         var source: OpaquePointer?
         var destination: OpaquePointer?
@@ -598,7 +573,6 @@ enum MigrationBackupManager {
     }
 
     // MARK: - Storage accounting
-
     private static func requiredBytes(for sourceBytes: Int64, multiplier: Double) -> Int64 {
         Int64((Double(sourceBytes) * multiplier).rounded(.up))
     }
@@ -652,7 +626,6 @@ enum MigrationBackupManager {
     }
 
     // MARK: - JSON
-
     private static func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

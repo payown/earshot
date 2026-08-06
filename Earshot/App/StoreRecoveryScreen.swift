@@ -236,7 +236,7 @@ struct StoreRecoveryScreen: View {
     }
 
     var offersRetry: Bool {
-        state == .migrationFailed || state == .backupUnavailable
+        state == .migrationFailed || state.isBackupUnavailable
     }
 
     private func reset() {
@@ -283,8 +283,14 @@ struct StoreRecoveryScreen: View {
                 return "Preparation stopped before Earshot could open your library. A backup from just before preparation is available."
             }
             return "Preparation stopped before Earshot could open your library. Your current library files have not been deleted."
-        case .backupUnavailable:
-            return "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Free up storage, then try again."
+        case .backupUnavailable(let requiredFreeSpaceBytes):
+            if let requiredFreeSpaceBytes {
+                let amount = Self.formattedStorageRequirement(
+                    bytes: requiredFreeSpaceBytes
+                )
+                return "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Earshot needs about \(amount) free to prepare your library safely. Free up space, then try again."
+            }
+            return "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Free up space, then try again."
         case .storeNewerThanApp:
             return "This version of Earshot is older than the data saved on your device. Update to the latest build to open your library. Your podcasts and history are safe and untouched."
         case .storePredatesSupportedSchema:
@@ -295,6 +301,20 @@ struct StoreRecoveryScreen: View {
             }
             return "Earshot couldn't read the data saved on this device. You can reset it to start fresh. A copy of the unreadable files is kept for possible support-assisted recovery."
         }
+    }
+
+    /// Uses decimal units to match iOS storage reporting and always rounds up.
+    static func formattedStorageRequirement(
+        bytes: Int64,
+        locale: Locale = .current
+    ) -> String {
+        let clampedBytes = max(bytes, 0)
+        if clampedBytes < 100_000_000 {
+            return "\(max(1, (clampedBytes + 999_999) / 1_000_000)) MB"
+        }
+        let tenths = (clampedBytes + 99_999_999) / 100_000_000
+        guard !tenths.isMultiple(of: 10) else { return "\(tenths / 10) GB" }
+        return "\(tenths / 10)\(locale.decimalSeparator ?? ".")\(tenths % 10) GB"
     }
 
     private var resetHint: String {
