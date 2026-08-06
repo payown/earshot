@@ -195,6 +195,20 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try context.save()
     }
 
+    private func writeV6Fixture(
+        populate: (ModelContext) throws -> Void = { _ in }
+    ) throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+        try autoreleasepool {
+            let container = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+            try populate(container.mainContext)
+            try container.mainContext.save()
+        }
+    }
+
     private func seedScaleV6(episodeCount: Int) throws {
         for index in 0..<min(43, episodeCount) {
             try createDownloadFile(named: "\(scaleDownloadPrefix)-\(index).mp3")
@@ -443,6 +457,20 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(try reopened.mainContext.fetch(savedEpisode).first?.title, marker)
     }
 
+    private func assertSettingSaveSurvivesReopen(
+        _ container: ModelContainer, value: String = UUID().uuidString
+    ) throws {
+        let key = "__migration_fixture_save_\(UUID().uuidString)"
+        container.mainContext.insert(AppSetting(key: key, value: value))
+        try container.mainContext.save()
+
+        let reopened = try StoreMigration.openOrMigrate(at: storeURL)
+        let saved = try reopened.mainContext.fetch(FetchDescriptor<AppSetting>(
+            predicate: #Predicate { $0.key == key }
+        ))
+        XCTAssertEqual(saved.map(\.value), [value])
+    }
+
     private func integrityCheck(at url: URL) throws -> [String] {
         var database: OpaquePointer?
         guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
@@ -575,6 +603,122 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<QueueItem>()), 2)
         XCTAssertEqual(Set(try context.fetch(FetchDescriptor<Bookmark>()).map(\.note)),
                        ["Keep", "Also keep"])
+        try assertEpisodeSaveSurvivesReopen(container)
+    }
+
+    func testSmallV6LibraryMigratesAndSaves() throws {
+        try writeV6Fixture { context in
+            let podcast = EarshotSchemaV5.Podcast(
+                feedURL: "https://small.example/feed", title: "Small Library"
+            )
+            let episode = EarshotSchemaV5.Episode(
+                guid: "only-episode", title: "Only Episode",
+                audioURL: "https://small.example/only.mp3"
+            )
+            episode.podcast = podcast
+            context.insert(podcast)
+            context.insert(episode)
+        }
+
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<Podcast>()), 1)
+        XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<Episode>()), 1)
+        XCTAssertEqual(
+            try migrated.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 0
+        )
+        try assertEpisodeSaveSurvivesReopen(migrated)
+    }
+
+    func testEmptyV6LibraryMigratesAndSaves() throws {
+        try writeV6Fixture()
+
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<Podcast>()), 0)
+        XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<Episode>()), 0)
+        XCTAssertEqual(
+            try migrated.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 0
+        )
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.splitCompletionKey, in: migrated.mainContext
+        ), "1")
+        XCTAssertEqual(LocalAppSettingIdentity.value(
+            for: StoreMigration.identityRepairCompletionKey, in: migrated.mainContext
+        ), "1")
+        try assertSettingSaveSurvivesReopen(migrated)
+    }
+
+    func testV6InFlightDownloadsMigrateAndSave() throws {
+        try writeV6Fixture { context in
+            let podcast = EarshotSchemaV5.Podcast(
+                feedURL: "HTTPS://Transfers.Example:443/feed#legacy", title: "Transfers"
+            )
+            context.insert(podcast)
+            for (guid, status, transferState) in [
+                ("pending", DownloadStatus.pending, ActiveDownloadState.pending),
+                ("downloading", DownloadStatus.downloading, ActiveDownloadState.downloading),
+            ] {
+                let episode = EarshotSchemaV5.Episode(
+                    guid: guid, title: guid.capitalized,
+                    audioURL: "https://transfers.example/\(guid).mp3",
+                    downloadStatus: status
+                )
+                episode.podcast = podcast
+                context.insert(episode)
+                context.insert(EarshotSchemaV5.ActiveDownload(
+                    episode: episode, state: transferState
+                ))
+            }
+        }
+
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        let localStates = Dictionary(uniqueKeysWithValues: try migrated.mainContext.fetch(
+            FetchDescriptor<LocalEpisodeState>()
+        ).map { ($0.episodeGUID, $0.downloadStatus) })
+        XCTAssertEqual(localStates, [
+            "pending": .pending,
+            "downloading": .downloading,
+        ])
+        let episodes = Dictionary(uniqueKeysWithValues: try migrated.mainContext.fetch(
+            FetchDescriptor<Episode>()
+        ).map { ($0.guid, $0.downloadStatus) })
+        XCTAssertEqual(episodes, [
+            "pending": .pending,
+            "downloading": .downloading,
+        ])
+        try assertEpisodeSaveSurvivesReopen(migrated)
+    }
+
+    func testV6OrphanedRowsMigrateAndSave() throws {
+        try writeV6Fixture { context in
+            context.insert(EarshotSchemaV5.QueueItem(position: 1))
+            context.insert(EarshotSchemaV5.ListeningSession(durationSeconds: 30))
+            context.insert(EarshotSchemaV5.Bookmark(positionSeconds: 12, note: "Orphan"))
+            context.insert(EarshotSchemaV5.RecentlyExpired(expiredAt: self.refreshed))
+            context.insert(EarshotSchemaV5.ActiveDownload(state: .downloading))
+            context.insert(EarshotSchemaV6.FolderMembership(sortOrder: 2))
+            context.insert(EarshotSchemaV6.EpisodeFolderMembership(sortOrder: 3))
+        }
+
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertEqual(
+            try migrated.mainContext.fetchCount(FetchDescriptor<ListeningSession>()), 1
+        )
+        XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<Bookmark>()), 1)
+        XCTAssertEqual(
+            try migrated.mainContext.fetchCount(FetchDescriptor<RecentlyExpired>()), 1
+        )
+        XCTAssertEqual(
+            try migrated.mainContext.fetchCount(FetchDescriptor<FolderMembership>()), 1
+        )
+        XCTAssertEqual(
+            try migrated.mainContext.fetchCount(FetchDescriptor<EpisodeFolderMembership>()), 1
+        )
+        XCTAssertEqual(
+            try migrated.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 0,
+            "an active transfer without an episode identity must be ignored"
+        )
+        try assertSettingSaveSurvivesReopen(migrated)
     }
 
     func testMigrationEngineReportsStagesWhileMainActorRemainsResponsive() async throws {
