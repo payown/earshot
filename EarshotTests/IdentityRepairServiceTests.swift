@@ -4,6 +4,29 @@ import XCTest
 
 @MainActor
 final class IdentityRepairServiceTests: XCTestCase {
+    func testOrdinaryHydrationProjectsOrphanPodcastStateWithoutRepair() throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        let context = container.mainContext
+        let refreshedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        context.insert(LocalPodcastState(
+            feedURL: "https://orphan.example/feed", refreshedAt: refreshedAt
+        ))
+        context.insert(LocalPodcastState(
+            feedURL: "https://orphan.example/feed", refreshedAt: .distantPast
+        ))
+        try context.save()
+
+        try LocalStateStore.hydrate(in: context, repairing: false)
+
+        let projected = try XCTUnwrap(
+            LocalRuntimeState.shared.refreshedAt(feedURL: "https://orphan.example/feed")
+        )
+        XCTAssertTrue(
+            [refreshedAt, Date.distantPast].contains(projected)
+        )
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocalPodcastState>()), 2)
+    }
+
     private let oldDate = Date(timeIntervalSince1970: 1_700_000_000)
     private let newDate = Date(timeIntervalSince1970: 1_800_000_000)
 
