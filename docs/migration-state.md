@@ -115,6 +115,9 @@ shipping-safety loop triggered by real-store and device findings.
   separate validated local-store preflight was required.
 - #776, `Add deterministic identity repair`: established natural-key identity
   and bounded lossless repair before removal of SwiftData unique constraints.
+- #779, `Prevent same-response episode GUID duplicates`: stopped malformed feed
+  responses from creating duplicate unsaved rows during subscribe, refresh, or
+  migrated-shell backfill before unique constraints were removed.
 - #777, `Prepare CloudKit-ready split V9 schema migration`: froze the shipped
   V6 graph, introduced the bridge and split mirrored/local stores, retained
   download tombstone columns, added restart markers, identity repair, and the
