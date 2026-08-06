@@ -26,6 +26,9 @@ enum StoreOpenError: Error {
 /// improve is the safe outcome.
 enum StoreMigrationFailure: Error {
     case operational(underlying: Error)
+    /// Migration was deliberately not started because Earshot could not create
+    /// and retain the verified safety snapshot or its required working margin.
+    case backupUnavailable(underlying: Error)
 }
 
 /// Coarse, durable migration boundaries suitable for user-facing progress. The
@@ -187,7 +190,18 @@ enum StoreMigration {
 
     #if DEBUG
     nonisolated(unsafe) static var injectedFailurePoint: InjectedFailurePoint?
+    /// Test-only escape hatch used exclusively by the real constrained-volume
+    /// ENOSPC test to prove what Core Data does without Earshot's new hard gate.
+    nonisolated(unsafe) static var bypassSafetyBackupForENOSPCTest = false
     #endif
+
+    private static var enforcesSafetyBackup: Bool {
+        #if DEBUG
+        !bypassSafetyBackupForENOSPCTest
+        #else
+        true
+        #endif
+    }
 
     /// Test-only force-quit simulation. The thrown error deliberately arrives
     /// only after the preceding save has returned, matching a process death at
@@ -282,6 +296,11 @@ enum StoreMigration {
         at url: URL,
         progress: (StoreMigrationProgress) -> Void = { _ in }
     ) throws -> ModelContainer {
+        do {
+            try MigrationBackupManager.recoverInterruptedRestore(at: url)
+        } catch {
+            throw StoreMigrationFailure.operational(underlying: error)
+        }
         let localURL = localStoreURL(for: url)
 
         // A durable marker is written only after the separate local store was
@@ -290,8 +309,22 @@ enum StoreMigration {
         if profiled("split-marker-probe", operation: {
             hasSplitCompletionMarker(at: localURL)
         }) {
-            progress(.migratingMirroredStore)
             do {
+                let mirroredMajor = try storeMajorVersion(at: url)
+                let localMajor = try storeMajorVersion(at: localURL)
+                let requiresResume = mirroredMajor < MigrationBackupManager.targetSchemaMajor
+                    || localMajor < MigrationBackupManager.targetSchemaMajor
+                    || !hasIdentityRepairCompletionMarker(at: localURL)
+                if requiresResume {
+                    progress(.migratingMirroredStore)
+                }
+                if enforcesSafetyBackup && requiresResume {
+                    do {
+                        try MigrationBackupManager.ensureResumeSafety(at: url)
+                    } catch {
+                        throw classifyBackupPreparationFailure(error)
+                    }
+                }
                 // No-op for V10; advances either an interrupted V7 cutover, the
                 // already-installed draft V8 store, or build-162 V9. The
                 // draft V8 wrote the full aggregate model metadata into both
@@ -302,11 +335,15 @@ enum StoreMigration {
                 try profiled("resume-local-finalization") {
                     try finalizeLocalStore(at: localURL)
                 }
-                progress(.openingAndRepairing)
+                if requiresResume {
+                    progress(.openingAndRepairing)
+                }
                 return try profiled("resume-final-open") {
                     try finishOpeningFinal(mirroredURL: url, localURL: localURL)
                 }
             } catch let failure as InjectedMigrationFailure {
+                throw failure
+            } catch let failure as StoreMigrationFailure {
                 throw failure
             } catch {
                 if indicatesNewerStore(error) {
@@ -317,7 +354,6 @@ enum StoreMigration {
         }
 
         if !FileManager.default.fileExists(atPath: url.path) {
-            progress(.openingAndRepairing)
             do {
                 let container = try openFinal(mirroredURL: url, localURL: localURL)
                 let context = ModelContext(container)
@@ -338,10 +374,16 @@ enum StoreMigration {
 
         progress(.preparingAndValidating)
         // The original store remains authoritative until the marker above is
-        // durable. Back it up before any preflight or finalization work.
-        if FileManager.default.fileExists(atPath: url.path) {
-            _ = profiled("backup-authoritative-store") {
-                ModelContainerFactory.backupStoreFiles(at: url)
+        // durable. A transactionally consistent, validated snapshot and the
+        // measured migration working margin are hard prerequisites; no source
+        // read that can migrate or write occurs until this succeeds.
+        if enforcesSafetyBackup {
+            do {
+                _ = try profiled("backup-authoritative-store") {
+                    try MigrationBackupManager.prepareVerifiedBackup(at: url)
+                }
+            } catch {
+                throw classifyBackupPreparationFailure(error)
             }
         }
 
@@ -683,6 +725,23 @@ enum StoreMigration {
         }) ?? false
     }
 
+    private static func hasIdentityRepairCompletionMarker(at localURL: URL) -> Bool {
+        guard (try? storeMajorVersion(at: localURL)) == 10 else { return false }
+        return (try? autoreleasepool {
+            let full = Schema(versionedSchema: EarshotSchemaV10.self)
+            let container = try ModelContainer(
+                for: full,
+                configurations: ModelConfiguration(
+                    "DeviceLocal", schema: full, url: localURL,
+                    cloudKitDatabase: .none
+                )
+            )
+            return LocalAppSettingIdentity.value(
+                for: identityRepairCompletionKey, in: ModelContext(container)
+            ) == "1"
+        }) ?? false
+    }
+
     private static func openFinal(mirroredURL: URL, localURL: URL) throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV10.self)
         let mirrored = ModelConfiguration(
@@ -804,6 +863,34 @@ enum StoreMigration {
             throw CocoaError(.persistentStoreIncompatibleVersionHash)
         }
         return major
+    }
+
+    /// Keeps the safety gate from turning corruption into a misleading storage
+    /// error. Only failures that can be resolved by freeing space or retrying
+    /// are presented as backup-unavailable; malformed source data stays on the
+    /// existing unreadable-store recovery path.
+    private static func classifyBackupPreparationFailure(_ error: Error) -> Error {
+        if let backupError = error as? MigrationBackupError {
+            switch backupError {
+            case .insufficientStorage, .restoreFailed:
+                return StoreMigrationFailure.backupUnavailable(underlying: backupError)
+            case .sourceMetadataUnavailable, .snapshotInvalid:
+                return StoreOpenError.unreadable(underlying: backupError)
+            case .snapshotFailed(let code, _):
+                let sqliteError = NSError(domain: NSSQLiteErrorDomain, code: Int(code))
+                if indicatesOperationalFailure(sqliteError) {
+                    return StoreMigrationFailure.backupUnavailable(underlying: backupError)
+                }
+                return StoreOpenError.unreadable(underlying: backupError)
+            }
+        }
+        if indicatesNewerStore(error) {
+            return StoreOpenError.storeNewerThanApp(underlying: error)
+        }
+        if indicatesOperationalFailure(error) {
+            return StoreMigrationFailure.backupUnavailable(underlying: error)
+        }
+        return StoreOpenError.unreadable(underlying: error)
     }
 
     /// Recognizes transient file-system/database conditions while leaving actual

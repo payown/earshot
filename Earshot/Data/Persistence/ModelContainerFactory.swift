@@ -9,6 +9,10 @@ enum StoreRecoveryState: Equatable {
     /// library remains intact and retryable, so destructive reset is never offered.
     case migrationFailed
 
+    /// Earshot deliberately did not begin migration because it could not create
+    /// or retain the verified safety snapshot and measured working-space margin.
+    case backupUnavailable(requiredFreeSpaceBytes: Int64?)
+
     /// The on-disk store was written by a NEWER build than this one. The store is
     /// left completely untouched and the recovery screen asks the user to update.
     /// Resetting here is NOT offered — it would destroy still-good data.
@@ -22,6 +26,11 @@ enum StoreRecoveryState: Equatable {
     /// recovery screen offers an explicit, user-consented "Reset local data"
     /// action — which backs the files up first.
     case corruptStore
+
+    var isBackupUnavailable: Bool {
+        if case .backupUnavailable = self { return true }
+        return false
+    }
 }
 
 /// The result of a launch-time store open. Recovery deliberately carries no
@@ -94,7 +103,18 @@ enum ModelContainerFactory {
     /// the launch coordinator through the engine's `AsyncStream`.
     static func makeShared(using engine: StoreMigrationEngine) async -> StoreLoad {
         do {
-            return .ready(try await engine.openOrMigrate(at: storeURL))
+            let container = try await engine.openOrMigrate(at: storeURL)
+            MigrationBackupManager.noteSuccessfulTargetOpen(
+                at: storeURL, targetSchemaMajor: MigrationBackupManager.targetSchemaMajor
+            )
+            return .ready(container)
+        } catch StoreMigrationFailure.backupUnavailable(let underlying) {
+            AppLog.data.error(
+                "Store migration did not start because its safety backup or working margin was unavailable: \(underlying.localizedDescription, privacy: .public)"
+            )
+            return .recovery(.backupUnavailable(
+                requiredFreeSpaceBytes: requiredFreeSpaceBytes(from: underlying)
+            ))
         } catch StoreMigrationFailure.operational(let underlying) {
             AppLog.data.error(
                 "Store migration could not complete; leaving data intact for retry: \(underlying.localizedDescription, privacy: .public)"
@@ -128,7 +148,17 @@ enum ModelContainerFactory {
         //    data separately from corruption and newer-than-app downgrades.
         do {
             let container = try StoreMigration.openOrMigrate(at: url)
+            MigrationBackupManager.noteSuccessfulTargetOpen(
+                at: url, targetSchemaMajor: MigrationBackupManager.targetSchemaMajor
+            )
             return .ready(container)
+        } catch StoreMigrationFailure.backupUnavailable(let underlying) {
+            AppLog.data.error(
+                "Store migration did not start because its safety backup or working margin was unavailable: \(underlying.localizedDescription, privacy: .public)"
+            )
+            return .recovery(.backupUnavailable(
+                requiredFreeSpaceBytes: requiredFreeSpaceBytes(from: underlying)
+            ))
         } catch StoreMigrationFailure.operational(let underlying) {
             AppLog.data.error(
                 "Store migration could not complete; leaving data intact for retry: \(underlying.localizedDescription, privacy: .public)"
@@ -155,6 +185,14 @@ enum ModelContainerFactory {
             )
             return .recovery(.corruptStore)
         }
+    }
+
+    static func requiredFreeSpaceBytes(from error: Error) -> Int64? {
+        guard let backupError = error as? MigrationBackupError else { return nil }
+        guard case .insufficientStorage(let requiredBytes, _) = backupError else {
+            return nil
+        }
+        return requiredBytes
     }
 
     /// Copies the store and its sidecar files to a timestamped backup directory in

@@ -20,6 +20,18 @@ enum RootServiceActivationStatus: Equatable {
     case completed
 }
 
+enum BackupRestorePhase: Equatable {
+    case idle
+    case restoring
+    case restored
+    case failed
+}
+
+private enum BackupRestoreResult: Sendable, Equatable {
+    case restored
+    case failed
+}
+
 /// The one heading that should receive VoiceOver focus after launch leaves the
 /// preparation or recovery UI. Requests are consumed once by the destination
 /// view without changing any existing label or trait.
@@ -105,6 +117,8 @@ final class AppRuntime {
     private(set) var showsLaunchPreparation: Bool
     private(set) var launchFocusRequest: LaunchFocusDestination?
     private(set) var launchAttemptCount = 0
+    private(set) var recoveryBackup: MigrationBackupDescriptor?
+    private(set) var backupRestorePhase: BackupRestorePhase = .idle
 
     private let mode: Mode
     private let launchOperation: StoreLaunchOperation
@@ -128,11 +142,14 @@ final class AppRuntime {
     private var wasBackgroundedDuringLaunch = false
     private var isPresentingLaunchResult = false
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+    private var backupRestoreTask: Task<Void, Never>?
+    private var backupRestoreHeartbeatTask: Task<Void, Never>?
 
     init(
         load: StoreLoad? = nil,
         mode: Mode,
         showsLaunchPreparation: Bool? = nil,
+        recoveryBackup: MigrationBackupDescriptor? = nil,
         launchOperation: StoreLaunchOperation? = nil,
         launchAnnouncer: (any LaunchAnnouncing)? = nil,
         launchSleep: @escaping LaunchSleepOperation = { duration in
@@ -140,8 +157,10 @@ final class AppRuntime {
         }
     ) {
         self.mode = mode
-        self.showsLaunchPreparation = showsLaunchPreparation
-            ?? (mode == .normal && ModelContainerFactory.hasExistingStoreFiles)
+        // Migration progress promotes the silent launch placeholder; file
+        // existence alone cannot distinguish a settled V10 store from V6-V9.
+        self.showsLaunchPreparation = showsLaunchPreparation ?? false
+        self.recoveryBackup = recoveryBackup
         self.launchOperation = launchOperation ?? Self.productionLaunch
         self.launchAnnouncer = launchAnnouncer ?? SystemLaunchAnnouncer.shared
         self.launchSleep = launchSleep
@@ -199,13 +218,78 @@ final class AppRuntime {
     /// operational migration failure. Other recovery states remain terminal and
     /// never gain a retry or destructive side effect.
     func retryLaunch() {
-        guard case .recovery(.migrationFailed) = phase, launchTask == nil else { return }
+        guard case .recovery(let recoveryState) = phase,
+              recoveryState == .migrationFailed
+                || recoveryState.isBackupUnavailable
+                || backupRestorePhase == .restored,
+              launchTask == nil else { return }
         cancelAnnouncementWork()
         launchFocusRequest = nil
+        backupRestorePhase = .idle
+        recoveryBackup = nil
         showsLaunchPreparation = true
         phase = .unavailable
         // StorePreparationScreen starts the attempt only after its initial
         // status has appeared and received the one stable focus request.
+    }
+
+    func discoverRecoveryBackupIfNeeded() async {
+        guard mode == .normal,
+              recoveryBackup == nil,
+              backupRestorePhase == .idle,
+              case .recovery = phase else { return }
+        let storeURL = ModelContainerFactory.storeURL
+        recoveryBackup = await Task.detached {
+            MigrationBackupManager.latestRestorableBackup(at: storeURL)
+        }.value
+    }
+
+    func restoreRecoveryBackup() {
+        guard let backup = recoveryBackup,
+              case .recovery = phase,
+              backupRestorePhase != .restoring,
+              backupRestoreTask == nil else { return }
+        backupRestorePhase = .restoring
+        startBackupRestoreHeartbeat()
+        let storeURL = ModelContainerFactory.storeURL
+        backupRestoreTask = Task { @MainActor [weak self] in
+            let result = await Task.detached { () -> BackupRestoreResult in
+                do {
+                    try MigrationBackupManager.restore(backup, at: storeURL)
+                    return .restored
+                } catch {
+                    AppLog.data.error(
+                        "Could not restore migration backup: \(error.localizedDescription, privacy: .public)"
+                    )
+                    return .failed
+                }
+            }.value
+            guard let self else { return }
+            backupRestoreHeartbeatTask?.cancel()
+            backupRestoreHeartbeatTask = nil
+            backupRestorePhase = result == .restored ? .restored : .failed
+            backupRestoreTask = nil
+        }
+    }
+
+    private func startBackupRestoreHeartbeat() {
+        backupRestoreHeartbeatTask?.cancel()
+        backupRestoreHeartbeatTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                do {
+                    try await launchSleep(.seconds(8))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, backupRestorePhase == .restoring else { return }
+                if isSceneActive {
+                    launchAnnouncer.announce(
+                        "Earshot is still restoring your library.", assertive: false
+                    )
+                }
+            }
+        }
     }
 
     /// Scene state gates announcements and terminal focus. Migration ownership
@@ -224,6 +308,12 @@ final class AppRuntime {
                 beginLaunchBackgroundTaskIfNeeded()
             }
             return
+        }
+
+        if backupRestorePhase == .restoring {
+            launchAnnouncer.announce(
+                "Earshot is still restoring your library.", assertive: false
+            )
         }
 
         endLaunchBackgroundTask()
@@ -275,6 +365,10 @@ final class AppRuntime {
 
     private func receive(_ progress: StoreMigrationProgress, attemptID: UUID) {
         guard launchAttemptID == attemptID, case .unavailable = phase else { return }
+        if !showsLaunchPreparation {
+            showsLaunchPreparation = true
+            startHeartbeat(after: Self.firstHeartbeatDelay, attemptID: attemptID)
+        }
         launchProgress = progress
         progressRevision += 1
         guard showsLaunchPreparation, isSceneActive else { return }
@@ -468,8 +562,18 @@ final class AppRuntime {
             generation += 1
             phase = .ready(container: container, generation: generation)
         case .migrationFailed:
+            if mode == .normal {
+                recoveryBackup = MigrationBackupManager.latestRecordedBackup(
+                    at: ModelContainerFactory.storeURL
+                )
+            }
             phase = .recovery(.migrationFailed)
         case .recovery(let state):
+            if mode == .normal {
+                recoveryBackup = MigrationBackupManager.latestRecordedBackup(
+                    at: ModelContainerFactory.storeURL
+                )
+            }
             phase = .recovery(state)
         }
     }
@@ -721,7 +825,7 @@ struct EarshotApp: App {
                     // Recovery has no ModelContainer. The screen performs only
                     // explicit file-level recovery and must never bind to a fake
                     // empty data graph (#529, #781).
-                    StoreRecoveryScreen(state: state)
+                    StoreRecoveryScreen(state: state, backup: runtime.recoveryBackup)
                 case let .ready(container, generation):
                     if isRunningTests {
                         Color.clear

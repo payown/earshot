@@ -49,6 +49,50 @@ private final class MigrationMemorySampler: @unchecked Sendable {
     }
 }
 
+private final class MigrationDiskSampler: @unchecked Sendable {
+    private let url: URL
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "media.payown.earshot.migration-disk")
+    private var timer: DispatchSourceTimer?
+    private var minimumAvailableBytes: Int64 = .max
+
+    init(url: URL) {
+        self.url = url
+    }
+
+    func start() throws -> Int64 {
+        let baseline = try availableBytes()
+        minimumAvailableBytes = baseline
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(5))
+        timer.setEventHandler { [weak self] in self?.sample() }
+        self.timer = timer
+        timer.resume()
+        return baseline
+    }
+
+    func stop() -> Int64 {
+        timer?.cancel()
+        timer = nil
+        queue.sync {}
+        sample()
+        return lock.withLock { minimumAvailableBytes }
+    }
+
+    private func sample() {
+        guard let current = try? availableBytes() else { return }
+        lock.withLock { minimumAvailableBytes = min(minimumAvailableBytes, current) }
+    }
+
+    private func availableBytes() throws -> Int64 {
+        var statistics = statfs()
+        guard statfs(url.path, &statistics) == 0 else {
+            throw POSIXError(.init(rawValue: errno) ?? .EIO)
+        }
+        return Int64(statistics.f_bavail) * Int64(statistics.f_bsize)
+    }
+}
+
 private actor MigrationCompletionState {
     private(set) var isFinished = false
 
@@ -80,13 +124,17 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         downloadArtifacts = []
         fixtureDownloadName = "migration-fixture-\(UUID()).mp3"
         scaleDownloadPrefix = "migration-scale-\(UUID())"
-        directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(
+        let testRoot = ProcessInfo.processInfo.environment["SYNC_MIGRATION_TEST_ROOT"]
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        directory = testRoot.appendingPathComponent(
             "migration-v6v8-\(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         storeURL = directory.appendingPathComponent("default.store")
     }
     override func tearDownWithError() throws {
         StoreMigration.injectedFailurePoint = nil
+        StoreMigration.bypassSafetyBackupForENOSPCTest = false
         for url in downloadArtifacts { try? FileManager.default.removeItem(at: url) }
         try? FileManager.default.removeItem(at: directory)
     }
@@ -630,7 +678,14 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
     func testMigratedSplitStoreReopensIdempotently() throws {
         try seedV6()
         try autoreleasepool { _ = try StoreMigration.openOrMigrate(at: storeURL) }
-        let reopened = try StoreMigration.openOrMigrate(at: storeURL)
+        let backupRoot = MigrationBackupManager.backupRoot(for: storeURL)
+        try? FileManager.default.removeItem(at: backupRoot)
+        var progress: [StoreMigrationProgress] = []
+        let reopened = try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }
+        XCTAssertTrue(progress.isEmpty, "a settled V10 store must not enter preparation")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backupRoot.path))
         XCTAssertEqual(try reopened.mainContext.fetchCount(FetchDescriptor<Podcast>()), 1)
         XCTAssertEqual(try reopened.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 2)
         XCTAssertEqual(LocalAppSettingIdentity.value(for: StoreMigration.splitCompletionKey,
@@ -750,9 +805,12 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
         try materializeV6FixtureDownloads()
         let beforeBytes = try storeSetSize()
+        let diskSampler = MigrationDiskSampler(url: directory)
+        let baselineAvailableBytes = try diskSampler.start()
         let start = DispatchTime.now().uptimeNanoseconds
         let migrated = try await StoreMigrationEngine().openOrMigrate(at: storeURL)
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
+        let minimumAvailableBytes = diskSampler.stop()
         let context = migrated.mainContext
 
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 666)
@@ -778,14 +836,132 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"])
         let afterBytes = try storeSetSize()
         print(String(format:
-            "REALV6MIGRATION|seconds|%.3f|beforeMB|%.1f|afterMB|%.1f",
+            "REALV6MIGRATION|seconds|%.3f|beforeMB|%.1f|afterMB|%.1f|peakAdditionalMB|%.1f|peakAdditionalMultiple|%.3f",
             elapsed, Double(beforeBytes) / 1_048_576, Double(afterBytes) / 1_048_576
+                , Double(baselineAvailableBytes - minimumAvailableBytes) / 1_048_576,
+            Double(baselineAvailableBytes - minimumAvailableBytes) / Double(beforeBytes)
         ))
         XCTAssertLessThan(
             elapsed, 15,
             "Aged-store migration leaves too little margin inside the 20-second launch watchdog"
         )
         try assertEpisodeSaveSurvivesReopen(migrated)
+    }
+
+    func testRealBuild161V6FixtureOnActuallyFullVolume() throws {
+        let fixtureVariable = "SYNC_MIGRATION_REAL_V6_DIRECTORY"
+        let runVariable = "RUN_SYNC_MIGRATION_ENOSPC"
+        guard ProcessInfo.processInfo.environment[runVariable] != nil,
+              let path = ProcessInfo.processInfo.environment[fixtureVariable] else {
+            throw XCTSkip(
+                "Set TEST_RUNNER_\(runVariable)=1 and TEST_RUNNER_\(fixtureVariable) to run the real ENOSPC profile."
+            )
+        }
+        try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+        let beforeBytes = try storeSetSize()
+        _ = try XCTUnwrap(
+            ModelContainerFactory.backupStoreFiles(at: storeURL),
+            "the real ENOSPC run requires a complete pre-migration backup"
+        )
+        StoreMigration.bypassSafetyBackupForENOSPCTest = true
+
+        XCTAssertThrowsError(try autoreleasepool {
+            _ = try StoreMigration.openOrMigrate(at: storeURL)
+        }) { error in
+            guard case StoreMigrationFailure.operational(let underlying) = error else {
+                return XCTFail("Expected operational ENOSPC, got \(error)")
+            }
+            var chain: [String] = []
+            var current: NSError? = underlying as NSError
+            while let error = current {
+                chain.append("\(error.domain):\(error.code):\(error.localizedDescription)")
+                current = error.userInfo[NSUnderlyingErrorKey] as? NSError
+            }
+            print("REALV6ENOSPC|errorChain|\(chain.joined(separator: " <- "))")
+        }
+
+        let filesAfterFailure = try FileManager.default.subpathsOfDirectory(atPath: directory.path)
+            .compactMap { relative -> String? in
+                let url = directory.appending(path: relative)
+                guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+                    return nil
+                }
+                return "\(relative):\(size)"
+            }
+            .sorted()
+        print("REALV6ENOSPC|filesAfterFailure|\(filesAfterFailure.joined(separator: ","))")
+
+        let backupRoot = directory.appending(path: "store-backups", directoryHint: .isDirectory)
+        let backupDirectories = try FileManager.default.contentsOfDirectory(
+            at: backupRoot, includingPropertiesForKeys: nil
+        )
+        let backupDirectory = try XCTUnwrap(backupDirectories.first)
+        let rescuedBackupDirectory = FileManager.default.temporaryDirectory.appending(
+            path: "rescued-migration-backup-\(UUID())", directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: rescuedBackupDirectory) }
+        try FileManager.default.copyItem(at: backupDirectory, to: rescuedBackupDirectory)
+
+        // Release enough blocks for SQLite to read and recover its WAL after the
+        // genuine ENOSPC. The separately rebuilt local store is disposable until
+        // its completion marker exists. The backup is copied off the constrained
+        // test volume first so both source and snapshot can be inspected.
+        try FileManager.default.removeItem(at: backupRoot)
+        ModelContainerFactory.removeStoreFiles(
+            at: StoreMigration.localStoreURL(for: storeURL)
+        )
+
+        // Core Data records V10 before the failed WAL checkpoint. The working
+        // source is therefore not the original V6 store after real ENOSPC.
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
+        XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
+        XCTAssertEqual(try sqliteScalar(at: storeURL, sql: "SELECT COUNT(*) FROM ZPODCAST"), 666)
+        XCTAssertEqual(
+            try sqliteScalar(at: storeURL, sql: "SELECT COUNT(*) FROM ZEPISODE"),
+            241_759
+        )
+        let backupURL = rescuedBackupDirectory.appending(path: "default.store")
+        XCTAssertEqual(try storeMajorVersion(at: backupURL), 6)
+        XCTAssertEqual(try integrityCheck(at: backupURL), ["ok"])
+        let remainingSampler = MigrationDiskSampler(url: directory)
+        let remainingBytes = try remainingSampler.start()
+        _ = remainingSampler.stop()
+        print(String(format:
+            "REALV6ENOSPC|beforeMB|%.1f|remainingMB|%.1f|backupCount|%d",
+            Double(beforeBytes) / 1_048_576,
+            Double(remainingBytes) / 1_048_576,
+            backupDirectories.count
+        ))
+    }
+
+    func testRealBuild161V6HardGateStopsBeforeWritingOnConstrainedVolume() throws {
+        let fixtureVariable = "SYNC_MIGRATION_REAL_V6_DIRECTORY"
+        let runVariable = "RUN_SYNC_MIGRATION_HARD_GATE"
+        guard ProcessInfo.processInfo.environment[runVariable] != nil,
+              let path = ProcessInfo.processInfo.environment[fixtureVariable] else {
+            throw XCTSkip(
+                "Set TEST_RUNNER_\(runVariable)=1 and TEST_RUNNER_\(fixtureVariable) to run the real hard-gate profile."
+            )
+        }
+        try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+
+        XCTAssertThrowsError(try autoreleasepool {
+            _ = try StoreMigration.openOrMigrate(at: storeURL)
+        }) { error in
+            guard case StoreMigrationFailure.backupUnavailable(let underlying) = error,
+                  case MigrationBackupError.insufficientStorage = underlying else {
+                return XCTFail("Expected the measured storage gate, got \(error)")
+            }
+        }
+
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 6)
+        XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
+        XCTAssertEqual(try sqliteScalar(at: storeURL, sql: "SELECT COUNT(*) FROM ZPODCAST"), 666)
+        XCTAssertEqual(
+            try sqliteScalar(at: storeURL, sql: "SELECT COUNT(*) FROM ZEPISODE"),
+            241_759
+        )
+        XCTAssertNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))
     }
 
     /// Opt-in proof against a disposable copy of the settled device's existing
