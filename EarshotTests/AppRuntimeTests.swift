@@ -377,11 +377,7 @@ final class AppRuntimeTests: XCTestCase {
         let announcer = RecordingLaunchAnnouncer()
         let runtime = AppRuntime(
             mode: .testHost,
-            showsLaunchPreparation: false,
-            launchOperation: { progress in
-                progress(.openingAndRepairing)
-                return .ready(container)
-            },
+            launchOperation: { _ in .ready(container) },
             launchAnnouncer: announcer
         )
 

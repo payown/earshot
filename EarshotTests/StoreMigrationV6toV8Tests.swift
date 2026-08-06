@@ -678,7 +678,14 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
     func testMigratedSplitStoreReopensIdempotently() throws {
         try seedV6()
         try autoreleasepool { _ = try StoreMigration.openOrMigrate(at: storeURL) }
-        let reopened = try StoreMigration.openOrMigrate(at: storeURL)
+        let backupRoot = MigrationBackupManager.backupRoot(for: storeURL)
+        try? FileManager.default.removeItem(at: backupRoot)
+        var progress: [StoreMigrationProgress] = []
+        let reopened = try StoreMigration.openOrMigrate(at: storeURL) {
+            progress.append($0)
+        }
+        XCTAssertTrue(progress.isEmpty, "a settled V10 store must not enter preparation")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backupRoot.path))
         XCTAssertEqual(try reopened.mainContext.fetchCount(FetchDescriptor<Podcast>()), 1)
         XCTAssertEqual(try reopened.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 2)
         XCTAssertEqual(LocalAppSettingIdentity.value(for: StoreMigration.splitCompletionKey,

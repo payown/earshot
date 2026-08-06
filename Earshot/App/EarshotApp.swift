@@ -157,8 +157,11 @@ final class AppRuntime {
         }
     ) {
         self.mode = mode
-        self.showsLaunchPreparation = showsLaunchPreparation
-            ?? (mode == .normal && ModelContainerFactory.hasExistingStoreFiles)
+        // Production starts behind the silent launch-colored placeholder. The
+        // migration engine promotes this to the preparation screen only after
+        // it has positively classified work as a migration/resume. File
+        // existence alone cannot distinguish a settled V10 store from V6-V9.
+        self.showsLaunchPreparation = showsLaunchPreparation ?? false
         self.recoveryBackup = recoveryBackup
         self.launchOperation = launchOperation ?? Self.productionLaunch
         self.launchAnnouncer = launchAnnouncer ?? SystemLaunchAnnouncer.shared
@@ -364,6 +367,10 @@ final class AppRuntime {
 
     private func receive(_ progress: StoreMigrationProgress, attemptID: UUID) {
         guard launchAttemptID == attemptID, case .unavailable = phase else { return }
+        if !showsLaunchPreparation {
+            showsLaunchPreparation = true
+            startHeartbeat(after: Self.firstHeartbeatDelay, attemptID: attemptID)
+        }
         launchProgress = progress
         progressRevision += 1
         guard showsLaunchPreparation, isSceneActive else { return }

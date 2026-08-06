@@ -309,14 +309,16 @@ enum StoreMigration {
         if profiled("split-marker-probe", operation: {
             hasSplitCompletionMarker(at: localURL)
         }) {
-            progress(.migratingMirroredStore)
             do {
                 let mirroredMajor = try storeMajorVersion(at: url)
                 let localMajor = try storeMajorVersion(at: localURL)
-                if enforcesSafetyBackup
-                    && (mirroredMajor < MigrationBackupManager.targetSchemaMajor
+                let requiresResume = mirroredMajor < MigrationBackupManager.targetSchemaMajor
                     || localMajor < MigrationBackupManager.targetSchemaMajor
-                    || !hasIdentityRepairCompletionMarker(at: localURL)) {
+                    || !hasIdentityRepairCompletionMarker(at: localURL)
+                if requiresResume {
+                    progress(.migratingMirroredStore)
+                }
+                if enforcesSafetyBackup && requiresResume {
                     do {
                         try MigrationBackupManager.ensureResumeSafety(at: url)
                     } catch {
@@ -333,7 +335,9 @@ enum StoreMigration {
                 try profiled("resume-local-finalization") {
                     try finalizeLocalStore(at: localURL)
                 }
-                progress(.openingAndRepairing)
+                if requiresResume {
+                    progress(.openingAndRepairing)
+                }
                 return try profiled("resume-final-open") {
                     try finishOpeningFinal(mirroredURL: url, localURL: localURL)
                 }
@@ -350,7 +354,6 @@ enum StoreMigration {
         }
 
         if !FileManager.default.fileExists(atPath: url.path) {
-            progress(.openingAndRepairing)
             do {
                 let container = try openFinal(mirroredURL: url, localURL: localURL)
                 let context = ModelContext(container)
