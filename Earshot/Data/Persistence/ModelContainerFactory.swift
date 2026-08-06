@@ -11,7 +11,7 @@ enum StoreRecoveryState: Equatable {
 
     /// Earshot deliberately did not begin migration because it could not create
     /// or retain the verified safety snapshot and measured working-space margin.
-    case backupUnavailable(requiredFreeSpaceBytes: Int64?)
+    case backupUnavailable(requiredFreeSpaceBytes: Int64?, availableFreeSpaceBytes: Int64?)
 
     /// The on-disk store was written by a NEWER build than this one. The store is
     /// left completely untouched and the recovery screen asks the user to update.
@@ -113,7 +113,8 @@ enum ModelContainerFactory {
                 "Store migration did not start because its safety backup or working margin was unavailable: \(underlying.localizedDescription, privacy: .public)"
             )
             return .recovery(.backupUnavailable(
-                requiredFreeSpaceBytes: requiredFreeSpaceBytes(from: underlying)
+                requiredFreeSpaceBytes: storageAmounts(from: underlying)?.required,
+                availableFreeSpaceBytes: storageAmounts(from: underlying)?.available
             ))
         } catch StoreMigrationFailure.operational(let underlying) {
             AppLog.data.error(
@@ -157,7 +158,8 @@ enum ModelContainerFactory {
                 "Store migration did not start because its safety backup or working margin was unavailable: \(underlying.localizedDescription, privacy: .public)"
             )
             return .recovery(.backupUnavailable(
-                requiredFreeSpaceBytes: requiredFreeSpaceBytes(from: underlying)
+                requiredFreeSpaceBytes: storageAmounts(from: underlying)?.required,
+                availableFreeSpaceBytes: storageAmounts(from: underlying)?.available
             ))
         } catch StoreMigrationFailure.operational(let underlying) {
             AppLog.data.error(
@@ -187,12 +189,12 @@ enum ModelContainerFactory {
         }
     }
 
-    static func requiredFreeSpaceBytes(from error: Error) -> Int64? {
+    static func storageAmounts(from error: Error) -> (required: Int64, available: Int64)? {
         guard let backupError = error as? MigrationBackupError else { return nil }
-        guard case .insufficientStorage(let requiredBytes, _) = backupError else {
+        guard case .insufficientStorage(let requiredBytes, let availableBytes) = backupError else {
             return nil
         }
-        return requiredBytes
+        return (requiredBytes, availableBytes)
     }
 
     /// Copies the store and its sidecar files to a timestamped backup directory in

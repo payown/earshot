@@ -72,6 +72,20 @@ private final class RecordingLaunchAnnouncer: LaunchAnnouncing {
     }
 }
 
+@MainActor
+private final class RecoveryCapacityProbe {
+    enum ProbeError: Error { case failed }
+    var available: Int64
+    var fails = false
+
+    init(available: Int64) { self.available = available }
+
+    func read() throws -> Int64 {
+        if fails { throw ProbeError.failed }
+        return available
+    }
+}
+
 /// Guards the #781 root-container seam without changing production launch yet.
 /// A data-bound root is created only from `.ready`; unavailable and recovery
 /// carry no fallback container, and process-lifetime services claim one final
@@ -167,12 +181,13 @@ final class AppRuntimeTests: XCTestCase {
 
     func testBackupUnavailableCopyPromisesNoMigrationStarted() {
         let screen = StoreRecoveryScreen(state: .backupUnavailable(
-            requiredFreeSpaceBytes: 2_147_000_001
+            requiredFreeSpaceBytes: 2_147_000_001,
+            availableFreeSpaceBytes: 147_000_001
         ))
         XCTAssertEqual(screen.title, "Earshot needs more storage")
         XCTAssertEqual(
             screen.message,
-            "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Earshot needs about 2.2 GB free to prepare your library safely. Free up space, then try again."
+            "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Earshot needs about 2 GB more free space to prepare your library safely. Free up space, then try again."
         )
         XCTAssertTrue(screen.offersRetry)
         XCTAssertFalse(screen.offersReset)
@@ -189,6 +204,189 @@ final class AppRuntimeTests: XCTestCase {
             StoreRecoveryScreen.formattedStorageRequirement(
                 bytes: 2_000_000_001, locale: locale
             ), "2.1 GB"
+        )
+        XCTAssertEqual(
+            StoreRecoveryScreen.formattedStorageRequirement(
+                bytes: 999_000_001, locale: locale
+            ), "1000 MB"
+        )
+        XCTAssertEqual(
+            StoreRecoveryScreen.formattedStorageRequirement(
+                bytes: 1_000_000_000, locale: locale
+            ), "1 GB"
+        )
+    }
+
+    func testEveryApprovedStorageRecoveryCopyState() {
+        let initial = RecoveryStorageState(
+            requiredBytes: 3_000_000_000, availableBytes: 1_000_000_000,
+            downloadBytes: 750_000_000, freedBytes: nil, deletionOutcome: nil
+        )
+        XCTAssertEqual(StoreRecoveryScreen.storageTitle(for: initial), "Earshot needs more storage")
+        XCTAssertEqual(
+            StoreRecoveryScreen.storageMessage(for: initial),
+            "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Earshot needs about 2 GB more free space to prepare your library safely. Free up space, then try again."
+        )
+        XCTAssertEqual(
+            StoreRecoveryScreen.downloadSectionMessage(bytes: 750_000_000),
+            "Downloaded episodes are using about 750 MB on this device. Most can be downloaded again, though some podcasts remove older episodes from their feed. Your library, subscriptions, and listening history will not be affected."
+        )
+        XCTAssertEqual(
+            StoreRecoveryScreen.downloadConfirmationMessage,
+            "This deletes all downloaded episode audio from this device. Most can be downloaded again, though some podcasts remove older episodes from their feed. Your library, subscriptions, and listening history will not be affected."
+        )
+        XCTAssertEqual(
+            StoreRecoveryScreen.downloadConfirmationTitle(bytes: 750_000_000),
+            "Delete about 750 MB of downloaded audio?"
+        )
+
+        let completeEnough = RecoveryStorageState(
+            requiredBytes: 3_000_000_000, availableBytes: 3_100_000_000,
+            downloadBytes: 0, freedBytes: 800_000_000, deletionOutcome: .complete
+        )
+        XCTAssertEqual(StoreRecoveryScreen.storageTitle(for: completeEnough), "Enough space is available")
+        XCTAssertEqual(
+            StoreRecoveryScreen.storageMessage(for: completeEnough),
+            "Earshot freed about 800 MB. You now have enough space to prepare your library. Your library, subscriptions, and listening history were not affected."
+        )
+
+        var completeInsufficient = completeEnough
+        completeInsufficient.availableBytes = 2_500_000_000
+        XCTAssertEqual(StoreRecoveryScreen.storageTitle(for: completeInsufficient), "Earshot still needs more storage")
+        XCTAssertEqual(
+            StoreRecoveryScreen.storageMessage(for: completeInsufficient),
+            "Earshot freed about 800 MB, but Earshot still needs about 500 MB more. Your library, subscriptions, and listening history were not affected. Free more space, then return to Earshot."
+        )
+
+        var partialEnough = completeEnough
+        partialEnough.deletionOutcome = .partial
+        XCTAssertEqual(StoreRecoveryScreen.storageTitle(for: partialEnough), "Enough space is available")
+        XCTAssertEqual(
+            StoreRecoveryScreen.storageMessage(for: partialEnough),
+            "Earshot freed about 800 MB. Some downloaded audio could not be deleted, but you now have enough space to prepare your library. Your library, subscriptions, and listening history were not affected."
+        )
+
+        var partialInsufficient = completeInsufficient
+        partialInsufficient.deletionOutcome = .partial
+        XCTAssertEqual(StoreRecoveryScreen.storageTitle(for: partialInsufficient), "Some downloaded audio couldn't be deleted")
+        XCTAssertEqual(
+            StoreRecoveryScreen.storageMessage(for: partialInsufficient),
+            "Earshot freed about 800 MB, but Earshot still needs about 500 MB more. Some downloaded audio could not be deleted. Your library, subscriptions, and listening history were not affected."
+        )
+
+        var none = completeInsufficient
+        none.freedBytes = 0
+        none.deletionOutcome = RecoveryDownloadDeletionOutcome.none
+        XCTAssertEqual(StoreRecoveryScreen.storageTitle(for: none), "Downloaded audio couldn't be deleted")
+        XCTAssertEqual(
+            StoreRecoveryScreen.storageMessage(for: none),
+            "Earshot couldn't free space from downloaded audio. Earshot still needs about 500 MB more. Your library, subscriptions, and listening history were not affected."
+        )
+    }
+
+    func testRecoveryDeletionUsesMeasuredResultAndRequestsCombinedFocus() async {
+        let runtime = AppRuntime(
+            load: .recovery(.backupUnavailable(
+                requiredFreeSpaceBytes: 3_000_000_000,
+                availableFreeSpaceBytes: 1_000_000_000
+            )),
+            mode: .testHost,
+            recoveryDownloadUsage: { 900_000_000 },
+            recoveryDownloadRemoval: {
+                RecoveryDownloadRemovalResult(
+                    freedBytes: 800_000_000,
+                    availableBytes: 3_100_000_000,
+                    remainingDownloadBytes: 100_000_000,
+                    failedItemCount: 1
+                )
+            }
+        )
+
+        await runtime.loadRecoveryDownloadUsageIfNeeded()
+        XCTAssertEqual(runtime.recoveryStorageState?.downloadBytes, 900_000_000)
+        await runtime.removeRecoveryDownloads()
+
+        XCTAssertEqual(runtime.recoveryStorageState?.deletionOutcome, .partial)
+        XCTAssertTrue(runtime.recoveryStorageState?.hasEnoughSpace == true)
+        XCTAssertEqual(runtime.recoveryStorageFocusRevision, 1)
+    }
+
+    func testRecoveryCapacityAnnouncementsDeduplicateAndManualCheckAlwaysReports() async {
+        let announcer = RecordingLaunchAnnouncer(isVoiceOverRunning: true)
+        let probe = RecoveryCapacityProbe(available: 1_000_000_000)
+        let runtime = AppRuntime(
+            load: .recovery(.backupUnavailable(
+                requiredFreeSpaceBytes: 3_000_000_000,
+                availableFreeSpaceBytes: probe.available
+            )),
+            mode: .testHost,
+            launchAnnouncer: announcer,
+            recoveryCapacity: { try probe.read() }
+        )
+
+        runtime.updateLaunchScenePhase(.background)
+        runtime.updateLaunchScenePhase(.active)
+        await settleTasks()
+        XCTAssertEqual(announcer.announcements.map(\.message), [
+            "Storage checked. Earshot still needs about 2 GB more.",
+        ])
+
+        runtime.updateLaunchScenePhase(.background)
+        runtime.updateLaunchScenePhase(.active)
+        await settleTasks()
+        XCTAssertEqual(announcer.announcements.count, 1)
+
+        await runtime.checkRecoveryStorage(manual: true)
+        XCTAssertEqual(announcer.announcements.count, 2)
+
+        probe.available = 1_500_000_000
+        runtime.updateLaunchScenePhase(.background)
+        runtime.updateLaunchScenePhase(.active)
+        await settleTasks()
+        XCTAssertEqual(
+            announcer.announcements.last?.message,
+            "Storage checked. Earshot still needs about 1.5 GB more."
+        )
+
+        probe.available = 3_000_000_000
+        runtime.updateLaunchScenePhase(.background)
+        runtime.updateLaunchScenePhase(.active)
+        await settleTasks()
+        XCTAssertEqual(announcer.announcements.count, 3)
+        XCTAssertEqual(runtime.recoveryStorageFocusRevision, 1)
+    }
+
+    func testRecoveryCapacityErrorAnnouncesOncePerErrorState() async {
+        let announcer = RecordingLaunchAnnouncer(isVoiceOverRunning: true)
+        let probe = RecoveryCapacityProbe(available: 1_100_000_000)
+        probe.fails = true
+        let runtime = AppRuntime(
+            load: .recovery(.backupUnavailable(
+                requiredFreeSpaceBytes: 2_000_000_000,
+                availableFreeSpaceBytes: 1_000_000_000
+            )),
+            mode: .testHost,
+            launchAnnouncer: announcer,
+            recoveryCapacity: { try probe.read() }
+        )
+
+        runtime.updateLaunchScenePhase(.background)
+        runtime.updateLaunchScenePhase(.active)
+        await settleTasks()
+        runtime.updateLaunchScenePhase(.background)
+        runtime.updateLaunchScenePhase(.active)
+        await settleTasks()
+        XCTAssertEqual(announcer.announcements.map(\.message), [
+            "Earshot couldn't check available space. Use Check available space to try again.",
+        ])
+
+        probe.fails = false
+        runtime.updateLaunchScenePhase(.background)
+        runtime.updateLaunchScenePhase(.active)
+        await settleTasks()
+        XCTAssertEqual(
+            announcer.announcements.last?.message,
+            "Storage checked. Earshot still needs about 900 MB more."
         )
     }
 
