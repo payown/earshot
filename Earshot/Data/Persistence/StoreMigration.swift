@@ -177,6 +177,7 @@ enum StoreMigration {
     static let identityRepairCompletionKey = "__earshot_identity_repair_v1_complete"
 
     enum InjectedFailurePoint: String, CaseIterable {
+        case beforeCompletedFinalOpen
         case afterBridgeMarker
         case beforeSplitMarker
         case afterSplitMarker
@@ -313,7 +314,8 @@ enum StoreMigration {
            (try? storeMajorVersion(at: localURL)) == MigrationBackupManager.targetSchemaMajor {
             do {
                 let container = try profiled("completed-final-open") {
-                    try openFinal(mirroredURL: url, localURL: localURL)
+                    try failIfInjected(at: .beforeCompletedFinalOpen)
+                    return try openFinal(mirroredURL: url, localURL: localURL)
                 }
                 let context = ModelContext(container)
                 if LocalAppSettingIdentity.value(for: splitCompletionKey, in: context) == "1",
@@ -328,6 +330,9 @@ enum StoreMigration {
             } catch {
                 if indicatesNewerStore(error) {
                     throw StoreOpenError.storeNewerThanApp(underlying: error)
+                }
+                if hasSplitCompletionMarker(at: localURL) {
+                    throw StoreMigrationFailure.operational(underlying: error)
                 }
                 throw StoreOpenError.unreadable(underlying: error)
             }
