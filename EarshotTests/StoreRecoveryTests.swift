@@ -21,6 +21,7 @@ final class StoreRecoveryTests: XCTestCase {
 
     override func tearDownWithError() throws {
         MigrationBackupManager.injectedRestoreFailureAfterQuarantine = false
+        MigrationBackupManager.injectedQuarantineCleanupFailure = false
         if let dir { try? FileManager.default.removeItem(at: dir) }
     }
 
@@ -28,13 +29,16 @@ final class StoreRecoveryTests: XCTestCase {
         FileManager.default.fileExists(atPath: storeURL.path)
     }
 
+    private func v6Container() throws -> ModelContainer {
+        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+        return try ModelContainer(
+            for: schema, configurations: ModelConfiguration(schema: schema, url: storeURL)
+        )
+    }
+
     private func seedV6RecoveryStore() throws {
         try autoreleasepool {
-            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
-            let container = try ModelContainer(
-                for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
-            )
+            let container = try v6Container()
             let podcast = EarshotSchemaV5.Podcast(
                 feedURL: "https://backup.example/feed", title: "Backup Fixture"
             )
@@ -44,6 +48,30 @@ final class StoreRecoveryTests: XCTestCase {
             episode.podcast = podcast
             container.mainContext.insert(podcast)
             container.mainContext.insert(episode)
+            try container.mainContext.save()
+        }
+    }
+
+    private func podcastCount() throws -> Int {
+        try autoreleasepool {
+            let container = try v6Container()
+            return try container.mainContext.fetchCount(FetchDescriptor<EarshotSchemaV5.Podcast>())
+        }
+    }
+
+    private func episodeCount() throws -> Int {
+        try autoreleasepool {
+            let container = try v6Container()
+            return try container.mainContext.fetchCount(FetchDescriptor<EarshotSchemaV5.Episode>())
+        }
+    }
+
+    private func addCurrentPodcast() throws {
+        try autoreleasepool {
+            let container = try v6Container()
+            container.mainContext.insert(EarshotSchemaV5.Podcast(
+                feedURL: "https://current.example/feed", title: "Current Fixture"
+            ))
             try container.mainContext.save()
         }
     }
@@ -196,19 +224,8 @@ final class StoreRecoveryTests: XCTestCase {
             FileManager.default.fileExists(atPath: localURL.path),
             "a partial local store must not be merged into the restored source"
         )
-        try autoreleasepool {
-            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
-            let restored = try ModelContainer(
-                for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
-            )
-            XCTAssertEqual(
-                try restored.mainContext.fetchCount(FetchDescriptor<EarshotSchemaV5.Podcast>()), 1
-            )
-            XCTAssertEqual(
-                try restored.mainContext.fetchCount(FetchDescriptor<EarshotSchemaV5.Episode>()), 1
-            )
-        }
+        XCTAssertEqual(try podcastCount(), 1)
+        XCTAssertEqual(try episodeCount(), 1)
         XCTAssertNotNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))
     }
 
@@ -227,33 +244,14 @@ final class StoreRecoveryTests: XCTestCase {
         XCTAssertEqual(legacy.format, .legacyStoreSet)
         try MigrationBackupManager.restore(legacy, at: storeURL)
 
-        try autoreleasepool {
-            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
-            let restored = try ModelContainer(
-                for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
-            )
-            XCTAssertEqual(
-                try restored.mainContext.fetchCount(FetchDescriptor<EarshotSchemaV5.Episode>()), 1
-            )
-        }
+        XCTAssertEqual(try episodeCount(), 1)
     }
 
     func testFailedRestoreRollsBackEveryCurrentStoreFile() throws {
         try seedV6RecoveryStore()
         let backup = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
 
-        try autoreleasepool {
-            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
-            let container = try ModelContainer(
-                for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
-            )
-            container.mainContext.insert(EarshotSchemaV5.Podcast(
-                feedURL: "https://current.example/feed", title: "Current Fixture"
-            ))
-            try container.mainContext.save()
-        }
+        try addCurrentPodcast()
         let localURL = StoreMigration.localStoreURL(for: storeURL)
         let partialLocal = Data([0xA1, 0xB2, 0xC3])
         try partialLocal.write(to: localURL)
@@ -263,17 +261,37 @@ final class StoreRecoveryTests: XCTestCase {
         MigrationBackupManager.injectedRestoreFailureAfterQuarantine = false
 
         XCTAssertEqual(try Data(contentsOf: localURL), partialLocal)
-        try autoreleasepool {
-            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
-            let current = try ModelContainer(
-                for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
-            )
-            XCTAssertEqual(
-                try current.mainContext.fetchCount(FetchDescriptor<EarshotSchemaV5.Podcast>()), 2,
-                "a failed restore must put the complete pre-restore store set back"
-            )
-        }
+        XCTAssertEqual(try podcastCount(), 2,
+            "a failed restore must put the complete pre-restore store set back")
+        XCTAssertNotNil(MigrationBackupManager.latestRestorableBackup(at: storeURL))
+    }
+
+    func testCleanupFailureAfterValidationNeverRollsBackRestoredStore() throws {
+        try seedV6RecoveryStore()
+        let backup = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
+        try addCurrentPodcast()
+        try Data([0xA1]).write(to: StoreMigration.localStoreURL(for: storeURL))
+
+        MigrationBackupManager.injectedQuarantineCleanupFailure = true
+        XCTAssertNoThrow(try MigrationBackupManager.restore(backup, at: storeURL))
+        MigrationBackupManager.injectedQuarantineCleanupFailure = false
+
+        let root = MigrationBackupManager.backupRoot(for: storeURL)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: root.appending(path: "restore-transaction.json").path
+        ))
+        let quarantine = try XCTUnwrap(FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil
+        ).first { $0.lastPathComponent.hasPrefix("restore-quarantine-") })
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(
+            at: quarantine, includingPropertiesForKeys: nil
+        ).isEmpty, "cleanup must have failed after deleting only part of quarantine")
+        XCTAssertEqual(try podcastCount(), 1, "validated backup must remain installed")
+
+        try MigrationBackupManager.recoverInterruptedRestore(at: storeURL)
+
+        XCTAssertEqual(try podcastCount(), 1, "cleanup retry must not restore quarantined files")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: quarantine.path))
         XCTAssertNotNil(MigrationBackupManager.latestRestorableBackup(at: storeURL))
     }
 

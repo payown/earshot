@@ -35,6 +35,7 @@ enum MigrationBackupManager {
     static let retainedBackupFreeSpaceMultiplier = 2.25
     #if DEBUG
     nonisolated(unsafe) static var injectedRestoreFailureAfterQuarantine = false
+    nonisolated(unsafe) static var injectedQuarantineCleanupFailure = false
     #endif
     private static let manifestName = "manifest.json"
     private static let snapshotName = "default.store"
@@ -69,7 +70,6 @@ enum MigrationBackupManager {
         storeURL.deletingLastPathComponent()
             .appending(path: "store-backups", directoryHint: .isDirectory)
     }
-
     /// Returns the newest verified snapshot or restorable pre-manifest backup.
     static func latestRestorableBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
         let root = backupRoot(for: storeURL)
@@ -95,7 +95,6 @@ enum MigrationBackupManager {
     static func latestRecordedBackup(at storeURL: URL) -> MigrationBackupDescriptor? {
         verifiedBackups(at: storeURL).first
     }
-
     /// A verified snapshot is a hard prerequisite. The measured V6-to-V10 peak
     /// used 3.015 times the source set in additional blocks: 1.000 snapshot,
     /// 0.987 final-store growth, 1.028 WAL/sidecars, and about 0.001 local store.
@@ -172,7 +171,6 @@ enum MigrationBackupManager {
             throw error
         }
     }
-
     static func ensureResumeSafety(at storeURL: URL) throws {
         if let retained = latestRestorableBackup(at: storeURL),
            retained.successfulTargetOpenCount == 0 {
@@ -187,7 +185,6 @@ enum MigrationBackupManager {
         }
         _ = try prepareVerifiedBackup(at: storeURL)
     }
-
     static func restore(_ backup: MigrationBackupDescriptor, at storeURL: URL) throws {
         try recoverInterruptedRestore(at: storeURL)
         guard try validate(backup) else { throw MigrationBackupError.snapshotInvalid }
@@ -234,8 +231,6 @@ enum MigrationBackupManager {
                   try sqliteIntegrityCheck(at: storeURL) else {
                 throw MigrationBackupError.snapshotInvalid
             }
-            try FileManager.default.removeItem(at: quarantine)
-            try FileManager.default.removeItem(at: journalURL)
         } catch {
             do {
                 try rollBackRestore(journal, from: quarantine, to: storeURL)
@@ -251,8 +246,9 @@ enum MigrationBackupManager {
                 )
             }
         }
+        // Validation is the commit point. Cleanup must never enter rollback.
+        finishValidatedRestore(quarantine: quarantine, journalURL: journalURL)
     }
-
     /// Completes a valid interrupted restore or reinstalls its quarantined store.
     static func recoverInterruptedRestore(at storeURL: URL) throws {
         let root = backupRoot(for: storeURL)
@@ -274,14 +270,12 @@ enum MigrationBackupManager {
            installedIdentity?.major == backup.sourceSchemaMajor,
            installedIdentity?.identifier == backup.sourceStoreIdentifier,
            (try? sqliteIntegrityCheck(at: storeURL)) == true {
-            try? FileManager.default.removeItem(at: quarantine)
-            try FileManager.default.removeItem(at: journalURL)
+            finishValidatedRestore(quarantine: quarantine, journalURL: journalURL)
             return
         }
         try rollBackRestore(journal, from: quarantine, to: storeURL)
         try FileManager.default.removeItem(at: journalURL)
     }
-
     /// A completed migration is retained through one independent later open.
     /// The first successful target open marks it; the next removes it.
     static func noteSuccessfulTargetOpen(at storeURL: URL, targetSchemaMajor: Int) {
@@ -304,7 +298,6 @@ enum MigrationBackupManager {
         guard targetSchemaMajor == self.targetSchemaMajor else { return }
         noteSuccessfulLegacyTargetOpen(at: storeURL)
     }
-
     // MARK: - Catalog
     private static func verifiedBackups(at storeURL: URL) -> [MigrationBackupDescriptor] {
         let root = backupRoot(for: storeURL)
@@ -316,7 +309,6 @@ enum MigrationBackupManager {
             return try? descriptor(for: manifest, in: directory)
         }.sorted { $0.createdAt > $1.createdAt }
     }
-
     private static func descriptor(
         for manifest: Manifest, in directory: URL
     ) throws -> MigrationBackupDescriptor {
@@ -335,7 +327,6 @@ enum MigrationBackupManager {
             successfulTargetOpenCount: manifest.successfulTargetOpenCount
         )
     }
-
     private static func legacyDescriptor(in directory: URL) throws -> MigrationBackupDescriptor {
         let url = directory.appending(path: snapshotName)
         guard FileManager.default.fileExists(atPath: url.path),
@@ -359,7 +350,6 @@ enum MigrationBackupManager {
             successfulTargetOpenCount: 0
         )
     }
-
     private static func validate(_ backup: MigrationBackupDescriptor) throws -> Bool {
         let snapshotURL = backup.directoryURL.appending(path: snapshotName)
         guard FileManager.default.fileExists(atPath: snapshotURL.path),
@@ -368,15 +358,12 @@ enum MigrationBackupManager {
         return identity.major == backup.sourceSchemaMajor
             && identity.identifier == backup.sourceStoreIdentifier
     }
-
     private static func readManifest(in directory: URL) throws -> Manifest {
         try readJSON(from: directory.appending(path: manifestName))
     }
-
     private static func writeManifest(_ manifest: Manifest, in directory: URL) throws {
         try writeJSON(manifest, to: directory.appending(path: manifestName))
     }
-
     private static func removeRedundantVerifiedBackups(
         except retained: MigrationBackupDescriptor, at storeURL: URL
     ) throws {
@@ -387,7 +374,6 @@ enum MigrationBackupManager {
             try FileManager.default.removeItem(at: backup.directoryURL)
         }
     }
-
     /// Gives valid build-163 V6–V9 backups manifest-equivalent retention without
     /// a whole-store integrity check during ordinary launch.
     private static func noteSuccessfulLegacyTargetOpen(at storeURL: URL) {
@@ -420,8 +406,28 @@ enum MigrationBackupManager {
             }
         }
     }
-
     // MARK: - Restore transaction
+    private static func finishValidatedRestore(quarantine: URL, journalURL: URL) {
+        do {
+            #if DEBUG
+            if injectedQuarantineCleanupFailure {
+                let files = try FileManager.default.contentsOfDirectory(
+                    at: quarantine, includingPropertiesForKeys: nil
+                )
+                if let first = files.first { try FileManager.default.removeItem(at: first) }
+                throw MigrationBackupError.restoreFailed("Injected quarantine cleanup failure")
+            }
+            #endif
+            if FileManager.default.fileExists(atPath: quarantine.path) {
+                try FileManager.default.removeItem(at: quarantine)
+            }
+            try FileManager.default.removeItem(at: journalURL)
+        } catch {
+            AppLog.data.error(
+                "Validated restore cleanup will be retried: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
     private static func moveLiveStoreSet(at storeURL: URL, to quarantine: URL) throws {
         for fileURL in liveStoreFiles(at: storeURL) {
             try FileManager.default.moveItem(
@@ -430,7 +436,6 @@ enum MigrationBackupManager {
             )
         }
     }
-
     private static func restoreQuarantinedStoreSet(
         from quarantine: URL, to storeURL: URL
     ) throws {
@@ -447,7 +452,6 @@ enum MigrationBackupManager {
         }
         try FileManager.default.removeItem(at: quarantine)
     }
-
     private static func rollBackRestore(
         _ journal: RestoreJournal, from quarantine: URL, to storeURL: URL
     ) throws {
@@ -461,7 +465,6 @@ enum MigrationBackupManager {
         // path and every file still in quarantine is moved back on the next run.
         try restoreQuarantinedStoreSet(from: quarantine, to: storeURL)
     }
-
     private static func install(
         _ backup: MigrationBackupDescriptor, at storeURL: URL
     ) throws {
@@ -477,7 +480,6 @@ enum MigrationBackupManager {
             try cloneOrCopy(from: sidecar, to: destination)
         }
     }
-
     private static func cloneOrCopy(from source: URL, to destination: URL) throws {
         if clonefile(source.path, destination.path, 0) == 0 { return }
         if FileManager.default.fileExists(atPath: destination.path) {
@@ -485,7 +487,6 @@ enum MigrationBackupManager {
         }
         try FileManager.default.copyItem(at: source, to: destination)
     }
-
     // MARK: - Snapshot and validation
     private static func createSQLiteSnapshot(from sourceURL: URL, to destinationURL: URL) throws {
         var source: OpaquePointer?
@@ -497,7 +498,6 @@ enum MigrationBackupManager {
             throw sqliteError(database: source, code: sourceResult)
         }
         defer { sqlite3_close(source) }
-
         let destinationResult = sqlite3_open_v2(
             destinationURL.path,
             &destination,
@@ -508,7 +508,6 @@ enum MigrationBackupManager {
             throw sqliteError(database: destination, code: destinationResult)
         }
         defer { sqlite3_close(destination) }
-
         guard let backup = sqlite3_backup_init(destination, "main", source, "main") else {
             throw sqliteError(database: destination, code: sqlite3_errcode(destination))
         }
@@ -527,7 +526,6 @@ enum MigrationBackupManager {
             )
         }
     }
-
     private static func sqliteIntegrityCheck(at url: URL) throws -> Bool {
         var database: OpaquePointer?
         let result = sqlite3_open_v2(
@@ -548,7 +546,6 @@ enum MigrationBackupManager {
               let text = sqlite3_column_text(statement, 0) else { return false }
         return String(cString: text) == "ok"
     }
-
     private static func sqliteError(
         database: OpaquePointer?, code: Int32
     ) -> MigrationBackupError {
@@ -556,7 +553,6 @@ enum MigrationBackupManager {
             ?? String(cString: sqlite3_errstr(code))
         return .snapshotFailed(code: code, message: message)
     }
-
     private static func sourceIdentity(at url: URL) throws -> (major: Int, identifier: String) {
         let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
             type: .sqlite, at: url
@@ -571,12 +567,10 @@ enum MigrationBackupManager {
         }
         return (major, storeIdentifier)
     }
-
     // MARK: - Storage accounting
     private static func requiredBytes(for sourceBytes: Int64, multiplier: Double) -> Int64 {
         Int64((Double(sourceBytes) * multiplier).rounded(.up))
     }
-
     private static func requireFreeSpace(at url: URL, bytes required: Int64) throws {
         let available = try availableBytes(at: url.deletingLastPathComponent())
         guard available >= required else {
@@ -585,7 +579,6 @@ enum MigrationBackupManager {
             )
         }
     }
-
     private static func availableBytes(at url: URL) throws -> Int64 {
         var statistics = statfs()
         guard statfs(url.path, &statistics) == 0 else {
@@ -593,45 +586,38 @@ enum MigrationBackupManager {
         }
         return Int64(statistics.f_bavail) * Int64(statistics.f_bsize)
     }
-
     private static func storeSetByteCount(at url: URL) throws -> Int64 {
         try storeFiles(at: url).reduce(into: Int64(0)) { total, fileURL in
             guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
             total += try fileByteCount(at: fileURL)
         }
     }
-
     private static func fileByteCount(at url: URL) throws -> Int64 {
         let values = try url.resourceValues(forKeys: [.fileSizeKey])
         return Int64(values.fileSize ?? 0)
     }
-
     private static func storeFiles(at url: URL) -> [URL] {
         storeSuffixes.map { suffix in
             url.deletingPathExtension().appendingPathExtension("store" + suffix)
         }
     }
-
     private static func liveStoreFiles(at storeURL: URL) -> [URL] {
         [storeURL, StoreMigration.localStoreURL(for: storeURL)]
             .flatMap { storeFiles(at: $0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
     }
-
     private static func excludeFromSystemBackup(_ url: URL) throws {
         var mutableURL = url
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try mutableURL.setResourceValues(values)
     }
-
     // MARK: - JSON
     private static func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(value).write(to: url, options: .atomic)
     }
-
     private static func readJSON<T: Decodable>(from url: URL) throws -> T {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
