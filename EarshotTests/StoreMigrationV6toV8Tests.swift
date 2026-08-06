@@ -135,6 +135,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
     override func tearDownWithError() throws {
         StoreMigration.injectedFailurePoint = nil
         StoreMigration.bypassSafetyBackupForENOSPCTest = false
+        MigrationBackupManager.injectedAvailableBytes = nil
         for url in downloadArtifacts { try? FileManager.default.removeItem(at: url) }
         try? FileManager.default.removeItem(at: directory)
     }
@@ -389,6 +390,25 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         }
     }
 
+    private func injectV6FixtureBookmark() throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+        try autoreleasepool {
+            let container = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+            var descriptor = FetchDescriptor<EarshotSchemaV5.Episode>(
+                sortBy: [SortDescriptor(\.guid)]
+            )
+            descriptor.fetchLimit = 1
+            let episode = try XCTUnwrap(container.mainContext.fetch(descriptor).first)
+            container.mainContext.insert(EarshotSchemaV5.Bookmark(
+                episode: episode, positionSeconds: 123, note: "Fixture bookmark"
+            ))
+            try container.mainContext.save()
+        }
+    }
+
     private func storeMajorVersion(at url: URL) throws -> Int? {
         let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
             type: .sqlite, at: url
@@ -438,6 +458,273 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             throw CocoaError(.fileReadUnknown)
         }
         return sqlite3_column_int64(statement, 0)
+    }
+
+    private func sqliteTextRows(at url: URL, sql: String) throws -> [String] {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_finalize(statement) }
+        var rows: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let text = sqlite3_column_text(statement, 0) else {
+                rows.append("<NULL>")
+                continue
+            }
+            rows.append(String(cString: text))
+        }
+        return rows
+    }
+
+    private struct RealV6StateSnapshot: Equatable {
+        let subscriptions: [String]
+        let folders: [String]
+        let folderMemberships: [String]
+        let episodeFolderMemberships: [String]
+        let inbox: [String]
+        let queue: [String]
+        let positions: [String]
+        let bookmarks: [String]
+        let history: [String]
+        let settings: [String]
+        let downloaded: [String]
+    }
+
+    private func realV6StateSnapshot() throws -> RealV6StateSnapshot {
+        try RealV6StateSnapshot(
+            subscriptions: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(ZTITLE), 'NULL') || char(31)
+                    || COALESCE(quote(ZAUTHOR), 'NULL') || char(31)
+                    || COALESCE(quote(ZAUTOQUEUE), 'NULL')
+                FROM ZPODCAST ORDER BY ZFEEDURL
+                """),
+            folders: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(ZNAME), 'NULL') || char(31)
+                    || COALESCE(quote(ZSORTORDER), 'NULL') || char(31)
+                    || COALESCE(quote(ZPARENT), 'NULL')
+                FROM ZPODCASTFOLDER ORDER BY ZNAME
+                """),
+            folderMemberships: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(f.ZNAME), 'NULL') || char(31)
+                    || COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(m.ZSORTORDER), 'NULL')
+                FROM ZFOLDERMEMBERSHIP m
+                LEFT JOIN ZPODCASTFOLDER f ON f.Z_PK = m.ZFOLDER
+                LEFT JOIN ZPODCAST p ON p.Z_PK = m.ZPODCAST
+                ORDER BY f.ZNAME, p.ZFEEDURL
+                """),
+            episodeFolderMemberships: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(f.ZNAME), 'NULL') || char(31)
+                    || COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(m.ZSORTORDER), 'NULL')
+                FROM ZEPISODEFOLDERMEMBERSHIP m
+                LEFT JOIN ZPODCASTFOLDER f ON f.Z_PK = m.ZFOLDER
+                LEFT JOIN ZEPISODE e ON e.Z_PK = m.ZEPISODE
+                LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                ORDER BY f.ZNAME, p.ZFEEDURL, e.ZGUID
+                """),
+            inbox: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL')
+                FROM ZEPISODE e LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                WHERE e.ZSTATUS = 'newEpisode' AND e.ZINBOXDISMISSED = 0
+                    AND (p.Z_PK IS NULL OR p.ZINBOXEXCLUDED = 0 OR p.ZINBOXINCLUDED = 1)
+                ORDER BY p.ZFEEDURL, e.ZGUID
+                """),
+            queue: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(q.ZPOSITION), 'NULL') || char(31)
+                    || COALESCE(quote(q.ZADDEDAT), 'NULL')
+                FROM ZQUEUEITEM q LEFT JOIN ZEPISODE e ON e.Z_PK = q.ZEPISODE
+                LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                ORDER BY q.ZPOSITION, p.ZFEEDURL, e.ZGUID
+                """),
+            positions: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZPOSITIONSECONDS), 'NULL')
+                FROM ZEPISODE e LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                WHERE e.ZPOSITIONSECONDS > 0 ORDER BY p.ZFEEDURL, e.ZGUID
+                """),
+            bookmarks: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(b.ZPOSITIONSECONDS), 'NULL') || char(31)
+                    || COALESCE(quote(b.ZNOTE), 'NULL')
+                FROM ZBOOKMARK b LEFT JOIN ZEPISODE e ON e.Z_PK = b.ZEPISODE
+                LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                ORDER BY p.ZFEEDURL, e.ZGUID, b.ZPOSITIONSECONDS
+                """),
+            history: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(h.ZDURATIONSECONDS), 'NULL') || char(31)
+                    || COALESCE(quote(h.ZSPEED), 'NULL') || char(31)
+                    || COALESCE(quote(h.ZDATE), 'NULL')
+                FROM ZLISTENINGSESSION h LEFT JOIN ZEPISODE e ON e.Z_PK = h.ZEPISODE
+                LEFT JOIN ZPODCAST p ON p.Z_PK = h.ZPODCAST
+                ORDER BY h.ZDATE, p.ZFEEDURL, e.ZGUID
+                """),
+            settings: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(ZKEY), 'NULL') || char(31)
+                    || COALESCE(quote(ZVALUE), 'NULL')
+                FROM ZAPPSETTING ORDER BY ZKEY
+                """),
+            downloaded: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZDOWNLOADSTATUS), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZDOWNLOADPATH), 'NULL')
+                FROM ZEPISODE e LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                WHERE e.ZDOWNLOADPATH IS NOT NULL
+                ORDER BY p.ZFEEDURL, e.ZGUID
+                """)
+        )
+    }
+
+    private func realV10StateSnapshot() throws -> RealV6StateSnapshot {
+        let localURL = StoreMigration.localStoreURL(for: storeURL)
+        return try RealV6StateSnapshot(
+            subscriptions: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(ZTITLE), 'NULL') || char(31)
+                    || COALESCE(quote(ZAUTHOR), 'NULL') || char(31)
+                    || COALESCE(quote(ZAUTOQUEUE), 'NULL')
+                FROM ZPODCAST ORDER BY ZFEEDURL
+                """),
+            folders: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(ZNAME), 'NULL') || char(31)
+                    || COALESCE(quote(ZSORTORDER), 'NULL') || char(31)
+                    || COALESCE(quote(ZPARENT), 'NULL')
+                FROM ZPODCASTFOLDER ORDER BY ZNAME
+                """),
+            folderMemberships: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(f.ZNAME), 'NULL') || char(31)
+                    || COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(m.ZSORTORDER), 'NULL')
+                FROM ZFOLDERMEMBERSHIP m
+                LEFT JOIN ZPODCASTFOLDER f ON f.Z_PK = m.ZFOLDER
+                LEFT JOIN ZPODCAST p ON p.Z_PK = m.ZPODCAST
+                ORDER BY f.ZNAME, p.ZFEEDURL
+                """),
+            episodeFolderMemberships: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(f.ZNAME), 'NULL') || char(31)
+                    || COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(m.ZSORTORDER), 'NULL')
+                FROM ZEPISODEFOLDERMEMBERSHIP m
+                LEFT JOIN ZPODCASTFOLDER f ON f.Z_PK = m.ZFOLDER
+                LEFT JOIN ZEPISODE e ON e.Z_PK = m.ZEPISODE
+                LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                ORDER BY f.ZNAME, p.ZFEEDURL, e.ZGUID
+                """),
+            inbox: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL')
+                FROM ZEPISODE e LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                WHERE e.ZSTATUS = 'newEpisode' AND e.ZINBOXDISMISSED = 0
+                    AND (p.Z_PK IS NULL OR p.ZINBOXEXCLUDED = 0 OR p.ZINBOXINCLUDED = 1)
+                ORDER BY p.ZFEEDURL, e.ZGUID
+                """),
+            queue: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(q.ZPOSITION), 'NULL') || char(31)
+                    || COALESCE(quote(q.ZADDEDAT), 'NULL')
+                FROM ZQUEUEITEM q LEFT JOIN ZEPISODE e ON e.Z_PK = q.ZEPISODE
+                LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                ORDER BY q.ZPOSITION, p.ZFEEDURL, e.ZGUID
+                """),
+            positions: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZPOSITIONSECONDS), 'NULL')
+                FROM ZEPISODE e LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                WHERE e.ZPOSITIONSECONDS > 0 ORDER BY p.ZFEEDURL, e.ZGUID
+                """),
+            bookmarks: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(b.ZPOSITIONSECONDS), 'NULL') || char(31)
+                    || COALESCE(quote(b.ZNOTE), 'NULL')
+                FROM ZBOOKMARK b LEFT JOIN ZEPISODE e ON e.Z_PK = b.ZEPISODE
+                LEFT JOIN ZPODCAST p ON p.Z_PK = e.ZPODCAST
+                ORDER BY p.ZFEEDURL, e.ZGUID, b.ZPOSITIONSECONDS
+                """),
+            history: sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(p.ZFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(e.ZGUID), 'NULL') || char(31)
+                    || COALESCE(quote(h.ZDURATIONSECONDS), 'NULL') || char(31)
+                    || COALESCE(quote(h.ZSPEED), 'NULL') || char(31)
+                    || COALESCE(quote(h.ZDATE), 'NULL')
+                FROM ZLISTENINGSESSION h LEFT JOIN ZEPISODE e ON e.Z_PK = h.ZEPISODE
+                LEFT JOIN ZPODCAST p ON p.Z_PK = h.ZPODCAST
+                ORDER BY h.ZDATE, p.ZFEEDURL, e.ZGUID
+                """),
+            settings: (sqliteTextRows(at: storeURL, sql: """
+                SELECT COALESCE(quote(ZKEY), 'NULL') || char(31)
+                    || COALESCE(quote(ZVALUE), 'NULL')
+                FROM ZAPPSETTING ORDER BY ZKEY
+                """) + sqliteTextRows(at: localURL, sql: """
+                SELECT COALESCE(quote(ZKEY), 'NULL') || char(31)
+                    || COALESCE(quote(ZVALUE), 'NULL')
+                FROM ZLOCALAPPSETTING
+                WHERE ZKEY NOT LIKE '__earshot_%' ORDER BY ZKEY
+                """)).sorted(),
+            downloaded: sqliteTextRows(at: localURL, sql: """
+                SELECT COALESCE(quote(ZPODCASTFEEDURL), 'NULL') || char(31)
+                    || COALESCE(quote(ZEPISODEGUID), 'NULL') || char(31)
+                    || COALESCE(quote(ZDOWNLOADSTATUSRAW), 'NULL') || char(31)
+                    || COALESCE(quote(ZDOWNLOADPATH), 'NULL')
+                FROM ZLOCALEPISODESTATE WHERE ZDOWNLOADPATH IS NOT NULL
+                ORDER BY ZPODCASTFEEDURL, ZEPISODEGUID
+                """)
+        )
+    }
+
+    private func assertRealStatePreserved(
+        _ actual: RealV6StateSnapshot,
+        _ expected: RealV6StateSnapshot,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let comparisons: [(String, [String], [String])] = [
+            ("subscriptions", actual.subscriptions, expected.subscriptions),
+            ("folders", actual.folders, expected.folders),
+            ("folder memberships", actual.folderMemberships, expected.folderMemberships),
+            ("episode folder memberships", actual.episodeFolderMemberships,
+             expected.episodeFolderMemberships),
+            ("Inbox", actual.inbox, expected.inbox),
+            ("Queue", actual.queue, expected.queue),
+            ("playback positions", actual.positions, expected.positions),
+            ("bookmarks", actual.bookmarks, expected.bookmarks),
+            ("history", actual.history, expected.history),
+            ("settings", actual.settings, expected.settings),
+            ("downloaded state", actual.downloaded, expected.downloaded),
+        ]
+        for (name, actualRows, expectedRows) in comparisons {
+            let mismatch = zip(actualRows, expectedRows).enumerated().first { entry in
+                entry.element.0 != entry.element.1
+            }?.offset
+            let mismatchDescription = mismatch.map(String.init) ?? "count-only"
+            XCTAssertTrue(
+                actualRows == expectedRows,
+                "\(name) mismatch: actual \(actualRows.count), expected "
+                    + "\(expectedRows.count), first differing index "
+                    + mismatchDescription,
+                file: file,
+                line: line
+            )
+        }
     }
 
     private func assertEpisodeSaveSurvivesReopen(
@@ -824,6 +1111,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try autoreleasepool { _ = try StoreMigration.openOrMigrate(at: storeURL) }
         let backupRoot = MigrationBackupManager.backupRoot(for: storeURL)
         try? FileManager.default.removeItem(at: backupRoot)
+        MigrationBackupManager.injectedAvailableBytes = 0
         var progress: [StoreMigrationProgress] = []
         let reopened = try StoreMigration.openOrMigrate(at: storeURL) {
             progress.append($0)
@@ -1272,6 +1560,19 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             throw XCTSkip("Set TEST_RUNNER_\(variable) to the verified V6 backup directory")
         }
         try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+        try injectV6FixtureBookmark()
+        let sourceState = try realV6StateSnapshot()
+        XCTAssertEqual(sourceState.subscriptions.count, 666)
+        XCTAssertEqual(sourceState.folders.count, 4)
+        XCTAssertEqual(sourceState.folderMemberships.count, 5)
+        XCTAssertEqual(sourceState.episodeFolderMemberships.count, 1)
+        XCTAssertEqual(sourceState.inbox.count, 2_548)
+        XCTAssertEqual(sourceState.queue.count, 42)
+        XCTAssertEqual(sourceState.positions.count, 14)
+        XCTAssertEqual(sourceState.bookmarks.count, 1)
+        XCTAssertEqual(sourceState.history.count, 713)
+        XCTAssertEqual(sourceState.settings.count, 16)
+        XCTAssertEqual(sourceState.downloaded.count, 43)
         try materializeV6FixtureDownloads()
         let beforeBytes = try storeSetSize()
         let diskSampler = MigrationDiskSampler(url: directory)
@@ -1281,6 +1582,8 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
         let minimumAvailableBytes = diskSampler.stop()
         let context = migrated.mainContext
+        let peakAdditionalBytes = baselineAvailableBytes - minimumAvailableBytes
+        let peakAdditionalMultiple = Double(peakAdditionalBytes) / Double(beforeBytes)
 
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 666)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 241_759)
@@ -1303,18 +1606,157 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
         XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
         XCTAssertEqual(try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"])
+        assertRealStatePreserved(try realV10StateSnapshot(), sourceState)
         let afterBytes = try storeSetSize()
         print(String(format:
             "REALV6MIGRATION|seconds|%.3f|beforeMB|%.1f|afterMB|%.1f|peakAdditionalMB|%.1f|peakAdditionalMultiple|%.3f",
             elapsed, Double(beforeBytes) / 1_048_576, Double(afterBytes) / 1_048_576
-                , Double(baselineAvailableBytes - minimumAvailableBytes) / 1_048_576,
-            Double(baselineAvailableBytes - minimumAvailableBytes) / Double(beforeBytes)
+                , Double(peakAdditionalBytes) / 1_048_576,
+            peakAdditionalMultiple
         ))
         XCTAssertLessThan(
             elapsed, 15,
             "Aged-store migration leaves too little margin inside the 20-second launch watchdog"
         )
+        XCTAssertLessThan(
+            peakAdditionalMultiple, MigrationBackupManager.initialFreeSpaceMultiplier,
+            "The initial disk gate must exceed the observed real-fixture peak"
+        )
         try assertEpisodeSaveSurvivesReopen(migrated)
+    }
+
+    func testRealBuild161V6InsufficientSpaceReportsExactShortfallAndRetries() throws {
+        let variable = "SYNC_MIGRATION_REAL_V6_DIRECTORY"
+        guard let path = ProcessInfo.processInfo.environment[variable] else {
+            throw XCTSkip("Set TEST_RUNNER_\(variable) to the verified V6 backup directory")
+        }
+        try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+        try injectV6FixtureBookmark()
+        let sourceState = try realV6StateSnapshot()
+        try materializeV6FixtureDownloads()
+        let sourceBytes = try storeSetSize()
+        let requiredBytes = Int64(
+            (Double(sourceBytes) * MigrationBackupManager.initialFreeSpaceMultiplier)
+                .rounded(.up)
+        )
+        let expectedShortfall: Int64 = 512_000_001
+        let availableBytes = requiredBytes - expectedShortfall
+        MigrationBackupManager.injectedAvailableBytes = availableBytes
+
+        let firstLoad = ModelContainerFactory.load(at: storeURL)
+        guard case .recovery(.backupUnavailable(
+            let reportedRequired?, let reportedAvailable?
+        )) = firstLoad else {
+            return XCTFail("Expected the storage recovery path, got \(firstLoad)")
+        }
+        XCTAssertEqual(reportedRequired, requiredBytes)
+        XCTAssertEqual(reportedAvailable, availableBytes)
+        XCTAssertEqual(reportedRequired - reportedAvailable, expectedShortfall)
+        XCTAssertEqual(
+            StoreRecoveryScreen.formattedStorageRequirement(bytes: expectedShortfall),
+            "513 MB"
+        )
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 6)
+        assertRealStatePreserved(try realV6StateSnapshot(), sourceState)
+        XCTAssertNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))
+
+        // Simulate the in-app storage action making the reported requirement
+        // available, then drive the same launch retry entry point.
+        MigrationBackupManager.injectedAvailableBytes = requiredBytes
+        let retryLoad = ModelContainerFactory.load(at: storeURL)
+        guard case .ready(let migrated) = retryLoad else {
+            return XCTFail("Expected retry to migrate successfully, got \(retryLoad)")
+        }
+        assertRealStatePreserved(try realV10StateSnapshot(), sourceState)
+        print(
+            "REALV6GATE|requiredBytes|\(requiredBytes)|availableBytes|\(availableBytes)"
+                + "|shortfallBytes|\(expectedShortfall)|spokenShortfall|513 MB"
+        )
+        try assertEpisodeSaveSurvivesReopen(migrated)
+    }
+
+    func testRealBuild161V6InjectedInflightDownloadsMigrateAndSave() throws {
+        let variable = "SYNC_MIGRATION_REAL_V6_DIRECTORY"
+        guard let path = ProcessInfo.processInfo.environment[variable] else {
+            throw XCTSkip("Set TEST_RUNNER_\(variable) to the verified V6 backup directory")
+        }
+        try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+        let identities: [(guid: String, status: DownloadStatus)] = try autoreleasepool {
+            let schema = Schema(versionedSchema: EarshotSchemaV6.self)
+            let container = try ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(schema: schema, url: storeURL)
+            )
+            var descriptor = FetchDescriptor<EarshotSchemaV5.Episode>(
+                predicate: #Predicate { $0.downloadPath == nil }
+            )
+            descriptor.fetchLimit = 2
+            let episodes = try container.mainContext.fetch(descriptor)
+            XCTAssertEqual(episodes.count, 2)
+            let statuses: [(DownloadStatus, ActiveDownloadState)] = [
+                (.pending, .pending), (.downloading, .downloading),
+            ]
+            for (episode, state) in zip(episodes, statuses) {
+                episode.downloadStatus = state.0
+                container.mainContext.insert(EarshotSchemaV5.ActiveDownload(
+                    episode: episode, state: state.1
+                ))
+            }
+            try container.mainContext.save()
+            return zip(episodes, statuses).map { ($0.0.guid, $0.1.0) }
+        }
+
+        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        let rows = try migrated.mainContext.fetch(FetchDescriptor<LocalEpisodeState>())
+        for identity in identities {
+            let row = try XCTUnwrap(rows.first { $0.episodeGUID == identity.guid })
+            XCTAssertEqual(row.downloadStatus, identity.status)
+        }
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
+        XCTAssertEqual(
+            try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"]
+        )
+        print(
+            "REALV6INFLIGHT|pending|1|downloading|1|migratedRows|\(identities.count)"
+        )
+        try assertEpisodeSaveSurvivesReopen(migrated)
+    }
+
+    func testRealBuild161V6ForcedFailureRestoresBackupAndRetries() throws {
+        let variable = "SYNC_MIGRATION_REAL_V6_DIRECTORY"
+        guard let path = ProcessInfo.processInfo.environment[variable] else {
+            throw XCTSkip("Set TEST_RUNNER_\(variable) to the verified V6 backup directory")
+        }
+        try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+        try injectV6FixtureBookmark()
+        let sourceState = try realV6StateSnapshot()
+        try materializeV6FixtureDownloads()
+        StoreMigration.injectedFailurePoint = .afterSplitMarker
+
+        XCTAssertThrowsError(try autoreleasepool {
+            _ = try StoreMigration.openOrMigrate(at: storeURL)
+        }) { error in
+            XCTAssertEqual(
+                error as? StoreMigration.InjectedMigrationFailure,
+                .init(point: .afterSplitMarker)
+            )
+        }
+        StoreMigration.injectedFailurePoint = nil
+        let backup = try XCTUnwrap(MigrationBackupManager.latestRestorableBackup(at: storeURL))
+        XCTAssertEqual(backup.sourceSchemaMajor, 6)
+        XCTAssertEqual(backup.targetSchemaMajor, 10)
+
+        try MigrationBackupManager.restore(backup, at: storeURL)
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 6)
+        XCTAssertEqual(try integrityCheck(at: storeURL), ["ok"])
+        assertRealStatePreserved(try realV6StateSnapshot(), sourceState)
+
+        let retried = try StoreMigration.openOrMigrate(at: storeURL)
+        assertRealStatePreserved(try realV10StateSnapshot(), sourceState)
+        print(
+            "REALV6RESTORE|backupBytes|\(backup.byteCount)|restoredSchema|6|retrySchema|10"
+        )
+        try assertEpisodeSaveSurvivesReopen(retried)
     }
 
     func testRealBuild161V6FixtureOnActuallyFullVolume() throws {
