@@ -75,6 +75,68 @@ final class DownloadManager {
         _ = session
     }
 
+    /// Connects the delegate while the durable marker still suppresses terminal
+    /// events, drains old tasks, repeats the filesystem sweep, then reconciles
+    /// SwiftData before the ready UI is published.
+    static func prepareForReadyContainer(_ container: ModelContainer) async {
+        guard RecoveryDownloadRemoval.isPending else {
+            activate(container: container)
+            return
+        }
+        self.container = container
+        delegate.installRecoverySuppressionHandler()
+        installEventsFinishedHandler()
+        _ = session
+        guard await cancelAllTasksAndWaitForRecovery() else {
+            AppLog.networking.error(
+                "Downloaded-audio recovery is waiting for background tasks to stop"
+            )
+            return
+        }
+        if let directory = try? DownloadPaths.downloadsDirectory() {
+            _ = await Task.detached(priority: .utility) {
+                RecoveryDownloadRemoval.removeContents(of: directory)
+            }.value
+        }
+        await Task.yield()
+        do {
+            try RecoveryDownloadRemoval.reconcileStoreIfNeeded(container: container)
+            activate(container: container)
+        } catch {
+            AppLog.networking.error(
+                "Downloaded-audio recovery reconciliation will retry next launch: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    static func recoveryDownloadUsage() async -> Int64 {
+        guard let directory = try? DownloadPaths.downloadsDirectory() else { return 0 }
+        return await Task.detached(priority: .utility) {
+            RecoveryDownloadRemoval.allocatedBytes(in: directory)
+        }.value
+    }
+
+    static func removeDownloadedAudioForRecovery() async throws -> RecoveryDownloadRemovalResult {
+        try await Task.detached(priority: .utility) {
+            try RecoveryDownloadRemoval.begin()
+        }.value
+        await cancelAllTasks()
+        let directory = try DownloadPaths.downloadsDirectory()
+        let sweep = await Task.detached(priority: .utility) {
+            RecoveryDownloadRemoval.removeContents(of: directory)
+        }.value
+        try RecoveryDownloadRemoval.failIfInjected(at: .afterFileDeletion)
+        let available = try await Task.detached(priority: .utility) {
+            try MigrationBackupManager.availableBytes(at: directory)
+        }.value
+        return RecoveryDownloadRemovalResult(
+            freedBytes: sweep.freedBytes,
+            availableBytes: available,
+            remainingDownloadBytes: sweep.remainingBytes,
+            failedItemCount: sweep.failedItemCount
+        )
+    }
+
     /// Reconnects a system-launched background session without requiring the
     /// store to be ready. Terminal events are journaled by the delegate and
     /// replayed when ``activate(container:)`` installs the final container.
@@ -402,12 +464,31 @@ final class DownloadManager {
 
     /// Cancels every task on the shared background session. Used by
     /// ``clearAllDownloads()`` so no in-flight transfer completes after a clear.
-    private static func cancelAllTasks() async {
-        await withCheckedContinuation { continuation in
-            session.getAllTasks { tasks in
-                for task in tasks { task.cancel() }
-                continuation.resume()
+    static func cancelAllTasks() async {
+        for task in await allTasks() { task.cancel() }
+    }
+
+    /// A recovery marker may be removed only after cancellation callbacks have
+    /// crossed the delegate queue. If the session does not quiesce promptly, the
+    /// marker stays durable and the whole idempotent reconciliation retries on
+    /// the next launch.
+    static func cancelAllTasksAndWaitForRecovery() async -> Bool {
+        await cancelAllTasks()
+        for _ in 0..<250 {
+            if await allTasks().isEmpty {
+                await withCheckedContinuation { continuation in
+                    session.delegateQueue.addOperation { continuation.resume() }
+                }
+                if await allTasks().isEmpty { return true }
             }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return false
+    }
+
+    private static func allTasks() async -> [URLSessionTask] {
+        await withCheckedContinuation { continuation in
+            session.getAllTasks { continuation.resume(returning: $0) }
         }
     }
 
@@ -496,8 +577,15 @@ final class DownloadManager {
 
     // MARK: Terminal events (delegate → main actor → SwiftData)
 
-    private static func handle(_ event: PendingDownloadTerminalEvent) {
+    static func handle(_ event: PendingDownloadTerminalEvent) {
         defer { delegate.acknowledge(event) }
+        if RecoveryDownloadRemoval.isPending {
+            if case .finished(let fileName) = event.outcome,
+               let url = DownloadPaths.resolveLocalURL(storedValue: fileName) {
+                try? FileManager.default.removeItem(at: url)
+            }
+            return
+        }
         switch event.outcome {
         case .finished(let fileName):
             complete(taskKey: event.taskKey, fileName: fileName)

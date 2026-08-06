@@ -30,10 +30,13 @@ struct StoreRecoveryScreen: View {
 
     static let retryLabel = "Try preparing again"
     static let retryHint = "Checks your library again without closing Earshot."
+    static let downloadConfirmationMessage =
+        "This deletes all downloaded episode audio from this device. Most can be downloaded again, though some podcasts remove older episodes from their feed. Your library, subscriptions, and listening history will not be affected."
 
     @Environment(AppRuntime.self) private var runtime
     @State private var confirmingReset = false
     @State private var confirmingRestore = false
+    @State private var confirmingDownloadRemoval = false
     @State private var didReset = false
     @State private var backupName: String?
     /// Lands VoiceOver on the heading at launch. This screen replaces the main UI
@@ -45,22 +48,28 @@ struct StoreRecoveryScreen: View {
     /// Moves VoiceOver to the result text after a reset, so focus isn't orphaned
     /// on the Reset button that was just removed from the tree.
     @AccessibilityFocusState private var focusedDone: Bool
+    @AccessibilityFocusState private var focusedStorageResult: Bool
     /// Decorative glyph size, scaled with Dynamic Type so it grows for low-vision
     /// users alongside the text (the glyph itself is hidden from VoiceOver).
     @ScaledMetric private var iconSize: CGFloat = 52
 
     var body: some View {
-        VStack(spacing: Spacing.xl) {
-            Image(systemName: iconName)
-                .font(.system(size: iconSize))
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
+        ScrollView {
+            VStack(spacing: Spacing.xl) {
+                Image(systemName: iconName)
+                    .font(.system(size: iconSize))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
 
-            status
+                status
 
-            actions
+                storageSection
+
+                actions
+            }
+            .padding(Spacing.xl)
+            .frame(maxWidth: .infinity)
         }
-        .padding(Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             // Cold-launch screen replace: VoiceOver's auto-focus is unreliable
@@ -72,7 +81,17 @@ struct StoreRecoveryScreen: View {
                 focusedHeader = true
             }
         }
-        .task { await runtime.discoverRecoveryBackupIfNeeded() }
+        .task {
+            await runtime.discoverRecoveryBackupIfNeeded()
+            await runtime.loadRecoveryDownloadUsageIfNeeded()
+        }
+        .onChange(of: runtime.recoveryStorageFocusRevision) { _, _ in
+            focusedHeader = false
+            focusedStorageResult = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                focusedStorageResult = true
+            }
+        }
         .onChange(of: runtime.backupRestorePhase) { _, phase in
             guard phase != .idle else { return }
             focusedRestoreStatus = false
@@ -95,13 +114,15 @@ struct StoreRecoveryScreen: View {
 
     @ViewBuilder
     private var status: some View {
-        if isRestoreResult {
+        if isRestoreResult || storageResultReceivesFocus {
             VStack(spacing: Spacing.md) {
                 statusTitle
                 statusMessage
             }
             .accessibilityElement(children: .combine)
-            .accessibilityFocused($focusedRestoreStatus)
+            .accessibilityFocused(
+                isRestoreResult ? $focusedRestoreStatus : $focusedStorageResult
+            )
         } else {
             VStack(spacing: Spacing.md) {
                 statusTitle
@@ -130,7 +151,35 @@ struct StoreRecoveryScreen: View {
     // MARK: Actions
 
     @ViewBuilder
+    private var storageSection: some View {
+        if let storage = runtime.recoveryStorageState,
+           storage.freedBytes == nil,
+           let downloadBytes = storage.downloadBytes,
+           downloadBytes > 0 {
+            VStack(spacing: Spacing.sm) {
+                Text("Downloaded audio")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                Text(Self.downloadSectionMessage(bytes: downloadBytes))
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var actions: some View {
+        if state.isBackupUnavailable, runtime.recoveryStorageState != nil {
+            storageActions
+        } else {
+            recoveryActions
+        }
+    }
+
+    @ViewBuilder
+    private var recoveryActions: some View {
         switch runtime.backupRestorePhase {
         case .restoring:
             ProgressView()
@@ -157,6 +206,72 @@ struct StoreRecoveryScreen: View {
                 resetAction
             }
         }
+    }
+
+    @ViewBuilder
+    private var storageActions: some View {
+        if runtime.isRemovingRecoveryDownloads {
+            ProgressView()
+                .accessibilityHidden(true)
+        } else if let storage = runtime.recoveryStorageState {
+            if storage.hasEnoughSpace {
+                Button("Prepare library") { runtime.retryLaunch() }
+                    .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
+                    .buttonStyle(.borderedProminent)
+            } else {
+                switch storage.deletionOutcome {
+                case .some(.partial):
+                    deleteDownloadedAudioButton(label: "Try deleting remaining audio")
+                    checkAvailableSpaceButton
+                case .some(.none):
+                    deleteDownloadedAudioButton(label: "Try deleting again")
+                    checkAvailableSpaceButton
+                case .some(.complete):
+                    checkAvailableSpaceButton
+                case nil:
+                    if let bytes = storage.downloadBytes {
+                        if bytes > 0 {
+                            deleteDownloadedAudioButton(label: "Delete downloaded audio")
+                        } else {
+                            checkAvailableSpaceButton
+                        }
+                    } else {
+                        ProgressView()
+                            .accessibilityHidden(true)
+                    }
+                }
+            }
+        }
+    }
+
+    private func deleteDownloadedAudioButton(label: String) -> some View {
+        Button(role: .destructive) { confirmingDownloadRemoval = true } label: {
+            Text(label)
+                .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
+        }
+        .buttonStyle(.borderedProminent)
+        .confirmationDialog(
+            Self.downloadConfirmationTitle(
+                bytes: runtime.recoveryStorageState?.downloadBytes ?? 0
+            ),
+            isPresented: $confirmingDownloadRemoval,
+            titleVisibility: .visible
+        ) {
+            Button("Delete downloaded audio", role: .destructive) {
+                Task { await runtime.removeRecoveryDownloads() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(Self.downloadConfirmationMessage)
+        }
+    }
+
+    private var checkAvailableSpaceButton: some View {
+        Button("Check available space") {
+            Task { await runtime.checkRecoveryStorage(manual: true) }
+        }
+        .frame(maxWidth: .infinity, minHeight: Spacing.minTouchTarget)
+        .buttonStyle(.bordered)
     }
 
     private var retryButton: some View {
@@ -283,12 +398,14 @@ struct StoreRecoveryScreen: View {
                 return "Preparation stopped before Earshot could open your library. A backup from just before preparation is available."
             }
             return "Preparation stopped before Earshot could open your library. Your current library files have not been deleted."
-        case .backupUnavailable(let requiredFreeSpaceBytes):
-            if let requiredFreeSpaceBytes {
-                let amount = Self.formattedStorageRequirement(
-                    bytes: requiredFreeSpaceBytes
-                )
-                return "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Earshot needs about \(amount) free to prepare your library safely. Free up space, then try again."
+        case .backupUnavailable(
+            let requiredFreeSpaceBytes, let availableFreeSpaceBytes
+        ):
+            if let requiredFreeSpaceBytes, let availableFreeSpaceBytes {
+                let amount = Self.formattedStorageRequirement(bytes: max(
+                    0, requiredFreeSpaceBytes - availableFreeSpaceBytes
+                ))
+                return "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Earshot needs about \(amount) more free space to prepare your library safely. Free up space, then try again."
             }
             return "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Free up space, then try again."
         case .storeNewerThanApp:
@@ -309,12 +426,69 @@ struct StoreRecoveryScreen: View {
         locale: Locale = .current
     ) -> String {
         let clampedBytes = max(bytes, 0)
-        if clampedBytes < 100_000_000 {
+        if clampedBytes < 1_000_000_000 {
             return "\(max(1, (clampedBytes + 999_999) / 1_000_000)) MB"
         }
         let tenths = (clampedBytes + 99_999_999) / 100_000_000
         guard !tenths.isMultiple(of: 10) else { return "\(tenths / 10) GB" }
         return "\(tenths / 10)\(locale.decimalSeparator ?? ".")\(tenths % 10) GB"
+    }
+
+    /// Approximate allocated sizes round down so deletion results never claim
+    /// more space than the filesystem actually released.
+    static func formattedApproximateBytes(
+        _ bytes: Int64,
+        locale: Locale = .current
+    ) -> String {
+        let clampedBytes = max(bytes, 0)
+        if clampedBytes < 1_000_000_000 {
+            return "\(clampedBytes / 1_000_000) MB"
+        }
+        let tenths = clampedBytes / 100_000_000
+        guard !tenths.isMultiple(of: 10) else { return "\(tenths / 10) GB" }
+        return "\(tenths / 10)\(locale.decimalSeparator ?? ".")\(tenths % 10) GB"
+    }
+
+    static func downloadSectionMessage(bytes: Int64) -> String {
+        "Downloaded episodes are using about \(formattedApproximateBytes(bytes)) on this device. Most can be downloaded again, though some podcasts remove older episodes from their feed. Your library, subscriptions, and listening history will not be affected."
+    }
+
+    static func downloadConfirmationTitle(bytes: Int64) -> String {
+        "Delete about \(formattedApproximateBytes(bytes)) of downloaded audio?"
+    }
+
+    static func storageTitle(for storage: RecoveryStorageState) -> String {
+        if storage.hasEnoughSpace { return "Enough space is available" }
+        switch storage.deletionOutcome {
+        case .some(.partial): return "Some downloaded audio couldn't be deleted"
+        case .some(.none): return "Downloaded audio couldn't be deleted"
+        case .some(.complete): return "Earshot still needs more storage"
+        case nil: return "Earshot needs more storage"
+        }
+    }
+
+    static func storageMessage(for storage: RecoveryStorageState) -> String {
+        let remaining = formattedStorageRequirement(bytes: storage.remainingBytes)
+        guard let freedBytes = storage.freedBytes,
+              let outcome = storage.deletionOutcome else {
+            if storage.hasEnoughSpace {
+                return "You now have enough space to prepare your library."
+            }
+            return "Earshot couldn't create a safety backup, so preparation did not start. Your library files were not changed. Earshot needs about \(remaining) more free space to prepare your library safely. Free up space, then try again."
+        }
+        let freed = formattedApproximateBytes(freedBytes)
+        switch (outcome, storage.hasEnoughSpace) {
+        case (.complete, true):
+            return "Earshot freed about \(freed). You now have enough space to prepare your library. Your library, subscriptions, and listening history were not affected."
+        case (.complete, false):
+            return "Earshot freed about \(freed), but Earshot still needs about \(remaining) more. Your library, subscriptions, and listening history were not affected. Free more space, then return to Earshot."
+        case (.partial, true):
+            return "Earshot freed about \(freed). Some downloaded audio could not be deleted, but you now have enough space to prepare your library. Your library, subscriptions, and listening history were not affected."
+        case (.partial, false):
+            return "Earshot freed about \(freed), but Earshot still needs about \(remaining) more. Some downloaded audio could not be deleted. Your library, subscriptions, and listening history were not affected."
+        case (.none, _):
+            return "Earshot couldn't free space from downloaded audio. Earshot still needs about \(remaining) more. Your library, subscriptions, and listening history were not affected."
+        }
     }
 
     private var resetHint: String {
@@ -358,7 +532,8 @@ struct StoreRecoveryScreen: View {
 
     private var displayTitle: String {
         switch runtime.backupRestorePhase {
-        case .idle: return title
+        case .idle:
+            return runtime.recoveryStorageState.map(Self.storageTitle(for:)) ?? title
         case .restoring: return "Restoring library"
         case .restored: return "Library backup restored"
         case .failed: return "Backup couldn't be restored"
@@ -368,7 +543,7 @@ struct StoreRecoveryScreen: View {
     private var displayMessage: String {
         switch runtime.backupRestorePhase {
         case .idle:
-            return message
+            return runtime.recoveryStorageState.map(Self.storageMessage(for:)) ?? message
         case .restoring:
             return "Checking and restoring your backup. Keep Earshot open."
         case .restored:
@@ -376,6 +551,11 @@ struct StoreRecoveryScreen: View {
         case .failed:
             return "Your current library files were not changed, and the backup is still available. Free up storage and try restoring again."
         }
+    }
+
+    private var storageResultReceivesFocus: Bool {
+        guard let storage = runtime.recoveryStorageState else { return false }
+        return storage.freedBytes != nil || storage.hasEnoughSpace
     }
 
     var restoreConfirmationMessage: String {

@@ -101,26 +101,44 @@ final class DownloadEventJournal: @unchecked Sendable {
         persistLocked()
     }
 
+    func acknowledgeAllForRecovery() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        let retained = events
+        events.removeAll()
+        do {
+            try persistLockedThrowing()
+        } catch {
+            events = retained
+            throw error
+        }
+    }
+
     private func persistLocked() {
         do {
-            if events.isEmpty {
-                try? FileManager.default.removeItem(at: url)
-                return
-            }
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let data = try JSONEncoder().encode(PersistedJournal(
-                version: Self.currentVersion,
-                events: events
-            ))
-            try data.write(to: url, options: .atomic)
+            try persistLockedThrowing()
         } catch {
             AppLog.networking.error(
                 "Could not persist pending download event: \(error.localizedDescription, privacy: .public)"
             )
         }
+    }
+
+    private func persistLockedThrowing() throws {
+        if events.isEmpty {
+            guard FileManager.default.fileExists(atPath: url.path) else { return }
+            try FileManager.default.removeItem(at: url)
+            return
+        }
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let data = try JSONEncoder().encode(PersistedJournal(
+            version: Self.currentVersion,
+            events: events
+        ))
+        try data.write(to: url, options: .atomic)
     }
 }
 
@@ -154,12 +172,29 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
     /// Installs the store-aware handler and replays anything iOS delivered before
     /// the real ModelContainer became available.
     func installTerminalHandler(
+        replayingPendingEvents: Bool = true,
         _ handler: @escaping @Sendable (PendingDownloadTerminalEvent) -> Void
     ) {
         handlerLock.lock()
         terminalHandler = handler
         handlerLock.unlock()
-        for event in journal.pendingEvents() { handler(event) }
+        if replayingPendingEvents {
+            for event in journal.pendingEvents() { handler(event) }
+        }
+    }
+
+    /// Recovery cannot queue store-aware MainActor work that might execute after
+    /// the marker is removed. This handler is filesystem-only, runs inline on
+    /// the delegate caller, and leaves old journal entries for the transaction's
+    /// explicit acknowledgement after its store save.
+    func installRecoverySuppressionHandler() {
+        installTerminalHandler(replayingPendingEvents: false) { [weak self] event in
+            if case .finished(let fileName) = event.outcome,
+               let url = DownloadPaths.resolveLocalURL(storedValue: fileName) {
+                try? FileManager.default.removeItem(at: url)
+            }
+            self?.acknowledge(event)
+        }
     }
 
     /// Installs the process-level background-session completion callback. It is
@@ -192,6 +227,10 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         didFinishDownloadingTo location: URL
     ) {
         guard let taskKey = downloadTask.taskDescription else { return }
+        if RecoveryDownloadRemoval.isPending {
+            record(taskKey: taskKey, outcome: .failed)
+            return
+        }
         guard let sourceURL = downloadTask.originalRequest?.url ?? downloadTask.currentRequest?.url else {
             record(taskKey: taskKey, outcome: .failed)
             return

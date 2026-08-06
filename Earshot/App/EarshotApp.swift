@@ -71,6 +71,10 @@ typealias StoreLaunchOperation = @MainActor (
 ) async -> StoreLoad
 
 typealias LaunchSleepOperation = @Sendable (Duration) async throws -> Void
+typealias RecoveryDownloadUsageOperation = @MainActor @Sendable () async -> Int64
+typealias RecoveryDownloadRemovalOperation = @MainActor @Sendable () async throws
+    -> RecoveryDownloadRemovalResult
+typealias RecoveryCapacityOperation = @MainActor @Sendable () async throws -> Int64
 
 /// Owns process-lifetime services and the container-dependent launch phase.
 /// Keeping these together makes the order explicit: bind process-wide download
@@ -119,11 +123,17 @@ final class AppRuntime {
     private(set) var launchAttemptCount = 0
     private(set) var recoveryBackup: MigrationBackupDescriptor?
     private(set) var backupRestorePhase: BackupRestorePhase = .idle
+    private(set) var recoveryStorageState: RecoveryStorageState?
+    private(set) var isRemovingRecoveryDownloads = false
+    private(set) var recoveryStorageFocusRevision = 0
 
     private let mode: Mode
     private let launchOperation: StoreLaunchOperation
     private let launchAnnouncer: any LaunchAnnouncing
     private let launchSleep: LaunchSleepOperation
+    private let recoveryDownloadUsage: RecoveryDownloadUsageOperation
+    private let recoveryDownloadRemoval: RecoveryDownloadRemovalOperation
+    private let recoveryCapacity: RecoveryCapacityOperation
     private var generation = 0
     private var processServicesStarted = false
     private var entitlementContainer: ModelContainer?
@@ -144,6 +154,11 @@ final class AppRuntime {
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var backupRestoreTask: Task<Void, Never>?
     private var backupRestoreHeartbeatTask: Task<Void, Never>?
+    private var recoveryUsageLoaded = false
+    private var recoveryCheckInProgress = false
+    private var recoveryCheckToken: String?
+    private var recoveryForegroundCheckCount = 0
+    private var preparedDownloadContainer: ModelContainer?
 
     init(
         load: StoreLoad? = nil,
@@ -152,6 +167,17 @@ final class AppRuntime {
         recoveryBackup: MigrationBackupDescriptor? = nil,
         launchOperation: StoreLaunchOperation? = nil,
         launchAnnouncer: (any LaunchAnnouncing)? = nil,
+        recoveryDownloadUsage: @escaping RecoveryDownloadUsageOperation = {
+            await DownloadManager.recoveryDownloadUsage()
+        },
+        recoveryDownloadRemoval: @escaping RecoveryDownloadRemovalOperation = {
+            try await DownloadManager.removeDownloadedAudioForRecovery()
+        },
+        recoveryCapacity: @escaping RecoveryCapacityOperation = {
+            try await Task.detached(priority: .utility) {
+                try MigrationBackupManager.availableBytes(at: .applicationSupportDirectory)
+            }.value
+        },
         launchSleep: @escaping LaunchSleepOperation = { duration in
             try await Task.sleep(for: duration)
         }
@@ -163,6 +189,9 @@ final class AppRuntime {
         self.recoveryBackup = recoveryBackup
         self.launchOperation = launchOperation ?? Self.productionLaunch
         self.launchAnnouncer = launchAnnouncer ?? SystemLaunchAnnouncer.shared
+        self.recoveryDownloadUsage = recoveryDownloadUsage
+        self.recoveryDownloadRemoval = recoveryDownloadRemoval
+        self.recoveryCapacity = recoveryCapacity
         self.launchSleep = launchSleep
         let router = NotificationRouter()
         notificationRouter = router
@@ -296,6 +325,7 @@ final class AppRuntime {
     /// never moves: background execution is requested only as a finite best-effort
     /// optimization, and expiration does not cancel or restart the migration.
     func updateLaunchScenePhase(_ scenePhase: ScenePhase) {
+        let wasActive = isSceneActive
         let becomingActive = scenePhase == .active
         isSceneActive = becomingActive
         isSceneBackgrounded = scenePhase == .background
@@ -314,6 +344,13 @@ final class AppRuntime {
             launchAnnouncer.announce(
                 "Earshot is still restoring your library.", assertive: false
             )
+        }
+
+        if !wasActive, becomingActive,
+           recoveryStorageState?.hasEnoughSpace == false {
+            Task { @MainActor [weak self] in
+                await self?.checkRecoveryStorage(manual: false)
+            }
         }
 
         endLaunchBackgroundTask()
@@ -394,6 +431,11 @@ final class AppRuntime {
     private func presentLaunchResult(_ load: StoreLoad, attemptID: UUID) async {
         guard launchAttemptID == attemptID else { return }
         cancelAnnouncementWork()
+
+        if case .ready(let container) = load, mode != .testHost {
+            await DownloadManager.prepareForReadyContainer(container)
+            preparedDownloadContainer = container
+        }
 
         if case .ready(let container) = load, showsLaunchPreparation {
             while launchAnnouncer.isVoiceOverRunning {
@@ -553,15 +595,15 @@ final class AppRuntime {
     func install(_ load: StoreLoad) {
         switch load {
         case .ready(let container):
-            if mode != .testHost {
-                // The process-wide background URL session must resolve against
-                // the same container the new RootView will receive. Do this
-                // before publishing ready so no data-bound UI can race it.
+            if mode != .testHost, preparedDownloadContainer !== container {
                 DownloadManager.activate(container: container)
             }
+            preparedDownloadContainer = nil
+            recoveryStorageState = nil
             generation += 1
             phase = .ready(container: container, generation: generation)
         case .migrationFailed:
+            recoveryStorageState = nil
             if mode == .normal {
                 recoveryBackup = MigrationBackupManager.latestRecordedBackup(
                     at: ModelContainerFactory.storeURL
@@ -569,6 +611,23 @@ final class AppRuntime {
             }
             phase = .recovery(.migrationFailed)
         case .recovery(let state):
+            if case .backupUnavailable(
+                let requiredFreeSpaceBytes, let availableFreeSpaceBytes
+            ) = state,
+               let requiredFreeSpaceBytes, let availableFreeSpaceBytes {
+                recoveryStorageState = RecoveryStorageState(
+                    requiredBytes: requiredFreeSpaceBytes,
+                    availableBytes: availableFreeSpaceBytes,
+                    downloadBytes: nil,
+                    freedBytes: nil,
+                    deletionOutcome: nil
+                )
+                recoveryUsageLoaded = false
+                recoveryCheckToken = nil
+                recoveryForegroundCheckCount = 0
+            } else {
+                recoveryStorageState = nil
+            }
             if mode == .normal {
                 recoveryBackup = MigrationBackupManager.latestRecordedBackup(
                     at: ModelContainerFactory.storeURL
@@ -576,6 +635,84 @@ final class AppRuntime {
             }
             phase = .recovery(state)
         }
+    }
+
+    func loadRecoveryDownloadUsageIfNeeded() async {
+        guard !recoveryUsageLoaded, recoveryStorageState != nil else { return }
+        recoveryUsageLoaded = true
+        let bytes = await recoveryDownloadUsage()
+        guard var storage = recoveryStorageState else { return }
+        storage.downloadBytes = bytes
+        recoveryStorageState = storage
+    }
+
+    func removeRecoveryDownloads() async {
+        guard recoveryStorageState != nil, !isRemovingRecoveryDownloads else { return }
+        isRemovingRecoveryDownloads = true
+        defer { isRemovingRecoveryDownloads = false }
+        do {
+            let result = try await recoveryDownloadRemoval()
+            guard var storage = recoveryStorageState else { return }
+            storage.availableBytes = result.availableBytes
+            storage.downloadBytes = result.remainingDownloadBytes
+            storage.freedBytes = result.freedBytes
+            storage.deletionOutcome = result.outcome
+            recoveryStorageState = storage
+            recoveryStorageFocusRevision += 1
+        } catch {
+            guard var storage = recoveryStorageState else { return }
+            storage.downloadBytes = await recoveryDownloadUsage()
+            storage.freedBytes = 0
+            storage.deletionOutcome = RecoveryDownloadDeletionOutcome.none
+            if let available = try? await recoveryCapacity() {
+                storage.availableBytes = available
+            }
+            recoveryStorageState = storage
+            recoveryStorageFocusRevision += 1
+        }
+    }
+
+    func checkRecoveryStorage(manual: Bool) async {
+        guard recoveryStorageState != nil, !recoveryCheckInProgress else { return }
+        recoveryCheckInProgress = true
+        defer { recoveryCheckInProgress = false }
+        do {
+            let available = try await recoveryCapacity()
+            guard var storage = recoveryStorageState else { return }
+            storage.availableBytes = available
+            recoveryStorageState = storage
+            let remaining = StoreRecoveryScreen.formattedStorageRequirement(
+                bytes: storage.remainingBytes
+            )
+            let token = storage.hasEnoughSpace ? "enough" : "remaining:\(remaining)"
+            let firstForeground = !manual && recoveryForegroundCheckCount == 0
+            if !manual { recoveryForegroundCheckCount += 1 }
+            if storage.hasEnoughSpace {
+                if recoveryCheckToken != token {
+                    recoveryStorageFocusRevision += 1
+                }
+            } else if manual || firstForeground || recoveryCheckToken != token {
+                launchAnnouncer.announce(
+                    "Storage checked. Earshot still needs about \(remaining) more.",
+                    assertive: false
+                )
+            }
+            recoveryCheckToken = token
+        } catch {
+            if !manual { recoveryForegroundCheckCount += 1 }
+            announceRecoveryCapacityError(manual: manual)
+        }
+    }
+
+    private func announceRecoveryCapacityError(manual: Bool) {
+        let token = "error"
+        if manual || recoveryCheckToken != token {
+            launchAnnouncer.announce(
+                "Earshot couldn't check available space. Use Check available space to try again.",
+                assertive: false
+            )
+        }
+        recoveryCheckToken = token
     }
 
     var readyContainer: ModelContainer? {
