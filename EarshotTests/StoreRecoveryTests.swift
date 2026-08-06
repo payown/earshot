@@ -306,6 +306,15 @@ final class StoreRecoveryTests: XCTestCase {
     func testVerifiedBackupSurvivesMigrationAndIsRemovedAfterIndependentReopen() throws {
         try seedV6RecoveryStore()
         _ = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
+        var metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite, at: storeURL)
+        metadata[NSStoreUUIDKey] = UUID().uuidString
+        try NSPersistentStoreCoordinator.setMetadata(
+            metadata, forPersistentStoreOfType: NSSQLiteStoreType, at: storeURL)
+        try MigrationBackupManager.ensureResumeSafety(at: storeURL)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(
+            at: MigrationBackupManager.backupRoot(for: storeURL),
+            includingPropertiesForKeys: nil).count, 2)
 
         MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
         XCTAssertNotNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))

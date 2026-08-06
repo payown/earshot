@@ -172,7 +172,9 @@ enum MigrationBackupManager {
         }
     }
     static func ensureResumeSafety(at storeURL: URL) throws {
+        let liveSourceIdentifier = try sourceIdentity(at: storeURL).identifier
         if let retained = latestRestorableBackup(at: storeURL),
+           retained.sourceStoreIdentifier == liveSourceIdentifier,
            retained.successfulTargetOpenCount == 0 {
             try requireFreeSpace(
                 at: storeURL,

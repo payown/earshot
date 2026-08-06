@@ -157,9 +157,7 @@ final class AppRuntime {
         }
     ) {
         self.mode = mode
-        // Production starts behind the silent launch-colored placeholder. The
-        // migration engine promotes this to the preparation screen only after
-        // it has positively classified work as a migration/resume. File
+        // Migration progress promotes the silent launch placeholder; file
         // existence alone cannot distinguish a settled V10 store from V6-V9.
         self.showsLaunchPreparation = showsLaunchPreparation ?? false
         self.recoveryBackup = recoveryBackup
