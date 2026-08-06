@@ -158,6 +158,10 @@ final class AppRuntimeTests: XCTestCase {
             screen.resetConfirmationMessage,
             "This permanently removes your subscriptions, episodes, folders, Queue, listening history, playback positions, bookmarks, and download records from Earshot. Your verified safety backup will remain on this device for possible support-assisted recovery.\n\nYou can re-import subscriptions from an OPML file, but the other data will not return."
         )
+        XCTAssertEqual(
+            screen.resetFailureMessage,
+            "Your library was not erased and its files are unchanged. Earshot could not complete the erase safely. Close and reopen Earshot to try again. Deleting Earshot will also delete the safety backup."
+        )
         XCTAssertTrue(
             screen.restoreConfirmationMessage.contains(
                 "The restored library still cannot be opened by Earshot."

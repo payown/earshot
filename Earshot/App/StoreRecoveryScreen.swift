@@ -37,6 +37,7 @@ struct StoreRecoveryScreen: View {
     @State private var confirmingRestore = false
     @State private var confirmingDownloadRemoval = false
     @State private var didReset = false
+    @State private var eraseFailed = false
     /// Lands VoiceOver on the heading at launch. This screen replaces the main UI
     /// as the WindowGroup root, where auto-focus is unreliable, so focus is
     /// requested explicitly (matches the InboxScreen empty-state pattern).
@@ -322,6 +323,13 @@ struct StoreRecoveryScreen: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityFocused($focusedDone)
+            } else if eraseFailed {
+                Text(resetFailureMessage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityFocused($focusedDone)
             } else {
                 Button(role: .destructive) {
                     confirmingReset = true
@@ -362,6 +370,7 @@ struct StoreRecoveryScreen: View {
 
     private func reset() {
         guard let backup else { return }
+        eraseFailed = false
         do {
             _ = try ModelContainerFactory.eraseLibrary(
                 at: ModelContainerFactory.storeURL,
@@ -372,6 +381,8 @@ struct StoreRecoveryScreen: View {
             AppLog.data.error(
                 "Library erasure was blocked because its safety backup could not be revalidated or store files could not be removed: \(error.localizedDescription, privacy: .public)"
             )
+            eraseFailed = true
+            focusResetResult()
             return
         }
         // The Reset button just left the tree, so VoiceOver focus would be
@@ -380,6 +391,11 @@ struct StoreRecoveryScreen: View {
         // once the confirmation dialog has finished dismissing. Focus landing
         // reads the message once, so no separate announce is needed (that would
         // double-read it). Delay matches InboxScreen.
+        focusResetResult()
+    }
+
+    private func focusResetResult() {
+        focusedDone = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             focusedDone = true
         }
@@ -520,6 +536,10 @@ struct StoreRecoveryScreen: View {
 
     private var resetDoneMessage: String {
         "The library was erased. A verified safety backup remains on this device for possible support-assisted recovery. Force-quit and reopen Earshot, then import your OPML file."
+    }
+
+    var resetFailureMessage: String {
+        "Your library was not erased and its files are unchanged. Earshot could not complete the erase safely. Close and reopen Earshot to try again. Deleting Earshot will also delete the safety backup."
     }
 
     private var isRestoreResult: Bool {
