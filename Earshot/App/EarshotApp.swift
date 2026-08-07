@@ -48,7 +48,11 @@ enum LaunchFocusDestination: Equatable {
 protocol LaunchAnnouncing: AnyObject {
     var isVoiceOverRunning: Bool { get }
     func announce(_ message: String, assertive: Bool)
-    func announceCompletion(_ message: String, timeout: Duration) async
+    func announceLaunch(
+        _ message: String,
+        assertive: Bool,
+        timeout: Duration?
+    ) async -> AnnouncementCompletionResult
 }
 
 @MainActor
@@ -61,8 +65,16 @@ private final class SystemLaunchAnnouncer: LaunchAnnouncing {
         Announcer.announce(message, assertive: assertive)
     }
 
-    func announceCompletion(_ message: String, timeout: Duration) async {
-        await Announcer.announceAndWaitForCompletion(message, timeout: timeout)
+    func announceLaunch(
+        _ message: String,
+        assertive: Bool,
+        timeout: Duration?
+    ) async -> AnnouncementCompletionResult {
+        await Announcer.announceAndWaitForCompletion(
+            message,
+            assertive: assertive,
+            timeout: timeout
+        )
     }
 }
 
@@ -144,11 +156,10 @@ final class AppRuntime {
     private var pendingStoreLoad: StoreLoad?
     private var heartbeatTask: Task<Void, Never>?
     private var pendingAnnouncementTask: Task<Void, Never>?
-    private var pendingAnnouncementID: UUID?
+    private var completionAnnouncementAttemptID: UUID?
     private var progressRevision = 0
     private var isSceneActive = true
     private var isSceneBackgrounded = false
-    private var sceneActivityRevision = 0
     private var wasBackgroundedDuringLaunch = false
     private var isPresentingLaunchResult = false
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
@@ -223,6 +234,7 @@ final class AppRuntime {
         let attemptID = UUID()
         launchAttemptID = attemptID
         pendingStoreLoad = nil
+        completionAnnouncementAttemptID = nil
         progressRevision = 0
         launchProgress = nil
         wasBackgroundedDuringLaunch = isSceneBackgrounded
@@ -329,7 +341,6 @@ final class AppRuntime {
         let becomingActive = scenePhase == .active
         isSceneActive = becomingActive
         isSceneBackgrounded = scenePhase == .background
-        sceneActivityRevision += 1
 
         if !becomingActive {
             cancelAnnouncementWork()
@@ -372,8 +383,8 @@ final class AppRuntime {
             wasBackgroundedDuringLaunch = false
             queueAnnouncement(
                 currentForegroundAnnouncement,
-                progressRevision: progressRevision,
-                attemptID: attemptID
+                attemptID: attemptID,
+                requiredProgressRevision: progressRevision
             )
         }
         startHeartbeat(after: Self.subsequentHeartbeatDelay, attemptID: attemptID)
@@ -409,11 +420,7 @@ final class AppRuntime {
         launchProgress = progress
         progressRevision += 1
         guard showsLaunchPreparation, isSceneActive else { return }
-        queueAnnouncement(
-            progress.announcement,
-            progressRevision: progressRevision,
-            attemptID: attemptID
-        )
+        queueAnnouncement(progress.announcement, attemptID: attemptID)
     }
 
     private func finishLaunch(_ load: StoreLoad, attemptID: UUID) async {
@@ -430,7 +437,6 @@ final class AppRuntime {
 
     private func presentLaunchResult(_ load: StoreLoad, attemptID: UUID) async {
         guard launchAttemptID == attemptID else { return }
-        cancelAnnouncementWork()
 
         if case .ready(let container) = load, mode != .testHost {
             await DownloadManager.prepareForReadyContainer(container)
@@ -438,25 +444,32 @@ final class AppRuntime {
         }
 
         if case .ready(let container) = load, showsLaunchPreparation {
+            let queuedAnnouncements = pendingAnnouncementTask
+            pendingAnnouncementTask = nil
+            await queuedAnnouncements?.value
+            guard launchAttemptID == attemptID else { return }
             while launchAnnouncer.isVoiceOverRunning {
                 guard isSceneActive else {
                     pendingStoreLoad = load
                     return
                 }
-                let activeRevision = sceneActivityRevision
+                guard completionAnnouncementAttemptID != attemptID else { break }
+                completionAnnouncementAttemptID = attemptID
                 isPresentingLaunchResult = true
-                await launchAnnouncer.announceCompletion(
-                    "Earshot is ready.", timeout: .seconds(4)
+                let result = await launchAnnouncer.announceLaunch(
+                    "Earshot is ready.",
+                    assertive: true,
+                    timeout: .seconds(4)
                 )
                 isPresentingLaunchResult = false
+                if result == .interrupted {
+                    completionAnnouncementAttemptID = nil
+                }
                 guard isSceneActive else {
                     pendingStoreLoad = load
                     return
                 }
-                // Any inactive/background/active cycle may have interrupted the
-                // utterance even if the app is active again now. Repeat it rather
-                // than removing the screen on a possibly truncated completion.
-                if sceneActivityRevision == activeRevision { break }
+                guard result == .interrupted else { break }
             }
             launchFocusRequest = Self.focusDestination(for: container)
         } else if case .ready(let container) = load {
@@ -469,6 +482,7 @@ final class AppRuntime {
 
         launchTask = nil
         launchAttemptID = nil
+        completionAnnouncementAttemptID = nil
         pendingStoreLoad = nil
         install(load)
     }
@@ -509,16 +523,12 @@ final class AppRuntime {
                       isSceneActive,
                       case .unavailable = phase else { return }
 
-                // Snapshot the exact stage. `queueAnnouncement` checks this token
-                // again immediately before posting, so a heartbeat superseded by
-                // a progress update can never enter Announcer's polite queue.
-                let revision = progressRevision
                 let message = launchProgress?.heartbeat
                     ?? "Earshot is still checking your library."
                 queueAnnouncement(
                     message,
-                    progressRevision: revision,
-                    attemptID: attemptID
+                    attemptID: attemptID,
+                    requiredProgressRevision: progressRevision
                 )
                 delay = Self.subsequentHeartbeatDelay
             }
@@ -527,37 +537,33 @@ final class AppRuntime {
 
     private func queueAnnouncement(
         _ message: String,
-        progressRevision: Int,
-        attemptID: UUID
+        attemptID: UUID,
+        requiredProgressRevision: Int? = nil
     ) {
         guard showsLaunchPreparation, isSceneActive else { return }
-        pendingAnnouncementTask?.cancel()
-        let deliveryID = UUID()
-        pendingAnnouncementID = deliveryID
+        let previousAnnouncement = pendingAnnouncementTask
         pendingAnnouncementTask = Task { @MainActor [weak self] in
-            // Coalesce progress events delivered together before posting into
-            // VoiceOver's own polite queue.
-            await Task.yield()
-            await Task.yield()
+            await previousAnnouncement?.value
             guard let self,
                   !Task.isCancelled,
-                  self.pendingAnnouncementID == deliveryID,
                   self.launchAttemptID == attemptID,
-                  Self.announcementIsCurrent(
-                    candidateRevision: progressRevision,
-                    currentRevision: self.progressRevision,
-                    isSceneActive: self.isSceneActive
-                  ),
+                  requiredProgressRevision.map({
+                      Self.heartbeatIsCurrent(
+                          candidateRevision: $0,
+                          currentRevision: self.progressRevision,
+                          isSceneActive: self.isSceneActive
+                      )
+                  }) ?? self.isSceneActive,
                   case .unavailable = self.phase else { return }
-            self.launchAnnouncer.announce(message, assertive: false)
-            if self.pendingAnnouncementID == deliveryID {
-                self.pendingAnnouncementID = nil
-                self.pendingAnnouncementTask = nil
-            }
+            _ = await self.launchAnnouncer.announceLaunch(
+                message,
+                assertive: false,
+                timeout: nil
+            )
         }
     }
 
-    static func announcementIsCurrent(
+    static func heartbeatIsCurrent(
         candidateRevision: Int,
         currentRevision: Int,
         isSceneActive: Bool
@@ -568,7 +574,6 @@ final class AppRuntime {
     private func cancelAnnouncementWork() {
         pendingAnnouncementTask?.cancel()
         pendingAnnouncementTask = nil
-        pendingAnnouncementID = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
     }

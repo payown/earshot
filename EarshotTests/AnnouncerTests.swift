@@ -39,4 +39,10 @@ final class AnnouncerTests: XCTestCase {
             XCTAssertFalse(tag.contains("_"), "expected BCP-47 (en-US), got POSIX: \(tag)")
         }
     }
+
+    func testCompletionResultRepeatsOnlyExplicitlyInterruptedUtterances() {
+        XCTAssertEqual(Announcer.completionResult(wasSuccessful: false), .interrupted)
+        XCTAssertEqual(Announcer.completionResult(wasSuccessful: true), .completed)
+        XCTAssertEqual(Announcer.completionResult(wasSuccessful: nil), .completed)
+    }
 }
