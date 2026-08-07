@@ -1221,14 +1221,16 @@ checkpointed: 189.815376958,161.198161625,185.861821583,208.200345209,109.019837
 RESETVARIANCESTATS|mode|present|count|5|mean|146.253898142|populationStdDev|21.326099482|min|108.028467834|max|169.085117333
 RESETVARIANCESTATS|mode|checkpointed|count|5|mean|170.819108508|populationStdDev|34.340095650|min|109.019837167|max|208.200345209
 RESETVARIANCESTATS|mode|combined|count|10|mean|158.536503325|populationStdDev|31.110845927|min|108.028467834|max|208.200345209
-RESETVARIANCECOMPARE|checkpointedMinusPresent|24.565210367|checkpointedDividedByPresent|1.167962773|percentSlower|16.796277
+RESETVARIANCECOMPARE|checkpointedMinusPresent|24.565210367|checkpointedDividedByPresent|1.167962773|percentSlower|not-supported
 ```
 
 Every copied present WAL was exactly 1,091,832 primary and 1,231,912 local
 bytes before and at delete. Every checkpointed WAL was those sizes before and
 zero bytes after checkpoint and at delete. All ten saves succeeded. Peak RSS
-ranged from 997.703 to 1000.188 MB. Checkpointing was slower on average, so WAL
-presence does not explain the variance.
+ranged from 997.703 to 1000.188 MB. The 24.565210367-second mean gap is only
+about 1.2 standard errors with the observed sample SDs and n=5, so a percentage
+increase is not supported. The data supports only that WAL presence does not
+explain the variance.
 
 ### 6.3 Cost model and falsifier
 
@@ -1239,13 +1241,13 @@ RESETCOSTFIT|naturalLogSlope|1.850573955969|naturalLogIntercept|-13.263101606655
 ```
 
 The fixed-total A/B and A/C ratios remain close to the `N²/P` predictions, but
-the new measurement falsifies its use as a precise absolute-time model:
+the new measurement does not validate its use as a precise absolute-time model:
 
 ```text
 RESETFALSIFIER|podcasts|2|episodesPerPodcast|20000|totalEpisodes|40000|seconds|188.613377458|save|success|baselineRssMB|485.906|peakRssMB|593.062|growthRssMB|107.156|counts|Podcast=0,Episode=0,QueueItem=0,ListeningSession=0,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=0,LocalPodcastState=0,LocalEpisodeState=0,LocalAppSetting=0|primaryIntegrity|ok|localIntegrity|ok
-RESETMODELFALSIFIER|anchorA|predicted|295.946065000|measured|188.613377458|percentError|56.906190
-RESETMODELFALSIFIER|anchorB|predicted|353.939218000|measured|188.613377458|percentError|87.653295
-RESETMODELFALSIFIER|anchorC|predicted|318.962480000|measured|188.613377458|percentError|69.109150
+RESETMODELFALSIFIER|anchorA|predicted|295.946065000|measured|188.613377458|percentError|not-supported
+RESETMODELFALSIFIER|anchorB|predicted|353.939218000|measured|188.613377458|percentError|not-supported
+RESETMODELFALSIFIER|anchorC|predicted|318.962480000|measured|188.613377458|percentError|not-supported
 ```
 
 **Conclusion:** exposure does concentrate in high episodes-per-podcast shapes,
@@ -1413,3 +1415,83 @@ None was staged, modified, moved, or deleted.
 - No Turn 2 shipping fix, post-fix CI, simulator reproduction, build 166,
   device binary, or device test exists because the mandatory purchase-state
   stop condition fired.
+## Turn 3 — authorized implementation
+
+### Entitlement resync gate (measured/source-derived)
+
+`EntitlementStore.resync()` is called at cold launch by
+`AppRuntime.activateEntitlements` (`Earshot/App/EarshotApp.swift:745-750`,
+and its launch task at `:1001-1005`), by the StoreKit transaction listener only
+when an update signal arrives (`Earshot/Features/Monetization/Data/EntitlementStore.swift:152-163`),
+and after the explicit Restore Purchases action (`Earshot/Features/Settings/Presentation/SettingsScreen.swift:189-196`,
+`EntitlementStore.swift:140-149`). There is no reset-completion, onboarding,
+scene-activation, or view-appearance resync. A user who resets and remains in
+the process therefore does not trigger a resync; the in-memory value remains
+until a later launch or StoreKit event. Issue [#805](https://github.com/payown/earshot/issues/805)
+records the cold-launch-only persisted-state window. Cached entitlement gates
+the Settings Plus section (`Earshot/Features/Settings/Presentation/SettingsScreen.swift:20-38`),
+subscription-cap/read-only behavior (`Earshot/Features/Subscriptions/Presentation/SubscriptionsView.swift:243-274`),
+OPML/import/subscription cap calls (`Earshot/App/RootView.swift:436`,
+`Earshot/Features/Onboarding/Presentation/OnboardingView.swift:79`,
+`Earshot/Features/Subscriptions/Data/SubscriptionRepository.swift:136-141`),
+and active-subscription presentation in the paywall
+(`Earshot/Features/Monetization/Presentation/PaywallView.swift:232-288`).
+
+### Cache teardown (measured)
+
+`ArtworkCache` owns a disk-backed `URLCache` and a dedicated `URLSession`
+(`Earshot/Core/Networking/ArtworkCache.swift:64-114`). Turn 3 added locked,
+replaceable resources, `tearDown()`, and `resetShared()`
+(`ArtworkCache.swift:20-47`, `:225-236`). The disposable reconstruction test
+removes and recreates the cache directory, stores and retrieves a response, and
+captured redirected stderr contained zero bytes matching
+`BUG IN CLIENT OF libsqlite3.dylib`. The simulator nevertheless emitted
+unified-log API-violation lines for Cache.db, -wal, and -shm while unlinking;
+therefore this run proves the client teardown/reconstruction path but does not
+prove Apple's URLCache descriptors close synchronously. Issue #690 remains open.
+
+### Shipping implementation (measured)
+
+`AppRuntime.resetLocalData()` rejects a second in-flight reset, posts the
+existing player shutdown notification, releases service contexts and cache
+resources, publishes `.unavailable`, runs the file transaction detached, then
+opens a fresh V10 container before reinstalling it
+(`Earshot/App/EarshotApp.swift:648-680`). `SettingsReset.performFileReset` uses
+a moving/committed journal and quarantine, moves both store sets, backups,
+Downloads, and artwork, and creates no snapshot precondition or retained
+snapshot (`Earshot/Features/Settings/Domain/SettingsReset.swift:30-115`). The
+existing success announcement remains byte-for-byte and 0.5 seconds after
+success (`Earshot/Features/Settings/Presentation/DataSettingsView.swift:117-124`);
+the new container's empty `onboarding_complete` state causes onboarding to be
+shown by the existing RootView path. The exact VoiceOver ordering at the
+announcement/onboarding transition remains an on-device behavioral unknown.
+
+Five shipping-seam runs against disposable copies of the real incident shape
+reported:
+
+```
+SHIPPINGRESET run 1 0.008333375 s
+SHIPPINGRESET run 2 0.005568292 s
+SHIPPINGRESET run 3 0.007474375 s
+SHIPPINGRESET run 4 0.006599042 s
+SHIPPINGRESET run 5 0.006395542 s
+mean 0.006874125 s; population SD 0.000948644 s; min 0.005568292 s; max 0.008333375 s
+```
+
+Every run reopened both stores as V10 `10.0.0`, integrity `ok`, all fourteen
+entity counts zero, Downloads/artwork/snapshot absent. The mean is below the
+3.0-second ceiling, so Gate 4 passed. Full CI after the implementation:
+`1741 executed, 37 skipped, 0 failed` (the delta from Turn 2 is the new
+opt-in shipping timing test, counted as one executed and one skipped in the
+two CI accounting paths).
+
+### Turn 3 corrections to Turn 2
+
+The earlier statement that checkpointing was `16.796277%` slower is withdrawn.
+The observed mean gap was about 24.6 seconds while sample SDs were about 24
+and 38 seconds at n=5 (roughly 1.2 standard errors); the supported conclusion
+is only that WAL state does not explain the variance. The falsifier's
+six-decimal model-error percentages are also withdrawn: the data supports a
+large parent-shape effect (about 15x from P=1 to P=16), but not a settled
+functional form; P=2 at 188.613 s and P=4 at 176.970 s are indistinguishable
+at that noise level.
