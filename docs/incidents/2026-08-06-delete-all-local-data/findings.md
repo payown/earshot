@@ -1297,6 +1297,102 @@ Issue #803 received the authorized Turn 2 comment at
 `https://github.com/payown/earshot/issues/803#issuecomment-5218011650`. No other
 issue was modified.
 
+### 8.5–8.6 commit, PR, and closeout inventory
+
+The first Turn 2 diagnosis commit is
+`d6b179a2663ccaaec80febbfb2d7039878b7a518` (`Diagnose file-level Settings
+reset gate`) and was pushed to `origin/agent/reset-watchdog-diagnosis`. Draft PR
+#804 remains based on `main`, assigned to `payown`, and was updated at
+`https://github.com/payown/earshot/pull/804`. No fix branch or second PR exists.
+
+**Exact worktree inventory (20):**
+
+```text
+/Users/michaelbabcock/code/earshot | main | 8ce477e27c887de81dfb4905700d47bdb0ab4604
+/Users/michaelbabcock/code/earshot-781-preparation | agent/781-migration-preparation | de522f5b03394a2faff6ffdbd3660c301f94cace
+/Users/michaelbabcock/code/earshot-appstore-assembly | docs/app-store-1.0-submission-assembly | 17c46708d043bb361c86bdc7b44923da4061dbfb
+/Users/michaelbabcock/code/earshot-attributed-migration-disk | agent/attribute-migration-disk-usage | 07bd9233fa7f5c17f5e98f764a04a5e096140203
+/Users/michaelbabcock/code/earshot-backup-recovery | agent/backup-recovery | 7b1e64eae87bfba20341d67c55586f5c329fc263
+/Users/michaelbabcock/code/earshot-build-165-identity | agent/build-165-identity | 148b8889056e6c1b8da1848aa20ad73b601b1e44
+/Users/michaelbabcock/code/earshot-build-165-release | detached | 806ea10167a700f455d4e46c78056d4c80ee9210
+/Users/michaelbabcock/code/earshot-device-fixture-validation | detached | a289231168b23e2c4e59a81192bbc66a4872c5ee
+/Users/michaelbabcock/code/earshot-interrupted-fresh-v10 | agent/interrupted-fresh-v10 | 75ace16c973b41521e9a7bb33d40be6c51a68d9c
+/Users/michaelbabcock/code/earshot-launch-announcement-order | agent/serialize-launch-announcements | 7d7459d49d29e88281fadde6d80e50a38db694f9
+/Users/michaelbabcock/code/earshot-migration-handoff | agent/migration-state-handoff | 12397776b0c5e0d25a6f0f61ecab62fba2a6e8b9
+/Users/michaelbabcock/code/earshot-migration-shape-fixtures | agent/migration-shape-fixtures | 83abec954e66c76debf6346c91d0d0068c71aa79
+/Users/michaelbabcock/code/earshot-peak-control | detached | 806ea10167a700f455d4e46c78056d4c80ee9210
+/Users/michaelbabcock/code/earshot-perf-diagnosis | agent/perf-diagnosis-2026-07-19 | 7dbac678fd1869cf6db6ba546467956687010319
+/Users/michaelbabcock/code/earshot-perf-pass | agent/perf-pass | d6f5c8192efc7d14e3f32613d6b33db365b54cba
+/Users/michaelbabcock/code/earshot-recovery-download-removal | agent/recovery-download-removal | 8a5bb3120472f17af5f462bb4c02cf071888db3b
+/Users/michaelbabcock/code/earshot-reset-diagnosis | agent/reset-watchdog-diagnosis | d6b179a2663ccaaec80febbfb2d7039878b7a518
+/Users/michaelbabcock/code/earshot-v10-cold-launch | agent/v10-cold-launch | ae34315abb82c875541c19880da9acefa203445a
+/Users/michaelbabcock/code/earshot-v10-null-tombstone | agent/v10-null-tombstone | 7304fee316fd25f102979638bc06793ffa17d38b
+/Users/michaelbabcock/code/earshot-v5-production-migration | agent/v5-production-migration | c261dce2753046706e97be37d4b9bd6f4bb52e2f
+```
+
+The complete 82-line `git branch -vv` output is retained at
+`evidence-review/turn2-closeout-branches.txt` (12,032 bytes); the complete
+80-line worktree porcelain output is at
+`evidence-review/turn2-closeout-worktrees.txt` (2,996 bytes). No branch or
+worktree was deleted, renamed, or pruned.
+
+**Exact stash inventory (unchanged):**
+
+```text
+stash@{0}: On swift: stray manual build-number prebump 155 (deploy script owns this)
+stash@{1}: On tech-debt/issue-656-swift-ci: unintended dart-format reformat from pre-commit hook (env SDK drift, unrelated to issue #656)
+stash@{2}: On (no branch): unrelated dart-format noise, pre-rebase
+stash@{3}: On fix/issue-653-position-throttle-guard: pre-commit dart-format side effect (unrelated to issue #653, dart formatter version drift) - attempt 2
+stash@{4}: On fix/issue-653-position-throttle-guard: pre-commit dart-format side effect (unrelated to issue #653, dart formatter version drift)
+stash@{5}: On swift: stray swiftui build bump 121->122 (set aside before #444)
+stash@{6}: On feature/swift6-strict-concurrency: preflight-noise: PROMPT.md/Claude backup
+stash@{7}: On swift: non-swift WIP: Flutter queue/search screens + CLAUDE.md rewrite
+```
+
+The diagnosis worktree has no tracked changes after the closeout commit. Its
+untracked files are the copied two `.ips` files, copied root Markdown files,
+the existing `evidence/` directory, Turn 1 analysis helpers/artifacts, and these
+Turn 2 artifacts:
+
+```text
+evidence-review/pr-body-turn2.md
+evidence-review/turn2-closeout-branches.txt
+evidence-review/turn2-closeout-stashes.txt
+evidence-review/turn2-closeout-worktrees.txt
+evidence-review/turn2-issue-696.json
+evidence-review/turn2-issue-803-comment.md
+evidence-review/turn2-local-ci.log
+evidence-review/turn2-task2-artwork-manifest.txt
+evidence-review/turn2-task2-backup-after.sha256
+evidence-review/turn2-task2-download-manifest.txt
+evidence-review/turn2-task2-filesystem-stderr-rerun.log
+evidence-review/turn2-task2-filesystem.log
+evidence-review/turn2-task3-backup-after.sha256
+evidence-review/turn2-task3-backup-before.sha256
+evidence-review/turn2-task3-e2e.log
+evidence-review/turn2-task3-interruptions.log
+evidence-review/turn2-task6-backup-after.sha256
+evidence-review/turn2-task6-backup-before.sha256
+evidence-review/turn2-task6-batch-error.log
+evidence-review/turn2-task6-cost-fit.txt
+evidence-review/turn2-task6-falsifier-model.txt
+evidence-review/turn2-task6-falsifier.log
+evidence-review/turn2-task6-variance-stats.txt
+evidence-review/turn2-task6-variance.log
+evidence-review/turn2-test-harness-citations.txt
+```
+
+Three temporary disposable roots remain and may be lost on reboot or temp
+cleanup: `/tmp/earshot-reset-turn2-fs-template.0OOK6D` (failed/empty setup),
+`/tmp/earshot-reset-turn2-fs-template.DqkvVU` (measurement template), and
+`/tmp/earshot-reset-turn2-task1.wpbVYi` (Task 1 disposable store copy). All
+essential conclusions and exact result lines are committed in this document;
+the raw untracked logs and temp fixtures remain at risk of loss.
+
+The main checkout remains exactly at `8ce477e` and has only the four required
+untracked evidence files plus the intentionally untracked `android/` directory.
+None was staged, modified, moved, or deleted.
+
 ## Turn 2 Unknowns
 
 - Whether D1 intentionally authorizes deleting the four cached Plus
