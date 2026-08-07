@@ -1,5 +1,11 @@
 import UIKit
 
+enum AnnouncementCompletionResult: Equatable {
+    case completed
+    case interrupted
+    case timedOut
+}
+
 /// Posts VoiceOver announcements for important state changes the user must know
 /// about (e.g. "Playing", "Episode added to queue"). Reserve announcements for
 /// meaningful changes — don't announce noise.
@@ -19,19 +25,20 @@ enum Announcer {
         UIAccessibility.post(notification: .announcement, argument: attributed)
     }
 
-    /// Posts an assertive announcement and waits until VoiceOver reports that it
-    /// finished. The timeout is deliberately a fallback, not the normal path:
-    /// a four-second default leaves room for a slow speech rate before a launch
-    /// screen is removed from underneath the utterance (#781).
+    /// Posts an announcement and waits until VoiceOver reports whether it
+    /// finished. Launch stages pass no timeout so the assertive completion can
+    /// never overtake queued progress speech. The completion itself retains its
+    /// four-second fallback before the launch screen is removed (#781).
     @MainActor
     static func announceAndWaitForCompletion(
         _ message: String,
-        timeout: Duration = .seconds(4)
-    ) async {
-        guard !message.isEmpty, UIAccessibility.isVoiceOverRunning else { return }
+        assertive: Bool,
+        timeout: Duration?
+    ) async -> AnnouncementCompletionResult {
+        guard !message.isEmpty, UIAccessibility.isVoiceOverRunning else { return .completed }
         let waiter = AnnouncementCompletionWaiter(message: message)
-        await waiter.wait(timeout: timeout) {
-            announce(message, assertive: true)
+        return await waiter.wait(timeout: timeout) {
+            announce(message, assertive: assertive)
         }
     }
 
@@ -75,6 +82,10 @@ enum Announcer {
         let tag = Locale.current.identifier(.bcp47)
         return tag.isEmpty ? nil : tag
     }
+
+    static func completionResult(wasSuccessful: Bool?) -> AnnouncementCompletionResult {
+        wasSuccessful == false ? .interrupted : .completed
+    }
 }
 
 /// Bridges UIKit's callback notification into one bounded async wait. Kept
@@ -84,13 +95,16 @@ private final class AnnouncementCompletionWaiter {
     private let message: String
     private var observer: NSObjectProtocol?
     private var timeoutTask: Task<Void, Never>?
-    private var continuation: CheckedContinuation<Void, Never>?
+    private var continuation: CheckedContinuation<AnnouncementCompletionResult, Never>?
 
     init(message: String) {
         self.message = message
     }
 
-    func wait(timeout: Duration, post: () -> Void) async {
+    func wait(
+        timeout: Duration?,
+        post: () -> Void
+    ) async -> AnnouncementCompletionResult {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
             observer = NotificationCenter.default.addObserver(
@@ -103,25 +117,30 @@ private final class AnnouncementCompletionWaiter {
                 ]
                 let finishedMessage = (value as? String)
                     ?? (value as? NSAttributedString)?.string
+                let wasSuccessful = notification.userInfo?[
+                    UIAccessibility.announcementWasSuccessfulUserInfoKey
+                ] as? Bool
                 Task { @MainActor [weak self] in
-                    self?.received(finishedMessage)
+                    self?.received(finishedMessage, wasSuccessful: wasSuccessful)
                 }
             }
-            timeoutTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: timeout)
-                guard !Task.isCancelled else { return }
-                self?.finish()
+            if let timeout {
+                timeoutTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: timeout)
+                    guard !Task.isCancelled else { return }
+                    self?.finish(.timedOut)
+                }
             }
             post()
         }
     }
 
-    private func received(_ finishedMessage: String?) {
+    private func received(_ finishedMessage: String?, wasSuccessful: Bool?) {
         guard finishedMessage == message else { return }
-        finish()
+        finish(Announcer.completionResult(wasSuccessful: wasSuccessful))
     }
 
-    private func finish() {
+    private func finish(_ result: AnnouncementCompletionResult) {
         guard let continuation else { return }
         self.continuation = nil
         timeoutTask?.cancel()
@@ -130,6 +149,6 @@ private final class AnnouncementCompletionWaiter {
             NotificationCenter.default.removeObserver(observer)
             self.observer = nil
         }
-        continuation.resume()
+        continuation.resume(returning: result)
     }
 }
