@@ -660,6 +660,19 @@ A/B: 591.892130 / 176.969609 = 3.344597603
 A/C: 591.892130 / 39.870310 = 14.845435864
 ```
 
+> **Turn 2 correction of the Turn 1 conclusion (2026-08-07):** Turn 1's
+> statement that these points did not support stable linear or quadratic
+> scaling was not supported. Regressing `ln(time)` on `ln(N)` for the five
+> one-Podcast points gives slope `1.850573955969`, intercept
+> `-13.263101606655`, and `R² = 0.984582008621`, which is close to quadratic.
+> The fixed-total ratios `3.344597603` and `14.845435864` are close to the
+> `N²/P` predictions `4` and `16`. Adjacent doubling ratios remain noisy and
+> must be reported as variance, not used to erase the fitted trend. Turn 2's
+> new 2×20,000 falsifier took `188.613377458` seconds; A/B/C-anchored `N²/P`
+> predictions overestimated it by `56.906190%`, `87.653295%`, and
+> `69.109150%`. Thus `N²/P` describes the direction of the parent-shape effect
+> but is not a validated quantitative predictor.
+
 ### 3.4 Candidate remedies
 
 Synthetic 1 Podcast × 40,000 Episodes:
@@ -792,7 +805,7 @@ identified as a judgment or unresolved.
 | Quantity | Claude Code prediction | Codex prediction | Measured result |
 |---|---|---|---|
 | Complexity in episode count `N` and podcast count `P` | `O(N²(1 + 1/P))`; redundant Episode pass dominates and parent cascade contributes `N²/P` | `Θ(sum(n_i²) + N + P)`; parent relationship-array maintenance dominates | The fixed-total parent ratios, `A/B = 3.344597603` and `A/C = 14.845435864`, favor a strong `sum(n_i²)` term. The single-parent doubling ratios were irregular: 3.118722797, 4.555690530, 2.047454231, and 6.866919395. These timings establish superlinear, shape-sensitive behavior but do not prove a tight asymptotic bound. |
-| `t(2N)/t(N)`, `P=1` | 4.0 | 4.00 | 3.118722797 (2,500→5,000); 4.555690530 (5,000→10,000); 2.047454231 (10,000→20,000); 6.866919395 (20,000→40,000). Neither prediction described a stable measured ratio. |
+| `t(2N)/t(N)`, `P=1` | 4.0 | 4.00 | 3.118722797 (2,500→5,000); 4.555690530 (5,000→10,000); 2.047454231 (10,000→20,000); 6.866919395 (20,000→40,000). **Turn 2 correction:** adjacent ratios are noisy, but the five-point log-log slope is 1.850573955969 with R² 0.984582008621; it was incorrect to treat ratio noise as absence of a trend. |
 | `1×40,000 / 4×10,000` | 1.6 | 4.00 | `591.892130 / 176.969609 = 3.344597603`. Codex absolute error: `|3.344597603 - 4| = 0.655402397`; Claude absolute error: `|3.344597603 - 1.6| = 1.744597603`. Measurement favors Codex. |
 | `1×40,000 / 16×2,500` | 1.9 | 16.00 | `591.892130 / 39.870310 = 14.845435864`. Codex absolute error: `1.154564136`; Claude absolute error: `12.945435864`. Measurement favors Codex. |
 | Current algorithm, real 10-podcast/53,864-episode point estimate | 60 seconds | 30.0 seconds | Phase 3.1: 145.774626 seconds. Claude error: 85.774626 seconds. Codex error: 115.774626 seconds. Claude is closer by exactly 30.000000 seconds. A second candidate-series sample was 121.419712 seconds, 24.354914 seconds lower; the gate uses the required Phase 3.1 value. |
@@ -819,8 +832,10 @@ identified as a judgment or unresolved.
 
 ## Items both predictions got wrong
 
-- Both predicted a stable 4.0 doubling ratio. The four observed ratios ranged
-  from 2.047454231 to 6.866919395 and did not form a stable 4.0 series.
+- **Turn 2 correction:** both predicted an exact 4.0 doubling ratio, while the
+  adjacent ratios ranged from 2.047454231 to 6.866919395. Turn 1 incorrectly
+  generalized that variance into absence of a quadratic trend; the log-log
+  slope is 1.850573955969 with R² 0.984582008621.
 - Both ranked the completing remedies `(d), (c), (b), (a)`. Candidate `(c)` did
   not complete in either shape; it failed and deleted zero rows. The `(a)/(b)`
   ordering also reversed between the one-parent synthetic and ten-parent real
@@ -910,3 +925,395 @@ in shipping code.
 - No fix behavior, post-fix CI result, simulator reproduction, build 166,
   device artifact, or device test exists because Gate 3 prohibited
   implementation. The diagnosis branch itself passed its pre-PR CI gate.
+
+---
+
+# Turn 2 — scope decisions, filesystem measurement, and gated implementation
+
+Date: 2026-08-07. All claims below are labeled measured, derived, or inferred.
+No phone command was run. Every preserved fixture read was bracketed by a
+68-file SHA-256 manifest; `diff -u` returned no output after Tasks 2, 3, and 6.
+
+## Task 1 — blocking local-state gate
+
+### 1.1 Raw `LocalAppSetting` rows
+
+**Measured.** The query ran against a disposable copy, never the preserved
+store. Raw output, including SQLite storage types:
+
+```text
+'pk','key','value','key_type','value_type'
+1,'earshot_plus_entitlement_product','','text','text'
+2,'last_playing_episode_id','https://feeds.megaphone.fm/RSV2429196838|30a4cf1e-91a9-11f1-a948-8f20eed9f297','text','text'
+3,'earshot_plus_entitled','false','text','text'
+4,'earshot_plus_entitlement_last_synced','1786070483.862052','text','text'
+5,'earshot_plus_active_subscription','false','text','text'
+6,'onboarding_complete','true','text','text'
+7,'last_feed_refresh','1786069997.386304','text','text'
+8,'__earshot_v8_split_complete','1','text','text'
+9,'__earshot_identity_repair_v1_complete','1','text','text'
+'local_app_setting_count','distinct_key_count'
+9,9
+```
+
+**Measured.** Preserved store-set hashes before and after were identical:
+
+```text
+da1f307632a5a071c892f1d37c236bfcb890101b7a068fb7eb579387f3a19978 default.store 114196480
+5933928bfcf0494bd9d03529f37689553977d059bb4c9a7291d92ff5d211d30c default.store-wal 1091832
+c123a093a161cbb06467c910381f0c6187f412d27ee94b2d42c4681fd98d818c default.store-shm 32768
+69bfcf0dbb1757f45f9a23163032bdd02d4c1fda128ffb77ac627039d15b4110 earshot-local.store 200704
+e23aa5bfca705df4834932ccfb76cc438a704b738deeea3db85f359344d453b9 earshot-local.store-wal 1231912
+83f50e1173f9d367835e482fbd366657f2f97b9c5f7024a65de3a29d87086e2e earshot-local.store-shm 32768
+```
+
+### 1.2 Key readers and writers
+
+**Derived from source.** All raw access routes through the local/mirrored
+scope switch at `Earshot/Data/Persistence/AppSettingsStore.swift:257-277`.
+
+- The four `earshot_plus_*` constants and their meaning are at
+  `AppSettingsStore.swift:128-141`; they are read synchronously at
+  `Earshot/Features/Monetization/Data/EntitlementStore.swift:83-100` and
+  written after resync at `EntitlementStore.swift:186-199`.
+- `last_playing_episode_id` is declared at `AppSettingsStore.swift:72`, read at
+  `Earshot/Features/Player/Domain/PlaybackStartup.swift:15-24` and
+  `Earshot/Features/Subscriptions/Data/FeedRefreshActor.swift:708-718`, and
+  written/cleared at `Earshot/Features/Player/Data/PlayerService.swift:703-709`
+  and `:1698-1710`.
+- `onboarding_complete` is declared at `AppSettingsStore.swift:10`, written by
+  `Earshot/Features/Settings/Presentation/SettingsStore.swift:50-51` from
+  `Earshot/Features/Onboarding/Presentation/OnboardingView.swift:198-201`, and
+  read at `SettingsStore.swift:60-89` and
+  `Earshot/App/EarshotApp.swift:490-495`.
+- `last_feed_refresh` is declared at `AppSettingsStore.swift:87-89`, read at
+  `Earshot/Features/Subscriptions/Data/BackgroundFeedRefresher.swift:75-80`,
+  and written at `BackgroundFeedRefresher.swift:102-109` and
+  `Earshot/Features/Subscriptions/Presentation/SubscriptionsView.swift:560-566`.
+- The split and identity-repair marker constants are at
+  `Earshot/Data/Persistence/StoreMigration.swift:175-178`. Reads include
+  `StoreMigration.swift:315-331`, `:895-907`, and `:1270-1275`; writes are at
+  `:815-817`, `:924-932`, and `:1284-1290`.
+
+### 1.3 Stop condition
+
+**Measured:** the stop condition fired. Four rows relate directly to purchase
+entitlement or subscription status. This prohibited all shipping implementation
+for the remainder of Turn 2. No purchase, entitlement, paywall, StoreKit, or
+shipping reset source was modified.
+
+### 1.4 Local model properties and deletion loss
+
+**Derived from source.** `LocalPodcastState` stores exact properties
+`feedURL: String` and `refreshedAt: Date?`
+(`Earshot/Data/Models/LocalState.swift:33-42`). It is written through
+`LocalStateStore.setRefreshedAt` at
+`Earshot/Data/Models/ActiveDownload.swift:102-117` and hydrated at `:173-181`.
+Deleting it loses the last-refresh timestamp and forces refresh bookkeeping to
+be re-established. Feed content can be fetched again; that exact local
+timestamp is not in the feed.
+
+`LocalEpisodeState` stores `podcastFeedURL: String`, `episodeGUID: String`,
+`downloadStatusRaw: String`, and `downloadPath: String?`; `downloadStatus` is a
+computed wrapper (`LocalState.swift:45-68`). Persistence is at
+`ActiveDownload.swift:68-100`, repair at `:134-159`, and hydration at `:183-190`.
+It is the sole durable record of download/in-flight state and the local audio
+filename because the mirrored `Episode` fields are tombstones and runtime state
+is transient (`Earshot/Data/Models/Episode.swift:22-40`). A feed refresh can
+recreate episode metadata, but not the device transfer state or path. D1 plus
+Downloads deletion intentionally loses both.
+
+`LocalAppSetting` stores `key: String` and `value: String`
+(`LocalState.swift:71-80`). Generic reads/writes are at
+`Earshot/Data/Persistence/IdentityRepairService.swift:163-180`. The exact nine
+facts lost are the rows printed above. StoreKit can recompute entitlement facts,
+but their deletion ordering is the mandatory unresolved blocker.
+
+## Task 2 — filesystem deletion
+
+### 2.1 Safety gate and redirection
+
+**Derived from source.** Production resolves Downloads from the process-global
+Documents directory plus `Downloads`
+(`Earshot/Features/Settings/Domain/SettingsReset.swift:41-46`). Artwork resolves
+from the process-global Caches directory plus `artwork`
+(`Earshot/Core/Networking/ArtworkCache.swift:81-88`); its clear primitive is
+`urlCache.removeAllCachedResponses()` at `ArtworkCache.swift:172-176`.
+
+The exact production singleton and process-global paths cannot be redirected.
+The measurement therefore passed explicit test-owned URLs from environment
+variables into the opt-in test at
+`EarshotTests/StoreMigrationV6toV8Tests.swift:3021-3108`. Exact
+`ArtworkCache.shared.clear()` was **skipped as unredirectable**. A separate
+`URLCache` with the same capacities and an explicit temporary directory timed
+the same `removeAllCachedResponses()` primitive. No production Documents or
+Caches path was removed.
+
+### 2.2 Non-sparse fixture
+
+**Measured.** Thirty-four exact-size files were created under
+`/tmp/earshot-reset-turn2-fs-template.DqkvVU/Downloads` using `/bin/dd` from
+`/dev/zero`: 4,096-byte blocks followed by the exact remainder with
+`conv=notrunc`. This writes allocated zeros; it does not seek over holes. The
+artwork tree was copied into the disposable template and contained `Cache.db`
+49,152 bytes, `Cache.db-wal` 177,192, `Cache.db-shm` 32,768, and three cache
+payloads of 120,079, 60,424, and 10,995 bytes.
+
+```text
+RESETFS|template|files|34|logicalBytes|2215876348|allocatedBytes|2215940096|sparse|false
+du -sk: 2164004 /tmp/earshot-reset-turn2-fs-template.DqkvVU/Downloads
+```
+
+The exact 34-file source manifest is in
+`evidence-review/turn2-task2-download-manifest.txt`; its count is 34 and its
+exact sum is 2,215,876,348 bytes. `ls/stat` allocation was 2,215,940,096 bytes,
+so allocated bytes exceeded logical bytes by
+`2,215,940,096 - 2,215,876,348 = 63,748` bytes.
+
+### 2.3 Five-run timing
+
+**Measured.** Primary series:
+
+```text
+RESETSTATS|name|downloads|samples|0.007803584,0.002035958,0.002413916,0.002141875,0.002251666|mean|0.003329400|populationStdDev|0.002240587|min|0.002035958|max|0.007803584
+RESETSTATS|name|artworkClearPrimitive|samples|0.000005958,0.000005875,0.000005709,0.000003666,0.000002125|mean|0.000004667|populationStdDev|0.000001528|min|0.000002125|max|0.000005958
+RESETSTATS|name|artworkDirectoryRemoval|samples|0.001223083,0.000624542,0.000710458,0.000774583,0.000664625|mean|0.000799458|populationStdDev|0.000217611|min|0.000624542|max|0.001223083
+RESETSTATS|name|filesystemTotal|samples|0.009032625,0.002666375,0.003130083,0.002920124,0.002918416|mean|0.004133525|populationStdDev|0.002453953|min|0.002666375|max|0.009032625
+RESETFS|artworkDirectoryRemovalSucceeded|5|of|5
+Executed 1 test, with 0 failures (0 unexpected) in 0.160 seconds
+** TEST SUCCEEDED **
+```
+
+Filesystem-only mean `0.004133525 / 3.0 = 0.001377842` of the allowed budget,
+or `0.1377842%`; maximum `0.009032625 / 3.0 = 0.003010875`, or `0.3010875%`.
+It fits within 3.0 seconds on this simulator host.
+
+### 2.4 Open SQLite descriptors
+
+**Measured.** The test's `/dev/fd` enumeration reported zero matching paths,
+but libsqlite3 independently reported open vnodes on its worker threads in all
+five confirmation runs:
+
+```text
+BUG IN CLIENT OF libsqlite3.dylib: database integrity compromised by API violation: vnode unlinked while in use: .../artwork/Cache.db
+BUG IN CLIENT OF libsqlite3.dylib: database integrity compromised by API violation: vnode unlinked while in use: .../artwork/Cache.db-wal
+BUG IN CLIENT OF libsqlite3.dylib: database integrity compromised by API violation: vnode unlinked while in use: .../artwork/Cache.db-shm
+```
+
+This reproduces issue #690's hazard. A preliminary run also failed one removal
+with `NSCocoaErrorDomain Code=513` and underlying POSIX code 1; the complete
+stderr-captured confirmation series removed all five directories but still
+emitted the API-violation warning every time. Reporting only; issue #690 was not
+modified.
+
+## Task 3 — complete test-only file-level reset
+
+### 3.1 Mechanism and separation from unsupported-schema recovery
+
+**Derived from test source.** The disposable incident shape is assembled at
+`StoreMigrationV6toV8Tests.swift:3167-3212`. The reset transaction is at
+`:3214-3260`, recovery at `:3266-3287`, and exhaustive verification at
+`:3289-3308`. It moves both complete store sets, Downloads, artwork, and the
+entire snapshot root into one quarantine under a `moving` journal; it writes a
+`committed` journal before deleting quarantine; then it opens fresh V10 stores.
+
+This reuses #797's two-phase journal/quarantine principle but not
+`ModelContainerFactory.eraseLibrary`. The latter requires and revalidates a
+verified snapshot and retains it (`ModelContainerFactory.swift:255-267`;
+`MigrationBackupManager.swift:290-350`). Settings reset instead has no snapshot
+precondition and quarantines/deletes the snapshot itself. That is the explicit
+separation required by D2.
+
+### 3.2–3.4 End-to-end results
+
+**Measured.** All five samples include cache clear, process-local state clear,
+container/context release, both store sets, snapshot, Downloads, artwork,
+journal/quarantine work, and fresh store construction:
+
+```text
+RESETE2E|run|1|seconds|0.046932667|peakRssMB|269.250|primaryVersion|10.0.0|localVersion|10.0.0|primaryIntegrity|ok|localIntegrity|ok|counts|Podcast=0,Episode=0,QueueItem=0,ListeningSession=0,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=0,LocalPodcastState=0,LocalEpisodeState=0,LocalAppSetting=0|downloadsGone|true|artworkGone|true|snapshotGone|true|journalGone|true|quarantineCount|0
+RESETE2E|run|2|seconds|0.041100583|peakRssMB|270.141|primaryVersion|10.0.0|localVersion|10.0.0|primaryIntegrity|ok|localIntegrity|ok|counts|Podcast=0,Episode=0,QueueItem=0,ListeningSession=0,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=0,LocalPodcastState=0,LocalEpisodeState=0,LocalAppSetting=0|downloadsGone|true|artworkGone|true|snapshotGone|true|journalGone|true|quarantineCount|0
+RESETE2E|run|3|seconds|0.041597375|peakRssMB|270.188|primaryVersion|10.0.0|localVersion|10.0.0|primaryIntegrity|ok|localIntegrity|ok|counts|Podcast=0,Episode=0,QueueItem=0,ListeningSession=0,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=0,LocalPodcastState=0,LocalEpisodeState=0,LocalAppSetting=0|downloadsGone|true|artworkGone|true|snapshotGone|true|journalGone|true|quarantineCount|0
+RESETE2E|run|4|seconds|0.035484084|peakRssMB|270.219|primaryVersion|10.0.0|localVersion|10.0.0|primaryIntegrity|ok|localIntegrity|ok|counts|Podcast=0,Episode=0,QueueItem=0,ListeningSession=0,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=0,LocalPodcastState=0,LocalEpisodeState=0,LocalAppSetting=0|downloadsGone|true|artworkGone|true|snapshotGone|true|journalGone|true|quarantineCount|0
+RESETE2E|run|5|seconds|0.040216417|peakRssMB|270.234|primaryVersion|10.0.0|localVersion|10.0.0|primaryIntegrity|ok|localIntegrity|ok|counts|Podcast=0,Episode=0,QueueItem=0,ListeningSession=0,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=0,LocalPodcastState=0,LocalEpisodeState=0,LocalAppSetting=0|downloadsGone|true|artworkGone|true|snapshotGone|true|journalGone|true|quarantineCount|0
+RESETSTATS|name|fileLevelReset|samples|0.046932667,0.041100583,0.041597375,0.035484084,0.040216417|mean|0.041066225|populationStdDev|0.003649135|min|0.035484084|max|0.046932667
+RESETSTATS|name|fileLevelResetPeakRssMB|samples|269.250000000,270.140625000,270.187500000,270.218750000,270.234375000|mean|270.006250000|populationStdDev|0.379478466|min|269.250000000|max|270.234375000
+Executed 1 test, with 0 failures (0 unexpected) in 0.397 seconds
+** TEST SUCCEEDED **
+```
+
+The simulator emitted `This store file was previously used on a build with
+Persistence-1627 but is now running on a build with Persistence-1526` when
+opening the copied device stores. It did not prevent reset or verification but
+limits device-time inference.
+
+### 3.5 Crash safety
+
+**Measured.** Every defined checkpoint passed:
+
+```text
+RESETINTERRUPT|point|afterMovingJournal|expected|rolled-back-original|counts|Podcast=10,Episode=53864,QueueItem=6,ListeningSession=5,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=2,LocalPodcastState=10,LocalEpisodeState=34,LocalAppSetting=9|consistent|true|journalGone|true|quarantineCount|0|downloadsExists|true|artworkExists|true|snapshotExists|true
+RESETINTERRUPT|point|afterQuarantine|expected|rolled-back-original|counts|Podcast=10,Episode=53864,QueueItem=6,ListeningSession=5,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=2,LocalPodcastState=10,LocalEpisodeState=34,LocalAppSetting=9|consistent|true|journalGone|true|quarantineCount|0|downloadsExists|true|artworkExists|true|snapshotExists|true
+RESETINTERRUPT|point|afterCommittedJournal|expected|committed-fresh|counts|Podcast=0,Episode=0,QueueItem=0,ListeningSession=0,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=0,LocalPodcastState=0,LocalEpisodeState=0,LocalAppSetting=0|consistent|true|journalGone|true|quarantineCount|0|downloadsExists|false|artworkExists|false|snapshotExists|false
+RESETINTERRUPT|point|afterQuarantineCleanup|expected|committed-fresh|counts|Podcast=0,Episode=0,QueueItem=0,ListeningSession=0,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=0,LocalPodcastState=0,LocalEpisodeState=0,LocalAppSetting=0|consistent|true|journalGone|true|quarantineCount|0|downloadsExists|false|artworkExists|false|snapshotExists|false
+RESETINTERRUPT|point|afterJournalRemoval|expected|committed-fresh|counts|Podcast=0,Episode=0,QueueItem=0,ListeningSession=0,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=0,LocalPodcastState=0,LocalEpisodeState=0,LocalAppSetting=0|consistent|true|journalGone|true|quarantineCount|0|downloadsExists|false|artworkExists|false|snapshotExists|false
+Executed 1 test, with 0 failures (0 unexpected) in 0.330 seconds
+** TEST SUCCEEDED **
+```
+
+Not tested: termination between individual quarantine moves, within an atomic
+journal write, during recursive quarantine deletion, during fresh-store open,
+or while the production `ArtworkCache.shared`/session is still being torn down.
+
+### 3.6 Ordering constraint
+
+**Derived/inferred.** Player/download/feed services, the artwork `URLSession`
+and `URLCache`, every `ModelContext`, and the live `ModelContainer` must release
+their store/cache descriptors before any store or cache path is moved/unlinked.
+The test does this before `performReset` at
+`StoreMigrationV6toV8Tests.swift:3110-3138`. If SQLite retains a descriptor,
+unlink removes the pathname but the descriptor continues addressing the old
+vnode; a new store at the same path is a different file. The exact libsqlite3
+API-violation output in Task 2 proves the cache side of that hazard.
+
+## Task 4 — gate
+
+**Measured/judgment under the supplied gate:** `T_total = 0.041066225` seconds,
+all five exhaustive verifications passed, and all five defined interruption
+checkpoints recovered. Nevertheless **GATE FAIL** fired because Task 1's
+purchase-state stop condition fired. That condition alone prohibited shipping
+implementation. Tasks 5 and 7 were therefore skipped: no fix branch, shipping
+code, post-fix CI, simulator reproduction, build 166, device binary, or device
+test document was created in Turn 2.
+
+## Task 6 — secondary diagnostics
+
+### 6.1 Error 134060
+
+**Measured.** The recursive `NSError` printer is at
+`StoreMigrationV6toV8Tests.swift:2583-2686`. Exact decisive output:
+
+```text
+RESETBATCHERROR|case|two-config-no-inbound-cascade|result|success
+RESETBATCHERROR|case|two-config-with-cascade|result|failure
+RESETBATCHERROR|case|two-config-with-cascade|error|domain|NSCocoaErrorDomain|code|134060|description|A Core Data error occurred.
+RESETBATCHERROR|case|two-config-with-cascade|error|userInfo|Reason|Optional(Entity named:Podcast not found for relationship named:episodes)
+RESETBATCHERROR|case|two-config-with-cascade|error|userInfo|Relationship|Optional(Name: episodes Destination Entity:Episode)
+RESETBATCHERROR|case|single-config-no-inbound-cascade|result|success
+RESETBATCHERROR|case|single-config-with-cascade|result|success
+Executed 1 test, with 0 failures (0 unexpected) in 6.126 seconds
+** TEST SUCCEEDED **
+```
+
+`MissingEntity` contained the complete `Podcast` entity description. There was
+no `NSDetailedErrors` array and no underlying `NSError`. **Derived:** code
+134060 requires the combination of the two-configuration container and a batch
+delete whose model has a cascade relationship. Neither two configurations
+alone nor the cascade alone reproduced it.
+
+### 6.2 Variance and WAL state
+
+**Measured.** Each line is a fresh copied store and fresh test process:
+
+```text
+present: 140.837353500,108.028467834,169.085117333,161.438489875,151.880062167
+checkpointed: 189.815376958,161.198161625,185.861821583,208.200345209,109.019837167
+RESETVARIANCESTATS|mode|present|count|5|mean|146.253898142|populationStdDev|21.326099482|min|108.028467834|max|169.085117333
+RESETVARIANCESTATS|mode|checkpointed|count|5|mean|170.819108508|populationStdDev|34.340095650|min|109.019837167|max|208.200345209
+RESETVARIANCESTATS|mode|combined|count|10|mean|158.536503325|populationStdDev|31.110845927|min|108.028467834|max|208.200345209
+RESETVARIANCECOMPARE|checkpointedMinusPresent|24.565210367|checkpointedDividedByPresent|1.167962773|percentSlower|16.796277
+```
+
+Every copied present WAL was exactly 1,091,832 primary and 1,231,912 local
+bytes before and at delete. Every checkpointed WAL was those sizes before and
+zero bytes after checkpoint and at delete. All ten saves succeeded. Peak RSS
+ranged from 997.703 to 1000.188 MB. Checkpointing was slower on average, so WAL
+presence does not explain the variance.
+
+### 6.3 Cost model and falsifier
+
+**Derived:** five-point one-Podcast natural-log regression:
+
+```text
+RESETCOSTFIT|naturalLogSlope|1.850573955969|naturalLogIntercept|-13.263101606655|rSquared|0.984582008621|powerCoefficient|1.73743337311e-06
+```
+
+The fixed-total A/B and A/C ratios remain close to the `N²/P` predictions, but
+the new measurement falsifies its use as a precise absolute-time model:
+
+```text
+RESETFALSIFIER|podcasts|2|episodesPerPodcast|20000|totalEpisodes|40000|seconds|188.613377458|save|success|baselineRssMB|485.906|peakRssMB|593.062|growthRssMB|107.156|counts|Podcast=0,Episode=0,QueueItem=0,ListeningSession=0,Bookmark=0,PodcastFolder=0,FolderMembership=0,EpisodeFolderMembership=0,RecentlyExpired=0,QuickActionConfig=0,AppSetting=0,LocalPodcastState=0,LocalEpisodeState=0,LocalAppSetting=0|primaryIntegrity|ok|localIntegrity|ok
+RESETMODELFALSIFIER|anchorA|predicted|295.946065000|measured|188.613377458|percentError|56.906190
+RESETMODELFALSIFIER|anchorB|predicted|353.939218000|measured|188.613377458|percentError|87.653295
+RESETMODELFALSIFIER|anchorC|predicted|318.962480000|measured|188.613377458|percentError|69.109150
+```
+
+**Conclusion:** exposure does concentrate in high episodes-per-podcast shapes,
+but `N²/P` is not validated for threshold prediction. Therefore there is no
+honest “validated-model” episodes-per-podcast 10-second threshold. The direct
+one-Podcast series brackets the simulator crossing between 2,500 episodes
+(`3.631215s`) and 5,000 (`11.324753s`); physical-device hardware remains
+unverified.
+
+### 6.4 Memory and issue #696
+
+**Measured:** file-level reset peak RSS mean was 270.006250 MB, versus
+997.703–1000.188 MB across the ten current real-store runs. The 2×20,000
+synthetic falsifier peaked at 593.062 MB from a 485.906 MB post-seed baseline.
+
+**Derived:** these numbers are directly relevant to open issue #696, whose body
+attributes large-library jetsam to full-Episode-table materialization into a
+main-actor `ModelContext`. The current reset reproduces the same large-graph
+materialization at roughly one gigabyte peak. The file-level measurement avoids
+that ~730 MB growth. Issue #696 was read only and not modified.
+
+## Task 8 — record and gate output
+
+The three user decisions are recorded verbatim as DECIDED in
+`approval-required.md`; the purchase-cache ordering, artwork-cache lifetime,
+failure behavior, and post-reset destination are separated as still open.
+
+Exact normal-gate tail after the six opt-in measurement methods were added:
+
+```text
+Test Suite 'EarshotTests.xctest' passed at 2026-08-07 07:00:20.389.
+    Executed 1739 tests, with 36 tests skipped and 0 failures (0 unexpected) in 52.931 (53.512) seconds
+Test Suite 'All tests' passed at 2026-08-07 07:00:20.389.
+    Executed 1739 tests, with 36 tests skipped and 0 failures (0 unexpected) in 52.931 (53.513) seconds
+** TEST SUCCEEDED **
+
+Local CI summary
+Result: PASS
+Tests: 1739 executed, 36 skipped, 0 failed
+Simulator: CI-iPhone-17 (23F12FE1-0D77-4B42-B766-ADD9F27A2153)
+Log: /var/folders/kf/zz3g2vln75ngjgddjrs4yg7h0000gn/T//earshot-local-ci.n5Avx3
+```
+
+Arithmetic versus Turn 1: `1739 - 1733 = 6` additional executed tests and
+`36 - 30 = 6` additional skips, exactly the six new opt-in methods. No failure
+count changed: `0 - 0 = 0`.
+
+Issue #803 received the authorized Turn 2 comment at
+`https://github.com/payown/earshot/issues/803#issuecomment-5218011650`. No other
+issue was modified.
+
+## Turn 2 Unknowns
+
+- Whether D1 intentionally authorizes deleting the four cached Plus
+  entitlement/subscription facts, and the required resync ordering before a
+  purchase gate reads the empty cache.
+- The safe shutdown/lifetime boundary for the production
+  `ArtworkCache.shared` and its `URLSession`; the exact singleton was not
+  redirectable, and disposable cache unlink reproduced issue #690.
+- The correct post-reset destination after deleting `onboarding_complete`.
+- Crash behavior between individual quarantine moves, within an atomic journal
+  write, during recursive quarantine cleanup, during fresh-store open, and
+  during production service/cache teardown.
+- Physical-device file-level timing and the timing effect of the simulator's
+  Persistence-1627-versus-1526 warning.
+- A quantitatively validated cost model and device-specific 10-second
+  episodes-per-podcast threshold. The Turn 2 falsifier disproved using the
+  simple A/B/C-anchored `N²/P` model for that purpose.
+- No Turn 2 shipping fix, post-fix CI, simulator reproduction, build 166,
+  device binary, or device test exists because the mandatory purchase-state
+  stop condition fired.

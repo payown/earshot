@@ -403,6 +403,16 @@ and 725.369190 seconds at 2,500, 5,000, 10,000, 20,000, and 40,000 Episodes.
 At fixed 40,000 Episodes, 1, 4, and 16 Podcasts took 591.892130, 176.969609,
 and 39.870310 seconds; A/B was 3.344597603 and A/C was 14.845435864.
 
+**Turn 2 correction of the Turn 1 scaling conclusion (2026-08-07):** A
+log-log regression over the five one-Podcast points has exponent
+1.850573955969, intercept -13.263101606655, and R² 0.984582008621. The
+fixed-total ratios are close to the N²/P predictions 4 and 16; adjacent-ratio
+instability is run-to-run variance and does not erase that trend. A new
+2×20,000 point took 188.613377458 seconds, however, versus A/B/C-anchored N²/P
+predictions of 295.946065000, 353.939218000, and 318.962480000 seconds. Their
+errors were 56.906190%, 87.653295%, and 69.109150%, so N²/P is directionally
+useful but not a validated absolute-time model.
+
 Gate 3 fired. The required `T_current` is 145.774626 seconds and the fastest
 successful scope-preserving Phase 3.4 real-store candidate was still
 121.419712 seconds, both above the 3.0-second VoiceOver silence judgment. The
