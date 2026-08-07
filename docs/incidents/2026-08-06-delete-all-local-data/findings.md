@@ -1482,7 +1482,9 @@ mean 0.006874125 s; population SD 0.000948644 s; min 0.005568292 s; max 0.008333
 The 0.006874125 s figure above was the file transaction seam only; it excluded
 the production container rebuild. The corrected five-run end-to-end samples were
 0.034000083, 0.038343625, 0.022888542, 0.030456000, and 0.025678417 s.
-Derived mean = 0.151366667 / 5 = 0.030273333 s; population SD 0.005522 s;
+Derived mean = 0.151366667 / 5 = 0.030273333 s. Deviations squared sum to
+0.0001547000369213892; population variance = 0.0001547000369213892 / 5;
+population SD = sqrt(0.0000309400073842778) = 0.005562374 s;
 range 0.022888542–0.038343625 s. Container rebuild alone was
 0.024064875, 0.028934208, 0.015328167, 0.014023416, 0.017185125 s;
 mean 0.019907158 s, SD 0.005688045 s, range 0.014023416–0.028934208 s.
@@ -1504,6 +1506,25 @@ Still untested: empty store, in-flight download, concurrent reset, injected
 failure at each destructive step, termination between individual quarantine
 moves, during recursive quarantine deletion, during fresh-store open, and during
 service/cache teardown.
+
+Turn 5 correction: the production-factory fresh-store query returned two
+`AppSetting` rows: `grandfathered_podcast_count|0|text|text` and
+`podcast_cap_gating_introduced|true|text|text`. These are podcast-cap feature
+state, not schema markers. The test-helper `openV10` measurement reported zero
+rows across fourteen types; the factory-path measurement reported
+`AppSetting=2`. Turn 4's shipping assertion was therefore weakened from
+`allZero` to all non-AppSetting entities zero plus AppSetting=2 after the test
+failed. The rows are written by `AppSettingsStore.introducePodcastCapGatingIfNeeded`
+at `AppSettingsStore.swift:494-501`, invoked from `RootView.swift:312`, after
+fresh-store installation; they are not survivors of the deleted store.
+
+The 0.030273333 s figure excludes the `AppRuntime.resetLocalData()` service
+preamble, including `await downloads.releasePersistence()` and its
+`cancelAllTasksAndWaitForRecovery()` path. That preamble remains unmeasured;
+the in-flight-download case is the unbounded case.
+
+Two distinct binaries were built and both were labelled build 166: the earlier
+artifact was 18,419,840 bytes and the corrected rebuild is 18,421,648 bytes.
 ```
 
 Every run reopened both stores as V10 `10.0.0`, integrity `ok`, all fourteen

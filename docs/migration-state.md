@@ -649,7 +649,14 @@ They must be reviewed before any branch pruning.
 
 Turn 4 correction: 0.006874125 s was the file transaction seam only, excluding
 container rebuild. Corrected shipping-path mean: 0.030273333 s (population SD
-0.005522 s; range 0.022888542–0.038343625 s), below the 3.0-second ceiling.
+0.005562374 s; range 0.022888542–0.038343625 s), below the 3.0-second ceiling.
 The earlier WAL percentage and single-run falsifier precision claims are
 withdrawn; WAL does not explain variance and parent-shape functional form is
 unresolved.
+
+Turn 5 record correction: the factory-path fresh store contains
+`grandfathered_podcast_count=0` and `podcast_cap_gating_introduced=true`.
+The helper-only measurement was zero across fourteen entity types; the factory
+measurement was `AppSetting=2`. The 0.030273333 s figure excludes the
+`AppRuntime.resetLocalData()` service-release preamble, including download
+recovery cancellation, which remains unmeasured.
