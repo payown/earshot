@@ -27,8 +27,70 @@ private actor InFlightFeedFetcher: FeedFetching {
     }
 }
 
+private actor LaunchStartSignal {
+    private var started = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func markStarted() {
+        started = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending { waiter.resume() }
+    }
+
+    func wait() async {
+        guard !started else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+}
+
 @MainActor
 final class FeedRefreshResetRaceTests: XCTestCase {
+    func testLaunchCannotRaceResetAgainstSameDisposableStore() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "EarshotLaunchResetRace-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let applicationSupport = root.appending(path: "Application Support", directoryHint: .isDirectory)
+        let documents = root.appending(path: "Documents", directoryHint: .isDirectory)
+        let caches = root.appending(path: "Caches", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: applicationSupport, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let primary = applicationSupport.appending(path: "default.store")
+        guard case .ready = await ModelContainerFactory.makeShared(
+            using: StoreMigrationEngine(), at: primary
+        ) else { return XCTFail("disposable store did not open") }
+
+        let launchStarted = LaunchStartSignal()
+        let launchOperation: StoreLaunchOperation = { _ in
+            await launchStarted.markStarted()
+            try? await Task.sleep(for: .milliseconds(100))
+            return await ModelContainerFactory.makeShared(
+                using: StoreMigrationEngine(), at: primary
+            )
+        }
+        let runtime = AppRuntime(
+            mode: .testHost,
+            launchOperation: launchOperation,
+            fileResetOperation: {
+                await SettingsReset.performFileReset(
+                    applicationSupport: applicationSupport,
+                    documents: documents,
+                    caches: caches
+                )
+            }
+        )
+
+        runtime.startLaunchIfNeeded()
+        await launchStarted.wait()
+        let reset = await runtime.resetLocalData()
+
+        XCTAssertTrue(reset)
+        XCTAssertFalse(ModelContainerFactory.hasStoreFiles(at: primary))
+        XCTAssertNotNil(runtime.readyContainer)
+    }
+
     func testResetCancelsInFlightRefreshBeforeDisposableFileReset() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         let context = container.mainContext

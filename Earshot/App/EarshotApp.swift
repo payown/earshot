@@ -172,6 +172,7 @@ final class AppRuntime {
     private var recoveryForegroundCheckCount = 0
     private var preparedDownloadContainer: ModelContainer?
     private var resetTask: Task<Bool, Never>?
+    private var resetInFlight = false
 
     init(
         load: StoreLoad? = nil,
@@ -234,7 +235,7 @@ final class AppRuntime {
     /// process-lifetime runtime rather than a SwiftUI `.task`, so view removal,
     /// backgrounding, or reconstruction cannot create a second migration.
     func startLaunchIfNeeded() {
-        guard case .unavailable = phase, launchTask == nil else { return }
+        guard case .unavailable = phase, launchTask == nil, !resetInFlight else { return }
 
         launchAttemptCount += 1
         let attemptID = UUID()
@@ -269,7 +270,7 @@ final class AppRuntime {
               recoveryState == .migrationFailed
                 || recoveryState.isBackupUnavailable
                 || backupRestorePhase == .restored,
-              launchTask == nil else { return }
+              launchTask == nil, !resetInFlight else { return }
         cancelAnnouncementWork()
         launchFocusRequest = nil
         backupRestorePhase = .idle
@@ -655,8 +656,13 @@ final class AppRuntime {
     /// the journaled file transaction runs in ``SettingsReset``'s detached task.
     func resetLocalData() async -> Bool {
         guard resetTask == nil else { return false }
+        resetInFlight = true
         NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
         await BackgroundFeedRefresher.cancelAndWait()
+        let launchToAwait = launchTask
+        launchToAwait?.cancel()
+        _ = await launchToAwait?.value
+        launchTask = nil
         player.releasePersistence()
         quickActions.releasePersistence()
         settings.releasePersistence()
@@ -683,6 +689,7 @@ final class AppRuntime {
         resetTask = task
         let result = await task.value
         resetTask = nil
+        resetInFlight = false
         return result
     }
 

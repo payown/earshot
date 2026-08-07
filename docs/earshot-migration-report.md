@@ -478,6 +478,12 @@ The fixtures contain 666 subscriptions and 241,759 fixture episodes:
 reproduces that watchdog-triggering shape; fixture counts are old-store counts,
 not predicted refetch counts.
 
+Build 167 is also KNOWN-BAD for further reset testing. Its launch path raced
+the reset transaction while opening the device-local store and crashed with
+incident `5876370B-E780-4C57-83C7-863E9A6EABB0`. The feed-refresh fix from
+`55a55cf` worked; this is a separate launch re-entry race. The current fix is
+on this branch and must be verified before another reset test.
+
 ## Device checklist
 
 **Status: BLOCKED.** The user selected the large-library option, targeting a

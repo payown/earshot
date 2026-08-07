@@ -1545,6 +1545,44 @@ large parent-shape effect (about 15x from P=1 to P=16), but not a settled
 functional form; P=2 at 188.613 s and P=4 at 176.970 s are indistinguishable
 at that noise level.
 
+## Build 167 launch-race crash, 2026-08-07
+
+### User-reported
+
+- “Imported earshot-100.opml, then ran Settings > Data > Delete all local data with VoiceOver.”
+- “The app returned to the Home Screen. He heard NOTHING.”
+
+### Crash identity (established analysis)
+
+Measured artifact: `Earshot-2026-08-07-121447.ips`, 28,938 bytes, SHA-256
+`72d20dc3dae5194be0e227b0c06d126979ad8a88e205307543f20c4c01cf0a62`,
+incident `5876370B-E780-4C57-83C7-863E9A6EABB0`, build 167, iPhone OS 27.0
+(`24A5390f`), `EXC_BREAKPOINT`/`SIGTRAP`, pid 25308, uptime 26.1500 s,
+foreground, faulting thread 4. The established stacks were:
+
+* Thread 4, `com.apple.root.user-initiated-qos.cooperative`:
+  `_assertionFailure <- SwiftData <- LocalStateStore.episodes(matching:in:) <- LocalStateStore.hydrate(in:repairing:) <- StoreMigration.openOrMigrate(at:progress:) <- ModelContainerFactory.makeShared(using:at:) <- ModelContainerFactory.makeShared(using:) <- AppRuntime.productionLaunch(progress:) <- closure #1 in AppRuntime.startLaunchIfNeeded()`.
+* Thread 3, same queue type:
+  `SettingsReset.transact(_:) <- FileManager.removeItem(at:) <- removefile <- unlink`.
+
+Thread 0 was idle in the main run loop. The established cause is launch-path
+re-entry while reset was moving the same store files: `resetLocalData()` set
+`phase = .unavailable`, SwiftUI rendered the unavailable launch view, and its
+`.task` started `startLaunchIfNeeded()` while `SettingsReset` was mid-transaction.
+
+The turn-6 feed-refresh fix WORKED. `BackgroundFeedRefresher`,
+`SubscriptionRepository`, and `FeedRefreshActor` appear nowhere in these
+stacks. This is a different race. The announcement did not play because reset
+never returned; there is no announcement defect.
+
+`resetLocalData()` has now been found to race two distinct readers: the feed
+refresh reader (fixed in `55a55cf`) and the launch/migration reader (fixed here).
+A named release list failed twice by omission, so this fix uses a reset-in-flight
+gate plus awaiting any existing launch task before publishing `.unavailable` or
+starting file reset. `AppRuntime.startLaunchIfNeeded()` now rejects entry while
+reset is in flight, and `resetLocalData()` awaits `launchTask` before the first
+quarantine move.
+
 ## Device test and post-reset crash, 2026-08-07
 
 ### User-reported device result
