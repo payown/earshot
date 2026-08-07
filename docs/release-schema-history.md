@@ -26,6 +26,10 @@ pre-launch identity distinguishing it from the stale build-164 binary that
 displayed the incorrect pre-V6 floor guard. Fresh stores: SwiftData V10.
 Supported migration sources: V5 and V6.
 
+Build 166 is the authorized reset-watchdog fix verification build, local only,
+with fresh-store schema V10 and supported migration sources V5 and V6. It is
+not uploaded or installed by this run.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
