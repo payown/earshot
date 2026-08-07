@@ -1544,3 +1544,48 @@ six-decimal model-error percentages are also withdrawn: the data supports a
 large parent-shape effect (about 15x from P=1 to P=16), but not a settled
 functional form; P=2 at 188.613 s and P=4 at 176.970 s are indistinguishable
 at that noise level.
+
+## Device test and post-reset crash, 2026-08-07
+
+### User-reported device result
+
+- “Confirmed Settings > Data > Delete all local data with VoiceOver.”
+- “App returned to the Home Screen almost immediately. He heard NOTHING.”
+- “Relaunch showed onboarding. Skip produced a correct empty app.”
+- “Earshot Plus entitlement was cleared.”
+
+### Crash identity (established analysis)
+
+Measured artifact: `Earshot-2026-08-07-095829.ips`, 34,282 bytes, SHA-256
+`ab8361af7b4b40fd643156a1d8144a19503a6a6098ecd6d5b0624631ae550058`,
+incident `0489A395-B0E6-4F57-979A-A16A9C6FE517`, build 166, iPhone OS 27.0
+(`24A5390f`), `iPhone18,2`, `EXC_BREAKPOINT`/`SIGTRAP`, pid 23949, uptime
+17.3945 s, foreground. The established three-thread stacks were:
+
+* Thread 1 (faulting), queue `NSManagedObjectContext 0x10cff2f40`:
+  `_assertionFailure <- SwiftData <- FeedRefreshActor.apply(_:to:autoQueueEnabled:) <- FeedRefreshActor.refreshAll <- SubscriptionRepository.refreshAll <- BackgroundFeedRefresher.runRefresh(container:force:isCancelled:notifier:) <- closure #2 in closure #1 in closure #1 in EarshotApp.body.getter`.
+* Thread 3, queue `com.apple.root.user-initiated-qos.cooperative`:
+  `SettingsReset.transact(_:) <- FileManager.removeItem(at:) <- removefile <- unlink`.
+* Thread 0 was SwiftUI teardown and did not trap.
+
+Root cause: an orphaned background feed refresh started by an app-body
+`.task` retained the old `ModelContainer` and kept writing while reset unlinked
+the store files. This was a race, not a watchdog or journal defect. Before the
+fix the one unreleased holder was the in-flight feed refresh; its transient
+`SubscriptionRepository`/`FeedRefreshActor` children were retained by that
+task. The fix retains the task in
+`Earshot/Features/Subscriptions/Data/BackgroundFeedRefresher.swift:32-33`,
+cancels and awaits it at `:35-44`, and calls that quiescence from
+`Earshot/App/EarshotApp.swift:656-670` before `SettingsReset`.
+
+The watchdog defect did NOT reproduce and deletion succeeded. The app crashed
+mid-reset from the unreleased background feed refresh, so D5 navigation and the
+success announcement never occurred. The journal and quarantine design
+absorbed the real process death; recovery produced a consistent empty state on
+the next launch, matching
+`testCommittedJournalRecoveryLeavesFreshStores`.
+
+Correction to Turn 5: app-data-container preservation is no longer unknown.
+The crash report `storeInfo` measured `distributorID=com.apple.AppStore` and
+`thirdParty=true`, evidence that the over-install preserved the existing
+container.

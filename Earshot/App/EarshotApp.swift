@@ -146,6 +146,7 @@ final class AppRuntime {
     private let recoveryDownloadUsage: RecoveryDownloadUsageOperation
     private let recoveryDownloadRemoval: RecoveryDownloadRemovalOperation
     private let recoveryCapacity: RecoveryCapacityOperation
+    private let fileResetOperation: @Sendable () async -> Bool
     private var generation = 0
     private var processServicesStarted = false
     private var entitlementContainer: ModelContainer?
@@ -190,6 +191,9 @@ final class AppRuntime {
                 try MigrationBackupManager.availableBytes(at: .applicationSupportDirectory)
             }.value
         },
+        fileResetOperation: @escaping @Sendable () async -> Bool = {
+            await SettingsReset.performFileReset()
+        },
         launchSleep: @escaping LaunchSleepOperation = { duration in
             try await Task.sleep(for: duration)
         }
@@ -204,6 +208,7 @@ final class AppRuntime {
         self.recoveryDownloadUsage = recoveryDownloadUsage
         self.recoveryDownloadRemoval = recoveryDownloadRemoval
         self.recoveryCapacity = recoveryCapacity
+        self.fileResetOperation = fileResetOperation
         self.launchSleep = launchSleep
         let router = NotificationRouter()
         notificationRouter = router
@@ -651,6 +656,7 @@ final class AppRuntime {
     func resetLocalData() async -> Bool {
         guard resetTask == nil else { return false }
         NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
+        await BackgroundFeedRefresher.cancelAndWait()
         player.releasePersistence()
         quickActions.releasePersistence()
         settings.releasePersistence()
@@ -666,7 +672,7 @@ final class AppRuntime {
         preparedDownloadContainer = nil
 
         let task = Task { @MainActor [weak self] () -> Bool in
-            let deleted = await SettingsReset.performFileReset()
+            let deleted = await self?.fileResetOperation() ?? false
             guard deleted, let self else { return false }
             let engine = StoreMigrationEngine()
             let load = await ModelContainerFactory.makeShared(using: engine)
