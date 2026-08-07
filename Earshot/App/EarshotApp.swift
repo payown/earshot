@@ -417,6 +417,10 @@ final class AppRuntime {
         "\(preparationAccessibilityLabel). \(initialPreparationValue)"
     static let firstHeartbeatDelay: Duration = .seconds(5)
     static let subsequentHeartbeatDelay: Duration = .seconds(8)
+    /// UIKit occasionally omits `announcementDidFinishNotification`. Preparation
+    /// speech is useful status, but it must never become a gate that prevents a
+    /// successfully migrated store from publishing the ready UI.
+    static let stageAnnouncementTimeout: Duration = .seconds(8)
 
     private func receive(_ progress: StoreMigrationProgress, attemptID: UUID) {
         guard launchAttemptID == attemptID, case .unavailable = phase else { return }
@@ -565,7 +569,7 @@ final class AppRuntime {
             _ = await self.launchAnnouncer.announceLaunch(
                 message,
                 assertive: false,
-                timeout: nil
+                timeout: Self.stageAnnouncementTimeout
             )
         }
     }

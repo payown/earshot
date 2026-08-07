@@ -26,8 +26,9 @@ enum Announcer {
     }
 
     /// Posts an announcement and waits until VoiceOver reports whether it
-    /// finished. Launch stages pass no timeout so the assertive completion can
-    /// never overtake queued progress speech. The completion itself retains its
+    /// finished. Every launch announcement has a bounded timeout: UIKit may omit
+    /// its completion notification, and missing speech must never hold the ready
+    /// UI indefinitely. Progress remains serialized; the completion retains its
     /// four-second fallback before the launch screen is removed (#781).
     @MainActor
     static func announceAndWaitForCompletion(
