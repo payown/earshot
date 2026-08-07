@@ -28,7 +28,13 @@ Supported migration sources: V5 and V6.
 
 Build 166 is the authorized reset-watchdog fix verification build, local only,
 with fresh-store schema V10 and supported migration sources V5 and V6. It is
-not uploaded or installed by this run.
+known-bad: the 2026-08-07 device reset crashed from the feed-refresh race and
+must not be used for further testing.
+
+Build 167 supersedes build 166 as the local device-verification build. It
+contains commit `55a55cfc` on `agent/reset-feed-refresh-race`, which cancels
+and awaits the active background feed refresh before file reset. Fresh-store
+schema remains V10; supported migration sources remain V5 and V6.
 
 ## Builds that reached distribution
 

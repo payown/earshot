@@ -1,71 +1,39 @@
-# Build 166 reset test — VoiceOver runbook
+# Build 167 reset test — VoiceOver runbook
 
-Build 166 was compiled locally and was not installed or launched by this run.
-Run the simulator reproduction first. Only then, if the simulator is clean,
-install the device build. The device test permanently destroys the on-device
-library; the Mac container backup is the only copy and no route back onto the
-phone has been proven.
+1. Confirm that build 167 is installed. Do not launch until ready.
 
-1. Simulator: from the repository root, build the app.
+2. Put `docs/incidents/2026-08-06-delete-all-local-data/opml/earshot-100.opml`
+   on the iPhone using Files, AirDrop, or Finder file sharing.
 
-   ```sh
-   xcodebuild build -project Earshot.xcodeproj -scheme Earshot \
-     -destination 'platform=iOS Simulator,id=58857CDF-1560-410D-8F46-7381F7ADF48A' \
-     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
-   ```
+   The file contains 100 subscriptions. Refetched episode counts will differ
+   from the fixture counts.
 
-2. Install the simulator build.
+3. Open the OPML file in Earshot and wait for the initial feed refresh to finish.
 
-   ```sh
-   xcrun simctl install 58857CDF-1560-410D-8F46-7381F7ADF48A \
-     /Users/michaelbabcock/Library/Developer/Xcode/DerivedData/Earshot-doqmtcyyuaifghbaeruvqgvrqzxy/Build/Products/Debug-iphonesimulator/Earshot.app
-   ```
+   Completion means the refresh activity has stopped and the library is stable.
 
-3. Launch the simulator app.
+4. Before resetting, note whether any download is in flight.
 
-   ```sh
-   xcrun simctl launch 58857CDF-1560-410D-8F46-7381F7ADF48A media.payown.earshot
-   ```
+5. Open Settings, then Data.
 
-4. Seed only a disposable simulator container by copying a temporary copy of
-   the build-165 backup's `Library/Application Support`, `Documents`, and
-   `Library/Caches/artwork` into the path returned by:
+6. Activate Delete all local data.
 
-   ```sh
-   xcrun simctl get_app_container 58857CDF-1560-410D-8F46-7381F7ADF48A media.payown.earshot data
-   ```
+7. Confirm Delete everything.
 
-   The preserved backup is never modified. Enable VoiceOver and open Settings
-   → Data.
+8. Pass: the app stays alive, the existing announcement “All local data deleted.
+   Podcasts you follow and downloads removed.” is heard, and onboarding appears
+   in-app without a relaunch.
 
-5. Before the reset, note whether any download is in flight. That path remains
-   unmeasured.
+9. Failure: the app returns to the Home Screen, becomes silent, or bounces.
 
-6. Swipe to “Delete all local data”, activate it, and confirm “Delete
-   everything”. Listen for the existing completion announcement. The expected
-   result is no watchdog bounce, a fresh empty store, and onboarding appearing.
-7. Device: install without connecting the phone through this run:
+10. The point of no return is confirming Delete everything.
 
-   ```sh
-   xcrun devicectl device install app --device <device-udid> \
-     /Users/michaelbabcock/Library/Developer/Xcode/DerivedData/Earshot-doqmtcyyuaifghbaeruvqgvrqzxy/Build/Products/Release-iphoneos/Earshot.app
-   ```
+## Second pass: download in flight
 
-   The install command is intentionally for the user’s later run. Do not
-   launch or delete data until the app is installed and VoiceOver is active.
-8. Open Earshot and listen for the normal launch/onboarding focus. Navigate to
-   Settings → Data → Delete all local data. Activate the destructive button,
-   confirm “Delete everything”, and wait. Do not force-quit during the reset.
-9. Pass: the app remains responsive, the existing “All local data deleted.
-   Podcasts you follow and downloads removed.” announcement is heard, and the
-   onboarding screen appears with its normal focus. Failure: a Home Screen
-   bounce, watchdog termination, missing announcement, or a return to the old
-   library. Capture the exact behavior and stop.
-10. At the moment the announcement and onboarding transition coincide, listen
-   specifically for whether the announcement is complete or clipped and whether
-   VoiceOver focus lands on onboarding before or after the announcement. This
-   run intentionally changes no announcement wording or focus-management code.
+11. After the clean pass, deliberately start a download and wait until it is
+    visibly in flight.
 
-The point of no return is confirmation of “Delete everything”: the store files,
-device-local settings, migration snapshot, downloads, and artwork are then
-removed. Recommended order: simulator first, device second.
+12. While that download remains in flight, repeat steps 5–9.
+
+No available OPML reproduces the incident store’s episodes-per-podcast shape.
+Do not attempt to reproduce the original watchdog condition.

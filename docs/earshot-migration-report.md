@@ -452,6 +452,32 @@ same pull request, following the procedure at
   audio and in-container migration snapshots. The two Mac fixture directories
   are independent copies and are safe from deletion of the phone app.
 
+## 2026-08-07 build-166 device test and handoff
+
+The real 53,864-episode build-166 device test showed that the watchdog defect
+did NOT reproduce and deletion succeeded. The app nevertheless crashed
+mid-reset with `EXC_BREAKPOINT`/`SIGTRAP`, incident
+`0489A395-B0E6-4F57-979A-A16A9C6FE517`, because an orphaned background feed
+refresh raced file deletion. Journal/quarantine recovery produced a consistent
+empty state on the next launch. Build 166 is KNOWN-BAD and must not be used for
+further testing. Fix `55a55cf` is on `agent/reset-feed-refresh-race`, tracked
+by #807 and PR #808. The device library was destroyed and must be rebuilt from
+OPML before further reset testing.
+
+The timing figures are not comparable: `0.030273333 s` measured the real
+53,864-episode incident store; `0.018309317 s` measured an empty disposable
+store. This is not an improvement claim.
+
+`FeedRefreshResetRaceTests` proves cancellation and awaiting before reset with
+an in-memory refresh container and separate disposable reset directories. It
+does not test a refresh writing to the same store files being deleted.
+
+The fixtures contain 666 subscriptions and 241,759 fixture episodes:
+`241759 / 666 = 362.7` episodes per podcast, versus approximately
+`53864 / 10 = 5386.4` in the incident store. None of the three OPML files
+reproduces that watchdog-triggering shape; fixture counts are old-store counts,
+not predicted refetch counts.
+
 ## Device checklist
 
 **Status: BLOCKED.** The user selected the large-library option, targeting a
