@@ -504,6 +504,41 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).count, 24)
     }
 
+    /// OPML bulk import persists only the newest ten rows immediately. A later
+    /// ordinary refresh fills older history, and the subscribe high-water mark
+    /// ensures those older rows remain dismissed rather than entering the Inbox.
+    func testActorSubscribeAllLimitsInitialHistoryAndRefreshAddsOlderDismissed() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let catalog = (0..<25).map { index in
+            parsedEpisode("episode-\(index)", d1.addingTimeInterval(Double(index)))
+        }
+        let fetcher = FakeFeed(parsedFeed(catalog))
+
+        _ = await actor.subscribeAll(
+            feedURLs: ["https://x/large.xml"], feed: fetcher, inboxSeedCount: 3
+        )
+
+        var stored = try episodes(container)
+        XCTAssertEqual(stored.count, 10, "OPML import stores only the newest ten episodes")
+        XCTAssertEqual(Set(stored.map(\.guid)), Set((15..<25).map { "episode-\($0)" }))
+
+        _ = try await actor.refreshOne(
+            feedURL: "https://x/large.xml", feed: fetcher, autoQueueEnabled: false
+        )
+
+        stored = try episodes(container)
+        XCTAssertEqual(stored.count, 25, "A normal later refresh restores older history")
+        let older = stored.filter { episode in
+            guard let index = Int(episode.guid.replacingOccurrences(of: "episode-", with: "")) else {
+                return false
+            }
+            return index < 15
+        }
+        XCTAssertEqual(older.count, 15)
+        XCTAssertTrue(older.allSatisfy(\.inboxDismissed), "Older history never appears as new Inbox content")
+    }
+
     /// A feed that throws is logged and skipped — the rest of the batch still
     /// subscribes and the result array omits the failed feed.
     func testActorSubscribeAllSkipsFailingFeedAndContinues() async throws {

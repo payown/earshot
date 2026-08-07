@@ -59,6 +59,14 @@ Build 170 is the local three-feed-concurrency comparison build. It retains build
 only the number of simultaneous feed fetches from two to three. Fresh-store
 schema remains V10; supported migration sources remain V5 and V6.
 
+Build 170.1 (device-test label “170A”) limits each OPML subscription's immediate
+catalog insertion to its newest 10 episodes. Later ordinary refreshes add older
+history as dismissed backlog, using the newest-date high-water mark established
+during import so old episodes do not enter the Inbox or auto-download path. It
+retains build 170's three-feed fetch concurrency, two-feed save batches, and
+cooperative insertion yields. Fresh-store schema remains V10; supported
+migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App

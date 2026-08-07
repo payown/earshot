@@ -33,6 +33,11 @@ actor FeedRefreshActor {
     /// metadata-only batch so large back catalogs cannot accumulate ten feeds'
     /// worth of live model objects at once.
     private static let subscribeSaveBatchSize = 2
+    /// OPML restores prioritize making subscriptions usable quickly. The normal
+    /// refresh path can add older catalog rows later; because the subscribe seeds
+    /// the newest-date high-water mark, that older history stays dismissed and is
+    /// never mistaken for newly published Inbox content.
+    private static let opmlInitialEpisodeLimit = 10
     /// A single unresponsive feed must not hold an OPML import at the URLSession
     /// resource timeout. The normal feed refresh path keeps its existing policy;
     /// this shorter ceiling applies only to bulk import prefetches.
@@ -302,7 +307,8 @@ actor FeedRefreshActor {
                             feedURL: url,
                             feed: feed,
                             inboxSeedCount: inboxSeedCount,
-                            parsedFeed: parsed
+                            parsedFeed: parsed,
+                            initialEpisodeLimit: Self.opmlInitialEpisodeLimit
                         )
                         title = outcome.title
                         if outcome.alreadySubscribed {
@@ -398,7 +404,8 @@ actor FeedRefreshActor {
         feedURL: String,
         feed: FeedFetching,
         inboxSeedCount: Int,
-        parsedFeed: ParsedFeed? = nil
+        parsedFeed: ParsedFeed? = nil,
+        initialEpisodeLimit: Int? = nil
     ) async throws -> SubscribeOutcome {
         let canonical = FeedURLIdentity.canonical(feedURL)
         let identity = PodcastIdentityService(context: modelContext)
@@ -418,7 +425,17 @@ actor FeedRefreshActor {
         } else {
             parsed = try await feed.fetch(canonical)
         }
-        let parsedEpisodes = Self.deduplicatedEpisodes(parsed.episodes)
+        let completeParsedEpisodes = Self.deduplicatedEpisodes(parsed.episodes)
+        let parsedEpisodes: [ParsedEpisode]
+        if let initialEpisodeLimit {
+            parsedEpisodes = Array(
+                completeParsedEpisodes
+                    .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+                    .prefix(initialEpisodeLimit)
+            )
+        } else {
+            parsedEpisodes = completeParsedEpisodes
+        }
 
         // Recheck after the await: another subscribe context may have committed
         // the same natural key while this actor was fetching the network feed.
