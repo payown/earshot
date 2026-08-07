@@ -84,7 +84,7 @@ enum SettingsReset {
         }
         journal = Journal(phase: .committed, quarantine: quarantineName, entries: entries)
         try write(journal, at: paths.journal)
-        try? fm.removeItem(at: quarantine)
+        try fm.removeItem(at: quarantine)
         try fm.removeItem(at: paths.journal)
     }
 
