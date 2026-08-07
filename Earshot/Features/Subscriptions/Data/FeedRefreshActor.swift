@@ -24,6 +24,10 @@ actor FeedRefreshActor {
     /// actor in input order. This keeps imports responsive without creating a
     /// context per feed or an unbounded request burst.
     private static let subscribeFetchConcurrency = 6
+    /// A single unresponsive feed must not hold an OPML import at the URLSession
+    /// resource timeout. The normal feed refresh path keeps its existing policy;
+    /// this shorter ceiling applies only to bulk import prefetches.
+    private static let subscribeFetchTimeout: Duration = .seconds(15)
 
     /// The per-podcast result of one refresh pass, identified by feed URL so the
     /// main actor can resolve it back without an `@Model` crossing the boundary.
@@ -268,7 +272,7 @@ actor FeedRefreshActor {
                 let url = fetchCandidates[nextIndex]
                 nextIndex += 1
                 group.addTask {
-                    (url, try? await feed.fetch(url))
+                    (url, await Self.fetchForImport(url, feed: feed))
                 }
             }
             while let (url, parsed) = await group.next() {
@@ -281,7 +285,7 @@ actor FeedRefreshActor {
                 let nextURL = fetchCandidates[nextIndex]
                 nextIndex += 1
                 group.addTask {
-                    (nextURL, try? await feed.fetch(nextURL))
+                    (nextURL, await Self.fetchForImport(nextURL, feed: feed))
                 }
             }
         }
@@ -289,7 +293,7 @@ actor FeedRefreshActor {
         for url in feedURLs {
             var title: String?
             if failedFetches.contains(url) {
-                AppLog.subscriptions.error("OPML import: failed (url, privacy: .public)")
+                AppLog.subscriptions.error("OPML import: failed \(url, privacy: .public)")
                 completed += 1
                 await onProgress?(completed, total, nil)
                 continue
@@ -336,6 +340,19 @@ actor FeedRefreshActor {
         NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
         await PodcastIdentityWriteGate.shared.release(feedURLs: feedURLs)
         return results
+    }
+
+    private static func fetchForImport(_ url: String, feed: FeedFetching) async -> ParsedFeed? {
+        await withTaskGroup(of: ParsedFeed?.self) { group in
+            group.addTask { try? await feed.fetch(url) }
+            group.addTask {
+                try? await Task.sleep(for: Self.subscribeFetchTimeout)
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
     }
 
     /// The result of one core subscribe, holding the live @Model objects (which stay
