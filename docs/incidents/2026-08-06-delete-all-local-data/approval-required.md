@@ -115,3 +115,24 @@ snapshot before erasure and retains it afterward
 `Earshot/Data/Persistence/MigrationBackupManager.swift:290-350`). The Settings
 measurement had no snapshot precondition and quarantined the snapshot itself,
 as D2 requires.
+## Turn 3 decisions (DECIDED — 2026-08-07)
+
+> D4. NEW. The four cached Earshot Plus entitlement rows ARE deleted. Entitlement resynchronizes on next launch. Do NOT preserve them. Do NOT add a resync call as part of the reset. D4 refines D1; it does not contradict it.
+
+> D5. NEW. onboarding_complete IS deleted, and a completed reset navigates to onboarding immediately. This is an approved user-facing behavior change.
+
+## Still open after Turn 3
+
+- Entitlement window: resync has no reset-completion, onboarding-appearance, or
+  scene-activation call. A user who remains in-process retains the old in-memory
+  value; a later cold launch reads the deleted default before `resync()`.
+  Issue #805 records this question.
+- Announcement ordering: the existing success announcement remains scheduled
+  0.5 seconds after success while the fresh empty container routes RootView to
+  onboarding. The exact VoiceOver focus/announcement clipping order needs a
+  device or simulator interaction test; no new copy or focus management was
+  added.
+- URLCache unified logging: redirected stderr was empty, but simulator unified
+  logging still emitted vnode-unlink API-violation lines. The client teardown
+  avoids a live singleton reference and reconstructs successfully, but whether
+  Apple's descriptors close synchronously remains unresolved (#690).
