@@ -312,7 +312,7 @@ final class OPMLBulkImportTests: XCTestCase {
             recorder.activeFetchesAtFirstProgress, 0,
             "Progress advances before every network fetch has completed"
         )
-        XCTAssertEqual(fetcher.maximumFetchCount, 6, "Import keeps at most six network fetches in flight")
+        XCTAssertEqual(fetcher.maximumFetchCount, 2, "Import keeps at most two network fetches in flight")
         XCTAssertEqual(recorder.completes, Array(1...8))
     }
 }

@@ -44,7 +44,15 @@ device-verification build. Its OPML path uses a bounded streaming pipeline:
 up to six feeds are fetched concurrently, and each completed feed is written
 and reported immediately instead of retaining every parsed feed until all
 network work finishes. Fresh-store schema remains V10; supported migration
-sources remain V5 and V6.
+sources remain V5 and V6. Its six-feed concurrency still made the device UI
+unresponsive during a real 60-feed OPML import, so it is known-bad for further
+OPML testing.
+
+Build 169 supersedes build 168 for local OPML device verification. It reduces
+bulk-import concurrency to two feeds, saves after two newly inserted feeds, and
+cooperatively yields during large episode-insertion loops to preserve foreground
+and VoiceOver responsiveness. Fresh-store schema remains V10; supported
+migration sources remain V5 and V6.
 
 ## Builds that reached distribution
 

@@ -23,7 +23,16 @@ actor FeedRefreshActor {
     /// Network fetches are overlapped, but all SwiftData mutation remains on this
     /// actor in input order. This keeps imports responsive without creating a
     /// context per feed or an unbounded request burst.
-    private static let subscribeFetchConcurrency = 6
+    // Two concurrent feeds leave CPU and memory headroom for SwiftUI and
+    // VoiceOver on device. Six overlapped XML parses made a 60-feed import faster
+    // in isolation but could starve the foreground UI and make the phone appear
+    // frozen while several large episode catalogs were decoded together.
+    private static let subscribeFetchConcurrency = 2
+    /// Bulk subscription outcomes retain their newly inserted Episode objects
+    /// until a save gives them permanent IDs. Keep this smaller than refresh's
+    /// metadata-only batch so large back catalogs cannot accumulate ten feeds'
+    /// worth of live model objects at once.
+    private static let subscribeSaveBatchSize = 2
     /// A single unresponsive feed must not hold an OPML import at the URLSession
     /// resource timeout. The normal feed refresh path keeps its existing policy;
     /// this shorter ceiling applies only to bulk import prefetches.
@@ -301,7 +310,7 @@ actor FeedRefreshActor {
                         } else {
                             pendingOutcomeByInputIndex[inputIndex] = outcome
                             sinceLastSave += 1
-                            if sinceLastSave >= Self.saveBatchSize { flushPending() }
+                            if sinceLastSave >= Self.subscribeSaveBatchSize { flushPending() }
                         }
                     } catch {
                         AppLog.subscriptions.error(
@@ -442,7 +451,7 @@ actor FeedRefreshActor {
 
         let now = Date.now
         var insertedEpisodes: [Episode] = []
-        for item in parsedEpisodes {
+        for (index, item) in parsedEpisodes.enumerated() {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
             // Start every episode dismissed; the seed pass below un-dismisses the
@@ -452,6 +461,10 @@ actor FeedRefreshActor {
             episode.inboxDismissed = true
             modelContext.insert(episode)
             insertedEpisodes.append(episode)
+            // A feed can contain thousands of episodes. Cooperatively yield during
+            // that synchronous insertion loop so other executors — especially the
+            // main actor serving SwiftUI and VoiceOver — get regular run time.
+            if index.isMultiple(of: 100) { await Task.yield() }
         }
         // Seed the inbox with the newest N NON-FUTURE episodes (status stays
         // .newEpisode), keeping the rest dismissed. N is resolved on the main actor
