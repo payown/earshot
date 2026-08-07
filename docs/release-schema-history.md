@@ -74,6 +74,13 @@ renames Step 2 to “Upgrading your library database.” It otherwise retains bu
 170.1 behavior. Fresh-store schema remains V10; supported migration sources
 remain V5 and V6.
 
+Build 171.1 is the local Bluetooth transport verification build. It publishes
+the selected playback speed as the Now Playing default playback rate while
+retaining zero as the current rate when paused, allowing single-button Bluetooth
+accessories to distinguish paused and playing states above 1x. It adds no timer,
+polling, or Now Playing update. Fresh-store schema remains V10; supported
+migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App

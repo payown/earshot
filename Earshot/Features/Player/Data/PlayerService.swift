@@ -793,6 +793,18 @@ final class PlayerService {
     /// ``effectiveRate`` instead.
     var debugDefaultRate: Double { Double(player.defaultRate) }
 
+    /// Now Playing transport rates exposed for regression tests. The current
+    /// rate becomes zero while paused; the default rate remains the user's
+    /// selected playback speed so Bluetooth accessories interpret play/pause
+    /// correctly above 1x.
+    var debugNowPlayingRate: Double? {
+        (cachedNowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber)?.doubleValue
+    }
+
+    var debugNowPlayingDefaultRate: Double? {
+        (cachedNowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] as? NSNumber)?.doubleValue
+    }
+
     /// Re-applies the effective rate to the player. Call when the global speed —
     /// or the current podcast's override — changes mid-playback.
     func reapplyRate() { applyRate() }
@@ -2126,6 +2138,7 @@ final class PlayerService {
         }
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentPositionSeconds
         info[MPNowPlayingInfoPropertyPlaybackRate] = reportedNowPlayingRate
+        info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = currentEffectiveRate
         // Preserve artwork that was already set by a prior fetch so it isn't
         // cleared by this synchronous update. The async artwork path will
         // overwrite it (or set it for the first time) when the image arrives.
@@ -2217,6 +2230,7 @@ final class PlayerService {
         var info = cachedNowPlayingInfo
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentPositionSeconds
         info[MPNowPlayingInfoPropertyPlaybackRate] = reportedNowPlayingRate
+        info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = currentEffectiveRate
         if durationSeconds > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = durationSeconds
         }
