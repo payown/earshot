@@ -6,8 +6,7 @@ install the device build. The device test permanently destroys the on-device
 library; the Mac container backup is the only copy and no route back onto the
 phone has been proven.
 
-1. Simulator: build/launch the disposable seeded-store reproduction using the
-   command recorded in the PR, then enable VoiceOver and open Settings → Data.
+1. Simulator: from the repository root run `xcodebuild build -project Earshot.xcodeproj -scheme Earshot -destination 'platform=iOS Simulator,id=58857CDF-1560-410D-8F46-7381F7ADF48A' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`, then `xcrun simctl install 58857CDF-1560-410D-8F46-7381F7ADF48A /Users/michaelbabcock/Library/Developer/Xcode/DerivedData/Earshot-doqmtcyyuaifghbaeruvqgvrqzxy/Build/Products/Debug-iphonesimulator/Earshot.app` and `xcrun simctl launch 58857CDF-1560-410D-8F46-7381F7ADF48A media.payown.earshot`. Seed only a disposable simulator container by copying a temporary copy of the build-165 backup's `Library/Application Support`, `Documents`, and `Library/Caches/artwork` into the path from `xcrun simctl get_app_container 58857CDF-1560-410D-8F46-7381F7ADF48A media.payown.earshot data`; the preserved backup is never modified. Enable VoiceOver and open Settings → Data.
    Swipe to “Delete all local data”, activate it, and confirm “Delete
    everything”. Listen for the existing completion announcement. The expected
    result is no watchdog bounce, a fresh empty store, and onboarding appearing.

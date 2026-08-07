@@ -646,3 +646,10 @@ They must be reviewed before any branch pruning.
   settings, or downloaded audio.
 - Fresh physical snapshot creation, post-#802 VoiceOver order, the five-second
   heartbeat, and a real background download are the material remaining proofs.
+
+Turn 4 correction: 0.006874125 s was the file transaction seam only, excluding
+container rebuild. Corrected shipping-path mean: 0.030273333 s (population SD
+0.005522 s; range 0.022888542–0.038343625 s), below the 3.0-second ceiling.
+The earlier WAL percentage and single-run falsifier precision claims are
+withdrawn; WAL does not explain variance and parent-shape functional form is
+unresolved.

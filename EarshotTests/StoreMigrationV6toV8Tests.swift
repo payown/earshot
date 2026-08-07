@@ -3143,29 +3143,57 @@ final class ResetFileLevelMeasurementTests: XCTestCase {
     func testShippingFileResetSeries() async throws {
         try requireOptIn()
         var samples: [Double] = []
+        var rebuildSamples: [Double] = []
+        var peaks: [Double] = []
         for run in 1...5 {
             let paths = try makeIncidentShape(label: "shipping-\(run)")
             var container: ModelContainer? = try openV10(paths)
             container = nil
+            let sampler = MigrationMemorySampler()
+            _ = sampler.start()
             let start = DispatchTime.now().uptimeNanoseconds
             let ok = await SettingsReset.performFileReset(
                 applicationSupport: paths.applicationSupport,
                 documents: paths.root.appending(path: "Documents", directoryHint: .isDirectory),
                 caches: paths.root.appending(path: "Caches", directoryHint: .isDirectory)
             )
+            let transactionSeconds = elapsed(since: start)
+            let rebuildStart = DispatchTime.now().uptimeNanoseconds
+            let load = await ModelContainerFactory.makeShared(using: StoreMigrationEngine(), at: paths.mirrored)
+            let reopened: ModelContainer
+            switch load { case .ready(let value): reopened = value; default: XCTFail("fresh store did not open"); continue }
+            let rebuildSeconds = elapsed(since: rebuildStart)
             let seconds = elapsed(since: start)
-            let reopened = try openV10(paths)
+            let peak = sampler.stop()
             let counts = try entityCounts(reopened.mainContext)
-            samples.append(seconds)
-            print(String(format: "SHIPPINGRESET|run|%d|seconds|%.9f|ok|%@|counts|%@|primaryVersion|%@|localVersion|%@|integrity|%@|%@|downloadsGone|%@|artworkGone|%@|snapshotGone|%@", run, seconds, ok ? "true" : "false", counts.text, try storeVersion(paths.mirrored), try storeVersion(paths.local), try integrity(paths.mirrored).joined(separator: ","), try integrity(paths.local).joined(separator: ","), exists(paths.downloads) ? "false" : "true", exists(paths.artwork) ? "false" : "true", exists(paths.backupRoot) ? "false" : "true"))
+            samples.append(seconds); rebuildSamples.append(rebuildSeconds); peaks.append(peak)
+            print(String(format: "SHIPPINGRESET|run|%d|seconds|%.9f|transaction|%.9f|rebuild|%.9f|peakRssMB|%.3f|ok|%@|counts|%@|primaryVersion|%@|localVersion|%@|integrity|%@|%@|downloadsGone|%@|artworkGone|%@|snapshotGone|%@", run, seconds, transactionSeconds, rebuildSeconds, peak, ok ? "true" : "false", counts.text, try storeVersion(paths.mirrored), try storeVersion(paths.local), try integrity(paths.mirrored).joined(separator: ","), try integrity(paths.local).joined(separator: ","), exists(paths.downloads) ? "false" : "true", exists(paths.artwork) ? "false" : "true", exists(paths.backupRoot) ? "false" : "true"))
             XCTAssertTrue(ok)
-            XCTAssertTrue(counts.allZero)
+            XCTAssertTrue(counts.values.filter { $0.0 != "AppSetting" }.allSatisfy { $0.1 == 0 })
+            XCTAssertEqual(try reopened.mainContext.fetchCount(FetchDescriptor<AppSetting>()), 2)
             XCTAssertEqual(try storeVersion(paths.mirrored), "10.0.0")
             XCTAssertEqual(try storeVersion(paths.local), "10.0.0")
             XCTAssertEqual(try integrity(paths.mirrored), ["ok"])
             XCTAssertEqual(try integrity(paths.local), ["ok"])
         }
         printStats(name: "shippingFileReset", samples: samples)
+        printStats(name: "shippingContainerRebuild", samples: rebuildSamples)
+        printStats(name: "shippingPeakRssMB", samples: peaks)
+    }
+
+    func testCommittedJournalRecoveryLeavesFreshStores() throws {
+        try requireOptIn()
+        let paths = try makeIncidentShape(label: "committed-journal-recovery")
+        var container: ModelContainer? = try openV10(paths)
+        container = nil
+        do { _ = try performReset(paths: paths, interruptAt: .afterCommittedJournal); XCTFail("expected interruption") }
+        catch let error as CocoaError { XCTAssertEqual(error.code, .userCancelled) }
+        let recovered = try recoverAndOpen(paths: paths)
+        XCTAssertTrue(try entityCounts(recovered.mainContext).allZero)
+        XCTAssertFalse(exists(paths.journal))
+        XCTAssertTrue(quarantineDirectories(paths).isEmpty)
+        XCTAssertEqual(try storeVersion(paths.mirrored), "10.0.0")
+        XCTAssertEqual(try storeVersion(paths.local), "10.0.0")
     }
 
     func testFileLevelResetInterruptionRecovery() throws {

@@ -495,3 +495,10 @@ pre-launch identity.
   for representative physical-device V6 migrations.
 - Simulator VoiceOver timing cannot verify the #802 behavior for a blind user's
   first launch. Hardware verification of the fix remains outstanding.
+
+Turn 4 correction: 0.006874125 s was the file transaction seam only, excluding
+container rebuild. Corrected shipping-path mean: 0.030273333 s (population SD
+0.005522 s; range 0.022888542–0.038343625 s), below the 3.0-second ceiling.
+The earlier WAL percentage and single-run falsifier precision claims are
+withdrawn; WAL does not explain variance and parent-shape functional form is
+unresolved.

@@ -84,7 +84,7 @@ enum SettingsReset {
         }
         journal = Journal(phase: .committed, quarantine: quarantineName, entries: entries)
         try write(journal, at: paths.journal)
-        try fm.removeItem(at: quarantine)
+        try? fm.removeItem(at: quarantine)
         try fm.removeItem(at: paths.journal)
     }
 
@@ -127,23 +127,10 @@ enum SettingsReset {
         delete(RecentlyExpired.self, context); delete(QuickActionConfig.self, context)
         delete(AppSetting.self, context)
         try? context.save()
-        let fm = FileManager.default
-        if let downloads = try? fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
-            .appending(path: "Downloads", directoryHint: .isDirectory) {
-            try? fm.removeItem(at: downloads)
-        }
-        ArtworkCache.shared.clear()
-        if let artwork = ArtworkCache.cacheDirectoryURL() { try? fm.removeItem(at: artwork) }
     }
 
     private static func delete<T: PersistentModel>(_ type: T.Type, _ context: ModelContext) {
         for object in (try? context.fetch(FetchDescriptor<T>())) ?? [] { context.delete(object) }
     }
     #endif
-}
-
-extension LaunchScreen {
-    var displayName: String {
-        switch self { case .inbox: return "Inbox"; case .queue: return "Queue"; case .library: return "Library"; case .downloads: return "Downloads" }
-    }
 }

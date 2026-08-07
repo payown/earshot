@@ -1476,6 +1476,34 @@ SHIPPINGRESET run 3 0.007474375 s
 SHIPPINGRESET run 4 0.006599042 s
 SHIPPINGRESET run 5 0.006395542 s
 mean 0.006874125 s; population SD 0.000948644 s; min 0.005568292 s; max 0.008333375 s
+
+## Turn 4 — correctness and shipping-path timing
+
+The 0.006874125 s figure above was the file transaction seam only; it excluded
+the production container rebuild. The corrected five-run end-to-end samples were
+0.034000083, 0.038343625, 0.022888542, 0.030456000, and 0.025678417 s.
+Derived mean = 0.151366667 / 5 = 0.030273333 s; population SD 0.005522 s;
+range 0.022888542–0.038343625 s. Container rebuild alone was
+0.024064875, 0.028934208, 0.015328167, 0.014023416, 0.017185125 s;
+mean 0.019907158 s, SD 0.005688045 s, range 0.014023416–0.028934208 s.
+Peak RSS was 273.906, 272.094, 276.516, 289.594, 295.266 MB (mean 281.475 MB,
+SD 9.230 MB). The corrected mean is below the 3.0 s ceiling.
+
+Quarantine cleanup is lenient after the committed journal write (`try?`);
+journal removal remains throwing as the completion marker. `recover()` removes
+both leftovers on the next launch. The artwork test now checks reconstruction
+only: the SQLite warning is unified-log output, not stderr, so the old assertion
+was vacuous; the warning still appeared and #690 remains open.
+
+Turn 3's 16.796277% checkpointing claim is withdrawn as statistically unsupported:
+WAL state does not explain the variance. The falsifier's six-decimal single-run
+errors are also withdrawn as over-precise; the supported result is a large
+parent-shape effect with functional form unresolved.
+
+Still untested: empty store, in-flight download, concurrent reset, injected
+failure at each destructive step, termination between individual quarantine
+moves, during recursive quarantine deletion, during fresh-store open, and during
+service/cache teardown.
 ```
 
 Every run reopened both stores as V10 `10.0.0`, integrity `ok`, all fourteen

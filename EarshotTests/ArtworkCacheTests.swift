@@ -229,23 +229,13 @@ final class ArtworkCacheTests: XCTestCase {
         let firstResult = await cache!.data(for: url)
         XCTAssertEqual(firstResult, payload)
 
-        let capture = Pipe()
-        let savedStderr = dup(STDERR_FILENO)
-        dup2(capture.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
         cache!.tearDown()
         cache = nil
-        usleep(2_000_000)
         try FileManager.default.removeItem(at: directory)
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
         let rebuilt = ArtworkCache(session: MockURLProtocol.makeSession(), directoryURL: directory)
         let rebuiltResult = await rebuilt.data(for: url)
         XCTAssertEqual(rebuiltResult, payload)
-        fflush(stderr)
-        dup2(savedStderr, STDERR_FILENO)
-        close(savedStderr)
-        capture.fileHandleForWriting.closeFile()
-        let stderrText = String(data: capture.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        XCTAssertFalse(stderrText.contains("BUG IN CLIENT OF libsqlite3.dylib"), stderrText)
         try? FileManager.default.removeItem(at: root)
     }
 }
