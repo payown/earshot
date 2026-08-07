@@ -560,11 +560,14 @@ cannot: fresh snapshot creation on hardware; announcement order after #802; a
 real background `URLSession` transfer crossing installation; and, if the
 library is large enough, the five-second heartbeat.
 
-The exact library size is not yet established. A prior target of roughly 60
-feeds and 145,000 episodes may not be large enough. A scan on 2026-08-06 did not
-locate the promised trimmed OPML under the user's home directory, and the
-planned 666-subscription OPML extraction was never run. Do not claim either
-OPML exists.
+The exact physical-device library size is not yet established. Simulator
+preparation timing extrapolates five seconds at 2,032,111 Episodes. The OPML
+extraction is now complete under
+`docs/incidents/2026-08-06-delete-all-local-data/opml/`: the full file contains
+666 subscriptions covering 241,759 fixture Episodes, and the top-250 and
+top-100 files cover 222,719 and 175,435 fixture Episodes respectively. These
+fixture counts do not establish the episode totals those feeds will expose when
+refetched from the network.
 
 ## Unmerged branches requiring review
 
