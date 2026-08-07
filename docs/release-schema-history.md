@@ -34,7 +34,17 @@ must not be used for further testing.
 Build 167 supersedes build 166 as the local device-verification build. It
 contains commit `55a55cfc` on `agent/reset-feed-refresh-race`, which cancels
 and awaits the active background feed refresh before file reset. Fresh-store
-schema remains V10; supported migration sources remain V5 and V6.
+schema remains V10; supported migration sources remain V5 and V6. It is also
+known-bad: the 2026-08-07 device reset crashed when the launch path reopened
+store files while reset was moving them, and it must not be used for further
+testing.
+
+Build 168 supersedes known-bad builds 166 and 167 as the local
+device-verification build. Its OPML path uses a bounded streaming pipeline:
+up to six feeds are fetched concurrently, and each completed feed is written
+and reported immediately instead of retaining every parsed feed until all
+network work finishes. Fresh-store schema remains V10; supported migration
+sources remain V5 and V6.
 
 ## Builds that reached distribution
 

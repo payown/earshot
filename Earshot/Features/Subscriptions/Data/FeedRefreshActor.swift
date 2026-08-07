@@ -229,15 +229,6 @@ actor FeedRefreshActor {
     ) async -> [SubscribeResult] {
         await PodcastIdentityWriteGate.shared.acquire(feedURLs: feedURLs)
         let total = feedURLs.count
-        var results: [SubscribeResult] = []
-        var sinceLastSave = 0
-        var completed = 0
-
-        // Inserted-but-not-yet-finally-saved subscribes whose IDs must be read AFTER
-        // a save. persistentModelID is temporary until the context saves; we collect
-        // the live @Model objects here (they never leave the actor) and resolve their
-        // permanent IDs into `results` after each batch save below.
-        var pendingIndexByResult: [Int: SubscribeOutcome] = [:]
 
         do {
             let repair = try IdentityRepairService(context: modelContext)
@@ -249,91 +240,93 @@ actor FeedRefreshActor {
             )
         }
 
-        func flushPending() {
-            saveIfNeededOrLog()
-            for (index, outcome) in pendingIndexByResult { results[index] = outcome.result() }
-            pendingIndexByResult.removeAll()
-            sinceLastSave = 0
-        }
+        let results = await withTaskGroup(
+            of: (Int, String, ParsedFeed?).self,
+            returning: [SubscribeResult].self
+        ) { group in
+            var resultByInputIndex: [Int: SubscribeResult] = [:]
+            var pendingOutcomeByInputIndex: [Int: SubscribeOutcome] = [:]
+            var sinceLastSave = 0
+            var completed = 0
 
-        // Fetch and parse feeds concurrently before touching the model context.
-        // The old loop waited for each network request before starting the next;
-        // bounded prefetch overlaps server latency while preserving serialized
-        // identity checks, inserts, and saves below.
-        let fetchCandidates = feedURLs.filter { url in
-            (try? PodcastIdentityService(context: modelContext).existing(feedURL: url)) == nil
-        }
-        var prefetched: [String: ParsedFeed] = [:]
-        var failedFetches: Set<String> = []
-        await withTaskGroup(of: (String, ParsedFeed?).self) { group in
+            func flushPending() {
+                saveIfNeededOrLog()
+                for (index, outcome) in pendingOutcomeByInputIndex {
+                    resultByInputIndex[index] = outcome.result()
+                }
+                pendingOutcomeByInputIndex.removeAll()
+                sinceLastSave = 0
+            }
+
+            // Resolve existing subscriptions without network work. New feeds enter
+            // the bounded pipeline below; each parsed feed is written and released
+            // as soon as it arrives rather than retaining every parsed feed until
+            // the slowest network request finishes.
+            let identity = PodcastIdentityService(context: modelContext)
+            var fetchCandidates: [(index: Int, url: String)] = []
+            for (index, url) in feedURLs.enumerated() {
+                if let existing = try? identity.existing(feedURL: url) {
+                    resultByInputIndex[index] = SubscribeOutcome(
+                        podcast: existing, episodes: [], alreadySubscribed: true
+                    ).result()
+                    completed += 1
+                    await onProgress?(completed, total, existing.title)
+                } else {
+                    fetchCandidates.append((index, url))
+                }
+            }
+
             var nextIndex = 0
             let initial = min(Self.subscribeFetchConcurrency, fetchCandidates.count)
             for _ in 0..<initial {
-                let url = fetchCandidates[nextIndex]
+                let candidate = fetchCandidates[nextIndex]
                 nextIndex += 1
                 group.addTask {
-                    (url, await Self.fetchForImport(url, feed: feed))
+                    (candidate.index, candidate.url, await Self.fetchForImport(candidate.url, feed: feed))
                 }
             }
-            while let (url, parsed) = await group.next() {
+            while let (inputIndex, url, parsed) = await group.next() {
+                var title: String?
                 if let parsed {
-                    prefetched[url] = parsed
-                } else {
-                    failedFetches.insert(url)
-                }
-                guard nextIndex < fetchCandidates.count else { continue }
-                let nextURL = fetchCandidates[nextIndex]
-                nextIndex += 1
-                group.addTask {
-                    (nextURL, await Self.fetchForImport(nextURL, feed: feed))
-                }
-            }
-        }
-
-        for url in feedURLs {
-            var title: String?
-            if failedFetches.contains(url) {
-                AppLog.subscriptions.error("OPML import: failed \(url, privacy: .public)")
-                completed += 1
-                await onProgress?(completed, total, nil)
-                continue
-            }
-            do {
-                let outcome = try await subscribeOne(
-                    feedURL: url,
-                    feed: feed,
-                    inboxSeedCount: inboxSeedCount,
-                    parsedFeed: prefetched[url]
-                )
-                title = outcome.title
-                if outcome.alreadySubscribed {
-                    // No insert/save needed: IDs are already permanent.
-                    results.append(outcome.result())
-                } else {
-                    // Reserve the slot now (preserves input order) and fill its
-                    // permanent IDs at the next save.
-                    let index = results.count
-                    results.append(
-                        SubscribeResult(
-                            feedURL: outcome.podcast.feedURL,
-                            podcastID: outcome.podcast.persistentModelID,
-                            episodeIDs: [],
-                            alreadySubscribed: false
+                    do {
+                        let outcome = try await subscribeOne(
+                            feedURL: url,
+                            feed: feed,
+                            inboxSeedCount: inboxSeedCount,
+                            parsedFeed: parsed
                         )
-                    )
-                    pendingIndexByResult[index] = outcome
-                    sinceLastSave += 1
-                    if sinceLastSave >= Self.saveBatchSize { flushPending() }
+                        title = outcome.title
+                        if outcome.alreadySubscribed {
+                            resultByInputIndex[inputIndex] = outcome.result()
+                        } else {
+                            pendingOutcomeByInputIndex[inputIndex] = outcome
+                            sinceLastSave += 1
+                            if sinceLastSave >= Self.saveBatchSize { flushPending() }
+                        }
+                    } catch {
+                        AppLog.subscriptions.error(
+                            "OPML import: failed \(url, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        )
+                    }
+                } else {
+                    AppLog.subscriptions.error("OPML import: failed \(url, privacy: .public)")
                 }
-            } catch {
-                AppLog.subscriptions.error("OPML import: failed \(url, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                completed += 1
+                await onProgress?(completed, total, title)
+
+                if nextIndex < fetchCandidates.count {
+                    let candidate = fetchCandidates[nextIndex]
+                    nextIndex += 1
+                    group.addTask {
+                        (candidate.index, candidate.url, await Self.fetchForImport(candidate.url, feed: feed))
+                    }
+                }
             }
-            completed += 1
-            await onProgress?(completed, total, title)
+
+            flushPending()
+            return resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] }
         }
 
-        // Flush the final partial batch and resolve its IDs.
-        flushPending()
         // Newly ingested episodes can change the inbox count — signal the tab
         // badge once, at the end of the whole operation rather than per batch,
         // so it refreshes without polling on every save (#736).
