@@ -2347,7 +2347,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try assertEpisodeSaveSurvivesReopen(container)
     }
 
-    func testScaleMigrationProfile() throws {
+    func testScaleMigrationProfile() async throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["RUN_SYNC_MIGRATION_SCALE"] != nil,
             "Set TEST_RUNNER_RUN_SYNC_MIGRATION_SCALE=1 to run the 242k migration profile."
@@ -2355,10 +2355,29 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         let count = Int(ProcessInfo.processInfo.environment["SYNC_MIGRATION_EPISODES"] ?? "")
             ?? 242_500
         try seedScaleV6(episodeCount: count)
+        let sourceStoreSetBytes = [
+            storeURL,
+            URL(fileURLWithPath: storeURL.path + "-wal"),
+            URL(fileURLWithPath: storeURL.path + "-shm"),
+        ].reduce(Int64(0)) { total, url in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return total + Int64(size)
+        }
         let memorySampler = MigrationMemorySampler()
         let baselineRSS = memorySampler.start()
         let start = DispatchTime.now().uptimeNanoseconds
-        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        let engine = StoreMigrationEngine()
+        let migration = Task { try await engine.openOrMigrate(at: storeURL) }
+        var preparationMilliseconds: Double?
+        var iterator = engine.progressUpdates.makeAsyncIterator()
+        while let stage = await iterator.next() {
+            if stage == .migratingMirroredStore, preparationMilliseconds == nil {
+                preparationMilliseconds = Double(
+                    DispatchTime.now().uptimeNanoseconds - start
+                ) / 1_000_000
+            }
+        }
+        let migrated = try await migration.value
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
         let migrationPeakRSS = memorySampler.stop()
         let migrationRSSGrowth = max(0, migrationPeakRSS - baselineRSS)
@@ -2370,8 +2389,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         )), count)
         XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 44)
         print(String(format:
-            "SYNCMIGRATION|podcasts|%d|episodes|%d|relatedEpisodes|%d|migrationMs|%.0f|baselineRssMB|%.0f|migrationPeakRssMB|%.0f|migrationRssGrowthMB|%.0f|processPeakIncludingSeedMB|%.0f",
-            666, count, count, elapsed, baselineRSS, migrationPeakRSS,
+            "SYNCMIGRATION|podcasts|%d|episodes|%d|relatedEpisodes|%d|sourceStoreSetBytes|%lld|preparationMs|%.3f|migrationMs|%.0f|baselineRssMB|%.0f|migrationPeakRssMB|%.0f|migrationRssGrowthMB|%.0f|processPeakIncludingSeedMB|%.0f",
+            666, count, count, sourceStoreSetBytes, preparationMilliseconds ?? -1,
+            elapsed, baselineRSS, migrationPeakRSS,
             migrationRSSGrowth, processPeakRSS
         ))
         XCTAssertLessThan(elapsed, 20_000, "migration entered launch-watchdog territory")
@@ -2380,5 +2400,425 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             "migration added enough resident memory to approach known device jetsam territory"
         )
         try assertEpisodeSaveSurvivesReopen(migrated)
+    }
+}
+
+/// Opt-in measurements for the 2026-08-06 Settings reset watchdog incident.
+///
+/// Uses the repository's existing `RUN_SYNC_MIGRATION_SCALE` opt-in gate. The
+/// production reset's NotificationCenter post and both filesystem removals are
+/// deliberately excluded: their FileManager locations are process-global and
+/// cannot be redirected to a test-owned root. Each timing therefore measures
+/// only the exact SwiftData fetch/delete sequence plus `ModelContext.save()`.
+@MainActor
+final class ResetWatchdogMeasurementTests: XCTestCase {
+    private struct StorePaths {
+        let root: URL
+        let primary: URL
+        let local: URL
+    }
+
+    private struct Counts {
+        let podcasts: Int
+        let episodes: Int
+        let queueItems: Int
+        let listeningSessions: Int
+        let bookmarks: Int
+        let podcastFolders: Int
+        let folderMemberships: Int
+        let episodeFolderMemberships: Int
+        let recentlyExpired: Int
+        let quickActions: Int
+        let appSettings: Int
+        let localPodcastStates: Int
+        let localEpisodeStates: Int
+        let localAppSettings: Int
+
+        var text: String {
+            [
+                "Podcast=\(podcasts)", "Episode=\(episodes)",
+                "QueueItem=\(queueItems)", "ListeningSession=\(listeningSessions)",
+                "Bookmark=\(bookmarks)", "PodcastFolder=\(podcastFolders)",
+                "FolderMembership=\(folderMemberships)",
+                "EpisodeFolderMembership=\(episodeFolderMemberships)",
+                "RecentlyExpired=\(recentlyExpired)",
+                "QuickActionConfig=\(quickActions)", "AppSetting=\(appSettings)",
+                "LocalPodcastState=\(localPodcastStates)",
+                "LocalEpisodeState=\(localEpisodeStates)",
+                "LocalAppSetting=\(localAppSettings)",
+            ].joined(separator: ",")
+        }
+    }
+
+    private enum Candidate: String, CaseIterable {
+        case currentA = "a-current-podcasts-first"
+        case episodesFirstB = "b-episodes-first"
+        case batchC = "c-batch-dependency-order"
+        case filesD = "d-remove-store-files"
+    }
+
+    private func requireOptIn() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["RUN_SYNC_MIGRATION_SCALE"] != nil,
+            "Set TEST_RUNNER_RUN_SYNC_MIGRATION_SCALE=1 to run opt-in reset measurements."
+        )
+    }
+
+    func testResetRealShapeCurrentCompletion() throws {
+        try requireOptIn()
+        let paths = try copiedIncidentStore(label: "real-current")
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let container = try openV10(paths)
+        let context = ModelContext(container)
+        let before = try counts(context)
+        let primaryVersion = try storeVersion(paths.primary)
+        let localVersion = try storeVersion(paths.local)
+        print("RESETREAL|pre|primaryVersion|\(primaryVersion)|localVersion|\(localVersion)|counts|\(before.text)")
+
+        let sampler = MigrationMemorySampler()
+        let baselineRSS = sampler.start()
+        let result = runObjectDelete(candidate: .currentA, context: context)
+        let peakRSS = sampler.stop()
+        let after = try counts(context)
+        let primaryIntegrity = try integrityCheck(paths.primary).joined(separator: ",")
+        let localIntegrity = try integrityCheck(paths.local).joined(separator: ",")
+        let reopen = (try? openV10(paths)) != nil ? "success" : "failure"
+        print(String(format:
+            "RESETREAL|result|candidate|%@|seconds|%.6f|save|%@|baselineRssMB|%.3f|peakRssMB|%.3f|growthRssMB|%.3f|counts|%@|primaryIntegrity|%@|localIntegrity|%@|reopen|%@|filesystemSteps|skipped",
+            Candidate.currentA.rawValue, result.seconds, result.save,
+            baselineRSS, peakRSS, max(0, peakRSS - baselineRSS), after.text,
+            primaryIntegrity, localIntegrity, reopen
+        ))
+        XCTAssertEqual(result.save, "success")
+        XCTAssertEqual(primaryIntegrity, "ok")
+        XCTAssertEqual(localIntegrity, "ok")
+        XCTAssertEqual(reopen, "success")
+    }
+
+    func testResetScalingSeries() throws {
+        try requireOptIn()
+        for episodeCount in [2_500, 5_000, 10_000, 20_000, 40_000] {
+            do {
+                let paths = try syntheticStore(
+                    label: "scale-\(episodeCount)", podcastCount: 1,
+                    episodeCount: episodeCount
+                )
+                defer { try? FileManager.default.removeItem(at: paths.root) }
+                let container = try openV10(paths)
+                let context = ModelContext(container)
+                let before = try counts(context)
+                let result = runObjectDelete(candidate: .currentA, context: context)
+                let after = try counts(context)
+                let primaryIntegrity = try integrityCheck(paths.primary).joined(separator: ",")
+                let localIntegrity = try integrityCheck(paths.local).joined(separator: ",")
+                print(String(format:
+                    "RESETSCALE|episodes|%d|podcasts|1|seconds|%.6f|save|%@|before|%@|after|%@|primaryIntegrity|%@|localIntegrity|%@|filesystemSteps|skipped",
+                    episodeCount, result.seconds, result.save, before.text, after.text,
+                    primaryIntegrity, localIntegrity
+                ))
+            } catch {
+                print("RESETSCALE|episodes|\(episodeCount)|error|\(String(reflecting: error))")
+                XCTFail("Scale \(episodeCount) failed: \(error)")
+            }
+        }
+    }
+
+    func testResetParentArrayDiscriminator() throws {
+        try requireOptIn()
+        for (label, podcastCount) in [("A", 1), ("B", 4), ("C", 16)] {
+            do {
+                let paths = try syntheticStore(
+                    label: "parent-\(label)", podcastCount: podcastCount,
+                    episodeCount: 40_000
+                )
+                defer { try? FileManager.default.removeItem(at: paths.root) }
+                let container = try openV10(paths)
+                let context = ModelContext(container)
+                let result = runObjectDelete(candidate: .currentA, context: context)
+                let after = try counts(context)
+                print(String(format:
+                    "RESETPARENT|config|%@|podcasts|%d|episodes|40000|seconds|%.6f|save|%@|after|%@|primaryIntegrity|%@|localIntegrity|%@|filesystemSteps|skipped",
+                    label, podcastCount, result.seconds, result.save, after.text,
+                    try integrityCheck(paths.primary).joined(separator: ","),
+                    try integrityCheck(paths.local).joined(separator: ",")
+                ))
+            } catch {
+                print("RESETPARENT|config|\(label)|error|\(String(reflecting: error))")
+                XCTFail("Parent configuration \(label) failed: \(error)")
+            }
+        }
+    }
+
+    func testResetCandidateRemediesSynthetic() throws {
+        try requireOptIn()
+        for candidate in Candidate.allCases {
+            do {
+                let paths = try syntheticStore(
+                    label: "candidate-synthetic-\(candidate.rawValue)",
+                    podcastCount: 1, episodeCount: 40_000
+                )
+                defer { try? FileManager.default.removeItem(at: paths.root) }
+                try measureCandidate(candidate, paths: paths, shape: "synthetic-1x40000")
+            } catch {
+                print("RESETCANDIDATE|shape|synthetic-1x40000|candidate|\(candidate.rawValue)|error|\(String(reflecting: error))")
+                XCTFail("Synthetic candidate \(candidate.rawValue) failed: \(error)")
+            }
+        }
+    }
+
+    func testResetCandidateRemediesReal() throws {
+        try requireOptIn()
+        for candidate in Candidate.allCases {
+            do {
+                let paths = try copiedIncidentStore(label: "candidate-real-\(candidate.rawValue)")
+                defer { try? FileManager.default.removeItem(at: paths.root) }
+                try measureCandidate(candidate, paths: paths, shape: "real-10x53864")
+            } catch {
+                print("RESETCANDIDATE|shape|real-10x53864|candidate|\(candidate.rawValue)|error|\(String(reflecting: error))")
+                XCTFail("Real candidate \(candidate.rawValue) failed: \(error)")
+            }
+        }
+    }
+
+    private func measureCandidate(
+        _ candidate: Candidate, paths: StorePaths, shape: String
+    ) throws {
+        if candidate == .filesD {
+            var container: ModelContainer? = try openV10(paths)
+            let before = try counts(ModelContext(try XCTUnwrap(container)))
+            let start = DispatchTime.now().uptimeNanoseconds
+            container = nil
+            autoreleasepool { }
+            ModelContainerFactory.removeStoreFiles(at: paths.primary)
+            ModelContainerFactory.removeStoreFiles(at: paths.local)
+            let reopened = try openV10(paths)
+            try reopened.mainContext.save()
+            let seconds = elapsedSeconds(since: start)
+            let after = try counts(reopened.mainContext)
+            print(String(format:
+                "RESETCANDIDATE|shape|%@|candidate|%@|seconds|%.6f|save|success|before|%@|after|%@|primaryIntegrity|%@|localIntegrity|%@|reopen|success|filesystemSteps|store-files-only|semantics|different",
+                shape, candidate.rawValue, seconds, before.text, after.text,
+                try integrityCheck(paths.primary).joined(separator: ","),
+                try integrityCheck(paths.local).joined(separator: ",")
+            ))
+            return
+        }
+
+        let container = try openV10(paths)
+        let context = ModelContext(container)
+        let before = try counts(context)
+        let result: (seconds: Double, save: String)
+        if candidate == .batchC {
+            result = runBatchDelete(context: context)
+        } else {
+            result = runObjectDelete(candidate: candidate, context: context)
+        }
+        let after = try counts(context)
+        let reopen = (try? openV10(paths)) != nil ? "success" : "failure"
+        print(String(format:
+            "RESETCANDIDATE|shape|%@|candidate|%@|seconds|%.6f|save|%@|before|%@|after|%@|primaryIntegrity|%@|localIntegrity|%@|reopen|%@|filesystemSteps|skipped|semantics|current-database-scope",
+            shape, candidate.rawValue, result.seconds, result.save, before.text, after.text,
+            try integrityCheck(paths.primary).joined(separator: ","),
+            try integrityCheck(paths.local).joined(separator: ","), reopen
+        ))
+    }
+
+    private func runObjectDelete(
+        candidate: Candidate, context: ModelContext
+    ) -> (seconds: Double, save: String) {
+        let start = DispatchTime.now().uptimeNanoseconds
+        if candidate == .episodesFirstB {
+            deleteAll(Episode.self, context)
+            deleteAll(Podcast.self, context)
+        } else {
+            deleteAll(Podcast.self, context)
+            deleteAll(Episode.self, context)
+        }
+        deleteAll(QueueItem.self, context)
+        deleteAll(ListeningSession.self, context)
+        deleteAll(Bookmark.self, context)
+        deleteAll(PodcastFolder.self, context)
+        deleteAll(FolderMembership.self, context)
+        deleteAll(EpisodeFolderMembership.self, context)
+        deleteAll(RecentlyExpired.self, context)
+        deleteAll(QuickActionConfig.self, context)
+        deleteAll(AppSetting.self, context)
+        let save: String
+        do {
+            try context.save()
+            save = "success"
+        } catch {
+            save = "failure:\(String(reflecting: error))"
+        }
+        return (elapsedSeconds(since: start), save)
+    }
+
+    private func runBatchDelete(
+        context: ModelContext
+    ) -> (seconds: Double, save: String) {
+        let start = DispatchTime.now().uptimeNanoseconds
+        let save: String
+        do {
+            try context.delete(model: QueueItem.self)
+            try context.delete(model: ListeningSession.self)
+            try context.delete(model: Bookmark.self)
+            try context.delete(model: FolderMembership.self)
+            try context.delete(model: EpisodeFolderMembership.self)
+            try context.delete(model: RecentlyExpired.self)
+            try context.delete(model: Episode.self)
+            try context.delete(model: PodcastFolder.self)
+            try context.delete(model: Podcast.self)
+            try context.delete(model: QuickActionConfig.self)
+            try context.delete(model: AppSetting.self)
+            try context.save()
+            save = "success"
+        } catch {
+            save = "failure:\(String(reflecting: error))"
+        }
+        return (elapsedSeconds(since: start), save)
+    }
+
+    private func deleteAll<T: PersistentModel>(_ type: T.Type, _ context: ModelContext) {
+        for object in (try? context.fetch(FetchDescriptor<T>())) ?? [] {
+            context.delete(object)
+        }
+    }
+
+    private func syntheticStore(
+        label: String, podcastCount: Int, episodeCount: Int
+    ) throws -> StorePaths {
+        let paths = try temporaryPaths(label: label)
+        autoreleasepool {
+            do {
+                let container = try openV10(paths)
+                let context = ModelContext(container)
+                let base = episodeCount / podcastCount
+                let remainder = episodeCount % podcastCount
+                for podcastIndex in 0..<podcastCount {
+                    let podcast = Podcast(
+                        feedURL: "https://reset-measurement.invalid/\(label)/\(podcastIndex)",
+                        title: "Podcast \(podcastIndex)"
+                    )
+                    context.insert(podcast)
+                    let count = base + (podcastIndex < remainder ? 1 : 0)
+                    var episodes: [Episode] = []
+                    episodes.reserveCapacity(count)
+                    for episodeIndex in 0..<count {
+                        let episode = Episode(
+                            guid: "\(label)-\(podcastIndex)-\(episodeIndex)",
+                            title: "Episode \(episodeIndex)",
+                            audioURL: "https://reset-measurement.invalid/audio/\(podcastIndex)/\(episodeIndex).mp3",
+                            pubDate: Date(timeIntervalSince1970: TimeInterval(episodeIndex))
+                        )
+                        context.insert(episode)
+                        episodes.append(episode)
+                    }
+                    podcast.episodes = episodes
+                    try context.save()
+                }
+            } catch {
+                XCTFail("Synthetic seed \(label) failed: \(error)")
+            }
+        }
+        return paths
+    }
+
+    private func copiedIncidentStore(label: String) throws -> StorePaths {
+        let fixtureRoot = try XCTUnwrap(
+            ProcessInfo.processInfo.environment["RESET_INCIDENT_FIXTURE_ROOT"],
+            "Set TEST_RUNNER_RESET_INCIDENT_FIXTURE_ROOT to the read-only container backup."
+        )
+        let source = URL(fileURLWithPath: fixtureRoot, isDirectory: true)
+            .appending(path: "Library/Application Support", directoryHint: .isDirectory)
+        let paths = try temporaryPaths(label: label)
+        for name in [
+            "default.store", "default.store-wal", "default.store-shm",
+            "earshot-local.store", "earshot-local.store-wal", "earshot-local.store-shm",
+        ] {
+            try FileManager.default.copyItem(
+                at: source.appending(path: name), to: paths.root.appending(path: name)
+            )
+        }
+        return paths
+    }
+
+    private func temporaryPaths(label: String) throws -> StorePaths {
+        let root = FileManager.default.temporaryDirectory.appending(
+            path: "reset-watchdog-\(label)-\(UUID().uuidString)", directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return StorePaths(
+            root: root,
+            primary: root.appending(path: "default.store"),
+            local: root.appending(path: "earshot-local.store")
+        )
+    }
+
+    private func openV10(_ paths: StorePaths) throws -> ModelContainer {
+        let full = Schema(versionedSchema: EarshotSchemaV10.self)
+        let mirrored = ModelConfiguration(
+            "FutureMirrored", schema: Schema(EarshotSchemaV10.mirroredModels),
+            url: paths.primary, cloudKitDatabase: .none
+        )
+        let local = ModelConfiguration(
+            "DeviceLocal", schema: Schema(EarshotSchemaV10.localModels),
+            url: paths.local, cloudKitDatabase: .none
+        )
+        return try ModelContainer(for: full, configurations: mirrored, local)
+    }
+
+    private func counts(_ context: ModelContext) throws -> Counts {
+        Counts(
+            podcasts: try context.fetchCount(FetchDescriptor<Podcast>()),
+            episodes: try context.fetchCount(FetchDescriptor<Episode>()),
+            queueItems: try context.fetchCount(FetchDescriptor<QueueItem>()),
+            listeningSessions: try context.fetchCount(FetchDescriptor<ListeningSession>()),
+            bookmarks: try context.fetchCount(FetchDescriptor<Bookmark>()),
+            podcastFolders: try context.fetchCount(FetchDescriptor<PodcastFolder>()),
+            folderMemberships: try context.fetchCount(FetchDescriptor<FolderMembership>()),
+            episodeFolderMemberships: try context.fetchCount(
+                FetchDescriptor<EpisodeFolderMembership>()
+            ),
+            recentlyExpired: try context.fetchCount(FetchDescriptor<RecentlyExpired>()),
+            quickActions: try context.fetchCount(FetchDescriptor<QuickActionConfig>()),
+            appSettings: try context.fetchCount(FetchDescriptor<AppSetting>()),
+            localPodcastStates: try context.fetchCount(FetchDescriptor<LocalPodcastState>()),
+            localEpisodeStates: try context.fetchCount(FetchDescriptor<LocalEpisodeState>()),
+            localAppSettings: try context.fetchCount(FetchDescriptor<LocalAppSetting>())
+        )
+    }
+
+    private func storeVersion(_ url: URL) throws -> String {
+        let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite, at: url
+        )
+        return try XCTUnwrap(
+            (metadata[NSStoreModelVersionIdentifiersKey] as? [String])?.first
+        )
+    }
+
+    private func integrityCheck(_ url: URL) throws -> [String] {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA integrity_check", -1, &statement, nil)
+                == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_finalize(statement) }
+        var rows: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let text = sqlite3_column_text(statement, 0) {
+                rows.append(String(cString: text))
+            }
+        }
+        return rows
+    }
+
+    private func elapsedSeconds(since start: UInt64) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
     }
 }
