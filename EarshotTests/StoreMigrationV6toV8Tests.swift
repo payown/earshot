@@ -49,7 +49,7 @@ private final class MigrationMemorySampler: @unchecked Sendable {
     }
 }
 
-private final class MigrationDiskSampler: @unchecked Sendable {
+private final class MigrationVolumeFreeSpaceSampler: @unchecked Sendable {
     private let url: URL
     private let lock = NSLock()
     private let queue = DispatchQueue(label: "media.payown.earshot.migration-disk")
@@ -90,6 +90,93 @@ private final class MigrationDiskSampler: @unchecked Sendable {
             throw POSIXError(.init(rawValue: errno) ?? .EIO)
         }
         return Int64(statistics.f_bavail) * Int64(statistics.f_bsize)
+    }
+}
+
+private final class MigrationAllocatedBlockSampler: @unchecked Sendable {
+    private let rootURL: URL
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "media.payown.earshot.migration-allocated-blocks")
+    private var timer: DispatchSourceTimer?
+    private var maximumAllocatedBytes: Int64 = 0
+    private var samplingError: Error?
+
+    init(rootURL: URL) {
+        self.rootURL = rootURL
+    }
+
+    func start() throws -> Int64 {
+        let baseline = try allocatedBytes()
+        maximumAllocatedBytes = baseline
+        samplingError = nil
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(5))
+        timer.setEventHandler { [weak self] in self?.sample() }
+        self.timer = timer
+        timer.resume()
+        return baseline
+    }
+
+    func stop() throws -> Int64 {
+        timer?.cancel()
+        timer = nil
+        queue.sync {}
+        sample()
+        return try lock.withLock {
+            if let samplingError { throw samplingError }
+            return maximumAllocatedBytes
+        }
+    }
+
+    private func sample() {
+        do {
+            let current = try allocatedBytes()
+            lock.withLock {
+                maximumAllocatedBytes = max(maximumAllocatedBytes, current)
+            }
+        } catch {
+            lock.withLock {
+                if samplingError == nil { samplingError = error }
+            }
+        }
+    }
+
+    /// `st_blocks` is reported in 512-byte units. Walk the complete test root
+    /// without filtering names so SQLite's adjacent WAL, SHM, rollback journal,
+    /// Core Data migration scratch files, snapshots, and atomic-write temporaries
+    /// are all attributed even when their names are private implementation details.
+    private func allocatedBytes() throws -> Int64 {
+        var total: Int64 = 0
+        try addAllocatedBytes(at: rootURL, to: &total)
+
+        var enumerationError: Error?
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: nil,
+            options: [],
+            errorHandler: { _, error in
+                if (error as NSError).code != NSFileNoSuchFileError {
+                    enumerationError = error
+                }
+                return true
+            }
+        ) else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        while let childURL = enumerator.nextObject() as? URL {
+            try addAllocatedBytes(at: childURL, to: &total)
+        }
+        if let enumerationError { throw enumerationError }
+        return total
+    }
+
+    private func addAllocatedBytes(at url: URL, to total: inout Int64) throws {
+        var information = stat()
+        guard lstat(url.path, &information) == 0 else {
+            if errno == ENOENT { return }
+            throw POSIXError(.init(rawValue: errno) ?? .EIO)
+        }
+        total += Int64(information.st_blocks) * 512
     }
 }
 
@@ -1655,14 +1742,20 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try materializePreSplitFixtureDownloads()
 
         let beforeBytes = try storeSetSize()
-        let diskSampler = MigrationDiskSampler(url: directory)
-        let baselineAvailableBytes = try diskSampler.start()
+        let allocatedBlockSampler = MigrationAllocatedBlockSampler(rootURL: directory)
+        let baselineAllocatedBytes = try allocatedBlockSampler.start()
+        let volumeSampler = MigrationVolumeFreeSpaceSampler(url: directory)
+        let baselineAvailableBytes = try volumeSampler.start()
         let start = DispatchTime.now().uptimeNanoseconds
         let migrated = try await StoreMigrationEngine().openOrMigrate(at: storeURL)
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
-        let minimumAvailableBytes = diskSampler.stop()
-        let peakAdditionalBytes = baselineAvailableBytes - minimumAvailableBytes
-        let peakAdditionalMultiple = Double(peakAdditionalBytes) / Double(beforeBytes)
+        let maximumAllocatedBytes = try allocatedBlockSampler.stop()
+        let minimumAvailableBytes = volumeSampler.stop()
+        let attributedPeakBytes = maximumAllocatedBytes - baselineAllocatedBytes
+        let attributedPeakMultiple = Double(attributedPeakBytes) / Double(beforeBytes)
+        let volumeDiagnosticPeakBytes = baselineAvailableBytes - minimumAvailableBytes
+        let volumeDiagnosticPeakMultiple = Double(volumeDiagnosticPeakBytes)
+            / Double(beforeBytes)
         let context = migrated.mainContext
 
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 10)
@@ -1684,17 +1777,20 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         assertRealStatePreserved(try realV10StateSnapshot(), sourceState)
         let afterBytes = try storeSetSize()
         print(String(format:
-            "REALV5MIGRATION|seconds|%.3f|beforeMB|%.1f|afterMB|%.1f"
-                + "|peakAdditionalMB|%.1f|peakAdditionalMultiple|%.3f|episodes|%d",
-            elapsed, Double(beforeBytes) / 1_048_576, Double(afterBytes) / 1_048_576,
-            Double(peakAdditionalBytes) / 1_048_576, peakAdditionalMultiple, 53_946
+            "REALV5MIGRATION|seconds|%.3f|beforeBytes|%lld|afterBytes|%lld"
+                + "|attributedPeakBytes|%lld|attributedPeakMultiple|%.6f"
+                + "|volumeDiagnosticPeakBytes|%lld|volumeDiagnosticPeakMultiple|%.6f"
+                + "|episodes|%d",
+            elapsed, beforeBytes, afterBytes,
+            attributedPeakBytes, attributedPeakMultiple,
+            volumeDiagnosticPeakBytes, volumeDiagnosticPeakMultiple, 53_946
         ))
         XCTAssertLessThan(
             elapsed, 15,
             "Production V5 migration leaves too little margin inside the launch watchdog"
         )
         XCTAssertLessThan(
-            peakAdditionalMultiple, MigrationBackupManager.initialFreeSpaceMultiplier,
+            attributedPeakMultiple, MigrationBackupManager.initialFreeSpaceMultiplier,
             "The production V5 disk gate must exceed the observed fixture peak"
         )
         try assertEpisodeSaveSurvivesReopen(
@@ -1725,15 +1821,21 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(sourceState.downloaded.count, 43)
         try materializePreSplitFixtureDownloads()
         let beforeBytes = try storeSetSize()
-        let diskSampler = MigrationDiskSampler(url: directory)
-        let baselineAvailableBytes = try diskSampler.start()
+        let allocatedBlockSampler = MigrationAllocatedBlockSampler(rootURL: directory)
+        let baselineAllocatedBytes = try allocatedBlockSampler.start()
+        let volumeSampler = MigrationVolumeFreeSpaceSampler(url: directory)
+        let baselineAvailableBytes = try volumeSampler.start()
         let start = DispatchTime.now().uptimeNanoseconds
         let migrated = try await StoreMigrationEngine().openOrMigrate(at: storeURL)
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
-        let minimumAvailableBytes = diskSampler.stop()
+        let maximumAllocatedBytes = try allocatedBlockSampler.stop()
+        let minimumAvailableBytes = volumeSampler.stop()
         let context = migrated.mainContext
-        let peakAdditionalBytes = baselineAvailableBytes - minimumAvailableBytes
-        let peakAdditionalMultiple = Double(peakAdditionalBytes) / Double(beforeBytes)
+        let attributedPeakBytes = maximumAllocatedBytes - baselineAllocatedBytes
+        let attributedPeakMultiple = Double(attributedPeakBytes) / Double(beforeBytes)
+        let volumeDiagnosticPeakBytes = baselineAvailableBytes - minimumAvailableBytes
+        let volumeDiagnosticPeakMultiple = Double(volumeDiagnosticPeakBytes)
+            / Double(beforeBytes)
 
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 666)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 241_759)
@@ -1759,17 +1861,19 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         assertRealStatePreserved(try realV10StateSnapshot(), sourceState)
         let afterBytes = try storeSetSize()
         print(String(format:
-            "REALV6MIGRATION|seconds|%.3f|beforeMB|%.1f|afterMB|%.1f|peakAdditionalMB|%.1f|peakAdditionalMultiple|%.3f",
-            elapsed, Double(beforeBytes) / 1_048_576, Double(afterBytes) / 1_048_576
-                , Double(peakAdditionalBytes) / 1_048_576,
-            peakAdditionalMultiple
+            "REALV6MIGRATION|seconds|%.3f|beforeBytes|%lld|afterBytes|%lld"
+                + "|attributedPeakBytes|%lld|attributedPeakMultiple|%.6f"
+                + "|volumeDiagnosticPeakBytes|%lld|volumeDiagnosticPeakMultiple|%.6f",
+            elapsed, beforeBytes, afterBytes,
+            attributedPeakBytes, attributedPeakMultiple,
+            volumeDiagnosticPeakBytes, volumeDiagnosticPeakMultiple
         ))
         XCTAssertLessThan(
             elapsed, 15,
             "Aged-store migration leaves too little margin inside the 20-second launch watchdog"
         )
         XCTAssertLessThan(
-            peakAdditionalMultiple, MigrationBackupManager.initialFreeSpaceMultiplier,
+            attributedPeakMultiple, MigrationBackupManager.initialFreeSpaceMultiplier,
             "The initial disk gate must exceed the observed real-fixture peak"
         )
         try assertEpisodeSaveSurvivesReopen(migrated)
@@ -1984,7 +2088,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         let backupURL = rescuedBackupDirectory.appending(path: "default.store")
         XCTAssertEqual(try storeMajorVersion(at: backupURL), 6)
         XCTAssertEqual(try integrityCheck(at: backupURL), ["ok"])
-        let remainingSampler = MigrationDiskSampler(url: directory)
+        let remainingSampler = MigrationVolumeFreeSpaceSampler(url: directory)
         let remainingBytes = try remainingSampler.start()
         _ = remainingSampler.stop()
         print(String(format:
