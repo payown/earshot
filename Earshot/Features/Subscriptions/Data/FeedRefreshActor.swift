@@ -23,11 +23,11 @@ actor FeedRefreshActor {
     /// Network fetches are overlapped, but all SwiftData mutation remains on this
     /// actor in input order. This keeps imports responsive without creating a
     /// context per feed or an unbounded request burst.
-    // Two concurrent feeds leave CPU and memory headroom for SwiftUI and
-    // VoiceOver on device. Six overlapped XML parses made a 60-feed import faster
-    // in isolation but could starve the foreground UI and make the phone appear
-    // frozen while several large episode catalogs were decoded together.
-    private static let subscribeFetchConcurrency = 2
+    // Three concurrent feeds balance throughput with CPU and memory headroom for
+    // SwiftUI and VoiceOver on device. Six overlapped XML parses made a 60-feed
+    // import faster in isolation but could starve the foreground UI; two proved
+    // responsive in the build-169 device test, so build 170 measures the middle.
+    private static let subscribeFetchConcurrency = 3
     /// Bulk subscription outcomes retain their newly inserted Episode objects
     /// until a save gives them permanent IDs. Keep this smaller than refresh's
     /// metadata-only batch so large back catalogs cannot accumulate ten feeds'

@@ -54,6 +54,11 @@ cooperatively yields during large episode-insertion loops to preserve foreground
 and VoiceOver responsiveness. Fresh-store schema remains V10; supported
 migration sources remain V5 and V6.
 
+Build 170 is the local three-feed-concurrency comparison build. It retains build
+169's two-feed save batches and cooperative episode-insertion yields, changing
+only the number of simultaneous feed fetches from two to three. Fresh-store
+schema remains V10; supported migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
