@@ -8,13 +8,13 @@ remembered release history.
 
 ## Current state
 
-Migration safety implementation is merged to `main` through PR #797 at commit
-`fb45ede5f939cd18eeb5291a20e038bcda507911`.
+Migration safety and launch-announcement ordering are merged to `main` through
+PR #802 at commit `8ce477e27c887de81dfb4905700d47bdb0ab4604`.
 
 Current source declares:
 
 - Marketing version: 1.1.0
-- Build number: 164
+- Build number: 165
 - Current SwiftData schema: V10
 - Supported SwiftData migration sources: V5 and V6
 
@@ -28,11 +28,11 @@ V5-to-V10 route. V6 still takes its supported V6-to-V10 route. Settled V10
 stores do not run the migration disk gate or create migration snapshots on
 ordinary cold launches.
 
-No corrected post-#797 binary has been installed on the phone. The phone has an
-older build-164 binary installed over public build 155. That binary was launched
-once and displayed the incorrect pre-V6 floor guard. Do not confuse that binary
-with a fresh build 164 from current `main`; the build number is the same but the
-code is different.
+The phone now has build 165 from merge commit
+`806ea10167a700f455d4e46c78056d4c80ee9210`. It was installed by overinstall
+onto the public build-155 V5 store and launched with VoiceOver. That build
+contains the corrected V5-to-V10 route but predates the announcement-order fix
+merged in #802.
 
 ## What the fixed launch paths do
 
@@ -154,14 +154,26 @@ shipping-safety loop triggered by real-store and device findings.
   creation without showing migration UI or applying the disk gate. Nonempty and
   sidecar-only ambiguous stores remain non-destructive recovery cases.
 - #795, `Raise migration disk gate from real V6 measurements`: raised the gate
-  from 3.25x to 4.5x after a measured 4.249x peak, added exact gate/retry tests,
-  and validated real V6 state, in-flight rows, restore, and V9 NULL tombstones.
+  from 3.25x to 4.5x after what was then reported as a 4.249x peak, added exact
+  gate/retry tests, and validated real V6 state, in-flight rows, restore, and V9
+  NULL tombstones. That 4.249x figure was a host-wide `statfs` artifact, not an
+  Earshot allocation peak. The five-run attributed V6 result was
+  1,281,912,832–1,281,916,928 bytes, or 3.015300x–3.015309x. The 4.5x gate is
+  retained deliberately as device margin; #801 tracks the remaining question.
 - #796, `Set source build number to 164`: made `project.yml` and the generated
   project agree with the build number used for device builds.
 - #797, `Restore production V5 migration and harden recovery erasure`: corrected
   the public release history, restored V5-to-V10, added real V5 and V6 fixture
   tests, made unsupported recovery non-looping, and made erasure require and
   retain a revalidated snapshot with crash-safe journaling.
+- #799, `Set build 165 for corrected device verification`: gave the corrected
+  device binary a pre-launch identity distinct from the stale build 164.
+- #800, `Attribute migration fixture disk usage`: replaced the host-wide
+  `statfs` assertion input with recursively sampled allocated blocks while
+  retaining the old volume figure as a labelled diagnostic.
+- #802, `Serialize launch completion announcements`: serialized preparation
+  stages and completion, latched completion per attempt, and made repetition
+  depend on the system announcement-success flag.
 
 PR numbers #790, #784, and #781 are issues, not missing pull requests. They were
 closed by #792, #794, and #786 respectively.
@@ -255,12 +267,11 @@ or edit the preserved directories in place.
 
 ## Verified results
 
-The last full required gate after #797 passed under Xcode 26.6:
+The last full required gate after #802 passed under Xcode 26.6:
 
-- `tool/local-ci.sh`: 1,723 executed, 25 expected skips, 0 failures
+- `tool/local-ci.sh`: 1,728 executed, 25 expected skips, 0 failures
 - Release simulator build: succeeded
 - Git diff check: clean
-- No open pull request authored in the effort remained after #797
 
 Real V5 result:
 
@@ -268,7 +279,8 @@ Real V5 result:
 - 66.0 MiB source store set
 - 125.5 MiB final two-store set
 - 2.377 seconds in the simulator
-- 256.7 MiB peak additional allocation, or 3.890x source
+- 198,504,448-byte attributed peak, or 189.308594 MiB and 2.868991x
+- Five attributed runs had zero-byte spread
 - Exact state preservation, both integrity checks, save, and reopen passed
 
 Real V6 result:
@@ -277,8 +289,9 @@ Real V6 result:
 - 405.4 MiB source store set
 - 783.4 MiB final two-store set
 - 10.583 seconds in the latest recorded simulator run
-- 1,715.2 MiB peak additional allocation, or 4.230x source
-- The highest repeated observed peak was 4.249x
+- 1,281,912,832–1,281,916,928-byte attributed peak, or
+  1,222.527344–1,222.531250 MiB and 3.015300x–3.015309x
+- Five attributed runs had one 4,096-byte block of spread
 - Exact state preservation, both integrity checks, save, and reopen passed
 
 Additional real-V6 scenarios passed:
@@ -295,16 +308,172 @@ Recovery tests prove a damaged backup blocks erasure without moving the live
 store, successful erasure retains its snapshot, and interrupted erasure restores
 the primary and local store files.
 
+### Build-165 physical-device result
+
+Build 165 from merge commit `806ea10167a700f455d4e46c78056d4c80ee9210`
+was installed by overinstall onto the public build-155 V5 store and launched
+once with VoiceOver. The V5-to-V10 route completed on hardware. Both resulting
+stores reported V10, both passed SQLite integrity checks, and both durable
+completion markers were present.
+
+The retained snapshot created by the stale pre-fix binary was revalidated and
+reused rather than recreated. It was retired correctly after two independent
+successful reopens. Post-migration state matched the fixture: 10 subscriptions,
+5 Queue rows, 2 playback positions, 4 history rows, 9 settings, 0 folders, and
+0 bookmarks.
+
+The settled V10 fast path is also proven on hardware. A background and resume,
+then a force quit and cold launch, produced no migration preparation, disk gate,
+or snapshot activity.
+
+The production V5 store contained 86 duplicate episode GUID pairs. Migration
+itself preserved all 53,946 episode rows. Per-podcast identity repair removed
+the duplicates afterward during the first feed refresh without losing user
+state. The V5 fixture test ends at `openOrMigrate`, so it does not exercise that
+repair and is narrower than an end-to-end launch test.
+
+VoiceOver delivered `ready`, then step 3 of 3, then `ready` again before focus
+reached Inbox. The assertive completion overtook the polite queued stage, and
+the repeat decision keyed on `sceneActivityRevision`, which increments during
+ordinary scene-phase churn. PR #802 serializes stages and completion through
+one path, adds a per-attempt completion latch, and repeats only when the
+system's announcement success flag reports an interruption. Five new tests
+cover the behavior, including the exact hardware sequence. The #802 fix is not
+yet verified on hardware.
+
+### Migration allocation measurement correction
+
+The earlier fixture sampler read volume-wide `statfs` free capacity on
+`/System/Volumes/Data` and attributed all host allocation to Earshot. In one
+run it reported a 406.3 MB peak even though the volume ended with 48,902,144
+bytes more free than it started. Unchanged main produced 3.890x, 5.324x, and
+6.176x on the same V5 fixture.
+
+PR #800 instead samples recursively attributed allocated blocks. Across five
+runs, V5 was exactly 198,504,448 bytes every time; V6 varied by a single
+4,096-byte block from 1,281,912,832 to 1,281,916,928 bytes. Isolated sparse-image
+cross-checks agreed within 12,288 bytes for V5 and 16,384 bytes for V6. The old
+4.249x and 4.230x figures were host-volume artifacts. The 4.5x production gate
+is unchanged and retained deliberately as device margin, not because the Mac
+evidence requires it. Issue #801 tracks the remaining device evidence.
+
+### OPEN DEFECT: Delete all local data watchdog kill
+
+On build 165, Settings > Data > Delete all local data hangs the device and is
+killed by the scene-update watchdog. Two incidents occurred on 2026-08-06:
+
+- `473065CC-6608-4D5C-ADDC-10636C726D5B` at 19:34:39
+- `296F1907-343B-44F6-B57A-3A9E93F923EC` at 19:40:38
+
+Both incidents are `0x8BADF00D` watchdog kills after exhausting the 10.00-second
+wall-clock allowance, not exceptions. Report 1 has 18 SwiftData frames after
+`RangeReplaceableCollection.removeAll(where:)`; report 2 has 24 SwiftData frames
+after `swift_release`. Both converge at Earshot image offset 3,628,992 in
+`SettingsReset.deleteAllLocalData(context:)`, called by
+`DataSettingsView.factoryReset`. The operation was entered synchronously from
+the confirmation alert action inside `MainActor.assumeIsolated` and ran on the
+main thread over 53,864 episodes.
+
+The second report is a second user-confirmed delete, not a launch crash. Its
+triggered-thread frames 35, 32, 30, 27, and 26 are respectively
+`-[UIAlertController _invokeHandlersForAction:]`,
+`UIKitDialogBridge.performDialogAction(_:)`, `ButtonAction.callAsFunction()`,
+the `DataSettingsView.body` action closure, and `factoryReset()`. No data was
+lost: the delete never committed and the library survived. Repeated one-second
+Home Screen bounces after the kill remain unexplained and produced neither crash
+report.
+
+The reports are tracked under
+`docs/incidents/2026-08-06-delete-all-local-data/`. App Store build 155 source
+commit `00482a0f8f47c72923451c758881c40ea439168a` already had the same
+`@MainActor`, whole-table-fetch, per-object delete path. The only reset-path
+change through build 165 was commit
+`7e818577458113517f3e739d62739ff45c465a91`, adding explicit
+`EpisodeFolderMembership` deletion. Public App Store users therefore share the
+defect. Migration does not share this main-actor cascade: synchronous migration
+work is confined to `StoreMigrationEngine`, while the main actor coordinates
+launch and consumes progress.
+
+On a disposable real incident-store copy, the current database deletion and
+save completed in 145.774626 seconds, grew resident memory from 268.734 MB to
+998.922 MB, saved successfully, left all 11 targeted model types empty, preserved
+the three omitted local model types, passed both integrity checks, and reopened.
+The one-Podcast scaling series was 3.631215, 11.324753, 51.592070, 105.632402,
+and 725.369190 seconds at 2,500, 5,000, 10,000, 20,000, and 40,000 Episodes.
+At fixed 40,000 Episodes, 1, 4, and 16 Podcasts took 591.892130, 176.969609,
+and 39.870310 seconds; A/B was 3.344597603 and A/C was 14.845435864.
+
+Gate 3 fired. The required `T_current` is 145.774626 seconds and the fastest
+successful scope-preserving Phase 3.4 real-store candidate was still
+121.419712 seconds, both above the 3.0-second VoiceOver silence judgment. The
+SwiftData batch candidate failed without deleting rows; removing both store
+sets took 0.027738 seconds but widened scope to the three V10 local models and
+split/repair markers. No fix, build 166, simulator reproduction, or device
+binary was created. Issue #803 tracks the defect; progress, VoiceOver behavior,
+deletion scope, and snapshot survival require explicit approval.
+
+The episode-count delta is reconciled. The V5 fixture had 53,946 rows, 86
+duplicate feed/GUID identity groups, and 53,860 distinct identities. The V10
+incident store contains every one of those identities plus four rows created
+immediately after V10 store creation during the first post-migration refresh:
+`53,946 - 86 + 4 = 53,864`.
+
+### Build-166 device identity requirement
+
+The phone holds build 165 built from
+`806ea10167a700f455d4e46c78056d4c80ee9210`, which predates #802. Current main
+also reports 165, so a fresh device build requires build 166 for a positive
+pre-launch identity. That requires changing `CURRENT_PROJECT_VERSION` in
+`project.yml`, running XcodeGen and committing the regenerated project, and
+adding the build-166 ledger entry to `docs/release-schema-history.md` in the
+same pull request, following the procedure at
+`docs/release-schema-history.md:110`. Build 166 has not been created.
+
+### Planned but unrun investigations
+
+- Determine whether `xcrun devicectl` can write files into an app data
+  container so an archived V5 store could be restored instead of re-importing.
+  A self-consistent restore cannot be only one SQLite file: it must account for
+  the complete checkpoint-consistent primary store set, compatible or absent
+  split local-store files and completion markers, snapshot catalog/manifest
+  state, downloaded audio referenced by restored rows, and other container state
+  that participates in the archived fixture. This route has not been tested.
+- OPML generation is complete under
+  `docs/incidents/2026-08-06-delete-all-local-data/opml/`: 666 subscriptions and
+  241,759 fixture Episodes; top 250 and top 100 subsets cover 222,719 and
+  175,435 fixture Episodes. All three files pass `xmllint --noout`.
+- Simulator actor-path preparation measurements covered 50,000 through 400,000
+  Episodes. Linear extrapolation estimates five seconds at 2,032,111 Episodes
+  and a 405,057,446-byte store set. This is not hardware evidence; no physical
+  device timing was established.
+
 ## Not yet verified
 
-- Corrected V5-to-V10 migration has not run on the physical phone.
-- Physical VoiceOver ordering, focus, heartbeat timing, and completion handoff
-  have not been verified for the corrected build.
-- Physical launch responsiveness and real hardware duration remain unknown.
+- The announcement serialization and interruption behavior merged in #802 has
+  not been verified on the physical phone; installed build 165 predates it.
+- The one-second Home Screen bounces remain unexplained. The captured 19:30 to
+  19:55 report window contains no FrontBoard, SpringBoard, backboardd,
+  RunningBoard, launchd, or LaunchServices incident report that explains them.
+- The iPhone18,2 CPU core count was not established from local evidence, so the
+  six-core interpretation of watchdog percentages remains conditional.
+- No successful measured scope-preserving reset algorithm completed within the
+  3.0-second VoiceOver threshold. The batch candidate failed with Core Data
+  error 134060; whether another store-level algorithm can preserve scope and
+  meet the threshold remains unverified.
+- The five-second preparation estimate is simulator-only extrapolation. Device
+  preparation timing at that scale remains unverified.
+- Fresh snapshot creation has not been observed on hardware because build 165
+  reused the retained pre-fix snapshot.
+- The five-second heartbeat has not been heard on hardware because the verified
+  V5 migration completed too quickly.
 - Simulator tests inject persisted pending/downloading rows. They do not prove a
   real background `URLSession` task crosses overinstall and migration correctly.
-- The 4.5x multiplier is empirical, not a mathematical filesystem upper bound.
-  The verified snapshot and recovery path remain necessary.
+- The attributed Mac peaks are 2.868991x for V5 and at most 3.015309x for V6.
+  The 4.5x multiplier is retained deliberately as device margin, not because
+  those Mac measurements require it. It leaves 112,848,896 bytes of V5
+  headroom and 631,195,648 bytes of V6 headroom. Its physical-device adequacy
+  remains open in #801; the verified snapshot and recovery path remain
+  necessary.
 - V1-V4 SwiftData stores have no migration route. They are preserved, and
   destructive recovery is blocked without a verified snapshot.
 - A genuinely corrupt store with no prior verified snapshot has no in-app erase
@@ -317,7 +486,8 @@ large-store release verification. Do not treat stale issue wording as current
 architecture.
 
 - #787, `Device VoiceOver verification of migration preparation screen`:
-  current and still required. This is the primary remaining migration gate.
+  the first hardware run proved migration and exposed the ready/step-3/ready
+  defect. PR #802 fixes it in source, but the fix still requires hardware proof.
 - #782, `VoiceOver device test for pre-V6 recovery screen`: open but dangerously
   stale. Its V6 floor, pre-release wording, Reset label, and backup description
   are superseded by #797. Reconcile the issue before using its checklist. Any
@@ -366,44 +536,45 @@ edit its area, comment on it, close it, or include it in migration cleanup.
 
 ## Remaining device checklist
 
-The smallest useful first test is the intact production-shaped V5 store already
-on the phone. It proves the public route and may be long enough on real hardware
-to produce the five-second heartbeat. It does not contain an active download.
+**Status: BLOCKED.** The user selected the large-library option, targeting a
+library large enough to exceed five seconds of preparation so the launch
+watchdog is exercised under realistic load rather than only the smaller cases.
+The run must not proceed until migration is confirmed free of the main-thread
+watchdog exposure found in the Delete all local data path.
 
-1. Obtain explicit permission before any phone install or launch.
-2. Before installation, read the device store metadata, store-set size, and
-   available capacity without launching or modifying the app.
-3. Build a signed Release from current `origin/main` at or after `fb45ede` using
-   command-line signing overrides only. Confirm build 164 and schema V10.
-4. Install with `xcrun devicectl device install app`. Do not launch it.
-5. Confirm installation succeeded and stop. The user must perform first launch
-   with VoiceOver enabled.
-6. On first launch, the user verifies focus on the preparation status; the three
-   stages in order; a heartbeat near 5 seconds then every 8 seconds; no stale
-   heartbeat; background/foreground behavior; and the final ready announcement.
-7. The user verifies launch remains responsive and VoiceOver focus reaches the
-   expected saved destination after completion.
-8. Verify the 10 subscriptions, 25 Inbox items, 5 Queue items, 2 positions,
-   4 history rows, 9 settings, and 30 completed downloads still exist.
-9. Make a small post-migration change, force-quit, reopen, and confirm settled
-   V10 launch shows no preparation, disk gate, or backup activity.
+The remaining run requires separate explicit authorization because it begins by
+deleting the app, which removes the current on-device stores, downloaded audio,
+and any in-container snapshot. The preserved Mac fixtures remain independent.
 
-A second, explicitly authorized setup is needed for the real in-flight transfer
-case because the preserved public V5 store has zero active downloads:
+1. Delete Earshot, then install public build 155 from the App Store.
+2. Import an OPML and allow all feeds to finish fetching.
+3. Create representative local state.
+4. Start a real download and leave it genuinely in progress.
+5. Build a fresh current-main binary with a new pre-launch identity, overinstall
+   it without launching, and stop so the user controls the first launch.
+6. Launch once with VoiceOver and verify the three stages, completion, saved
+   focus destination, data preservation, and transfer reconciliation.
 
-1. Do not delete the app until the user explicitly approves. Deletion removes
-   the on-device snapshot and downloads; the Mac V5 fixture remains safe.
-2. Reinstall public build 155 and create a V5 library large enough to keep
-   migration active for more than five seconds.
-3. Create representative local state and leave one real download in progress.
-4. Overinstall the corrected current-main build without launching it.
-5. Let the user perform the VoiceOver first launch and verify that the real
-   transfer completes or reconciles correctly after migration.
+This run is expected to prove what existing simulator and hardware evidence
+cannot: fresh snapshot creation on hardware; announcement order after #802; a
+real background `URLSession` transfer crossing installation; and, if the
+library is large enough, the five-second heartbeat.
 
-A prior request targeted roughly 60 feeds and 145,000 episodes for this second
-run. A scan on 2026-08-06 did not locate the promised trimmed OPML under the
-user's home directory. Do not claim it exists; recreate it from the user's
-source OPML and preserved-store episode counts if the user still wants that run.
+The exact library size is not yet established. A prior target of roughly 60
+feeds and 145,000 episodes may not be large enough. A scan on 2026-08-06 did not
+locate the promised trimmed OPML under the user's home directory, and the
+planned 666-subscription OPML extraction was never run. Do not claim either
+OPML exists.
+
+## Unmerged branches requiring review
+
+These branches contain committed work and have no pull request:
+
+- `docs/app-store-1.0-submission-assembly` at `17c4670`
+- `agent/perf-diagnosis-2026-07-19` at `7dbac67`
+- `agent/perf-pass` at `d6f5c81`
+
+They must be reviewed before any branch pruning.
 
 ## Standing constraints
 
@@ -431,8 +602,10 @@ source OPML and preserved-store episode counts if the user still wants that run.
 ## Common traps for a fresh session
 
 - Public build 155 is V5. Build 161 is TestFlight V6. Build 157 did not ship V6.
-- Current source and the old pre-fix phone binary both say build 164. Identify
-  the code by commit, not build number alone.
+- Current main is `8ce477e27c887de81dfb4905700d47bdb0ab4604` at build
+  165. The phone also reports build 165, but its installed binary was built from
+  `806ea10167a700f455d4e46c78056d4c80ee9210` and predates #802. Identify local
+  device-verification binaries by both build number and commit.
 - V5 and V6 are both live supported sources. V1-V4 are unsupported historical
   TestFlight schemas, not proof that a detected V5 store is pre-release data.
 - The real V5 fixture intentionally has no folders or bookmarks. Use synthetic
@@ -456,5 +629,5 @@ source OPML and preserved-store episode counts if the user still wants that run.
 - Download audio is not included in the SQLite migration snapshot. OPML restores
   subscriptions only; it cannot restore Queue, history, positions, bookmarks,
   settings, or downloaded audio.
-- Physical-device VoiceOver timing and a real background download are the two
-  material proofs the simulator cannot supply.
+- Fresh physical snapshot creation, post-#802 VoiceOver order, the five-second
+  heartbeat, and a real background download are the material remaining proofs.
