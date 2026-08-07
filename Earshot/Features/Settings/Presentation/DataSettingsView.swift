@@ -10,6 +10,7 @@ struct DataSettingsView: View {
     @Environment(OPMLImportProgress.self) private var importProgress
     @Environment(DownloadManager.self) private var downloads
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(AppRuntime.self) private var runtime
 
     @Query private var podcasts: [Podcast]
 
@@ -114,11 +115,13 @@ struct DataSettingsView: View {
     // MARK: Factory reset
 
     private func factoryReset() {
-        SettingsReset.deleteAllLocalData(context: context)
-        // Delay so the announcement lands after the confirmation dialog finishes
-        // dismissing (otherwise the focus change can swallow it).
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            Announcer.announce("All local data deleted. Podcasts you follow and downloads removed.")
+        Task { @MainActor in
+            guard await runtime.resetLocalData() else { return }
+            // Keep the existing announcement byte-for-byte and at its existing
+            // delay; the new container routes the root to onboarding.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                Announcer.announce("All local data deleted. Podcasts you follow and downloads removed.")
+            }
         }
     }
 }

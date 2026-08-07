@@ -238,6 +238,13 @@ final class PlayerService {
         sleepTimer.onExpired = { [weak self] in self?.handleSleepTimerExpired() }
     }
 
+    /// Drops the old model context after the synchronous reset notification has
+    /// unloaded playback and before the store files are moved.
+    func releasePersistence() {
+        context = nil
+        settings = nil
+    }
+
     /// Pauses when a countdown sleep timer fires, with a short fade so it isn't
     /// an abrupt cut.
     private func handleSleepTimerExpired() {

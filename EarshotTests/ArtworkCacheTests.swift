@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import Darwin
 @testable import Earshot
 
 /// Tests for the disk-backed artwork cache (#385).
@@ -213,5 +214,38 @@ final class ArtworkCacheTests: XCTestCase {
                         "Sanity: the response should be stored before clearing")
 
         cache.clear()
+    }
+
+    func test_tearDown_allowsDirectoryRemovalAndCacheReconstruction() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ArtworkCacheTeardown-\(UUID().uuidString)", isDirectory: true)
+        let directory = root.appendingPathComponent(ArtworkCache.directoryName, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        MockURLProtocol.reset()
+        let payload = Data("teardown-round-trip".utf8)
+        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: payload), .response(statusCode: 200, data: payload)])
+        var cache: ArtworkCache? = ArtworkCache(session: MockURLProtocol.makeSession(), directoryURL: directory)
+        let url = try XCTUnwrap(URL(string: "https://example.test/teardown-\(UUID().uuidString).jpg"))
+        let firstResult = await cache!.data(for: url)
+        XCTAssertEqual(firstResult, payload)
+
+        let capture = Pipe()
+        let savedStderr = dup(STDERR_FILENO)
+        dup2(capture.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
+        cache!.tearDown()
+        cache = nil
+        usleep(2_000_000)
+        try FileManager.default.removeItem(at: directory)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+        let rebuilt = ArtworkCache(session: MockURLProtocol.makeSession(), directoryURL: directory)
+        let rebuiltResult = await rebuilt.data(for: url)
+        XCTAssertEqual(rebuiltResult, payload)
+        fflush(stderr)
+        dup2(savedStderr, STDERR_FILENO)
+        close(savedStderr)
+        capture.fileHandleForWriting.closeFile()
+        let stderrText = String(data: capture.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertFalse(stderrText.contains("BUG IN CLIENT OF libsqlite3.dylib"), stderrText)
+        try? FileManager.default.removeItem(at: root)
     }
 }

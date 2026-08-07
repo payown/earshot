@@ -194,6 +194,13 @@ final class DownloadManager {
         }
     }
 
+    /// Releases the old SwiftData graph before Settings reset unlinks its files.
+    func releasePersistence() async {
+        _ = await Self.cancelAllTasksAndWaitForRecovery()
+        context = nil
+        settings = nil
+    }
+
     /// Whether a download may start right now under the Wi-Fi gate.
     var downloadsAllowed: Bool {
         let wifiOnly = settings?.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads)

@@ -17,10 +17,34 @@ import UIKit
 /// `Sendable` `final class`. The `UIImage`/`Data` it returns cross back to the
 /// caller's actor; callers that touch the main actor (the SwiftUI loader) hop
 /// there themselves after `await`.
-final class ArtworkCache: Sendable {
+final class ArtworkCache: @unchecked Sendable {
     /// Shared instance used by both the artwork UI and the now-playing path so
     /// they read and write one disk cache (the #378 reuse requirement).
-    static let shared = ArtworkCache()
+    private final class SharedBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = ArtworkCache()
+
+        func current() -> ArtworkCache {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+
+        func replace(with value: ArtworkCache) {
+            lock.lock()
+            self.value = value
+            lock.unlock()
+        }
+    }
+
+    private static let sharedBox = SharedBox()
+    static var shared: ArtworkCache { sharedBox.current() }
+
+    /// Drops the process-wide cache object after ``tearDown()`` has released
+    /// its descriptors. The next access creates a fresh cache lazily.
+    static func resetShared() {
+        sharedBox.replace(with: ArtworkCache())
+    }
 
     /// In-memory capacity of the backing ``URLCache``. A small RAM fast-path on
     /// top of the disk store; the disk capacity is what survives relaunch.
@@ -37,8 +61,18 @@ final class ArtworkCache: Sendable {
     /// ample while still avoiding a full-resolution (often 3000px) decode. (#481)
     static let nowPlayingMaxPixelSize: CGFloat = 1024
 
-    let urlCache: URLCache
-    private let session: URLSession
+    private struct Resources {
+        let urlCache: URLCache
+        let session: URLSession
+    }
+
+    private let lock = NSLock()
+    private var resources: Resources?
+    private let directoryURL: URL?
+
+    var urlCache: URLCache {
+        currentResources().urlCache
+    }
 
     /// Builds the cache. Falls back to a memory-only ``URLCache`` if the Caches
     /// directory can't be located, so callers never crash and still get an
@@ -50,8 +84,12 @@ final class ArtworkCache: Sendable {
     /// real network — otherwise a cache miss fetched a reserved `example.test` host
     /// and intermittently failed with `-1003` (a shared-cache eviction race between
     /// parallel tests). The injected session's own configuration is used as-is.
-    init(session: URLSession? = nil) {
-        let directory = Self.cacheDirectoryURL()
+    init(session: URLSession? = nil, directoryURL: URL? = nil) {
+        self.directoryURL = directoryURL ?? Self.cacheDirectoryURL()
+        self.resources = Self.makeResources(session: session, directory: self.directoryURL)
+    }
+
+    private static func makeResources(session: URLSession?, directory: URL?) -> Resources {
         let cache: URLCache
         if let directory {
             // Best effort: URLCache creates the directory lazily, but creating it
@@ -64,18 +102,25 @@ final class ArtworkCache: Sendable {
             AppLog.networking.error("Artwork cache directory unavailable; using memory-only cache")
             cache = URLCache(memoryCapacity: Self.memoryCapacity, diskCapacity: 0, directory: nil)
         }
-        self.urlCache = cache
-
         if let session {
-            self.session = session
+            return Resources(urlCache: cache, session: session)
         } else {
             let config = URLSessionConfiguration.default
             config.urlCache = cache
             // Serve cached data when present so a relaunch reads from disk instead
             // of re-downloading; only reach the network on a true miss.
             config.requestCachePolicy = .returnCacheDataElseLoad
-            self.session = URLSession(configuration: config)
+            return Resources(urlCache: cache, session: URLSession(configuration: config))
         }
+    }
+
+    private func currentResources() -> Resources {
+        lock.lock()
+        defer { lock.unlock() }
+        if let resources { return resources }
+        let resources = Self.makeResources(session: nil, directory: directoryURL)
+        self.resources = resources
+        return resources
     }
 
     /// Location of the artwork cache directory inside the app's Caches directory,
@@ -99,12 +144,13 @@ final class ArtworkCache: Sendable {
 
         // Fast path: a stored response (memory or disk) avoids the network and,
         // critically, survives relaunch because the URLCache is disk-backed.
-        if let cached = urlCache.cachedResponse(for: request) {
+        let resources = currentResources()
+        if let cached = resources.urlCache.cachedResponse(for: request) {
             return cached.data
         }
 
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await resources.session.data(for: request)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 AppLog.networking.error("Artwork HTTP \(http.statusCode, privacy: .public) for \(url.absoluteString, privacy: .public)")
                 return nil
@@ -172,6 +218,20 @@ final class ArtworkCache: Sendable {
     /// Drops every cached artwork response from memory and disk. Used by the
     /// Settings "Reset local data" action so the artwork cache is cleared too.
     func clear() {
-        urlCache.removeAllCachedResponses()
+        currentResources().urlCache.removeAllCachedResponses()
+    }
+
+    /// Releases URLSession and URLCache before a caller removes the backing
+    /// directory. Resources are rebuilt lazily by the next cache operation.
+    func tearDown() {
+        lock.lock()
+        var old = resources
+        resources = nil
+        lock.unlock()
+        old?.session.invalidateAndCancel()
+        old?.urlCache.removeAllCachedResponses()
+        // Drop the last strong reference before the caller unlinks the cache
+        // directory. URLCache closes its SQLite descriptors during destruction.
+        old = nil
     }
 }

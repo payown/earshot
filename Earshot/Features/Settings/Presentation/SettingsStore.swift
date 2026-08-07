@@ -89,6 +89,8 @@ final class SettingsStore {
         loaded = true
     }
 
+    func releasePersistence() { store = nil; loaded = false }
+
     private func persist(_ apply: (AppSettingsStore) -> Void) {
         guard loaded, let store else { return }
         apply(store)

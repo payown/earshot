@@ -170,6 +170,7 @@ final class AppRuntime {
     private var recoveryCheckToken: String?
     private var recoveryForegroundCheckCount = 0
     private var preparedDownloadContainer: ModelContainer?
+    private var resetTask: Task<Bool, Never>?
 
     init(
         load: StoreLoad? = nil,
@@ -642,6 +643,41 @@ final class AppRuntime {
             }
             phase = .recovery(state)
         }
+    }
+
+    /// Runs Settings reset as a single in-flight operation. Main-actor work is
+    /// limited to quiescing services and publishing the replacement container;
+    /// the journaled file transaction runs in ``SettingsReset``'s detached task.
+    func resetLocalData() async -> Bool {
+        guard resetTask == nil else { return false }
+        NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
+        player.releasePersistence()
+        quickActions.releasePersistence()
+        settings.releasePersistence()
+        tips.releasePersistence()
+        entitlements.releasePersistence()
+        ArtworkCache.shared.tearDown()
+        ArtworkCache.resetShared()
+        entitlementContainer = nil
+        boundRootServicesContainer = nil
+        rootServiceActivationState = .notStarted
+        await downloads.releasePersistence()
+        phase = .unavailable
+        preparedDownloadContainer = nil
+
+        let task = Task { @MainActor [weak self] () -> Bool in
+            let deleted = await SettingsReset.performFileReset()
+            guard deleted, let self else { return false }
+            let engine = StoreMigrationEngine()
+            let load = await ModelContainerFactory.makeShared(using: engine)
+            guard case .ready = load else { return false }
+            self.install(load)
+            return true
+        }
+        resetTask = task
+        let result = await task.value
+        resetTask = nil
+        return result
     }
 
     func loadRecoveryDownloadUsageIfNeeded() async {

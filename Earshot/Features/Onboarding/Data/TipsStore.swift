@@ -18,6 +18,8 @@ final class TipsStore {
         dismissed = Self.decode(store.rawValue(Self.key))
     }
 
+    func releasePersistence() { store = nil }
+
     /// Whether `tip` should be shown now (not yet dismissed).
     func shouldShow(_ tip: TipCategory) -> Bool {
         !dismissed.contains(tip.rawValue)
