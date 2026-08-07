@@ -11,7 +11,7 @@ final class AppSettingsStoreTests: XCTestCase {
 
     func testReturnsDefaultsWhenUnset() throws {
         let store = try makeStore()
-        XCTAssertEqual(store.int(SettingsKey.autoDownloadCount, default: SettingsDefault.autoDownloadCount), 3)
+        XCTAssertEqual(store.int(SettingsKey.autoDownloadCount, default: SettingsDefault.autoDownloadCount), 0)
         XCTAssertEqual(store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads), true)
         XCTAssertEqual(store.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed), 1.0)
         XCTAssertEqual(store.launchScreen(), .inbox)

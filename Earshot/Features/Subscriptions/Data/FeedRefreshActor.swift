@@ -20,6 +20,10 @@ actor FeedRefreshActor {
     /// library while still bounding how much un-persisted work is at risk if the
     /// task is cancelled mid-run.
     private static let saveBatchSize = 10
+    /// Network fetches are overlapped, but all SwiftData mutation remains on this
+    /// actor in input order. This keeps imports responsive without creating a
+    /// context per feed or an unbounded request burst.
+    private static let subscribeFetchConcurrency = 6
 
     /// The per-podcast result of one refresh pass, identified by feed URL so the
     /// main actor can resolve it back without an `@Model` crossing the boundary.
@@ -248,10 +252,55 @@ actor FeedRefreshActor {
             sinceLastSave = 0
         }
 
+        // Fetch and parse feeds concurrently before touching the model context.
+        // The old loop waited for each network request before starting the next;
+        // bounded prefetch overlaps server latency while preserving serialized
+        // identity checks, inserts, and saves below.
+        let fetchCandidates = feedURLs.filter { url in
+            (try? PodcastIdentityService(context: modelContext).existing(feedURL: url)) == nil
+        }
+        var prefetched: [String: ParsedFeed] = [:]
+        var failedFetches: Set<String> = []
+        await withTaskGroup(of: (String, ParsedFeed?).self) { group in
+            var nextIndex = 0
+            let initial = min(Self.subscribeFetchConcurrency, fetchCandidates.count)
+            for _ in 0..<initial {
+                let url = fetchCandidates[nextIndex]
+                nextIndex += 1
+                group.addTask {
+                    (url, try? await feed.fetch(url))
+                }
+            }
+            while let (url, parsed) = await group.next() {
+                if let parsed {
+                    prefetched[url] = parsed
+                } else {
+                    failedFetches.insert(url)
+                }
+                guard nextIndex < fetchCandidates.count else { continue }
+                let nextURL = fetchCandidates[nextIndex]
+                nextIndex += 1
+                group.addTask {
+                    (nextURL, try? await feed.fetch(nextURL))
+                }
+            }
+        }
+
         for url in feedURLs {
             var title: String?
+            if failedFetches.contains(url) {
+                AppLog.subscriptions.error("OPML import: failed (url, privacy: .public)")
+                completed += 1
+                await onProgress?(completed, total, nil)
+                continue
+            }
             do {
-                let outcome = try await subscribeOne(feedURL: url, feed: feed, inboxSeedCount: inboxSeedCount)
+                let outcome = try await subscribeOne(
+                    feedURL: url,
+                    feed: feed,
+                    inboxSeedCount: inboxSeedCount,
+                    parsedFeed: prefetched[url]
+                )
                 title = outcome.title
                 if outcome.alreadySubscribed {
                     // No insert/save needed: IDs are already permanent.
@@ -326,7 +375,12 @@ actor FeedRefreshActor {
     /// Core subscribe used by both ``subscribe(feedURL:feed:)`` and
     /// ``subscribeAll(feedURLs:feed:onProgress:)``. Does NOT save — the caller decides
     /// when to save and then reads permanent IDs via ``SubscribeOutcome/result()``.
-    private func subscribeOne(feedURL: String, feed: FeedFetching, inboxSeedCount: Int) async throws -> SubscribeOutcome {
+    private func subscribeOne(
+        feedURL: String,
+        feed: FeedFetching,
+        inboxSeedCount: Int,
+        parsedFeed: ParsedFeed? = nil
+    ) async throws -> SubscribeOutcome {
         let canonical = FeedURLIdentity.canonical(feedURL)
         let identity = PodcastIdentityService(context: modelContext)
 
@@ -339,7 +393,12 @@ actor FeedRefreshActor {
 
         // The fetch (network I/O) and the synchronous parse inside it both run on
         // this background actor, never the main thread.
-        let parsed = try await feed.fetch(canonical)
+        let parsed: ParsedFeed
+        if let parsedFeed {
+            parsed = parsedFeed
+        } else {
+            parsed = try await feed.fetch(canonical)
+        }
         let parsedEpisodes = Self.deduplicatedEpisodes(parsed.episodes)
 
         // Recheck after the await: another subscribe context may have committed
