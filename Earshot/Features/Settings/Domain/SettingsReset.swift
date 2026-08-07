@@ -30,14 +30,27 @@ enum SettingsReset {
     /// Performs the authorized all-local-data reset. A false result means no
     /// success announcement or navigation may be emitted by the caller.
     static func performFileReset() async -> Bool {
-        let paths = Paths(
+        return await performFileReset(
             applicationSupport: .applicationSupportDirectory,
-            primary: ModelContainerFactory.storeURL,
-            local: StoreMigration.localStoreURL(for: ModelContainerFactory.storeURL),
-            downloads: URL.documentsDirectory.appending(path: "Downloads", directoryHint: .isDirectory),
-            artwork: ArtworkCache.cacheDirectoryURL(),
-            backups: MigrationBackupManager.backupRoot(for: ModelContainerFactory.storeURL),
-            journal: URL.applicationSupportDirectory.appending(path: "settings-reset-transaction.json")
+            documents: .documentsDirectory,
+            caches: .cachesDirectory
+        )
+    }
+
+    /// Test seam for a fully disposable directory tree; production always uses
+    /// the process's Application Support, Documents, and Caches roots above.
+    static func performFileReset(
+        applicationSupport: URL, documents: URL, caches: URL
+    ) async -> Bool {
+        let primary = applicationSupport.appending(path: "default.store")
+        let paths = Paths(
+            applicationSupport: applicationSupport,
+            primary: primary,
+            local: StoreMigration.localStoreURL(for: primary),
+            downloads: documents.appending(path: "Downloads", directoryHint: .isDirectory),
+            artwork: caches.appending(path: ArtworkCache.directoryName, directoryHint: .isDirectory),
+            backups: MigrationBackupManager.backupRoot(for: primary),
+            journal: applicationSupport.appending(path: "settings-reset-transaction.json")
         )
         return await Task.detached(priority: .userInitiated) {
             do {

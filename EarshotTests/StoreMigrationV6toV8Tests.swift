@@ -3140,6 +3140,34 @@ final class ResetFileLevelMeasurementTests: XCTestCase {
         printStats(name: "fileLevelResetPeakRssMB", samples: peaks)
     }
 
+    func testShippingFileResetSeries() async throws {
+        try requireOptIn()
+        var samples: [Double] = []
+        for run in 1...5 {
+            let paths = try makeIncidentShape(label: "shipping-\(run)")
+            var container: ModelContainer? = try openV10(paths)
+            container = nil
+            let start = DispatchTime.now().uptimeNanoseconds
+            let ok = await SettingsReset.performFileReset(
+                applicationSupport: paths.applicationSupport,
+                documents: paths.root.appending(path: "Documents", directoryHint: .isDirectory),
+                caches: paths.root.appending(path: "Caches", directoryHint: .isDirectory)
+            )
+            let seconds = elapsed(since: start)
+            let reopened = try openV10(paths)
+            let counts = try entityCounts(reopened.mainContext)
+            samples.append(seconds)
+            print(String(format: "SHIPPINGRESET|run|%d|seconds|%.9f|ok|%@|counts|%@|primaryVersion|%@|localVersion|%@|integrity|%@|%@|downloadsGone|%@|artworkGone|%@|snapshotGone|%@", run, seconds, ok ? "true" : "false", counts.text, try storeVersion(paths.mirrored), try storeVersion(paths.local), try integrity(paths.mirrored).joined(separator: ","), try integrity(paths.local).joined(separator: ","), exists(paths.downloads) ? "false" : "true", exists(paths.artwork) ? "false" : "true", exists(paths.backupRoot) ? "false" : "true"))
+            XCTAssertTrue(ok)
+            XCTAssertTrue(counts.allZero)
+            XCTAssertEqual(try storeVersion(paths.mirrored), "10.0.0")
+            XCTAssertEqual(try storeVersion(paths.local), "10.0.0")
+            XCTAssertEqual(try integrity(paths.mirrored), ["ok"])
+            XCTAssertEqual(try integrity(paths.local), ["ok"])
+        }
+        printStats(name: "shippingFileReset", samples: samples)
+    }
+
     func testFileLevelResetInterruptionRecovery() throws {
         try requireOptIn()
         for point in Interruption.allCases {
