@@ -67,6 +67,13 @@ retains build 170's three-feed fetch concurrency, two-feed save batches, and
 cooperative insertion yields. Fresh-store schema remains V10; supported
 migration sources remain V5 and V6.
 
+Build 171 is the direct-device App Store upgrade verification build. It bounds
+each VoiceOver migration-progress announcement wait at eight seconds, preventing
+a missing UIKit completion callback from holding the ready UI indefinitely, and
+renames Step 2 to “Upgrading your library database.” It otherwise retains build
+170.1 behavior. Fresh-store schema remains V10; supported migration sources
+remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
