@@ -523,6 +523,26 @@ architecture.
   the Mac imported 41,200 episodes but zero podcasts, leaving Library empty.
   Development is moving to a separate compact projection store with subscription
   parents first and feed catalogs local. Production CloudKit is not deployed.
+- #811's replacement compact-projection run on development build 174 converged
+  all 662 subscription records to both the iPhone and Designed-for-iPhone Mac
+  stores. The projection also converged 2 meaningful episode-state records, 1
+  queue intent, 4 shared settings, and 31 listening sessions; this library had
+  no bookmarks or folders to exercise those paths physically. The iPhone
+  projection contained 700 CloudKit metadata rows and passed SQLite integrity;
+  the Mac projection matched those counts and also passed integrity.
+- The development container still contains roughly 242,000 obsolete records
+  from the rejected full-graph experiment. Successful imports took 77 seconds
+  on the iPhone and 123 seconds on the Mac while SwiftData skipped those old
+  record types. These figures are contaminated and are not clean compact-sync
+  performance measurements. Production remains undeployed and clean.
+- The Mac's pre-existing partial application store has one orphaned queued
+  episode whose podcast relationship is nil. The compact queue intent reached
+  the Mac projection, but cannot become a local QueueItem until its podcast/feed
+  metadata exists locally. Subscription convergence is complete; queue
+  materialization for this damaged legacy row remains an explicit B2/B6 case.
+- Build 174 has not completed the two-device matrix or a physical VoiceOver
+  status-screen pass. Do not treat this development result as the 1.1 release
+  gate or deploy the production CloudKit schema from it.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.

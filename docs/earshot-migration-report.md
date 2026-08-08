@@ -559,3 +559,29 @@ episode catalog metadata remains local and is refetched per device. Production
 CloudKit remains undeployed. The development container must be cleared before
 testing the replacement so obsolete full-graph records cannot contaminate the
 result.
+
+### Compact-projection physical result
+
+Development build 174 subsequently converged the compact projection on the
+iPhone and the Designed-for-iPhone Mac. Each projection measured 662 podcasts,
+2 meaningful episode-state rows, 1 queue intent, 4 shared settings, 0 bookmarks,
+31 listening sessions, 0 folders, and 700 CloudKit metadata rows. SQLite
+integrity was `ok` on both copies. The Mac application store consequently
+contained all 662 subscribed podcasts rather than the empty Library produced by
+the rejected full graph.
+
+This is functional convergence evidence, not a clean latency measurement. The
+development container was not reset because no CloudKit management token was
+available. It still holds roughly 242,000 obsolete full-graph records. The
+iPhone import took 77 seconds and the Mac import took 123 seconds while those
+unknown record types were skipped. Do not compare those numbers with a fresh
+compact container or use them as a production performance claim.
+
+One queue intent is present in both compact projections but did not materialize
+as a Mac QueueItem. The corresponding episode in the Mac's old partial
+application store has a nil podcast relationship and no QueueItem. The
+coordinator correctly retained the intent rather than inventing a catalog
+parent; refetch/recovery of that damaged legacy local row remains unproved.
+There were no bookmarks or folders in this device library, and no physical
+VoiceOver pass or bidirectional edit matrix has been completed. Production
+CloudKit remains undeployed.
