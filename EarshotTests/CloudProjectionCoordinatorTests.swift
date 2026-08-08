@@ -34,6 +34,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 "CloudPodcastProjection",
                 "CloudQueueItemProjection",
                 "CloudSettingProjection",
+                "CloudBookmarkProjection",
             ]
         )
     }
@@ -451,6 +452,56 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(phoneSettings.double(SettingsKey.globalSpeed, default: 1), 2)
     }
 
+    func testBookmarksArriveAfterCatalogAndDeletionPropagates() throws {
+        let phone = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "episode", title: "Episode", audioURL: "https://example.com/audio")
+        episode.podcast = podcast
+        phone.mainContext.insert(podcast)
+        phone.mainContext.insert(episode)
+        let bookmark = Bookmark(
+            episode: episode,
+            positionSeconds: 42,
+            note: "Remember",
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        phone.mainContext.insert(bookmark)
+        try phone.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainer()
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try macCoordinator.reconcile()
+        XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<Bookmark>()).isEmpty)
+
+        let macPodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let macEpisode = Episode(guid: "episode", title: "Episode", audioURL: "https://example.com/audio")
+        macEpisode.podcast = macPodcast
+        mac.mainContext.insert(macPodcast)
+        mac.mainContext.insert(macEpisode)
+        try mac.mainContext.save()
+        try macCoordinator.reconcile()
+        XCTAssertEqual(try mac.mainContext.fetch(FetchDescriptor<Bookmark>()).first?.note, "Remember")
+
+        phone.mainContext.delete(bookmark)
+        try phone.mainContext.save()
+        try phoneCoordinator.publishLocalBookmarkChanges(now: Date(timeIntervalSince1970: 200))
+        try macCoordinator.reconcile()
+        XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<Bookmark>()).isEmpty)
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV10.self)
         return try ModelContainer(
@@ -477,6 +528,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             CloudEpisodeStateProjection.self,
             CloudQueueItemProjection.self,
             CloudSettingProjection.self,
+            CloudBookmarkProjection.self,
         ])
         return try ModelContainer(
             for: schema,

@@ -130,6 +130,21 @@ final class CloudSettingProjection {
     init() {}
 }
 
+@Model
+final class CloudBookmarkProjection {
+    var bookmarkID: String = ""
+    var feedURL: String = ""
+    var episodeGUID: String = ""
+    var positionSeconds: Int = 0
+    var note: String = ""
+    var createdAt: Date = Date.distantPast
+    var modifiedAt: Date = Date.distantPast
+    var deletedAt: Date?
+    var sourceDeviceID: String = ""
+
+    init() {}
+}
+
 @MainActor
 final class CloudProjectionCoordinator {
     private struct PodcastValue: Equatable {
@@ -174,8 +189,10 @@ final class CloudProjectionCoordinator {
     private var catalogObserver: NSObjectProtocol?
     private var queueObserver: NSObjectProtocol?
     private var settingObserver: NSObjectProtocol?
+    private var bookmarkObserver: NSObjectProtocol?
     private var reconcileTask: Task<Void, Never>?
     private var knownLocalFeedURLs: Set<String> = []
+    private var knownLocalBookmarkIDs: Set<String> = []
     private let deviceID: String
     private var isApplyingRemote = false
 
@@ -197,6 +214,7 @@ final class CloudProjectionCoordinator {
             CloudEpisodeStateProjection.self,
             CloudQueueItemProjection.self,
             CloudSettingProjection.self,
+            CloudBookmarkProjection.self,
         ])
         let configuration = ModelConfiguration(
             "CloudProjection",
@@ -297,6 +315,22 @@ final class CloudProjectionCoordinator {
                 }
             }
         }
+        bookmarkObserver = center.addObserver(
+            forName: .earshotBookmarksDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard self?.isApplyingRemote == false else { return }
+                do {
+                    try self?.publishLocalBookmarkChanges()
+                } catch {
+                    AppLog.data.error(
+                        "Cloud bookmark projection failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+        }
         try reconcile()
     }
 
@@ -324,6 +358,10 @@ final class CloudProjectionCoordinator {
         if let settingObserver {
             center.removeObserver(settingObserver)
             self.settingObserver = nil
+        }
+        if let bookmarkObserver {
+            center.removeObserver(bookmarkObserver)
+            self.bookmarkObserver = nil
         }
         reconcileTask?.cancel()
         _ = await reconcileTask?.value
@@ -434,6 +472,12 @@ final class CloudProjectionCoordinator {
             appContext: appContext,
             cloudContext: cloudContext
         ) || applicationChanged
+        let bookmarkChanged = try applyRemoteBookmarks(
+            appContext: appContext,
+            cloudContext: cloudContext
+        )
+        try publishLocalBookmarkChanges(now: .now, onlyIfCloudEmpty: true)
+        applicationChanged = bookmarkChanged || applicationChanged
         if applicationChanged {
             center.post(name: .earshotCloudProjectionDidApply, object: nil)
         }
@@ -605,6 +649,60 @@ final class CloudProjectionCoordinator {
         if cloudContext.hasChanges { try cloudContext.save() }
     }
 
+    func publishLocalBookmarkChanges(
+        now: Date = .now,
+        onlyIfCloudEmpty: Bool = false
+    ) throws {
+        let appContext = applicationContainer.mainContext
+        let cloudContext = projectionContainer.mainContext
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudBookmarkProjection>())
+        if onlyIfCloudEmpty, !rows.isEmpty { return }
+        let bookmarks = try appContext.fetch(FetchDescriptor<Bookmark>())
+        var activeBySemanticKey: [String: CloudBookmarkProjection] = [:]
+        for row in rows.filter({ $0.deletedAt == nil }).sorted(by: Self.bookmarkProjectionOrder) {
+            let key = Self.bookmarkSemanticKey(row)
+            if activeBySemanticKey[key] == nil { activeBySemanticKey[key] = row }
+        }
+        var currentIDs: Set<String> = []
+        for bookmark in bookmarks.sorted(by: { $0.createdAt < $1.createdAt }) {
+            guard let episode = bookmark.episode,
+                  let feedURL = episode.podcast?.feedURL,
+                  !episode.guid.isEmpty else { continue }
+            let key = Self.bookmarkSemanticKey(
+                feedURL: feedURL,
+                guid: episode.guid,
+                position: bookmark.positionSeconds,
+                createdAt: bookmark.createdAt
+            )
+            let row = activeBySemanticKey[key] ?? {
+                let inserted = CloudBookmarkProjection()
+                inserted.bookmarkID = UUID().uuidString.lowercased()
+                inserted.feedURL = FeedURLIdentity.canonical(feedURL)
+                inserted.episodeGUID = episode.guid
+                inserted.positionSeconds = max(0, bookmark.positionSeconds)
+                inserted.createdAt = bookmark.createdAt
+                inserted.sourceDeviceID = deviceID
+                cloudContext.insert(inserted)
+                activeBySemanticKey[key] = inserted
+                return inserted
+            }()
+            currentIDs.insert(row.bookmarkID)
+            if row.note != bookmark.note || row.modifiedAt == .distantPast {
+                row.note = bookmark.note
+                row.modifiedAt = now
+            }
+        }
+        if !onlyIfCloudEmpty, !knownLocalBookmarkIDs.isEmpty {
+            for row in rows where knownLocalBookmarkIDs.contains(row.bookmarkID)
+                && !currentIDs.contains(row.bookmarkID) && row.deletedAt == nil {
+                row.deletedAt = now
+                row.modifiedAt = now
+            }
+        }
+        knownLocalBookmarkIDs = currentIDs
+        if cloudContext.hasChanges { try cloudContext.save() }
+    }
+
     private func publishLocalSettingChange(
         key: String,
         value: String,
@@ -769,8 +867,14 @@ final class CloudProjectionCoordinator {
             row.deletedAt = now
             row.modifiedAt = now
         }
+        let bookmarkRows = try context.fetch(FetchDescriptor<CloudBookmarkProjection>())
+        for row in bookmarkRows where row.deletedAt == nil {
+            row.deletedAt = now
+            row.modifiedAt = now
+        }
         if context.hasChanges { try context.save() }
         knownLocalFeedURLs.removeAll()
+        knownLocalBookmarkIDs.removeAll()
     }
 
     private static func projectionOrder(
@@ -851,6 +955,32 @@ final class CloudProjectionCoordinator {
             return lhs.sourceDeviceID < rhs.sourceDeviceID
         }
         return lhs.value < rhs.value
+    }
+
+    private static func bookmarkProjectionOrder(
+        _ lhs: CloudBookmarkProjection,
+        _ rhs: CloudBookmarkProjection
+    ) -> Bool {
+        if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
+        return lhs.bookmarkID < rhs.bookmarkID
+    }
+
+    private static func bookmarkSemanticKey(_ row: CloudBookmarkProjection) -> String {
+        bookmarkSemanticKey(
+            feedURL: row.feedURL,
+            guid: row.episodeGUID,
+            position: row.positionSeconds,
+            createdAt: row.createdAt
+        )
+    }
+
+    private static func bookmarkSemanticKey(
+        feedURL: String,
+        guid: String,
+        position: Int,
+        createdAt: Date
+    ) -> String {
+        "\(FeedURLIdentity.canonical(feedURL))\u{1f}\(guid)\u{1f}\(max(0, position))\u{1f}\(createdAt.timeIntervalSinceReferenceDate.bitPattern)"
     }
 
     private func applicationEpisodes(matching keys: Set<EpisodeKey>) -> [EpisodeKey: Episode] {
@@ -1032,6 +1162,72 @@ final class CloudProjectionCoordinator {
         }
         if appContext.hasChanges { try appContext.save() }
         if cloudContext.hasChanges { try cloudContext.save() }
+        return changed
+    }
+
+    private func applyRemoteBookmarks(
+        appContext: ModelContext,
+        cloudContext: ModelContext
+    ) throws -> Bool {
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudBookmarkProjection>())
+        var newestByID: [String: CloudBookmarkProjection] = [:]
+        for row in rows.sorted(by: Self.bookmarkProjectionOrder) {
+            if newestByID[row.bookmarkID] == nil {
+                newestByID[row.bookmarkID] = row
+            } else {
+                cloudContext.delete(row)
+            }
+        }
+        let existing = try appContext.fetch(FetchDescriptor<Bookmark>())
+        var localBySemanticKey: [String: Bookmark] = [:]
+        for bookmark in existing {
+            guard let episode = bookmark.episode,
+                  let feedURL = episode.podcast?.feedURL else { continue }
+            let key = Self.bookmarkSemanticKey(
+                feedURL: feedURL,
+                guid: episode.guid,
+                position: bookmark.positionSeconds,
+                createdAt: bookmark.createdAt
+            )
+            if localBySemanticKey[key] == nil { localBySemanticKey[key] = bookmark }
+        }
+        var changed = false
+        var locallyPresentIDs: Set<String> = []
+        for row in newestByID.values.sorted(by: Self.bookmarkProjectionOrder) {
+            let key = Self.bookmarkSemanticKey(row)
+            if row.deletedAt != nil {
+                if let bookmark = localBySemanticKey.removeValue(forKey: key) {
+                    appContext.delete(bookmark)
+                    changed = true
+                }
+                continue
+            }
+            guard let episode = applicationEpisodes(matching: [
+                EpisodeKey(
+                    feedURL: FeedURLIdentity.canonical(row.feedURL),
+                    guid: row.episodeGUID
+                )
+            ]).values.first else { continue }
+            if let bookmark = localBySemanticKey[key] {
+                locallyPresentIDs.insert(row.bookmarkID)
+                if bookmark.note != row.note {
+                    bookmark.note = row.note
+                    changed = true
+                }
+            } else {
+                appContext.insert(Bookmark(
+                    episode: episode,
+                    positionSeconds: row.positionSeconds,
+                    note: row.note,
+                    createdAt: row.createdAt
+                ))
+                locallyPresentIDs.insert(row.bookmarkID)
+                changed = true
+            }
+        }
+        if appContext.hasChanges { try appContext.save() }
+        if cloudContext.hasChanges { try cloudContext.save() }
+        knownLocalBookmarkIDs = locallyPresentIDs
         return changed
     }
 
