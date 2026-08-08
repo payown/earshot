@@ -802,3 +802,15 @@ audio, or entitlements. Their separate local stores retained different facts:
 versus 1 downloaded row and no entitlement on Mac. Exact library-projection
 convergence therefore did not copy those device-owned values. All inspection was
 read-only.
+
+The current build was subsequently run on the M3 Mac through Xcode's Designed
+for iPhone destination. Its wrapper identified 1.1.0 (184) and retained the
+development push and private CloudKit entitlements. Newly copied iPhone and Mac
+projection snapshots each returned `ok` from SQLite `integrity_check`.
+Bidirectional `EXCEPT` comparisons over every synchronized field returned zero
+differences for podcasts, episode state, queue, settings, bookmarks, listening
+history, and folders. SwiftData's per-store `Z_PK`, `Z_ENT`, and `Z_OPT`
+bookkeeping columns were deliberately excluded because they are not synchronized
+application data. Counts remained 662, 4, 1, 4, 0, 31, and 0 respectively. This
+is build-184 same-state convergence evidence, not a substitute for physical
+two-way mutation, offline/reconnect, account-change, VoiceOver, or heat tests.

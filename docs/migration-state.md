@@ -924,3 +924,15 @@ and an active lifetime entitlement, while the Mac reports 1 downloaded row and
 no entitlement. Those differences survived exact projection convergence, which
 is direct evidence that audio ownership and StoreKit-derived state did not cross
 devices. The inspection did not modify either store.
+
+Build 184 was then launched through Xcode on the Apple-silicon Mac as Designed
+for iPhone with the CloudKit Development scheme. The running app reported 1.1.0
+(184), development push, `iCloud.media.payown.earshot`, and CloudKit
+entitlements. Fresh read-only iPhone and Mac projection snapshots both passed
+SQLite `integrity_check`. Excluding only SwiftData's device-local bookkeeping
+columns (`Z_PK`, `Z_ENT`, and `Z_OPT`), bidirectional `EXCEPT` comparisons found
+zero differing rows for all seven projection entities. Both sides contained 662
+podcasts, 4 episode states, 1 queue item, 4 settings, 0 bookmarks, 31 listening
+sessions, and 0 folders. This verifies same-state physical convergence on build
+184; it does not claim the still-unperformed mutation, offline, account-change,
+VoiceOver, or thermal matrix.
