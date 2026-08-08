@@ -101,6 +101,14 @@ local. It also separates device-only clearing from an explicitly confirmed synce
 library deletion. Production CloudKit remains disabled and undeployed. Fresh-store
 schema remains V10; supported migration sources remain V5 and V6.
 
+Build 175 is the development-only large-library responsiveness follow-up. It
+keeps build 174's compact CloudKit projection unchanged and replaces the global
+Inbox's live SwiftData observation with explicit Inbox- and queue-change
+refreshes, preventing unrelated catalog-rebuild saves from repeatedly
+materializing the Inbox on the main actor. Production CloudKit remains disabled
+and undeployed. Fresh-store schema remains V10; supported migration sources
+remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
