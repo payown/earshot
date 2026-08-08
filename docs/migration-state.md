@@ -493,6 +493,13 @@ same pull request, following the procedure at
 
 ## Open items and issue state
 
+The iCloud tracking hierarchy is being reconciled against the merged V10 code.
+Issues #771 and #772 describe obsolete V7 implementation work that landed and
+advanced through V10. Issue #773's build-161 checklist is superseded by the
+real-device build-171 V10 migration result. Actual mirroring remains disabled;
+the current 1.1 release gate and implementation order live in
+`docs/icloud-sync-v1.1-plan.md`.
+
 These are all known open items that directly affect migration handoff or its
 large-store release verification. Do not treat stale issue wording as current
 architecture.
