@@ -643,3 +643,12 @@ Rows at or before the transferred mark remain dismissed, and only publications
 after that mark receive normal new-episode behavior. A focused actor test uses
 25 feed episodes around a transferred mark and verifies a ten-row local catalog
 with exactly the five post-mark rows in the Inbox.
+
+Development build 176 contains that bootstrap correction. Its verified
+CloudKitDevelopment iPhone binary measured 14,835,040 bytes with SHA-256
+`b8999c18c508d511a7225b1a4ced7f22902c8037fabd4116db05899a75b7b496`
+and a 2026-08-07 23:45:52 -0700 modification time. The runtime development gate
+was `YES`, and the signed development push, private CloudKit container, and
+CloudKit service entitlements were present. Wireless over-install retained
+database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration
+reported build 176. The installer did not launch it.

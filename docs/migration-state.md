@@ -591,6 +591,14 @@ architecture.
   mark stay dismissed; only later publications count as new. This preserves the
   compact CloudKit shape while making the subscription usable without eagerly
   rebuilding an unbounded history.
+- Development build 176 contains the bounded clean-device seed. Its verified
+  CloudKitDevelopment iPhone binary is 14,835,040 bytes, SHA-256
+  `b8999c18c508d511a7225b1a4ced7f22902c8037fabd4116db05899a75b7b496`,
+  built 2026-08-07 23:45:52 -0700. The runtime development gate is `YES`, and
+  development push, private CloudKit container, and CloudKit service
+  entitlements are present. Wireless over-install replaced unlaunched build 175
+  while retaining database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`;
+  read-only enumeration reports build 176. The installer did not launch it.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.
