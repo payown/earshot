@@ -775,3 +775,12 @@ projection mid-reset. Focused lifecycle/reset coverage executed 11 tests with 0
 failures; full local CI executed 1,806 tests, skipped 38, and failed 0. Physical
 offline/reconnect behavior remains an explicit B6 measurement rather than an
 automated-test inference.
+
+The signed build-184 CloudKitDevelopment arm64 executable measured 19,821,216
+bytes with SHA-256
+`b423ef9a13b909d0fe47de1a455f6d1230da1054d80175fed13481e9bcc2998f`
+and modification time 2026-08-08 01:10:45 -0700. Wireless iPhone over-install
+retained database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; installed-app
+enumeration reports 1.1.0 (184). The app launched successfully, and the compact
+projection WAL recorded activity at 01:11 local time. No reset or data deletion
+was performed.
