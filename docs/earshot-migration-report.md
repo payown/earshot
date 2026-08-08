@@ -585,3 +585,40 @@ parent; refetch/recovery of that damaged legacy local row remains unproved.
 There were no bookmarks or folders in this device library, and no physical
 VoiceOver pass or bidirectional edit matrix has been completed. Production
 CloudKit remains undeployed.
+
+Account continuity subsequently gained an explicit fail-closed recovery. A
+CloudKit user-record change stops synchronization before the projection opens.
+The user may leave it paused or confirm use of the current account. Confirmation
+verifiably removes only the previous account's local compact projection, keeps
+the application and device-local stores, and then rebuilds from the current
+private account plus this device's library. This prevents an old local projection
+from being silently uploaded into another person's account.
+
+Restart and conflict tests now cover a real on-disk close/reopen after seeding
+662 subscriptions without duplicates; an idempotent everywhere-delete across
+all library projection types; nested folder deletion and membership cleanup;
+simultaneous queue add, reorder, and removal in both record-arrival orders while
+preserving the device-local current-item identity; complete observer shutdown;
+and a 100-notification CloudKit import burst coalescing to one reconciliation.
+
+The account-safe development build-174 binary measured 14,833,280 bytes with
+SHA-256
+`934ce259d262369cda95ff2e57526b84d5cfbbc42a3fc99816bb4f302d15738e`
+and a 2026-08-07 23:20:58 -0700 modification time. Its signed entitlements name
+the development APNs environment, `iCloud.media.payown.earshot`, and CloudKit.
+After a container-preserving wireless over-install and relaunch on both devices,
+the read-only compact-store snapshots matched: 662 podcasts, 4 episode states,
+1 queue intent, 4 shared settings, 0 bookmarks, 31 listening sessions, 0 folders,
+and 702 CloudKit metadata rows. Both SQLite integrity checks returned `ok`.
+
+The first full Mac catalog rebuild also exposed a non-CloudKit performance
+regression in the global Inbox. Its live SwiftData query re-evaluated while the
+feed refresher saved the large episode catalog; one sample placed 977 of 1,461
+samples in `AllInboxCandidates.body`, and observed RSS reached 337 MB. The Inbox
+now loads through its bounded repository query only on initial display and
+explicit Inbox or queue change events, not on every unrelated SwiftData save.
+Against this same 662-subscription Mac library, the real background refresh
+finished 3 minutes 42 seconds after launch. Earshot then measured 0.7% CPU; a
+two-second sample found the main thread idle in all 319 samples. The finite
+catalog rebuild remains material work and is not described as a sync-speed
+improvement.
