@@ -1,5 +1,11 @@
 # Folders — Sync Phase A: CloudKit-ready local schema
 
+> **Current status, 2026-08-07:** The implementation described here landed and
+> advanced through the retained-column V10 architecture. The remaining unchecked
+> V7/V9 and build-161 wording is historical and must not be used as the current
+> execution checklist. CloudKit remains disabled. The current 1.1 implementation
+> plan is [`icloud-sync-v1.1-plan.md`](icloud-sync-v1.1-plan.md).
+
 **Goal:** Ship and bake a CloudKit-ready local-store migration whose models are compatible with SwiftData's CloudKit mirror, whose natural-key writes remain idempotent without SwiftData unique constraints, and whose device-only data is explicitly separated from future mirrored data — without enabling iCloud sync yet. The amended A1 decision targets retained-column V9, keeps V7/V8 as frozen resume points, and makes `LocalEpisodeState` the sole runtime download-state source; see `docs/sync-a1-storage-map.md`.
 
 **Estimated duration:** 2–3 weeks, part-time.

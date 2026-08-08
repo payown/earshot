@@ -446,6 +446,12 @@ Kept as the decision record.
 
 ## 16. iCloud sync (folders, subscriptions, and listening state)
 
+> **Implementation status, 2026-08-07:** Phase A is merged in the live V10
+> split-store architecture. The schema is CloudKit-compatible, natural-key repair
+> is implemented, and device-only download/settings state is separated. Actual
+> mirroring is still disabled and no iCloud entitlement ships. The release-gated
+> implementation sequence is [`icloud-sync-v1.1-plan.md`](icloud-sync-v1.1-plan.md).
+
 Earshot should keep a user's world in step across their Apple devices: the same folders and nesting, the same subscriptions, queue, bookmarks, played state, and playback positions on iPhone and iPad — **without Earshot ever running a server that sees user data.**
 
 **Chosen approach (Michael, 2026-07-30): SwiftData's built-in CloudKit sync**, not a hand-rolled sync engine. SwiftData can mirror a store to the user's **private CloudKit database** automatically (`ModelConfiguration(..., cloudKitDatabase: .private("iCloud.media.payown.earshot"))`, backed by `NSPersistentCloudKitContainer`). Apple owns the sync engine, the conflict handling, and the change tracking. This is far less code than `CKSyncEngine` and the strongest possible fit for the zero-data-collection rule: sync *reduces* Earshot's data footprint versus any hosted backend.
@@ -482,16 +488,25 @@ With the CloudKit mirror, SwiftData assigns each record a stable CloudKit identi
 - **`feedURL` and `guid` are still the natural keys for dedup.** Because CloudKit forbids unique constraints (§16.4), two devices could each create a "Podcast(feedURL: X)" before they converge. Keep an app-level dedup pass (merge duplicate podcasts/episodes by `feedURL`/`guid` after sync) — small, testable, and the only reconciliation logic we own.
 - **Episodes are derived from feeds.** Each device already fetches feeds and holds full episode rows. We rely on the CloudKit mirror for episode *state*; a device that hasn't yet fetched a referenced episode applies incoming state on its next feed refresh (match on `guid` + podcast `feedURL`).
 
-### 16.4 CloudKit-compatible schema (a real migration, before any sync)
+### 16.4 CloudKit-compatible schema (completed in V10)
 
-The current schema is **not** CloudKit-ready. Enabling the mirror requires a schema that satisfies CloudKit's rules, which is itself a migration — follow `.claude/rules/database-migrations.md` to the letter (freeze the prior version, migration test, on-device upgrade test).
+The live V10 schema is CloudKit-compatible and keeps the mirrored and
+device-local graphs in separate configurations. Enabling the mirror still
+requires the measured, staged work in `docs/icloud-sync-v1.1-plan.md`; schema
+compatibility alone is not proof of safe conflict, account, reset, or scale
+behavior.
 
-CloudKit + SwiftData constraints and the required changes:
+CloudKit + SwiftData constraints addressed by the V10 migration:
 
-1. **No `@Attribute(.unique)`.** CloudKit rejects unique constraints. Today `Podcast.feedURL` and `AppSetting.key` are `.unique` (`Podcast.swift`, `AppSetting.swift`). Drop `.unique` and enforce uniqueness in the repository layer (a fetch-or-create by `feedURL`/`key`, plus the §16.3 dedup pass).
-2. **Every non-optional attribute needs a default (or becomes optional).** CloudKit-mirrored attributes must be optional or have a default. Audit each `@Model` (e.g. `Episode.guid/title/audioURL`, `PodcastFolder.name/sortOrder`) and add defaults or make optional.
-3. **All relationships optional.** CloudKit requires optional relationships with inverses. Folder relationships (`memberships`, `folder`, `podcast`, the new `parent`/`children`, episode membership) must all be optional — most already are.
-4. **No `deleteRule: .cascade` guarantees across the mirror.** CloudKit deletes propagate as record deletions; keep app-level cleanup (the `removeFromAllFolders`-style discipline) so a delete on one device doesn't strand memberships on another.
+1. **No `@Attribute(.unique)`.** V10 removed the former constraints from
+   `Podcast.feedURL` and `AppSetting.key`; repository fetch-or-create and bounded
+   repair now enforce their natural keys.
+2. **Every non-optional attribute needs a default (or becomes optional).** V10's
+   mirrored attributes pass the schema-reflection compatibility audit.
+3. **All relationships optional.** V10 made mirrored relationships optional and
+   supplied the required inverses.
+4. **No `deleteRule: .cascade` guarantees across the mirror.** Application-level
+   cleanup remains authoritative and still requires real two-device verification.
 
 This lands as its own **schema version(s)** (freeze current, add the CloudKit-ready version + stage). Because dropping `.unique` and adding defaults changes model definitions, sequence it deliberately in the migration plan (§12). No sync *behavior* ships until this schema has baked on TestFlight.
 
