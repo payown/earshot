@@ -130,6 +130,16 @@ now creates that model actor on a detached utility executor. Build 177 is
 superseded for testing. Production CloudKit remains disabled and undeployed.
 Fresh-store schema remains V10; supported migration sources remain V5 and V6.
 
+Build 179 is the development-only bounded automatic-refresh correction. Device
+profiling showed build 178 moved feed persistence off the main actor, but
+faulting a real 45,436-episode inverse relationship still caused repeated UI
+stalls. Established subscriptions now preserve all stored history while
+ingesting at most the newest ten genuinely-new episodes per automatic refresh;
+older feed-catalog rows remain refetchable rather than local or CloudKit state.
+Build 178 is superseded for testing. Production CloudKit remains disabled and
+undeployed. Fresh-store schema remains V10; supported migration sources remain
+V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
