@@ -975,3 +975,45 @@ The locked iPhone had not imported those field updates by the final read-only
 snapshot, so visible Mac-to-iPhone queue materialization is not yet claimed.
 Wireless over-install preserved iPhone database UUID
 `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; no reset or data deletion ran.
+
+### Build-186 targeted AppleInsider queue repair, 2026-08-08
+
+Fresh read-only application-store inspection found exactly one queue row across
+both devices without a usable episode/feed projection key: Mac queue position 9,
+GUID `4fae1d7d-53fe-4215-a2e7-53ca1a813e98`. The same Mac store contains one
+correctly attributed AppleInsider episode with the same GUID, title, and audio
+URL; the iPhone has no unprojectable queue row. Both compact stores already
+matched at 17 active device contributions resolving to nine episode keys, so
+the tenth Mac item was local orphan residue rather than failed CloudKit
+transport or an unsubscribed-feed shell failure.
+
+Build 186 implements only the approved manifest repair: it requires the exact
+GUID, title, audio URL, canonical AppleInsider feed, one orphan source, and one
+unqueued target before moving the existing queue relationship and removing the
+orphan episode. Ambiguity is a logged no-op. Any other unprojectable queue item
+is logged and preserved; there is no general recovery behavior. Focused
+projection verification executed 29 tests with 0 failures. The first full local
+CI run executed 1,810 tests, skipped 38, and failed 0 before the build-number
+bump and project regeneration; the post-regeneration gate remains required
+before installation.
+
+The post-regeneration full local CI gate also executed 1,810 tests, skipped 38,
+and failed 0. Signed CloudKitDevelopment build 186 then launched on the
+Designed-for-iPhone Mac. The repair removed orphan episode PK 521, preserved
+the existing queue item's position 9 and `addedAt`, attached it to the sole
+correct AppleInsider row PK 239134, and published one queued contribution under
+`https://feeds.transistor.fm/appleinsider` plus GUID
+`4fae1d7d-53fe-4215-a2e7-53ca1a813e98`. Post-repair application and projection
+integrity checks both returned `ok`; the Mac had zero unprojectable queue rows.
+A read-only iPhone snapshot at 09:43 still had nine queue rows and had not yet
+imported the corrected AppleInsider contribution. The phone was not modified or
+reinstalled, so visible ten-item convergence remains unproved.
+
+The build-186 device-test candidate adds development-only initial compact-
+projection seed markers so migration time, durable local projection time, and
+CloudKit export time can be measured independently. Start, completion, and
+failure markers share a run identifier; completion reports monotonic duration
+and all seven entity counts. The ordinary Release configuration keeps
+`EarshotDevelopmentCloudKitEnabled=NO`, does not construct the projection
+coordinator or projection store, and is approved for a migration-only 1.1.0
+TestFlight release. Production CloudKit remains disabled and undeployed.

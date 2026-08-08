@@ -191,6 +191,25 @@ from attaching one feed's episodes to another podcast. Build 184 is superseded
 for testing. Production CloudKit remains disabled and undeployed. Fresh-store
 schema remains V10; supported migration sources remain V5 and V6.
 
+Build 186 is the development-only targeted queue-data repair. Read-only
+comparison found both compact stores converged on nine queue keys while the Mac
+application store retained one additional unprojectable AppleInsider queue row
+whose episode had lost its podcast relationship. The repair moves that exact
+manifest entry to the unique matching AppleInsider catalog row only when GUID,
+title, audio URL, and feed identity all match, then removes the single approved
+orphan episode. Other unprojectable queue rows are logged and left untouched;
+there is no general orphan recovery. Production CloudKit remains disabled and
+undeployed. Fresh-store schema remains V10; supported migration sources remain
+V5 and V6.
+
+Build 186 also brackets development-only initial compact-projection seeding with
+stable start, completion, and failure log markers. A run identifier joins each
+pair; completion records monotonic duration and counts for all seven projection
+entities. The instrumentation is gated by
+`EarshotDevelopmentCloudKitEnabled`, so the ordinary Release configuration does
+not create, seed, or open the projection store. Version 1.1.0 is approved as a
+migration-only TestFlight release with that Release gate remaining `NO`.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App

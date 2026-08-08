@@ -4,6 +4,49 @@ import XCTest
 
 @MainActor
 final class CloudProjectionCoordinatorTests: XCTestCase {
+    func testDevelopmentSeedMarkersBracketDurableProjectionWithAllEntityCounts() throws {
+        let app = try makeApplicationContainer()
+        app.mainContext.insert(Podcast(feedURL: "https://example.com/feed", title: "Show"))
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        var markers: [CompactProjectionSeedMarker] = []
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone",
+            seedInstrumentationEnabled: { true },
+            seedMarkerRecorder: { markers.append($0) }
+        )
+
+        try coordinator.start()
+
+        XCTAssertEqual(markers.count, 2)
+        guard case .start(let startRunID) = markers[0],
+              case .complete(let completeRunID, let duration, let counts) = markers[1]
+        else {
+            return XCTFail("Expected one start marker followed by one completion marker")
+        }
+        XCTAssertEqual(startRunID, completeRunID)
+        XCTAssertGreaterThanOrEqual(duration, 0)
+        XCTAssertEqual(
+            counts,
+            CompactProjectionSeedCounts(
+                podcasts: 1,
+                episodeStates: 0,
+                queueItems: 0,
+                settings: 0,
+                bookmarks: 0,
+                listeningSessions: 0,
+                folders: 0
+            )
+        )
+        XCTAssertEqual(
+            try projection.mainContext.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
+            counts.podcasts
+        )
+    }
+
     func testStartObservesLocalChangesAndStopFullyDetaches() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
@@ -711,6 +754,38 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             try mac.mainContext.fetch(FetchDescriptor<QueueItem>())
                 .compactMap { $0.episode?.guid },
             ["a"]
+        )
+    }
+
+    func testUnprojectableQueueItemIsPreserved() throws {
+        let app = try makeApplicationContainer()
+        let orphan = Episode(
+            guid: "unrelated", title: "Unrelated", audioURL: "https://example.com/audio",
+            status: .inQueue
+        )
+        let queueItem = QueueItem(episode: orphan, position: 0)
+        app.mainContext.insert(orphan)
+        app.mainContext.insert(queueItem)
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+
+        try coordinator.publishLocalQueueChanges()
+
+        XCTAssertEqual(
+            try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 1
+        )
+        XCTAssertEqual(queueItem.episode?.guid, "unrelated")
+        XCTAssertEqual(
+            try projection.mainContext.fetchCount(
+                FetchDescriptor<CloudQueueItemProjection>()
+            ),
+            0
         )
     }
 

@@ -81,6 +81,7 @@ lib/core/config/api_keys.dart
 
 # Local test fixtures (sample OPML feed lists)
 *.opml
+!docs/earshot-upgrade-100.opml
 
 # Xcode
 *.xcuserstate

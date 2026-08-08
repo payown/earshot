@@ -205,6 +205,22 @@ final class CloudFolderProjection {
     init() {}
 }
 
+struct CompactProjectionSeedCounts: Equatable {
+    let podcasts: Int
+    let episodeStates: Int
+    let queueItems: Int
+    let settings: Int
+    let bookmarks: Int
+    let listeningSessions: Int
+    let folders: Int
+}
+
+enum CompactProjectionSeedMarker: Equatable {
+    case start(runID: String)
+    case complete(runID: String, durationSeconds: Double, counts: CompactProjectionSeedCounts)
+    case failure(runID: String, durationSeconds: Double, error: String)
+}
+
 @MainActor
 final class CloudProjectionCoordinator {
     /// Initial subscription projection is restartable at natural-key boundaries.
@@ -265,18 +281,28 @@ final class CloudProjectionCoordinator {
     private var knownLocalSessionIDs: Set<String> = []
     private var knownLocalFolderIDs: Set<String> = []
     private let deviceID: String
+    private let seedInstrumentationEnabled: () -> Bool
+    private let seedMarkerRecorder: (CompactProjectionSeedMarker) -> Void
     private var isApplyingRemote = false
 
     init(
         applicationContainer: ModelContainer,
         projectionContainer: ModelContainer,
         center: NotificationCenter = .default,
-        deviceID: String = CloudProjectionDeviceIdentity.value()
+        deviceID: String = CloudProjectionDeviceIdentity.value(),
+        seedInstrumentationEnabled: @escaping () -> Bool = {
+            CloudKitLaunchPolicy.isDevelopmentMirroringEnabled()
+        },
+        seedMarkerRecorder: @escaping (CompactProjectionSeedMarker) -> Void = {
+            CloudProjectionCoordinator.logSeedMarker($0)
+        }
     ) {
         self.applicationContainer = applicationContainer
         self.projectionContainer = projectionContainer
         self.center = center
         self.deviceID = deviceID
+        self.seedInstrumentationEnabled = seedInstrumentationEnabled
+        self.seedMarkerRecorder = seedMarkerRecorder
     }
 
     static func make(applicationContainer: ModelContainer) throws -> CloudProjectionCoordinator {
@@ -436,7 +462,64 @@ final class CloudProjectionCoordinator {
                 }
             }
         }
-        try reconcile()
+        guard seedInstrumentationEnabled() else {
+            try reconcile()
+            return
+        }
+        let runID = UUID().uuidString
+        let clock = ContinuousClock()
+        let started = clock.now
+        seedMarkerRecorder(.start(runID: runID))
+        do {
+            try reconcile()
+            seedMarkerRecorder(.complete(
+                runID: runID,
+                durationSeconds: Self.seconds(clock.now - started),
+                counts: try compactProjectionCounts()
+            ))
+        } catch {
+            seedMarkerRecorder(.failure(
+                runID: runID,
+                durationSeconds: Self.seconds(clock.now - started),
+                error: error.localizedDescription
+            ))
+            throw error
+        }
+    }
+
+    private func compactProjectionCounts() throws -> CompactProjectionSeedCounts {
+        let context = projectionContainer.mainContext
+        return try CompactProjectionSeedCounts(
+            podcasts: context.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
+            episodeStates: context.fetchCount(FetchDescriptor<CloudEpisodeStateProjection>()),
+            queueItems: context.fetchCount(FetchDescriptor<CloudQueueItemProjection>()),
+            settings: context.fetchCount(FetchDescriptor<CloudSettingProjection>()),
+            bookmarks: context.fetchCount(FetchDescriptor<CloudBookmarkProjection>()),
+            listeningSessions: context.fetchCount(FetchDescriptor<CloudListeningSessionProjection>()),
+            folders: context.fetchCount(FetchDescriptor<CloudFolderProjection>())
+        )
+    }
+
+    private static func seconds(_ duration: Duration) -> Double {
+        let components = duration.components
+        return Double(components.seconds) + Double(components.attoseconds) / 1e18
+    }
+
+    private static func logSeedMarker(_ marker: CompactProjectionSeedMarker) {
+        switch marker {
+        case .start(let runID):
+            AppLog.data.info(
+                "compact-projection-seed-start runID=\(runID, privacy: .public)"
+            )
+        case .complete(let runID, let duration, let counts):
+            AppLog.data.info(
+                "compact-projection-seed-complete runID=\(runID, privacy: .public) durationSeconds=\(duration, privacy: .public) podcasts=\(counts.podcasts, privacy: .public) episodeStates=\(counts.episodeStates, privacy: .public) queueItems=\(counts.queueItems, privacy: .public) settings=\(counts.settings, privacy: .public) bookmarks=\(counts.bookmarks, privacy: .public) listeningSessions=\(counts.listeningSessions, privacy: .public) folders=\(counts.folders, privacy: .public)"
+            )
+        case .failure(let runID, let duration, let error):
+            AppLog.data.error(
+                "compact-projection-seed-failed runID=\(runID, privacy: .public) durationSeconds=\(duration, privacy: .public) error=\(error, privacy: .public)"
+            )
+        }
     }
 
     func stop() async {
@@ -702,8 +785,13 @@ final class CloudProjectionCoordinator {
         var current: [EpisodeKey: (position: Int, episode: Episode)] = [:]
         for item in items {
             guard let episode = item.episode,
-                  let key = Self.episodeKey(for: episode),
-                  current[key] == nil else { continue }
+                  let key = Self.episodeKey(for: episode) else {
+                AppLog.data.error(
+                    "Queue projection skipped unprojectable item at position \(item.position, privacy: .public); missing usable episode or feed key"
+                )
+                continue
+            }
+            guard current[key] == nil else { continue }
             current[key] = (item.position, episode)
         }
         if onlyIfCloudEmpty, !rows.isEmpty {
