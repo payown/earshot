@@ -2,6 +2,14 @@ import CoreData
 import Foundation
 import OSLog
 
+extension Notification.Name {
+    /// A completed, successful CloudKit import may change rows held by views
+    /// that deliberately use bounded fetches instead of live `@Query` results.
+    static let earshotCloudKitImportDidFinish = Notification.Name(
+        "earshotCloudKitImportDidFinish"
+    )
+}
+
 /// A bounded diagnostic view of the public Core Data + CloudKit event stream.
 ///
 /// SwiftData does not expose a supported "last synced" timestamp. Its backing
@@ -117,6 +125,9 @@ final class CloudKitEventMonitor {
         AppLog.data.info(
             "CloudKit event kind=\(event.kind.rawValue, privacy: .public) succeeded=\(event.succeeded, privacy: .public) durationSeconds=\(duration, privacy: .public) error=\(errorDescription, privacy: .public)"
         )
+        if event.kind == .import, event.endDate != nil, event.succeeded {
+            center.post(name: .earshotCloudKitImportDidFinish, object: nil)
+        }
     }
 
 }
