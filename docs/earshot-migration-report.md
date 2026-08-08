@@ -726,3 +726,13 @@ progress, queue state, and global speed are reconciled into a Mac application
 store; newer Mac metadata, progress, queue removal, and speed are then
 reconciled back into the phone application store. Full local CI executed 1,803
 tests, skipped 38, and failed 0.
+
+Development build 182 packages the restart-safe subscription backfill. Its
+signed CloudKitDevelopment arm64 binary measured 19,785,936 bytes with SHA-256
+`bd36401f96c45ddd4c90e3d266e156ec6464af0095b2a06a25291dcfebd21e3a`
+and modification time 2026-08-08 00:46:19 -0700. It reports 1.1.0 (182), the
+runtime development gate is `YES`, and the signed entitlements contain
+development push, `iCloud.media.payown.earshot`, and CloudKit. Wireless
+over-install retained database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration reports build
+182. The installer did not launch it, and no reset ran.

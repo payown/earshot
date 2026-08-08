@@ -845,3 +845,14 @@ state, and global speed reach the Mac; newer Mac metadata, progress, queue
 removal, and speed then return to the phone. The test uses the production
 conflict timestamps and verifies the final application stores, not merely the
 projection rows. Full local CI executed 1,803 tests, skipped 38, and failed 0.
+
+Development build 182 contains the checkpointed subscription backfill and the
+core two-device round-trip proof. Its signed CloudKitDevelopment arm64 binary
+is 19,785,936 bytes, SHA-256
+`bd36401f96c45ddd4c90e3d266e156ec6464af0095b2a06a25291dcfebd21e3a`,
+modified 2026-08-08 00:46:19 -0700. It reports 1.1.0 (182), its runtime
+development gate is `YES`, and its entitlements include development push,
+`iCloud.media.payown.earshot`, and CloudKit. A single wireless iPhone
+over-install replaced build 181 and preserved database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration reports build
+182. The installer did not launch the app, and no data reset ran.
