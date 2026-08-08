@@ -40,6 +40,58 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testBurstOfRemoteImportNotificationsCoalescesAndStopsCleanly() async throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let center = NotificationCenter()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: center,
+            deviceID: "phone"
+        )
+        try coordinator.start()
+        let remote = CloudPodcastProjection()
+        remote.feedURL = "https://example.com/remote"
+        remote.title = "Remote"
+        projection.mainContext.insert(remote)
+        try projection.mainContext.save()
+        var applyCount = 0
+        let token = center.addObserver(
+            forName: .earshotCloudProjectionDidApply,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { applyCount += 1 }
+        }
+        defer { center.removeObserver(token) }
+
+        for _ in 0..<100 {
+            center.post(name: .earshotCloudKitImportDidFinish, object: nil)
+        }
+        for _ in 0..<5 { await Task.yield() }
+
+        XCTAssertEqual(
+            try app.mainContext.fetchCount(FetchDescriptor<Podcast>()),
+            1
+        )
+        XCTAssertEqual(applyCount, 1)
+
+        await coordinator.stop()
+        let afterStop = CloudPodcastProjection()
+        afterStop.feedURL = "https://example.com/after-stop"
+        afterStop.title = "After stop"
+        projection.mainContext.insert(afterStop)
+        try projection.mainContext.save()
+        center.post(name: .earshotCloudKitImportDidFinish, object: nil)
+        for _ in 0..<3 { await Task.yield() }
+        XCTAssertEqual(
+            try app.mainContext.fetchCount(FetchDescriptor<Podcast>()),
+            1
+        )
+        XCTAssertEqual(applyCount, 1)
+    }
+
     func testExistingSubscriptionsSeedOnlyCompactProjectionRows() throws {
         let app = try makeApplicationContainer()
         for index in 0..<662 {
