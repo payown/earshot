@@ -218,6 +218,53 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testEverywhereDeleteIsIdempotentAndTombstonesEveryLibraryProjection() throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        let podcast = CloudPodcastProjection()
+        podcast.feedURL = "https://example.com/feed"
+        let episode = episodeStateRow(device: "phone", position: 30, updatedAt: 10)
+        let queue = CloudQueueItemProjection()
+        queue.feedURL = "https://example.com/feed"
+        queue.episodeGUID = "episode"
+        queue.sourceDeviceID = "phone"
+        queue.isQueued = true
+        let bookmark = CloudBookmarkProjection()
+        bookmark.bookmarkID = "bookmark"
+        bookmark.feedURL = "https://example.com/feed"
+        bookmark.episodeGUID = "episode"
+        let session = CloudListeningSessionProjection()
+        session.sessionID = "session"
+        session.feedURL = "https://example.com/feed"
+        let folder = CloudFolderProjection()
+        folder.folderID = "folder"
+        projection.mainContext.insert(podcast)
+        projection.mainContext.insert(episode)
+        projection.mainContext.insert(queue)
+        projection.mainContext.insert(bookmark)
+        projection.mainContext.insert(session)
+        projection.mainContext.insert(folder)
+        try projection.mainContext.save()
+        let deletionDate = Date(timeIntervalSince1970: 500)
+
+        try coordinator.markAllSubscriptionsDeleted(now: deletionDate)
+        try coordinator.markAllSubscriptionsDeleted(now: Date(timeIntervalSince1970: 600))
+
+        XCTAssertEqual(podcast.deletedAt, deletionDate)
+        XCTAssertEqual(episode.deletedAt, deletionDate)
+        XCTAssertEqual(queue.deletedAt, deletionDate)
+        XCTAssertFalse(queue.isQueued)
+        XCTAssertEqual(bookmark.deletedAt, deletionDate)
+        XCTAssertEqual(session.deletedAt, deletionDate)
+        XCTAssertEqual(folder.deletedAt, deletionDate)
+    }
+
     func testEpisodeProjectionContainsOnlyMeaningfulUserState() throws {
         let app = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
@@ -627,6 +674,18 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             try mac.mainContext.fetch(FetchDescriptor<EpisodeFolderMembership>())
                 .first?.episode?.guid,
             "episode"
+        )
+
+        phone.mainContext.delete(child)
+        try phone.mainContext.save()
+        try phoneCoordinator.publishLocalFolderChanges(now: Date(timeIntervalSince1970: 100))
+        try macCoordinator.reconcile()
+
+        let remainingFolders = try mac.mainContext.fetch(FetchDescriptor<PodcastFolder>())
+        XCTAssertEqual(remainingFolders.map(\.name), ["Parent"])
+        XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<FolderMembership>()).isEmpty)
+        XCTAssertTrue(
+            try mac.mainContext.fetch(FetchDescriptor<EpisodeFolderMembership>()).isEmpty
         )
     }
 
