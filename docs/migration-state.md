@@ -856,3 +856,12 @@ development gate is `YES`, and its entitlements include development push,
 over-install replaced build 181 and preserved database UUID
 `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration reports build
 182. The installer did not launch the app, and no data reset ran.
+
+B2 coordinator-level deletion and folder-conflict coverage now proves two
+previously indirect safety contracts. A remote subscription tombstone delivered
+while that podcast is playing synchronously unloads `PlayerService` before the
+podcast/episode cascade, and subsequent pause/seek persistence cannot resurrect
+the episode. A remote three-folder cycle deterministically detaches the
+lexicographically greatest folder, persists an acyclic hierarchy, and emits
+exactly one conflict-repair notification. Full local CI executed 1,805 tests,
+skipped 38, and failed 0.

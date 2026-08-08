@@ -736,3 +736,9 @@ development push, `iCloud.media.payown.earshot`, and CloudKit. Wireless
 over-install retained database UUID
 `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration reports build
 182. The installer did not launch it, and no reset ran.
+
+Coordinator integration tests now cover the B2 deletion and folder-cycle seams.
+A remotely delivered unfollow releases active playback before cascade deletion
+and remains safe under later pause/seek persistence. A remotely delivered
+three-folder cycle is repaired to the deterministic acyclic hierarchy and emits
+one repair notice. Full local CI executed 1,805 tests, skipped 38, and failed 0.

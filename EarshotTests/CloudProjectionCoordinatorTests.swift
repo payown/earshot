@@ -319,6 +319,42 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(rows[0].deletedAt, deletedAt)
     }
 
+    func testRemoteUnfollowReleasesActivePlayerBeforeCascadeDelete() throws {
+        let app = try makeApplicationContainerWithEpisode(position: 30)
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        let player = PlayerService()
+        player.configure(context: app.mainContext)
+        player.play(episode)
+        XCTAssertEqual(player.nowPlayingEpisodeID, episode.persistentModelID)
+
+        let projection = try makeProjectionContainer()
+        let tombstone = CloudPodcastProjection()
+        tombstone.feedURL = "https://example.com/feed"
+        tombstone.title = "Show"
+        tombstone.deletedAt = Date.distantFuture
+        tombstone.modifiedAt = Date.distantFuture
+        tombstone.sourceDeviceID = "mac"
+        projection.mainContext.insert(tombstone)
+        try projection.mainContext.save()
+
+        try CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        ).reconcile()
+
+        XCTAssertNil(player.nowPlayingEpisode)
+        XCTAssertNil(player.nowPlayingEpisodeID)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 0)
+        XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 0)
+        player.pause()
+        player.seek(to: 60)
+        try app.mainContext.save()
+        XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 0)
+    }
+
     func testDuplicateCloudRowsConvergeToNewestRecord() throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
@@ -1032,6 +1068,59 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(
             try mac.mainContext.fetch(FetchDescriptor<EpisodeFolderMembership>()).isEmpty
         )
+    }
+
+    func testRemoteFolderCycleRepairsPersistAndNotifyOnce() throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        for (index, id, parentID) in [
+            (0, "a", "b"),
+            (1, "b", "c"),
+            (2, "c", "a"),
+        ] {
+            let row = CloudFolderProjection()
+            row.folderID = id
+            row.name = id.uppercased()
+            row.parentFolderID = parentID
+            row.createdAt = Date(timeIntervalSince1970: TimeInterval(index + 1))
+            row.modifiedAt = Date(timeIntervalSince1970: 100)
+            row.sourceDeviceID = "remote"
+            projection.mainContext.insert(row)
+        }
+        try projection.mainContext.save()
+        let center = NotificationCenter()
+        var repairNotices = 0
+        let token = center.addObserver(
+            forName: .earshotFolderSyncConflictRepaired,
+            object: nil,
+            queue: nil
+        ) { _ in
+            MainActor.assumeIsolated { repairNotices += 1 }
+        }
+        defer { center.removeObserver(token) }
+
+        try CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: center,
+            deviceID: "phone"
+        ).reconcile()
+
+        let folders = try app.mainContext.fetch(FetchDescriptor<PodcastFolder>())
+        let byName = Dictionary(uniqueKeysWithValues: folders.map { ($0.name, $0) })
+        XCTAssertEqual(folders.count, 3)
+        XCTAssertEqual(byName["A"]?.parent?.name, "B")
+        XCTAssertEqual(byName["B"]?.parent?.name, "C")
+        XCTAssertNil(byName["C"]?.parent)
+        XCTAssertEqual(repairNotices, 1)
+        for folder in folders {
+            var seen: Set<PersistentIdentifier> = []
+            var cursor: PodcastFolder? = folder
+            while let current = cursor {
+                XCTAssertTrue(seen.insert(current.persistentModelID).inserted)
+                cursor = current.parent
+            }
+        }
     }
 
     private func makeApplicationContainer() throws -> ModelContainer {
