@@ -148,6 +148,14 @@ Refresh now repairs only GUIDs eligible to participate in that refresh. Build
 undeployed. Fresh-store schema remains V10; supported migration sources remain
 V5 and V6.
 
+Build 181 is the development-only bounded CloudKit resolution correction. A
+build-180 device trace reduced refresh stalls to one 780-millisecond hang and
+identified it in queue reconciliation: resolving one projection faulted and
+sorted an entire podcast episode relationship. CloudKit reconciliation now
+fetches only the requested podcast/GUID pairs. Build 180 is superseded for
+testing. Production CloudKit remains disabled and undeployed. Fresh-store schema
+remains V10; supported migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
