@@ -719,3 +719,10 @@ partial durable state by reopening a 662-subscription application store and a
 137-row projection store; reconciliation finishes with 662 projection rows,
 662 unique canonical keys, and 662 application subscriptions. Full local CI
 then executed 1,802 tests, skipped 38, and failed 0.
+
+Core bidirectional behavior is also covered as one integrated round trip rather
+than only isolated projection cases. Phone subscription metadata, playback
+progress, queue state, and global speed are reconciled into a Mac application
+store; newer Mac metadata, progress, queue removal, and speed are then
+reconciled back into the phone application store. Full local CI executed 1,803
+tests, skipped 38, and failed 0.

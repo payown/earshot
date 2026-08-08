@@ -777,6 +777,75 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(phoneSettings.double(SettingsKey.globalSpeed, default: 1), 2)
     }
 
+    func testCoreLibraryRoundTripFromPhoneToMacAndBack() throws {
+        let projection = try makeProjectionContainer()
+        let phone = try makeApplicationContainerWithEpisode(position: 120)
+        let phoneEpisode = try XCTUnwrap(applicationEpisode(in: phone))
+        phone.mainContext.insert(QueueItem(episode: phoneEpisode, position: 0))
+        let phoneSettings = AppSettingsStore(context: phone.mainContext)
+        phoneSettings.setDouble(1.5, for: SettingsKey.globalSpeed)
+        try phone.mainContext.save()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainerWithEpisode(position: 0)
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try macCoordinator.reconcile()
+        let macEpisode = try XCTUnwrap(applicationEpisode(in: mac))
+        XCTAssertEqual(macEpisode.positionSeconds, 120)
+        XCTAssertEqual(
+            try mac.mainContext.fetch(FetchDescriptor<QueueItem>()).first?.episode?.guid,
+            "episode"
+        )
+        XCTAssertEqual(
+            AppSettingsStore(context: mac.mainContext)
+                .double(SettingsKey.globalSpeed, default: 1),
+            1.5
+        )
+
+        let macPodcast = try XCTUnwrap(
+            mac.mainContext.fetch(FetchDescriptor<Podcast>()).first
+        )
+        macPodcast.title = "Renamed on Mac"
+        macEpisode.positionSeconds = 240
+        for item in try mac.mainContext.fetch(FetchDescriptor<QueueItem>()) {
+            mac.mainContext.delete(item)
+        }
+        let macSettings = AppSettingsStore(context: mac.mainContext)
+        macSettings.setDouble(2, for: SettingsKey.globalSpeed)
+        try mac.mainContext.save()
+        let later = Date.distantFuture
+        try macCoordinator.publishLocalSubscriptionChanges(now: later)
+        try macCoordinator.publishLocalEpisodeStateChanges(
+            snapshots: [try XCTUnwrap(EpisodeUserStateSnapshot(episode: macEpisode))],
+            now: later
+        )
+        try macCoordinator.publishLocalQueueChanges(now: later)
+        try macCoordinator.publishLocalSettingChange(
+            key: SettingsKey.globalSpeed,
+            now: later
+        )
+
+        try phoneCoordinator.reconcile()
+        XCTAssertEqual(
+            try phone.mainContext.fetch(FetchDescriptor<Podcast>()).first?.title,
+            "Renamed on Mac"
+        )
+        XCTAssertEqual(phoneEpisode.positionSeconds, 240)
+        XCTAssertTrue(try phone.mainContext.fetch(FetchDescriptor<QueueItem>()).isEmpty)
+        XCTAssertEqual(phoneSettings.double(SettingsKey.globalSpeed, default: 1), 2)
+    }
+
     func testFreshDeviceCannotReduceGrandfatheredPodcastAllowance() throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()

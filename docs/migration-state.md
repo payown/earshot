@@ -838,3 +838,10 @@ An on-disk restart test seeds 662 application subscriptions, persists a partial
 137-row projection, reopens both stores, and converges to 662 projection rows,
 662 unique canonical keys, and 662 application subscriptions. Full local CI
 executed 1,802 tests, skipped 38, and failed 0.
+
+A single two-device integration test now exercises the core round trip through
+one shared projection: phone subscription metadata, playback progress, queue
+state, and global speed reach the Mac; newer Mac metadata, progress, queue
+removal, and speed then return to the phone. The test uses the production
+conflict timestamps and verifies the final application stores, not merely the
+projection rows. Full local CI executed 1,803 tests, skipped 38, and failed 0.
