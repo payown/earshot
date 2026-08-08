@@ -962,3 +962,16 @@ create a dismissed local episode shell when the episode is absent from its
 refetchable catalog. The shell is queue-only and does not enter Inbox. Focused
 coverage executes out-of-order three-request feed completion and remote queue
 materialization against an application store with no matching episode.
+
+Build 185 then completed 1,808 local-CI tests with 38 skips and 0 failures. The
+signed CloudKitDevelopment arm64 executable installed on iPhone measured
+14,950,768 bytes, SHA-256
+`2c1745573da336203fe18ee51c04a84e24938bb6f36fac83849f2945df34ee29`,
+and modification time 2026-08-08 08:12:51 -0700. Both the existing Mac and
+iPhone projection stores opened with the added optional queue columns. The Mac
+backfilled episode metadata into its seven existing queue contributions and
+Core Data reported a successful eight-record CloudKit export with no error.
+The locked iPhone had not imported those field updates by the final read-only
+snapshot, so visible Mac-to-iPhone queue materialization is not yet claimed.
+Wireless over-install preserved iPhone database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; no reset or data deletion ran.

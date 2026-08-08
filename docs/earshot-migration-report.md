@@ -833,3 +833,14 @@ from the receiving catalog, reconciliation can now create one dismissed episode
 shell and the queue item without surfacing that shell in Inbox. Legacy projection
 rows remain readable; a row without metadata continues to wait for a matching
 local feed episode. Production CloudKit remains disabled and undeployed.
+
+Build-185 verification executed 1,808 tests, skipped 38, and failed 0. The
+signed development executable installed on iPhone was 14,950,768 bytes with
+SHA-256 `2c1745573da336203fe18ee51c04a84e24938bb6f36fac83849f2945df34ee29`
+and modification time 2026-08-08 08:12:51 -0700. Existing projection stores on
+both devices upgraded in place. Mac startup populated metadata on all seven
+Mac-origin queue contributions, followed by a successful eight-record CloudKit
+export. A later read-only iPhone snapshot still had the legacy empty fields;
+the phone had locked and could not be foregrounded remotely, so end-to-end
+visible receipt remains unproved. The over-install retained iPhone database
+UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; no reset or deletion occurred.
