@@ -195,6 +195,62 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
     }
 
+    func testPartialSubscriptionBackfillResumesOnDiskWithoutDuplicates() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let applicationURL = directory.appending(path: "application.store")
+        let localURL = directory.appending(path: "local.store")
+        let projectionURL = directory.appending(path: "projection.store")
+
+        try autoreleasepool {
+            let app = try makeOnDiskApplicationContainer(
+                applicationURL: applicationURL,
+                localURL: localURL
+            )
+            for index in 0..<662 {
+                app.mainContext.insert(Podcast(
+                    feedURL: "https://example.com/\(index).xml",
+                    title: "Podcast \(index)"
+                ))
+            }
+            try app.mainContext.save()
+            let projection = try makeOnDiskProjectionContainer(at: projectionURL)
+            // A process death after two complete 50-row checkpoints plus a
+            // partially committed server import can leave any natural-key
+            // prefix. Reopen from 137 durable rows to exercise that state.
+            for index in 0..<137 {
+                let row = CloudPodcastProjection()
+                row.feedURL = "https://example.com/\(index).xml"
+                row.title = "Podcast \(index)"
+                projection.mainContext.insert(row)
+            }
+            try projection.mainContext.save()
+        }
+
+        try autoreleasepool {
+            let app = try makeOnDiskApplicationContainer(
+                applicationURL: applicationURL,
+                localURL: localURL
+            )
+            let projection = try makeOnDiskProjectionContainer(at: projectionURL)
+            try CloudProjectionCoordinator(
+                applicationContainer: app,
+                projectionContainer: projection,
+                center: NotificationCenter(),
+                deviceID: "phone"
+            ).reconcile()
+
+            let rows = try projection.mainContext.fetch(
+                FetchDescriptor<CloudPodcastProjection>()
+            )
+            XCTAssertEqual(rows.count, 662)
+            XCTAssertEqual(Set(rows.map { FeedURLIdentity.canonical($0.feedURL) }).count, 662)
+            XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 662)
+        }
+    }
+
     func testImportedProjectionCreatesApplicationSubscription() throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()

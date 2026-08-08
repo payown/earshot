@@ -710,3 +710,12 @@ counts are intentionally device-local and can differ as feeds change; the
 compact synchronized library does not differ. Full local CI executed 1,801
 tests, skipped 38, and failed 0. Production CloudKit remains disabled and
 undeployed.
+
+The initial relationship-free subscription projection is restartable in
+50-row save batches. Reconciliation uses canonical feed URL as its natural key,
+so a process interruption replays no more than the unfinished batch and cannot
+create duplicate subscription rows. The on-disk regression test models a
+partial durable state by reopening a 662-subscription application store and a
+137-row projection store; reconciliation finishes with 662 projection rows,
+662 unique canonical keys, and 662 application subscriptions. Full local CI
+then executed 1,802 tests, skipped 38, and failed 0.

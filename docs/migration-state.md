@@ -829,3 +829,12 @@ modified 2026-08-08 00:34:17 -0700. The runtime development gate is `YES`.
 Wireless over-install preserved database UUID
 `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`. Full local CI executed 1,801 tests,
 skipped 38, and failed 0. Production CloudKit remains disabled and undeployed.
+
+Initial compact-projection subscription backfill is now checkpointed every 50
+changed relationship-free podcast rows. If the process stops, the next
+reconciliation resumes by canonical feed URL; it does not duplicate already
+durable subscriptions, and at most the current 50-row batch must be replayed.
+An on-disk restart test seeds 662 application subscriptions, persists a partial
+137-row projection, reopens both stores, and converges to 662 projection rows,
+662 unique canonical keys, and 662 application subscriptions. Full local CI
+executed 1,802 tests, skipped 38, and failed 0.

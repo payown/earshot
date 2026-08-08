@@ -193,6 +193,10 @@ final class CloudFolderProjection {
 
 @MainActor
 final class CloudProjectionCoordinator {
+    /// Initial subscription projection is restartable at natural-key boundaries.
+    /// Checkpoint frequently enough that a force quit replays at most this many
+    /// small, relationship-free rows rather than one all-or-nothing library seed.
+    private static let subscriptionBackfillSaveBatchSize = 50
     static let storeURL = URL.applicationSupportDirectory
         .appending(path: "earshot-cloud-projection.store")
 
@@ -524,18 +528,28 @@ final class CloudProjectionCoordinator {
 
         let podcasts = try appContext.fetch(FetchDescriptor<Podcast>())
             .sorted { FeedURLIdentity.canonical($0.feedURL) < FeedURLIdentity.canonical($1.feedURL) }
+        var subscriptionRowsSinceSave = 0
         for podcast in podcasts {
             let key = FeedURLIdentity.canonical(podcast.feedURL)
+            var insertedRow = false
             let row = cloudByFeed[key] ?? {
                 let inserted = CloudPodcastProjection()
                 inserted.feedURL = key
                 cloudContext.insert(inserted)
                 cloudByFeed[key] = inserted
+                insertedRow = true
                 return inserted
             }()
             guard row.deletedAt == nil else { continue }
+            var changedRow = insertedRow
             if value(podcast) != value(row) {
                 copy(podcast, to: row)
+                changedRow = true
+            }
+            if changedRow { subscriptionRowsSinceSave += 1 }
+            if subscriptionRowsSinceSave >= Self.subscriptionBackfillSaveBatchSize {
+                try cloudContext.save()
+                subscriptionRowsSinceSave = 0
             }
         }
         if cloudContext.hasChanges { try cloudContext.save() }
