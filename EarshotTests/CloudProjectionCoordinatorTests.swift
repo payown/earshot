@@ -454,6 +454,37 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(phoneSettings.double(SettingsKey.globalSpeed, default: 1), 2)
     }
 
+    func testFreshDeviceCannotReduceGrandfatheredPodcastAllowance() throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let olderPhone = CloudSettingProjection()
+        olderPhone.key = SettingsKey.grandfatheredPodcastCount
+        olderPhone.value = "662"
+        olderPhone.sourceDeviceID = "phone"
+        olderPhone.modifiedAt = Date(timeIntervalSince1970: 100)
+        projection.mainContext.insert(olderPhone)
+        let newerMac = CloudSettingProjection()
+        newerMac.key = SettingsKey.grandfatheredPodcastCount
+        newerMac.value = "0"
+        newerMac.sourceDeviceID = "mac"
+        newerMac.modifiedAt = Date(timeIntervalSince1970: 200)
+        projection.mainContext.insert(newerMac)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "test"
+        )
+
+        try coordinator.reconcile()
+
+        XCTAssertEqual(
+            AppSettingsStore(context: app.mainContext).grandfatheredPodcastCount(),
+            662
+        )
+    }
+
     func testBookmarksArriveAfterCatalogAndDeletionPropagates() throws {
         let phone = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
