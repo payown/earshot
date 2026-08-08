@@ -175,6 +175,50 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(stored.first?.audioURL, "https://x/newer.mp3")
     }
 
+    /// A compact CloudKit subscription carries a feed high-water mark but no
+    /// episode relationships. Its first local refresh must create a bounded,
+    /// useful catalog without treating pre-mark history as newly published.
+    func testActorSeedsSyncedShellWithTenRecentEpisodes() async throws {
+        let container = cleanContainer()
+        let mark = Date(timeIntervalSince1970: 1_700_020_000)
+        do {
+            let seedContext = ModelContext(container)
+            seedContext.insert(Podcast(
+                feedURL: "https://x/feed.xml", title: "Cloud shell",
+                lastSeenPubDate: mark
+            ))
+            try seedContext.save()
+        }
+        let items = (1...25).map { index in
+            parsedEpisode(
+                "episode-\(index)",
+                Date(timeIntervalSince1970: 1_700_000_000 + Double(index * 1_000))
+            )
+        }
+
+        let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: "https://x/feed.xml",
+            feed: FakeFeed(parsedFeed(items)),
+            autoQueueEnabled: false
+        )
+
+        let stored = try episodes(container)
+        XCTAssertEqual(stored.count, 10, "A synced shell seeds a bounded recent catalog")
+        XCTAssertEqual(
+            Set(stored.map(\.guid)),
+            Set((16...25).map { "episode-\($0)" })
+        )
+        XCTAssertEqual(outcome?.added, 5, "Only episodes newer than the transferred mark are new")
+        XCTAssertEqual(
+            Set(stored.filter { !$0.inboxDismissed }.map(\.guid)),
+            Set((21...25).map { "episode-\($0)" })
+        )
+        XCTAssertEqual(
+            try ModelContext(container).fetch(FetchDescriptor<Podcast>()).first?.lastSeenPubDate,
+            Date(timeIntervalSince1970: 1_700_025_000)
+        )
+    }
+
     // MARK: subscribe (off the caller's context)
 
     /// Subscribing inserts the podcast + every episode on the actor's OWN

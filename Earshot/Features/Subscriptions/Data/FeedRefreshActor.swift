@@ -38,6 +38,11 @@ actor FeedRefreshActor {
     /// the newest-date high-water mark, that older history stays dismissed and is
     /// never mistaken for newly published Inbox content.
     private static let opmlInitialEpisodeLimit = 10
+    /// A relationship-free synced subscription arrives with its source device's
+    /// feed high-water mark but no local episode catalog. Seed a small usable
+    /// catalog on first refresh; older feed history remains refetchable metadata,
+    /// not CloudKit state.
+    private static let syncedShellInitialEpisodeLimit = 10
     /// A single unresponsive feed must not hold an OPML import at the URLSession
     /// resource timeout. The normal feed refresh path keeps its existing policy;
     /// this shorter ceiling applies only to bulk import prefetches.
@@ -600,6 +605,23 @@ actor FeedRefreshActor {
             return ApplyOutcome(refreshOutcome: .backfill, newEpisodes: [])
         }
 
+        // Compact CloudKit synchronization deliberately transfers subscription
+        // metadata without the refetchable episode catalog. Such a podcast has a
+        // high-water mark copied from the source device but no episodes locally.
+        // Running the ordinary diff over the full feed would eagerly rebuild an
+        // unbounded history; inserting none would leave a clean second device
+        // with an unusable empty podcast. Seed only the newest ten. Rows at or
+        // before the transferred mark are backlog and stay dismissed; genuinely
+        // newer rows retain the normal Inbox/notification semantics.
+        if (podcast.episodes?.isEmpty ?? true), podcast.lastSeenPubDate != nil {
+            return seedSyncedShell(
+                from: parsedEpisodes,
+                podcast: podcast,
+                autoQueueEnabled: autoQueueEnabled,
+                now: now
+            )
+        }
+
         let existingGUIDs = Set((podcast.episodes ?? []).map(\.guid))
         // Clamp an already-future mark back to now so a previously-poisoned mark
         // can't keep real new episodes out of the inbox (#296).
@@ -675,6 +697,61 @@ actor FeedRefreshActor {
         return ApplyOutcome(
             refreshOutcome: RefreshOutcome(added: added, wasBackfill: false, newestNewEpisodeGUID: newestNewGUID),
             newEpisodes: newEpisodes
+        )
+    }
+
+    private func seedSyncedShell(
+        from parsedEpisodes: [ParsedEpisode],
+        podcast: Podcast,
+        autoQueueEnabled: Bool,
+        now: Date
+    ) -> ApplyOutcome {
+        let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
+        let seed = parsedEpisodes
+            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+            .prefix(Self.syncedShellInitialEpisodeLimit)
+        let autoQueueOn = podcast.autoQueue && autoQueueEnabled
+        var genuinelyNew: [Episode] = []
+        var autoQueued: [Episode] = []
+        var newestNewGUID: String?
+        var newestNewPub = Date.distantPast
+
+        for item in seed {
+            let episode = Self.makeEpisode(from: item)
+            episode.podcast = podcast
+            let pub = item.pubDate ?? .distantPast
+            let isNewEpisode = pub > mark && pub <= now
+            episode.inboxDismissed = !isNewEpisode || autoQueueOn
+            modelContext.insert(episode)
+            if isNewEpisode {
+                genuinelyNew.append(episode)
+                if pub >= newestNewPub {
+                    newestNewPub = pub
+                    newestNewGUID = episode.guid
+                }
+                if autoQueueOn { autoQueued.append(episode) }
+            }
+        }
+
+        podcast.lastSeenPubDate = max(
+            mark,
+            Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? mark
+        )
+        LocalStateStore.setRefreshedAt(now, on: podcast, in: modelContext)
+        if !autoQueued.isEmpty {
+            enqueueAtEnd(autoQueued)
+            enforceQueueCap(for: podcast)
+        }
+        AppLog.subscriptions.info(
+            "Seeded synced subscription \(podcast.title, privacy: .public) with \(seed.count) recent episode(s); \(genuinelyNew.count) genuinely new"
+        )
+        return ApplyOutcome(
+            refreshOutcome: RefreshOutcome(
+                added: genuinelyNew.count,
+                wasBackfill: false,
+                newestNewEpisodeGUID: newestNewGUID
+            ),
+            newEpisodes: genuinelyNew
         )
     }
 

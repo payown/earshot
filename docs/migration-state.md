@@ -583,6 +583,14 @@ architecture.
   `iCloud.media.payown.earshot`, and CloudKit. A single wireless over-install
   replaced build 174 while preserving the app data container; read-only device
   enumeration reports build 175. It was not launched during installation.
+- Review of the clean second-device path found that a compact synced podcast
+  arrives with the source feed high-water mark but no episode relationships.
+  The ordinary refresh could therefore regard it as caught up and leave a clean
+  device's episode list empty. The first refresh of this specific shell now
+  seeds only the ten newest feed episodes. Episodes at or before the transferred
+  mark stay dismissed; only later publications count as new. This preserves the
+  compact CloudKit shape while making the subscription usable without eagerly
+  rebuilding an unbounded history.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.

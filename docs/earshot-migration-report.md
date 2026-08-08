@@ -633,3 +633,13 @@ was `YES`; the signed entitlements contained the development push environment,
 `iCloud.media.payown.earshot`, and CloudKit. A single wireless over-install
 replaced iPhone build 174 without uninstalling or clearing data. Read-only
 enumeration then reported build 175. The installation did not launch the app.
+
+A subsequent clean-path review found one compact-projection bootstrap gap. A
+synced podcast has the source device's feed high-water mark but intentionally
+has no episode relationships. The receiving device's ordinary refresh could
+therefore treat the shell as caught up and leave its episode list empty. The
+specific relationship-free shell path now seeds the ten newest feed episodes.
+Rows at or before the transferred mark remain dismissed, and only publications
+after that mark receive normal new-episode behavior. A focused actor test uses
+25 feed episodes around a transferred mark and verifies a ten-row local catalog
+with exactly the five post-mark rows in the Inbox.
