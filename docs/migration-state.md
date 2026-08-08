@@ -865,3 +865,25 @@ the episode. A remote three-folder cycle deterministically detaches the
 lexicographically greatest folder, persists an acyclic hierarchy, and emits
 exactly one conflict-repair notification. Full local CI executed 1,805 tests,
 skipped 38, and failed 0.
+
+The B2 audit also closed two device-owned cleanup races. If a background
+download finishes after its episode was removed locally or by remote sync, the
+terminal handler now removes the unowned audio file without writing through a
+deleted SwiftData object. Artwork-cache teardown now awaits URLSession
+invalidation and a bounded 250-millisecond URLCache SQLite drain before reset
+moves or removes the cache directory. The focused directory-removal test emitted
+no SQLite API-violation diagnostics; full local CI executed 1,806 tests, skipped
+38, and failed 0.
+
+Development build 183 contains those cleanup corrections. Its signed
+CloudKitDevelopment arm64 binary is 19,795,984 bytes, SHA-256
+`6f6b17ccf1a2d2d43059d8fa2815e292de2684c2f3d67714f508da5abaa52b39`,
+modified 2026-08-08 01:02:40 -0700. It reports 1.1.0 (183), carries development
+push plus the `iCloud.media.payown.earshot` CloudKit entitlement, and was
+wirelessly over-installed on the iPhone while preserving database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`. After launch, a read-only projection
+snapshot had SQLite integrity `ok` and exactly matched the running
+Designed-for-iPhone Mac projection in both EXCEPT directions for all persisted
+columns: 662 podcasts, 4 episode states, 1 queue item, 4 settings, 0 bookmarks,
+31 history sessions, and 0 folders. This is a same-state convergence check, not
+a completed bidirectional mutation, offline, account-change, or VoiceOver test.

@@ -742,3 +742,25 @@ A remotely delivered unfollow releases active playback before cascade deletion
 and remains safe under later pause/seek persistence. A remotely delivered
 three-folder cycle is repaired to the deterministic acyclic hierarchy and emits
 one repair notice. Full local CI executed 1,805 tests, skipped 38, and failed 0.
+
+The subsequent B2 safety audit found and fixed two local-resource terminal
+conditions. A download completing after sync or local unfollow deleted its
+episode no longer leaks the already-moved audio file or touches deleted
+SwiftData state. Explicit data clearing now waits for the dedicated artwork
+URLSession to invalidate and for a bounded 250-millisecond URLCache SQLite drain
+before filesystem removal. The focused removal/reconstruction test produced no
+SQLite unlink diagnostics, and full local CI executed 1,806 tests, skipped 38,
+and failed 0.
+
+Development build 183 packages those fixes. The signed CloudKitDevelopment
+arm64 binary measured 19,795,984 bytes with SHA-256
+`6f6b17ccf1a2d2d43059d8fa2815e292de2684c2f3d67714f508da5abaa52b39`
+and modification time 2026-08-08 01:02:40 -0700. It reports 1.1.0 (183) and
+retained iPhone database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84` across
+wireless over-install. A post-launch read-only iPhone snapshot and the running
+Designed-for-iPhone Mac projection each passed SQLite integrity and matched
+exactly, column-for-column in both EXCEPT directions: 662 podcast rows, 4
+episode-state rows, 1 queue row, 4 setting rows, 0 bookmark rows, 31 listening
+sessions, and 0 folder rows. No mutation was introduced for that observation,
+so it does not substitute for the remaining two-direction, offline,
+account-change, heat, or physical VoiceOver matrix.
