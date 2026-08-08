@@ -67,19 +67,16 @@ retains build 170's three-feed fetch concurrency, two-feed save batches, and
 cooperative insertion yields. Fresh-store schema remains V10; supported
 migration sources remain V5 and V6.
 
-Build 171 is the direct-device App Store upgrade verification build. It bounds
+Build 171 is the direct-device and TestFlight upgrade verification build. It bounds
 each VoiceOver migration-progress announcement wait at eight seconds, preventing
 a missing UIKit completion callback from holding the ready UI indefinitely, and
-renames Step 2 to “Upgrading your library database.” It otherwise retains build
-170.1 behavior. Fresh-store schema remains V10; supported migration sources
-remain V5 and V6.
-
-Build 171.1 is the local Bluetooth transport verification build. It publishes
-the selected playback speed as the Now Playing default playback rate while
-retaining zero as the current rate when paused, allowing single-button Bluetooth
-accessories to distinguish paused and playing states above 1x. It adds no timer,
-polling, or Now Playing update. Fresh-store schema remains V10; supported
-migration sources remain V5 and V6.
+renames Step 2 to “Upgrading your library database.” Its final TestFlight
+candidate also publishes the selected playback speed as the Now Playing default
+playback rate while retaining zero as the current rate when paused, allowing
+single-button Bluetooth accessories to distinguish paused and playing states
+above 1x. This supersedes the locally installed 171.1 verification label and
+adds no timer, polling, or Now Playing update. Fresh-store schema remains V10;
+supported migration sources remain V5 and V6.
 
 ## Builds that reached distribution
 
