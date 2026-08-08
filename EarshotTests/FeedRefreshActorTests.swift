@@ -590,10 +590,10 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).count, 24)
     }
 
-    /// OPML bulk import persists only the newest ten rows immediately. A later
-    /// ordinary refresh fills older history, and the subscribe high-water mark
-    /// ensures those older rows remain dismissed rather than entering the Inbox.
-    func testActorSubscribeAllLimitsInitialHistoryAndRefreshAddsOlderDismissed() async throws {
+    /// OPML bulk import persists only the newest ten rows immediately. Automatic
+    /// refresh must not rebuild the older history and recreate the large inverse-
+    /// relationship stall measured on the build-178 device.
+    func testActorSubscribeAllAndRefreshKeepHistoricalBacklogBounded() async throws {
         let container = cleanContainer()
         let actor = FeedRefreshActor(modelContainer: container)
         let catalog = (0..<25).map { index in
@@ -614,15 +614,52 @@ final class FeedRefreshActorTests: XCTestCase {
         )
 
         stored = try episodes(container)
-        XCTAssertEqual(stored.count, 25, "A normal later refresh restores older history")
-        let older = stored.filter { episode in
-            guard let index = Int(episode.guid.replacingOccurrences(of: "episode-", with: "")) else {
-                return false
-            }
-            return index < 15
+        XCTAssertEqual(stored.count, 10, "Automatic refresh does not rebuild historical gaps")
+        XCTAssertEqual(Set(stored.map(\.guid)), Set((15..<25).map { "episode-\($0)" }))
+    }
+
+    /// A device that has been offline can encounter more than ten genuinely-new
+    /// publications in one response. Persist the newest ten only, but advance the
+    /// durable high-water mark to the newest publication so the same backlog is
+    /// not reconsidered on every subsequent automatic refresh.
+    func testActorRefreshLimitsGenuinelyNewEpisodesToNewestTen() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/established-large.xml"
+        let seedContext = ModelContext(container)
+        let podcast = Podcast(feedURL: feedURL, title: "Established", lastSeenPubDate: d1)
+        let existing = Episode(
+            guid: "existing",
+            title: "Existing",
+            audioURL: "https://x/existing.mp3",
+            pubDate: d1
+        )
+        existing.podcast = podcast
+        seedContext.insert(podcast)
+        seedContext.insert(existing)
+        try seedContext.save()
+
+        let catalog = (1...25).map { index in
+            parsedEpisode("new-\(index)", d1.addingTimeInterval(Double(index)))
         }
-        XCTAssertEqual(older.count, 15)
-        XCTAssertTrue(older.allSatisfy(\.inboxDismissed), "Older history never appears as new Inbox content")
+        let actor = FeedRefreshActor(modelContainer: container)
+        let optionalOutcome = try await actor.refreshOne(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed(catalog)),
+            autoQueueEnabled: false
+        )
+        let outcome = try XCTUnwrap(optionalOutcome)
+
+        let stored = try episodes(container)
+        XCTAssertEqual(outcome.added, 10)
+        XCTAssertEqual(stored.count, 11)
+        XCTAssertEqual(
+            Set(stored.map(\.guid)),
+            Set(["existing"] + (16...25).map { "new-\($0)" })
+        )
+        let refreshedPodcast = try XCTUnwrap(
+            ModelContext(container).fetch(FetchDescriptor<Podcast>()).first
+        )
+        XCTAssertEqual(refreshedPodcast.lastSeenPubDate, d1.addingTimeInterval(25))
     }
 
     /// A feed that throws is logged and skipped — the rest of the batch still

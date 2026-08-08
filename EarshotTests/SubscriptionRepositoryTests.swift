@@ -677,11 +677,9 @@ final class SubscriptionRepositoryTests: XCTestCase {
         fetcher.feed = feed([episode("a", d1), episode("old", d0)])
         try await repo.refresh(podcast)
 
-        let old = try XCTUnwrap(podcast.episodes?.first { $0.guid == "old" })
-        // Old episodes are pre-dismissed into inbox, not auto-queued.
-        XCTAssertEqual(old.status, .newEpisode)
-        XCTAssertTrue(old.inboxDismissed) // dismissed, not queued
-        XCTAssertNil(old.queueItem)
+        // Automatic refresh no longer reconstructs historical catalog gaps.
+        // The old row is neither inserted nor accidentally auto-queued.
+        XCTAssertNil(podcast.episodes?.first { $0.guid == "old" })
         XCTAssertTrue(queueRepo.queue().isEmpty)
     }
 

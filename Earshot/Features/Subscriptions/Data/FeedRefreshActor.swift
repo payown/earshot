@@ -66,6 +66,11 @@ actor FeedRefreshActor {
     /// catalog on first refresh; older feed history remains refetchable metadata,
     /// not CloudKit state.
     private static let syncedShellInitialEpisodeLimit = 10
+    /// An established subscription refreshes frequently, so it should ingest
+    /// only the newest genuinely-new rows. Rebuilding historical gaps made a
+    /// single 45,436-episode inverse relationship monopolize SwiftData and block
+    /// the UI even from a background context. Older local rows are preserved.
+    private static let ordinaryRefreshNewEpisodeLimit = 10
     /// A single unresponsive feed must not hold an OPML import at the URLSession
     /// resource timeout. The normal feed refresh path keeps its existing policy;
     /// this shorter ceiling applies only to bulk import prefetches.
@@ -652,7 +657,8 @@ actor FeedRefreshActor {
         // First refresh of a freshly-migrated shell (no episodes AND no mark):
         // backfill the whole catalog pre-dismissed and seed the mark. Guarded on
         // episodes.isEmpty so a normally-subscribed podcast never takes this path.
-        if (podcast.episodes?.isEmpty ?? true) && podcast.lastSeenPubDate == nil {
+        let hasStoredEpisodes = hasEpisodes(for: podcast)
+        if !hasStoredEpisodes && podcast.lastSeenPubDate == nil {
             for item in parsedEpisodes {
                 let episode = Self.makeEpisode(from: item)
                 episode.podcast = podcast
@@ -675,7 +681,7 @@ actor FeedRefreshActor {
         // with an unusable empty podcast. Seed only the newest ten. Rows at or
         // before the transferred mark are backlog and stay dismissed; genuinely
         // newer rows retain the normal Inbox/notification semantics.
-        if (podcast.episodes?.isEmpty ?? true), podcast.lastSeenPubDate != nil {
+        if !hasStoredEpisodes, podcast.lastSeenPubDate != nil {
             return seedSyncedShell(
                 from: parsedEpisodes,
                 podcast: podcast,
@@ -684,10 +690,26 @@ actor FeedRefreshActor {
             )
         }
 
-        let existingGUIDs = Set((podcast.episodes ?? []).map(\.guid))
         // Clamp an already-future mark back to now so a previously-poisoned mark
         // can't keep real new episodes out of the inbox (#296).
         let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
+        // Automatic refresh is not a historical-catalog rebuild. Keep only the
+        // newest ten genuinely-new, non-future publications. This preserves all
+        // existing history while bounding relationship maintenance for feeds
+        // whose GUID format or retained catalog has changed.
+        let candidates = parsedEpisodes
+            .filter {
+                let pub = $0.pubDate ?? .distantPast
+                return pub > mark && pub <= now
+            }
+            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+            .prefix(Self.ordinaryRefreshNewEpisodeLimit)
+        let candidateEpisodes = Array(candidates)
+        let existingEpisodes = episodes(
+            in: podcast,
+            matchingGUIDs: candidateEpisodes.map(\.guid)
+        )
+        let existingGUIDs = Set(existingEpisodes.map(\.guid))
         // Gate matches the former `podcast.autoQueue && queue != nil`: with no
         // queue capability, an autoQueue podcast's new episodes go to the inbox.
         let autoQueueOn = podcast.autoQueue && autoQueueEnabled
@@ -700,11 +722,11 @@ actor FeedRefreshActor {
         // Lookup by guid for the republish pass below (#397), built once instead
         // of a per-item linear scan.
         let existingByGUID = Dictionary(
-            (podcast.episodes ?? []).map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
+            existingEpisodes.map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
         )
-        resurfaceRepublished(parsedEpisodes, existingByGUID: existingByGUID, now: now)
+        resurfaceRepublished(candidateEpisodes, existingByGUID: existingByGUID, now: now)
 
-        for item in parsedEpisodes where !existingGUIDs.contains(item.guid) {
+        for item in candidateEpisodes where !existingGUIDs.contains(item.guid) {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
             let pub = item.pubDate ?? .distantPast
@@ -760,6 +782,28 @@ actor FeedRefreshActor {
             refreshOutcome: RefreshOutcome(added: added, wasBackfill: false, newestNewEpisodeGUID: newestNewGUID),
             newEpisodes: newEpisodes
         )
+    }
+
+    private func hasEpisodes(for podcast: Podcast) -> Bool {
+        let podcastID = podcast.persistentModelID
+        let descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.podcast?.persistentModelID == podcastID }
+        )
+        return ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
+    }
+
+    /// Fetch only rows that can participate in this refresh. In particular, do
+    /// not fault `podcast.episodes`: the real device has one 45,436-row inverse
+    /// relationship, and materializing it caused the build-178 hang samples.
+    private func episodes(in podcast: Podcast, matchingGUIDs guids: [String]) -> [Episode] {
+        guard !guids.isEmpty else { return [] }
+        let podcastID = podcast.persistentModelID
+        let descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate {
+                $0.podcast?.persistentModelID == podcastID && guids.contains($0.guid)
+            }
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
     }
 
     private func seedSyncedShell(
