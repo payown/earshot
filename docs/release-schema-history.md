@@ -78,6 +78,13 @@ above 1x. This supersedes the locally installed 171.1 verification label and
 adds no timer, polling, or Now Playing update. Fresh-store schema remains V10;
 supported migration sources remain V5 and V6.
 
+Build 172 is the direct-device accelerated-playback heat verification build. It
+keeps periodic playback housekeeping near one callback per wall-clock second at
+all playback rates and reduces steady-state Now Playing elapsed-time corrections
+from every five to every fifteen wall-clock seconds. Play, pause, seek, rate
+changes, episode changes, and background persistence remain immediate. Fresh-store
+schema remains V10; supported migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App

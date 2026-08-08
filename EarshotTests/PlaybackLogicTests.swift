@@ -388,6 +388,19 @@ final class PlaybackLogicTests: XCTestCase {
         XCTAssertGreaterThan(PlaybackLogic.positionPersistInterval, 1)
     }
 
+    func testMediaIntervalScalesWithAcceleratedPlayback() {
+        XCTAssertEqual(PlaybackLogic.mediaSeconds(forWallClockSeconds: 1, playbackRate: 1), 1)
+        XCTAssertEqual(PlaybackLogic.mediaSeconds(forWallClockSeconds: 1, playbackRate: 1.5), 1.5)
+        XCTAssertEqual(PlaybackLogic.mediaSeconds(forWallClockSeconds: 1, playbackRate: 2), 2)
+        XCTAssertEqual(PlaybackLogic.mediaSeconds(forWallClockSeconds: 5, playbackRate: 2), 10)
+    }
+
+    func testMediaIntervalDoesNotAccelerateAtSlowOrInvalidRates() {
+        XCTAssertEqual(PlaybackLogic.mediaSeconds(forWallClockSeconds: 1, playbackRate: 0.5), 1)
+        XCTAssertEqual(PlaybackLogic.mediaSeconds(forWallClockSeconds: 1, playbackRate: .nan), 1)
+        XCTAssertEqual(PlaybackLogic.mediaSeconds(forWallClockSeconds: 0, playbackRate: 2), 2)
+    }
+
     // MARK: Now-playing elapsed-sync cadence (#412)
 
     func testFirstNowPlayingSyncAfterDiscontinuityAlwaysWrites() {
@@ -409,8 +422,8 @@ final class PlaybackLogicTests: XCTestCase {
     }
 
     func testNowPlayingResyncsOnceIntervalElapses() {
-        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 5, lastSyncedSecond: 0))
-        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 60, lastSyncedSecond: 50))
+        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 15, lastSyncedSecond: 0))
+        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(currentSecond: 65, lastSyncedSecond: 50))
     }
 
     func testNowPlayingBackwardJumpResyncsImmediately() {
@@ -435,6 +448,24 @@ final class PlaybackLogicTests: XCTestCase {
         // Guards against regressing back to a per-second nowPlayingInfo rewrite,
         // which is the sustained-CPU / overheating cause in #412.
         XCTAssertGreaterThan(PlaybackLogic.nowPlayingElapsedSyncInterval, 1)
+    }
+
+    func testNowPlayingSyncUsesFifteenSecondWallClockBaseline() {
+        XCTAssertEqual(PlaybackLogic.nowPlayingElapsedSyncInterval, 15)
+        let intervalAt2x = Int(PlaybackLogic.mediaSeconds(
+            forWallClockSeconds: Double(PlaybackLogic.nowPlayingElapsedSyncInterval),
+            playbackRate: 2
+        ))
+        XCTAssertFalse(PlaybackLogic.shouldSyncNowPlayingElapsed(
+            currentSecond: 29,
+            lastSyncedSecond: 0,
+            interval: intervalAt2x
+        ))
+        XCTAssertTrue(PlaybackLogic.shouldSyncNowPlayingElapsed(
+            currentSecond: 30,
+            lastSyncedSecond: 0,
+            interval: intervalAt2x
+        ))
     }
 
     // MARK: Up-next resolution (gapless advance)

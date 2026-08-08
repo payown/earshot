@@ -101,6 +101,7 @@ final class PlayerService {
     /// alive; a relaunch reverts to the saved boundary setting.
     @ObservationIgnored private var playNextOverrides: Set<PersistentIdentifier> = []
     @ObservationIgnored private var timeObserver: Any?
+    @ObservationIgnored private var timeObserverMediaInterval: Double?
     @ObservationIgnored private var didFinishObserver: NSObjectProtocol?
     @ObservationIgnored private var interruptionObserver: NSObjectProtocol?
     @ObservationIgnored private var routeChangeObserver: NSObjectProtocol?
@@ -869,6 +870,7 @@ final class PlayerService {
         // While a fast-forward scan is active, the scan rate wins; the prior rate
         // is restored by `endFastForward`.
         let rate = isFastForwarding ? ChapterSkipLogic.fastForwardRate : currentEffectiveRate
+        observePeriodicTime(playbackRate: rate)
         // Always keep `defaultRate` in sync with the effective rate, not just when
         // paused (#609). `AVPlayer.play()` can reassert the rate from `defaultRate`
         // when resuming from a paused state (iOS 16+) -- `play(_:preparedItem:...)`
@@ -1444,15 +1446,24 @@ final class PlayerService {
 
     // MARK: Private — periodic time / persistence
 
-    private func observePeriodicTime() {
-        let interval = CMTime(seconds: 1, preferredTimescale: 1)
+    private func observePeriodicTime(playbackRate: Double = 1) {
+        let mediaInterval = PlaybackLogic.mediaSeconds(
+            forWallClockSeconds: 1,
+            playbackRate: playbackRate
+        )
+        guard timeObserverMediaInterval != mediaInterval else { return }
+        if let timeObserver {
+            player.removeTimeObserver(timeObserver)
+            self.timeObserver = nil
+        }
+        timeObserverMediaInterval = mediaInterval
+        let interval = CMTime(seconds: mediaInterval, preferredTimescale: 600)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
             // The observer is already delivered on the main queue, so run the
             // tick synchronously instead of allocating a `Task` and deferring a
-            // runloop hop every second. At 1.5x-3x playback this fired 1.5-3x a
-            // second continuously; the hop was pure overhead (heat trim, see
-            // docs/plans/2026-07-downloads-and-heat.md).
+            // runloop hop every second. Scaling the media-time interval to the
+            // playback rate keeps this work near once per wall-clock second.
             MainActor.assumeIsolated {
                 self.handleTick(currentSeconds: time.seconds)
             }
@@ -1615,6 +1626,10 @@ final class PlayerService {
         guard PlaybackLogic.shouldPersistTick(
             currentSecond: currentSecond,
             lastPersistedSecond: lastPersistedSecond,
+            interval: Int(ceil(PlaybackLogic.mediaSeconds(
+                forWallClockSeconds: Double(PlaybackLogic.positionPersistInterval),
+                playbackRate: timeObserverMediaInterval ?? currentEffectiveRate
+            ))),
             isPlayed: episode.isPlayed
         ) else { return }
         lastPersistedSecond = currentSecond
@@ -2216,7 +2231,11 @@ final class PlayerService {
     private func updateNowPlayingElapsedThrottled(currentSecond: Int) {
         guard PlaybackLogic.shouldSyncNowPlayingElapsed(
             currentSecond: currentSecond,
-            lastSyncedSecond: lastNowPlayingSyncSecond
+            lastSyncedSecond: lastNowPlayingSyncSecond,
+            interval: Int(ceil(PlaybackLogic.mediaSeconds(
+                forWallClockSeconds: Double(PlaybackLogic.nowPlayingElapsedSyncInterval),
+                playbackRate: timeObserverMediaInterval ?? currentEffectiveRate
+            )))
         ) else { return }
         lastNowPlayingSyncSecond = currentSecond
         updateNowPlayingElapsed()
