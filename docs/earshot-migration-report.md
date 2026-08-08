@@ -622,3 +622,12 @@ finished 3 minutes 42 seconds after launch. Earshot then measured 0.7% CPU; a
 two-second sample found the main thread idle in all 319 samples. The finite
 catalog rebuild remains material work and is not described as a sync-speed
 improvement.
+
+The resulting development build 175 CloudKitDevelopment binary measured
+14,818,096 bytes with SHA-256
+`6d61fb8faeeb20b1f27b6c3bfc029d78f7cf8ebc787bfa8ac52b43b9e1584fbb`
+and a 2026-08-07 23:37:10 -0700 modification time. The runtime development gate
+was `YES`; the signed entitlements contained the development push environment,
+`iCloud.media.payown.earshot`, and CloudKit. A single wireless over-install
+replaced iPhone build 174 without uninstalling or clearing data. Read-only
+enumeration then reported build 175. The installation did not launch the app.

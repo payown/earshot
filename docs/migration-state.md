@@ -573,6 +573,14 @@ architecture.
   after launch; Earshot then measured 0.7% CPU, and all 319 main-thread samples
   in a two-second follow-up were idle. This does not make the feed rebuild cheap:
   it separates that finite work from a persistent SwiftUI query loop.
+- Development build 175 contains that responsiveness fix. The verified
+  CloudKitDevelopment iPhone binary is 14,818,096 bytes, SHA-256
+  `6d61fb8faeeb20b1f27b6c3bfc029d78f7cf8ebc787bfa8ac52b43b9e1584fbb`,
+  built 2026-08-07 23:37:10 -0700. Its runtime development gate is `YES` and
+  its signed entitlements name the development push environment,
+  `iCloud.media.payown.earshot`, and CloudKit. A single wireless over-install
+  replaced build 174 while preserving the app data container; read-only device
+  enumeration reports build 175. It was not launched during installation.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.
