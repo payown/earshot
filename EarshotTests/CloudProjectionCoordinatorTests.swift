@@ -56,6 +56,126 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(podcasts[0].autoQueue)
     }
 
+    func testLocalDeletionPersistsTombstoneAndSurvivesCoordinatorRestart() throws {
+        let source = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed.xml", title: "Podcast")
+        source.mainContext.insert(podcast)
+        try source.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let first = CloudProjectionCoordinator(
+            applicationContainer: source,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try first.reconcile()
+        source.mainContext.delete(podcast)
+        try source.mainContext.save()
+        let deletedAt = Date(timeIntervalSince1970: 1_800_000_000)
+
+        try first.publishLocalSubscriptionChanges(now: deletedAt)
+
+        let rows = try projection.mainContext.fetch(
+            FetchDescriptor<CloudPodcastProjection>()
+        )
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].deletedAt, deletedAt)
+
+        let secondDevice = try makeApplicationContainer()
+        secondDevice.mainContext.insert(
+            Podcast(feedURL: "https://example.com/feed.xml", title: "Stale copy")
+        )
+        try secondDevice.mainContext.save()
+        let restarted = CloudProjectionCoordinator(
+            applicationContainer: secondDevice,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try restarted.reconcile()
+
+        XCTAssertEqual(
+            try secondDevice.mainContext.fetchCount(FetchDescriptor<Podcast>()),
+            0
+        )
+        XCTAssertEqual(rows[0].deletedAt, deletedAt)
+    }
+
+    func testDuplicateCloudRowsConvergeToNewestRecord() throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let older = CloudPodcastProjection()
+        older.feedURL = "https://example.com/feed.xml"
+        older.title = "Older"
+        older.modifiedAt = Date(timeIntervalSince1970: 100)
+        let newer = CloudPodcastProjection()
+        newer.feedURL = "HTTPS://EXAMPLE.COM:443/feed.xml#ignored"
+        newer.title = "Newer"
+        newer.modifiedAt = Date(timeIntervalSince1970: 200)
+        projection.mainContext.insert(older)
+        projection.mainContext.insert(newer)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+
+        try coordinator.reconcile()
+
+        XCTAssertEqual(
+            try projection.mainContext.fetchCount(
+                FetchDescriptor<CloudPodcastProjection>()
+            ),
+            1
+        )
+        XCTAssertEqual(
+            try app.mainContext.fetch(FetchDescriptor<Podcast>()).first?.title,
+            "Newer"
+        )
+    }
+
+    func testEverywhereDeleteIntentPrecedesApplicationStoreDeletion() throws {
+        let app = try makeApplicationContainer()
+        app.mainContext.insert(Podcast(
+            feedURL: "https://example.com/feed.xml",
+            title: "Podcast"
+        ))
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try coordinator.reconcile()
+        let deletionDate = Date(timeIntervalSince1970: 1_800_000_001)
+
+        try coordinator.markAllSubscriptionsDeleted(now: deletionDate)
+
+        let row = try XCTUnwrap(
+            projection.mainContext.fetch(
+                FetchDescriptor<CloudPodcastProjection>()
+            ).first
+        )
+        XCTAssertEqual(row.deletedAt, deletionDate)
+
+        let freshApplicationStore = try makeApplicationContainer()
+        let restarted = CloudProjectionCoordinator(
+            applicationContainer: freshApplicationStore,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try restarted.reconcile()
+        XCTAssertEqual(
+            try freshApplicationStore.mainContext.fetchCount(FetchDescriptor<Podcast>()),
+            0
+        )
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV10.self)
         return try ModelContainer(

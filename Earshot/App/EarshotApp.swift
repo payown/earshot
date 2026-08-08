@@ -670,6 +670,15 @@ final class AppRuntime {
         resetInFlight = true
         NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
         await BackgroundFeedRefresher.cancelAndWait()
+        do {
+            try cloudProjectionCoordinator?.markAllSubscriptionsDeleted()
+        } catch {
+            AppLog.data.error(
+                "Refused local reset because sync tombstones could not be saved: \(error.localizedDescription, privacy: .public)"
+            )
+            resetInFlight = false
+            return false
+        }
         await cloudProjectionCoordinator?.stop()
         cloudProjectionCoordinator = nil
         let launchToAwait = launchTask
