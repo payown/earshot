@@ -1,4 +1,5 @@
 import XCTest
+import SwiftData
 @testable import Earshot
 
 final class CloudKitLaunchPolicyTests: XCTestCase {
@@ -25,5 +26,24 @@ final class CloudKitLaunchPolicyTests: XCTestCase {
         XCTAssertFalse(CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(
             infoDictionary: [CloudKitLaunchPolicy.infoKey: false]
         ))
+    }
+
+    func testDevelopmentBuildMirrorsProjectionButNotApplicationStore() {
+        let enabled = [CloudKitLaunchPolicy.infoKey: "YES"]
+        XCTAssertTrue(
+            String(describing: CloudKitLaunchPolicy.mirroredDatabase(infoDictionary: enabled))
+                .contains("_none: true")
+        )
+        XCTAssertTrue(
+            String(describing: CloudKitLaunchPolicy.projectionDatabase(infoDictionary: enabled))
+                .contains(CloudKitLaunchPolicy.containerIdentifier)
+        )
+    }
+
+    func testOrdinaryBuildDoesNotMirrorProjection() {
+        XCTAssertTrue(
+            String(describing: CloudKitLaunchPolicy.projectionDatabase(infoDictionary: [:]))
+                .contains("_none: true")
+        )
     }
 }

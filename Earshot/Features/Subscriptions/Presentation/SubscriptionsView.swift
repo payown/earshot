@@ -233,6 +233,11 @@ struct SubscriptionsView: View {
         )) { _ in
             loadPodcasts()
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .earshotCloudProjectionDidApply
+        )) { _ in
+            loadPodcasts()
+        }
         // Confirm the reorder for VoiceOver: the menu dismisses and the list
         // silently re-sorts, so without this the change gives no feedback. Mirrors
         // StatsScreen's period Picker. Announcer no-ops when VoiceOver is off.

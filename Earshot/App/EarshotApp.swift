@@ -174,6 +174,7 @@ final class AppRuntime {
     private var resetTask: Task<Bool, Never>?
     private var resetInFlight = false
     private var cloudKitEventMonitor: CloudKitEventMonitor?
+    private var cloudProjectionCoordinator: CloudProjectionCoordinator?
 
     init(
         load: StoreLoad? = nil,
@@ -669,6 +670,8 @@ final class AppRuntime {
         resetInFlight = true
         NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
         await BackgroundFeedRefresher.cancelAndWait()
+        await cloudProjectionCoordinator?.stop()
+        cloudProjectionCoordinator = nil
         let launchToAwait = launchTask
         launchToAwait?.cancel()
         _ = await launchToAwait?.value
@@ -807,6 +810,17 @@ final class AppRuntime {
         entitlements.configure(context: container.mainContext)
         entitlements.startObservingTransactionUpdates()
         await entitlements.resync()
+    }
+
+    func activateCloudProjectionIfNeeded(container: ModelContainer) async throws {
+        guard mode == .normal,
+              CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(),
+              cloudProjectionCoordinator == nil else { return }
+        let coordinator = try CloudProjectionCoordinator.make(
+            applicationContainer: container
+        )
+        try coordinator.start()
+        cloudProjectionCoordinator = coordinator
     }
 
     var rootServiceActivationStatus: RootServiceActivationStatus {

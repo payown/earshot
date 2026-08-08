@@ -6,8 +6,9 @@ import SwiftData
 /// Ordinary Debug and Release builds leave this setting at `NO`, preserving the
 /// build-172 local-only behavior. A deliberate local build may override
 /// `EARSHOT_DEVELOPMENT_CLOUDKIT_ENABLED=YES`; its generated Info.plist then
-/// opts only `FutureMirrored` into Earshot's private development container.
-/// `DeviceLocal` remains explicitly `.none` at its call site.
+/// opts only the compact sync projection into Earshot's private development
+/// container. Both application stores remain explicitly `.none`: uploading the
+/// complete episode catalog failed the B1 bounded-bootstrap gate.
 enum CloudKitLaunchPolicy {
     static let containerIdentifier = "iCloud.media.payown.earshot"
     static let infoKey = "EarshotDevelopmentCloudKitEnabled"
@@ -26,6 +27,12 @@ enum CloudKitLaunchPolicy {
     }
 
     static func mirroredDatabase(
+        infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]
+    ) -> ModelConfiguration.CloudKitDatabase {
+        .none
+    }
+
+    static func projectionDatabase(
         infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]
     ) -> ModelConfiguration.CloudKitDatabase {
         guard isDevelopmentMirroringEnabled(infoDictionary: infoDictionary) else {
