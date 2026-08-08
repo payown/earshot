@@ -58,6 +58,7 @@
 		251963B6D5F51C922BCDD6C7 /* EpisodeSummaryCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60FC5E0CACB16838EACB447D /* EpisodeSummaryCacheTests.swift */; };
 		2651183B9A6197ACA0DCEC9D /* SubscriptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B9DA2518345900178343187 /* SubscriptionsView.swift */; };
 		2770F2A93C5278E71C214601 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3D0B29C92483947ADFC8FD /* SettingsStore.swift */; };
+		2821183881F8E67631F2F43C /* CloudKitLaunchPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2237691ACC276910FF9CAF4 /* CloudKitLaunchPolicy.swift */; };
 		2857B154501288DEDB7BD7CE /* DownloadScanBoundsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D2665493DE11CF2A5CC6B72 /* DownloadScanBoundsTests.swift */; };
 		286B8CE0CD292D58CBE8DC60 /* DownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD0D647CD02ADF165EDBDE2 /* DownloadManager.swift */; };
 		2935513B75B77BA2E89021EC /* ChapterRowStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85ABED55FD2BFEA32BF1198 /* ChapterRowStateTests.swift */; };
@@ -252,6 +253,7 @@
 		C591E706C3B3930635BA9CEE /* InboxLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB277E3AB7A3AD6A261D149A /* InboxLogic.swift */; };
 		C5C819B83A38639C57E7E45E /* TranscriptParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A7810695393637C415A3723 /* TranscriptParser.swift */; };
 		C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */; };
+		C7FFE7CA3DC6BA90BD4972C5 /* CloudKitLaunchPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A91F9AF1812A9FFC39767E /* CloudKitLaunchPolicyTests.swift */; };
 		C84A8A8808D8727FC8DC1C5C /* PlayerControlsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CDDEEB4DCCF1EAA40AA1518 /* PlayerControlsSheet.swift */; };
 		C8CF2F0E0FDDC190BC14C478 /* QuickActionBuildersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4250FA40569C87B3F4F943A8 /* QuickActionBuildersTests.swift */; };
 		C91A1ACAA55ACBDD7F85D9A7 /* SpeedPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2804D27627887442B0547472 /* SpeedPickerSheet.swift */; };
@@ -595,6 +597,7 @@
 		C2AFBB00F8C76C7C8D5A7BF3 /* PodcastArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastArtwork.swift; sourceTree = "<group>"; };
 		C2F6CF6323EFF4CD2679160C /* TranscriptViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptViewModel.swift; sourceTree = "<group>"; };
 		C4C2CEA51FF27CE1EF442176 /* Chapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chapter.swift; sourceTree = "<group>"; };
+		C5A91F9AF1812A9FFC39767E /* CloudKitLaunchPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitLaunchPolicyTests.swift; sourceTree = "<group>"; };
 		C75A4D2E9D30DDEF48E91230 /* FoldersScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoldersScreen.swift; sourceTree = "<group>"; };
 		C7B3441D6FAADB5EF76D830C /* StallRecoveryLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StallRecoveryLogic.swift; sourceTree = "<group>"; };
 		C8561A6AE50C3C685C15CCAF /* StorePreparationScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorePreparationScreen.swift; sourceTree = "<group>"; };
@@ -653,6 +656,8 @@
 		F02DD508062C57130CC40137 /* ChapterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterParser.swift; sourceTree = "<group>"; };
 		F0E82F35CB949845DE1189C9 /* ModelEnums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelEnums.swift; sourceTree = "<group>"; };
 		F2139AAC938323A76B008595 /* NotificationPermissionTrigger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPermissionTrigger.swift; sourceTree = "<group>"; };
+		F2237691ACC276910FF9CAF4 /* CloudKitLaunchPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitLaunchPolicy.swift; sourceTree = "<group>"; };
+		F2831EA33BA2B36B5FC9C01D /* Earshot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Earshot.entitlements; sourceTree = "<group>"; };
 		F402886F5BBB7E16BCE8E077 /* QuickActionsRotorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionsRotorTests.swift; sourceTree = "<group>"; };
 		F4095F2EF53A691A6012C117 /* EpisodeExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeExporter.swift; sourceTree = "<group>"; };
 		F4EB4F7F597FCC1DD27CEEE4 /* FolderRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRepository.swift; sourceTree = "<group>"; };
@@ -705,6 +710,7 @@
 			isa = PBXGroup;
 			children = (
 				58EF6C73A139CF1EDE219A40 /* AppSettingsStore.swift */,
+				F2237691ACC276910FF9CAF4 /* CloudKitLaunchPolicy.swift */,
 				DF69017C7C2090E496CBC830 /* EarshotSchema.swift */,
 				52A120256FB53824821318A4 /* EarshotSchemaV1.swift */,
 				75AA4BC50202563D2746E805 /* IdentityRepairService.swift */,
@@ -902,6 +908,7 @@
 				A85ABED55FD2BFEA32BF1198 /* ChapterRowStateTests.swift */,
 				E561A2C8B10CB27A76F73D67 /* ChapterSkipLogicTests.swift */,
 				3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */,
+				C5A91F9AF1812A9FFC39767E /* CloudKitLaunchPolicyTests.swift */,
 				338EA98CF90A517F0214201F /* ContrastAuditTests.swift */,
 				278A76C6E3AB1F92AFACB741 /* CoreServicesTests.swift */,
 				2D427D5DE0B2E076644ADA1F /* DownloadManagerTests.swift */,
@@ -1064,6 +1071,7 @@
 		62EB7B31F1A76BAA6CD3E051 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				F2831EA33BA2B36B5FC9C01D /* Earshot.entitlements */,
 				5DA06952463063521A170CEC /* EarshotApp.swift */,
 				EF4559A7D750A9F7AFFC5652 /* Info.plist */,
 				12C01B02A39EC9D1F2D40E13 /* PrivacyInfo.xcprivacy */,
@@ -1731,6 +1739,7 @@
 				A681FA248AD40066761C93A0 /* ChapterRowState.swift in Sources */,
 				C50E7E8B943F8A46B218EB53 /* ChapterService.swift in Sources */,
 				DA8A89E9C242146855F938FE /* ChapterSkipLogic.swift in Sources */,
+				2821183881F8E67631F2F43C /* CloudKitLaunchPolicy.swift in Sources */,
 				A3FB4153E4416BC7D50401C6 /* ContextualTip.swift in Sources */,
 				6DDCE8372585E12C5A979647 /* DataSettingsView.swift in Sources */,
 				90B302BC78F413A2F575AC1A /* DownloadGate.swift in Sources */,
@@ -1928,6 +1937,7 @@
 				2935513B75B77BA2E89021EC /* ChapterRowStateTests.swift in Sources */,
 				3B2C35CAA573FA40C23EF216 /* ChapterSkipLogicTests.swift in Sources */,
 				C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */,
+				C7FFE7CA3DC6BA90BD4972C5 /* CloudKitLaunchPolicyTests.swift in Sources */,
 				EA932C39B04426E2CAD3F337 /* ContrastAuditTests.swift in Sources */,
 				51AB6A682FF34A1A768BCF68 /* CoreServicesTests.swift in Sources */,
 				2B45B84062C387D339236F1D /* DownloadManagerTests.swift in Sources */,
@@ -2114,9 +2124,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Earshot/App/Earshot.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 72PH974742;
+				EARSHOT_DEVELOPMENT_CLOUDKIT_ENABLED = NO;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Earshot/App/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -2211,9 +2223,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Earshot/App/Earshot.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 72PH974742;
+				EARSHOT_DEVELOPMENT_CLOUDKIT_ENABLED = NO;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Earshot/App/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

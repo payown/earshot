@@ -1,6 +1,6 @@
 # Earshot 1.1 iCloud sync implementation plan
 
-**Status:** Phase A foundation complete; Phase B mirroring implementation not started
+**Status:** Phase A foundation complete; B1 development-only feasibility work in progress
 
 **Release gate:** Earshot 1.1.0 does not go to App Review until this document's
 definition of done passes on an iPhone and an Apple-silicon Mac using the same
@@ -49,9 +49,9 @@ test and must not be used as a current checklist.
 7. Routine sync is silent. Announce only a user-requested action, a persistent
    problem, or a visible conflict repair.
 
-## Decisions required before capability work
+## Approved product decisions (Michael, 2026-08-07)
 
-The recommended decisions are:
+Michael approved the following decisions before capability work began:
 
 1. **Availability:** Sync automatically when the device is signed into iCloud
    and Earshot's iCloud access is enabled. Do not promise an in-app instant
@@ -69,8 +69,16 @@ The recommended decisions are:
    rewind a newer position. An explicit user reset/mark-unplayed may move it
    backward. Queue and folder repairs must converge deterministically.
 
-These decisions add user-facing text and change the meaning of destructive data
-actions, so Michael's explicit approval is required before their implementation.
+The Mac hardware is an M3 MacBook running the existing iPhone app as “Designed
+for iPhone”; a separate native Mac app is not in scope. Michael approved using
+his regular Apple account on both devices and accepts loss of Earshot test data.
+That permission does not extend beyond Earshot's private CloudKit container or
+device-local Earshot data, and a recoverable local snapshot remains required
+before the first sync-enabled install.
+
+Michael also explicitly approved adding the iCloud, CloudKit, push-notification,
+and remote-notification capabilities through `project.yml`. Production CloudKit
+schema deployment remains separately gated by B1 through B6.
 
 ## Work packages
 
