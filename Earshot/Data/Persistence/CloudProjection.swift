@@ -101,6 +101,21 @@ final class CloudEpisodeStateProjection {
     init() {}
 }
 
+/// Per-device queue membership contribution. Reconciliation chooses the newest
+/// contribution for each episode and then sorts deterministically by position.
+@Model
+final class CloudQueueItemProjection {
+    var feedURL: String = ""
+    var episodeGUID: String = ""
+    var sourceDeviceID: String = ""
+    var isQueued: Bool = false
+    var position: Int = 0
+    var modifiedAt: Date = Date.distantPast
+    var deletedAt: Date?
+
+    init() {}
+}
+
 @MainActor
 final class CloudProjectionCoordinator {
     private struct PodcastValue: Equatable {
@@ -143,6 +158,7 @@ final class CloudProjectionCoordinator {
     private var subscriptionObserver: NSObjectProtocol?
     private var episodeObserver: NSObjectProtocol?
     private var catalogObserver: NSObjectProtocol?
+    private var queueObserver: NSObjectProtocol?
     private var reconcileTask: Task<Void, Never>?
     private var knownLocalFeedURLs: Set<String> = []
     private let deviceID: String
@@ -164,6 +180,7 @@ final class CloudProjectionCoordinator {
         let schema = Schema([
             CloudPodcastProjection.self,
             CloudEpisodeStateProjection.self,
+            CloudQueueItemProjection.self,
         ])
         let configuration = ModelConfiguration(
             "CloudProjection",
@@ -231,6 +248,22 @@ final class CloudProjectionCoordinator {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.scheduleReconciliation() }
         }
+        queueObserver = center.addObserver(
+            forName: .earshotQueueDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard self?.isApplyingRemote == false else { return }
+                do {
+                    try self?.publishLocalQueueChanges()
+                } catch {
+                    AppLog.data.error(
+                        "Cloud queue projection failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+        }
         try reconcile()
     }
 
@@ -250,6 +283,10 @@ final class CloudProjectionCoordinator {
         if let catalogObserver {
             center.removeObserver(catalogObserver)
             self.catalogObserver = nil
+        }
+        if let queueObserver {
+            center.removeObserver(queueObserver)
+            self.queueObserver = nil
         }
         reconcileTask?.cancel()
         _ = await reconcileTask?.value
@@ -345,6 +382,16 @@ final class CloudProjectionCoordinator {
         if episodeChanged {
             center.post(name: .earshotInboxDidChange, object: nil)
         }
+        try publishLocalQueueChanges(now: .now, onlyIfCloudEmpty: true)
+        let queueChanged = try applyRemoteQueue(
+            appContext: appContext,
+            cloudContext: cloudContext
+        )
+        applicationChanged = queueChanged || applicationChanged
+        if queueChanged {
+            center.post(name: .earshotQueueDidChange, object: nil)
+            center.post(name: .earshotInboxDidChange, object: nil)
+        }
         if applicationChanged {
             center.post(name: .earshotCloudProjectionDidApply, object: nil)
         }
@@ -416,6 +463,64 @@ final class CloudProjectionCoordinator {
                 row.modifiedAt = now
             }
             if row.modifiedAt == .distantPast { row.modifiedAt = now }
+        }
+        if cloudContext.hasChanges { try cloudContext.save() }
+    }
+
+    func publishLocalQueueChanges(
+        now: Date = .now,
+        onlyIfCloudEmpty: Bool = false
+    ) throws {
+        let appContext = applicationContainer.mainContext
+        let cloudContext = projectionContainer.mainContext
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
+        if onlyIfCloudEmpty, !rows.isEmpty { return }
+
+        let items = try appContext.fetch(FetchDescriptor<QueueItem>(
+            sortBy: [SortDescriptor(\.position)]
+        ))
+        var current: [EpisodeKey: Int] = [:]
+        for item in items {
+            guard let episode = item.episode,
+                  let key = Self.episodeKey(for: episode),
+                  current[key] == nil else { continue }
+            current[key] = item.position
+        }
+
+        var ownByKey: [EpisodeKey: CloudQueueItemProjection] = [:]
+        for row in rows
+            .filter({ $0.sourceDeviceID == deviceID && $0.deletedAt == nil })
+            .sorted(by: Self.queueProjectionOrder) {
+            let key = Self.episodeKey(for: row)
+            if ownByKey[key] == nil {
+                ownByKey[key] = row
+            } else {
+                cloudContext.delete(row)
+            }
+        }
+        let keys = onlyIfCloudEmpty
+            ? Set(current.keys)
+            : Set(rows.filter { $0.deletedAt == nil }.map(Self.episodeKey)).union(current.keys)
+        for key in keys.sorted() {
+            let row = ownByKey[key] ?? {
+                let inserted = CloudQueueItemProjection()
+                inserted.feedURL = key.feedURL
+                inserted.episodeGUID = key.guid
+                inserted.sourceDeviceID = deviceID
+                cloudContext.insert(inserted)
+                ownByKey[key] = inserted
+                return inserted
+            }()
+            let queued = current[key] != nil
+            let position = current[key] ?? 0
+            if row.isQueued != queued || row.position != position || row.deletedAt != nil {
+                row.isQueued = queued
+                row.position = position
+                row.modifiedAt = now
+                row.deletedAt = nil
+            } else if row.modifiedAt == .distantPast {
+                row.modifiedAt = now
+            }
         }
         if cloudContext.hasChanges { try cloudContext.save() }
     }
@@ -549,6 +654,12 @@ final class CloudProjectionCoordinator {
             row.deletedAt = now
             row.modifiedAt = now
         }
+        let queueRows = try context.fetch(FetchDescriptor<CloudQueueItemProjection>())
+        for row in queueRows where row.deletedAt == nil {
+            row.isQueued = false
+            row.deletedAt = now
+            row.modifiedAt = now
+        }
         if context.hasChanges { try context.save() }
         knownLocalFeedURLs.removeAll()
     }
@@ -602,6 +713,24 @@ final class CloudProjectionCoordinator {
             feedURL: FeedURLIdentity.canonical(row.feedURL),
             guid: row.episodeGUID
         )
+    }
+
+    private static func episodeKey(for row: CloudQueueItemProjection) -> EpisodeKey {
+        EpisodeKey(
+            feedURL: FeedURLIdentity.canonical(row.feedURL),
+            guid: row.episodeGUID
+        )
+    }
+
+    private static func queueProjectionOrder(
+        _ lhs: CloudQueueItemProjection,
+        _ rhs: CloudQueueItemProjection
+    ) -> Bool {
+        if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
+        if lhs.sourceDeviceID != rhs.sourceDeviceID {
+            return lhs.sourceDeviceID < rhs.sourceDeviceID
+        }
+        return episodeKey(for: lhs) < episodeKey(for: rhs)
     }
 
     private func applicationEpisodes(matching keys: Set<EpisodeKey>) -> [EpisodeKey: Episode] {
@@ -675,6 +804,84 @@ final class CloudProjectionCoordinator {
             }
         }
         if appContext.hasChanges { try appContext.save() }
+        return changed
+    }
+
+    private func applyRemoteQueue(
+        appContext: ModelContext,
+        cloudContext: ModelContext
+    ) throws -> Bool {
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
+            .filter { $0.deletedAt == nil && !$0.episodeGUID.isEmpty }
+        var contributionByDevice: [String: CloudQueueItemProjection] = [:]
+        for row in rows.sorted(by: Self.queueProjectionOrder) {
+            let key = Self.episodeKey(for: row)
+            let contributionKey = "\(key.feedURL)\u{1f}\(key.guid)\u{1f}\(row.sourceDeviceID)"
+            if contributionByDevice[contributionKey] == nil {
+                contributionByDevice[contributionKey] = row
+            } else {
+                cloudContext.delete(row)
+            }
+        }
+        let grouped = Dictionary(
+            grouping: contributionByDevice.values,
+            by: Self.episodeKey
+        )
+        var winners: [EpisodeKey: CloudQueueItemProjection] = [:]
+        for (key, contributions) in grouped {
+            winners[key] = contributions.sorted(by: Self.queueProjectionOrder).first
+        }
+        let episodes = applicationEpisodes(matching: Set(winners.keys))
+        let existing = try appContext.fetch(FetchDescriptor<QueueItem>(
+            sortBy: [SortDescriptor(\.position)]
+        ))
+        var existingByKey: [EpisodeKey: QueueItem] = [:]
+        for item in existing {
+            guard let episode = item.episode,
+                  let key = Self.episodeKey(for: episode),
+                  existingByKey[key] == nil else { continue }
+            existingByKey[key] = item
+        }
+
+        var changed = false
+        for key in winners.keys.sorted() {
+            guard let winner = winners[key], let episode = episodes[key] else { continue }
+            if winner.isQueued {
+                if existingByKey[key] == nil {
+                    let item = QueueItem(episode: episode, position: winner.position)
+                    appContext.insert(item)
+                    existingByKey[key] = item
+                    changed = true
+                }
+                if episode.status != .inQueue {
+                    episode.status = .inQueue
+                    changed = true
+                }
+            } else if let item = existingByKey.removeValue(forKey: key) {
+                appContext.delete(item)
+                if episode.status == .inQueue { episode.status = .newEpisode }
+                changed = true
+            }
+        }
+
+        let projected = existingByKey.compactMap { key, item -> (QueueItem, Int, EpisodeKey)? in
+            guard let winner = winners[key], winner.isQueued else { return nil }
+            return (item, winner.position, key)
+        }.sorted {
+            if $0.1 != $1.1 { return $0.1 < $1.1 }
+            return $0.2 < $1.2
+        }.map(\.0)
+        let projectedIDs = Set(projected.map(\.persistentModelID))
+        let untouched = existing.filter {
+            !projectedIDs.contains($0.persistentModelID) && !$0.isDeleted
+        }
+        let ordered = projected + untouched
+        for (position, item) in ordered.enumerated() where item.position != position {
+            item.position = position
+            changed = true
+        }
+        if appContext.hasChanges { try appContext.save() }
+        if cloudContext.hasChanges { try cloudContext.save() }
         return changed
     }
 

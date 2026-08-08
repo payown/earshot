@@ -29,7 +29,11 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
         XCTAssertEqual(
             Set(projection.schema.entities.map(\.name)),
-            ["CloudEpisodeStateProjection", "CloudPodcastProjection"]
+            [
+                "CloudEpisodeStateProjection",
+                "CloudPodcastProjection",
+                "CloudQueueItemProjection",
+            ]
         )
     }
 
@@ -341,6 +345,75 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(episode.isPlayed)
     }
 
+    func testQueueProjectionConvergesOrderAndRemovalAcrossDevices() throws {
+        let phone = try makeApplicationContainer()
+        let phonePodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let phoneA = Episode(guid: "a", title: "A", audioURL: "https://example.com/a")
+        let phoneB = Episode(guid: "b", title: "B", audioURL: "https://example.com/b")
+        phoneA.podcast = phonePodcast
+        phoneB.podcast = phonePodcast
+        phone.mainContext.insert(phonePodcast)
+        phone.mainContext.insert(phoneA)
+        phone.mainContext.insert(phoneB)
+        phone.mainContext.insert(QueueItem(episode: phoneB, position: 0))
+        phone.mainContext.insert(QueueItem(episode: phoneA, position: 1))
+        try phone.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainer()
+        let macPodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let macA = Episode(guid: "a", title: "A", audioURL: "https://example.com/a")
+        let macB = Episode(guid: "b", title: "B", audioURL: "https://example.com/b")
+        macA.podcast = macPodcast
+        macB.podcast = macPodcast
+        mac.mainContext.insert(macPodcast)
+        mac.mainContext.insert(macA)
+        mac.mainContext.insert(macB)
+        try mac.mainContext.save()
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+
+        try macCoordinator.reconcile()
+
+        XCTAssertEqual(
+            try mac.mainContext.fetch(FetchDescriptor<QueueItem>(
+                sortBy: [SortDescriptor(\.position)]
+            )).compactMap { $0.episode?.guid },
+            ["b", "a"]
+        )
+
+        let rows = try projection.mainContext.fetch(
+            FetchDescriptor<CloudQueueItemProjection>()
+        )
+        XCTAssertEqual(rows.count, 2)
+        let removal = CloudQueueItemProjection()
+        removal.feedURL = "https://example.com/feed"
+        removal.episodeGUID = "b"
+        removal.sourceDeviceID = "phone-2"
+        removal.isQueued = false
+        removal.modifiedAt = Date(timeIntervalSinceNow: 100)
+        projection.mainContext.insert(removal)
+        try projection.mainContext.save()
+        try macCoordinator.reconcile()
+
+        XCTAssertEqual(
+            try mac.mainContext.fetch(FetchDescriptor<QueueItem>())
+                .compactMap { $0.episode?.guid },
+            ["a"]
+        )
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV10.self)
         return try ModelContainer(
@@ -365,6 +438,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let schema = Schema([
             CloudPodcastProjection.self,
             CloudEpisodeStateProjection.self,
+            CloudQueueItemProjection.self,
         ])
         return try ModelContainer(
             for: schema,
