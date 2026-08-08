@@ -903,7 +903,16 @@ final class AppRuntime {
     private func handleCloudAccountChange() async {
         await cloudProjectionCoordinator?.stop()
         cloudProjectionCoordinator = nil
-        cloudSyncAvailability = .accountChanged
+        cloudSyncAvailability = .checking
+        guard case .ready(let container, _) = phase else { return }
+        do {
+            try await activateCloudProjectionIfNeeded(container: container)
+        } catch {
+            cloudSyncAvailability = .temporarilyUnavailable
+            AppLog.data.error(
+                "Cloud account-change reconciliation failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     var rootServiceActivationStatus: RootServiceActivationStatus {

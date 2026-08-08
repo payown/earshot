@@ -14,6 +14,9 @@ extension Notification.Name {
     static let earshotMirroredSettingDidChange = Notification.Name(
         "earshotMirroredSettingDidChange"
     )
+    static let earshotFolderSyncConflictRepaired = Notification.Name(
+        "earshotFolderSyncConflictRepaired"
+    )
 }
 
 struct EpisodeUserStateSnapshot: Sendable, Equatable {
@@ -1677,10 +1680,15 @@ final class CloudProjectionCoordinator {
                 changed = true
             }
         }
+        let requestedParents = Dictionary(uniqueKeysWithValues: newestByID.values
+            .filter { $0.deletedAt == nil }
+            .map { ($0.folderID, $0.parentFolderID) })
+        let parentRepair = FolderSyncConflictPolicy.repairCycles(in: requestedParents)
         for row in newestByID.values.sorted(by: Self.folderProjectionOrder)
         where row.deletedAt == nil {
             guard let folder = folderByCloudID[row.folderID] else { continue }
-            let parent = row.parentFolderID.flatMap { folderByCloudID[$0] }
+            let parentID = parentRepair.parents[row.folderID] ?? nil
+            let parent = parentID.flatMap { folderByCloudID[$0] }
             if folder.parent?.persistentModelID != parent?.persistentModelID,
                !FolderLogic.wouldCreateCycle(moving: folder, under: parent) {
                 folder.parent = parent
@@ -1774,6 +1782,9 @@ final class CloudProjectionCoordinator {
         if appContext.hasChanges { try appContext.save() }
         if cloudContext.hasChanges { try cloudContext.save() }
         knownLocalFolderIDs = Set(folderByCloudID.keys)
+        if !parentRepair.detachedFolderIDs.isEmpty {
+            center.post(name: .earshotFolderSyncConflictRepaired, object: nil)
+        }
         return changed
     }
 

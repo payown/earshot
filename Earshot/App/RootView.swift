@@ -296,6 +296,11 @@ struct RootView: View {
         ) { _ in
             settings.configure(context: modelContext)
         }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .earshotFolderSyncConflictRepaired)
+        ) { _ in
+            Announcer.announce("A folder sync conflict was repaired.")
+        }
         .task {
             let activationCompleted = await runtime.activateRootServices(
                 for: modelContext.container
