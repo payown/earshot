@@ -57,11 +57,11 @@ final class EpisodeRepository {
                 DownloadCleanup.removeDownloadFileAndState(episode, in: context)
             }
         }
-        save()
+        save(changedEpisodes: unplayed)
         return unplayed.count
     }
 
-    private func save() {
+    private func save(changedEpisodes: [Episode]) {
         guard context.hasChanges else { return }
         do {
             try context.save()
@@ -69,6 +69,10 @@ final class EpisodeRepository {
             // Marking episodes played/unplayed changes inbox membership — nudge
             // the tab badge to recompute (#736).
             NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+            postEpisodeUserStateChanges(
+                changedEpisodes,
+                playedChangedExplicitly: true
+            )
         } catch {
             AppLog.data.error("Episode bulk save failed: \(error.localizedDescription, privacy: .public)")
         }

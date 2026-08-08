@@ -297,6 +297,7 @@ final class QueueRepository {
             // the same save as the played flip so the file and state clear atomically.
             DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: context)
         }
+        postEpisodeUserStateChanges([episode], playedChangedExplicitly: true)
     }
 
     /// Empties the queue, reverting every episode to `newEpisode`.
@@ -309,11 +310,14 @@ final class QueueRepository {
     /// silently dropped from the inbox count. For an already-unplayed episode this
     /// is equivalent to the old assignment.
     func clear() {
-        for item in orderedItems() {
+        let items = orderedItems()
+        let episodes = items.compactMap(\.episode)
+        for item in items {
             item.episode?.isPlayed = false
             context.delete(item)
         }
         save()
+        postEpisodeUserStateChanges(episodes, playedChangedExplicitly: true)
     }
 
     // MARK: Moves

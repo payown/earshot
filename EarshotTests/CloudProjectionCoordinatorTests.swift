@@ -28,8 +28,8 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             662
         )
         XCTAssertEqual(
-            projection.schema.entities.map(\.name),
-            ["CloudPodcastProjection"]
+            Set(projection.schema.entities.map(\.name)),
+            ["CloudEpisodeStateProjection", "CloudPodcastProjection"]
         )
     }
 
@@ -182,6 +182,9 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
         try coordinator.reconcile()
         let deletionDate = Date(timeIntervalSince1970: 1_800_000_001)
+        let episodeRow = episodeStateRow(device: "phone", position: 90, updatedAt: 100)
+        projection.mainContext.insert(episodeRow)
+        try projection.mainContext.save()
 
         try coordinator.markAllSubscriptionsDeleted(now: deletionDate)
 
@@ -191,6 +194,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             ).first
         )
         XCTAssertEqual(row.deletedAt, deletionDate)
+        XCTAssertEqual(episodeRow.deletedAt, deletionDate)
 
         let freshApplicationStore = try makeApplicationContainer()
         let restarted = CloudProjectionCoordinator(
@@ -204,6 +208,137 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             try freshApplicationStore.mainContext.fetchCount(FetchDescriptor<Podcast>()),
             0
         )
+    }
+
+    func testEpisodeProjectionContainsOnlyMeaningfulUserState() throws {
+        let app = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        app.mainContext.insert(podcast)
+        var meaningful: [Episode] = []
+        for index in 0..<1_000 {
+            let episode = Episode(
+                guid: "episode-\(index)", title: "Episode \(index)",
+                audioURL: "https://example.com/\(index).mp3"
+            )
+            episode.podcast = podcast
+            app.mainContext.insert(episode)
+            if index == 42 || index == 73 { meaningful.append(episode) }
+        }
+        meaningful[0].positionSeconds = 120
+        meaningful[1].isPlayed = true
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+
+        try coordinator.reconcile()
+
+        let rows = try projection.mainContext.fetch(
+            FetchDescriptor<CloudEpisodeStateProjection>()
+        )
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(Set(rows.map(\.episodeGUID)), ["episode-42", "episode-73"])
+    }
+
+    func testStaleProgressCannotMovePlaybackBackward() throws {
+        let app = try makeApplicationContainerWithEpisode(position: 200)
+        let projection = try makeProjectionContainer()
+        let phone = episodeStateRow(device: "phone", position: 200, updatedAt: 200)
+        let staleMac = episodeStateRow(device: "mac", position: 100, updatedAt: 100)
+        projection.mainContext.insert(phone)
+        projection.mainContext.insert(staleMac)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+
+        try coordinator.reconcile()
+
+        XCTAssertEqual(try XCTUnwrap(applicationEpisode(in: app)).positionSeconds, 200)
+    }
+
+    func testExplicitRewindOverridesOlderProgressThenLaterProgressAdvances() throws {
+        let app = try makeApplicationContainerWithEpisode(position: 200)
+        let projection = try makeProjectionContainer()
+        let stale = episodeStateRow(device: "phone", position: 200, updatedAt: 100)
+        let rewind = episodeStateRow(device: "mac", position: 50, updatedAt: 200)
+        rewind.positionResetAt = Date(timeIntervalSince1970: 200)
+        projection.mainContext.insert(stale)
+        projection.mainContext.insert(rewind)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+
+        try coordinator.reconcile()
+        XCTAssertEqual(try XCTUnwrap(applicationEpisode(in: app)).positionSeconds, 50)
+
+        rewind.positionSeconds = 80
+        rewind.positionUpdatedAt = Date(timeIntervalSince1970: 300)
+        rewind.modifiedAt = Date(timeIntervalSince1970: 300)
+        try projection.mainContext.save()
+        try coordinator.reconcile()
+        XCTAssertEqual(try XCTUnwrap(applicationEpisode(in: app)).positionSeconds, 80)
+    }
+
+    func testStaleUnplayedDeviceCannotUndoNewerPlayedStateWithoutExplicitAction() throws {
+        let app = try makeApplicationContainerWithEpisode(position: 100)
+        let projection = try makeProjectionContainer()
+        let played = episodeStateRow(device: "phone", position: 0, updatedAt: 200)
+        played.isPlayed = true
+        projection.mainContext.insert(played)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+
+        try coordinator.reconcile()
+
+        XCTAssertTrue(try XCTUnwrap(applicationEpisode(in: app)).isPlayed)
+    }
+
+    func testExplicitMarkUnplayedCanOverrideNewerPlayedState() throws {
+        let app = try makeApplicationContainerWithEpisode(position: 100)
+        let projection = try makeProjectionContainer()
+        let played = episodeStateRow(device: "phone", position: 0, updatedAt: 200)
+        played.isPlayed = true
+        projection.mainContext.insert(played)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try coordinator.reconcile()
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        episode.isPlayed = false
+        try app.mainContext.save()
+        let snapshot = try XCTUnwrap(EpisodeUserStateSnapshot(
+            episode: episode,
+            playedChangedExplicitly: true
+        ))
+
+        try coordinator.publishLocalEpisodeStateChanges(
+            snapshots: [snapshot],
+            now: Date(timeIntervalSince1970: 300)
+        )
+        try coordinator.reconcile()
+
+        XCTAssertFalse(episode.isPlayed)
     }
 
     private func makeApplicationContainer() throws -> ModelContainer {
@@ -227,7 +362,10 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
     }
 
     private func makeProjectionContainer() throws -> ModelContainer {
-        let schema = Schema([CloudPodcastProjection.self])
+        let schema = Schema([
+            CloudPodcastProjection.self,
+            CloudEpisodeStateProjection.self,
+        ])
         return try ModelContainer(
             for: schema,
             configurations: ModelConfiguration(
@@ -237,5 +375,39 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 cloudKitDatabase: .none
             )
         )
+    }
+
+    private func makeApplicationContainerWithEpisode(position: Int) throws -> ModelContainer {
+        let container = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(
+            guid: "episode", title: "Episode", audioURL: "https://example.com/episode.mp3",
+            positionSeconds: position
+        )
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+        return container
+    }
+
+    private func applicationEpisode(in container: ModelContainer) throws -> Episode? {
+        try container.mainContext.fetch(FetchDescriptor<Episode>()).first
+    }
+
+    private func episodeStateRow(
+        device: String,
+        position: Int,
+        updatedAt: TimeInterval
+    ) -> CloudEpisodeStateProjection {
+        let row = CloudEpisodeStateProjection()
+        row.feedURL = "https://example.com/feed"
+        row.episodeGUID = "episode"
+        row.sourceDeviceID = device
+        row.positionSeconds = position
+        row.positionUpdatedAt = Date(timeIntervalSince1970: updatedAt)
+        row.playedUpdatedAt = Date(timeIntervalSince1970: updatedAt)
+        row.modifiedAt = Date(timeIntervalSince1970: updatedAt)
+        return row
     }
 }

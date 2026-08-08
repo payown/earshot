@@ -223,7 +223,7 @@ final class InboxRepository {
         episode.inboxDismissed = true
         // Auto-delete the download once played, when the user opted in (#downloads).
         DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
-        save()
+        save(changedEpisodes: [episode])
     }
 
     // MARK: Internals
@@ -258,13 +258,17 @@ final class InboxRepository {
         return InboxLogic.isExcluded(inboxExcluded: podcast.inboxExcluded, inboxIncluded: podcast.inboxIncluded)
     }
 
-    private func save() {
+    private func save(changedEpisodes: [Episode] = []) {
         guard context.hasChanges else { return }
         do {
             try context.save()
             // Inbox membership changed (dismiss / clear / caps) — refresh the
             // tab badge without it having to poll on every save (#736).
             NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+            postEpisodeUserStateChanges(
+                changedEpisodes,
+                playedChangedExplicitly: true
+            )
         } catch {
             AppLog.data.error("Inbox save failed: \(error.localizedDescription, privacy: .public)")
         }

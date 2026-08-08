@@ -528,7 +528,7 @@ struct SubscriptionsView: View {
     /// exact same effect.
     private func toggleInboxInclude(_ podcast: Podcast) {
         podcast.inboxIncluded.toggle()
-        saveQuickAction(context, "inbox-include")
+        savePodcastQuickAction(context, "inbox-include")
         Announcer.announce(podcast.inboxIncluded ? "Added to inbox" : "Removed from inbox")
     }
 
@@ -537,7 +537,7 @@ struct SubscriptionsView: View {
     /// runs the equivalent effect through `buildPodcastActions`.
     private func toggleInboxExclude(_ podcast: Podcast) {
         podcast.inboxExcluded.toggle()
-        saveQuickAction(context, "inbox-exclude")
+        savePodcastQuickAction(context, "inbox-exclude")
         Announcer.announce(podcast.inboxExcluded ? "Excluded from inbox" : "Included in inbox")
     }
 
