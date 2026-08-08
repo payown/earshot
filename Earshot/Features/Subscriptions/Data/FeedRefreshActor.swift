@@ -15,6 +15,25 @@ import SwiftData
 /// carry guids and counts, never an `Episode` or `Podcast`).
 @ModelActor
 actor FeedRefreshActor {
+    /// A `ModelContext` adopts the executor on which it is created. Constructing
+    /// this actor directly from `SubscriptionRepository` (which is `@MainActor`)
+    /// therefore pinned the supposedly-background refresh to the UI thread. Do
+    /// the construction itself in a detached task so every subsequent actor call
+    /// uses a genuinely background serial model executor.
+    nonisolated static func makeBackground(
+        modelContainer: ModelContainer
+    ) async -> FeedRefreshActor {
+        await Task.detached(priority: .utility) {
+            FeedRefreshActor(modelContainer: modelContainer)
+        }.value
+    }
+
+#if DEBUG
+    /// Direct executor assertion used by the regression test for the device-
+    /// measured main-thread refresh stall.
+    func isExecutingOnMainThreadForTesting() -> Bool { Thread.isMainThread }
+#endif
+
     /// How many feeds are processed between `ModelContext.save()` calls. The old
     /// code saved once per podcast; batching cuts the save count ~10x for a large
     /// library while still bounding how much un-persisted work is at risk if the

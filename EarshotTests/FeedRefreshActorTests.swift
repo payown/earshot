@@ -53,6 +53,17 @@ final class FeedRefreshActorTests: XCTestCase {
         try ModelContext(container).fetch(FetchDescriptor<Episode>())
     }
 
+    /// Regression for the build-177 device trace: constructing a `@ModelActor`
+    /// from this `@MainActor` test must not pin its ModelContext work to the main
+    /// thread. The production repository uses this same factory at every call
+    /// site.
+    func testBackgroundFactoryDoesNotExecuteOnMainThread() async {
+        let actor = await FeedRefreshActor.makeBackground(modelContainer: cleanContainer())
+        let isOnMainThread = await actor.isExecutingOnMainThreadForTesting()
+
+        XCTAssertFalse(isOnMainThread)
+    }
+
     /// A new subscription has its backlog pre-dismissed (so refresh of an existing
     /// podcast must add only genuinely-new episodes). Seed one directly with a
     /// mark already set, then refresh on the actor and read from a fresh context.
