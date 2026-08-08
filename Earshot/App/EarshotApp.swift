@@ -715,6 +715,16 @@ final class AppRuntime {
         return result
     }
 
+    /// Removes device-owned downloads and rendered artwork without changing the
+    /// synced library, playback state, folders, history, or preferences.
+    func clearThisDeviceData() async -> Bool {
+        guard resetTask == nil else { return false }
+        _ = await downloads.clearAllDownloads()
+        ArtworkCache.shared.tearDown()
+        ArtworkCache.resetShared()
+        return true
+    }
+
     func loadRecoveryDownloadUsageIfNeeded() async {
         guard !recoveryUsageLoaded, recoveryStorageState != nil else { return }
         recoveryUsageLoaded = true
