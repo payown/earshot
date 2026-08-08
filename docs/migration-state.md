@@ -887,3 +887,14 @@ Designed-for-iPhone Mac projection in both EXCEPT directions for all persisted
 columns: 662 podcasts, 4 episode states, 1 queue item, 4 settings, 0 bookmarks,
 31 history sessions, and 0 folders. This is a same-state convergence check, not
 a completed bidirectional mutation, offline, account-change, or VoiceOver test.
+
+The offline/reconnect audit then found that a launch-time signed-out or
+temporarily unavailable account was reported safely but projection activation
+was not retried solely because the app returned active. Foreground activation
+now retries without polling, while an account-change pause still requires
+explicit confirmation. One owned activation task serializes overlapping root,
+account-notification, and foreground requests; reset and account replacement
+cancel and await it before persistent-file work. Focused lifecycle/reset tests
+executed 11 tests with 0 failures, and full local CI executed 1,806 tests,
+skipped 38, and failed 0. This is build 184; physical offline/reconnect remains
+to be exercised.

@@ -764,3 +764,14 @@ episode-state rows, 1 queue row, 4 setting rows, 0 bookmark rows, 31 listening
 sessions, and 0 folder rows. No mutation was introduced for that observation,
 so it does not substitute for the remaining two-direction, offline,
 account-change, heat, or physical VoiceOver matrix.
+
+An availability-path review subsequently found that a launch-time signed-out
+or temporarily unavailable account stayed local-only until another launch or
+account-change notification. Build 184 adds an event-driven retry whenever the
+app next becomes active. Projection activation is now one serialized,
+cancellable task; reset and account replacement cancel and await it before
+persistent-file operations, so a delayed account response cannot reopen the
+projection mid-reset. Focused lifecycle/reset coverage executed 11 tests with 0
+failures; full local CI executed 1,806 tests, skipped 38, and failed 0. Physical
+offline/reconnect behavior remains an explicit B6 measurement rather than an
+automated-test inference.

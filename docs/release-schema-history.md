@@ -172,6 +172,14 @@ Build 182 is superseded for testing. Production CloudKit remains disabled and
 undeployed. Fresh-store schema remains V10; supported migration sources remain
 V5 and V6.
 
+Build 184 is the development-only CloudKit availability follow-up. A foreground
+transition retries projection activation after signed-out or temporarily
+unavailable account states without polling. Activation is serialized through
+one cancellable task, and reset or account replacement cancels and awaits that
+task before touching persistent files. Build 183 is superseded for testing.
+Production CloudKit remains disabled and undeployed. Fresh-store schema remains
+V10; supported migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
