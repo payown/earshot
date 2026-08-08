@@ -109,6 +109,13 @@ materializing the Inbox on the main actor. Production CloudKit remains disabled
 and undeployed. Fresh-store schema remains V10; supported migration sources
 remain V5 and V6.
 
+Build 176 is the development-only clean-second-device bootstrap follow-up. A
+relationship-free synced subscription now seeds a bounded ten-episode local
+catalog on its first feed refresh while preserving the transferred high-water
+mark, so historical rows stay dismissed and only later publications count as
+new. Production CloudKit remains disabled and undeployed. Fresh-store schema
+remains V10; supported migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
