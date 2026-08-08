@@ -1868,4 +1868,52 @@ She sent Renata one message.
 
 ---
 
+### Chapter 56 — Build 172
+
+*Keeping time*
+
+Build 172 reduces unnecessary background work during accelerated playback.
+
+**What changed**
+
+Playback housekeeping now follows real time instead of podcast time. At 2x,
+Earshot had been updating its position, checking chapters, recording listening
+progress, and considering lock-screen corrections about twice as often as it did
+at 1x. Those small jobs continued for the entire episode.
+
+The main playback update now runs about once per real second at every speed.
+Steady lock-screen elapsed-time corrections occur every fifteen seconds. Play,
+pause, seek, speed changes, episode changes, and Bluetooth commands still update
+immediately. Earshot keeps the same voice-quality processing.
+
+**What to test**
+
+Play a downloaded episode at 1x, 1.5x, and 2x for several minutes at each speed.
+Compare how warm the phone feels. Try with the screen open and locked.
+
+Confirm the playback position advances normally. Pause and resume from Earshot,
+the Lock Screen, and a Bluetooth accessory. Seek forward and backward, change
+speed, and confirm the Lock Screen remains accurate.
+
+Kashe noticed heat the way she noticed most things: after working around it for
+long enough that the workaround had become routine.
+
+At one and a half speed, the phone went in the outside pocket of her bag instead
+of the pocket against her leg. At twice speed, it sometimes stayed on the car
+seat. She had never described this as a bug. It was simply where the phone went.
+
+Renata asked her to try another build. Kashe played the same downloaded episode,
+locked the screen, and drove the familiar road beyond the grain elevator. The
+host spoke quickly. The phone kept her place. The button on her glasses paused
+when she reached the client's driveway.
+
+When she picked up the phone, it felt like a phone that had been playing audio,
+not a hand warmer with a podcast attached.
+
+She put it back in her pocket.
+
+That was the whole review.
+
+---
+
 *More chapters added here as Earshot ships.*
