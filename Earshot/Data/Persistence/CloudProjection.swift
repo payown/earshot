@@ -234,11 +234,14 @@ final class CloudProjectionCoordinator {
         let appContext = applicationContainer.mainContext
         let cloudContext = projectionContainer.mainContext
         let podcasts = try appContext.fetch(FetchDescriptor<Podcast>())
-        let localByFeed = Dictionary(
-            uniqueKeysWithValues: podcasts.map {
-                (FeedURLIdentity.canonical($0.feedURL), $0)
-            }
-        )
+        // Legacy stores can contain duplicate spellings of the same feed URL.
+        // Launch repair normally coalesces them, but projection must remain
+        // total even if a save notification arrives before that repair.
+        var localByFeed: [String: Podcast] = [:]
+        for podcast in podcasts.sorted(by: Self.podcastOrder) {
+            let key = FeedURLIdentity.canonical(podcast.feedURL)
+            if localByFeed[key] == nil { localByFeed[key] = podcast }
+        }
         let rows = try cloudContext.fetch(FetchDescriptor<CloudPodcastProjection>())
         var cloudByFeed: [String: CloudPodcastProjection] = [:]
         for row in rows.sorted(by: Self.projectionOrder) {
@@ -300,6 +303,12 @@ final class CloudProjectionCoordinator {
             return lhs.sourceDeviceID < rhs.sourceDeviceID
         }
         return FeedURLIdentity.canonical(lhs.feedURL) < FeedURLIdentity.canonical(rhs.feedURL)
+    }
+
+    private static func podcastOrder(_ lhs: Podcast, _ rhs: Podcast) -> Bool {
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+        if lhs.feedURL != rhs.feedURL { return lhs.feedURL < rhs.feedURL }
+        return lhs.title < rhs.title
     }
 
     private func copy(_ source: CloudPodcastProjection, to target: Podcast) {

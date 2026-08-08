@@ -136,6 +136,36 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testPublishingLegacyDuplicateLocalFeedURLsDoesNotTrap() throws {
+        let app = try makeApplicationContainer()
+        app.mainContext.insert(Podcast(
+            feedURL: "https://example.com/feed.xml",
+            title: "First",
+            createdAt: Date(timeIntervalSince1970: 100)
+        ))
+        app.mainContext.insert(Podcast(
+            feedURL: "HTTPS://EXAMPLE.COM:443/feed.xml#duplicate",
+            title: "Second",
+            createdAt: Date(timeIntervalSince1970: 200)
+        ))
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+
+        try coordinator.publishLocalSubscriptionChanges()
+
+        let rows = try projection.mainContext.fetch(
+            FetchDescriptor<CloudPodcastProjection>()
+        )
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].title, "First")
+    }
+
     func testEverywhereDeleteIntentPrecedesApplicationStoreDeletion() throws {
         let app = try makeApplicationContainer()
         app.mainContext.insert(Podcast(
