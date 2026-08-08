@@ -1,5 +1,6 @@
 import CoreData
 import Foundation
+import OSLog
 
 /// A bounded diagnostic view of the public Core Data + CloudKit event stream.
 ///
@@ -111,6 +112,11 @@ final class CloudKitEventMonitor {
         if events.count > capacity {
             events.removeFirst(events.count - capacity)
         }
+        let duration = event.endDate.map { $0.timeIntervalSince(event.startDate) } ?? -1
+        let errorDescription = event.errorDescription ?? "none"
+        AppLog.data.info(
+            "CloudKit event kind=\(event.kind.rawValue, privacy: .public) succeeded=\(event.succeeded, privacy: .public) durationSeconds=\(duration, privacy: .public) error=\(errorDescription, privacy: .public)"
+        )
     }
 
 }
