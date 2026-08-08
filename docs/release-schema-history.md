@@ -116,6 +116,13 @@ mark, so historical rows stay dismissed and only later publications count as
 new. Production CloudKit remains disabled and undeployed. Fresh-store schema
 remains V10; supported migration sources remain V5 and V6.
 
+Build 177 is the development-only large-library feed-rebuild follow-up. It
+overlaps at most three network fetch-and-parse operations while retaining one
+serialized SwiftData writer, input-ordered results, batched saves, and prompt
+background-task cancellation. Production CloudKit remains disabled and
+undeployed. Fresh-store schema remains V10; supported migration sources remain
+V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
