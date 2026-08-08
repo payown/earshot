@@ -652,3 +652,23 @@ was `YES`, and the signed development push, private CloudKit container, and
 CloudKit service entitlements were present. Wireless over-install retained
 database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration
 reported build 176. The installer did not launch it.
+
+The same build-176 Mac run established that local feed-catalog reconstruction
+was still a separate long-running operation: 339 of 662 podcasts had been
+refreshed after approximately 8.5 minutes, and the durable completion timestamp
+had not advanced. That checkpoint is not a completion measurement. The
+whole-library scheduler now overlaps no more than three network fetch-and-parse
+operations while keeping repair, application, and saving serialized through one
+`FeedRefreshActor` SwiftData context. Its deterministic concurrency test reaches
+three active requests and proves the ceiling is three. Full local CI executed
+1,798 tests, skipped 38, and failed 0.
+
+Development build 177 contains that scheduler. A clean signed
+CloudKitDevelopment build produced a 19,746,800-byte arm64 binary with SHA-256
+`2dec7c9c2dec33c0f034847d63970f08ca5408daf696774e621d49700f9a7b5a` and
+modification time 2026-08-07 23:54:06 -0700. Its build number is 177, marketing
+version is 1.1.0, runtime development gate is `YES`, and its development push,
+private CloudKit container, and CloudKit service entitlements are present. This
+is 4,911,760 bytes larger than build 176 (`19,746,800 - 14,835,040`), primarily
+in link-edit symbol metadata. Because that artifact-size change is not yet fully
+explained, build 177 was not installed or launched.

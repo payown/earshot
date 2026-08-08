@@ -599,6 +599,24 @@ architecture.
   entitlements are present. Wireless over-install replaced unlaunched build 175
   while retaining database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`;
   read-only enumeration reports build 176. The installer did not launch it.
+- The build-176 Mac run also showed that the remaining local episode-catalog
+  rebuild was still sequential and long-running: 339 of 662 podcasts had a
+  post-launch `refreshedAt` value after approximately 8.5 minutes, while the
+  durable `last_feed_refresh` timestamp had not advanced. This is a checkpoint,
+  not a completion time. Whole-library refresh now overlaps at most three
+  network fetch-and-parse operations, then applies every result through the one
+  serialized `FeedRefreshActor` SwiftData context. A deterministic test reaches
+  exactly three active fetches and proves the scheduler does not exceed three.
+  Full local CI reports 1,798 executed, 38 skipped, and 0 failed.
+- Development build 177 contains that bounded refresh scheduler. Its clean,
+  signed CloudKitDevelopment iPhone binary is 19,746,800 bytes, SHA-256
+  `2dec7c9c2dec33c0f034847d63970f08ca5408daf696774e621d49700f9a7b5a`,
+  built 2026-08-07 23:54:06 -0700. Build number 177, marketing version 1.1.0,
+  runtime development gate `YES`, and the development CloudKit entitlements
+  were verified. The binary is 4,911,760 bytes larger than build 176
+  (`19,746,800 - 14,835,040 = 4,911,760`); the increase is concentrated in
+  link-edit symbol metadata and remains under investigation. Build 177 has not
+  been installed or launched.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.
