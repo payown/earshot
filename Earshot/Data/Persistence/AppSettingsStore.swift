@@ -152,13 +152,10 @@ enum SettingsKey {
 
 enum AppSettingScope {
     private static let mirroredKeys: Set<String> = [
-        SettingsKey.autoDownloadCount, SettingsKey.historyRetentionDays,
-        SettingsKey.downloadRetentionDays, SettingsKey.voiceEnhanceEnabled,
+        SettingsKey.historyRetentionDays, SettingsKey.voiceEnhanceEnabled,
         SettingsKey.globalSpeed, SettingsKey.skipForwardSeconds,
         SettingsKey.skipBackSeconds, SettingsKey.chapterNavButtonsVisible,
-        SettingsKey.inboxOptInOnly, SettingsKey.wifiOnlyDownloads,
-        SettingsKey.deleteDownloadAfterPlayed, SettingsKey.autoDownloadQueued,
-        SettingsKey.downloadsPlayedFilter, SettingsKey.groupQueueEpisodes,
+        SettingsKey.inboxOptInOnly, SettingsKey.groupQueueEpisodes,
         SettingsKey.showEpisodeNumbers, SettingsKey.openPlayerOnPlay,
         SettingsKey.continueAfterEpisode, SettingsKey.continueAfterGroupEnds,
         SettingsKey.defaultLaunchScreen, SettingsKey.librarySortOrder,
@@ -259,6 +256,7 @@ final class AppSettingsStore {
     func rawValue(_ key: String) -> String? {
         if AppSettingScope.isLocal(key) {
             return LocalAppSettingIdentity.value(for: key, in: context)
+                ?? AppSettingIdentity.value(for: key, in: context)
         }
         return AppSettingIdentity.value(for: key, in: context)
     }
