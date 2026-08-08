@@ -237,6 +237,15 @@ struct RootView: View {
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
+                // Designed-for-iPhone apps on macOS host full-screen covers in
+                // a separate presentation graph. Inject the shared observable
+                // services explicitly so first-launch onboarding cannot lose
+                // them while that graph is being constructed.
+                .environment(runtime)
+                .environment(settings)
+                .environment(importProgress)
+                .environment(downloads)
+                .environment(entitlements)
         }
         // Raise the full player when the user plays an episode from a row and the
         // "open player on play" setting is on (#562). Presented here at the single
