@@ -50,7 +50,7 @@ enum StoreMigrationProgress: Int, CaseIterable, Sendable, Equatable {
         case .preparingAndValidating:
             return "Preparing Earshot. Step 1 of 3. Preparing your library data."
         case .migratingMirroredStore:
-            return "Preparing Earshot. Step 2 of 3. Reorganizing your episodes."
+            return "Preparing Earshot. Step 2 of 3. Upgrading your library database."
         case .openingAndRepairing:
             return "Preparing Earshot. Step 3 of 3. Finishing preparation."
         }
@@ -65,7 +65,7 @@ enum StoreMigrationProgress: Int, CaseIterable, Sendable, Equatable {
         case .preparingAndValidating:
             return "Step 1 of 3. Preparing your library data."
         case .migratingMirroredStore:
-            return "Step 2 of 3. Reorganizing your episodes."
+            return "Step 2 of 3. Upgrading your library database."
         case .openingAndRepairing:
             return "Step 3 of 3. Finishing preparation."
         }

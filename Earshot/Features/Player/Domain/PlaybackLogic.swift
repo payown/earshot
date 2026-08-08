@@ -271,6 +271,18 @@ enum PlaybackLogic {
     /// progress on an abrupt kill, while keeping the run loop responsive.
     static let positionPersistInterval = 5
 
+    /// Converts a wall-clock cadence into media seconds. AVPlayer's periodic
+    /// observer interval is measured in item time, so an unscaled one-second
+    /// interval fires twice per real second at 2x playback.
+    static func mediaSeconds(
+        forWallClockSeconds wallClockSeconds: Double,
+        playbackRate: Double
+    ) -> Double {
+        let safeWallClockSeconds = max(wallClockSeconds, 1)
+        let safeRate = playbackRate.isFinite ? max(playbackRate, 1) : 1
+        return safeWallClockSeconds * safeRate
+    }
+
     /// Whether this tick should write the playback position to disk.
     ///
     /// True on the first tracked tick (`lastPersistedSecond == nil`), whenever at
@@ -321,7 +333,7 @@ enum PlaybackLogic {
     /// imperceptible on the lock screen while cutting the IPC rate by this factor.
     /// Discontinuities (play, pause, seek, rate change) still update eagerly and
     /// exactly via ``PlayerService`` so the lock screen never shows a stale jump.
-    static let nowPlayingElapsedSyncInterval = 5
+    static let nowPlayingElapsedSyncInterval = 15
 
     /// Whether this tick should re-sync the lock-screen elapsed time.
     ///

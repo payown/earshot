@@ -22,7 +22,7 @@ here. To prevent drift:
    revealed about Kashe, so future chapters stay consistent.
 3. **The chapter number and build number must match what actually deployed.**
    If they diverged (pubspec vs App Store Connect), note the real numbers.
-4. **Every chapter is 2500 characters or fewer.** That covers the whole chapter
+4. **Every chapter is 4000 characters or fewer.** That covers the whole chapter
    (the "What to test" section plus the story). The full chapter is the text that
    ships to TestFlight as the `--notes` payload, so there is no separate condensed
    version. Verify before shipping with `wc -m` on the chapter text; if it is over
@@ -1815,6 +1815,104 @@ She expands the folder once, then collapses it. VoiceOver stays where she left i
 At the end of the week she opens Stats and chooses the same folder. The number isn't impressive and doesn't need to be. It is simply the time between one client's driveway and the next, gathered without her keeping count.
 
 She used to think a folder was where something waited. This one moves with her.
+
+---
+
+### Chapter 55 — Build 171
+
+*The long way home*
+
+Since build 161, Earshot has rebuilt library upgrades, local-data deletion, OPML import, and Bluetooth playback.
+
+**What changed**
+
+Earshot upgrades App Store and TestFlight databases through a tested path. Work happens off-screen so VoiceOver remains responsive. It checks storage, makes recoverable backups, repairs duplicate identities safely, preserves downloads, and avoids repeating completed work. The preparation screen says “Upgrading your library database” and cannot wait forever for a missing announcement callback.
+
+Delete all local data is recoverable. Device tests found a feed refresh writing during deletion and the launch path reopening files mid-reset. Both are blocked and awaited. The final test stayed alive and showed onboarding in-app.
+
+Large OPML imports fetch a small number of feeds concurrently, save in small batches, yield during insertion, and move the count as feeds finish. The first import keeps the newest 10 episodes per podcast. Older history can arrive later without flooding the Inbox or download path.
+
+Newly followed podcasts now default Download episodes to none. Auto-download queued episodes stays on, so episodes deliberately queued still download. This reduces surprise storage, network use, processing, and heat after a large import.
+
+Bluetooth now reports both the current transport rate and selected speed. When paused above 1x, accessories can see “paused, preferred speed 1.5x,” allowing one-button controls to pause correctly. This adds no timer, polling, or extra update cycle.
+
+**What to test**
+
+Update without deleting Earshot. Let all three preparation steps finish. VoiceOver should keep speaking and Earshot should open without a force-quit. Confirm subscriptions, folders, queue, positions, bookmarks, history, settings, and downloads remain.
+
+Import a larger OPML file. The count should move and VoiceOver should remain usable. New podcasts should initially contain no more than 10 episodes. Confirm Download episodes defaults to none, then queue one episode and confirm it still downloads when Auto-download queued episodes is on.
+
+Play above 1x using Bluetooth headphones or glasses. One press should pause and another resume. Try Shokz, Bose, Meta Ray-Bans, or another accessory. Skip commands should still work.
+
+Kashe had put off the update until Sunday night.
+
+She had the week arranged: Thursday Route nested under Work, a queue long enough to get past the grain elevator and back. Updating the library felt like opening every kitchen drawer before company arrived.
+
+She did it with coffee cooling beside her. VoiceOver counted the steps. The second said it was upgrading the library database, which was at least honest. She waited for the silence that makes an app feel broken.
+
+It kept talking. Then it opened.
+
+Thursday Route was there. So was the queue. The long interview knew where she'd stopped. The downloaded episode still played in airplane mode. She checked more than needed, because trust and habit are different things.
+
+Renata sent an OPML file with sixty shows. Kashe imported it, expecting another frozen screen. But the count moved. Not evenly, because some feed servers answer mail by horse, but it moved. VoiceOver stayed with her. The phone stayed cool.
+
+The shows did not volunteer their entire family histories. Ten episodes each was enough. They did not start downloading a small nation's worth of audio either. She queued one for Thursday and that one downloaded.
+
+The next morning a client asked a question while a show played at one and a half speed through her glasses. Kashe pressed the button at her temple. Silence, first try. She answered, pressed again, and the host returned without drama.
+
+Databases moved, repaired, and reopened. Imports learned how to breathe. Yet the part she felt was smaller. The phone stayed in her pocket. The button worked. Her things were where she'd left them.
+
+She sent Renata one message.
+
+“Tell him the drawers are all still closed.”
+
+---
+
+### Chapter 56 — Build 172
+
+*Keeping time*
+
+Build 172 reduces unnecessary background work during accelerated playback.
+
+**What changed**
+
+Playback housekeeping now follows real time instead of podcast time. At 2x,
+Earshot had been updating its position, checking chapters, recording listening
+progress, and considering lock-screen corrections about twice as often as it did
+at 1x. Those small jobs continued for the entire episode.
+
+The main playback update now runs about once per real second at every speed.
+Steady lock-screen elapsed-time corrections occur every fifteen seconds. Play,
+pause, seek, speed changes, episode changes, and Bluetooth commands still update
+immediately. Earshot keeps the same voice-quality processing.
+
+**What to test**
+
+Play a downloaded episode at 1x, 1.5x, and 2x for several minutes at each speed.
+Compare how warm the phone feels. Try with the screen open and locked.
+
+Confirm the playback position advances normally. Pause and resume from Earshot,
+the Lock Screen, and a Bluetooth accessory. Seek forward and backward, change
+speed, and confirm the Lock Screen remains accurate.
+
+Kashe noticed heat the way she noticed most things: after working around it for
+long enough that the workaround had become routine.
+
+At one and a half speed, the phone went in the outside pocket of her bag instead
+of the pocket against her leg. At twice speed, it sometimes stayed on the car
+seat. She had never described this as a bug. It was simply where the phone went.
+
+Renata asked her to try another build. Kashe played the same downloaded episode,
+locked the screen, and drove the familiar road beyond the grain elevator. The
+host spoke quickly. The phone kept her place. The button on her glasses paused
+when she reached the client's driveway.
+
+When she picked up the phone, it felt like a phone that had been playing audio,
+not a hand warmer with a podcast attached.
+
+She put it back in her pocket.
+
+That was the whole review.
 
 ---
 

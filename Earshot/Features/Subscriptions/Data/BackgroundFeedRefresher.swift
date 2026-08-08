@@ -24,12 +24,24 @@ enum BackgroundFeedRefresher {
     /// namespace (`media.payown.earshot`).
     static let taskIdentifier = "media.payown.earshot.feedrefresh"
 
-    /// Reentrancy guard. Foreground (`scenePhase == .active`), cold launch, and
-    /// the background task can all call ``runRefresh`` near-simultaneously; this
-    /// ensures only one pass runs at a time (the throttle alone isn't enough,
-    /// since two callers can both pass `shouldRefresh` before either stamps
-    /// `lastFeedRefresh`). Main-actor isolated, so no locking needed. (#470)
-    @MainActor private static var isRefreshing = false
+    /// Reentrancy guard and ownership of the in-flight refresh. Foreground
+    /// (`scenePhase == .active`), cold launch, and the background task can all
+    /// call ``runRefresh`` near-simultaneously; the task is also retained here so
+    /// a destructive store reset can cancel it and await its completion before
+    /// unlinking the store files. Main-actor isolated, so no locking is needed.
+    @MainActor private static var activeRefreshTask: Task<Bool, Never>?
+    @MainActor private static var activeRefreshID: UUID?
+
+    /// Cancels the refresh that currently owns a model container and waits for
+    /// its actor work to finish. Reset calls this before releasing services or
+    /// invoking the file transaction, so no old-container write can race the
+    /// quarantine move.
+    @MainActor
+    static func cancelAndWait() async {
+        guard let task = activeRefreshTask else { return }
+        task.cancel()
+        _ = await task.value
+    }
 
     // MARK: Scheduling
 
@@ -63,14 +75,42 @@ enum BackgroundFeedRefresher {
         container: ModelContainer,
         force: Bool = false,
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
-        notifier: NotificationService = NotificationService()
+        notifier: NotificationService = NotificationService(),
+        feed: FeedFetching = FeedService()
     ) async -> Bool {
-        guard !isRefreshing else {
+        guard activeRefreshTask == nil else {
             AppLog.networking.info("Feed refresh already in progress; skipping overlap")
             return false
         }
-        isRefreshing = true
-        defer { isRefreshing = false }
+
+        let refreshID = UUID()
+        let task = Task { @MainActor in
+            await performRefresh(
+                container: container,
+                force: force,
+                isCancelled: isCancelled,
+                notifier: notifier,
+                feed: feed
+            )
+        }
+        activeRefreshID = refreshID
+        activeRefreshTask = task
+        let result = await task.value
+        if activeRefreshID == refreshID {
+            activeRefreshID = nil
+            activeRefreshTask = nil
+        }
+        return result
+    }
+
+    @MainActor
+    private static func performRefresh(
+        container: ModelContainer,
+        force: Bool,
+        isCancelled: @escaping @Sendable () -> Bool,
+        notifier: NotificationService,
+        feed: FeedFetching
+    ) async -> Bool {
 
         let context = container.mainContext
         let settings = AppSettingsStore(context: context)
@@ -95,6 +135,7 @@ enum BackgroundFeedRefresher {
         downloads.configure(context: context)
         let repo = SubscriptionRepository(
             context: context,
+            feed: feed,
             downloader: downloads,
             queue: queue
         )
@@ -105,6 +146,11 @@ enum BackgroundFeedRefresher {
         // It returns one notification per notification-enabled podcast that got
         // genuinely-new episodes (#72).
         let notifications = await repo.refreshAll(isCancelled: isCancelled) { _, _ in }
+
+        guard !Task.isCancelled, !isCancelled() else {
+            AppLog.networking.info("Background feed refresh cancelled after feed work")
+            return false
+        }
 
         settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
 

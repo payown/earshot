@@ -1,0 +1,55 @@
+You are performing an independent diagnostic review. Another agent is
+working the same problem separately. Do not try to agree with anyone. Your
+value here is independence.
+
+Read the two crash reports and the two project documents in ./evidence/,
+and read the source files listed in ./evidence/source-paths.txt. The two
+project documents are authoritative over your assumptions.
+
+Context you may rely on: on iOS build 165, Settings > Data > Delete all
+local data was killed twice by the scene-update watchdog on a store holding
+10 podcasts and 53,864 episodes. Nothing was committed. No timing data
+exists for this operation; it has never been run to completion.
+
+Answer these, in writing, committing to specific numbers where asked:
+
+A. From the crash reports alone, was the main thread CPU-bound or blocked on
+   I/O during the watchdog window? Show your arithmetic.
+
+B. From the source alone, describe the exact mechanism by which deleting
+   podcasts leads to the observed frames. Cite file and line.
+
+C. PRE-REGISTERED PREDICTION. State the computational complexity you expect
+   for this deletion as a function of episode count N and podcast count P.
+   Then predict, as specific numbers:
+     - the ratio t(2N)/t(N) for a doubling of episodes at fixed P=1
+     - the ratio of time for 1 podcast x 40,000 episodes versus
+       4 podcasts x 10,000 episodes
+     - the ratio of time for 1 podcast x 40,000 episodes versus
+       16 podcasts x 2,500 episodes
+     - your point estimate, in seconds, for the current implementation to
+       run to completion against 10 podcasts and 53,864 episodes on a
+       modern Mac in the simulator, plus a range you would be surprised to
+       fall outside
+
+D. PRE-REGISTERED PREDICTION. If this deletion were moved off the main actor
+   with no other change, would the result be acceptable for a blind
+   VoiceOver user, given that they would hear nothing between confirming and
+   completion? Answer yes or no, give your reasoning, and give the duration
+   threshold at which your answer flips.
+
+E. Rank the candidate remedies by expected completion time, fastest first:
+   (a) current implementation, podcasts deleted first
+   (b) delete Episodes explicitly before Podcasts
+   (c) SwiftData batch delete by model type in dependency order
+   (d) tear down the ModelContainer and remove the store files
+   For each, state what it changes about deletion scope compared to the
+   current implementation.
+
+F. Independently of the above, list anything in the two project documents
+   that you believe is wrong, stale, unsupported, or overstated. Cite the
+   specific text.
+
+Label every answer as measured, derived, or inferred. Do not hedge your way
+out of the numeric predictions in C. A wrong specific prediction is more
+useful than a vague correct one.

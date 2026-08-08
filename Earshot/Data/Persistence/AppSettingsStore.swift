@@ -180,7 +180,7 @@ enum AppSettingScope {
 
 /// Documented defaults for settings not yet written by the user.
 enum SettingsDefault {
-    static let autoDownloadCount = 3
+    static let autoDownloadCount = 0
     static let historyRetentionDays = 90
     static let crashReportingEnabled = true  // retained; not read by SettingsStore (no telemetry ships)
     static let analyticsEnabled = true  // retained; not read by SettingsStore (no telemetry ships)

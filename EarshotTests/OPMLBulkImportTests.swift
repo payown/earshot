@@ -288,6 +288,33 @@ final class OPMLBulkImportTests: XCTestCase {
         XCTAssertEqual(recorder.total, 4)
         XCTAssertEqual(recorder.titles.count, 4, "Each completed feed reports a title")
     }
+
+    /// Regression for the on-device 60-feed import that remained at 0 until all
+    /// network work finished. One feed completes quickly while the other seven
+    /// remain in flight. Progress must advance immediately, with bounded overlap,
+    /// instead of retaining every parsed feed and waiting for the slowest one.
+    func testBulkImportStreamsProgressWhileOtherFetchesRemainInFlight() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = StaggeredFeedFetcher()
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher)
+        let service = OPMLImportService(context: ctx, subscriptions: repo)
+        let feeds = (0..<8).map { "https://feed\($0).com/rss" }
+        let recorder = ProgressRecorder()
+
+        _ = await service.importOPML(opml(feeds: feeds), onProgress: { completed, _, _ in
+            recorder.completes.append(completed)
+            if completed == 1 {
+                recorder.activeFetchesAtFirstProgress = fetcher.activeFetchCount
+            }
+        })
+
+        XCTAssertGreaterThan(
+            recorder.activeFetchesAtFirstProgress, 0,
+            "Progress advances before every network fetch has completed"
+        )
+        XCTAssertEqual(fetcher.maximumFetchCount, 3, "Import keeps at most three network fetches in flight")
+        XCTAssertEqual(recorder.completes, Array(1...8))
+    }
 }
 
 /// Captures progress callback values on the main actor.
@@ -296,4 +323,37 @@ private final class ProgressRecorder {
     var completes: [Int] = []
     var total = 0
     var titles: [String] = []
+    var activeFetchesAtFirstProgress = 0
+}
+
+/// Makes feed 0 finish first and keeps the others in flight long enough to prove
+/// that the import reports and writes that result without waiting for the batch.
+private final class StaggeredFeedFetcher: FeedFetching, @unchecked Sendable {
+    private struct State {
+        var active = 0
+        var maximum = 0
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    var activeFetchCount: Int { state.withLock { $0.active } }
+    var maximumFetchCount: Int { state.withLock { $0.maximum } }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        state.withLock {
+            $0.active += 1
+            $0.maximum = max($0.maximum, $0.active)
+        }
+        defer { state.withLock { $0.active -= 1 } }
+
+        if urlString.contains("feed0") {
+            try await Task.sleep(for: .milliseconds(20))
+        } else {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        return ParsedFeed(
+            title: "Show \(urlString)", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: []
+        )
+    }
 }

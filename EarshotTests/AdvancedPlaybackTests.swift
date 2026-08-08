@@ -662,6 +662,50 @@ final class AdvancedPlaybackTests: XCTestCase {
                        "defaultRate must track A's override again, not stay stuck at B's global rate")
     }
 
+    // MARK: Bluetooth play/pause metadata above 1x
+
+    func test_nowPlayingRates_whilePlayingAboveOneX_publishSelectedRate() {
+        let ctx = TestStore.freshContext()
+        let settings = AppSettingsStore(context: ctx)
+        settings.setDouble(1.5, for: SettingsKey.globalSpeed)
+        let player = PlayerService()
+        player.configure(context: ctx)
+
+        player.play(makeEpisode(ctx))
+
+        XCTAssertEqual(player.debugNowPlayingRate ?? -1, 1.5, accuracy: 0.001)
+        XCTAssertEqual(player.debugNowPlayingDefaultRate ?? -1, 1.5, accuracy: 0.001)
+    }
+
+    func test_nowPlayingRates_whilePausedAboveOneX_publishZeroCurrentAndSelectedDefault() {
+        let ctx = TestStore.freshContext()
+        let settings = AppSettingsStore(context: ctx)
+        settings.setDouble(1.5, for: SettingsKey.globalSpeed)
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.play(makeEpisode(ctx))
+
+        player.pause()
+
+        XCTAssertEqual(player.debugNowPlayingRate ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(player.debugNowPlayingDefaultRate ?? -1, 1.5, accuracy: 0.001)
+    }
+
+    func test_nowPlayingRates_afterResumeAboveOneX_restoreSelectedCurrentRate() {
+        let ctx = TestStore.freshContext()
+        let settings = AppSettingsStore(context: ctx)
+        settings.setDouble(1.5, for: SettingsKey.globalSpeed)
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.play(makeEpisode(ctx))
+        player.pause()
+
+        player.resume()
+
+        XCTAssertEqual(player.debugNowPlayingRate ?? -1, 1.5, accuracy: 0.001)
+        XCTAssertEqual(player.debugNowPlayingDefaultRate ?? -1, 1.5, accuracy: 0.001)
+    }
+
     // MARK: removeFromQueue stops/advances the current episode (#619)
 
     func test_removeFromQueue_currentEpisodeWithNextQueued_stopsAndAdvances() {

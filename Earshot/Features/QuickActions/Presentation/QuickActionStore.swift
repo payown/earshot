@@ -25,6 +25,8 @@ final class QuickActionStore {
         queueActions = repo.queueOrder()
     }
 
+    func releasePersistence() { context = nil }
+
     func moveEpisodeActions(from: IndexSet, to: Int) {
         episodeActions.move(fromOffsets: from, toOffset: to)
         repo?.setEpisodeOrder(episodeActions)

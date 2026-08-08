@@ -2347,7 +2347,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try assertEpisodeSaveSurvivesReopen(container)
     }
 
-    func testScaleMigrationProfile() throws {
+    func testScaleMigrationProfile() async throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["RUN_SYNC_MIGRATION_SCALE"] != nil,
             "Set TEST_RUNNER_RUN_SYNC_MIGRATION_SCALE=1 to run the 242k migration profile."
@@ -2355,10 +2355,29 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         let count = Int(ProcessInfo.processInfo.environment["SYNC_MIGRATION_EPISODES"] ?? "")
             ?? 242_500
         try seedScaleV6(episodeCount: count)
+        let sourceStoreSetBytes = [
+            storeURL,
+            URL(fileURLWithPath: storeURL.path + "-wal"),
+            URL(fileURLWithPath: storeURL.path + "-shm"),
+        ].reduce(Int64(0)) { total, url in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return total + Int64(size)
+        }
         let memorySampler = MigrationMemorySampler()
         let baselineRSS = memorySampler.start()
         let start = DispatchTime.now().uptimeNanoseconds
-        let migrated = try StoreMigration.openOrMigrate(at: storeURL)
+        let engine = StoreMigrationEngine()
+        let migration = Task { try await engine.openOrMigrate(at: storeURL) }
+        var preparationMilliseconds: Double?
+        var iterator = engine.progressUpdates.makeAsyncIterator()
+        while let stage = await iterator.next() {
+            if stage == .migratingMirroredStore, preparationMilliseconds == nil {
+                preparationMilliseconds = Double(
+                    DispatchTime.now().uptimeNanoseconds - start
+                ) / 1_000_000
+            }
+        }
+        let migrated = try await migration.value
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
         let migrationPeakRSS = memorySampler.stop()
         let migrationRSSGrowth = max(0, migrationPeakRSS - baselineRSS)
@@ -2370,8 +2389,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         )), count)
         XCTAssertEqual(try migrated.mainContext.fetchCount(FetchDescriptor<LocalEpisodeState>()), 44)
         print(String(format:
-            "SYNCMIGRATION|podcasts|%d|episodes|%d|relatedEpisodes|%d|migrationMs|%.0f|baselineRssMB|%.0f|migrationPeakRssMB|%.0f|migrationRssGrowthMB|%.0f|processPeakIncludingSeedMB|%.0f",
-            666, count, count, elapsed, baselineRSS, migrationPeakRSS,
+            "SYNCMIGRATION|podcasts|%d|episodes|%d|relatedEpisodes|%d|sourceStoreSetBytes|%lld|preparationMs|%.3f|migrationMs|%.0f|baselineRssMB|%.0f|migrationPeakRssMB|%.0f|migrationRssGrowthMB|%.0f|processPeakIncludingSeedMB|%.0f",
+            666, count, count, sourceStoreSetBytes, preparationMilliseconds ?? -1,
+            elapsed, baselineRSS, migrationPeakRSS,
             migrationRSSGrowth, processPeakRSS
         ))
         XCTAssertLessThan(elapsed, 20_000, "migration entered launch-watchdog territory")
@@ -2380,5 +2400,1121 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             "migration added enough resident memory to approach known device jetsam territory"
         )
         try assertEpisodeSaveSurvivesReopen(migrated)
+    }
+}
+
+/// Opt-in measurements for the 2026-08-06 Settings reset watchdog incident.
+///
+/// Uses the repository's existing `RUN_SYNC_MIGRATION_SCALE` opt-in gate. The
+/// production reset's NotificationCenter post and both filesystem removals are
+/// deliberately excluded: their FileManager locations are process-global and
+/// cannot be redirected to a test-owned root. Each timing therefore measures
+/// only the exact SwiftData fetch/delete sequence plus `ModelContext.save()`.
+@MainActor
+final class ResetWatchdogMeasurementTests: XCTestCase {
+    private struct StorePaths {
+        let root: URL
+        let primary: URL
+        let local: URL
+    }
+
+    private struct Counts {
+        let podcasts: Int
+        let episodes: Int
+        let queueItems: Int
+        let listeningSessions: Int
+        let bookmarks: Int
+        let podcastFolders: Int
+        let folderMemberships: Int
+        let episodeFolderMemberships: Int
+        let recentlyExpired: Int
+        let quickActions: Int
+        let appSettings: Int
+        let localPodcastStates: Int
+        let localEpisodeStates: Int
+        let localAppSettings: Int
+
+        var text: String {
+            [
+                "Podcast=\(podcasts)", "Episode=\(episodes)",
+                "QueueItem=\(queueItems)", "ListeningSession=\(listeningSessions)",
+                "Bookmark=\(bookmarks)", "PodcastFolder=\(podcastFolders)",
+                "FolderMembership=\(folderMemberships)",
+                "EpisodeFolderMembership=\(episodeFolderMemberships)",
+                "RecentlyExpired=\(recentlyExpired)",
+                "QuickActionConfig=\(quickActions)", "AppSetting=\(appSettings)",
+                "LocalPodcastState=\(localPodcastStates)",
+                "LocalEpisodeState=\(localEpisodeStates)",
+                "LocalAppSetting=\(localAppSettings)",
+            ].joined(separator: ",")
+        }
+    }
+
+    private enum Candidate: String, CaseIterable {
+        case currentA = "a-current-podcasts-first"
+        case episodesFirstB = "b-episodes-first"
+        case batchC = "c-batch-dependency-order"
+        case filesD = "d-remove-store-files"
+    }
+
+    private func requireOptIn() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["RUN_SYNC_MIGRATION_SCALE"] != nil,
+            "Set TEST_RUNNER_RUN_SYNC_MIGRATION_SCALE=1 to run opt-in reset measurements."
+        )
+    }
+
+    func testResetRealShapeCurrentCompletion() throws {
+        try requireOptIn()
+        let paths = try copiedIncidentStore(label: "real-current")
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let container = try openV10(paths)
+        let context = ModelContext(container)
+        let before = try counts(context)
+        let primaryVersion = try storeVersion(paths.primary)
+        let localVersion = try storeVersion(paths.local)
+        print("RESETREAL|pre|primaryVersion|\(primaryVersion)|localVersion|\(localVersion)|counts|\(before.text)")
+
+        let sampler = MigrationMemorySampler()
+        let baselineRSS = sampler.start()
+        let result = runObjectDelete(candidate: .currentA, context: context)
+        let peakRSS = sampler.stop()
+        let after = try counts(context)
+        let primaryIntegrity = try integrityCheck(paths.primary).joined(separator: ",")
+        let localIntegrity = try integrityCheck(paths.local).joined(separator: ",")
+        let reopen = (try? openV10(paths)) != nil ? "success" : "failure"
+        print(String(format:
+            "RESETREAL|result|candidate|%@|seconds|%.6f|save|%@|baselineRssMB|%.3f|peakRssMB|%.3f|growthRssMB|%.3f|counts|%@|primaryIntegrity|%@|localIntegrity|%@|reopen|%@|filesystemSteps|skipped",
+            Candidate.currentA.rawValue, result.seconds, result.save,
+            baselineRSS, peakRSS, max(0, peakRSS - baselineRSS), after.text,
+            primaryIntegrity, localIntegrity, reopen
+        ))
+        XCTAssertEqual(result.save, "success")
+        XCTAssertEqual(primaryIntegrity, "ok")
+        XCTAssertEqual(localIntegrity, "ok")
+        XCTAssertEqual(reopen, "success")
+    }
+
+    func testResetScalingSeries() throws {
+        try requireOptIn()
+        for episodeCount in [2_500, 5_000, 10_000, 20_000, 40_000] {
+            do {
+                let paths = try syntheticStore(
+                    label: "scale-\(episodeCount)", podcastCount: 1,
+                    episodeCount: episodeCount
+                )
+                defer { try? FileManager.default.removeItem(at: paths.root) }
+                let container = try openV10(paths)
+                let context = ModelContext(container)
+                let before = try counts(context)
+                let result = runObjectDelete(candidate: .currentA, context: context)
+                let after = try counts(context)
+                let primaryIntegrity = try integrityCheck(paths.primary).joined(separator: ",")
+                let localIntegrity = try integrityCheck(paths.local).joined(separator: ",")
+                print(String(format:
+                    "RESETSCALE|episodes|%d|podcasts|1|seconds|%.6f|save|%@|before|%@|after|%@|primaryIntegrity|%@|localIntegrity|%@|filesystemSteps|skipped",
+                    episodeCount, result.seconds, result.save, before.text, after.text,
+                    primaryIntegrity, localIntegrity
+                ))
+            } catch {
+                print("RESETSCALE|episodes|\(episodeCount)|error|\(String(reflecting: error))")
+                XCTFail("Scale \(episodeCount) failed: \(error)")
+            }
+        }
+    }
+
+    func testResetParentArrayDiscriminator() throws {
+        try requireOptIn()
+        for (label, podcastCount) in [("A", 1), ("B", 4), ("C", 16)] {
+            do {
+                let paths = try syntheticStore(
+                    label: "parent-\(label)", podcastCount: podcastCount,
+                    episodeCount: 40_000
+                )
+                defer { try? FileManager.default.removeItem(at: paths.root) }
+                let container = try openV10(paths)
+                let context = ModelContext(container)
+                let result = runObjectDelete(candidate: .currentA, context: context)
+                let after = try counts(context)
+                print(String(format:
+                    "RESETPARENT|config|%@|podcasts|%d|episodes|40000|seconds|%.6f|save|%@|after|%@|primaryIntegrity|%@|localIntegrity|%@|filesystemSteps|skipped",
+                    label, podcastCount, result.seconds, result.save, after.text,
+                    try integrityCheck(paths.primary).joined(separator: ","),
+                    try integrityCheck(paths.local).joined(separator: ",")
+                ))
+            } catch {
+                print("RESETPARENT|config|\(label)|error|\(String(reflecting: error))")
+                XCTFail("Parent configuration \(label) failed: \(error)")
+            }
+        }
+    }
+
+    func testResetCandidateRemediesSynthetic() throws {
+        try requireOptIn()
+        for candidate in Candidate.allCases {
+            do {
+                let paths = try syntheticStore(
+                    label: "candidate-synthetic-\(candidate.rawValue)",
+                    podcastCount: 1, episodeCount: 40_000
+                )
+                defer { try? FileManager.default.removeItem(at: paths.root) }
+                try measureCandidate(candidate, paths: paths, shape: "synthetic-1x40000")
+            } catch {
+                print("RESETCANDIDATE|shape|synthetic-1x40000|candidate|\(candidate.rawValue)|error|\(String(reflecting: error))")
+                XCTFail("Synthetic candidate \(candidate.rawValue) failed: \(error)")
+            }
+        }
+    }
+
+    func testResetCandidateRemediesReal() throws {
+        try requireOptIn()
+        for candidate in Candidate.allCases {
+            do {
+                let paths = try copiedIncidentStore(label: "candidate-real-\(candidate.rawValue)")
+                defer { try? FileManager.default.removeItem(at: paths.root) }
+                try measureCandidate(candidate, paths: paths, shape: "real-10x53864")
+            } catch {
+                print("RESETCANDIDATE|shape|real-10x53864|candidate|\(candidate.rawValue)|error|\(String(reflecting: error))")
+                XCTFail("Real candidate \(candidate.rawValue) failed: \(error)")
+            }
+        }
+    }
+
+    func testBatchDeleteErrorIsolation() throws {
+        try requireOptIn()
+
+        try diagnoseBatchDelete(
+            label: "two-config-no-inbound-cascade",
+            open: openV10,
+            delete: { context in try context.delete(model: AppSetting.self) }
+        )
+        try diagnoseBatchDelete(
+            label: "two-config-with-cascade",
+            open: openV10,
+            delete: { context in try context.delete(model: Podcast.self) }
+        )
+        try diagnoseBatchDelete(
+            label: "single-config-no-inbound-cascade",
+            open: openMirroredOnly,
+            delete: { context in try context.delete(model: AppSetting.self) }
+        )
+        try diagnoseBatchDelete(
+            label: "single-config-with-cascade",
+            open: openMirroredOnly,
+            delete: { context in try context.delete(model: Podcast.self) }
+        )
+    }
+
+    func testCurrentRealVarianceOneRun() throws {
+        try requireOptIn()
+        let mode = try XCTUnwrap(ProcessInfo.processInfo.environment["RESET_VARIANCE_WAL_MODE"])
+        let run = try XCTUnwrap(ProcessInfo.processInfo.environment["RESET_VARIANCE_RUN_INDEX"])
+        let paths = try copiedIncidentStore(label: "variance-\(mode)-\(run)")
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let primaryWAL = URL(fileURLWithPath: paths.primary.path + "-wal")
+        let localWAL = URL(fileURLWithPath: paths.local.path + "-wal")
+        let primaryBefore = fileSize(primaryWAL)
+        let localBefore = fileSize(localWAL)
+        if mode == "checkpointed" {
+            try checkpointWAL(paths.primary)
+            try checkpointWAL(paths.local)
+        } else {
+            XCTAssertEqual(mode, "present")
+        }
+        let primaryAfterPreparation = fileSize(primaryWAL)
+        let localAfterPreparation = fileSize(localWAL)
+        let container = try openV10(paths)
+        let context = ModelContext(container)
+        let primaryAtDelete = fileSize(primaryWAL)
+        let localAtDelete = fileSize(localWAL)
+        let sampler = MigrationMemorySampler()
+        let baseline = sampler.start()
+        let result = runObjectDelete(candidate: .currentA, context: context)
+        let peak = sampler.stop()
+        print(String(format: "RESETVARIANCE|mode|%@|run|%@|seconds|%.9f|save|%@|primaryWalBefore|%lld|localWalBefore|%lld|primaryWalAfterPreparation|%lld|localWalAfterPreparation|%lld|primaryWalAtDelete|%lld|localWalAtDelete|%lld|baselineRssMB|%.3f|peakRssMB|%.3f|growthRssMB|%.3f", mode, run, result.seconds, result.save, primaryBefore, localBefore, primaryAfterPreparation, localAfterPreparation, primaryAtDelete, localAtDelete, baseline, peak, max(0, peak - baseline)))
+    }
+
+    func testResetFalsifyingTwoByTwentyThousand() throws {
+        try requireOptIn()
+        let paths = try syntheticStore(
+            label: "falsifier-2x20000", podcastCount: 2, episodeCount: 40_000
+        )
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let container = try openV10(paths)
+        let context = ModelContext(container)
+        let sampler = MigrationMemorySampler()
+        let baseline = sampler.start()
+        let result = runObjectDelete(candidate: .currentA, context: context)
+        let peak = sampler.stop()
+        print(String(format: "RESETFALSIFIER|podcasts|2|episodesPerPodcast|20000|totalEpisodes|40000|seconds|%.9f|save|%@|baselineRssMB|%.3f|peakRssMB|%.3f|growthRssMB|%.3f|counts|%@|primaryIntegrity|%@|localIntegrity|%@", result.seconds, result.save, baseline, peak, max(0, peak - baseline), try counts(context).text, try integrityCheck(paths.primary).joined(separator: ","), try integrityCheck(paths.local).joined(separator: ",")))
+    }
+
+    private func diagnoseBatchDelete(
+        label: String,
+        open: (StorePaths) throws -> ModelContainer,
+        delete: (ModelContext) throws -> Void
+    ) throws {
+        let paths = try copiedIncidentStore(label: "batch-isolation-\(label)")
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let container = try open(paths)
+        let context = ModelContext(container)
+        do {
+            try delete(context)
+            try context.save()
+            print("RESETBATCHERROR|case|\(label)|result|success")
+        } catch {
+            print("RESETBATCHERROR|case|\(label)|result|failure")
+            printNSError(error, prefix: "RESETBATCHERROR|case|\(label)|error")
+        }
+    }
+
+    private func printNSError(_ error: Error, prefix: String) {
+        let nsError = error as NSError
+        print("\(prefix)|domain|\(nsError.domain)|code|\(nsError.code)|description|\(nsError.localizedDescription)")
+        for key in nsError.userInfo.keys.map({ String(describing: $0) }).sorted() {
+            let value = nsError.userInfo.first { String(describing: $0.key) == key }?.value
+            print("\(prefix)|userInfo|\(key)|\(String(reflecting: value as Any))")
+        }
+        if let detailed = nsError.userInfo[NSDetailedErrorsKey] as? [NSError] {
+            for (index, detail) in detailed.enumerated() {
+                printNSError(detail, prefix: "\(prefix)|detailed|\(index)")
+            }
+        }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+            printNSError(underlying, prefix: "\(prefix)|underlying")
+        }
+    }
+
+    private func measureCandidate(
+        _ candidate: Candidate, paths: StorePaths, shape: String
+    ) throws {
+        if candidate == .filesD {
+            var container: ModelContainer? = try openV10(paths)
+            let before = try counts(ModelContext(try XCTUnwrap(container)))
+            let start = DispatchTime.now().uptimeNanoseconds
+            container = nil
+            autoreleasepool { }
+            ModelContainerFactory.removeStoreFiles(at: paths.primary)
+            ModelContainerFactory.removeStoreFiles(at: paths.local)
+            let reopened = try openV10(paths)
+            try reopened.mainContext.save()
+            let seconds = elapsedSeconds(since: start)
+            let after = try counts(reopened.mainContext)
+            print(String(format:
+                "RESETCANDIDATE|shape|%@|candidate|%@|seconds|%.6f|save|success|before|%@|after|%@|primaryIntegrity|%@|localIntegrity|%@|reopen|success|filesystemSteps|store-files-only|semantics|different",
+                shape, candidate.rawValue, seconds, before.text, after.text,
+                try integrityCheck(paths.primary).joined(separator: ","),
+                try integrityCheck(paths.local).joined(separator: ",")
+            ))
+            return
+        }
+
+        let container = try openV10(paths)
+        let context = ModelContext(container)
+        let before = try counts(context)
+        let result: (seconds: Double, save: String)
+        if candidate == .batchC {
+            result = runBatchDelete(context: context)
+        } else {
+            result = runObjectDelete(candidate: candidate, context: context)
+        }
+        let after = try counts(context)
+        let reopen = (try? openV10(paths)) != nil ? "success" : "failure"
+        print(String(format:
+            "RESETCANDIDATE|shape|%@|candidate|%@|seconds|%.6f|save|%@|before|%@|after|%@|primaryIntegrity|%@|localIntegrity|%@|reopen|%@|filesystemSteps|skipped|semantics|current-database-scope",
+            shape, candidate.rawValue, result.seconds, result.save, before.text, after.text,
+            try integrityCheck(paths.primary).joined(separator: ","),
+            try integrityCheck(paths.local).joined(separator: ","), reopen
+        ))
+    }
+
+    private func runObjectDelete(
+        candidate: Candidate, context: ModelContext
+    ) -> (seconds: Double, save: String) {
+        let start = DispatchTime.now().uptimeNanoseconds
+        if candidate == .episodesFirstB {
+            deleteAll(Episode.self, context)
+            deleteAll(Podcast.self, context)
+        } else {
+            deleteAll(Podcast.self, context)
+            deleteAll(Episode.self, context)
+        }
+        deleteAll(QueueItem.self, context)
+        deleteAll(ListeningSession.self, context)
+        deleteAll(Bookmark.self, context)
+        deleteAll(PodcastFolder.self, context)
+        deleteAll(FolderMembership.self, context)
+        deleteAll(EpisodeFolderMembership.self, context)
+        deleteAll(RecentlyExpired.self, context)
+        deleteAll(QuickActionConfig.self, context)
+        deleteAll(AppSetting.self, context)
+        let save: String
+        do {
+            try context.save()
+            save = "success"
+        } catch {
+            save = "failure:\(String(reflecting: error))"
+        }
+        return (elapsedSeconds(since: start), save)
+    }
+
+    private func runBatchDelete(
+        context: ModelContext
+    ) -> (seconds: Double, save: String) {
+        let start = DispatchTime.now().uptimeNanoseconds
+        let save: String
+        do {
+            try context.delete(model: QueueItem.self)
+            try context.delete(model: ListeningSession.self)
+            try context.delete(model: Bookmark.self)
+            try context.delete(model: FolderMembership.self)
+            try context.delete(model: EpisodeFolderMembership.self)
+            try context.delete(model: RecentlyExpired.self)
+            try context.delete(model: Episode.self)
+            try context.delete(model: PodcastFolder.self)
+            try context.delete(model: Podcast.self)
+            try context.delete(model: QuickActionConfig.self)
+            try context.delete(model: AppSetting.self)
+            try context.save()
+            save = "success"
+        } catch {
+            save = "failure:\(String(reflecting: error))"
+        }
+        return (elapsedSeconds(since: start), save)
+    }
+
+    private func deleteAll<T: PersistentModel>(_ type: T.Type, _ context: ModelContext) {
+        for object in (try? context.fetch(FetchDescriptor<T>())) ?? [] {
+            context.delete(object)
+        }
+    }
+
+    private func syntheticStore(
+        label: String, podcastCount: Int, episodeCount: Int
+    ) throws -> StorePaths {
+        let paths = try temporaryPaths(label: label)
+        autoreleasepool {
+            do {
+                let container = try openV10(paths)
+                let context = ModelContext(container)
+                let base = episodeCount / podcastCount
+                let remainder = episodeCount % podcastCount
+                for podcastIndex in 0..<podcastCount {
+                    let podcast = Podcast(
+                        feedURL: "https://reset-measurement.invalid/\(label)/\(podcastIndex)",
+                        title: "Podcast \(podcastIndex)"
+                    )
+                    context.insert(podcast)
+                    let count = base + (podcastIndex < remainder ? 1 : 0)
+                    var episodes: [Episode] = []
+                    episodes.reserveCapacity(count)
+                    for episodeIndex in 0..<count {
+                        let episode = Episode(
+                            guid: "\(label)-\(podcastIndex)-\(episodeIndex)",
+                            title: "Episode \(episodeIndex)",
+                            audioURL: "https://reset-measurement.invalid/audio/\(podcastIndex)/\(episodeIndex).mp3",
+                            pubDate: Date(timeIntervalSince1970: TimeInterval(episodeIndex))
+                        )
+                        context.insert(episode)
+                        episodes.append(episode)
+                    }
+                    podcast.episodes = episodes
+                    try context.save()
+                }
+            } catch {
+                XCTFail("Synthetic seed \(label) failed: \(error)")
+            }
+        }
+        return paths
+    }
+
+    private func copiedIncidentStore(label: String) throws -> StorePaths {
+        let fixtureRoot = try XCTUnwrap(
+            ProcessInfo.processInfo.environment["RESET_INCIDENT_FIXTURE_ROOT"],
+            "Set TEST_RUNNER_RESET_INCIDENT_FIXTURE_ROOT to the read-only container backup."
+        )
+        let source = URL(fileURLWithPath: fixtureRoot, isDirectory: true)
+            .appending(path: "Library/Application Support", directoryHint: .isDirectory)
+        let paths = try temporaryPaths(label: label)
+        for name in [
+            "default.store", "default.store-wal", "default.store-shm",
+            "earshot-local.store", "earshot-local.store-wal", "earshot-local.store-shm",
+        ] {
+            try FileManager.default.copyItem(
+                at: source.appending(path: name), to: paths.root.appending(path: name)
+            )
+        }
+        return paths
+    }
+
+    private func temporaryPaths(label: String) throws -> StorePaths {
+        let root = FileManager.default.temporaryDirectory.appending(
+            path: "reset-watchdog-\(label)-\(UUID().uuidString)", directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return StorePaths(
+            root: root,
+            primary: root.appending(path: "default.store"),
+            local: root.appending(path: "earshot-local.store")
+        )
+    }
+
+    private func openV10(_ paths: StorePaths) throws -> ModelContainer {
+        let full = Schema(versionedSchema: EarshotSchemaV10.self)
+        let mirrored = ModelConfiguration(
+            "FutureMirrored", schema: Schema(EarshotSchemaV10.mirroredModels),
+            url: paths.primary, cloudKitDatabase: .none
+        )
+        let local = ModelConfiguration(
+            "DeviceLocal", schema: Schema(EarshotSchemaV10.localModels),
+            url: paths.local, cloudKitDatabase: .none
+        )
+        return try ModelContainer(for: full, configurations: mirrored, local)
+    }
+
+    private func openMirroredOnly(_ paths: StorePaths) throws -> ModelContainer {
+        let schema = Schema(EarshotSchemaV10.mirroredModels)
+        let configuration = ModelConfiguration(
+            "FutureMirrored", schema: schema, url: paths.primary, cloudKitDatabase: .none
+        )
+        return try ModelContainer(for: schema, configurations: configuration)
+    }
+
+    private func checkpointWAL(_ url: URL) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_close(database) }
+        guard sqlite3_exec(database, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, nil)
+                == SQLITE_OK else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+    }
+
+    private func fileSize(_ url: URL) -> Int64 {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    private func counts(_ context: ModelContext) throws -> Counts {
+        Counts(
+            podcasts: try context.fetchCount(FetchDescriptor<Podcast>()),
+            episodes: try context.fetchCount(FetchDescriptor<Episode>()),
+            queueItems: try context.fetchCount(FetchDescriptor<QueueItem>()),
+            listeningSessions: try context.fetchCount(FetchDescriptor<ListeningSession>()),
+            bookmarks: try context.fetchCount(FetchDescriptor<Bookmark>()),
+            podcastFolders: try context.fetchCount(FetchDescriptor<PodcastFolder>()),
+            folderMemberships: try context.fetchCount(FetchDescriptor<FolderMembership>()),
+            episodeFolderMemberships: try context.fetchCount(
+                FetchDescriptor<EpisodeFolderMembership>()
+            ),
+            recentlyExpired: try context.fetchCount(FetchDescriptor<RecentlyExpired>()),
+            quickActions: try context.fetchCount(FetchDescriptor<QuickActionConfig>()),
+            appSettings: try context.fetchCount(FetchDescriptor<AppSetting>()),
+            localPodcastStates: try context.fetchCount(FetchDescriptor<LocalPodcastState>()),
+            localEpisodeStates: try context.fetchCount(FetchDescriptor<LocalEpisodeState>()),
+            localAppSettings: try context.fetchCount(FetchDescriptor<LocalAppSetting>())
+        )
+    }
+
+    private func storeVersion(_ url: URL) throws -> String {
+        let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite, at: url
+        )
+        return try XCTUnwrap(
+            (metadata[NSStoreModelVersionIdentifiersKey] as? [String])?.first
+        )
+    }
+
+    private func integrityCheck(_ url: URL) throws -> [String] {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA integrity_check", -1, &statement, nil)
+                == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_finalize(statement) }
+        var rows: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let text = sqlite3_column_text(statement, 0) {
+                rows.append(String(cString: text))
+            }
+        }
+        return rows
+    }
+
+    private func elapsedSeconds(since start: UInt64) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
+    }
+}
+
+/// Opt-in, test-owned filesystem and file-level reset measurements for turn 2
+/// of the Settings reset watchdog investigation. Production Documents, Caches,
+/// and Application Support paths are never resolved or mutated here.
+@MainActor
+final class ResetFileLevelMeasurementTests: XCTestCase {
+    private enum Interruption: String, CaseIterable {
+        case afterMovingJournal
+        case afterQuarantine
+        case afterCommittedJournal
+        case afterQuarantineCleanup
+        case afterJournalRemoval
+    }
+
+    private struct ResetEntry: Codable {
+        let sourcePath: String
+        let quarantineName: String
+    }
+
+    private struct ResetJournal: Codable {
+        enum Phase: String, Codable { case moving, committed }
+        let phase: Phase
+        let quarantineName: String
+        let entries: [ResetEntry]
+    }
+
+    private struct Paths {
+        let root: URL
+        let applicationSupport: URL
+        let mirrored: URL
+        let local: URL
+        let downloads: URL
+        let artwork: URL
+        let backupRoot: URL
+        let journal: URL
+    }
+
+    private struct EntityCounts {
+        let values: [(String, Int)]
+        var text: String { values.map { "\($0.0)=\($0.1)" }.joined(separator: ",") }
+        var allZero: Bool { values.allSatisfy { $0.1 == 0 } }
+    }
+
+    private func requireOptIn() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["RUN_SYNC_MIGRATION_SCALE"] != nil,
+            "Set TEST_RUNNER_RUN_SYNC_MIGRATION_SCALE=1 to run opt-in reset measurements."
+        )
+    }
+
+    private var incidentFixture: URL {
+        get throws {
+            URL(fileURLWithPath: try XCTUnwrap(
+                ProcessInfo.processInfo.environment["RESET_INCIDENT_FIXTURE_ROOT"]
+            ), isDirectory: true)
+        }
+    }
+
+    private var filesystemTemplate: URL {
+        get throws {
+            URL(fileURLWithPath: try XCTUnwrap(
+                ProcessInfo.processInfo.environment["RESET_FILESYSTEM_TEMPLATE_ROOT"]
+            ), isDirectory: true)
+        }
+    }
+
+    func testResetFilesystemDeletionSeries() throws {
+        try requireOptIn()
+        let template = try filesystemTemplate
+        let templateDownloads = template.appending(path: "Downloads", directoryHint: .isDirectory)
+        let templateArtwork = template.appending(path: "artwork", directoryHint: .isDirectory)
+        let allocation = try allocationTotals(at: templateDownloads)
+        print("RESETFS|template|files|\(allocation.files)|logicalBytes|\(allocation.logical)|allocatedBytes|\(allocation.allocated)|sparse|\(allocation.allocated < allocation.logical)")
+
+        var downloadTimes: [Double] = []
+        var clearTimes: [Double] = []
+        var artworkRemovalTimes: [Double] = []
+        var artworkRemovalSucceeded: [Bool] = []
+        var descriptorsBeforeUnlink: [[String]] = []
+
+        for run in 1...5 {
+            let root = try temporaryRoot(label: "fs-download-\(run)")
+            let downloads = root.appending(path: "Downloads", directoryHint: .isDirectory)
+            try FileManager.default.copyItem(at: templateDownloads, to: downloads)
+            let copied = try allocationTotals(at: downloads)
+            let start = DispatchTime.now().uptimeNanoseconds
+            try FileManager.default.removeItem(at: downloads)
+            let seconds = elapsed(since: start)
+            downloadTimes.append(seconds)
+            print(String(format: "RESETFS|downloads|run|%d|seconds|%.9f|files|%d|logicalBytes|%lld|allocatedBytes|%lld|gone|%@", run, seconds, copied.files, copied.logical, copied.allocated, exists(downloads) ? "false" : "true"))
+        }
+
+        for run in 1...5 {
+            let root = try temporaryRoot(label: "fs-clear-\(run)")
+            let artwork = root.appending(path: "artwork", directoryHint: .isDirectory)
+            try FileManager.default.copyItem(at: templateArtwork, to: artwork)
+            let cache = URLCache(
+                memoryCapacity: ArtworkCache.memoryCapacity,
+                diskCapacity: ArtworkCache.diskCapacity,
+                directory: artwork
+            )
+            populate(cache: cache, run: run)
+            let before = openDescriptors(under: artwork)
+            let start = DispatchTime.now().uptimeNanoseconds
+            cache.removeAllCachedResponses()
+            let seconds = elapsed(since: start)
+            clearTimes.append(seconds)
+            let after = openDescriptors(under: artwork)
+            print(String(format: "RESETFS|artworkClearPrimitive|run|%d|seconds|%.9f|fdsBefore|%d|fdsAfter|%d|exactSharedSingleton|skipped-unredirectable", run, seconds, before.count, after.count))
+            print("RESETFS|artworkClearPrimitive|run|\(run)|fdPathsBefore|\(before.joined(separator: ","))")
+            print("RESETFS|artworkClearPrimitive|run|\(run)|fdPathsAfter|\(after.joined(separator: ","))")
+        }
+
+        for run in 1...5 {
+            let root = try temporaryRoot(label: "fs-artwork-remove-\(run)")
+            let artwork = root.appending(path: "artwork", directoryHint: .isDirectory)
+            try FileManager.default.copyItem(at: templateArtwork, to: artwork)
+            var cache: URLCache? = URLCache(
+                memoryCapacity: ArtworkCache.memoryCapacity,
+                diskCapacity: ArtworkCache.diskCapacity,
+                directory: artwork
+            )
+            populate(cache: try XCTUnwrap(cache), run: 100 + run)
+            let before = openDescriptors(under: artwork)
+            descriptorsBeforeUnlink.append(before)
+            let start = DispatchTime.now().uptimeNanoseconds
+            var errorText = "none"
+            do {
+                try FileManager.default.removeItem(at: artwork)
+                artworkRemovalSucceeded.append(true)
+            } catch {
+                artworkRemovalSucceeded.append(false)
+                errorText = String(reflecting: error)
+            }
+            let seconds = elapsed(since: start)
+            artworkRemovalTimes.append(seconds)
+            let after = openDescriptors(under: artwork)
+            print(String(format: "RESETFS|artworkDirectoryRemoval|run|%d|seconds|%.9f|fdsBefore|%d|fdsAfter|%d|gone|%@|error|%@", run, seconds, before.count, after.count, exists(artwork) ? "false" : "true", errorText))
+            print("RESETFS|artworkDirectoryRemoval|run|\(run)|fdPathsBefore|\(before.joined(separator: ","))")
+            print("RESETFS|artworkDirectoryRemoval|run|\(run)|fdPathsAfter|\(after.joined(separator: ","))")
+            cache = nil
+            autoreleasepool { }
+        }
+
+        printStats(name: "downloads", samples: downloadTimes)
+        printStats(name: "artworkClearPrimitive", samples: clearTimes)
+        printStats(name: "artworkDirectoryRemoval", samples: artworkRemovalTimes)
+        let totalSamples = zip(zip(downloadTimes, clearTimes), artworkRemovalTimes).map { pair, artwork in
+            pair.0 + pair.1 + artwork
+        }
+        printStats(name: "filesystemTotal", samples: totalSamples)
+        print("RESETFS|openDescriptorRunsBeforeUnlink|\(descriptorsBeforeUnlink.filter { !$0.isEmpty }.count)|of|5")
+        print("RESETFS|artworkDirectoryRemovalSucceeded|\(artworkRemovalSucceeded.filter { $0 }.count)|of|5")
+    }
+
+    func testFileLevelResetEndToEndSeries() throws {
+        try requireOptIn()
+        var times: [Double] = []
+        var peaks: [Double] = []
+        for run in 1...5 {
+            let paths = try makeIncidentShape(label: "e2e-\(run)")
+            var container: ModelContainer? = try openV10(paths)
+            XCTAssertNotNil(container)
+            var cache: URLCache? = URLCache(
+                memoryCapacity: ArtworkCache.memoryCapacity,
+                diskCapacity: ArtworkCache.diskCapacity,
+                directory: paths.artwork
+            )
+            populate(cache: try XCTUnwrap(cache), run: run)
+            let sampler = MigrationMemorySampler()
+            _ = sampler.start()
+            let start = DispatchTime.now().uptimeNanoseconds
+            cache?.removeAllCachedResponses()
+            cache = nil
+            container = nil
+            autoreleasepool { }
+            LocalRuntimeState.shared.clear()
+            let reopened = try performReset(paths: paths, interruptAt: nil)
+            let seconds = elapsed(since: start)
+            let peak = sampler.stop()
+            times.append(seconds)
+            peaks.append(peak)
+            try reportVerification(run: run, paths: paths, container: reopened, seconds: seconds, peak: peak)
+        }
+        printStats(name: "fileLevelReset", samples: times)
+        printStats(name: "fileLevelResetPeakRssMB", samples: peaks)
+    }
+
+    func testShippingFileResetSeries() async throws {
+        try requireOptIn()
+        var samples: [Double] = []
+        var rebuildSamples: [Double] = []
+        var peaks: [Double] = []
+        for run in 1...5 {
+            let paths = try makeIncidentShape(label: "shipping-\(run)")
+            var container: ModelContainer? = try openV10(paths)
+            container = nil
+            let sampler = MigrationMemorySampler()
+            _ = sampler.start()
+            let start = DispatchTime.now().uptimeNanoseconds
+            let ok = await SettingsReset.performFileReset(
+                applicationSupport: paths.applicationSupport,
+                documents: paths.root.appending(path: "Documents", directoryHint: .isDirectory),
+                caches: paths.root.appending(path: "Caches", directoryHint: .isDirectory)
+            )
+            let transactionSeconds = elapsed(since: start)
+            let rebuildStart = DispatchTime.now().uptimeNanoseconds
+            let load = await ModelContainerFactory.makeShared(using: StoreMigrationEngine(), at: paths.mirrored)
+            let reopened: ModelContainer
+            switch load { case .ready(let value): reopened = value; default: XCTFail("fresh store did not open"); continue }
+            let rebuildSeconds = elapsed(since: rebuildStart)
+            let seconds = elapsed(since: start)
+            let peak = sampler.stop()
+            let counts = try entityCounts(reopened.mainContext)
+            samples.append(seconds); rebuildSamples.append(rebuildSeconds); peaks.append(peak)
+            print(String(format: "SHIPPINGRESET|run|%d|seconds|%.9f|transaction|%.9f|rebuild|%.9f|peakRssMB|%.3f|ok|%@|counts|%@|primaryVersion|%@|localVersion|%@|integrity|%@|%@|downloadsGone|%@|artworkGone|%@|snapshotGone|%@", run, seconds, transactionSeconds, rebuildSeconds, peak, ok ? "true" : "false", counts.text, try storeVersion(paths.mirrored), try storeVersion(paths.local), try integrity(paths.mirrored).joined(separator: ","), try integrity(paths.local).joined(separator: ","), exists(paths.downloads) ? "false" : "true", exists(paths.artwork) ? "false" : "true", exists(paths.backupRoot) ? "false" : "true"))
+            XCTAssertTrue(ok)
+            XCTAssertTrue(counts.values.filter { $0.0 != "AppSetting" }.allSatisfy { $0.1 == 0 })
+            XCTAssertEqual(try reopened.mainContext.fetchCount(FetchDescriptor<AppSetting>()), 2)
+            XCTAssertEqual(try storeVersion(paths.mirrored), "10.0.0")
+            XCTAssertEqual(try storeVersion(paths.local), "10.0.0")
+            XCTAssertEqual(try integrity(paths.mirrored), ["ok"])
+            XCTAssertEqual(try integrity(paths.local), ["ok"])
+        }
+        printStats(name: "shippingFileReset", samples: samples)
+        printStats(name: "shippingContainerRebuild", samples: rebuildSamples)
+        printStats(name: "shippingPeakRssMB", samples: peaks)
+    }
+
+    func testCommittedJournalRecoveryLeavesFreshStores() throws {
+        try requireOptIn()
+        let paths = try makeIncidentShape(label: "committed-journal-recovery")
+        var container: ModelContainer? = try openV10(paths)
+        container = nil
+        do { _ = try performReset(paths: paths, interruptAt: .afterCommittedJournal); XCTFail("expected interruption") }
+        catch let error as CocoaError { XCTAssertEqual(error.code, .userCancelled) }
+        let recovered = try recoverAndOpen(paths: paths)
+        XCTAssertTrue(try entityCounts(recovered.mainContext).allZero)
+        XCTAssertFalse(exists(paths.journal))
+        XCTAssertTrue(quarantineDirectories(paths).isEmpty)
+        XCTAssertEqual(try storeVersion(paths.mirrored), "10.0.0")
+        XCTAssertEqual(try storeVersion(paths.local), "10.0.0")
+    }
+
+    func testFileLevelResetInterruptionRecovery() throws {
+        try requireOptIn()
+        for point in Interruption.allCases {
+            let paths = try makeIncidentShape(label: "interrupt-\(point.rawValue)")
+            var container: ModelContainer? = try openV10(paths)
+            XCTAssertNotNil(container)
+            container = nil
+            autoreleasepool { }
+            do {
+                _ = try performReset(paths: paths, interruptAt: point)
+                XCTFail("Expected interruption at \(point.rawValue)")
+            } catch let error as CocoaError where error.code == .userCancelled {
+                // Expected simulated process termination.
+            }
+            let recovered = try recoverAndOpen(paths: paths)
+            let counts = try entityCounts(recovered.mainContext)
+            let expected = [Interruption.afterMovingJournal, .afterQuarantine].contains(point)
+                ? "rolled-back-original" : "committed-fresh"
+            let consistent = expected == "rolled-back-original" ? !counts.allZero : counts.allZero
+            print("RESETINTERRUPT|point|\(point.rawValue)|expected|\(expected)|counts|\(counts.text)|consistent|\(consistent)|journalGone|\(!exists(paths.journal))|quarantineCount|\(quarantineDirectories(paths).count)|downloadsExists|\(exists(paths.downloads))|artworkExists|\(exists(paths.artwork))|snapshotExists|\(exists(paths.backupRoot))")
+            XCTAssertTrue(consistent)
+            XCTAssertFalse(exists(paths.journal))
+            XCTAssertTrue(quarantineDirectories(paths).isEmpty)
+        }
+    }
+
+    private func makeIncidentShape(label: String) throws -> Paths {
+        let root = try temporaryRoot(label: label)
+        let appSupport = root.appending(path: "Application Support", directoryHint: .isDirectory)
+        let documents = root.appending(path: "Documents", directoryHint: .isDirectory)
+        let caches = root.appending(path: "Caches", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
+        let sourceAppSupport = try incidentFixture
+            .appending(path: "Library/Application Support", directoryHint: .isDirectory)
+        for name in [
+            "default.store", "default.store-wal", "default.store-shm",
+            "earshot-local.store", "earshot-local.store-wal", "earshot-local.store-shm",
+        ] {
+            try FileManager.default.copyItem(
+                at: sourceAppSupport.appending(path: name), to: appSupport.appending(path: name)
+            )
+        }
+        let template = try filesystemTemplate
+        try FileManager.default.copyItem(
+            at: template.appending(path: "Downloads"),
+            to: documents.appending(path: "Downloads", directoryHint: .isDirectory)
+        )
+        try FileManager.default.copyItem(
+            at: template.appending(path: "artwork"),
+            to: caches.appending(path: "artwork", directoryHint: .isDirectory)
+        )
+        let backupRoot = appSupport.appending(path: "store-backups", directoryHint: .isDirectory)
+        let snapshot = backupRoot.appending(path: "verified-reset-fixture", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: snapshot, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(
+            at: sourceAppSupport.appending(path: "default.store"),
+            to: snapshot.appending(path: "default.store")
+        )
+        try Data("{\"formatVersion\":1,\"measurementFixture\":true}".utf8)
+            .write(to: snapshot.appending(path: "manifest.json"), options: .atomic)
+        return Paths(
+            root: root, applicationSupport: appSupport,
+            mirrored: appSupport.appending(path: "default.store"),
+            local: appSupport.appending(path: "earshot-local.store"),
+            downloads: documents.appending(path: "Downloads", directoryHint: .isDirectory),
+            artwork: caches.appending(path: "artwork", directoryHint: .isDirectory),
+            backupRoot: backupRoot,
+            journal: appSupport.appending(path: "settings-reset-transaction.json")
+        )
+    }
+
+    private func performReset(
+        paths: Paths, interruptAt: Interruption?
+    ) throws -> ModelContainer {
+        try recoverTransaction(paths)
+        let quarantineName = "settings-reset-quarantine-\(UUID().uuidString)"
+        let quarantine = paths.applicationSupport.appending(
+            path: quarantineName, directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(at: quarantine, withIntermediateDirectories: false)
+        let candidates = [
+            paths.mirrored,
+            URL(fileURLWithPath: paths.mirrored.path + "-wal"),
+            URL(fileURLWithPath: paths.mirrored.path + "-shm"),
+            URL(fileURLWithPath: paths.mirrored.path + "-journal"),
+            paths.local,
+            URL(fileURLWithPath: paths.local.path + "-wal"),
+            URL(fileURLWithPath: paths.local.path + "-shm"),
+            URL(fileURLWithPath: paths.local.path + "-journal"),
+            paths.backupRoot, paths.downloads, paths.artwork,
+        ].filter(exists)
+        let entries = candidates.enumerated().map {
+            ResetEntry(sourcePath: $0.element.path, quarantineName: "\($0.offset)-\($0.element.lastPathComponent)")
+        }
+        var journal = ResetJournal(
+            phase: .moving, quarantineName: quarantineName, entries: entries
+        )
+        try write(journal, to: paths.journal)
+        try interruptIfRequested(.afterMovingJournal, requested: interruptAt)
+        for entry in entries {
+            try FileManager.default.moveItem(
+                at: URL(fileURLWithPath: entry.sourcePath),
+                to: quarantine.appending(path: entry.quarantineName)
+            )
+        }
+        try interruptIfRequested(.afterQuarantine, requested: interruptAt)
+        journal = ResetJournal(
+            phase: .committed, quarantineName: quarantineName, entries: entries
+        )
+        try write(journal, to: paths.journal)
+        try interruptIfRequested(.afterCommittedJournal, requested: interruptAt)
+        try FileManager.default.removeItem(at: quarantine)
+        try interruptIfRequested(.afterQuarantineCleanup, requested: interruptAt)
+        try FileManager.default.removeItem(at: paths.journal)
+        try interruptIfRequested(.afterJournalRemoval, requested: interruptAt)
+        return try openV10(paths)
+    }
+
+    private func recoverAndOpen(paths: Paths) throws -> ModelContainer {
+        try recoverTransaction(paths)
+        return try openV10(paths)
+    }
+
+    private func recoverTransaction(_ paths: Paths) throws {
+        guard exists(paths.journal) else { return }
+        let journal = try JSONDecoder().decode(
+            ResetJournal.self, from: Data(contentsOf: paths.journal)
+        )
+        let quarantine = paths.applicationSupport.appending(
+            path: journal.quarantineName, directoryHint: .isDirectory
+        )
+        if journal.phase == .moving {
+            for entry in journal.entries {
+                let staged = quarantine.appending(path: entry.quarantineName)
+                guard exists(staged) else { continue }
+                let source = URL(fileURLWithPath: entry.sourcePath)
+                try FileManager.default.createDirectory(
+                    at: source.deletingLastPathComponent(), withIntermediateDirectories: true
+                )
+                try FileManager.default.moveItem(at: staged, to: source)
+            }
+        }
+        if exists(quarantine) { try FileManager.default.removeItem(at: quarantine) }
+        try FileManager.default.removeItem(at: paths.journal)
+    }
+
+    private func reportVerification(
+        run: Int, paths: Paths, container: ModelContainer, seconds: Double, peak: Double
+    ) throws {
+        let counts = try entityCounts(container.mainContext)
+        let primaryVersion = try storeVersion(paths.mirrored)
+        let localVersion = try storeVersion(paths.local)
+        let primaryIntegrity = try integrity(paths.mirrored).joined(separator: ",")
+        let localIntegrity = try integrity(paths.local).joined(separator: ",")
+        print(String(format: "RESETE2E|run|%d|seconds|%.9f|peakRssMB|%.3f|primaryVersion|%@|localVersion|%@|primaryIntegrity|%@|localIntegrity|%@|counts|%@|downloadsGone|%@|artworkGone|%@|snapshotGone|%@|journalGone|%@|quarantineCount|%d", run, seconds, peak, primaryVersion, localVersion, primaryIntegrity, localIntegrity, counts.text, exists(paths.downloads) ? "false" : "true", exists(paths.artwork) ? "false" : "true", exists(paths.backupRoot) ? "false" : "true", exists(paths.journal) ? "false" : "true", quarantineDirectories(paths).count))
+        XCTAssertTrue(counts.allZero)
+        XCTAssertEqual(primaryVersion, "10.0.0")
+        XCTAssertEqual(localVersion, "10.0.0")
+        XCTAssertEqual(primaryIntegrity, "ok")
+        XCTAssertEqual(localIntegrity, "ok")
+        XCTAssertFalse(exists(paths.downloads))
+        XCTAssertFalse(exists(paths.artwork))
+        XCTAssertFalse(exists(paths.backupRoot))
+        XCTAssertFalse(exists(paths.journal))
+        XCTAssertTrue(quarantineDirectories(paths).isEmpty)
+    }
+
+    private func openV10(_ paths: Paths) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: EarshotSchemaV10.self)
+        let mirrored = ModelConfiguration(
+            "FutureMirrored", schema: Schema(EarshotSchemaV10.mirroredModels),
+            url: paths.mirrored, cloudKitDatabase: .none
+        )
+        let local = ModelConfiguration(
+            "DeviceLocal", schema: Schema(EarshotSchemaV10.localModels),
+            url: paths.local, cloudKitDatabase: .none
+        )
+        return try ModelContainer(for: schema, configurations: mirrored, local)
+    }
+
+    private func entityCounts(_ context: ModelContext) throws -> EntityCounts {
+        EntityCounts(values: [
+            ("Podcast", try context.fetchCount(FetchDescriptor<Podcast>())),
+            ("Episode", try context.fetchCount(FetchDescriptor<Episode>())),
+            ("QueueItem", try context.fetchCount(FetchDescriptor<QueueItem>())),
+            ("ListeningSession", try context.fetchCount(FetchDescriptor<ListeningSession>())),
+            ("Bookmark", try context.fetchCount(FetchDescriptor<Bookmark>())),
+            ("PodcastFolder", try context.fetchCount(FetchDescriptor<PodcastFolder>())),
+            ("FolderMembership", try context.fetchCount(FetchDescriptor<FolderMembership>())),
+            ("EpisodeFolderMembership", try context.fetchCount(FetchDescriptor<EpisodeFolderMembership>())),
+            ("RecentlyExpired", try context.fetchCount(FetchDescriptor<RecentlyExpired>())),
+            ("QuickActionConfig", try context.fetchCount(FetchDescriptor<QuickActionConfig>())),
+            ("AppSetting", try context.fetchCount(FetchDescriptor<AppSetting>())),
+            ("LocalPodcastState", try context.fetchCount(FetchDescriptor<LocalPodcastState>())),
+            ("LocalEpisodeState", try context.fetchCount(FetchDescriptor<LocalEpisodeState>())),
+            ("LocalAppSetting", try context.fetchCount(FetchDescriptor<LocalAppSetting>())),
+        ])
+    }
+
+    private func populate(cache: URLCache, run: Int) {
+        let url = URL(string: "https://reset-measurement.invalid/artwork-\(run).png")!
+        let request = URLRequest(url: url)
+        let response = URLResponse(
+            url: url, mimeType: "image/png", expectedContentLength: 4096,
+            textEncodingName: nil
+        )
+        cache.storeCachedResponse(
+            CachedURLResponse(response: response, data: Data(repeating: UInt8(run), count: 4096)),
+            for: request
+        )
+        _ = cache.cachedResponse(for: request)
+    }
+
+    private func allocationTotals(at directory: URL) throws -> (
+        files: Int, logical: Int64, allocated: Int64
+    ) {
+        let files = try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        ).filter { url in
+            (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }
+        var logical: Int64 = 0
+        var allocated: Int64 = 0
+        for file in files {
+            var info = stat()
+            guard lstat(file.path, &info) == 0 else { throw CocoaError(.fileReadUnknown) }
+            logical += Int64(info.st_size)
+            allocated += Int64(info.st_blocks) * 512
+        }
+        return (files.count, logical, allocated)
+    }
+
+    private func openDescriptors(under directory: URL) -> [String] {
+        let prefix = directory.standardizedFileURL.path
+        return (0..<1024).compactMap { descriptor -> String? in
+            var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+            let descriptorPath = "/dev/fd/\(descriptor)"
+            let count = descriptorPath.withCString { path in
+                buffer.withUnsafeMutableBufferPointer {
+                    readlink(path, $0.baseAddress, $0.count - 1)
+                }
+            }
+            guard count > 0 else { return nil }
+            buffer[Int(count)] = 0
+            let path = String(
+                decoding: buffer.prefix(Int(count)).map { UInt8(bitPattern: $0) },
+                as: UTF8.self
+            )
+            return path.hasPrefix(prefix) ? path : nil
+        }.sorted()
+    }
+
+    private func storeVersion(_ url: URL) throws -> String {
+        let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite, at: url
+        )
+        return try XCTUnwrap(
+            (metadata[NSStoreModelVersionIdentifiersKey] as? [String])?.first
+        )
+    }
+
+    private func integrity(_ url: URL) throws -> [String] {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA integrity_check", -1, &statement, nil)
+                == SQLITE_OK else { throw CocoaError(.fileReadUnknown) }
+        defer { sqlite3_finalize(statement) }
+        var rows: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let text = sqlite3_column_text(statement, 0) {
+                rows.append(String(cString: text))
+            }
+        }
+        return rows
+    }
+
+    private func temporaryRoot(label: String) throws -> URL {
+        let root = FileManager.default.temporaryDirectory.appending(
+            path: "reset-turn2-\(label)-\(UUID().uuidString)", directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    private func quarantineDirectories(_ paths: Paths) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(
+            at: paths.applicationSupport, includingPropertiesForKeys: nil
+        )) ?? []).filter { $0.lastPathComponent.hasPrefix("settings-reset-quarantine-") }
+    }
+
+    private func interruptIfRequested(
+        _ point: Interruption, requested: Interruption?
+    ) throws {
+        guard point == requested else { return }
+        throw CocoaError(.userCancelled)
+    }
+
+    private func write(_ journal: ResetJournal, to url: URL) throws {
+        try JSONEncoder().encode(journal).write(to: url, options: .atomic)
+    }
+
+    private func exists(_ url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.path)
+    }
+
+    private func elapsed(since start: UInt64) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
+    }
+
+    private func printStats(name: String, samples: [Double]) {
+        let mean = samples.reduce(0, +) / Double(samples.count)
+        let variance = samples.reduce(0) { $0 + pow($1 - mean, 2) } / Double(samples.count)
+        let standardDeviation = sqrt(variance)
+        print(String(format: "RESETSTATS|name|%@|samples|%@|mean|%.9f|populationStdDev|%.9f|min|%.9f|max|%.9f", name, samples.map { String(format: "%.9f", $0) }.joined(separator: ","), mean, standardDeviation, samples.min()!, samples.max()!))
     }
 }

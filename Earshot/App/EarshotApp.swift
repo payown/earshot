@@ -146,6 +146,7 @@ final class AppRuntime {
     private let recoveryDownloadUsage: RecoveryDownloadUsageOperation
     private let recoveryDownloadRemoval: RecoveryDownloadRemovalOperation
     private let recoveryCapacity: RecoveryCapacityOperation
+    private let fileResetOperation: @Sendable () async -> Bool
     private var generation = 0
     private var processServicesStarted = false
     private var entitlementContainer: ModelContainer?
@@ -170,6 +171,8 @@ final class AppRuntime {
     private var recoveryCheckToken: String?
     private var recoveryForegroundCheckCount = 0
     private var preparedDownloadContainer: ModelContainer?
+    private var resetTask: Task<Bool, Never>?
+    private var resetInFlight = false
 
     init(
         load: StoreLoad? = nil,
@@ -189,6 +192,9 @@ final class AppRuntime {
                 try MigrationBackupManager.availableBytes(at: .applicationSupportDirectory)
             }.value
         },
+        fileResetOperation: @escaping @Sendable () async -> Bool = {
+            await SettingsReset.performFileReset()
+        },
         launchSleep: @escaping LaunchSleepOperation = { duration in
             try await Task.sleep(for: duration)
         }
@@ -203,6 +209,7 @@ final class AppRuntime {
         self.recoveryDownloadUsage = recoveryDownloadUsage
         self.recoveryDownloadRemoval = recoveryDownloadRemoval
         self.recoveryCapacity = recoveryCapacity
+        self.fileResetOperation = fileResetOperation
         self.launchSleep = launchSleep
         let router = NotificationRouter()
         notificationRouter = router
@@ -228,7 +235,7 @@ final class AppRuntime {
     /// process-lifetime runtime rather than a SwiftUI `.task`, so view removal,
     /// backgrounding, or reconstruction cannot create a second migration.
     func startLaunchIfNeeded() {
-        guard case .unavailable = phase, launchTask == nil else { return }
+        guard case .unavailable = phase, launchTask == nil, !resetInFlight else { return }
 
         launchAttemptCount += 1
         let attemptID = UUID()
@@ -263,7 +270,7 @@ final class AppRuntime {
               recoveryState == .migrationFailed
                 || recoveryState.isBackupUnavailable
                 || backupRestorePhase == .restored,
-              launchTask == nil else { return }
+              launchTask == nil, !resetInFlight else { return }
         cancelAnnouncementWork()
         launchFocusRequest = nil
         backupRestorePhase = .idle
@@ -410,6 +417,10 @@ final class AppRuntime {
         "\(preparationAccessibilityLabel). \(initialPreparationValue)"
     static let firstHeartbeatDelay: Duration = .seconds(5)
     static let subsequentHeartbeatDelay: Duration = .seconds(8)
+    /// UIKit occasionally omits `announcementDidFinishNotification`. Preparation
+    /// speech is useful status, but it must never become a gate that prevents a
+    /// successfully migrated store from publishing the ready UI.
+    static let stageAnnouncementTimeout: Duration = .seconds(8)
 
     private func receive(_ progress: StoreMigrationProgress, attemptID: UUID) {
         guard launchAttemptID == attemptID, case .unavailable = phase else { return }
@@ -558,7 +569,7 @@ final class AppRuntime {
             _ = await self.launchAnnouncer.announceLaunch(
                 message,
                 assertive: false,
-                timeout: nil
+                timeout: Self.stageAnnouncementTimeout
             )
         }
     }
@@ -642,6 +653,48 @@ final class AppRuntime {
             }
             phase = .recovery(state)
         }
+    }
+
+    /// Runs Settings reset as a single in-flight operation. Main-actor work is
+    /// limited to quiescing services and publishing the replacement container;
+    /// the journaled file transaction runs in ``SettingsReset``'s detached task.
+    func resetLocalData() async -> Bool {
+        guard resetTask == nil else { return false }
+        resetInFlight = true
+        NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
+        await BackgroundFeedRefresher.cancelAndWait()
+        let launchToAwait = launchTask
+        launchToAwait?.cancel()
+        _ = await launchToAwait?.value
+        launchTask = nil
+        player.releasePersistence()
+        quickActions.releasePersistence()
+        settings.releasePersistence()
+        tips.releasePersistence()
+        entitlements.releasePersistence()
+        ArtworkCache.shared.tearDown()
+        ArtworkCache.resetShared()
+        entitlementContainer = nil
+        boundRootServicesContainer = nil
+        rootServiceActivationState = .notStarted
+        await downloads.releasePersistence()
+        phase = .unavailable
+        preparedDownloadContainer = nil
+
+        let task = Task { @MainActor [weak self] () -> Bool in
+            let deleted = await self?.fileResetOperation() ?? false
+            guard deleted, let self else { return false }
+            let engine = StoreMigrationEngine()
+            let load = await ModelContainerFactory.makeShared(using: engine)
+            guard case .ready = load else { return false }
+            self.install(load)
+            return true
+        }
+        resetTask = task
+        let result = await task.value
+        resetTask = nil
+        resetInFlight = false
+        return result
     }
 
     func loadRecoveryDownloadUsageIfNeeded() async {

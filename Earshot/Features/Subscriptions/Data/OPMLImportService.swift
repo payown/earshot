@@ -20,6 +20,8 @@ struct OPMLImportOutcome {
 final class OPMLImportService {
     private let context: ModelContext
     private let subscriptions: SubscriptionRepository
+    private var folderCache: [String: PodcastFolder] = [:]
+    private var membershipCache: Set<String> = []
 
     /// `downloader` is threaded through to the underlying ``SubscriptionRepository``
     /// so the end-of-import auto-download pass below (`autoDownloadRecent`) actually
@@ -75,17 +77,28 @@ final class OPMLImportService {
         onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
     ) async -> OPMLImportOutcome {
         let groups = OPMLDocument.groups(from: opml)
+        folderCache = Dictionary(
+            uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<PodcastFolder>())) ?? [])
+                .map { ($0.name, $0) }
+        )
+        membershipCache = Set(
+            ((try? context.fetch(FetchDescriptor<FolderMembership>())) ?? []).compactMap {
+                guard let folder = $0.folder, let podcast = $0.podcast else { return nil }
+                return membershipKey(folder: folder.name, feedURL: podcast.feedURL)
+            }
+        )
 
         // Flatten to an ordered list of feed URLs and a trimmed-URL -> folder-name
         // map. A URL keeps its FIRST folder if it somehow appears twice (mirrors the
         // old loop, which created the membership on first encounter).
         var orderedURLs: [String] = []
+        var seenURLs: Set<String> = []
         var folderForURL: [String: String] = [:]
         for group in groups {
             for feedURL in group.feedURLs {
                 let canonical = FeedURLIdentity.canonical(feedURL)
                 guard !canonical.isEmpty else { continue }
-                if !orderedURLs.contains(canonical) { orderedURLs.append(canonical) }
+                if seenURLs.insert(canonical).inserted { orderedURLs.append(canonical) }
                 if let folderName = group.folder, folderForURL[canonical] == nil {
                     folderForURL[canonical] = folderName
                 }
@@ -120,19 +133,21 @@ final class OPMLImportService {
     }
 
     private func findOrCreateFolder(named name: String) -> PodcastFolder {
-        let existing = (try? context.fetch(FetchDescriptor<PodcastFolder>()))?
-            .first { $0.name == name }
-        if let existing { return existing }
+        if let existing = folderCache[name] { return existing }
         let folder = PodcastFolder(name: name)
         context.insert(folder)
+        folderCache[name] = folder
         return folder
     }
 
     private func addMembership(_ podcast: Podcast, to folder: PodcastFolder) {
-        let already = (try? context.fetch(FetchDescriptor<FolderMembership>()))?
-            .contains { $0.folder == folder && $0.podcast == podcast } ?? false
-        guard !already else { return }
+        let key = membershipKey(folder: folder.name, feedURL: podcast.feedURL)
+        guard membershipCache.insert(key).inserted else { return }
         context.insert(FolderMembership(folder: folder, podcast: podcast))
+    }
+
+    private func membershipKey(folder: String, feedURL: String) -> String {
+        "\(folder)\u{1F}\(FeedURLIdentity.canonical(feedURL))"
     }
 
     private func save() {

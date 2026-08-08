@@ -20,6 +20,28 @@ actor FeedRefreshActor {
     /// library while still bounding how much un-persisted work is at risk if the
     /// task is cancelled mid-run.
     private static let saveBatchSize = 10
+    /// Network fetches are overlapped, but all SwiftData mutation remains on this
+    /// actor in input order. This keeps imports responsive without creating a
+    /// context per feed or an unbounded request burst.
+    // Three concurrent feeds balance throughput with CPU and memory headroom for
+    // SwiftUI and VoiceOver on device. Six overlapped XML parses made a 60-feed
+    // import faster in isolation but could starve the foreground UI; two proved
+    // responsive in the build-169 device test, so build 170 measures the middle.
+    private static let subscribeFetchConcurrency = 3
+    /// Bulk subscription outcomes retain their newly inserted Episode objects
+    /// until a save gives them permanent IDs. Keep this smaller than refresh's
+    /// metadata-only batch so large back catalogs cannot accumulate ten feeds'
+    /// worth of live model objects at once.
+    private static let subscribeSaveBatchSize = 2
+    /// OPML restores prioritize making subscriptions usable quickly. The normal
+    /// refresh path can add older catalog rows later; because the subscribe seeds
+    /// the newest-date high-water mark, that older history stays dismissed and is
+    /// never mistaken for newly published Inbox content.
+    private static let opmlInitialEpisodeLimit = 10
+    /// A single unresponsive feed must not hold an OPML import at the URLSession
+    /// resource timeout. The normal feed refresh path keeps its existing policy;
+    /// this shorter ceiling applies only to bulk import prefetches.
+    private static let subscribeFetchTimeout: Duration = .seconds(15)
 
     /// The per-podcast result of one refresh pass, identified by feed URL so the
     /// main actor can resolve it back without an `@Model` crossing the boundary.
@@ -221,15 +243,6 @@ actor FeedRefreshActor {
     ) async -> [SubscribeResult] {
         await PodcastIdentityWriteGate.shared.acquire(feedURLs: feedURLs)
         let total = feedURLs.count
-        var results: [SubscribeResult] = []
-        var sinceLastSave = 0
-        var completed = 0
-
-        // Inserted-but-not-yet-finally-saved subscribes whose IDs must be read AFTER
-        // a save. persistentModelID is temporary until the context saves; we collect
-        // the live @Model objects here (they never leave the actor) and resolve their
-        // permanent IDs into `results` after each batch save below.
-        var pendingIndexByResult: [Int: SubscribeOutcome] = [:]
 
         do {
             let repair = try IdentityRepairService(context: modelContext)
@@ -241,52 +254,113 @@ actor FeedRefreshActor {
             )
         }
 
-        func flushPending() {
-            saveIfNeededOrLog()
-            for (index, outcome) in pendingIndexByResult { results[index] = outcome.result() }
-            pendingIndexByResult.removeAll()
-            sinceLastSave = 0
-        }
+        let results = await withTaskGroup(
+            of: (Int, String, ParsedFeed?).self,
+            returning: [SubscribeResult].self
+        ) { group in
+            var resultByInputIndex: [Int: SubscribeResult] = [:]
+            var pendingOutcomeByInputIndex: [Int: SubscribeOutcome] = [:]
+            var sinceLastSave = 0
+            var completed = 0
 
-        for url in feedURLs {
-            var title: String?
-            do {
-                let outcome = try await subscribeOne(feedURL: url, feed: feed, inboxSeedCount: inboxSeedCount)
-                title = outcome.title
-                if outcome.alreadySubscribed {
-                    // No insert/save needed: IDs are already permanent.
-                    results.append(outcome.result())
-                } else {
-                    // Reserve the slot now (preserves input order) and fill its
-                    // permanent IDs at the next save.
-                    let index = results.count
-                    results.append(
-                        SubscribeResult(
-                            feedURL: outcome.podcast.feedURL,
-                            podcastID: outcome.podcast.persistentModelID,
-                            episodeIDs: [],
-                            alreadySubscribed: false
-                        )
-                    )
-                    pendingIndexByResult[index] = outcome
-                    sinceLastSave += 1
-                    if sinceLastSave >= Self.saveBatchSize { flushPending() }
+            func flushPending() {
+                saveIfNeededOrLog()
+                for (index, outcome) in pendingOutcomeByInputIndex {
+                    resultByInputIndex[index] = outcome.result()
                 }
-            } catch {
-                AppLog.subscriptions.error("OPML import: failed \(url, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                pendingOutcomeByInputIndex.removeAll()
+                sinceLastSave = 0
             }
-            completed += 1
-            await onProgress?(completed, total, title)
+
+            // Resolve existing subscriptions without network work. New feeds enter
+            // the bounded pipeline below; each parsed feed is written and released
+            // as soon as it arrives rather than retaining every parsed feed until
+            // the slowest network request finishes.
+            let identity = PodcastIdentityService(context: modelContext)
+            var fetchCandidates: [(index: Int, url: String)] = []
+            for (index, url) in feedURLs.enumerated() {
+                if let existing = try? identity.existing(feedURL: url) {
+                    resultByInputIndex[index] = SubscribeOutcome(
+                        podcast: existing, episodes: [], alreadySubscribed: true
+                    ).result()
+                    completed += 1
+                    await onProgress?(completed, total, existing.title)
+                } else {
+                    fetchCandidates.append((index, url))
+                }
+            }
+
+            var nextIndex = 0
+            let initial = min(Self.subscribeFetchConcurrency, fetchCandidates.count)
+            for _ in 0..<initial {
+                let candidate = fetchCandidates[nextIndex]
+                nextIndex += 1
+                group.addTask {
+                    (candidate.index, candidate.url, await Self.fetchForImport(candidate.url, feed: feed))
+                }
+            }
+            while let (inputIndex, url, parsed) = await group.next() {
+                var title: String?
+                if let parsed {
+                    do {
+                        let outcome = try await subscribeOne(
+                            feedURL: url,
+                            feed: feed,
+                            inboxSeedCount: inboxSeedCount,
+                            parsedFeed: parsed,
+                            initialEpisodeLimit: Self.opmlInitialEpisodeLimit
+                        )
+                        title = outcome.title
+                        if outcome.alreadySubscribed {
+                            resultByInputIndex[inputIndex] = outcome.result()
+                        } else {
+                            pendingOutcomeByInputIndex[inputIndex] = outcome
+                            sinceLastSave += 1
+                            if sinceLastSave >= Self.subscribeSaveBatchSize { flushPending() }
+                        }
+                    } catch {
+                        AppLog.subscriptions.error(
+                            "OPML import: failed \(url, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        )
+                    }
+                } else {
+                    AppLog.subscriptions.error("OPML import: failed \(url, privacy: .public)")
+                }
+                completed += 1
+                await onProgress?(completed, total, title)
+
+                if nextIndex < fetchCandidates.count {
+                    let candidate = fetchCandidates[nextIndex]
+                    nextIndex += 1
+                    group.addTask {
+                        (candidate.index, candidate.url, await Self.fetchForImport(candidate.url, feed: feed))
+                    }
+                }
+            }
+
+            flushPending()
+            return resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] }
         }
 
-        // Flush the final partial batch and resolve its IDs.
-        flushPending()
         // Newly ingested episodes can change the inbox count — signal the tab
         // badge once, at the end of the whole operation rather than per batch,
         // so it refreshes without polling on every save (#736).
         NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
         await PodcastIdentityWriteGate.shared.release(feedURLs: feedURLs)
         return results
+    }
+
+    private static func fetchForImport(_ url: String, feed: FeedFetching) async -> ParsedFeed? {
+        await withTaskGroup(of: ParsedFeed?.self) { group in
+            group.addTask { try? await feed.fetch(url) }
+            group.addTask {
+                try? await Task.sleep(for: Self.subscribeFetchTimeout)
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
     }
 
     /// The result of one core subscribe, holding the live @Model objects (which stay
@@ -326,7 +400,13 @@ actor FeedRefreshActor {
     /// Core subscribe used by both ``subscribe(feedURL:feed:)`` and
     /// ``subscribeAll(feedURLs:feed:onProgress:)``. Does NOT save — the caller decides
     /// when to save and then reads permanent IDs via ``SubscribeOutcome/result()``.
-    private func subscribeOne(feedURL: String, feed: FeedFetching, inboxSeedCount: Int) async throws -> SubscribeOutcome {
+    private func subscribeOne(
+        feedURL: String,
+        feed: FeedFetching,
+        inboxSeedCount: Int,
+        parsedFeed: ParsedFeed? = nil,
+        initialEpisodeLimit: Int? = nil
+    ) async throws -> SubscribeOutcome {
         let canonical = FeedURLIdentity.canonical(feedURL)
         let identity = PodcastIdentityService(context: modelContext)
 
@@ -339,8 +419,23 @@ actor FeedRefreshActor {
 
         // The fetch (network I/O) and the synchronous parse inside it both run on
         // this background actor, never the main thread.
-        let parsed = try await feed.fetch(canonical)
-        let parsedEpisodes = Self.deduplicatedEpisodes(parsed.episodes)
+        let parsed: ParsedFeed
+        if let parsedFeed {
+            parsed = parsedFeed
+        } else {
+            parsed = try await feed.fetch(canonical)
+        }
+        let completeParsedEpisodes = Self.deduplicatedEpisodes(parsed.episodes)
+        let parsedEpisodes: [ParsedEpisode]
+        if let initialEpisodeLimit {
+            parsedEpisodes = Array(
+                completeParsedEpisodes
+                    .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+                    .prefix(initialEpisodeLimit)
+            )
+        } else {
+            parsedEpisodes = completeParsedEpisodes
+        }
 
         // Recheck after the await: another subscribe context may have committed
         // the same natural key while this actor was fetching the network feed.
@@ -373,7 +468,7 @@ actor FeedRefreshActor {
 
         let now = Date.now
         var insertedEpisodes: [Episode] = []
-        for item in parsedEpisodes {
+        for (index, item) in parsedEpisodes.enumerated() {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
             // Start every episode dismissed; the seed pass below un-dismisses the
@@ -383,6 +478,10 @@ actor FeedRefreshActor {
             episode.inboxDismissed = true
             modelContext.insert(episode)
             insertedEpisodes.append(episode)
+            // A feed can contain thousands of episodes. Cooperatively yield during
+            // that synchronous insertion loop so other executors — especially the
+            // main actor serving SwiftUI and VoiceOver — get regular run time.
+            if index.isMultiple(of: 100) { await Task.yield() }
         }
         // Seed the inbox with the newest N NON-FUTURE episodes (status stays
         // .newEpisode), keeping the rest dismissed. N is resolved on the main actor

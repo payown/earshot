@@ -113,10 +113,15 @@ enum ModelContainerFactory {
     /// the same failure classification as ``load(at:)``. Progress is consumed by
     /// the launch coordinator through the engine's `AsyncStream`.
     static func makeShared(using engine: StoreMigrationEngine) async -> StoreLoad {
+        await makeShared(using: engine, at: storeURL)
+    }
+
+    /// Test seam using the same migration/open path against a disposable store.
+    static func makeShared(using engine: StoreMigrationEngine, at url: URL) async -> StoreLoad {
         do {
-            let container = try await engine.openOrMigrate(at: storeURL)
+            let container = try await engine.openOrMigrate(at: url)
             MigrationBackupManager.noteSuccessfulTargetOpen(
-                at: storeURL, targetSchemaMajor: MigrationBackupManager.targetSchemaMajor
+                at: url, targetSchemaMajor: MigrationBackupManager.targetSchemaMajor
             )
             return .ready(container)
         } catch StoreMigrationFailure.backupUnavailable(let underlying) {

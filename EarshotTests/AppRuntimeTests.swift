@@ -59,15 +59,18 @@ private final class RecordingLaunchAnnouncer: LaunchAnnouncing {
     private(set) var events: [Event] = []
     private let completionGate: ActivationGate?
     private var completionSuccesses: [Bool]
+    private let simulateMissingCallback: Bool
 
     init(
         isVoiceOverRunning: Bool = true,
         completionGate: ActivationGate? = nil,
-        completionSuccesses: [Bool] = []
+        completionSuccesses: [Bool] = [],
+        simulateMissingCallback: Bool = false
     ) {
         self.isVoiceOverRunning = isVoiceOverRunning
         self.completionGate = completionGate
         self.completionSuccesses = completionSuccesses
+        self.simulateMissingCallback = simulateMissingCallback
     }
 
     func announce(_ message: String, assertive: Bool) {
@@ -80,6 +83,9 @@ private final class RecordingLaunchAnnouncer: LaunchAnnouncing {
         timeout: Duration?
     ) async -> AnnouncementCompletionResult {
         events.append(Event(message: message, assertive: assertive, timeout: timeout))
+        if simulateMissingCallback, !assertive {
+            return timeout == nil ? .interrupted : .timedOut
+        }
         if assertive { await completionGate?.waitUntilReleased() }
         let wasSuccessful = completionSuccesses.isEmpty
             ? true
@@ -604,6 +610,33 @@ final class AppRuntimeTests: XCTestCase {
         ])
     }
 
+    func testMissingProgressAnnouncementCallbackCannotBlockReadyUI() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        AppSettingsStore(context: container.mainContext).setBool(
+            true, for: SettingsKey.onboardingComplete
+        )
+        let announcer = RecordingLaunchAnnouncer(simulateMissingCallback: true)
+        let runtime = AppRuntime(
+            mode: .testHost,
+            showsLaunchPreparation: true,
+            launchOperation: { progress in
+                progress(.openingAndRepairing)
+                return .ready(container)
+            },
+            launchAnnouncer: announcer
+        )
+
+        runtime.startLaunchIfNeeded()
+        await waitUntil { runtime.readyContainer != nil }
+
+        XCTAssertEqual(announcer.events.map(\.message), [
+            StoreMigrationProgress.openingAndRepairing.announcement,
+            "Earshot is ready.",
+        ])
+        XCTAssertEqual(announcer.events.first?.timeout, AppRuntime.stageAnnouncementTimeout)
+        XCTAssertEqual(AppRuntime.stageAnnouncementTimeout, .seconds(8))
+    }
+
     func testInitialScenePhaseChurnDoesNotRepeatCompletedReady() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         AppSettingsStore(context: container.mainContext).setBool(
@@ -705,10 +738,11 @@ final class AppRuntimeTests: XCTestCase {
         )
         XCTAssertEqual(AppRuntime.firstHeartbeatDelay, .seconds(5))
         XCTAssertEqual(AppRuntime.subsequentHeartbeatDelay, .seconds(8))
+        XCTAssertEqual(AppRuntime.stageAnnouncementTimeout, .seconds(8))
         XCTAssertEqual(StoreMigrationProgress.preparingAndValidating.announcement,
                        "Preparing Earshot. Step 1 of 3. Preparing your library data.")
         XCTAssertEqual(StoreMigrationProgress.migratingMirroredStore.announcement,
-                       "Preparing Earshot. Step 2 of 3. Reorganizing your episodes.")
+                       "Preparing Earshot. Step 2 of 3. Upgrading your library database.")
         XCTAssertEqual(StoreMigrationProgress.openingAndRepairing.announcement,
                        "Preparing Earshot. Step 3 of 3. Finishing preparation.")
         XCTAssertEqual(StoreMigrationProgress.migratingMirroredStore.heartbeat,

@@ -100,6 +100,8 @@ final class EntitlementStore {
         lastSyncedAt = store.date(SettingsKey.earshotPlusEntitlementLastSynced)
     }
 
+    func releasePersistence() { settings = nil; listenerTask?.cancel(); listenerTask = nil }
+
     /// Re-fetches current entitlement facts from ``source`` and persists the
     /// recomputed state. Safe to call repeatedly (e.g. from the transaction
     /// listener and from an explicit Restore Purchases action) — each call is

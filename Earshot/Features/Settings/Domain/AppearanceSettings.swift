@@ -1,5 +1,12 @@
 import SwiftUI
 
+// Existing launch-screen labels used by AppearanceSettingsView.
+extension LaunchScreen {
+    var displayName: String {
+        switch self { case .inbox: return "Inbox"; case .queue: return "Queue"; case .library: return "Library"; case .downloads: return "Downloads" }
+    }
+}
+
 // Appearance preferences (#461): theme override, accent color, layout density.
 // Pure value types with raw-value persistence (via AppSettingsStore) and
 // side-effect-free mapping helpers so every mapping is unit-testable.
