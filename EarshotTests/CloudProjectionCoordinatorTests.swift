@@ -4,6 +4,42 @@ import XCTest
 
 @MainActor
 final class CloudProjectionCoordinatorTests: XCTestCase {
+    func testStartObservesLocalChangesAndStopFullyDetaches() async throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let center = NotificationCenter()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: center,
+            deviceID: "phone"
+        )
+        try coordinator.start()
+        app.mainContext.insert(Podcast(
+            feedURL: "https://example.com/first",
+            title: "First"
+        ))
+        try app.mainContext.save()
+        center.post(name: .earshotSubscriptionsDidChange, object: nil)
+        XCTAssertEqual(
+            try projection.mainContext.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
+            1
+        )
+
+        await coordinator.stop()
+        app.mainContext.insert(Podcast(
+            feedURL: "https://example.com/second",
+            title: "Second"
+        ))
+        try app.mainContext.save()
+        center.post(name: .earshotSubscriptionsDidChange, object: nil)
+        XCTAssertEqual(
+            try projection.mainContext.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
+            1,
+            "a stopped coordinator must not retain a persistence observer"
+        )
+    }
+
     func testExistingSubscriptionsSeedOnlyCompactProjectionRows() throws {
         let app = try makeApplicationContainer()
         for index in 0..<662 {
