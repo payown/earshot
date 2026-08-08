@@ -11,6 +11,9 @@ extension Notification.Name {
     static let earshotEpisodeUserStateDidChange = Notification.Name(
         "earshotEpisodeUserStateDidChange"
     )
+    static let earshotMirroredSettingDidChange = Notification.Name(
+        "earshotMirroredSettingDidChange"
+    )
 }
 
 struct EpisodeUserStateSnapshot: Sendable, Equatable {
@@ -116,6 +119,17 @@ final class CloudQueueItemProjection {
     init() {}
 }
 
+@Model
+final class CloudSettingProjection {
+    var key: String = ""
+    var value: String = ""
+    var sourceDeviceID: String = ""
+    var modifiedAt: Date = Date.distantPast
+    var deletedAt: Date?
+
+    init() {}
+}
+
 @MainActor
 final class CloudProjectionCoordinator {
     private struct PodcastValue: Equatable {
@@ -159,6 +173,7 @@ final class CloudProjectionCoordinator {
     private var episodeObserver: NSObjectProtocol?
     private var catalogObserver: NSObjectProtocol?
     private var queueObserver: NSObjectProtocol?
+    private var settingObserver: NSObjectProtocol?
     private var reconcileTask: Task<Void, Never>?
     private var knownLocalFeedURLs: Set<String> = []
     private let deviceID: String
@@ -181,6 +196,7 @@ final class CloudProjectionCoordinator {
             CloudPodcastProjection.self,
             CloudEpisodeStateProjection.self,
             CloudQueueItemProjection.self,
+            CloudSettingProjection.self,
         ])
         let configuration = ModelConfiguration(
             "CloudProjection",
@@ -264,6 +280,23 @@ final class CloudProjectionCoordinator {
                 }
             }
         }
+        settingObserver = center.addObserver(
+            forName: .earshotMirroredSettingDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let key = notification.object as? String else { return }
+            MainActor.assumeIsolated {
+                guard self?.isApplyingRemote == false else { return }
+                do {
+                    try self?.publishLocalSettingChange(key: key)
+                } catch {
+                    AppLog.data.error(
+                        "Cloud setting projection failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+        }
         try reconcile()
     }
 
@@ -287,6 +320,10 @@ final class CloudProjectionCoordinator {
         if let queueObserver {
             center.removeObserver(queueObserver)
             self.queueObserver = nil
+        }
+        if let settingObserver {
+            center.removeObserver(settingObserver)
+            self.settingObserver = nil
         }
         reconcileTask?.cancel()
         _ = await reconcileTask?.value
@@ -392,6 +429,11 @@ final class CloudProjectionCoordinator {
             center.post(name: .earshotQueueDidChange, object: nil)
             center.post(name: .earshotInboxDidChange, object: nil)
         }
+        try publishLocalSettings(onlyIfCloudEmpty: true)
+        applicationChanged = try applyRemoteSettings(
+            appContext: appContext,
+            cloudContext: cloudContext
+        ) || applicationChanged
         if applicationChanged {
             center.post(name: .earshotCloudProjectionDidApply, object: nil)
         }
@@ -523,6 +565,73 @@ final class CloudProjectionCoordinator {
             }
         }
         if cloudContext.hasChanges { try cloudContext.save() }
+    }
+
+    func publishLocalSettings(
+        now: Date = .now,
+        onlyIfCloudEmpty: Bool = false
+    ) throws {
+        let appContext = applicationContainer.mainContext
+        let cloudContext = projectionContainer.mainContext
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudSettingProjection>())
+        if onlyIfCloudEmpty, !rows.isEmpty { return }
+        let settings = try appContext.fetch(FetchDescriptor<AppSetting>())
+        for setting in settings where AppSettingScope.isMirrored(setting.key) {
+            try publishLocalSettingChange(
+                key: setting.key,
+                value: setting.value,
+                now: now,
+                rows: rows,
+                cloudContext: cloudContext
+            )
+        }
+        if cloudContext.hasChanges { try cloudContext.save() }
+    }
+
+    func publishLocalSettingChange(key: String, now: Date = .now) throws {
+        guard AppSettingScope.isMirrored(key) else { return }
+        let canonical = AppSettingIdentity.canonicalKey(key)
+        let appContext = applicationContainer.mainContext
+        guard let value = AppSettingIdentity.value(for: canonical, in: appContext) else { return }
+        let cloudContext = projectionContainer.mainContext
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudSettingProjection>())
+        try publishLocalSettingChange(
+            key: canonical,
+            value: value,
+            now: now,
+            rows: rows,
+            cloudContext: cloudContext
+        )
+        if cloudContext.hasChanges { try cloudContext.save() }
+    }
+
+    private func publishLocalSettingChange(
+        key: String,
+        value: String,
+        now: Date,
+        rows: [CloudSettingProjection],
+        cloudContext: ModelContext
+    ) throws {
+        let canonical = AppSettingIdentity.canonicalKey(key)
+        let matches = rows.filter {
+            AppSettingIdentity.canonicalKey($0.key) == canonical
+                && $0.sourceDeviceID == deviceID
+                && $0.deletedAt == nil
+        }.sorted(by: Self.settingProjectionOrder)
+        let row = matches.first ?? {
+            let inserted = CloudSettingProjection()
+            inserted.key = canonical
+            inserted.sourceDeviceID = deviceID
+            cloudContext.insert(inserted)
+            return inserted
+        }()
+        for duplicate in matches.dropFirst() { cloudContext.delete(duplicate) }
+        if row.value != value || row.deletedAt != nil || row.modifiedAt == .distantPast {
+            row.key = canonical
+            row.value = value
+            row.modifiedAt = now
+            row.deletedAt = nil
+        }
     }
 
     /// O(number of changed episodes) hot path used by playback and explicit
@@ -733,6 +842,17 @@ final class CloudProjectionCoordinator {
         return episodeKey(for: lhs) < episodeKey(for: rhs)
     }
 
+    private static func settingProjectionOrder(
+        _ lhs: CloudSettingProjection,
+        _ rhs: CloudSettingProjection
+    ) -> Bool {
+        if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
+        if lhs.sourceDeviceID != rhs.sourceDeviceID {
+            return lhs.sourceDeviceID < rhs.sourceDeviceID
+        }
+        return lhs.value < rhs.value
+    }
+
     private func applicationEpisodes(matching keys: Set<EpisodeKey>) -> [EpisodeKey: Episode] {
         guard !keys.isEmpty else { return [:] }
         let keysByFeed = Dictionary(grouping: keys, by: \.feedURL)
@@ -878,6 +998,36 @@ final class CloudProjectionCoordinator {
         let ordered = projected + untouched
         for (position, item) in ordered.enumerated() where item.position != position {
             item.position = position
+            changed = true
+        }
+        if appContext.hasChanges { try appContext.save() }
+        if cloudContext.hasChanges { try cloudContext.save() }
+        return changed
+    }
+
+    private func applyRemoteSettings(
+        appContext: ModelContext,
+        cloudContext: ModelContext
+    ) throws -> Bool {
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudSettingProjection>())
+            .filter { $0.deletedAt == nil && AppSettingScope.isMirrored($0.key) }
+        var newestByKey: [String: CloudSettingProjection] = [:]
+        var newestByDevice: [String: CloudSettingProjection] = [:]
+        for row in rows.sorted(by: Self.settingProjectionOrder) {
+            let key = AppSettingIdentity.canonicalKey(row.key)
+            let deviceKey = "\(key)\u{1f}\(row.sourceDeviceID)"
+            if newestByDevice[deviceKey] == nil {
+                newestByDevice[deviceKey] = row
+                if newestByKey[key] == nil { newestByKey[key] = row }
+            } else {
+                cloudContext.delete(row)
+            }
+        }
+        var changed = false
+        for key in newestByKey.keys.sorted() {
+            guard let row = newestByKey[key],
+                  AppSettingIdentity.value(for: key, in: appContext) != row.value else { continue }
+            try AppSettingIdentity.setValue(row.value, for: key, in: appContext)
             changed = true
         }
         if appContext.hasChanges { try appContext.save() }

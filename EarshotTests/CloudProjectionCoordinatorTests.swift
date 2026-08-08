@@ -33,6 +33,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 "CloudEpisodeStateProjection",
                 "CloudPodcastProjection",
                 "CloudQueueItemProjection",
+                "CloudSettingProjection",
             ]
         )
     }
@@ -414,6 +415,42 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testNewestMirroredSettingWinsWithoutCopyingLocalSettings() throws {
+        let phone = try makeApplicationContainer()
+        let phoneSettings = AppSettingsStore(context: phone.mainContext)
+        phoneSettings.setDouble(1.5, for: SettingsKey.globalSpeed)
+        phoneSettings.setRawValue("phone-only", for: SettingsKey.lastPlayingEpisodeID)
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainer()
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try macCoordinator.reconcile()
+        let macSettings = AppSettingsStore(context: mac.mainContext)
+        XCTAssertEqual(macSettings.double(SettingsKey.globalSpeed, default: 1), 1.5)
+        XCTAssertNil(macSettings.rawValue(SettingsKey.lastPlayingEpisodeID))
+
+        macSettings.setDouble(2, for: SettingsKey.globalSpeed)
+        try macCoordinator.publishLocalSettingChange(
+            key: SettingsKey.globalSpeed,
+            now: .distantFuture
+        )
+        try phoneCoordinator.reconcile()
+
+        XCTAssertEqual(phoneSettings.double(SettingsKey.globalSpeed, default: 1), 2)
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV10.self)
         return try ModelContainer(
@@ -439,6 +476,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             CloudPodcastProjection.self,
             CloudEpisodeStateProjection.self,
             CloudQueueItemProjection.self,
+            CloudSettingProjection.self,
         ])
         return try ModelContainer(
             for: schema,
