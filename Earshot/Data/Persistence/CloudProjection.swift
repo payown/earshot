@@ -145,6 +145,21 @@ final class CloudBookmarkProjection {
     init() {}
 }
 
+@Model
+final class CloudListeningSessionProjection {
+    var sessionID: String = ""
+    var feedURL: String = ""
+    var episodeGUID: String?
+    var durationSeconds: Int = 0
+    var speed: Double = 1
+    var date: Date = Date.distantPast
+    var modifiedAt: Date = Date.distantPast
+    var deletedAt: Date?
+    var sourceDeviceID: String = ""
+
+    init() {}
+}
+
 @MainActor
 final class CloudProjectionCoordinator {
     private struct PodcastValue: Equatable {
@@ -190,9 +205,11 @@ final class CloudProjectionCoordinator {
     private var queueObserver: NSObjectProtocol?
     private var settingObserver: NSObjectProtocol?
     private var bookmarkObserver: NSObjectProtocol?
+    private var historyObserver: NSObjectProtocol?
     private var reconcileTask: Task<Void, Never>?
     private var knownLocalFeedURLs: Set<String> = []
     private var knownLocalBookmarkIDs: Set<String> = []
+    private var knownLocalSessionIDs: Set<String> = []
     private let deviceID: String
     private var isApplyingRemote = false
 
@@ -215,6 +232,7 @@ final class CloudProjectionCoordinator {
             CloudQueueItemProjection.self,
             CloudSettingProjection.self,
             CloudBookmarkProjection.self,
+            CloudListeningSessionProjection.self,
         ])
         let configuration = ModelConfiguration(
             "CloudProjection",
@@ -331,6 +349,22 @@ final class CloudProjectionCoordinator {
                 }
             }
         }
+        historyObserver = center.addObserver(
+            forName: .earshotListeningHistoryDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard self?.isApplyingRemote == false else { return }
+                do {
+                    try self?.publishLocalListeningHistoryChanges()
+                } catch {
+                    AppLog.data.error(
+                        "Cloud listening-history projection failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+        }
         try reconcile()
     }
 
@@ -362,6 +396,10 @@ final class CloudProjectionCoordinator {
         if let bookmarkObserver {
             center.removeObserver(bookmarkObserver)
             self.bookmarkObserver = nil
+        }
+        if let historyObserver {
+            center.removeObserver(historyObserver)
+            self.historyObserver = nil
         }
         reconcileTask?.cancel()
         _ = await reconcileTask?.value
@@ -478,6 +516,12 @@ final class CloudProjectionCoordinator {
         )
         try publishLocalBookmarkChanges(now: .now, onlyIfCloudEmpty: true)
         applicationChanged = bookmarkChanged || applicationChanged
+        let historyChanged = try applyRemoteListeningHistory(
+            appContext: appContext,
+            cloudContext: cloudContext
+        )
+        try publishLocalListeningHistoryChanges(now: .now, onlyIfCloudEmpty: true)
+        applicationChanged = historyChanged || applicationChanged
         if applicationChanged {
             center.post(name: .earshotCloudProjectionDidApply, object: nil)
         }
@@ -703,6 +747,58 @@ final class CloudProjectionCoordinator {
         if cloudContext.hasChanges { try cloudContext.save() }
     }
 
+    func publishLocalListeningHistoryChanges(
+        now: Date = .now,
+        onlyIfCloudEmpty: Bool = false
+    ) throws {
+        let appContext = applicationContainer.mainContext
+        let cloudContext = projectionContainer.mainContext
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudListeningSessionProjection>())
+        if onlyIfCloudEmpty, !rows.isEmpty { return }
+        let sessions = try appContext.fetch(FetchDescriptor<ListeningSession>())
+        var activeByKey: [String: CloudListeningSessionProjection] = [:]
+        for row in rows.filter({ $0.deletedAt == nil }).sorted(by: Self.sessionProjectionOrder) {
+            let key = Self.sessionSemanticKey(row)
+            if activeByKey[key] == nil { activeByKey[key] = row }
+        }
+        var currentIDs: Set<String> = []
+        for session in sessions.sorted(by: { $0.date < $1.date }) {
+            guard let podcast = session.podcast ?? session.episode?.podcast else { continue }
+            let guid = session.episode?.guid
+            let key = Self.sessionSemanticKey(
+                feedURL: podcast.feedURL,
+                guid: guid,
+                duration: session.durationSeconds,
+                speed: session.speed,
+                date: session.date
+            )
+            let row = activeByKey[key] ?? {
+                let inserted = CloudListeningSessionProjection()
+                inserted.sessionID = UUID().uuidString.lowercased()
+                inserted.feedURL = FeedURLIdentity.canonical(podcast.feedURL)
+                inserted.episodeGUID = guid
+                inserted.durationSeconds = max(0, session.durationSeconds)
+                inserted.speed = session.speed
+                inserted.date = session.date
+                inserted.modifiedAt = now
+                inserted.sourceDeviceID = deviceID
+                cloudContext.insert(inserted)
+                activeByKey[key] = inserted
+                return inserted
+            }()
+            currentIDs.insert(row.sessionID)
+        }
+        if !onlyIfCloudEmpty, !knownLocalSessionIDs.isEmpty {
+            for row in rows where knownLocalSessionIDs.contains(row.sessionID)
+                && !currentIDs.contains(row.sessionID) && row.deletedAt == nil {
+                row.deletedAt = now
+                row.modifiedAt = now
+            }
+        }
+        knownLocalSessionIDs = currentIDs
+        if cloudContext.hasChanges { try cloudContext.save() }
+    }
+
     private func publishLocalSettingChange(
         key: String,
         value: String,
@@ -872,9 +968,15 @@ final class CloudProjectionCoordinator {
             row.deletedAt = now
             row.modifiedAt = now
         }
+        let sessionRows = try context.fetch(FetchDescriptor<CloudListeningSessionProjection>())
+        for row in sessionRows where row.deletedAt == nil {
+            row.deletedAt = now
+            row.modifiedAt = now
+        }
         if context.hasChanges { try context.save() }
         knownLocalFeedURLs.removeAll()
         knownLocalBookmarkIDs.removeAll()
+        knownLocalSessionIDs.removeAll()
     }
 
     private static func projectionOrder(
@@ -981,6 +1083,34 @@ final class CloudProjectionCoordinator {
         createdAt: Date
     ) -> String {
         "\(FeedURLIdentity.canonical(feedURL))\u{1f}\(guid)\u{1f}\(max(0, position))\u{1f}\(createdAt.timeIntervalSinceReferenceDate.bitPattern)"
+    }
+
+    private static func sessionProjectionOrder(
+        _ lhs: CloudListeningSessionProjection,
+        _ rhs: CloudListeningSessionProjection
+    ) -> Bool {
+        if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
+        return lhs.sessionID < rhs.sessionID
+    }
+
+    private static func sessionSemanticKey(_ row: CloudListeningSessionProjection) -> String {
+        sessionSemanticKey(
+            feedURL: row.feedURL,
+            guid: row.episodeGUID,
+            duration: row.durationSeconds,
+            speed: row.speed,
+            date: row.date
+        )
+    }
+
+    private static func sessionSemanticKey(
+        feedURL: String,
+        guid: String?,
+        duration: Int,
+        speed: Double,
+        date: Date
+    ) -> String {
+        "\(FeedURLIdentity.canonical(feedURL))\u{1f}\(guid ?? "")\u{1f}\(max(0, duration))\u{1f}\(speed.bitPattern)\u{1f}\(date.timeIntervalSinceReferenceDate.bitPattern)"
     }
 
     private func applicationEpisodes(matching keys: Set<EpisodeKey>) -> [EpisodeKey: Episode] {
@@ -1228,6 +1358,75 @@ final class CloudProjectionCoordinator {
         if appContext.hasChanges { try appContext.save() }
         if cloudContext.hasChanges { try cloudContext.save() }
         knownLocalBookmarkIDs = locallyPresentIDs
+        return changed
+    }
+
+    private func applyRemoteListeningHistory(
+        appContext: ModelContext,
+        cloudContext: ModelContext
+    ) throws -> Bool {
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudListeningSessionProjection>())
+        var newestByID: [String: CloudListeningSessionProjection] = [:]
+        for row in rows.sorted(by: Self.sessionProjectionOrder) {
+            if newestByID[row.sessionID] == nil {
+                newestByID[row.sessionID] = row
+            } else {
+                cloudContext.delete(row)
+            }
+        }
+        let existing = try appContext.fetch(FetchDescriptor<ListeningSession>())
+        var localByKey: [String: ListeningSession] = [:]
+        for session in existing {
+            guard let podcast = session.podcast ?? session.episode?.podcast else { continue }
+            let key = Self.sessionSemanticKey(
+                feedURL: podcast.feedURL,
+                guid: session.episode?.guid,
+                duration: session.durationSeconds,
+                speed: session.speed,
+                date: session.date
+            )
+            if localByKey[key] == nil { localByKey[key] = session }
+        }
+        var changed = false
+        var locallyPresentIDs: Set<String> = []
+        for row in newestByID.values.sorted(by: Self.sessionProjectionOrder) {
+            let key = Self.sessionSemanticKey(row)
+            if row.deletedAt != nil {
+                if let session = localByKey.removeValue(forKey: key) {
+                    appContext.delete(session)
+                    changed = true
+                }
+                continue
+            }
+            if localByKey[key] != nil {
+                locallyPresentIDs.insert(row.sessionID)
+                continue
+            }
+            guard let podcast = try PodcastIdentityService(context: appContext)
+                .existing(feedURL: row.feedURL) else { continue }
+            let episode: Episode? = if let guid = row.episodeGUID {
+                applicationEpisodes(matching: [
+                    EpisodeKey(
+                        feedURL: FeedURLIdentity.canonical(row.feedURL),
+                        guid: guid
+                    )
+                ]).values.first
+            } else {
+                nil
+            }
+            appContext.insert(ListeningSession(
+                episode: episode,
+                podcast: podcast,
+                durationSeconds: row.durationSeconds,
+                speed: row.speed,
+                date: row.date
+            ))
+            locallyPresentIDs.insert(row.sessionID)
+            changed = true
+        }
+        if appContext.hasChanges { try appContext.save() }
+        if cloudContext.hasChanges { try cloudContext.save() }
+        knownLocalSessionIDs = locallyPresentIDs
         return changed
     }
 

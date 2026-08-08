@@ -35,6 +35,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 "CloudQueueItemProjection",
                 "CloudSettingProjection",
                 "CloudBookmarkProjection",
+                "CloudListeningSessionProjection",
             ]
         )
     }
@@ -502,6 +503,51 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<Bookmark>()).isEmpty)
     }
 
+    func testListeningHistorySyncsWithoutRequiringEpisodeCatalog() throws {
+        let phone = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        phone.mainContext.insert(podcast)
+        let session = ListeningSession(
+            podcast: podcast,
+            durationSeconds: 90,
+            speed: 1.5,
+            date: Date(timeIntervalSince1970: 100)
+        )
+        phone.mainContext.insert(session)
+        try phone.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainer()
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try macCoordinator.reconcile()
+        let imported = try XCTUnwrap(
+            mac.mainContext.fetch(FetchDescriptor<ListeningSession>()).first
+        )
+        XCTAssertEqual(imported.durationSeconds, 90)
+        XCTAssertEqual(imported.speed, 1.5)
+        XCTAssertEqual(imported.podcast?.feedURL, "https://example.com/feed")
+
+        phone.mainContext.delete(session)
+        try phone.mainContext.save()
+        try phoneCoordinator.publishLocalListeningHistoryChanges(
+            now: Date(timeIntervalSince1970: 200)
+        )
+        try macCoordinator.reconcile()
+        XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<ListeningSession>()).isEmpty)
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV10.self)
         return try ModelContainer(
@@ -529,6 +575,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             CloudQueueItemProjection.self,
             CloudSettingProjection.self,
             CloudBookmarkProjection.self,
+            CloudListeningSessionProjection.self,
         ])
         return try ModelContainer(
             for: schema,
