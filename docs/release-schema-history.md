@@ -163,6 +163,15 @@ Build 181 is superseded for testing. Production CloudKit remains disabled and
 undeployed. Fresh-store schema remains V10; supported migration sources remain
 V5 and V6.
 
+Build 183 is the development-only two-device safety follow-up. A completed
+background download whose episode was removed locally or by remote sync now
+deletes its unowned audio file without touching a deleted SwiftData object.
+Destructive local-data actions await URLSession invalidation and a bounded
+URLCache SQLite drain before moving or deleting the artwork-cache directory.
+Build 182 is superseded for testing. Production CloudKit remains disabled and
+undeployed. Fresh-store schema remains V10; supported migration sources remain
+V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
