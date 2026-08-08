@@ -797,3 +797,35 @@ The helper-only measurement was zero across fourteen entity types; the factory
 measurement was `AppSetting=2`. The 0.030273333 s figure excludes the
 `AppRuntime.resetLocalData()` service-release preamble, including download
 recovery cancellation, which remains unmeasured.
+
+## CloudKit device convergence and refresh profiling, 2026-08-08
+
+The iPhone and Apple-silicon Mac compact projection stores now converge exactly:
+662 podcasts, 4 meaningful episode-state rows, 1 queue intent, 4 mirrored
+settings, 0 bookmarks, 31 listening sessions, and 0 folders. Both projection
+stores pass SQLite `integrity_check`. The Mac application store contains 662
+podcasts and 274,072 locally refetched episodes. Inbox/catalog counts may differ
+between devices because episode catalogs are deliberately local and each device
+refetches feeds independently; that difference is not missing CloudKit library
+records.
+
+Physical profiling found and corrected three independent large-library costs.
+Build 177 constructed the feed model actor on the main executor. Build 178 moved
+it to a detached utility executor, but a 45,436-episode podcast relationship
+still caused nine 0.81–0.98 second UI stalls. Build 179 bounded automatic ingest
+to the newest ten genuinely-new episodes while preserving stored history, but
+its duplicate-repair preamble still scanned the entire relationship and produced
+16 0.84–1.16 second hangs. Build 180 limited repair to incoming candidate GUIDs;
+the full 662-feed refresh then completed durably at 2026-08-08 00:31:55 -0700,
+approximately 1 minute 58 seconds after its 00:29:57 launch. Its only remaining
+trace hang was 780.26 ms in CloudKit queue reconciliation, which resolved one
+queue item by faulting and sorting an entire podcast relationship.
+
+Build 181 replaces that relationship traversal with podcast/GUID-targeted store
+fetches. A 15-second physical-device trace recorded zero hangs. Its verified
+CloudKitDevelopment arm64 binary is 19,784,704 bytes, SHA-256
+`a52becdc65348ad01ed189de3dac711a29a213589d5eb175fc212044b3a60140`,
+modified 2026-08-08 00:34:17 -0700. The runtime development gate is `YES`.
+Wireless over-install preserved database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`. Full local CI executed 1,801 tests,
+skipped 38, and failed 0. Production CloudKit remains disabled and undeployed.

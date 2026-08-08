@@ -678,3 +678,35 @@ mostly of link-edit symbol metadata and cannot be attributed to the scheduler.
 A single wireless over-install then replaced build 176 while retaining database
 UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`. Read-only enumeration reported
 build 177. The installer did not launch the app, and no reset ran.
+
+Subsequent physical-device profiling established why the iPhone remained busy.
+Build 177's feed model actor inherited the main executor. Build 178 corrected the
+executor, but SwiftData still faulted a real 45,436-episode inverse relationship
+and recorded nine 0.81–0.98 second UI stalls. Builds 179 and 180 bounded both
+automatic episode ingest and duplicate repair to the newest ten incoming
+candidate GUIDs while preserving all already-stored history. The build-180
+662-feed refresh completed durably at 2026-08-08 00:31:55 -0700, approximately
+1 minute 58 seconds after launch, rather than the earlier approximately
+16-minute sequential Mac run. These timings use different devices and catalog
+states and are not presented as a controlled speedup measurement.
+
+Build 180's remaining 780.26-millisecond hang was independent of feed refresh:
+CloudKit queue reconciliation faulted and sorted an entire podcast relationship
+to resolve one episode. Build 181 resolves compact episode, queue, and folder
+projection keys with targeted podcast/GUID store fetches instead. A 15-second
+physical-device trace recorded zero hangs. Its signed CloudKitDevelopment arm64
+binary is 19,784,704 bytes, SHA-256
+`a52becdc65348ad01ed189de3dac711a29a213589d5eb175fc212044b3a60140`,
+modified 2026-08-08 00:34:17 -0700; the runtime development gate is `YES`.
+Wireless over-install preserved database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`.
+
+Read-only snapshots after the run show exact compact-projection convergence on
+iPhone and Mac: 662 podcasts, 4 meaningful episode states, 1 queue intent, 4
+mirrored settings, 0 bookmarks, 31 listening sessions, and 0 folders, with both
+SQLite integrity checks returning `ok`. The Mac application store contains 662
+podcasts and 274,072 locally refetched episodes. Episode catalogs and Inbox
+counts are intentionally device-local and can differ as feeds change; the
+compact synchronized library does not differ. Full local CI executed 1,801
+tests, skipped 38, and failed 0. Production CloudKit remains disabled and
+undeployed.
