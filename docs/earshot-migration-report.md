@@ -793,3 +793,12 @@ entitlement state, and download preferences remain local. â€œData Not Collectedâ
 remains the engineering recommendation because no developer-accessible backend
 receives the private records. The live WordPress page and App Store Connect must
 still be verified after publication.
+
+The build-184 device-local boundary was also inspected directly. Both the copied
+iPhone compact projection and live Mac compact projection passed SQLite
+integrity and contained no table or column whose schema represented downloads,
+audio, or entitlements. Their separate local stores retained different facts:
+2 downloaded episode-state rows plus an active lifetime entitlement on iPhone,
+versus 1 downloaded row and no entitlement on Mac. Exact library-projection
+convergence therefore did not copy those device-owned values. All inspection was
+read-only.

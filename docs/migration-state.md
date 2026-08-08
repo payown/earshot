@@ -914,3 +914,13 @@ preferences remain device-local. The App Store answer remains “Data Not
 Collected” because Earshot has no developer-accessible sync backend. Publishing
 the revised WordPress source and re-verifying App Store Connect remain release
 operations, not claims established by this repository change.
+
+A build-184 read-only physical boundary audit proves that device-owned state is
+not present in either compact projection schema: neither the iPhone snapshot nor
+the live Mac projection contains a download, entitlement, or audio table or
+column, and both integrity checks returned `ok`. The separate device-local
+stores intentionally differ: the iPhone reports 2 downloaded episode-state rows
+and an active lifetime entitlement, while the Mac reports 1 downloaded row and
+no entitlement. Those differences survived exact projection convergence, which
+is direct evidence that audio ownership and StoreKit-derived state did not cross
+devices. The inspection did not modify either store.
