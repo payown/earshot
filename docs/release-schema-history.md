@@ -123,6 +123,13 @@ background-task cancellation. Production CloudKit remains disabled and
 undeployed. Fresh-store schema remains V10; supported migration sources remain
 V5 and V6.
 
+Build 178 is the development-only feed-executor correction. Device profiling
+showed build 177's `FeedRefreshActor` had been constructed on the main actor,
+pinning SwiftData relationship work to the UI thread. Every production call site
+now creates that model actor on a detached utility executor. Build 177 is
+superseded for testing. Production CloudKit remains disabled and undeployed.
+Fresh-store schema remains V10; supported migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
