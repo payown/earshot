@@ -107,6 +107,14 @@ production CloudKit record types.
 Deliverable: a measured architecture decision and a disposable development
 CloudKit schema. No TestFlight build and no production schema deployment.
 
+Current API finding (Xcode 26.6): SwiftData publicly exposes context save
+notifications but no authoritative "last synced" value. Core Data publicly
+exposes event notifications containing setup/import/export type, start and end
+times, success, and error. B1 records those events in a bounded, development
+diagnostic monitor without polling. Physical testing must still establish that
+SwiftData emits them for this split configuration, and an event completion must
+not be presented as proof that every device has converged.
+
 ### B2. V11 conflict metadata and deterministic reconciliation (#812)
 
 Goal: make convergence preserve user intent instead of relying blindly on
