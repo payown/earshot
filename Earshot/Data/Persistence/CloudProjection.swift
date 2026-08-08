@@ -193,6 +193,9 @@ final class CloudFolderProjection {
 
 @MainActor
 final class CloudProjectionCoordinator {
+    static let storeURL = URL.applicationSupportDirectory
+        .appending(path: "earshot-cloud-projection.store")
+
     private struct PodcastValue: Equatable {
         let feedURL: String
         let title: String
@@ -271,7 +274,7 @@ final class CloudProjectionCoordinator {
         let configuration = ModelConfiguration(
             "CloudProjection",
             schema: schema,
-            url: URL.applicationSupportDirectory.appending(path: "earshot-cloud-projection.store"),
+            url: storeURL,
             cloudKitDatabase: CloudKitLaunchPolicy.projectionDatabase()
         )
         let projectionContainer = try ModelContainer(for: schema, configurations: configuration)

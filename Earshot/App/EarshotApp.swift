@@ -915,6 +915,40 @@ final class AppRuntime {
         }
     }
 
+    /// Continues only after the user explicitly accepts the currently signed-in
+    /// iCloud account. The old projection belongs to the previous account, so it
+    /// must not be reopened or uploaded. Removing it leaves the application and
+    /// device-local stores untouched; the new projection is rebuilt from the
+    /// current private database and this device's existing library.
+    func connectToCurrentCloudAccount() async {
+        guard mode == .normal,
+              CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(),
+              case .ready(let container, _) = phase else { return }
+        await cloudProjectionCoordinator?.stop()
+        cloudProjectionCoordinator = nil
+        cloudSyncAvailability = .checking
+        let cloudContainer = CKContainer(
+            identifier: CloudKitLaunchPolicy.containerIdentifier
+        )
+        do {
+            guard try await cloudContainer.accountStatus() == .available else {
+                cloudSyncAvailability = .temporarilyUnavailable
+                return
+            }
+            let current = try await cloudContainer.userRecordID().recordName
+            try ModelContainerFactory.removeStoreFilesVerifiably(
+                at: CloudProjectionCoordinator.storeURL
+            )
+            CloudAccountIdentityStore.set(current)
+            try await activateCloudProjectionIfNeeded(container: container)
+        } catch {
+            cloudSyncAvailability = .temporarilyUnavailable
+            AppLog.data.error(
+                "Cloud account recovery failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
     var rootServiceActivationStatus: RootServiceActivationStatus {
         switch rootServiceActivationState {
         case .notStarted: .notStarted

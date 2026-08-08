@@ -133,9 +133,18 @@ projection store. The existing application and device-local stores both remain
 local-only. Subscription records seed first and contain no episode relationship;
 feed catalog episodes are refetched locally. A later projection will sync only
 meaningful episode user state with explicit conflict metadata, never the entire
-feed catalog. The existing development CloudKit environment must be cleared
-before the projection's two-device test so stale full-graph records cannot be
-mistaken for projection results. Production CloudKit remains undeployed.
+feed catalog. The existing development CloudKit environment should be cleared
+before clean latency measurement so stale full-graph records cannot be mistaken
+for compact-projection cost. A management token was not available for the first
+replacement run, so its timings are explicitly contaminated. Production
+CloudKit remains undeployed.
+
+The replacement build-174 run converged all 662 subscriptions on the iPhone and
+Designed-for-iPhone Mac. Both compact stores measured 2 meaningful episode
+states, 1 queue intent, 4 shared settings, 0 bookmarks, 31 listening sessions,
+0 folders, and 700 CloudKit metadata rows, with SQLite integrity `ok`. Imports
+took 77 seconds on iPhone and 123 seconds on Mac while roughly 242,000 obsolete
+full-graph records were skipped; those are not clean compact-sync benchmarks.
 
 ### B2. V11 conflict metadata and deterministic reconciliation (#812)
 
@@ -162,12 +171,13 @@ record-level last-writer-wins.
 Deliverable: pure reconciliation tests, on-disk V10-to-V11 tests if applicable,
 and no enabled production mirroring.
 
-### B3. Production container integration and lifecycle coordinator (#813)
+### B3. Compact projection integration and lifecycle coordinator (#813)
 
 Goal: enable the mirror without creating a second launch/reset race.
 
-- Change only the `FutureMirrored` production configuration from `.none` to the
-  approved private CloudKit database. Keep `DeviceLocal` explicitly `.none`.
+- Keep `FutureMirrored` and `DeviceLocal` explicitly `.none`. Enable only the
+  separate relationship-free compact projection store against the approved
+  private CloudKit database. The rejected full V10 graph must never be enabled.
 - Start sync only after migration/open completes and `AppRuntime` owns the final
   container. No view `.task` may independently open a container.
 - Add one process-lifetime sync coordinator owned by `AppRuntime`. It observes
@@ -203,6 +213,14 @@ Goal: fail safely in every state that can otherwise surprise or destroy data.
   iCloud; Payown receives nothing and runs no sync server.
 
 Deliverable: failure-injection tests and an approved destructive-action runbook.
+
+Current implementation pauses before opening the projection when the CloudKit
+user record changes. Explicit recovery keeps the application and device-local
+stores, verifiably removes only the previous account's local projection-store
+family, and then rebuilds against the currently signed-in private account. The
+native confirmation states that the current device library will merge with any
+Earshot library already in that account and that the previous account's iCloud
+data is unchanged. Keeping sync paused remains the default.
 
 ### B5. VoiceOver-first sync status (#815)
 

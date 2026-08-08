@@ -2,6 +2,8 @@ import SwiftUI
 
 struct CloudSyncSettingsView: View {
     @Environment(AppRuntime.self) private var runtime
+    @State private var confirmingAccountChange = false
+    @State private var isConnectingAccount = false
 
     var body: some View {
         Form {
@@ -18,8 +20,30 @@ struct CloudSyncSettingsView: View {
             Section("Timing") {
                 Text("Earshot syncs automatically when iCloud is available. A completed event means this device finished its current work; it does not prove that every other device has received the changes yet.")
             }
+
+            if runtime.cloudSyncAvailability == .accountChanged {
+                Section("Account Change") {
+                    Button(isConnectingAccount ? "Connecting…" : "Use Current iCloud Account") {
+                        confirmingAccountChange = true
+                    }
+                    .disabled(isConnectingAccount)
+                    Text("This device's library is kept. Earshot discards only the previous account's local sync cache before connecting.")
+                }
+            }
         }
         .navigationTitle("iCloud Sync")
+        .alert("Connect to Current iCloud Account?", isPresented: $confirmingAccountChange) {
+            Button("Connect") {
+                isConnectingAccount = true
+                Task { @MainActor in
+                    await runtime.connectToCurrentCloudAccount()
+                    isConnectingAccount = false
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Earshot will keep this device's library, discard the previous account's local sync cache, and merge with any Earshot library in the current iCloud account. The previous account's iCloud data is not changed.")
+        }
     }
 
     private var statusText: String {

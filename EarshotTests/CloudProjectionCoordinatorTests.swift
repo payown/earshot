@@ -501,6 +501,72 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testSimultaneousQueueAddReorderAndRemoveConvergesInEitherArrivalOrder() throws {
+        for reverseArrival in [false, true] {
+            let app = try makeApplicationContainer()
+            let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+            app.mainContext.insert(podcast)
+            for guid in ["a", "b", "c", "d"] {
+                let episode = Episode(
+                    guid: guid,
+                    title: guid.uppercased(),
+                    audioURL: "https://example.com/\(guid)"
+                )
+                episode.podcast = podcast
+                app.mainContext.insert(episode)
+                if guid == "b" {
+                    app.mainContext.insert(QueueItem(episode: episode, position: 0))
+                }
+            }
+            try LocalAppSettingIdentity.setValue(
+                "b",
+                for: SettingsKey.lastPlayingEpisodeID,
+                in: app.mainContext
+            )
+            try app.mainContext.save()
+            let projection = try makeProjectionContainer()
+            let rows = [
+                queueRow(device: "phone", guid: "a", queued: true, position: 2, modifiedAt: 100),
+                queueRow(device: "mac", guid: "a", queued: true, position: 0, modifiedAt: 200),
+                queueRow(device: "phone", guid: "b", queued: true, position: 0, modifiedAt: 200),
+                queueRow(device: "mac", guid: "b", queued: false, position: 0, modifiedAt: 300),
+                queueRow(device: "phone", guid: "c", queued: true, position: 1, modifiedAt: 200),
+                queueRow(device: "mac", guid: "d", queued: true, position: 1, modifiedAt: 250),
+            ]
+            let arrival = reverseArrival ? Array(rows.reversed()) : rows
+            for row in arrival {
+                projection.mainContext.insert(row)
+            }
+            try projection.mainContext.save()
+            let coordinator = CloudProjectionCoordinator(
+                applicationContainer: app,
+                projectionContainer: projection,
+                center: NotificationCenter(),
+                deviceID: "receiver"
+            )
+
+            try coordinator.reconcile()
+
+            let queue = try app.mainContext.fetch(FetchDescriptor<QueueItem>(
+                sortBy: [SortDescriptor(\.position)]
+            ))
+            XCTAssertEqual(queue.compactMap { $0.episode?.guid }, ["a", "c", "d"])
+            XCTAssertEqual(queue.map(\.position), [0, 1, 2])
+            XCTAssertNotNil(
+                try app.mainContext.fetch(FetchDescriptor<Episode>()).first { $0.guid == "b" },
+                "removing the current item from the queue must not delete its episode"
+            )
+            XCTAssertEqual(
+                LocalAppSettingIdentity.value(
+                    for: SettingsKey.lastPlayingEpisodeID,
+                    in: app.mainContext
+                ),
+                "b",
+                "remote queue reconciliation must not replace this device's current player"
+            )
+        }
+    }
+
     func testNewestMirroredSettingWinsWithoutCopyingLocalSettings() throws {
         let phone = try makeApplicationContainer()
         let phoneSettings = AppSettingsStore(context: phone.mainContext)
@@ -797,6 +863,23 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         row.positionUpdatedAt = Date(timeIntervalSince1970: updatedAt)
         row.playedUpdatedAt = Date(timeIntervalSince1970: updatedAt)
         row.modifiedAt = Date(timeIntervalSince1970: updatedAt)
+        return row
+    }
+
+    private func queueRow(
+        device: String,
+        guid: String,
+        queued: Bool,
+        position: Int,
+        modifiedAt: TimeInterval
+    ) -> CloudQueueItemProjection {
+        let row = CloudQueueItemProjection()
+        row.feedURL = "https://example.com/feed"
+        row.episodeGUID = guid
+        row.sourceDeviceID = device
+        row.isQueued = queued
+        row.position = position
+        row.modifiedAt = Date(timeIntervalSince1970: modifiedAt)
         return row
     }
 }
