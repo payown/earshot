@@ -227,13 +227,27 @@ struct IdentityRepairService {
         return try repairPodcastGroups(matching: keys)
     }
 
-    func repairEpisodes(in podcast: Podcast) throws -> IdentityRepairReport {
+    func repairEpisodes(
+        in podcast: Podcast,
+        matchingGUIDs requestedGUIDs: [String]? = nil
+    ) throws -> IdentityRepairReport {
         let podcastID = podcast.persistentModelID
-        let episodes = try context.fetch(
-            FetchDescriptor<Episode>(
-                predicate: #Predicate { $0.podcast?.persistentModelID == podcastID }
+        let episodes: [Episode]
+        if let requestedGUIDs {
+            guard !requestedGUIDs.isEmpty else { return .none }
+            episodes = try context.fetch(
+                FetchDescriptor<Episode>(
+                    predicate: #Predicate {
+                        $0.podcast?.persistentModelID == podcastID
+                            && requestedGUIDs.contains($0.guid)
+                    }
+                )
             )
-        )
+        } else {
+            episodes = try context.fetch(FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.podcast?.persistentModelID == podcastID }
+            ))
+        }
         var report = IdentityRepairReport(episodesInspected: episodes.count)
         try repairEpisodeGroups(episodes, survivorPodcast: podcast, report: &report)
         return report

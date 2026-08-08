@@ -178,8 +178,13 @@ actor FeedRefreshActor {
                 let url = podcast.feedURL
                 if let parsed {
                     do {
+                        let repairGUIDs = ordinaryRefreshCandidates(
+                            from: Self.deduplicatedEpisodes(parsed.episodes),
+                            podcast: podcast,
+                            now: .now
+                        ).map(\.guid)
                         let repair = try IdentityRepairService(context: modelContext)
-                            .repairEpisodes(in: podcast)
+                            .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
                         if repair.didChange { try modelContext.save() }
                         let applyOutcome = apply(
                             parsed, to: podcast, autoQueueEnabled: autoQueueEnabled
@@ -239,9 +244,15 @@ actor FeedRefreshActor {
         guard let podcast = try PodcastIdentityService(context: modelContext)
             .existing(feedURL: canonical)
         else { return nil }
-        let repair = try IdentityRepairService(context: modelContext).repairEpisodes(in: podcast)
-        if repair.didChange { try modelContext.save() }
         let parsed = try await feed.fetch(canonical)
+        let repairGUIDs = ordinaryRefreshCandidates(
+            from: Self.deduplicatedEpisodes(parsed.episodes),
+            podcast: podcast,
+            now: .now
+        ).map(\.guid)
+        let repair = try IdentityRepairService(context: modelContext)
+            .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
+        if repair.didChange { try modelContext.save() }
         let applyOutcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
         // Save BEFORE resolving `newEpisodeIDs` — persistentModelID is temporary
         // for a newly-inserted Episode until the context saves (same reason
@@ -697,14 +708,11 @@ actor FeedRefreshActor {
         // newest ten genuinely-new, non-future publications. This preserves all
         // existing history while bounding relationship maintenance for feeds
         // whose GUID format or retained catalog has changed.
-        let candidates = parsedEpisodes
-            .filter {
-                let pub = $0.pubDate ?? .distantPast
-                return pub > mark && pub <= now
-            }
-            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
-            .prefix(Self.ordinaryRefreshNewEpisodeLimit)
-        let candidateEpisodes = Array(candidates)
+        let candidateEpisodes = ordinaryRefreshCandidates(
+            from: parsedEpisodes,
+            podcast: podcast,
+            now: now
+        )
         let existingEpisodes = episodes(
             in: podcast,
             matchingGUIDs: candidateEpisodes.map(\.guid)
@@ -790,6 +798,21 @@ actor FeedRefreshActor {
             predicate: #Predicate { $0.podcast?.persistentModelID == podcastID }
         )
         return ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
+    }
+
+    private func ordinaryRefreshCandidates(
+        from parsedEpisodes: [ParsedEpisode],
+        podcast: Podcast,
+        now: Date
+    ) -> [ParsedEpisode] {
+        let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
+        return Array(parsedEpisodes
+            .filter {
+                let pub = $0.pubDate ?? .distantPast
+                return pub > mark && pub <= now
+            }
+            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+            .prefix(Self.ordinaryRefreshNewEpisodeLimit))
     }
 
     /// Fetch only rows that can participate in this refresh. In particular, do
