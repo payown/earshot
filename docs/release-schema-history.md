@@ -156,6 +156,13 @@ fetches only the requested podcast/GUID pairs. Build 180 is superseded for
 testing. Production CloudKit remains disabled and undeployed. Fresh-store schema
 remains V10; supported migration sources remain V5 and V6.
 
+Build 182 is the development-only restartability follow-up. Initial compact
+subscription projection saves every 50 changed rows and resumes by canonical
+feed URL after interruption without duplicating already durable subscriptions.
+Build 181 is superseded for testing. Production CloudKit remains disabled and
+undeployed. Fresh-store schema remains V10; supported migration sources remain
+V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
