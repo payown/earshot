@@ -569,10 +569,12 @@ architecture.
   977 of 1,461 samples to `AllInboxCandidates.body`; RSS reached 337 MB in the
   observed run. The global Inbox now performs an event-driven bounded fetch on
   Inbox and queue changes instead of observing every unrelated store save.
-  On the same Mac library, the background refresh finished 3 minutes 42 seconds
-  after launch; Earshot then measured 0.7% CPU, and all 319 main-thread samples
-  in a two-second follow-up were idle. This does not make the feed rebuild cheap:
-  it separates that finite work from a persistent SwiftUI query loop.
+  On the same Mac library, Earshot reached a temporarily quiet interval 3 minutes
+  42 seconds after launch: it measured 0.7% CPU and all 319 main-thread samples
+  in a two-second follow-up were idle. The durable refresh timestamp had not yet
+  advanced, so that observation does not establish total refresh duration. It
+  establishes that network waits can go idle and that the Inbox no longer spins
+  during them; the full feed rebuild remains unbounded by this measurement.
 - Development build 175 contains that responsiveness fix. The verified
   CloudKitDevelopment iPhone binary is 14,818,096 bytes, SHA-256
   `6d61fb8faeeb20b1f27b6c3bfc029d78f7cf8ebc787bfa8ac52b43b9e1584fbb`,

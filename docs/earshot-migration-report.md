@@ -617,11 +617,13 @@ feed refresher saved the large episode catalog; one sample placed 977 of 1,461
 samples in `AllInboxCandidates.body`, and observed RSS reached 337 MB. The Inbox
 now loads through its bounded repository query only on initial display and
 explicit Inbox or queue change events, not on every unrelated SwiftData save.
-Against this same 662-subscription Mac library, the real background refresh
-finished 3 minutes 42 seconds after launch. Earshot then measured 0.7% CPU; a
-two-second sample found the main thread idle in all 319 samples. The finite
-catalog rebuild remains material work and is not described as a sync-speed
-improvement.
+Against this same 662-subscription Mac library, Earshot reached a temporarily
+quiet interval 3 minutes 42 seconds after launch. It measured 0.7% CPU, and a
+two-second sample found the main thread idle in all 319 samples. The durable
+last-refresh timestamp had not advanced, so this does not measure completion or
+bound total catalog-rebuild time. It shows that network waits can become idle
+and that the Inbox no longer spins during them; it is not described as a
+sync-speed improvement.
 
 The resulting development build 175 CloudKitDevelopment binary measured
 14,818,096 bytes with SHA-256
