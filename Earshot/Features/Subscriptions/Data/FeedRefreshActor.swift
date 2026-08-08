@@ -28,6 +28,10 @@ actor FeedRefreshActor {
     // import faster in isolation but could starve the foreground UI; two proved
     // responsive in the build-169 device test, so build 170 measures the middle.
     private static let subscribeFetchConcurrency = 3
+    /// Whole-library refresh uses the same bounded network overlap as OPML.
+    /// Parsed results are still applied serially on this model actor, so this
+    /// never creates concurrent SwiftData writers.
+    private static let refreshFetchConcurrency = 3
     /// Bulk subscription outcomes retain their newly inserted Episode objects
     /// until a save gives them permanent IDs. Keep this smaller than refresh's
     /// metadata-only batch so large back catalogs cannot accumulate ten feeds'
@@ -85,10 +89,11 @@ actor FeedRefreshActor {
     /// of `SubscriptionRepository.refresh` exactly (dedup-by-guid, inbox high-water
     /// mark, future-date clamp, migrated-shell backfill, auto-queue enrollment).
     ///
-    /// `isCancelled` is checked before each feed so a background-task expiration
-    /// (#381) stops the loop promptly. `onProgress` is marshaled to the main actor
-    /// and is intentionally cheap (two ints) so it can't reintroduce a per-feed
-    /// main-actor stall.
+    /// `isCancelled` is checked before the initial request and after every
+    /// completion so a background-task expiration (#381) stops scheduling new
+    /// work and cancels outstanding requests promptly. `onProgress` is marshaled
+    /// to the main actor and is intentionally cheap (two ints) so it can't
+    /// reintroduce a per-feed main-actor stall.
     ///
     /// Returns one ``RefreshProgress`` per podcast that completed without throwing;
     /// the caller decides which earn a notification.
@@ -100,61 +105,99 @@ actor FeedRefreshActor {
     ) async -> [RefreshProgress] {
         let podcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
         let total = podcasts.count
-        var results: [RefreshProgress] = []
-        var sinceLastSave = 0
+        var completed = 0
+        let results = await withTaskGroup(
+            of: (Int, ParsedFeed?, String?).self,
+            returning: [RefreshProgress].self
+        ) { group in
+            var resultByInputIndex: [Int: RefreshProgress] = [:]
+            var pendingByInputIndex: [Int: ApplyOutcome] = [:]
+            var sinceLastSave = 0
+            var nextIndex = 0
+            var activeFetches = 0
 
-        // Rows whose `outcome.newEpisodeIDs` must be resolved AFTER a save —
-        // `persistentModelID` is temporary for a newly-inserted `Episode` until the
-        // context saves, mirroring the identical problem solved for
-        // `SubscribeOutcome`/`pendingIndexByResult` in `subscribeAll` below.
-        var pendingIndexByApply: [Int: ApplyOutcome] = [:]
-
-        func flushPending() {
-            saveIfNeededOrLog()
-            for (index, applyOutcome) in pendingIndexByApply {
-                results[index].outcome = applyOutcome.result()
-            }
-            pendingIndexByApply.removeAll()
-            sinceLastSave = 0
-        }
-
-        for (index, podcast) in podcasts.enumerated() {
-            guard !isCancelled() else {
-                AppLog.subscriptions.info("refreshAll stopped early (cancelled) after \(index) of \(total)")
-                break
-            }
-            let title = podcast.title
-            let url = podcast.feedURL
-            do {
-                let repair = try IdentityRepairService(context: modelContext)
-                    .repairEpisodes(in: podcast)
-                if repair.didChange { try modelContext.save() }
-                // The fetch (network I/O) and the synchronous parse inside it both
-                // run on this background actor, never the main thread.
-                let parsed = try await feed.fetch(url)
-                let applyOutcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
-                let resultIndex = results.count
-                results.append(
-                    RefreshProgress(
-                        feedURL: url,
-                        podcastTitle: title,
-                        notificationEnabled: podcast.notificationEnabled ?? false,
-                        outcome: applyOutcome.refreshOutcome
-                    )
-                )
-                pendingIndexByApply[resultIndex] = applyOutcome
-                sinceLastSave += 1
-                if sinceLastSave >= Self.saveBatchSize {
-                    flushPending()
+            func flushPending() {
+                saveIfNeededOrLog()
+                for (index, applyOutcome) in pendingByInputIndex {
+                    guard var progress = resultByInputIndex[index] else { continue }
+                    progress.outcome = applyOutcome.result()
+                    resultByInputIndex[index] = progress
                 }
-            } catch {
-                AppLog.subscriptions.error("Refresh failed for \(title, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                pendingByInputIndex.removeAll()
+                sinceLastSave = 0
             }
-            await onProgress(index + 1, total)
-        }
 
-        // Flush the final partial batch and resolve its IDs.
-        flushPending()
+            func addFetch(at index: Int) {
+                let url = podcasts[index].feedURL
+                group.addTask {
+                    do {
+                        return (index, try await feed.fetch(url), nil)
+                    } catch {
+                        return (index, nil, error.localizedDescription)
+                    }
+                }
+                activeFetches += 1
+            }
+
+            // Start one request so an already-expiring BG task retains the exact
+            // prompt-cancellation behavior. After that first completion, keep a
+            // maximum of three network requests in flight.
+            if !isCancelled(), nextIndex < total {
+                addFetch(at: nextIndex)
+                nextIndex += 1
+            }
+
+            while let (inputIndex, parsed, errorDescription) = await group.next() {
+                activeFetches -= 1
+                let podcast = podcasts[inputIndex]
+                let title = podcast.title
+                let url = podcast.feedURL
+                if let parsed {
+                    do {
+                        let repair = try IdentityRepairService(context: modelContext)
+                            .repairEpisodes(in: podcast)
+                        if repair.didChange { try modelContext.save() }
+                        let applyOutcome = apply(
+                            parsed, to: podcast, autoQueueEnabled: autoQueueEnabled
+                        )
+                        resultByInputIndex[inputIndex] = RefreshProgress(
+                            feedURL: url,
+                            podcastTitle: title,
+                            notificationEnabled: podcast.notificationEnabled ?? false,
+                            outcome: applyOutcome.refreshOutcome
+                        )
+                        pendingByInputIndex[inputIndex] = applyOutcome
+                        sinceLastSave += 1
+                        if sinceLastSave >= Self.saveBatchSize { flushPending() }
+                    } catch {
+                        AppLog.subscriptions.error(
+                            "Refresh failed for \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        )
+                    }
+                } else {
+                    AppLog.subscriptions.error(
+                        "Refresh failed for \(title, privacy: .public): \(errorDescription ?? "Unknown error", privacy: .public)"
+                    )
+                }
+                completed += 1
+                await onProgress(completed, total)
+
+                if isCancelled() {
+                    group.cancelAll()
+                    AppLog.subscriptions.info(
+                        "refreshAll stopped early (cancelled) after \(completed) of \(total)"
+                    )
+                    break
+                }
+                while activeFetches < Self.refreshFetchConcurrency, nextIndex < total {
+                    addFetch(at: nextIndex)
+                    nextIndex += 1
+                }
+            }
+
+            flushPending()
+            return resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] }
+        }
         // Newly ingested episodes can change the inbox count — signal the tab
         // badge once, at the end of the whole operation rather than per batch,
         // so it refreshes without polling on every save (#736).

@@ -515,6 +515,37 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).filter { $0.guid == "b" }.count, 3)
     }
 
+    /// Whole-library refresh overlaps at most three network requests. The first
+    /// request completes alone to preserve prompt background-task cancellation;
+    /// the next three rendezvous here, proving the steady-state window reaches
+    /// three without creating an unbounded request burst.
+    func testActorRefreshAllBoundsNetworkConcurrencyAtThree() async throws {
+        let container = cleanContainer()
+        do {
+            let seedContext = ModelContext(container)
+            for index in 0..<7 {
+                seedContext.insert(Podcast(
+                    feedURL: "https://x/feed\(index).xml",
+                    title: "Show \(index)",
+                    lastSeenPubDate: d1
+                ))
+            }
+            try seedContext.save()
+        }
+        let fetcher = RefreshConcurrencyFeed(parsedFeed([parsedEpisode("a", d1)]))
+
+        let results = await FeedRefreshActor(modelContainer: container).refreshAll(
+            feed: fetcher,
+            autoQueueEnabled: false,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+
+        let maximumActiveFetches = await fetcher.maximumActiveFetches()
+        XCTAssertEqual(results.count, 7)
+        XCTAssertEqual(maximumActiveFetches, 3)
+    }
+
     // MARK: subscribeAll (bulk OPML path)
 
     /// Bulk subscribe inserts every feed's podcast + backlog on the actor's own
@@ -655,6 +686,41 @@ private final class FakeFeed: FeedFetching, @unchecked Sendable {
     let feed: ParsedFeed
     init(_ feed: ParsedFeed) { self.feed = feed }
     func fetch(_ urlString: String) async throws -> ParsedFeed { feed }
+}
+
+/// Lets the first request finish immediately, then holds the next requests
+/// until three are active. Later requests finish immediately; the recorded high
+/// water mark proves the production scheduler never exceeded its bound.
+private actor RefreshConcurrencyFeed: FeedFetching {
+    private let feed: ParsedFeed
+    private var callCount = 0
+    private var active = 0
+    private var maximumActive = 0
+    private var rendezvous: [CheckedContinuation<Void, Never>] = []
+
+    init(_ feed: ParsedFeed) { self.feed = feed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        callCount += 1
+        active += 1
+        maximumActive = max(maximumActive, active)
+
+        if callCount > 1, callCount <= 4 {
+            await withCheckedContinuation { continuation in
+                rendezvous.append(continuation)
+                if rendezvous.count == 3 {
+                    let waiting = rendezvous
+                    rendezvous.removeAll()
+                    waiting.forEach { $0.resume() }
+                }
+            }
+        }
+
+        active -= 1
+        return feed
+    }
+
+    func maximumActiveFetches() -> Int { maximumActive }
 }
 
 /// Captures progress callback values across the actor boundary.
