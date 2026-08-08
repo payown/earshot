@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 
 extension Notification.Name {
+    static let earshotFoldersDidChange = Notification.Name("earshotFoldersDidChange")
     /// Posted after FolderRepository persists a folder deletion. The removed
     /// identifiers let PlayerService clear a matching in-memory playback origin
     /// without coupling folder data to the player.
@@ -654,6 +655,7 @@ final class FolderRepository {
         guard context.hasChanges else { return }
         do {
             try context.save()
+            NotificationCenter.default.post(name: .earshotFoldersDidChange, object: nil)
         } catch {
             AppLog.data.error("Folder save failed: \(error.localizedDescription, privacy: .public)")
         }

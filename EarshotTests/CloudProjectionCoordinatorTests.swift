@@ -36,6 +36,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 "CloudSettingProjection",
                 "CloudBookmarkProjection",
                 "CloudListeningSessionProjection",
+                "CloudFolderProjection",
             ]
         )
     }
@@ -548,6 +549,56 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<ListeningSession>()).isEmpty)
     }
 
+    func testNestedFoldersAndMembershipsConvergeWithoutCycles() throws {
+        let phone = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "episode", title: "Episode", audioURL: "https://example.com/audio")
+        episode.podcast = podcast
+        phone.mainContext.insert(podcast)
+        phone.mainContext.insert(episode)
+        let parent = PodcastFolder(name: "Parent", createdAt: Date(timeIntervalSince1970: 10))
+        let child = PodcastFolder(name: "Child", createdAt: Date(timeIntervalSince1970: 20))
+        child.parent = parent
+        phone.mainContext.insert(parent)
+        phone.mainContext.insert(child)
+        phone.mainContext.insert(FolderMembership(folder: child, podcast: podcast, sortOrder: 2))
+        phone.mainContext.insert(EpisodeFolderMembership(folder: child, episode: episode, sortOrder: 3))
+        try phone.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainer()
+        let macPodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let macEpisode = Episode(guid: "episode", title: "Episode", audioURL: "https://example.com/audio")
+        macEpisode.podcast = macPodcast
+        mac.mainContext.insert(macPodcast)
+        mac.mainContext.insert(macEpisode)
+        try mac.mainContext.save()
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try macCoordinator.reconcile()
+
+        let macFolders = try mac.mainContext.fetch(FetchDescriptor<PodcastFolder>())
+        let macChild = try XCTUnwrap(macFolders.first { $0.name == "Child" })
+        XCTAssertEqual(macChild.parent?.name, "Parent")
+        XCTAssertEqual(macChild.memberships?.first?.podcast?.feedURL, "https://example.com/feed")
+        XCTAssertEqual(
+            try mac.mainContext.fetch(FetchDescriptor<EpisodeFolderMembership>())
+                .first?.episode?.guid,
+            "episode"
+        )
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV10.self)
         return try ModelContainer(
@@ -576,6 +627,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             CloudSettingProjection.self,
             CloudBookmarkProjection.self,
             CloudListeningSessionProjection.self,
+            CloudFolderProjection.self,
         ])
         return try ModelContainer(
             for: schema,
