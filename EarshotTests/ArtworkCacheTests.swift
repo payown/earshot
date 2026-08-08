@@ -221,21 +221,23 @@ final class ArtworkCacheTests: XCTestCase {
             .appendingPathComponent("ArtworkCacheTeardown-\(UUID().uuidString)", isDirectory: true)
         let directory = root.appendingPathComponent(ArtworkCache.directoryName, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        MockURLProtocol.reset()
         let payload = Data("teardown-round-trip".utf8)
-        MockURLProtocol.setOutcomes([.response(statusCode: 200, data: payload), .response(statusCode: 200, data: payload)])
-        var cache: ArtworkCache? = ArtworkCache(session: MockURLProtocol.makeSession(), directoryURL: directory)
+        var cache: ArtworkCache? = ArtworkCache(directoryURL: directory)
         let url = try XCTUnwrap(URL(string: "https://example.test/teardown-\(UUID().uuidString).jpg"))
-        let firstResult = await cache!.data(for: url)
-        XCTAssertEqual(firstResult, payload)
+        let response = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
+        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad)
+        cache!.urlCache.storeCachedResponse(CachedURLResponse(response: response, data: payload), for: request)
+        XCTAssertEqual(cache!.urlCache.cachedResponse(for: request)?.data, payload)
 
-        cache!.tearDown()
+        await cache!.tearDown()
         cache = nil
         try FileManager.default.removeItem(at: directory)
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
-        let rebuilt = ArtworkCache(session: MockURLProtocol.makeSession(), directoryURL: directory)
-        let rebuiltResult = await rebuilt.data(for: url)
-        XCTAssertEqual(rebuiltResult, payload)
+        var rebuilt: ArtworkCache? = ArtworkCache(directoryURL: directory)
+        rebuilt!.urlCache.storeCachedResponse(CachedURLResponse(response: response, data: payload), for: request)
+        XCTAssertEqual(rebuilt!.urlCache.cachedResponse(for: request)?.data, payload)
+        await rebuilt!.tearDown()
+        rebuilt = nil
         try? FileManager.default.removeItem(at: root)
     }
 }

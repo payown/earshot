@@ -64,6 +64,35 @@ final class ArtworkCache: @unchecked Sendable {
     private struct Resources {
         let urlCache: URLCache
         let session: URLSession
+        let invalidationObserver: SessionInvalidationObserver?
+    }
+
+    private final class SessionInvalidationObserver: NSObject, URLSessionDelegate, @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var invalidated = false
+
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if invalidated {
+                    lock.unlock()
+                    continuation.resume()
+                } else {
+                    self.continuation = continuation
+                    lock.unlock()
+                }
+            }
+        }
+
+        func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
+            lock.lock()
+            invalidated = true
+            let continuation = continuation
+            self.continuation = nil
+            lock.unlock()
+            continuation?.resume()
+        }
     }
 
     private let lock = NSLock()
@@ -103,14 +132,16 @@ final class ArtworkCache: @unchecked Sendable {
             cache = URLCache(memoryCapacity: Self.memoryCapacity, diskCapacity: 0, directory: nil)
         }
         if let session {
-            return Resources(urlCache: cache, session: session)
+            return Resources(urlCache: cache, session: session, invalidationObserver: nil)
         } else {
             let config = URLSessionConfiguration.default
             config.urlCache = cache
             // Serve cached data when present so a relaunch reads from disk instead
             // of re-downloading; only reach the network on a true miss.
             config.requestCachePolicy = .returnCacheDataElseLoad
-            return Resources(urlCache: cache, session: URLSession(configuration: config))
+            let observer = SessionInvalidationObserver()
+            let session = URLSession(configuration: config, delegate: observer, delegateQueue: nil)
+            return Resources(urlCache: cache, session: session, invalidationObserver: observer)
         }
     }
 
@@ -223,15 +254,24 @@ final class ArtworkCache: @unchecked Sendable {
 
     /// Releases URLSession and URLCache before a caller removes the backing
     /// directory. Resources are rebuilt lazily by the next cache operation.
-    func tearDown() {
-        lock.lock()
-        var old = resources
-        resources = nil
-        lock.unlock()
+    func tearDown() async {
+        var old = lock.withLock {
+            let old = resources
+            resources = nil
+            return old
+        }
         old?.session.invalidateAndCancel()
+        if let observer = old?.invalidationObserver {
+            await observer.wait()
+        }
         old?.urlCache.removeAllCachedResponses()
         // Drop the last strong reference before the caller unlinks the cache
         // directory. URLCache closes its SQLite descriptors during destruction.
         old = nil
+        // URLCache has no completion callback for its private SQLite writer.
+        // Even after URLSession invalidation is acknowledged, Foundation can
+        // finish the cache deletion on that writer queue. Give it a bounded
+        // drain interval before SettingsReset moves and unlinks the directory.
+        try? await Task.sleep(for: .milliseconds(250))
     }
 }

@@ -696,7 +696,7 @@ final class AppRuntime {
         settings.releasePersistence()
         tips.releasePersistence()
         entitlements.releasePersistence()
-        ArtworkCache.shared.tearDown()
+        await ArtworkCache.shared.tearDown()
         ArtworkCache.resetShared()
         entitlementContainer = nil
         boundRootServicesContainer = nil
@@ -726,7 +726,7 @@ final class AppRuntime {
     func clearThisDeviceData() async -> Bool {
         guard resetTask == nil else { return false }
         _ = await downloads.clearAllDownloads()
-        ArtworkCache.shared.tearDown()
+        await ArtworkCache.shared.tearDown()
         ArtworkCache.resetShared()
         return true
     }
