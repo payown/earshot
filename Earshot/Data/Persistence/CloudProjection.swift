@@ -1309,9 +1309,18 @@ final class CloudProjectionCoordinator {
         for podcast in podcasts {
             let feed = FeedURLIdentity.canonical(podcast.feedURL)
             guard let requested = keysByFeed[feed] else { continue }
-            let requestedGUIDs = Set(requested.map(\.guid))
-            for episode in (podcast.episodes ?? []).sorted(by: Self.episodeOrder)
-            where requestedGUIDs.contains(episode.guid) {
+            let requestedGUIDs = requested.map(\.guid)
+            let podcastID = podcast.persistentModelID
+            let matched = (try? context.fetch(FetchDescriptor<Episode>(
+                predicate: #Predicate {
+                    $0.podcast?.persistentModelID == podcastID
+                        && requestedGUIDs.contains($0.guid)
+                }
+            ))) ?? []
+            // Never fault podcast.episodes here. The real phone has a 45,436-row
+            // inverse relationship; loading and sorting that graph to resolve one
+            // queue projection caused the build-180 launch hang.
+            for episode in matched.sorted(by: Self.episodeOrder) {
                 let key = EpisodeKey(feedURL: feed, guid: episode.guid)
                 if result[key] == nil { result[key] = episode }
             }
