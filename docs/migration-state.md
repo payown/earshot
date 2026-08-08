@@ -619,7 +619,9 @@ architecture.
   (`19,746,800 - 19,603,472 = 143,328`). The earlier 14,835,040-byte build-176
   artifact remains valid, but its 4,911,760-byte cross-build difference is
   mostly link-edit symbol metadata and is not attributable to the scheduler.
-  Build 177 has not yet been installed or launched.
+  A single wireless over-install then replaced build 176 while retaining
+  database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration
+  reports build 177. The installer did not launch the app, and no reset ran.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.

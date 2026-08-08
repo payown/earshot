@@ -675,4 +675,6 @@ increase is therefore 143,328 bytes
 (`19,746,800 - 19,603,472 = 143,328`). The earlier 14,835,040-byte build-176
 artifact remains valid, but its 4,911,760-byte cross-build difference consists
 mostly of link-edit symbol metadata and cannot be attributed to the scheduler.
-Build 177 had not been installed or launched at this measurement point.
+A single wireless over-install then replaced build 176 while retaining database
+UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`. Read-only enumeration reported
+build 177. The installer did not launch the app, and no reset ran.
