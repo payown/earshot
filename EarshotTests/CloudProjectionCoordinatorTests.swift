@@ -77,6 +77,72 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testCompletedSubscriptionBackfillIsRestartableOnDiskWithoutDuplicates() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let applicationURL = directory.appending(path: "application.store")
+        let localURL = directory.appending(path: "local.store")
+        let projectionURL = directory.appending(path: "projection.store")
+
+        try autoreleasepool {
+            let app = try makeOnDiskApplicationContainer(
+                applicationURL: applicationURL,
+                localURL: localURL
+            )
+            for index in 0..<662 {
+                app.mainContext.insert(Podcast(
+                    feedURL: "https://example.com/\(index).xml",
+                    title: "Podcast \(index)"
+                ))
+            }
+            try app.mainContext.save()
+            let projection = try makeOnDiskProjectionContainer(at: projectionURL)
+            let coordinator = CloudProjectionCoordinator(
+                applicationContainer: app,
+                projectionContainer: projection,
+                center: NotificationCenter(),
+                deviceID: "phone"
+            )
+            try coordinator.reconcile()
+            XCTAssertEqual(
+                try projection.mainContext.fetchCount(
+                    FetchDescriptor<CloudPodcastProjection>()
+                ),
+                662
+            )
+        }
+
+        try autoreleasepool {
+            let app = try makeOnDiskApplicationContainer(
+                applicationURL: applicationURL,
+                localURL: localURL
+            )
+            let projection = try makeOnDiskProjectionContainer(at: projectionURL)
+            let restarted = CloudProjectionCoordinator(
+                applicationContainer: app,
+                projectionContainer: projection,
+                center: NotificationCenter(),
+                deviceID: "phone"
+            )
+            try restarted.reconcile()
+            XCTAssertEqual(
+                try projection.mainContext.fetchCount(
+                    FetchDescriptor<CloudPodcastProjection>()
+                ),
+                662
+            )
+            XCTAssertEqual(
+                try app.mainContext.fetchCount(FetchDescriptor<Podcast>()),
+                662
+            )
+        }
+    }
+
     func testImportedProjectionCreatesApplicationSubscription() throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
@@ -827,6 +893,50 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 "CloudProjection",
                 schema: schema,
                 isStoredInMemoryOnly: true,
+                cloudKitDatabase: .none
+            )
+        )
+    }
+
+    private func makeOnDiskApplicationContainer(
+        applicationURL: URL,
+        localURL: URL
+    ) throws -> ModelContainer {
+        let full = Schema(versionedSchema: EarshotSchemaV10.self)
+        return try ModelContainer(
+            for: full,
+            configurations:
+                ModelConfiguration(
+                    "FutureMirrored",
+                    schema: Schema(EarshotSchemaV10.mirroredModels),
+                    url: applicationURL,
+                    cloudKitDatabase: .none
+                ),
+                ModelConfiguration(
+                    "DeviceLocal",
+                    schema: Schema(EarshotSchemaV10.localModels),
+                    url: localURL,
+                    cloudKitDatabase: .none
+                )
+        )
+    }
+
+    private func makeOnDiskProjectionContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema([
+            CloudPodcastProjection.self,
+            CloudEpisodeStateProjection.self,
+            CloudQueueItemProjection.self,
+            CloudSettingProjection.self,
+            CloudBookmarkProjection.self,
+            CloudListeningSessionProjection.self,
+            CloudFolderProjection.self,
+        ])
+        return try ModelContainer(
+            for: schema,
+            configurations: ModelConfiguration(
+                "CloudProjection",
+                schema: schema,
+                url: url,
                 cloudKitDatabase: .none
             )
         )
