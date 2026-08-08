@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Earshot Privacy Policy</title>
-  <meta name="description" content="Earshot collects no data. Everything stays on your device.">
+  <meta name="description" content="Earshot collects no data. Your library can sync through your private iCloud account.">
   <style>
     :root {
       color-scheme: light dark;
@@ -60,46 +60,61 @@
 <body>
   <main>
     <h1>Earshot Privacy Policy</h1>
-    <p class="effective muted">Effective July 15, 2026</p>
+    <p class="effective muted">Effective August 8, 2026</p>
 
     <p>
       Earshot is an accessibility-first podcast player. The short version: Earshot
-      collects nothing about you. There is no account, no sign-in, and no tracking.
-      Everything you do in the app stays on your device.
+      collects nothing about you. There is no Earshot account, no advertising,
+      and no tracking. Your library can sync between your devices through your
+      private iCloud account; Payown Media cannot access that private database.
     </p>
 
     <h2 id="what-we-collect">What Earshot collects</h2>
-    <p>Nothing. To be specific, Earshot does not collect, store off your device, or share:</p>
+    <p>Nothing for Payown Media. To be specific, Earshot does not collect for Payown Media, use for tracking, or share:</p>
     <ul>
       <li>Your identity. There is no account and no login.</li>
-      <li>Your subscriptions, listening history, queue, folders, bookmarks, or settings. These live only on your device.</li>
+      <li>Your subscriptions, listening history, queue, folders, bookmarks, or settings. These stay on your devices and in your private iCloud account; Payown Media cannot access them.</li>
       <li>Analytics or usage data. There is no analytics SDK in the app.</li>
       <li>Crash reports. There is no crash reporter in the app.</li>
       <li>Advertising identifiers. There are no ads and no ad IDs.</li>
       <li>Third-party trackers. There are none.</li>
     </ul>
 
-    <h2>What stays on your device</h2>
+    <h2>Where your data is stored</h2>
     <p>
       Your subscriptions, listening history, queue, folders, bookmarks, and
-      settings are saved locally on your device. They are not uploaded to Payown
-      Media or anyone else. If you delete the app, that data goes with it.
+      shared preferences are saved locally and can synchronize through Apple's
+      CloudKit in your private iCloud account. This synchronization is automatic
+      when iCloud is available. Payown Media does not operate a sync server and
+      cannot read your private CloudKit records.
+    </p>
+    <p>
+      Downloaded audio, cached artwork, purchase entitlement state, and download
+      preferences remain device-local and are not synchronized through CloudKit.
+      Deleting Earshot from one device ordinarily removes that device's local
+      data, but does not by itself delete a synchronized library from iCloud or
+      your other devices. Earshot provides separate actions to clear only this
+      device or to delete the synchronized library everywhere.
     </p>
 
     <h2>Network connections Earshot makes</h2>
     <p>
-      Earshot connects to the internet only to do the things a podcast player has
-      to do, and only with servers you choose by following a show:
+      Earshot connects to the internet only to provide podcast, purchase, and
+      private-iCloud synchronization features:
     </p>
 
     <ul>
       <li>Downloading podcast feeds and episode audio from the show's own host.</li>
       <li>Fetching show artwork.</li>
       <li>Searching the public podcast directory when you use search.</li>
+      <li>Synchronizing your library through Apple's CloudKit service when iCloud is available.</li>
     </ul>
     <p>
       These requests go directly to those services. Their own privacy practices
-      are their own. Earshot does not add any identifier of you to these requests.
+      apply. CloudKit uses your Apple account to provide your private database;
+      Earshot does not send that account identity to Payown Media. Podcast and
+      search requests do not include an Earshot account, advertising, or tracking
+      identifier.
     </p>
 
     <h2>Purchases</h2>

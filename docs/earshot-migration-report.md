@@ -784,3 +784,12 @@ retained database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; installed-app
 enumeration reports 1.1.0 (184). The app launched successfully, and the compact
 projection WAL recorded activity at 01:11 local time. No reset or data deletion
 was performed.
+
+The checked-in hosted-policy HTML, WordPress source, and App Store privacy
+questionnaire record have been corrected for CloudKit. They now state that
+synchronized library data stays on the user's devices and in the user's private
+iCloud database, inaccessible to Payown Media, while downloads, artwork cache,
+entitlement state, and download preferences remain local. “Data Not Collected”
+remains the engineering recommendation because no developer-accessible backend
+receives the private records. The live WordPress page and App Store Connect must
+still be verified after publication.

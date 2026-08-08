@@ -905,3 +905,12 @@ modified 2026-08-08 01:10:45 -0700. A wireless over-install preserved iPhone
 database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration
 reports 1.1.0 (184). The app launched successfully and the compact projection
 WAL advanced at 01:11 local time. No reset or data deletion ran.
+
+The tracked privacy-policy sources and App Store privacy questionnaire record
+now describe private-iCloud synchronization accurately. Synchronized library
+state lives locally and in the user's private CloudKit database, which Payown
+Media cannot access; downloads, artwork cache, entitlement state, and download
+preferences remain device-local. The App Store answer remains “Data Not
+Collected” because Earshot has no developer-accessible sync backend. Publishing
+the revised WordPress source and re-verifying App Store Connect remain release
+operations, not claims established by this repository change.
