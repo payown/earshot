@@ -668,7 +668,11 @@ CloudKitDevelopment build produced a 19,746,800-byte arm64 binary with SHA-256
 `2dec7c9c2dec33c0f034847d63970f08ca5408daf696774e621d49700f9a7b5a` and
 modification time 2026-08-07 23:54:06 -0700. Its build number is 177, marketing
 version is 1.1.0, runtime development gate is `YES`, and its development push,
-private CloudKit container, and CloudKit service entitlements are present. This
-is 4,911,760 bytes larger than build 176 (`19,746,800 - 14,835,040`), primarily
-in link-edit symbol metadata. Because that artifact-size change is not yet fully
-explained, build 177 was not installed or launched.
+private CloudKit container, and CloudKit service entitlements are present. An
+isolated clean rebuild of the exact build-176 commit with the same current
+toolchain and settings measured 19,603,472 bytes. Build 177's like-for-like
+increase is therefore 143,328 bytes
+(`19,746,800 - 19,603,472 = 143,328`). The earlier 14,835,040-byte build-176
+artifact remains valid, but its 4,911,760-byte cross-build difference consists
+mostly of link-edit symbol metadata and cannot be attributed to the scheduler.
+Build 177 had not been installed or launched at this measurement point.

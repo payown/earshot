@@ -613,10 +613,13 @@ architecture.
   `2dec7c9c2dec33c0f034847d63970f08ca5408daf696774e621d49700f9a7b5a`,
   built 2026-08-07 23:54:06 -0700. Build number 177, marketing version 1.1.0,
   runtime development gate `YES`, and the development CloudKit entitlements
-  were verified. The binary is 4,911,760 bytes larger than build 176
-  (`19,746,800 - 14,835,040 = 4,911,760`); the increase is concentrated in
-  link-edit symbol metadata and remains under investigation. Build 177 has not
-  been installed or launched.
+  were verified. An isolated clean rebuild of the exact build-176 commit under
+  the same current conditions measured 19,603,472 bytes, making build 177's
+  like-for-like increase 143,328 bytes
+  (`19,746,800 - 19,603,472 = 143,328`). The earlier 14,835,040-byte build-176
+  artifact remains valid, but its 4,911,760-byte cross-build difference is
+  mostly link-edit symbol metadata and is not attributable to the scheduler.
+  Build 177 has not yet been installed or launched.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.
