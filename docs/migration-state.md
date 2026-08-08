@@ -936,3 +936,29 @@ podcasts, 4 episode states, 1 queue item, 4 settings, 0 bookmarks, 31 listening
 sessions, and 0 folders. This verifies same-state physical convergence on build
 184; it does not claim the still-unperformed mutation, offline, account-change,
 VoiceOver, or thermal matrix.
+
+### Build-184 physical queue failure, 2026-08-08
+
+User-reported: the iPhone showed 1,962 Inbox episodes and the Mac showed 1,957.
+That difference is expected because episode catalogs and Inbox derivation are
+device-local. Five queue items added on the iPhone appeared on the Mac. Two
+episodes subsequently added on the Mac did not appear in the iPhone queue after
+approximately one minute.
+
+Read-only inspection found all 12 per-device queue contributions in both compact
+projection stores, including the two Mac additions. CloudKit transport therefore
+completed; the iPhone application store still contained only the five original
+queue items. The two Mac episode keys were unavailable under the projected feed
+in the iPhone's bounded catalog, so queue reconciliation skipped them. The Mac
+store also contained 20 unrelated episodes attached to the Apple Watch and
+Accessibility feed, although the live source contains only its original 2015
+episode. Those rows were created during the build-184 Mac launch refresh and are
+cross-feed catalog corruption, not sync latency.
+
+Build 185 addresses both boundaries. A completed concurrent fetch is resolved
+again by its captured requested feed URL before applying parsed episodes. Queue
+projection rows carry optional episode metadata, allowing a receiving device to
+create a dismissed local episode shell when the episode is absent from its
+refetchable catalog. The shell is queue-only and does not enter Inbox. Focused
+coverage executes out-of-order three-request feed completion and remote queue
+materialization against an application store with no matching episode.

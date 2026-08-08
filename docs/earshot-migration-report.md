@@ -814,3 +814,22 @@ bookkeeping columns were deliberately excluded because they are not synchronized
 application data. Counts remained 662, 4, 1, 4, 0, 31, and 0 respectively. This
 is build-184 same-state convergence evidence, not a substitute for physical
 two-way mutation, offline/reconnect, account-change, VoiceOver, or heat tests.
+
+The first physical mutation exposed a narrower failure. User-reported Inbox
+counts were 1,962 on iPhone and 1,957 on Mac, an allowed difference because each
+device owns its refetched episode catalog. Five iPhone queue additions reached
+the Mac, while two later Mac additions did not become visible on iPhone after
+approximately one minute. Read-only snapshots showed that both projection stores
+already contained all 12 per-device contributions. The transport succeeded, but
+the iPhone could not resolve the two Mac keys to local episodes. Inspection also
+found that the Mac launch refresh had attached 20 unrelated episodes to Apple's
+one-episode Watch Accessibility feed, establishing cross-feed local-catalog
+corruption rather than an iCloud delay.
+
+Build 185 re-resolves every completed concurrent feed request by its captured
+requested URL before choosing a SwiftData destination. It also adds optional
+episode metadata to queue contributions. When a winning queued key is absent
+from the receiving catalog, reconciliation can now create one dismissed episode
+shell and the queue item without surfacing that shell in Inbox. Legacy projection
+rows remain readable; a row without metadata continues to wait for a matching
+local feed episode. Production CloudKit remains disabled and undeployed.

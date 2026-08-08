@@ -113,6 +113,20 @@ final class CloudEpisodeStateProjection {
 final class CloudQueueItemProjection {
     var feedURL: String = ""
     var episodeGUID: String = ""
+    // Queue membership must remain usable when the destination's deliberately
+    // local, bounded episode catalog has not retained this episode. These
+    // optional fields let reconciliation create one dismissed episode shell;
+    // legacy projection rows remain readable and simply wait for a feed fetch.
+    var episodeTitle: String?
+    var episodeAudioURL: String?
+    var episodeDescription: String?
+    var episodeDurationSeconds: Int?
+    var episodePubDate: Date?
+    var episodeArtworkURL: String?
+    var episodeNumber: Int?
+    var episodeSeasonNumber: Int?
+    var episodeChapterURL: String?
+    var episodeTranscriptURL: String?
     var sourceDeviceID: String = ""
     var isQueued: Bool = false
     var position: Int = 0
@@ -681,17 +695,24 @@ final class CloudProjectionCoordinator {
         let appContext = applicationContainer.mainContext
         let cloudContext = projectionContainer.mainContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
-        if onlyIfCloudEmpty, !rows.isEmpty { return }
 
         let items = try appContext.fetch(FetchDescriptor<QueueItem>(
             sortBy: [SortDescriptor(\.position)]
         ))
-        var current: [EpisodeKey: Int] = [:]
+        var current: [EpisodeKey: (position: Int, episode: Episode)] = [:]
         for item in items {
             guard let episode = item.episode,
                   let key = Self.episodeKey(for: episode),
                   current[key] == nil else { continue }
-            current[key] = item.position
+            current[key] = (item.position, episode)
+        }
+        if onlyIfCloudEmpty, !rows.isEmpty {
+            for row in rows where row.sourceDeviceID == deviceID && row.deletedAt == nil {
+                guard let item = current[Self.episodeKey(for: row)] else { continue }
+                Self.copyEpisodeMetadata(item.episode, to: row)
+            }
+            if cloudContext.hasChanges { try cloudContext.save() }
+            return
         }
 
         var ownByKey: [EpisodeKey: CloudQueueItemProjection] = [:]
@@ -718,8 +739,12 @@ final class CloudProjectionCoordinator {
                 ownByKey[key] = inserted
                 return inserted
             }()
-            let queued = current[key] != nil
-            let position = current[key] ?? 0
+            let item = current[key]
+            let queued = item != nil
+            let position = item?.position ?? 0
+            if let episode = item?.episode {
+                Self.copyEpisodeMetadata(episode, to: row)
+            }
             if row.isQueued != queued || row.position != position || row.deletedAt != nil {
                 row.isQueued = queued
                 row.position = position
@@ -1220,6 +1245,22 @@ final class CloudProjectionCoordinator {
         return episodeKey(for: lhs) < episodeKey(for: rhs)
     }
 
+    private static func copyEpisodeMetadata(
+        _ episode: Episode,
+        to row: CloudQueueItemProjection
+    ) {
+        row.episodeTitle = episode.title
+        row.episodeAudioURL = episode.audioURL
+        row.episodeDescription = episode.episodeDescription
+        row.episodeDurationSeconds = episode.durationSeconds
+        row.episodePubDate = episode.pubDate
+        row.episodeArtworkURL = episode.artworkURL
+        row.episodeNumber = episode.episodeNumber
+        row.episodeSeasonNumber = episode.seasonNumber
+        row.episodeChapterURL = episode.chapterURL
+        row.episodeTranscriptURL = episode.transcriptURL
+    }
+
     private static func settingProjectionOrder(
         _ lhs: CloudSettingProjection,
         _ rhs: CloudSettingProjection
@@ -1421,7 +1462,39 @@ final class CloudProjectionCoordinator {
         for (key, contributions) in grouped {
             winners[key] = contributions.sorted(by: Self.queueProjectionOrder).first
         }
-        let episodes = applicationEpisodes(matching: Set(winners.keys))
+        var episodes = applicationEpisodes(matching: Set(winners.keys))
+        for key in winners.keys.sorted() where episodes[key] == nil {
+            guard let winner = winners[key],
+                  winner.isQueued,
+                  let metadata = grouped[key]?.sorted(by: Self.queueProjectionOrder).first(where: {
+                      $0.episodeTitle?.isEmpty == false && $0.episodeAudioURL?.isEmpty == false
+                  }),
+                  let title = metadata.episodeTitle,
+                  !title.isEmpty,
+                  let audioURL = metadata.episodeAudioURL,
+                  !audioURL.isEmpty,
+                  let podcast = try PodcastIdentityService(context: appContext)
+                    .existing(feedURL: key.feedURL)
+            else { continue }
+            let episode = Episode(
+                guid: key.guid,
+                title: title,
+                audioURL: audioURL,
+                episodeDescription: metadata.episodeDescription,
+                durationSeconds: metadata.episodeDurationSeconds,
+                pubDate: metadata.episodePubDate,
+                artworkURL: metadata.episodeArtworkURL,
+                episodeNumber: metadata.episodeNumber,
+                seasonNumber: metadata.episodeSeasonNumber,
+                chapterURL: metadata.episodeChapterURL,
+                transcriptURL: metadata.episodeTranscriptURL,
+                status: .inQueue,
+                inboxDismissed: true
+            )
+            episode.podcast = podcast
+            appContext.insert(episode)
+            episodes[key] = episode
+        }
         let existing = try appContext.fetch(FetchDescriptor<QueueItem>(
             sortBy: [SortDescriptor(\.position)]
         ))

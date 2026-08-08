@@ -694,6 +694,9 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             FetchDescriptor<CloudQueueItemProjection>()
         )
         XCTAssertEqual(rows.count, 2)
+        let projectedA = try XCTUnwrap(rows.first { $0.episodeGUID == "a" })
+        XCTAssertEqual(projectedA.episodeTitle, "A")
+        XCTAssertEqual(projectedA.episodeAudioURL, "https://example.com/a")
         let removal = CloudQueueItemProjection()
         removal.feedURL = "https://example.com/feed"
         removal.episodeGUID = "b"
@@ -708,6 +711,52 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             try mac.mainContext.fetch(FetchDescriptor<QueueItem>())
                 .compactMap { $0.episode?.guid },
             ["a"]
+        )
+    }
+
+    func testRemoteQueueMaterializesEpisodeMissingFromLocalCatalog() throws {
+        let app = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        app.mainContext.insert(podcast)
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let row = CloudQueueItemProjection()
+        row.feedURL = podcast.feedURL
+        row.episodeGUID = "remote-episode"
+        row.episodeTitle = "Remote episode"
+        row.episodeAudioURL = "https://example.com/remote.mp3"
+        row.episodeDescription = "Description"
+        row.episodeDurationSeconds = 321
+        row.episodePubDate = Date(timeIntervalSince1970: 200)
+        row.sourceDeviceID = "phone"
+        row.isQueued = true
+        row.position = 4
+        row.modifiedAt = Date(timeIntervalSince1970: 300)
+        projection.mainContext.insert(row)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+
+        try coordinator.reconcile()
+
+        let episode = try XCTUnwrap(
+            app.mainContext.fetch(FetchDescriptor<Episode>()).first {
+                $0.guid == "remote-episode"
+            }
+        )
+        XCTAssertEqual(episode.podcast?.feedURL, podcast.feedURL)
+        XCTAssertEqual(episode.title, "Remote episode")
+        XCTAssertEqual(episode.audioURL, "https://example.com/remote.mp3")
+        XCTAssertEqual(episode.durationSeconds, 321)
+        XCTAssertTrue(episode.inboxDismissed)
+        XCTAssertEqual(episode.status, .inQueue)
+        XCTAssertEqual(
+            try app.mainContext.fetch(FetchDescriptor<QueueItem>()).first?.episode?.guid,
+            "remote-episode"
         )
     }
 

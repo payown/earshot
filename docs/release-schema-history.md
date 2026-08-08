@@ -180,6 +180,17 @@ task before touching persistent files. Build 183 is superseded for testing.
 Production CloudKit remains disabled and undeployed. Fresh-store schema remains
 V10; supported migration sources remain V5 and V6.
 
+Build 185 is the development-only two-device queue correction. A physical
+build-184 test showed CloudKit delivered Mac queue records to the iPhone compact
+projection, but the visible queue could not materialize episodes absent from the
+iPhone's independently bounded catalog. Queue contributions now include optional
+episode metadata so reconciliation can create one dismissed local episode shell.
+Concurrent feed-refresh results are also re-resolved by their captured requested
+feed URL before any SwiftData write, preventing a stale model/index association
+from attaching one feed's episodes to another podcast. Build 184 is superseded
+for testing. Production CloudKit remains disabled and undeployed. Fresh-store
+schema remains V10; supported migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
