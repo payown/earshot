@@ -511,19 +511,13 @@ architecture.
   stale. Its V6 floor, pre-release wording, Reset label, and backup description
   are superseded by #797. Reconcile the issue before using its checklist. Any
   replacement copy requires explicit user approval.
-- #773, `Sync A5: TestFlight build-161 upgrade and schema bake`: device portion
-  remains relevant, but the route is now V6-to-V10 and public V5 also requires
-  device proof. Rewrite or close only after reconciling it with #787.
-- #772, `Sync A4: prove V6-to-V7 migration and 242K-episode scale safety`: open
-  but implementation wording is obsolete. Real V6-to-V10 scale, data, recovery,
-  save, and reopen proof is merged. Review acceptance criteria and close or
-  rewrite; do not build another V7 route.
-- #771, `Sync A3: migrate live models to CloudKit-compatible schema V7`: open
-  but its implementation landed and subsequently advanced through V9 to V10.
-  Reconcile status; never roll current code back to V7.
-- #599, `Cross-device sync`: open parent for #771-#773. CloudKit remains
-  deliberately disabled in V10; migration safety does not authorize enabling
-  capabilities, entitlements, mirroring, or sync UX.
+- #771 and #772 are closed as completed/superseded. Their implementation landed
+  and advanced through V9 to V10; never roll current code back to V7.
+- #773 is closed after reconciliation with the build-171 App Store-to-V10 device
+  result. Its exact build-161-only wording is no longer an active gate.
+- #599 remains the open 1.1 parent. CloudKit is deliberately disabled in V10;
+  implementation is now ordered through #811-#817 in
+  `docs/icloud-sync-v1.1-plan.md`.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.

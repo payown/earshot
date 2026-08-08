@@ -74,7 +74,7 @@ actions, so Michael's explicit approval is required before their implementation.
 
 ## Work packages
 
-### B1. CloudKit feasibility gate and permanent data shape
+### B1. CloudKit feasibility gate and permanent data shape (#811)
 
 Goal: prove that the proposed mirrored graph is viable before freezing any
 production CloudKit record types.
@@ -99,7 +99,7 @@ production CloudKit record types.
 Deliverable: a measured architecture decision and a disposable development
 CloudKit schema. No TestFlight build and no production schema deployment.
 
-### B2. V11 conflict metadata and deterministic reconciliation
+### B2. V11 conflict metadata and deterministic reconciliation (#812)
 
 Goal: make convergence preserve user intent instead of relying blindly on
 record-level last-writer-wins.
@@ -124,7 +124,7 @@ record-level last-writer-wins.
 Deliverable: pure reconciliation tests, on-disk V10-to-V11 tests if applicable,
 and no enabled production mirroring.
 
-### B3. Production container integration and lifecycle coordinator
+### B3. Production container integration and lifecycle coordinator (#813)
 
 Goal: enable the mirror without creating a second launch/reset race.
 
@@ -146,7 +146,7 @@ Goal: enable the mirror without creating a second launch/reset race.
 Deliverable: an internal development build whose existing single-device suite is
 green and whose sync coordinator can be deterministically tested without iCloud.
 
-### B4. Account, reset, recovery, and privacy behavior
+### B4. Account, reset, recovery, and privacy behavior (#814)
 
 Goal: fail safely in every state that can otherwise surprise or destroy data.
 
@@ -166,7 +166,7 @@ Goal: fail safely in every state that can otherwise surprise or destroy data.
 
 Deliverable: failure-injection tests and an approved destructive-action runbook.
 
-### B5. VoiceOver-first sync status
+### B5. VoiceOver-first sync status (#815)
 
 Goal: explain sync without adding chatter or inaccessible transient UI.
 
@@ -186,7 +186,7 @@ Goal: explain sync without adding chatter or inaccessible transient UI.
 Deliverable: reviewed UI with spoken labels, values, traits, hints, focus, and
 announcement behavior recorded byte-for-byte.
 
-### B6. Two-device development test
+### B6. Two-device development test (#816)
 
 Goal: prove real convergence before touching production CloudKit or TestFlight.
 
@@ -210,7 +210,7 @@ Record exact timestamps, counts, conflict outcomes, build identities, account
 state, device/OS versions, and any CloudKit delay. “It appeared eventually” is
 not a sufficient result without the observed time.
 
-### B7. Production schema and staged TestFlight release
+### B7. Production schema and staged TestFlight release (#817)
 
 Goal: make the irreversible production step only after every earlier gate passes.
 
