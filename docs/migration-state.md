@@ -19,6 +19,11 @@ Current source declares:
 - Supported SwiftData migration sources: V5 and V6
 
 The public App Store binary is version 1.0.0, build 155, and creates V5.
+
+The realistic physical upgrade gate completed on 2026-08-08 with 100 podcasts
+and 27,755 episodes. Build 155 V5 migrated to build 186 V10 with all copied
+stores intact; measured preservation and development-only two-device results are
+recorded in `docs/device-test-artifacts/2026-08-08-v5-v10-upgrade.md`.
 Build 161 was TestFlight and creates V6. The old claim that public build 157
 shipped V6 was false and caused every public V5 library to hit an unsupported
 schema guard.

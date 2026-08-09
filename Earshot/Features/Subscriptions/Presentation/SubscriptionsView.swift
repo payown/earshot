@@ -14,6 +14,7 @@ struct SubscriptionsView: View {
     @State private var podcasts: [Podcast] = []
     @State private var hasLoadedPodcasts = false
     @State private var showingAdd = false
+    @State private var isRefreshing = false
     @State private var sharingPodcast: Podcast?
     @State private var pendingUnsubscribe: Podcast?
     // The pending "Add to folder" / "Move to folder" podcast Quick Action target
@@ -86,7 +87,7 @@ struct SubscriptionsView: View {
                             .accessibilityFocused($focusedRowID, equals: podcast.persistentModelID)
                     }
                 }
-                .refreshable { await refreshAll() }
+                .refreshable { await performRefresh() }
             }
         }
         // Persistent multi-select bar (#757): its primary button's label carries
@@ -150,6 +151,17 @@ struct SubscriptionsView: View {
                 } label: {
                     Label("Folders", systemImage: "folder")
                 }
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    Task { await performRefresh() }
+                } label: {
+                    Label(
+                        isRefreshing ? "Refreshing library" : "Refresh library",
+                        systemImage: "arrow.clockwise"
+                    )
+                }
+                .disabled(isRefreshing)
             }
             if !podcasts.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -565,7 +577,12 @@ struct SubscriptionsView: View {
         return parts.joined(separator: ", ")
     }
 
-    private func refreshAll() async {
+    private func performRefresh() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        Announcer.announce("Refreshing library")
+        defer { isRefreshing = false }
+
         // Pull-to-refresh always forces (bypasses the FeedRefreshPolicy window)
         // and updates the throttle timestamp so the next background wake within
         // 15 minutes is skipped (#381).
