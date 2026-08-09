@@ -1921,7 +1921,7 @@ That was the whole review.
 
 ---
 
-+### Chapter 57 — Build 187
+### Chapter 57 — Build 187
 
 *Everything where she left it*
 
