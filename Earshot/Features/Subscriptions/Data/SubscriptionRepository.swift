@@ -60,6 +60,40 @@ struct RefreshOutcome: Sendable {
     static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisodeGUID: nil, newEpisodeIDs: [])
 }
 
+struct SubscriptionRefreshReport: Sendable {
+    enum Completion: Sendable, Equatable {
+        case full
+        case partial(succeeded: Int, total: Int)
+        case failure
+    }
+
+    let notifications: [NewEpisodeNotification]
+    let attempted: Int
+    let total: Int
+    let succeeded: Int
+    let failed: Int
+    let cancelled: Bool
+    let intendedInsertions: Int
+    let durableInsertions: Int
+
+    var completion: Completion {
+        if !cancelled, failed == 0, succeeded == total { return .full }
+        if succeeded > 0 { return .partial(succeeded: succeeded, total: total) }
+        return .failure
+    }
+
+    var announcement: String {
+        switch completion {
+        case .full:
+            "Library refreshed"
+        case let .partial(succeeded, total):
+            "Library partially refreshed, \(succeeded) of \(total) feeds"
+        case .failure:
+            "Library refresh failed"
+        }
+    }
+}
+
 /// Owns subscribe and refresh logic for podcasts. Views call into this instead
 /// of touching the model graph directly.
 @MainActor
@@ -324,13 +358,21 @@ final class SubscriptionRepository {
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
     ) async -> [NewEpisodeNotification] {
+        await refreshAllReport(isCancelled: isCancelled, onProgress: onProgress).notifications
+    }
+
+    @discardableResult
+    func refreshAllReport(
+        isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
+        onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
+    ) async -> SubscriptionRefreshReport {
         // Hand the whole per-feed loop — fetch, parse, diff, insert, save — to a
         // background `@ModelActor` so none of it runs on the main thread and
         // starves VoiceOver (#382). The actor returns lightweight value-type
         // results; only the cheap progress callback hops back to the main actor.
         let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
         let progress = onProgress
-        let results = await actor.refreshAll(
+        let actorReport = await actor.refreshAllReport(
             feed: feed,
             autoQueueEnabled: autoQueueEnabled,
             isCancelled: isCancelled,
@@ -338,6 +380,7 @@ final class SubscriptionRepository {
                 progress?(completed, total)
             }
         )
+        let results = actorReport.results
 
         // Pull the background context's writes into the main context so the UI
         // (and any held `Podcast`/`Episode` objects) reflect the refresh. Only the
@@ -378,7 +421,16 @@ final class SubscriptionRepository {
                 )
             )
         }
-        return notifications
+        return SubscriptionRefreshReport(
+            notifications: notifications,
+            attempted: actorReport.attempted,
+            total: actorReport.total,
+            succeeded: results.count,
+            failed: actorReport.failed,
+            cancelled: actorReport.cancelled,
+            intendedInsertions: actorReport.intendedInsertions,
+            durableInsertions: actorReport.durableInsertions
+        )
     }
 
     /// One feed's outcome from a bulk ``subscribeAll(feedURLs:onProgress:)``, resolved
