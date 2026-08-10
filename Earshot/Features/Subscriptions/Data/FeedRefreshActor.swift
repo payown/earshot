@@ -142,12 +142,14 @@ actor FeedRefreshActor {
     func refreshAll(
         feed: FeedFetching,
         autoQueueEnabled: Bool,
+        trigger: FeedRefreshTrigger = .unspecified,
         isCancelled: @Sendable () -> Bool,
         onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async -> [RefreshProgress] {
         await refreshAllReport(
             feed: feed,
             autoQueueEnabled: autoQueueEnabled,
+            trigger: trigger,
             isCancelled: isCancelled,
             onProgress: onProgress
         ).results
@@ -156,11 +158,17 @@ actor FeedRefreshActor {
     func refreshAllReport(
         feed: FeedFetching,
         autoQueueEnabled: Bool,
+        trigger: FeedRefreshTrigger = .unspecified,
         isCancelled: @Sendable () -> Bool,
         onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async -> RefreshRun {
+        let correlationID = UUID().uuidString.lowercased()
         let podcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
         let total = podcasts.count
+        let availableCapacity = Self.availableCapacityForImportantUsage()
+        AppLog.subscriptions.info(
+            "refresh=\(correlationID, privacy: .public) trigger=\(trigger.rawValue, privacy: .public) feedsAttempted=\(total) availableBytes=\(availableCapacity)"
+        )
         let report = await withTaskGroup(
             of: (Int, String, ParsedFeed?, String?).self,
             returning: RefreshRun.self
@@ -171,18 +179,25 @@ actor FeedRefreshActor {
             var failed = 0
             var intendedInsertions = 0
             var durableInsertions = 0
+            var batchIndex = 0
             var sinceLastSave = 0
             var nextIndex = 0
             var activeFetches = 0
 
             func flushPending() {
-                intendedInsertions += pendingByInputIndex.values.reduce(0) {
+                guard !pendingByInputIndex.isEmpty else { return }
+                batchIndex += 1
+                let batchIntended = pendingByInputIndex.values.reduce(0) {
                     $0 + $1.refreshOutcome.added
                 }
-                if saveIfNeededOrLog() {
-                    durableInsertions += pendingByInputIndex.values.reduce(0) {
-                        $0 + $1.refreshOutcome.added
-                    }
+                intendedInsertions += batchIntended
+                if saveIfNeededOrLog(
+                    correlationID: correlationID,
+                    batchIndex: batchIndex,
+                    feedCount: pendingByInputIndex.count,
+                    intendedInsertions: batchIntended
+                ) {
+                    durableInsertions += batchIntended
                     for (index, applyOutcome) in pendingByInputIndex {
                         guard var progress = resultByInputIndex[index] else { continue }
                         progress.outcome = applyOutcome.result()
@@ -227,6 +242,10 @@ actor FeedRefreshActor {
                 guard let podcast = try? PodcastIdentityService(context: modelContext)
                     .existing(feedURL: requestedURL) else {
                     failed += 1
+                    let feedID = Self.opaqueFeedID(requestedURL, salt: correlationID)
+                    AppLog.subscriptions.error(
+                        "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=identity-failure"
+                    )
                     completed += 1
                     await onProgress(completed, total)
                     while activeFetches < Self.refreshFetchConcurrency, nextIndex < total {
@@ -237,8 +256,10 @@ actor FeedRefreshActor {
                 }
                 let title = podcast.title
                 let url = requestedURL
+                let feedID = Self.opaqueFeedID(url, salt: correlationID)
                 if let parsed {
                     do {
+                        let markBefore = podcast.lastSeenPubDate
                         let repairGUIDs = ordinaryRefreshCandidates(
                             from: Self.deduplicatedEpisodes(parsed.episodes),
                             podcast: podcast,
@@ -249,6 +270,9 @@ actor FeedRefreshActor {
                         if repair.didChange { try modelContext.save() }
                         let applyOutcome = apply(
                             parsed, to: podcast, autoQueueEnabled: autoQueueEnabled
+                        )
+                        AppLog.subscriptions.info(
+                            "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) candidates=\(repairGUIDs.count) markBefore=\(Self.epoch(markBefore)) markAfter=\(Self.epoch(podcast.lastSeenPubDate)) intended=\(applyOutcome.refreshOutcome.added)"
                         )
                         resultByInputIndex[inputIndex] = RefreshProgress(
                             feedURL: url,
@@ -263,13 +287,13 @@ actor FeedRefreshActor {
                         modelContext.rollback()
                         failed += 1
                         AppLog.subscriptions.error(
-                            "Refresh failed for \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                            "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=feed-failure error=\(Self.errorDetail(error), privacy: .public)"
                         )
                     }
                 } else {
                     failed += 1
                     AppLog.subscriptions.error(
-                        "Refresh failed for \(title, privacy: .public): \(errorDescription ?? "Unknown error", privacy: .public)"
+                        "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=fetch-failure error=\(Self.sanitized(errorDescription ?? "Unknown error"), privacy: .public)"
                     )
                 }
                 completed += 1
@@ -303,6 +327,9 @@ actor FeedRefreshActor {
         // badge once, at the end of the whole operation rather than per batch,
         // so it refreshes without polling on every save (#736).
         NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+        AppLog.subscriptions.info(
+            "refresh=\(correlationID, privacy: .public) summary trigger=\(trigger.rawValue, privacy: .public) attempted=\(report.attempted) total=\(report.total) succeeded=\(report.results.count) failed=\(report.failed) cancelled=\(report.cancelled) intendedInsertions=\(report.intendedInsertions) durableInsertions=\(report.durableInsertions)"
+        )
         return report
     }
 
@@ -1120,15 +1147,87 @@ actor FeedRefreshActor {
     }
 
     @discardableResult
-    private func saveIfNeededOrLog() -> Bool {
+    private func saveIfNeededOrLog(
+        correlationID: String? = nil,
+        batchIndex: Int? = nil,
+        feedCount: Int = 0,
+        intendedInsertions: Int = 0
+    ) -> Bool {
         do {
             try saveIfNeeded()
+            if let correlationID, let batchIndex {
+                AppLog.subscriptions.info(
+                    "refresh=\(correlationID, privacy: .public) batch=\(batchIndex) feeds=\(feedCount) save=success durableInsertions=\(intendedInsertions)"
+                )
+            }
             return true
         } catch {
-            AppLog.subscriptions.error("Feed refresh save failed: \(error.localizedDescription, privacy: .public)")
+            if let correlationID, let batchIndex {
+                AppLog.subscriptions.error(
+                    "refresh=\(correlationID, privacy: .public) batch=\(batchIndex) feeds=\(feedCount) save=failure intendedInsertions=\(intendedInsertions) error=\(Self.errorDetail(error), privacy: .public)"
+                )
+            } else {
+                AppLog.subscriptions.error(
+                    "Feed refresh save failed: \(Self.errorDetail(error), privacy: .public)"
+                )
+            }
             modelContext.rollback()
             return false
         }
+    }
+
+    private static func availableCapacityForImportantUsage() -> Int64 {
+        let directory = ModelContainerFactory.storeURL.deletingLastPathComponent()
+        return (try? directory.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+        ).volumeAvailableCapacityForImportantUsage) ?? -1
+    }
+
+    private static func opaqueFeedID(_ feedURL: String, salt: String) -> String {
+        var hasher = Hasher()
+        hasher.combine(salt)
+        hasher.combine(FeedURLIdentity.canonical(feedURL))
+        return String(UInt(bitPattern: hasher.finalize()), radix: 16)
+    }
+
+    private static func epoch(_ date: Date?) -> Int64 {
+        guard let date else { return -1 }
+        return Int64(date.timeIntervalSince1970)
+    }
+
+    private static func errorDetail(_ error: Error, depth: Int = 0) -> String {
+        let nsError = error as NSError
+        var pieces = [
+            "\(nsError.domain)(\(nsError.code)): \(sanitized(nsError.localizedDescription))"
+        ]
+        guard depth < 4 else { return pieces.joined(separator: " | ") }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+            pieces.append("underlying=\(errorDetail(underlying, depth: depth + 1))")
+        }
+        if let detailed = nsError.userInfo["NSDetailedErrors"] as? [Error] {
+            pieces.append(contentsOf: detailed.prefix(4).map {
+                "detail=\(errorDetail($0, depth: depth + 1))"
+            })
+        }
+        return pieces.joined(separator: " | ")
+    }
+
+    private static func sanitized(_ text: String) -> String {
+        var value = text
+        let patterns = [
+            #"https?://[^\s]+"#,
+            #"file://[^\s]+"#,
+            #"/[A-Za-z0-9._~!$&'()*+,;=:@%/-]+"#,
+            #"[0-9A-Fa-f]{8}-[0-9A-Fa-f-]{27,}"#,
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(value.startIndex..., in: value)
+            value = regex.stringByReplacingMatches(
+                in: value, range: range, withTemplate: "<redacted>"
+            )
+        }
+        return value
     }
 
     // MARK: Pure helpers (mirror SubscriptionRepository)

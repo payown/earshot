@@ -73,6 +73,7 @@ enum BackgroundFeedRefresher {
     @discardableResult
     static func runRefresh(
         container: ModelContainer,
+        trigger: FeedRefreshTrigger = .unspecified,
         force: Bool = false,
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         notifier: NotificationService = NotificationService(),
@@ -87,6 +88,7 @@ enum BackgroundFeedRefresher {
         let task = Task { @MainActor in
             await performRefresh(
                 container: container,
+                trigger: trigger,
                 force: force,
                 isCancelled: isCancelled,
                 notifier: notifier,
@@ -106,6 +108,7 @@ enum BackgroundFeedRefresher {
     @MainActor
     private static func performRefresh(
         container: ModelContainer,
+        trigger: FeedRefreshTrigger,
         force: Bool,
         isCancelled: @escaping @Sendable () -> Bool,
         notifier: NotificationService,
@@ -145,10 +148,20 @@ enum BackgroundFeedRefresher {
         // stops the loop promptly rather than spinning through every feed.
         // It returns one notification per notification-enabled podcast that got
         // genuinely-new episodes (#72).
-        let notifications = await repo.refreshAll(isCancelled: isCancelled) { _, _ in }
+        let report = await repo.refreshAllReport(
+            trigger: trigger,
+            isCancelled: isCancelled
+        ) { _, _ in }
 
         guard !Task.isCancelled, !isCancelled() else {
             AppLog.networking.info("Background feed refresh cancelled after feed work")
+            return false
+        }
+
+        guard report.completion == .full else {
+            AppLog.networking.error(
+                "Background feed refresh incomplete: succeeded=\(report.succeeded) total=\(report.total)"
+            )
             return false
         }
 
@@ -156,8 +169,8 @@ enum BackgroundFeedRefresher {
 
         // Deliver per-podcast "new episodes" notifications. NotificationService
         // never throws (logs + swallows), so this can't break task completion.
-        if !notifications.isEmpty {
-            await notifier.deliver(notifications)
+        if !report.notifications.isEmpty {
+            await notifier.deliver(report.notifications)
         }
 
         AppLog.networking.info("Background feed refresh complete")

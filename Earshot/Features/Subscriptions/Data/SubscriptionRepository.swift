@@ -12,6 +12,14 @@ protocol FeedFetching: Sendable {
     func fetch(_ urlString: String) async throws -> ParsedFeed
 }
 
+enum FeedRefreshTrigger: String, Sendable {
+    case manual
+    case coldLaunch
+    case foreground
+    case backgroundTask
+    case unspecified
+}
+
 // `FeedService: FeedFetching` is declared in FeedService.swift (same file as the
 // type) because `FeedFetching` refines `Sendable`: Swift 6 requires a `Sendable`
 // conformance to live in the type's own source file so the compiler can verify
@@ -363,6 +371,7 @@ final class SubscriptionRepository {
 
     @discardableResult
     func refreshAllReport(
+        trigger: FeedRefreshTrigger = .unspecified,
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
     ) async -> SubscriptionRefreshReport {
@@ -375,6 +384,7 @@ final class SubscriptionRepository {
         let actorReport = await actor.refreshAllReport(
             feed: feed,
             autoQueueEnabled: autoQueueEnabled,
+            trigger: trigger,
             isCancelled: isCancelled,
             onProgress: { completed, total in
                 progress?(completed, total)

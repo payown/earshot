@@ -597,7 +597,7 @@ struct SubscriptionsView: View {
             context: context,
             downloader: downloads,
             isEntitled: entitlements.isEntitled
-        ).refreshAllReport()
+        ).refreshAllReport(trigger: .manual)
         if report.completion == .full {
             AppSettingsStore(context: context).setDate(Date(), for: SettingsKey.lastFeedRefresh)
         }
