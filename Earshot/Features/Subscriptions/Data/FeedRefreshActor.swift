@@ -93,6 +93,16 @@ actor FeedRefreshActor {
         var outcome: RefreshOutcome
     }
 
+    struct RefreshRun: Sendable {
+        let results: [RefreshProgress]
+        let attempted: Int
+        let total: Int
+        let failed: Int
+        let cancelled: Bool
+        let intendedInsertions: Int
+        let durableInsertions: Int
+    }
+
     /// The result of subscribing on the background context. Carries only
     /// `PersistentIdentifier`s (a `Sendable` value type), never an `@Model`
     /// `Podcast`/`Episode`, so it can cross back to the main actor. The caller
@@ -135,25 +145,54 @@ actor FeedRefreshActor {
         isCancelled: @Sendable () -> Bool,
         onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async -> [RefreshProgress] {
+        await refreshAllReport(
+            feed: feed,
+            autoQueueEnabled: autoQueueEnabled,
+            isCancelled: isCancelled,
+            onProgress: onProgress
+        ).results
+    }
+
+    func refreshAllReport(
+        feed: FeedFetching,
+        autoQueueEnabled: Bool,
+        isCancelled: @Sendable () -> Bool,
+        onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
+    ) async -> RefreshRun {
         let podcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
         let total = podcasts.count
-        var completed = 0
-        let results = await withTaskGroup(
+        let report = await withTaskGroup(
             of: (Int, String, ParsedFeed?, String?).self,
-            returning: [RefreshProgress].self
+            returning: RefreshRun.self
         ) { group in
             var resultByInputIndex: [Int: RefreshProgress] = [:]
             var pendingByInputIndex: [Int: ApplyOutcome] = [:]
+            var completed = 0
+            var failed = 0
+            var intendedInsertions = 0
+            var durableInsertions = 0
             var sinceLastSave = 0
             var nextIndex = 0
             var activeFetches = 0
 
             func flushPending() {
-                _ = saveIfNeededOrLog()
-                for (index, applyOutcome) in pendingByInputIndex {
-                    guard var progress = resultByInputIndex[index] else { continue }
-                    progress.outcome = applyOutcome.result()
-                    resultByInputIndex[index] = progress
+                intendedInsertions += pendingByInputIndex.values.reduce(0) {
+                    $0 + $1.refreshOutcome.added
+                }
+                if saveIfNeededOrLog() {
+                    durableInsertions += pendingByInputIndex.values.reduce(0) {
+                        $0 + $1.refreshOutcome.added
+                    }
+                    for (index, applyOutcome) in pendingByInputIndex {
+                        guard var progress = resultByInputIndex[index] else { continue }
+                        progress.outcome = applyOutcome.result()
+                        resultByInputIndex[index] = progress
+                    }
+                } else {
+                    failed += pendingByInputIndex.count
+                    for index in pendingByInputIndex.keys {
+                        resultByInputIndex.removeValue(forKey: index)
+                    }
                 }
                 pendingByInputIndex.removeAll()
                 sinceLastSave = 0
@@ -187,6 +226,7 @@ actor FeedRefreshActor {
                 // while CloudKit subscription inserts and feed requests overlap.
                 guard let podcast = try? PodcastIdentityService(context: modelContext)
                     .existing(feedURL: requestedURL) else {
+                    failed += 1
                     completed += 1
                     await onProgress(completed, total)
                     while activeFetches < Self.refreshFetchConcurrency, nextIndex < total {
@@ -220,11 +260,14 @@ actor FeedRefreshActor {
                         sinceLastSave += 1
                         if sinceLastSave >= Self.saveBatchSize { flushPending() }
                     } catch {
+                        modelContext.rollback()
+                        failed += 1
                         AppLog.subscriptions.error(
                             "Refresh failed for \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
                         )
                     }
                 } else {
+                    failed += 1
                     AppLog.subscriptions.error(
                         "Refresh failed for \(title, privacy: .public): \(errorDescription ?? "Unknown error", privacy: .public)"
                     )
@@ -246,13 +289,21 @@ actor FeedRefreshActor {
             }
 
             flushPending()
-            return resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] }
+            return RefreshRun(
+                results: resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] },
+                attempted: completed,
+                total: total,
+                failed: failed,
+                cancelled: completed < total,
+                intendedInsertions: intendedInsertions,
+                durableInsertions: durableInsertions
+            )
         }
         // Newly ingested episodes can change the inbox count — signal the tab
         // badge once, at the end of the whole operation rather than per batch,
         // so it refreshes without polling on every save (#736).
         NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
-        return results
+        return report
     }
 
     /// Refreshes a single podcast (resolved by feed URL) on the background context.

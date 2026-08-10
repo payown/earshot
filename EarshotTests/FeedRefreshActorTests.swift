@@ -550,7 +550,7 @@ final class FeedRefreshActorTests: XCTestCase {
         let actor = FeedRefreshActor(modelContainer: container)
         await actor.forceNextSaveFailureForTesting()
 
-        _ = await actor.refreshAll(
+        let report = await actor.refreshAllReport(
             feed: FakeFeed(parsedFeed([parsedEpisode("new", d2)])),
             autoQueueEnabled: false,
             isCancelled: { false },
@@ -561,6 +561,10 @@ final class FeedRefreshActorTests: XCTestCase {
         let hasPendingChanges = await actor.hasPendingChangesForTesting()
         XCTAssertEqual(durableNewEpisodes.count, 5, "Only the later successful batch persists")
         XCTAssertFalse(hasPendingChanges)
+        XCTAssertEqual(report.results.count, 5, "Unsaved feeds must not be reported as successful")
+        XCTAssertEqual(report.failed, 10)
+        XCTAssertEqual(report.intendedInsertions, 15)
+        XCTAssertEqual(report.durableInsertions, 5)
     }
 
     /// Whole-library refresh overlaps at most three network requests. The first
