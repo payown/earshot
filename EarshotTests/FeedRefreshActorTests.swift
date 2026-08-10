@@ -526,6 +526,43 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).filter { $0.guid == "b" }.count, 3)
     }
 
+    /// A failed batch must be discarded before later feeds are applied. SwiftData
+    /// otherwise leaves the failed graph dirty and every later save retries it.
+    func testActorRefreshAllRollsBackFailedBatchAndLaterBatchPersists() async throws {
+        let container = cleanContainer()
+        do {
+            let seedContext = ModelContext(container)
+            for index in 0..<15 {
+                let podcast = Podcast(
+                    feedURL: "https://x/rollback-\(index).xml",
+                    title: "Show \(index)",
+                    lastSeenPubDate: d1
+                )
+                let oldEpisode = Episode(
+                    guid: "old", title: "Old", audioURL: "https://x/old.mp3", pubDate: d1
+                )
+                oldEpisode.podcast = podcast
+                seedContext.insert(podcast)
+                seedContext.insert(oldEpisode)
+            }
+            try seedContext.save()
+        }
+        let actor = FeedRefreshActor(modelContainer: container)
+        await actor.forceNextSaveFailureForTesting()
+
+        _ = await actor.refreshAll(
+            feed: FakeFeed(parsedFeed([parsedEpisode("new", d2)])),
+            autoQueueEnabled: false,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+
+        let durableNewEpisodes = try episodes(container).filter { $0.guid == "new" }
+        let hasPendingChanges = await actor.hasPendingChangesForTesting()
+        XCTAssertEqual(durableNewEpisodes.count, 5, "Only the later successful batch persists")
+        XCTAssertFalse(hasPendingChanges)
+    }
+
     /// Whole-library refresh overlaps at most three network requests. The first
     /// request completes alone to preserve prompt background-task cancellation;
     /// the next three rendezvous here, proving the steady-state window reaches

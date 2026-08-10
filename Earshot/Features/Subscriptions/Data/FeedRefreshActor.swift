@@ -29,9 +29,17 @@ actor FeedRefreshActor {
     }
 
 #if DEBUG
+    private var forcedSaveFailuresForTesting = 0
+
     /// Direct executor assertion used by the regression test for the device-
     /// measured main-thread refresh stall.
     func isExecutingOnMainThreadForTesting() -> Bool { Thread.isMainThread }
+
+    func forceNextSaveFailureForTesting() {
+        forcedSaveFailuresForTesting += 1
+    }
+
+    func hasPendingChangesForTesting() -> Bool { modelContext.hasChanges }
 #endif
 
     /// How many feeds are processed between `ModelContext.save()` calls. The old
@@ -141,7 +149,7 @@ actor FeedRefreshActor {
             var activeFetches = 0
 
             func flushPending() {
-                saveIfNeededOrLog()
+                _ = saveIfNeededOrLog()
                 for (index, applyOutcome) in pendingByInputIndex {
                     guard var progress = resultByInputIndex[index] else { continue }
                     progress.outcome = applyOutcome.result()
@@ -360,7 +368,7 @@ actor FeedRefreshActor {
             var completed = 0
 
             func flushPending() {
-                saveIfNeededOrLog()
+                _ = saveIfNeededOrLog()
                 for (index, outcome) in pendingOutcomeByInputIndex {
                     resultByInputIndex[index] = outcome.result()
                 }
@@ -1048,12 +1056,27 @@ actor FeedRefreshActor {
 
     private func saveIfNeeded() throws {
         guard modelContext.hasChanges else { return }
+#if DEBUG
+        if forcedSaveFailuresForTesting > 0 {
+            forcedSaveFailuresForTesting -= 1
+            throw NSError(
+                domain: "FeedRefreshActor.ForcedSaveFailure", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Forced save failure for testing"]
+            )
+        }
+#endif
         try modelContext.save()
     }
 
-    private func saveIfNeededOrLog() {
-        do { try saveIfNeeded() } catch {
+    @discardableResult
+    private func saveIfNeededOrLog() -> Bool {
+        do {
+            try saveIfNeeded()
+            return true
+        } catch {
             AppLog.subscriptions.error("Feed refresh save failed: \(error.localizedDescription, privacy: .public)")
+            modelContext.rollback()
+            return false
         }
     }
 
