@@ -59,6 +59,50 @@ actor FeedRefreshActor {
     /// Parsed results are still applied serially on this model actor, so this
     /// never creates concurrent SwiftData writers.
     private static let refreshFetchConcurrency = 3
+
+    private struct FetchCandidate: Sendable {
+        let index: Int
+        let url: String
+    }
+
+    private struct FetchedFeed: Sendable {
+        let index: Int
+        let url: String
+        let parsed: ParsedFeed?
+        let errorDescription: String?
+    }
+
+    /// Run only the network fan-out on the cooperative executor. Keeping the task
+    /// group out of the custom SwiftData model executor avoids Release builds
+    /// discarding completed child results while all model mutation stays isolated.
+    private nonisolated static func fetchBatch(
+        _ candidates: [FetchCandidate], feed: FeedFetching
+    ) async -> [FetchedFeed] {
+        await withTaskGroup(of: FetchedFeed.self, returning: [FetchedFeed].self) { group in
+            for candidate in candidates {
+                group.addTask {
+                    do {
+                        return FetchedFeed(
+                            index: candidate.index,
+                            url: candidate.url,
+                            parsed: try await feed.fetch(candidate.url),
+                            errorDescription: nil
+                        )
+                    } catch {
+                        return FetchedFeed(
+                            index: candidate.index,
+                            url: candidate.url,
+                            parsed: nil,
+                            errorDescription: error.localizedDescription
+                        )
+                    }
+                }
+            }
+            var results: [FetchedFeed] = []
+            for await result in group { results.append(result) }
+            return results
+        }
+    }
     /// Bulk subscription outcomes retain their newly inserted Episode objects
     /// until a save gives them permanent IDs. Keep this smaller than refresh's
     /// metadata-only batch so large back catalogs cannot accumulate ten feeds'
@@ -175,84 +219,66 @@ actor FeedRefreshActor {
         AppLog.subscriptions.info(
             "refresh=\(correlationID, privacy: .public) trigger=\(trigger.rawValue, privacy: .public) taskCancelledAtEntry=\(taskCancelledAtEntry, privacy: .public) feedsAttempted=\(total) eligibleFeeds=\(eligibleFeedCount) isEntitled=\(entitlementValue, privacy: .public) availableBytes=\(availableCapacity)"
         )
-        let report = await withTaskGroup(
-            of: (Int, String, ParsedFeed?, String?).self,
-            returning: RefreshRun.self
-        ) { group in
-            var resultByInputIndex: [Int: RefreshProgress] = [:]
-            var pendingByInputIndex: [Int: ApplyOutcome] = [:]
-            var completed = 0
-            var failed = 0
-            var intendedInsertions = 0
-            var durableInsertions = 0
-            var batchIndex = 0
-            var sinceLastSave = 0
-            var nextIndex = 0
-            var activeFetches = 0
+        var resultByInputIndex: [Int: RefreshProgress] = [:]
+        var pendingByInputIndex: [Int: ApplyOutcome] = [:]
+        var completed = 0
+        var failed = 0
+        var intendedInsertions = 0
+        var durableInsertions = 0
+        var batchIndex = 0
+        var sinceLastSave = 0
+        var nextIndex = 0
 
-            func flushPending() {
-                guard !pendingByInputIndex.isEmpty else { return }
-                batchIndex += 1
-                let batchIntended = pendingByInputIndex.values.reduce(0) {
-                    $0 + $1.insertedCount
-                }
-                intendedInsertions += batchIntended
-                if saveIfNeededOrLog(
-                    correlationID: correlationID,
-                    batchIndex: batchIndex,
-                    feedCount: pendingByInputIndex.count,
-                    intendedInsertions: batchIntended
-                ) {
-                    durableInsertions += batchIntended
-                    for (index, applyOutcome) in pendingByInputIndex {
-                        guard var progress = resultByInputIndex[index] else { continue }
-                        progress.outcome = applyOutcome.result()
-                        resultByInputIndex[index] = progress
-                    }
-                } else {
-                    failed += pendingByInputIndex.count
-                    for index in pendingByInputIndex.keys {
-                        resultByInputIndex.removeValue(forKey: index)
-                    }
-                }
-                pendingByInputIndex.removeAll()
-                sinceLastSave = 0
+        func flushPending() {
+            guard !pendingByInputIndex.isEmpty else { return }
+            batchIndex += 1
+            let batchIntended = pendingByInputIndex.values.reduce(0) {
+                $0 + $1.insertedCount
             }
-
-            func addFetch(at index: Int) {
-                let url = podcasts[index].feedURL
-                group.addTask {
-                    do {
-                        return (index, url, try await feed.fetch(url), nil)
-                    } catch {
-                        return (index, url, nil, error.localizedDescription)
-                    }
+            intendedInsertions += batchIntended
+            if saveIfNeededOrLog(
+                correlationID: correlationID,
+                batchIndex: batchIndex,
+                feedCount: pendingByInputIndex.count,
+                intendedInsertions: batchIntended
+            ) {
+                durableInsertions += batchIntended
+                for (index, applyOutcome) in pendingByInputIndex {
+                    guard var progress = resultByInputIndex[index] else { continue }
+                    progress.outcome = applyOutcome.result()
+                    resultByInputIndex[index] = progress
                 }
-                activeFetches += 1
-            }
-
-            // Start one request so an already-expiring BG task retains the exact
-            // prompt-cancellation behavior. After that first completion, keep a
-            // maximum of three network requests in flight.
-            let cancelledAtFirstSchedule = isCancelled()
-            let firstScheduleReason: String
-            if cancelledAtFirstSchedule {
-                firstScheduleReason = "task-cancelled"
-            } else if nextIndex >= eligibleFeedCount {
-                firstScheduleReason = "no-eligible-feeds"
             } else {
-                firstScheduleReason = "scheduled"
+                failed += pendingByInputIndex.count
+                for index in pendingByInputIndex.keys {
+                    resultByInputIndex.removeValue(forKey: index)
+                }
             }
-            AppLog.subscriptions.info(
-                "refresh=\(correlationID, privacy: .public) firstFetch=\(firstScheduleReason, privacy: .public) taskCancelled=\(cancelledAtFirstSchedule, privacy: .public) eligibleFeeds=\(eligibleFeedCount) total=\(total) isEntitled=\(entitlementValue, privacy: .public)"
-            )
-            if !cancelledAtFirstSchedule, nextIndex < eligibleFeedCount {
-                addFetch(at: nextIndex)
-                nextIndex += 1
-            }
+            pendingByInputIndex.removeAll()
+            sinceLastSave = 0
+        }
 
-            while let (inputIndex, requestedURL, parsed, errorDescription) = await group.next() {
-                activeFetches -= 1
+        let cancelledAtFirstSchedule = isCancelled()
+        let firstScheduleReason = cancelledAtFirstSchedule
+            ? "task-cancelled"
+            : (eligibleFeedCount == 0 ? "no-eligible-feeds" : "scheduled")
+        AppLog.subscriptions.info(
+            "refresh=\(correlationID, privacy: .public) firstFetch=\(firstScheduleReason, privacy: .public) taskCancelled=\(cancelledAtFirstSchedule, privacy: .public) eligibleFeeds=\(eligibleFeedCount) total=\(total) isEntitled=\(entitlementValue, privacy: .public)"
+        )
+
+        refreshLoop: while !cancelledAtFirstSchedule, nextIndex < eligibleFeedCount {
+            // Preserve the prompt-cancellation contract: start one request, then
+            // use the steady-state three-wide network window for later batches.
+            let fetchCount = nextIndex == 0 ? 1 : Self.refreshFetchConcurrency
+            let endIndex = min(nextIndex + fetchCount, eligibleFeedCount)
+            let candidates = (nextIndex..<endIndex).map {
+                FetchCandidate(index: $0, url: podcasts[$0].feedURL)
+            }
+            nextIndex = endIndex
+            let fetchedFeeds = await Self.fetchBatch(candidates, feed: feed)
+            for fetched in fetchedFeeds {
+                let inputIndex = fetched.index
+                let requestedURL = fetched.url
                 // Resolve the destination again by the URL captured inside the
                 // network task. This prevents a stale fetched-model/index pair
                 // from ever attaching one feed's episodes to another podcast
@@ -266,16 +292,12 @@ actor FeedRefreshActor {
                     )
                     completed += 1
                     await onProgress(completed, total)
-                    while activeFetches < Self.refreshFetchConcurrency, nextIndex < total {
-                        addFetch(at: nextIndex)
-                        nextIndex += 1
-                    }
                     continue
                 }
                 let title = podcast.title
                 let url = requestedURL
                 let feedID = Self.opaqueFeedID(url, salt: correlationID)
-                if let parsed {
+                if let parsed = fetched.parsed {
                     do {
                         let markBefore = podcast.lastSeenPubDate
                         let repairGUIDs = ordinaryRefreshCandidates(
@@ -311,36 +333,30 @@ actor FeedRefreshActor {
                 } else {
                     failed += 1
                     AppLog.subscriptions.error(
-                        "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=fetch-failure error=\(Self.sanitized(errorDescription ?? "Unknown error"), privacy: .public)"
+                        "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=fetch-failure error=\(Self.sanitized(fetched.errorDescription ?? "Unknown error"), privacy: .public)"
                     )
                 }
                 completed += 1
                 await onProgress(completed, total)
 
                 if isCancelled() {
-                    group.cancelAll()
                     AppLog.subscriptions.info(
                         "refreshAll stopped early (cancelled) after \(completed) of \(total)"
                     )
-                    break
-                }
-                while activeFetches < Self.refreshFetchConcurrency, nextIndex < total {
-                    addFetch(at: nextIndex)
-                    nextIndex += 1
+                    break refreshLoop
                 }
             }
-
-            flushPending()
-            return RefreshRun(
-                results: resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] },
-                attempted: completed,
-                total: total,
-                failed: failed,
-                cancelled: completed < total,
-                intendedInsertions: intendedInsertions,
-                durableInsertions: durableInsertions
-            )
         }
+        flushPending()
+        let report = RefreshRun(
+            results: resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] },
+            attempted: completed,
+            total: total,
+            failed: failed,
+            cancelled: completed < total,
+            intendedInsertions: intendedInsertions,
+            durableInsertions: durableInsertions
+        )
         // Newly ingested episodes can change the inbox count — signal the tab
         // badge once, at the end of the whole operation rather than per batch,
         // so it refreshes without polling on every save (#736).
