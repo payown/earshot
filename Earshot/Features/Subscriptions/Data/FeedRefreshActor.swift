@@ -468,6 +468,7 @@ actor FeedRefreshActor {
         feedURLs: [String],
         feed: FeedFetching,
         inboxSeedCount: Int,
+        isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
     ) async -> [SubscribeResult] {
         await PodcastIdentityWriteGate.shared.acquire(feedURLs: feedURLs)
@@ -505,10 +506,21 @@ actor FeedRefreshActor {
             // the bounded pipeline below; each parsed feed is written and released
             // as soon as it arrives rather than retaining every parsed feed until
             // the slowest network request finishes.
+            let identityScan = PerformanceSignposts.signposter.beginInterval(
+                "OPMLIdentityScan",
+                "inputCount=\(feedURLs.count)"
+            )
             let identity = PodcastIdentityService(context: modelContext)
+            let existingByURL = (try? identity.existingByCanonicalFeedURL(for: feedURLs)) ?? [:]
+            PerformanceSignposts.signposter.endInterval(
+                "OPMLIdentityScan",
+                identityScan,
+                "existingCount=\(existingByURL.count) mainThread=\(Thread.isMainThread)"
+            )
             var fetchCandidates: [(index: Int, url: String)] = []
             for (index, url) in feedURLs.enumerated() {
-                if let existing = try? identity.existing(feedURL: url) {
+                guard !isCancelled() else { break }
+                if let existing = existingByURL[FeedURLIdentity.canonical(url)] {
                     resultByInputIndex[index] = SubscribeOutcome(
                         podcast: existing, episodes: [], alreadySubscribed: true
                     ).result()
@@ -520,7 +532,7 @@ actor FeedRefreshActor {
             }
 
             var nextIndex = 0
-            let initial = min(Self.subscribeFetchConcurrency, fetchCandidates.count)
+            let initial = isCancelled() ? 0 : min(Self.subscribeFetchConcurrency, fetchCandidates.count)
             for _ in 0..<initial {
                 let candidate = fetchCandidates[nextIndex]
                 nextIndex += 1
@@ -532,31 +544,12 @@ actor FeedRefreshActor {
                 var title: String?
                 if let parsed {
                     do {
-                        let applyInterval = PerformanceSignposts.signposter.beginInterval(
-                            "ActorApply",
-                            "inputIndex=\(inputIndex) import=1"
-                        )
-                        let outcome: SubscribeOutcome
-                        do {
-                            outcome = try await subscribeOne(
-                                feedURL: url,
-                                feed: feed,
-                                inboxSeedCount: inboxSeedCount,
-                                parsedFeed: parsed,
-                                initialEpisodeLimit: Self.opmlInitialEpisodeLimit
-                            )
-                        } catch {
-                            PerformanceSignposts.signposter.endInterval(
-                                "ActorApply",
-                                applyInterval,
-                                "failed=1"
-                            )
-                            throw error
-                        }
-                        PerformanceSignposts.signposter.endInterval(
-                            "ActorApply",
-                            applyInterval,
-                            "alreadySubscribed=\(outcome.alreadySubscribed)"
+                        let outcome = try await subscribeOne(
+                            feedURL: url,
+                            feed: feed,
+                            inboxSeedCount: inboxSeedCount,
+                            parsedFeed: parsed,
+                            initialEpisodeLimit: Self.opmlInitialEpisodeLimit
                         )
                         title = outcome.title
                         if outcome.alreadySubscribed {
@@ -576,6 +569,11 @@ actor FeedRefreshActor {
                 }
                 completed += 1
                 await onProgress?(completed, total, title)
+
+                guard !isCancelled() else {
+                    group.cancelAll()
+                    continue
+                }
 
                 if nextIndex < fetchCandidates.count {
                     let candidate = fetchCandidates[nextIndex]

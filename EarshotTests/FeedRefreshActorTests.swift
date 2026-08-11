@@ -989,6 +989,68 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).count, 2, "No duplicate episode rows")
     }
 
+    /// Canonical variants resolve through the bulk identity map without another
+    /// network request or a duplicate podcast row.
+    func testActorSubscribeAllBulkIdentityMatchesCanonicalVariants() async throws {
+        final class CountingFeed: FeedFetching, @unchecked Sendable {
+            let calls = OSAllocatedUnfairLock(initialState: 0)
+            let parsed: ParsedFeed
+            init(_ parsed: ParsedFeed) { self.parsed = parsed }
+            func fetch(_ urlString: String) async throws -> ParsedFeed {
+                calls.withLock { $0 += 1 }
+                return parsed
+            }
+        }
+        let container = cleanContainer()
+        let seed = ModelContext(container)
+        seed.insert(Podcast(feedURL: "https://example.com/feed.xml", title: "Existing"))
+        try seed.save()
+        let fetcher = CountingFeed(parsedFeed([parsedEpisode("a", d1)]))
+        let actor = FeedRefreshActor(modelContainer: container)
+
+        let results = await actor.subscribeAll(
+            feedURLs: [" HTTPS://EXAMPLE.COM:443/feed.xml#fragment "],
+            feed: fetcher,
+            inboxSeedCount: 3
+        )
+
+        XCTAssertEqual(results.count, 1)
+        XCTAssertTrue(results[0].alreadySubscribed)
+        XCTAssertEqual(fetcher.calls.withLock { $0 }, 0)
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<Podcast>()), 1)
+    }
+
+    /// Cancellation preserves completed save batches; retrying the same input is
+    /// idempotent and completes the remaining feeds without duplicate rows.
+    func testActorSubscribeAllCancellationThenRetryIsIdempotent() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1)]))
+        let urls = (0..<24).map { "https://cancel\($0).example/feed" }
+        let state = OSAllocatedUnfairLock(initialState: (progress: 0, cancelled: false))
+
+        let partial = await actor.subscribeAll(
+            feedURLs: urls,
+            feed: fetcher,
+            inboxSeedCount: 3,
+            isCancelled: { state.withLock { $0.cancelled } },
+            onProgress: { _, _, _ in
+                state.withLock {
+                    $0.progress += 1
+                    if $0.progress == 11 { $0.cancelled = true }
+                }
+            }
+        )
+
+        XCTAssertGreaterThanOrEqual(partial.count, 10, "The first completed batch remains durable")
+        XCTAssertLessThan(partial.count, urls.count)
+
+        let retried = await actor.subscribeAll(feedURLs: urls, feed: fetcher, inboxSeedCount: 3)
+        XCTAssertEqual(retried.count, urls.count)
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<Podcast>()), urls.count)
+        XCTAssertEqual(try episodes(container).count, urls.count, "Retry creates no duplicate episodes")
+    }
+
     /// Cancellation before the first feed processes nothing.
     func testActorRefreshAllCancelledImmediatelyDoesNothing() async throws {
         let container = cleanContainer()

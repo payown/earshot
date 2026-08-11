@@ -9,6 +9,20 @@ struct OPMLImportOutcome {
     /// How many requested feeds were skipped because of the free-tier cap
     /// (0 for Plus users). #635.
     let skippedForCapCount: Int
+    let failedCount: Int
+    let cancelled: Bool
+
+    init(
+        importedCount: Int,
+        skippedForCapCount: Int,
+        failedCount: Int = 0,
+        cancelled: Bool = false
+    ) {
+        self.importedCount = importedCount
+        self.skippedForCapCount = skippedForCapCount
+        self.failedCount = failedCount
+        self.cancelled = cancelled
+    }
 }
 
 /// Imports an OPML document: subscribes to each feed and recreates folder groups
@@ -81,7 +95,9 @@ final class OPMLImportService {
             PerformanceSignposts.signposter.endInterval("WholeOPMLImport", wholeImport)
         }
         let parseInterval = PerformanceSignposts.signposter.beginInterval("OPMLParse")
-        let groups = OPMLDocument.groups(from: opml)
+        let groups = await Task.detached(priority: .userInitiated) {
+            OPMLDocument.groups(from: opml)
+        }.value
         PerformanceSignposts.signposter.endInterval(
             "OPMLParse",
             parseInterval,
@@ -144,7 +160,12 @@ final class OPMLImportService {
         // which preserves the OPML path's existing behavior).
         await subscriptions.autoDownloadRecent(episodeIDsPerPodcast: result.outcomes.map(\.episodeIDs))
 
-        return OPMLImportOutcome(importedCount: result.outcomes.count, skippedForCapCount: result.skippedForCap)
+        return OPMLImportOutcome(
+            importedCount: result.outcomes.count,
+            skippedForCapCount: result.skippedForCap,
+            failedCount: result.failed,
+            cancelled: result.cancelled
+        )
     }
 
     private func findOrCreateFolder(named name: String) -> PodcastFolder {

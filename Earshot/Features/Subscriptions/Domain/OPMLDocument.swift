@@ -16,7 +16,7 @@ enum OPMLDocument {
 
     /// A single podcast feed in the export tree. Value type so export stays free
     /// of SwiftData; the data layer maps its `Podcast`s onto these.
-    struct OPMLFeed: Equatable {
+    struct OPMLFeed: Equatable, Sendable {
         let title: String
         let feedURL: String
     }
@@ -25,7 +25,7 @@ enum OPMLDocument {
     /// in it (not in a subfolder), and its nested subfolders. Recursive so an
     /// arbitrarily deep folder hierarchy round-trips through nested `<outline>`
     /// groups. New in folders phase 3 (#764).
-    struct OPMLFolderNode: Equatable {
+    struct OPMLFolderNode: Equatable, Sendable {
         let name: String
         let feeds: [OPMLFeed]
         let children: [OPMLFolderNode]
@@ -112,7 +112,7 @@ enum OPMLDocument {
 
     /// A feed group from an imported OPML: feeds nested inside a folder outline
     /// carry that folder's name; top-level feeds are ungrouped (`folder == nil`).
-    struct OPMLGroup: Equatable {
+    struct OPMLGroup: Equatable, Sendable {
         let folder: String?
         let feedURLs: [String]
     }

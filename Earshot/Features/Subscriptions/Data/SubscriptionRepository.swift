@@ -474,6 +474,8 @@ final class SubscriptionRepository {
         /// How many requested feed URLs were NOT attempted because of the
         /// free-tier cap (0 for Plus users, 0 when already under the cap). #635.
         let skippedForCap: Int
+        let failed: Int
+        let cancelled: Bool
     }
 
     /// Subscribes to every URL in `feedURLs` in ONE background pass, reconciling the
@@ -512,7 +514,7 @@ final class SubscriptionRepository {
             return canonical
         }
         guard !canonicalFeedURLs.isEmpty else {
-            return BulkSubscribeResult(outcomes: [], skippedForCap: 0)
+            return BulkSubscribeResult(outcomes: [], skippedForCap: 0, failed: 0, cancelled: false)
         }
 
         var allowedURLs = canonicalFeedURLs
@@ -526,7 +528,11 @@ final class SubscriptionRepository {
             allowedURLs = Array(canonicalFeedURLs.prefix(allowedCount))
             skippedForCap = canonicalFeedURLs.count - allowedURLs.count
         }
-        guard !allowedURLs.isEmpty else { return BulkSubscribeResult(outcomes: [], skippedForCap: skippedForCap) }
+        guard !allowedURLs.isEmpty else {
+            return BulkSubscribeResult(
+                outcomes: [], skippedForCap: skippedForCap, failed: 0, cancelled: false
+            )
+        }
 
         // Resolve the inbox seed count on the main actor (AppSettingsStore is
         // @MainActor) so the bulk OPML path seeds the inbox identically to the
@@ -581,7 +587,12 @@ final class SubscriptionRepository {
         if !outcomes.isEmpty {
             NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
         }
-        return BulkSubscribeResult(outcomes: outcomes, skippedForCap: skippedForCap)
+        return BulkSubscribeResult(
+            outcomes: outcomes,
+            skippedForCap: skippedForCap,
+            failed: max(0, allowedURLs.count - results.count),
+            cancelled: Task.isCancelled
+        )
     }
 
     /// Auto-downloads the N most recent episodes (global `autoDownloadCount`; 0 =

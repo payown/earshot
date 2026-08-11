@@ -88,12 +88,7 @@ enum OPMLFileImporter {
                 PerformanceSignposts.signposter.endInterval("OPMLProgressCallback", interval)
             },
             onProgress: { completed, total, title in
-                let interval = PerformanceSignposts.signposter.beginInterval(
-                    "OPMLProgressCallback",
-                    "completed=\(completed) total=\(total)"
-                )
                 progress?.advance(completed: completed, total: total, title: title)
-                PerformanceSignposts.signposter.endInterval("OPMLProgressCallback", interval)
             }
         )
         // Resolve the inflection markup THROUGH String(localized:) before it
@@ -107,7 +102,12 @@ enum OPMLFileImporter {
         // it to the correct singular/plural spoken form first.
         let imported = String(localized: "Imported ^[\(outcome.importedCount) podcast](inflect: true)")
         let message: String
-        if outcome.skippedForCapCount > 0 {
+        if outcome.cancelled {
+            message = "Import cancelled. \(imported)."
+        } else if outcome.failedCount > 0 {
+            let failed = String(localized: "^[\(outcome.failedCount) podcast](inflect: true)")
+            message = "\(imported). \(failed) could not be imported."
+        } else if outcome.skippedForCapCount > 0 {
             // Free-tier cap (#635): tell the user how many were skipped and why,
             // with an upgrade mention. This announcement is the only accessible
             // surface for OPML import outcome in the app (no persistent status UI),
