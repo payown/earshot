@@ -13,7 +13,8 @@ protocol FeedFetching: Sendable {
 }
 
 enum FeedRefreshTrigger: String, Sendable {
-    case manual
+    case manualToolbar
+    case manualPullToRefresh
     case coldLaunch
     case foreground
     case backgroundTask

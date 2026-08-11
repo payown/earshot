@@ -87,7 +87,7 @@ struct SubscriptionsView: View {
                             .accessibilityFocused($focusedRowID, equals: podcast.persistentModelID)
                     }
                 }
-                .refreshable { await performRefresh() }
+                .refreshable { await performRefresh(trigger: .manualPullToRefresh) }
             }
         }
         // Persistent multi-select bar (#757): its primary button's label carries
@@ -154,7 +154,7 @@ struct SubscriptionsView: View {
             }
             ToolbarItem(placement: .topBarLeading) {
                 Button {
-                    Task { await performRefresh() }
+                    Task { await performRefresh(trigger: .manualToolbar) }
                 } label: {
                     Label(
                         isRefreshing ? "Refreshing library" : "Refresh library",
@@ -577,7 +577,7 @@ struct SubscriptionsView: View {
         return parts.joined(separator: ", ")
     }
 
-    private func performRefresh() async {
+    private func performRefresh(trigger: FeedRefreshTrigger) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         Announcer.announce("Refreshing library")
@@ -597,7 +597,7 @@ struct SubscriptionsView: View {
             context: context,
             downloader: downloads,
             isEntitled: entitlements.isEntitled
-        ).refreshAllReport(trigger: .manual)
+        ).refreshAllReport(trigger: trigger)
         if report.completion == .full {
             AppSettingsStore(context: context).setDate(Date(), for: SettingsKey.lastFeedRefresh)
         }

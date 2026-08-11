@@ -163,11 +163,12 @@ actor FeedRefreshActor {
         onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async -> RefreshRun {
         let correlationID = UUID().uuidString.lowercased()
+        let taskCancelledAtEntry = Task.isCancelled
         let podcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
         let total = podcasts.count
         let availableCapacity = Self.availableCapacityForImportantUsage()
         AppLog.subscriptions.info(
-            "refresh=\(correlationID, privacy: .public) trigger=\(trigger.rawValue, privacy: .public) feedsAttempted=\(total) availableBytes=\(availableCapacity)"
+            "refresh=\(correlationID, privacy: .public) trigger=\(trigger.rawValue, privacy: .public) taskCancelledAtEntry=\(taskCancelledAtEntry, privacy: .public) feedsAttempted=\(total) availableBytes=\(availableCapacity)"
         )
         let report = await withTaskGroup(
             of: (Int, String, ParsedFeed?, String?).self,

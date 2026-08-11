@@ -122,7 +122,7 @@ final class FeedRefreshActorTests: XCTestCase {
         let report = await actor.refreshAllReport(
             feed: OutOfOrderDistinctFeed(feeds: feeds),
             autoQueueEnabled: false,
-            trigger: .manual,
+            trigger: .manualToolbar,
             isCancelled: { false },
             onProgress: { _, _ in }
         )
