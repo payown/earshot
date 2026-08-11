@@ -398,10 +398,19 @@ final class SubscriptionRepository {
         // (and any held `Podcast`/`Episode` objects) reflect the refresh. Only the
         // podcasts that actually gained episodes need their `.episodes` re-faulted,
         // and one at a time — never the whole Episode table (#696).
+        let mergeInterval = PerformanceSignposts.signposter.beginInterval(
+            "MainContextMerge",
+            "resultCount=\(results.count)"
+        )
         let affectedIDs = results
             .filter { $0.outcome.added > 0 }
             .compactMap { self.podcast(forFeedURL: $0.feedURL)?.persistentModelID }
         mergeBackgroundWrites(affectedPodcastIDs: affectedIDs)
+        PerformanceSignposts.signposter.endInterval(
+            "MainContextMerge",
+            mergeInterval,
+            "affectedCount=\(affectedIDs.count)"
+        )
 
         // Auto-download the newest `autoDownloadCount` genuinely-new episodes per
         // podcast (never a backfill pass — `newEpisodeIDs` is empty there). This is
@@ -530,6 +539,17 @@ final class SubscriptionRepository {
         let results = await actor.subscribeAll(
             feedURLs: allowedURLs, feed: feed, inboxSeedCount: inboxSeedCount, onProgress: onProgress
         )
+
+        let reconciliationInterval = PerformanceSignposts.signposter.beginInterval(
+            "OPMLReconciliation",
+            "resultCount=\(results.count)"
+        )
+        defer {
+            PerformanceSignposts.signposter.endInterval(
+                "OPMLReconciliation",
+                reconciliationInterval
+            )
+        }
 
         // Reconcile the main context ONCE for the entire batch (the essential fix:
         // this used to run once per feed).

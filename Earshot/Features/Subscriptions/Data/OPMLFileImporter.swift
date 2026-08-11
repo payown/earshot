@@ -80,10 +80,20 @@ enum OPMLFileImporter {
         let outcome = await OPMLImportService(context: context, downloader: downloader, isEntitled: isEntitled).importOPML(
             opml,
             onResolveTotal: { total in
+                let interval = PerformanceSignposts.signposter.beginInterval(
+                    "OPMLProgressCallback",
+                    "completed=0 total=\(total)"
+                )
                 progress?.start(total: total)
+                PerformanceSignposts.signposter.endInterval("OPMLProgressCallback", interval)
             },
             onProgress: { completed, total, title in
+                let interval = PerformanceSignposts.signposter.beginInterval(
+                    "OPMLProgressCallback",
+                    "completed=\(completed) total=\(total)"
+                )
                 progress?.advance(completed: completed, total: total, title: title)
+                PerformanceSignposts.signposter.endInterval("OPMLProgressCallback", interval)
             }
         )
         // Resolve the inflection markup THROUGH String(localized:) before it

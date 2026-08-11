@@ -613,6 +613,8 @@ struct SubscriptionsView: View {
     /// demand; merely entering Library cannot materialize every show's inverse
     /// episode relationship.
     private func loadPodcasts() {
+        let interval = PerformanceSignposts.signposter.beginInterval("LibraryReload")
+        defer { PerformanceSignposts.signposter.endInterval("LibraryReload", interval) }
         var descriptor = FetchDescriptor<Podcast>(sortBy: [SortDescriptor(\.title)])
         descriptor.propertiesToFetch = [
             \Podcast.feedURL,

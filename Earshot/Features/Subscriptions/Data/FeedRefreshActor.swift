@@ -209,6 +209,10 @@ actor FeedRefreshActor {
         isCancelled: @Sendable () -> Bool,
         onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async -> RefreshRun {
+        let wholeRefresh = PerformanceSignposts.signposter.beginInterval("WholeRefresh")
+        defer {
+            PerformanceSignposts.signposter.endInterval("WholeRefresh", wholeRefresh)
+        }
         let correlationID = UUID().uuidString.lowercased()
         let taskCancelledAtEntry = Task.isCancelled
         let podcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
@@ -307,9 +311,18 @@ actor FeedRefreshActor {
                         ).map(\.guid)
                         let repair = try IdentityRepairService(context: modelContext)
                             .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
-                        if repair.didChange { try modelContext.save() }
+                        if repair.didChange { try saveWithSignpost() }
+                        let applyInterval = PerformanceSignposts.signposter.beginInterval(
+                            "ActorApply",
+                            "inputIndex=\(inputIndex) candidateCount=\(repairGUIDs.count)"
+                        )
                         let applyOutcome = apply(
                             parsed, to: podcast, autoQueueEnabled: autoQueueEnabled
+                        )
+                        PerformanceSignposts.signposter.endInterval(
+                            "ActorApply",
+                            applyInterval,
+                            "insertedCount=\(applyOutcome.insertedCount)"
                         )
                         AppLog.subscriptions.info(
                             "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) candidates=\(repairGUIDs.count) markBefore=\(Self.epoch(markBefore)) markAfter=\(Self.epoch(podcast.lastSeenPubDate)) intended=\(applyOutcome.insertedCount)"
@@ -385,7 +398,7 @@ actor FeedRefreshActor {
         ).map(\.guid)
         let repair = try IdentityRepairService(context: modelContext)
             .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
-        if repair.didChange { try modelContext.save() }
+        if repair.didChange { try saveWithSignpost() }
         let applyOutcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
         // Save BEFORE resolving `newEpisodeIDs` — persistentModelID is temporary
         // for a newly-inserted Episode until the context saves (same reason
@@ -414,7 +427,7 @@ actor FeedRefreshActor {
         do {
             let repair = try IdentityRepairService(context: modelContext)
                 .repair(feedURLs: [canonical])
-            if repair.didChange { try modelContext.save() }
+            if repair.didChange { try saveWithSignpost() }
             // Hold the identity gate through the save: another context must not
             // perform its final existence check while this insert is uncommitted.
             let outcome = try await subscribeOne(
@@ -463,7 +476,7 @@ actor FeedRefreshActor {
         do {
             let repair = try IdentityRepairService(context: modelContext)
                 .repair(feedURLs: feedURLs)
-            if repair.didChange { try modelContext.save() }
+            if repair.didChange { try saveWithSignpost() }
         } catch {
             AppLog.subscriptions.error(
                 "OPML import: preflight identity repair failed: \(error.localizedDescription, privacy: .public)"
@@ -519,12 +532,31 @@ actor FeedRefreshActor {
                 var title: String?
                 if let parsed {
                     do {
-                        let outcome = try await subscribeOne(
-                            feedURL: url,
-                            feed: feed,
-                            inboxSeedCount: inboxSeedCount,
-                            parsedFeed: parsed,
-                            initialEpisodeLimit: Self.opmlInitialEpisodeLimit
+                        let applyInterval = PerformanceSignposts.signposter.beginInterval(
+                            "ActorApply",
+                            "inputIndex=\(inputIndex) import=1"
+                        )
+                        let outcome: SubscribeOutcome
+                        do {
+                            outcome = try await subscribeOne(
+                                feedURL: url,
+                                feed: feed,
+                                inboxSeedCount: inboxSeedCount,
+                                parsedFeed: parsed,
+                                initialEpisodeLimit: Self.opmlInitialEpisodeLimit
+                            )
+                        } catch {
+                            PerformanceSignposts.signposter.endInterval(
+                                "ActorApply",
+                                applyInterval,
+                                "failed=1"
+                            )
+                            throw error
+                        }
+                        PerformanceSignposts.signposter.endInterval(
+                            "ActorApply",
+                            applyInterval,
+                            "alreadySubscribed=\(outcome.alreadySubscribed)"
                         )
                         title = outcome.title
                         if outcome.alreadySubscribed {
@@ -1184,6 +1216,14 @@ actor FeedRefreshActor {
             )
         }
 #endif
+        try saveWithSignpost()
+    }
+
+    private func saveWithSignpost() throws {
+        let saveInterval = PerformanceSignposts.signposter.beginInterval("PersistenceSave")
+        defer {
+            PerformanceSignposts.signposter.endInterval("PersistenceSave", saveInterval)
+        }
         try modelContext.save()
     }
 

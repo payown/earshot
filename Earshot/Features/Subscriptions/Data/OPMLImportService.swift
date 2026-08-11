@@ -76,7 +76,17 @@ final class OPMLImportService {
         onResolveTotal: (@MainActor @Sendable (_ total: Int) -> Void)? = nil,
         onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
     ) async -> OPMLImportOutcome {
+        let wholeImport = PerformanceSignposts.signposter.beginInterval("WholeOPMLImport")
+        defer {
+            PerformanceSignposts.signposter.endInterval("WholeOPMLImport", wholeImport)
+        }
+        let parseInterval = PerformanceSignposts.signposter.beginInterval("OPMLParse")
         let groups = OPMLDocument.groups(from: opml)
+        PerformanceSignposts.signposter.endInterval(
+            "OPMLParse",
+            parseInterval,
+            "groupCount=\(groups.count)"
+        )
         folderCache = Dictionary(
             uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<PodcastFolder>())) ?? [])
                 .map { ($0.name, $0) }
@@ -116,6 +126,10 @@ final class OPMLImportService {
         // trim the requested URLs before the pass even starts.
         let result = await subscriptions.subscribeAll(feedURLs: orderedURLs, onProgress: onProgress)
 
+        let folderInterval = PerformanceSignposts.signposter.beginInterval(
+            "OPMLFolderPass",
+            "outcomeCount=\(result.outcomes.count)"
+        )
         // Create folders + memberships on the main context from the resolved
         // main-context podcasts. findOrCreateFolder/addMembership are unchanged.
         for outcome in result.outcomes {
@@ -124,6 +138,7 @@ final class OPMLImportService {
             addMembership(outcome.podcast, to: folder)
         }
         save()
+        PerformanceSignposts.signposter.endInterval("OPMLFolderPass", folderInterval)
 
         // Auto-download once at the end (no-op unless a downloader was injected,
         // which preserves the OPML path's existing behavior).
