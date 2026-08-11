@@ -143,6 +143,7 @@ actor FeedRefreshActor {
         feed: FeedFetching,
         autoQueueEnabled: Bool,
         trigger: FeedRefreshTrigger = .unspecified,
+        isEntitled: Bool? = nil,
         isCancelled: @Sendable () -> Bool,
         onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async -> [RefreshProgress] {
@@ -150,6 +151,7 @@ actor FeedRefreshActor {
             feed: feed,
             autoQueueEnabled: autoQueueEnabled,
             trigger: trigger,
+            isEntitled: isEntitled,
             isCancelled: isCancelled,
             onProgress: onProgress
         ).results
@@ -159,6 +161,7 @@ actor FeedRefreshActor {
         feed: FeedFetching,
         autoQueueEnabled: Bool,
         trigger: FeedRefreshTrigger = .unspecified,
+        isEntitled: Bool? = nil,
         isCancelled: @Sendable () -> Bool,
         onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async -> RefreshRun {
@@ -166,9 +169,11 @@ actor FeedRefreshActor {
         let taskCancelledAtEntry = Task.isCancelled
         let podcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
         let total = podcasts.count
+        let eligibleFeedCount = podcasts.count
+        let entitlementValue = isEntitled.map(String.init) ?? "unknown"
         let availableCapacity = Self.availableCapacityForImportantUsage()
         AppLog.subscriptions.info(
-            "refresh=\(correlationID, privacy: .public) trigger=\(trigger.rawValue, privacy: .public) taskCancelledAtEntry=\(taskCancelledAtEntry, privacy: .public) feedsAttempted=\(total) availableBytes=\(availableCapacity)"
+            "refresh=\(correlationID, privacy: .public) trigger=\(trigger.rawValue, privacy: .public) taskCancelledAtEntry=\(taskCancelledAtEntry, privacy: .public) feedsAttempted=\(total) eligibleFeeds=\(eligibleFeedCount) isEntitled=\(entitlementValue, privacy: .public) availableBytes=\(availableCapacity)"
         )
         let report = await withTaskGroup(
             of: (Int, String, ParsedFeed?, String?).self,
@@ -229,7 +234,19 @@ actor FeedRefreshActor {
             // Start one request so an already-expiring BG task retains the exact
             // prompt-cancellation behavior. After that first completion, keep a
             // maximum of three network requests in flight.
-            if !isCancelled(), nextIndex < total {
+            let cancelledAtFirstSchedule = isCancelled()
+            let firstScheduleReason: String
+            if cancelledAtFirstSchedule {
+                firstScheduleReason = "task-cancelled"
+            } else if nextIndex >= eligibleFeedCount {
+                firstScheduleReason = "no-eligible-feeds"
+            } else {
+                firstScheduleReason = "scheduled"
+            }
+            AppLog.subscriptions.info(
+                "refresh=\(correlationID, privacy: .public) firstFetch=\(firstScheduleReason, privacy: .public) taskCancelled=\(cancelledAtFirstSchedule, privacy: .public) eligibleFeeds=\(eligibleFeedCount) total=\(total) isEntitled=\(entitlementValue, privacy: .public)"
+            )
+            if !cancelledAtFirstSchedule, nextIndex < eligibleFeedCount {
                 addFetch(at: nextIndex)
                 nextIndex += 1
             }

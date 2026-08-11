@@ -386,6 +386,7 @@ final class SubscriptionRepository {
             feed: feed,
             autoQueueEnabled: autoQueueEnabled,
             trigger: trigger,
+            isEntitled: isEntitled,
             isCancelled: isCancelled,
             onProgress: { completed, total in
                 progress?(completed, total)
