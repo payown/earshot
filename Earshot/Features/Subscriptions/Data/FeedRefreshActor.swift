@@ -188,7 +188,7 @@ actor FeedRefreshActor {
                 guard !pendingByInputIndex.isEmpty else { return }
                 batchIndex += 1
                 let batchIntended = pendingByInputIndex.values.reduce(0) {
-                    $0 + $1.refreshOutcome.added
+                    $0 + $1.insertedCount
                 }
                 intendedInsertions += batchIntended
                 if saveIfNeededOrLog(
@@ -272,7 +272,7 @@ actor FeedRefreshActor {
                             parsed, to: podcast, autoQueueEnabled: autoQueueEnabled
                         )
                         AppLog.subscriptions.info(
-                            "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) candidates=\(repairGUIDs.count) markBefore=\(Self.epoch(markBefore)) markAfter=\(Self.epoch(podcast.lastSeenPubDate)) intended=\(applyOutcome.refreshOutcome.added)"
+                            "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) candidates=\(repairGUIDs.count) markBefore=\(Self.epoch(markBefore)) markAfter=\(Self.epoch(podcast.lastSeenPubDate)) intended=\(applyOutcome.insertedCount)"
                         )
                         resultByInputIndex[inputIndex] = RefreshProgress(
                             feedURL: url,
@@ -739,6 +739,7 @@ actor FeedRefreshActor {
     private struct ApplyOutcome {
         let refreshOutcome: RefreshOutcome
         let newEpisodes: [Episode]
+        let insertedCount: Int
 
         func result() -> RefreshOutcome {
             var outcome = refreshOutcome
@@ -780,7 +781,11 @@ actor FeedRefreshActor {
             AppLog.subscriptions.info("Backfilled \(podcast.title, privacy: .public): \(parsedEpisodes.count) episode(s)")
             // Backfilled/pre-existing catalog episodes must NOT trigger
             // auto-download, matching the existing `wasBackfill` notification gate.
-            return ApplyOutcome(refreshOutcome: .backfill, newEpisodes: [])
+            return ApplyOutcome(
+                refreshOutcome: .backfill,
+                newEpisodes: [],
+                insertedCount: parsedEpisodes.count
+            )
         }
 
         // Compact CloudKit synchronization deliberately transfers subscription
@@ -887,7 +892,8 @@ actor FeedRefreshActor {
 
         return ApplyOutcome(
             refreshOutcome: RefreshOutcome(added: added, wasBackfill: false, newestNewEpisodeGUID: newestNewGUID),
-            newEpisodes: newEpisodes
+            newEpisodes: newEpisodes,
+            insertedCount: added
         )
     }
 
@@ -979,7 +985,8 @@ actor FeedRefreshActor {
                 wasBackfill: false,
                 newestNewEpisodeGUID: newestNewGUID
             ),
-            newEpisodes: genuinelyNew
+            newEpisodes: genuinelyNew,
+            insertedCount: seed.count
         )
     }
 
