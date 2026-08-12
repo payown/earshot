@@ -53,6 +53,17 @@ final class FeedRefreshActorTests: XCTestCase {
         try ModelContext(container).fetch(FetchDescriptor<Episode>())
     }
 
+    /// Regression for the build-177 device trace: constructing a `@ModelActor`
+    /// from this `@MainActor` test must not pin its ModelContext work to the main
+    /// thread. The production repository uses this same factory at every call
+    /// site.
+    func testBackgroundFactoryDoesNotExecuteOnMainThread() async {
+        let actor = await FeedRefreshActor.makeBackground(modelContainer: cleanContainer())
+        let isOnMainThread = await actor.isExecutingOnMainThreadForTesting()
+
+        XCTAssertFalse(isOnMainThread)
+    }
+
     /// A new subscription has its backlog pre-dismissed (so refresh of an existing
     /// podcast must add only genuinely-new episodes). Seed one directly with a
     /// mark already set, then refresh on the actor and read from a fresh context.
@@ -173,6 +184,50 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(stored.count, 1)
         XCTAssertEqual(stored.first?.guid, "duplicate")
         XCTAssertEqual(stored.first?.audioURL, "https://x/newer.mp3")
+    }
+
+    /// A compact CloudKit subscription carries a feed high-water mark but no
+    /// episode relationships. Its first local refresh must create a bounded,
+    /// useful catalog without treating pre-mark history as newly published.
+    func testActorSeedsSyncedShellWithTenRecentEpisodes() async throws {
+        let container = cleanContainer()
+        let mark = Date(timeIntervalSince1970: 1_700_020_000)
+        do {
+            let seedContext = ModelContext(container)
+            seedContext.insert(Podcast(
+                feedURL: "https://x/feed.xml", title: "Cloud shell",
+                lastSeenPubDate: mark
+            ))
+            try seedContext.save()
+        }
+        let items = (1...25).map { index in
+            parsedEpisode(
+                "episode-\(index)",
+                Date(timeIntervalSince1970: 1_700_000_000 + Double(index * 1_000))
+            )
+        }
+
+        let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: "https://x/feed.xml",
+            feed: FakeFeed(parsedFeed(items)),
+            autoQueueEnabled: false
+        )
+
+        let stored = try episodes(container)
+        XCTAssertEqual(stored.count, 10, "A synced shell seeds a bounded recent catalog")
+        XCTAssertEqual(
+            Set(stored.map(\.guid)),
+            Set((16...25).map { "episode-\($0)" })
+        )
+        XCTAssertEqual(outcome?.added, 5, "Only episodes newer than the transferred mark are new")
+        XCTAssertEqual(
+            Set(stored.filter { !$0.inboxDismissed }.map(\.guid)),
+            Set((21...25).map { "episode-\($0)" })
+        )
+        XCTAssertEqual(
+            try ModelContext(container).fetch(FetchDescriptor<Podcast>()).first?.lastSeenPubDate,
+            Date(timeIntervalSince1970: 1_700_025_000)
+        )
     }
 
     // MARK: subscribe (off the caller's context)
@@ -471,6 +526,37 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).filter { $0.guid == "b" }.count, 3)
     }
 
+    /// Whole-library refresh overlaps at most three network requests. The first
+    /// request completes alone to preserve prompt background-task cancellation;
+    /// the next three rendezvous here, proving the steady-state window reaches
+    /// three without creating an unbounded request burst.
+    func testActorRefreshAllBoundsNetworkConcurrencyAtThree() async throws {
+        let container = cleanContainer()
+        do {
+            let seedContext = ModelContext(container)
+            for index in 0..<7 {
+                seedContext.insert(Podcast(
+                    feedURL: "https://x/feed\(index).xml",
+                    title: "Show \(index)",
+                    lastSeenPubDate: d1
+                ))
+            }
+            try seedContext.save()
+        }
+        let fetcher = RefreshConcurrencyFeed(parsedFeed([parsedEpisode("a", d1)]))
+
+        let results = await FeedRefreshActor(modelContainer: container).refreshAll(
+            feed: fetcher,
+            autoQueueEnabled: false,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+
+        let maximumActiveFetches = await fetcher.maximumActiveFetches()
+        XCTAssertEqual(results.count, 7)
+        XCTAssertEqual(maximumActiveFetches, 3)
+    }
+
     // MARK: subscribeAll (bulk OPML path)
 
     /// Bulk subscribe inserts every feed's podcast + backlog on the actor's own
@@ -504,10 +590,10 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).count, 24)
     }
 
-    /// OPML bulk import persists only the newest ten rows immediately. A later
-    /// ordinary refresh fills older history, and the subscribe high-water mark
-    /// ensures those older rows remain dismissed rather than entering the Inbox.
-    func testActorSubscribeAllLimitsInitialHistoryAndRefreshAddsOlderDismissed() async throws {
+    /// OPML bulk import persists only the newest ten rows immediately. Automatic
+    /// refresh must not rebuild the older history and recreate the large inverse-
+    /// relationship stall measured on the build-178 device.
+    func testActorSubscribeAllAndRefreshKeepHistoricalBacklogBounded() async throws {
         let container = cleanContainer()
         let actor = FeedRefreshActor(modelContainer: container)
         let catalog = (0..<25).map { index in
@@ -528,15 +614,52 @@ final class FeedRefreshActorTests: XCTestCase {
         )
 
         stored = try episodes(container)
-        XCTAssertEqual(stored.count, 25, "A normal later refresh restores older history")
-        let older = stored.filter { episode in
-            guard let index = Int(episode.guid.replacingOccurrences(of: "episode-", with: "")) else {
-                return false
-            }
-            return index < 15
+        XCTAssertEqual(stored.count, 10, "Automatic refresh does not rebuild historical gaps")
+        XCTAssertEqual(Set(stored.map(\.guid)), Set((15..<25).map { "episode-\($0)" }))
+    }
+
+    /// A device that has been offline can encounter more than ten genuinely-new
+    /// publications in one response. Persist the newest ten only, but advance the
+    /// durable high-water mark to the newest publication so the same backlog is
+    /// not reconsidered on every subsequent automatic refresh.
+    func testActorRefreshLimitsGenuinelyNewEpisodesToNewestTen() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/established-large.xml"
+        let seedContext = ModelContext(container)
+        let podcast = Podcast(feedURL: feedURL, title: "Established", lastSeenPubDate: d1)
+        let existing = Episode(
+            guid: "existing",
+            title: "Existing",
+            audioURL: "https://x/existing.mp3",
+            pubDate: d1
+        )
+        existing.podcast = podcast
+        seedContext.insert(podcast)
+        seedContext.insert(existing)
+        try seedContext.save()
+
+        let catalog = (1...25).map { index in
+            parsedEpisode("new-\(index)", d1.addingTimeInterval(Double(index)))
         }
-        XCTAssertEqual(older.count, 15)
-        XCTAssertTrue(older.allSatisfy(\.inboxDismissed), "Older history never appears as new Inbox content")
+        let actor = FeedRefreshActor(modelContainer: container)
+        let optionalOutcome = try await actor.refreshOne(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed(catalog)),
+            autoQueueEnabled: false
+        )
+        let outcome = try XCTUnwrap(optionalOutcome)
+
+        let stored = try episodes(container)
+        XCTAssertEqual(outcome.added, 10)
+        XCTAssertEqual(stored.count, 11)
+        XCTAssertEqual(
+            Set(stored.map(\.guid)),
+            Set(["existing"] + (16...25).map { "new-\($0)" })
+        )
+        let refreshedPodcast = try XCTUnwrap(
+            ModelContext(container).fetch(FetchDescriptor<Podcast>()).first
+        )
+        XCTAssertEqual(refreshedPodcast.lastSeenPubDate, d1.addingTimeInterval(25))
     }
 
     /// A feed that throws is logged and skipped — the rest of the batch still
@@ -611,6 +734,41 @@ private final class FakeFeed: FeedFetching, @unchecked Sendable {
     let feed: ParsedFeed
     init(_ feed: ParsedFeed) { self.feed = feed }
     func fetch(_ urlString: String) async throws -> ParsedFeed { feed }
+}
+
+/// Lets the first request finish immediately, then holds the next requests
+/// until three are active. Later requests finish immediately; the recorded high
+/// water mark proves the production scheduler never exceeded its bound.
+private actor RefreshConcurrencyFeed: FeedFetching {
+    private let feed: ParsedFeed
+    private var callCount = 0
+    private var active = 0
+    private var maximumActive = 0
+    private var rendezvous: [CheckedContinuation<Void, Never>] = []
+
+    init(_ feed: ParsedFeed) { self.feed = feed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        callCount += 1
+        active += 1
+        maximumActive = max(maximumActive, active)
+
+        if callCount > 1, callCount <= 4 {
+            await withCheckedContinuation { continuation in
+                rendezvous.append(continuation)
+                if rendezvous.count == 3 {
+                    let waiting = rendezvous
+                    rendezvous.removeAll()
+                    waiting.forEach { $0.resume() }
+                }
+            }
+        }
+
+        active -= 1
+        return feed
+    }
+
+    func maximumActiveFetches() -> Int { maximumActive }
 }
 
 /// Captures progress callback values across the actor boundary.

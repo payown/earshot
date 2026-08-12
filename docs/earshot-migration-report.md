@@ -617,8 +617,150 @@ feed refresher saved the large episode catalog; one sample placed 977 of 1,461
 samples in `AllInboxCandidates.body`, and observed RSS reached 337 MB. The Inbox
 now loads through its bounded repository query only on initial display and
 explicit Inbox or queue change events, not on every unrelated SwiftData save.
-Against this same 662-subscription Mac library, the real background refresh
-finished 3 minutes 42 seconds after launch. Earshot then measured 0.7% CPU; a
-two-second sample found the main thread idle in all 319 samples. The finite
-catalog rebuild remains material work and is not described as a sync-speed
-improvement.
+Against this same 662-subscription Mac library, Earshot reached a temporarily
+quiet interval 3 minutes 42 seconds after launch. It measured 0.7% CPU, and a
+two-second sample found the main thread idle in all 319 samples. The durable
+last-refresh timestamp had not advanced, so this does not measure completion or
+bound total catalog-rebuild time. It shows that network waits can become idle
+and that the Inbox no longer spins during them; it is not described as a
+sync-speed improvement.
+
+The resulting development build 175 CloudKitDevelopment binary measured
+14,818,096 bytes with SHA-256
+`6d61fb8faeeb20b1f27b6c3bfc029d78f7cf8ebc787bfa8ac52b43b9e1584fbb`
+and a 2026-08-07 23:37:10 -0700 modification time. The runtime development gate
+was `YES`; the signed entitlements contained the development push environment,
+`iCloud.media.payown.earshot`, and CloudKit. A single wireless over-install
+replaced iPhone build 174 without uninstalling or clearing data. Read-only
+enumeration then reported build 175. The installation did not launch the app.
+
+A subsequent clean-path review found one compact-projection bootstrap gap. A
+synced podcast has the source device's feed high-water mark but intentionally
+has no episode relationships. The receiving device's ordinary refresh could
+therefore treat the shell as caught up and leave its episode list empty. The
+specific relationship-free shell path now seeds the ten newest feed episodes.
+Rows at or before the transferred mark remain dismissed, and only publications
+after that mark receive normal new-episode behavior. A focused actor test uses
+25 feed episodes around a transferred mark and verifies a ten-row local catalog
+with exactly the five post-mark rows in the Inbox.
+
+Development build 176 contains that bootstrap correction. Its verified
+CloudKitDevelopment iPhone binary measured 14,835,040 bytes with SHA-256
+`b8999c18c508d511a7225b1a4ced7f22902c8037fabd4116db05899a75b7b496`
+and a 2026-08-07 23:45:52 -0700 modification time. The runtime development gate
+was `YES`, and the signed development push, private CloudKit container, and
+CloudKit service entitlements were present. Wireless over-install retained
+database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration
+reported build 176. The installer did not launch it.
+
+The same build-176 Mac run established that local feed-catalog reconstruction
+was still a separate long-running operation: 339 of 662 podcasts had been
+refreshed after approximately 8.5 minutes, and the durable completion timestamp
+had not advanced. That checkpoint is not a completion measurement. The
+whole-library scheduler now overlaps no more than three network fetch-and-parse
+operations while keeping repair, application, and saving serialized through one
+`FeedRefreshActor` SwiftData context. Its deterministic concurrency test reaches
+three active requests and proves the ceiling is three. Full local CI executed
+1,798 tests, skipped 38, and failed 0.
+
+Development build 177 contains that scheduler. A clean signed
+CloudKitDevelopment build produced a 19,746,800-byte arm64 binary with SHA-256
+`2dec7c9c2dec33c0f034847d63970f08ca5408daf696774e621d49700f9a7b5a` and
+modification time 2026-08-07 23:54:06 -0700. Its build number is 177, marketing
+version is 1.1.0, runtime development gate is `YES`, and its development push,
+private CloudKit container, and CloudKit service entitlements are present. An
+isolated clean rebuild of the exact build-176 commit with the same current
+toolchain and settings measured 19,603,472 bytes. Build 177's like-for-like
+increase is therefore 143,328 bytes
+(`19,746,800 - 19,603,472 = 143,328`). The earlier 14,835,040-byte build-176
+artifact remains valid, but its 4,911,760-byte cross-build difference consists
+mostly of link-edit symbol metadata and cannot be attributed to the scheduler.
+A single wireless over-install then replaced build 176 while retaining database
+UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`. Read-only enumeration reported
+build 177. The installer did not launch the app, and no reset ran.
+
+Subsequent physical-device profiling established why the iPhone remained busy.
+Build 177's feed model actor inherited the main executor. Build 178 corrected the
+executor, but SwiftData still faulted a real 45,436-episode inverse relationship
+and recorded nine 0.81–0.98 second UI stalls. Builds 179 and 180 bounded both
+automatic episode ingest and duplicate repair to the newest ten incoming
+candidate GUIDs while preserving all already-stored history. The build-180
+662-feed refresh completed durably at 2026-08-08 00:31:55 -0700, approximately
+1 minute 58 seconds after launch, rather than the earlier approximately
+16-minute sequential Mac run. These timings use different devices and catalog
+states and are not presented as a controlled speedup measurement.
+
+Build 180's remaining 780.26-millisecond hang was independent of feed refresh:
+CloudKit queue reconciliation faulted and sorted an entire podcast relationship
+to resolve one episode. Build 181 resolves compact episode, queue, and folder
+projection keys with targeted podcast/GUID store fetches instead. A 15-second
+physical-device trace recorded zero hangs. Its signed CloudKitDevelopment arm64
+binary is 19,784,704 bytes, SHA-256
+`a52becdc65348ad01ed189de3dac711a29a213589d5eb175fc212044b3a60140`,
+modified 2026-08-08 00:34:17 -0700; the runtime development gate is `YES`.
+Wireless over-install preserved database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`.
+
+Read-only snapshots after the run show exact compact-projection convergence on
+iPhone and Mac: 662 podcasts, 4 meaningful episode states, 1 queue intent, 4
+mirrored settings, 0 bookmarks, 31 listening sessions, and 0 folders, with both
+SQLite integrity checks returning `ok`. The Mac application store contains 662
+podcasts and 274,072 locally refetched episodes. Episode catalogs and Inbox
+counts are intentionally device-local and can differ as feeds change; the
+compact synchronized library does not differ. Full local CI executed 1,801
+tests, skipped 38, and failed 0. Production CloudKit remains disabled and
+undeployed.
+
+The initial relationship-free subscription projection is restartable in
+50-row save batches. Reconciliation uses canonical feed URL as its natural key,
+so a process interruption replays no more than the unfinished batch and cannot
+create duplicate subscription rows. The on-disk regression test models a
+partial durable state by reopening a 662-subscription application store and a
+137-row projection store; reconciliation finishes with 662 projection rows,
+662 unique canonical keys, and 662 application subscriptions. Full local CI
+then executed 1,802 tests, skipped 38, and failed 0.
+
+Core bidirectional behavior is also covered as one integrated round trip rather
+than only isolated projection cases. Phone subscription metadata, playback
+progress, queue state, and global speed are reconciled into a Mac application
+store; newer Mac metadata, progress, queue removal, and speed are then
+reconciled back into the phone application store. Full local CI executed 1,803
+tests, skipped 38, and failed 0.
+
+Development build 182 packages the restart-safe subscription backfill. Its
+signed CloudKitDevelopment arm64 binary measured 19,785,936 bytes with SHA-256
+`bd36401f96c45ddd4c90e3d266e156ec6464af0095b2a06a25291dcfebd21e3a`
+and modification time 2026-08-08 00:46:19 -0700. It reports 1.1.0 (182), the
+runtime development gate is `YES`, and the signed entitlements contain
+development push, `iCloud.media.payown.earshot`, and CloudKit. Wireless
+over-install retained database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration reports build
+182. The installer did not launch it, and no reset ran.
+
+Coordinator integration tests now cover the B2 deletion and folder-cycle seams.
+A remotely delivered unfollow releases active playback before cascade deletion
+and remains safe under later pause/seek persistence. A remotely delivered
+three-folder cycle is repaired to the deterministic acyclic hierarchy and emits
+one repair notice. Full local CI executed 1,805 tests, skipped 38, and failed 0.
+
+The subsequent B2 safety audit found and fixed two local-resource terminal
+conditions. A download completing after sync or local unfollow deleted its
+episode no longer leaks the already-moved audio file or touches deleted
+SwiftData state. Explicit data clearing now waits for the dedicated artwork
+URLSession to invalidate and for a bounded 250-millisecond URLCache SQLite drain
+before filesystem removal. The focused removal/reconstruction test produced no
+SQLite unlink diagnostics, and full local CI executed 1,806 tests, skipped 38,
+and failed 0.
+
+Development build 183 packages those fixes. The signed CloudKitDevelopment
+arm64 binary measured 19,795,984 bytes with SHA-256
+`6f6b17ccf1a2d2d43059d8fa2815e292de2684c2f3d67714f508da5abaa52b39`
+and modification time 2026-08-08 01:02:40 -0700. It reports 1.1.0 (183) and
+retained iPhone database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84` across
+wireless over-install. A post-launch read-only iPhone snapshot and the running
+Designed-for-iPhone Mac projection each passed SQLite integrity and matched
+exactly, column-for-column in both EXCEPT directions: 662 podcast rows, 4
+episode-state rows, 1 queue row, 4 setting rows, 0 bookmark rows, 31 listening
+sessions, and 0 folder rows. No mutation was introduced for that observation,
+so it does not substitute for the remaining two-direction, offline,
+account-change, heat, or physical VoiceOver matrix.

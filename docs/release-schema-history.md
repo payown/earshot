@@ -101,6 +101,77 @@ local. It also separates device-only clearing from an explicitly confirmed synce
 library deletion. Production CloudKit remains disabled and undeployed. Fresh-store
 schema remains V10; supported migration sources remain V5 and V6.
 
+Build 175 is the development-only large-library responsiveness follow-up. It
+keeps build 174's compact CloudKit projection unchanged and replaces the global
+Inbox's live SwiftData observation with explicit Inbox- and queue-change
+refreshes, preventing unrelated catalog-rebuild saves from repeatedly
+materializing the Inbox on the main actor. Production CloudKit remains disabled
+and undeployed. Fresh-store schema remains V10; supported migration sources
+remain V5 and V6.
+
+Build 176 is the development-only clean-second-device bootstrap follow-up. A
+relationship-free synced subscription now seeds a bounded ten-episode local
+catalog on its first feed refresh while preserving the transferred high-water
+mark, so historical rows stay dismissed and only later publications count as
+new. Production CloudKit remains disabled and undeployed. Fresh-store schema
+remains V10; supported migration sources remain V5 and V6.
+
+Build 177 is the development-only large-library feed-rebuild follow-up. It
+overlaps at most three network fetch-and-parse operations while retaining one
+serialized SwiftData writer, input-ordered results, batched saves, and prompt
+background-task cancellation. Production CloudKit remains disabled and
+undeployed. Fresh-store schema remains V10; supported migration sources remain
+V5 and V6.
+
+Build 178 is the development-only feed-executor correction. Device profiling
+showed build 177's `FeedRefreshActor` had been constructed on the main actor,
+pinning SwiftData relationship work to the UI thread. Every production call site
+now creates that model actor on a detached utility executor. Build 177 is
+superseded for testing. Production CloudKit remains disabled and undeployed.
+Fresh-store schema remains V10; supported migration sources remain V5 and V6.
+
+Build 179 is the development-only bounded automatic-refresh correction. Device
+profiling showed build 178 moved feed persistence off the main actor, but
+faulting a real 45,436-episode inverse relationship still caused repeated UI
+stalls. Established subscriptions now preserve all stored history while
+ingesting at most the newest ten genuinely-new episodes per automatic refresh;
+older feed-catalog rows remain refetchable rather than local or CloudKit state.
+Build 178 is superseded for testing. Production CloudKit remains disabled and
+undeployed. Fresh-store schema remains V10; supported migration sources remain
+V5 and V6.
+
+Build 180 is the development-only targeted duplicate-repair correction. A
+build-179 device trace proved its pre-refresh identity repair still fetched all
+45,436 stored episodes for one podcast before reaching the new history bound.
+Refresh now repairs only GUIDs eligible to participate in that refresh. Build
+179 is superseded for testing. Production CloudKit remains disabled and
+undeployed. Fresh-store schema remains V10; supported migration sources remain
+V5 and V6.
+
+Build 181 is the development-only bounded CloudKit resolution correction. A
+build-180 device trace reduced refresh stalls to one 780-millisecond hang and
+identified it in queue reconciliation: resolving one projection faulted and
+sorted an entire podcast episode relationship. CloudKit reconciliation now
+fetches only the requested podcast/GUID pairs. Build 180 is superseded for
+testing. Production CloudKit remains disabled and undeployed. Fresh-store schema
+remains V10; supported migration sources remain V5 and V6.
+
+Build 182 is the development-only restartability follow-up. Initial compact
+subscription projection saves every 50 changed rows and resumes by canonical
+feed URL after interruption without duplicating already durable subscriptions.
+Build 181 is superseded for testing. Production CloudKit remains disabled and
+undeployed. Fresh-store schema remains V10; supported migration sources remain
+V5 and V6.
+
+Build 183 is the development-only two-device safety follow-up. A completed
+background download whose episode was removed locally or by remote sync now
+deletes its unowned audio file without touching a deleted SwiftData object.
+Destructive local-data actions await URLSession invalidation and a bounded
+URLCache SQLite drain before moving or deleting the artwork-cache directory.
+Build 182 is superseded for testing. Production CloudKit remains disabled and
+undeployed. Fresh-store schema remains V10; supported migration sources remain
+V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App

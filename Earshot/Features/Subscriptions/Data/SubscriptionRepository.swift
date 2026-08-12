@@ -154,7 +154,7 @@ final class SubscriptionRepository {
 
         // Hand the fetch/parse/insert/save to the background actor (off the main
         // thread). It returns only Sendable PersistentIdentifiers.
-        let actor = FeedRefreshActor(modelContainer: context.container)
+        let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
         let result = try await actor.subscribe(feedURL: canonical, feed: feed, inboxSeedCount: inboxSeedCount)
 
         // Pull the background context's writes into the main context so the
@@ -290,7 +290,7 @@ final class SubscriptionRepository {
     @discardableResult
     func refresh(_ podcast: Podcast) async throws -> RefreshOutcome {
         let feedURL = podcast.feedURL
-        let actor = FeedRefreshActor(modelContainer: context.container)
+        let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
         guard let outcome = try await actor.refreshOne(
             feedURL: feedURL, feed: feed, autoQueueEnabled: autoQueueEnabled
         ) else {
@@ -328,7 +328,7 @@ final class SubscriptionRepository {
         // background `@ModelActor` so none of it runs on the main thread and
         // starves VoiceOver (#382). The actor returns lightweight value-type
         // results; only the cheap progress callback hops back to the main actor.
-        let actor = FeedRefreshActor(modelContainer: context.container)
+        let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
         let progress = onProgress
         let results = await actor.refreshAll(
             feed: feed,
@@ -462,7 +462,7 @@ final class SubscriptionRepository {
 
         // Hand the whole fetch/parse/insert/save loop to the background actor. It
         // returns only Sendable PersistentIdentifiers, batching its saves.
-        let actor = FeedRefreshActor(modelContainer: context.container)
+        let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
         let results = await actor.subscribeAll(
             feedURLs: allowedURLs, feed: feed, inboxSeedCount: inboxSeedCount, onProgress: onProgress
         )

@@ -569,10 +569,59 @@ architecture.
   977 of 1,461 samples to `AllInboxCandidates.body`; RSS reached 337 MB in the
   observed run. The global Inbox now performs an event-driven bounded fetch on
   Inbox and queue changes instead of observing every unrelated store save.
-  On the same Mac library, the background refresh finished 3 minutes 42 seconds
-  after launch; Earshot then measured 0.7% CPU, and all 319 main-thread samples
-  in a two-second follow-up were idle. This does not make the feed rebuild cheap:
-  it separates that finite work from a persistent SwiftUI query loop.
+  On the same Mac library, Earshot reached a temporarily quiet interval 3 minutes
+  42 seconds after launch: it measured 0.7% CPU and all 319 main-thread samples
+  in a two-second follow-up were idle. The durable refresh timestamp had not yet
+  advanced, so that observation does not establish total refresh duration. It
+  establishes that network waits can go idle and that the Inbox no longer spins
+  during them; the full feed rebuild remains unbounded by this measurement.
+- Development build 175 contains that responsiveness fix. The verified
+  CloudKitDevelopment iPhone binary is 14,818,096 bytes, SHA-256
+  `6d61fb8faeeb20b1f27b6c3bfc029d78f7cf8ebc787bfa8ac52b43b9e1584fbb`,
+  built 2026-08-07 23:37:10 -0700. Its runtime development gate is `YES` and
+  its signed entitlements name the development push environment,
+  `iCloud.media.payown.earshot`, and CloudKit. A single wireless over-install
+  replaced build 174 while preserving the app data container; read-only device
+  enumeration reports build 175. It was not launched during installation.
+- Review of the clean second-device path found that a compact synced podcast
+  arrives with the source feed high-water mark but no episode relationships.
+  The ordinary refresh could therefore regard it as caught up and leave a clean
+  device's episode list empty. The first refresh of this specific shell now
+  seeds only the ten newest feed episodes. Episodes at or before the transferred
+  mark stay dismissed; only later publications count as new. This preserves the
+  compact CloudKit shape while making the subscription usable without eagerly
+  rebuilding an unbounded history.
+- Development build 176 contains the bounded clean-device seed. Its verified
+  CloudKitDevelopment iPhone binary is 14,835,040 bytes, SHA-256
+  `b8999c18c508d511a7225b1a4ced7f22902c8037fabd4116db05899a75b7b496`,
+  built 2026-08-07 23:45:52 -0700. The runtime development gate is `YES`, and
+  development push, private CloudKit container, and CloudKit service
+  entitlements are present. Wireless over-install replaced unlaunched build 175
+  while retaining database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`;
+  read-only enumeration reports build 176. The installer did not launch it.
+- The build-176 Mac run also showed that the remaining local episode-catalog
+  rebuild was still sequential and long-running: 339 of 662 podcasts had a
+  post-launch `refreshedAt` value after approximately 8.5 minutes, while the
+  durable `last_feed_refresh` timestamp had not advanced. This is a checkpoint,
+  not a completion time. Whole-library refresh now overlaps at most three
+  network fetch-and-parse operations, then applies every result through the one
+  serialized `FeedRefreshActor` SwiftData context. A deterministic test reaches
+  exactly three active fetches and proves the scheduler does not exceed three.
+  Full local CI reports 1,798 executed, 38 skipped, and 0 failed.
+- Development build 177 contains that bounded refresh scheduler. Its clean,
+  signed CloudKitDevelopment iPhone binary is 19,746,800 bytes, SHA-256
+  `2dec7c9c2dec33c0f034847d63970f08ca5408daf696774e621d49700f9a7b5a`,
+  built 2026-08-07 23:54:06 -0700. Build number 177, marketing version 1.1.0,
+  runtime development gate `YES`, and the development CloudKit entitlements
+  were verified. An isolated clean rebuild of the exact build-176 commit under
+  the same current conditions measured 19,603,472 bytes, making build 177's
+  like-for-like increase 143,328 bytes
+  (`19,746,800 - 19,603,472 = 143,328`). The earlier 14,835,040-byte build-176
+  artifact remains valid, but its 4,911,760-byte cross-build difference is
+  mostly link-edit symbol metadata and is not attributable to the scheduler.
+  A single wireless over-install then replaced build 176 while retaining
+  database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration
+  reports build 177. The installer did not launch the app, and no reset ran.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.
@@ -748,3 +797,93 @@ The helper-only measurement was zero across fourteen entity types; the factory
 measurement was `AppSetting=2`. The 0.030273333 s figure excludes the
 `AppRuntime.resetLocalData()` service-release preamble, including download
 recovery cancellation, which remains unmeasured.
+
+## CloudKit device convergence and refresh profiling, 2026-08-08
+
+The iPhone and Apple-silicon Mac compact projection stores now converge exactly:
+662 podcasts, 4 meaningful episode-state rows, 1 queue intent, 4 mirrored
+settings, 0 bookmarks, 31 listening sessions, and 0 folders. Both projection
+stores pass SQLite `integrity_check`. The Mac application store contains 662
+podcasts and 274,072 locally refetched episodes. Inbox/catalog counts may differ
+between devices because episode catalogs are deliberately local and each device
+refetches feeds independently; that difference is not missing CloudKit library
+records.
+
+Physical profiling found and corrected three independent large-library costs.
+Build 177 constructed the feed model actor on the main executor. Build 178 moved
+it to a detached utility executor, but a 45,436-episode podcast relationship
+still caused nine 0.81–0.98 second UI stalls. Build 179 bounded automatic ingest
+to the newest ten genuinely-new episodes while preserving stored history, but
+its duplicate-repair preamble still scanned the entire relationship and produced
+16 0.84–1.16 second hangs. Build 180 limited repair to incoming candidate GUIDs;
+the full 662-feed refresh then completed durably at 2026-08-08 00:31:55 -0700,
+approximately 1 minute 58 seconds after its 00:29:57 launch. Its only remaining
+trace hang was 780.26 ms in CloudKit queue reconciliation, which resolved one
+queue item by faulting and sorting an entire podcast relationship.
+
+Build 181 replaces that relationship traversal with podcast/GUID-targeted store
+fetches. A 15-second physical-device trace recorded zero hangs. Its verified
+CloudKitDevelopment arm64 binary is 19,784,704 bytes, SHA-256
+`a52becdc65348ad01ed189de3dac711a29a213589d5eb175fc212044b3a60140`,
+modified 2026-08-08 00:34:17 -0700. The runtime development gate is `YES`.
+Wireless over-install preserved database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`. Full local CI executed 1,801 tests,
+skipped 38, and failed 0. Production CloudKit remains disabled and undeployed.
+
+Initial compact-projection subscription backfill is now checkpointed every 50
+changed relationship-free podcast rows. If the process stops, the next
+reconciliation resumes by canonical feed URL; it does not duplicate already
+durable subscriptions, and at most the current 50-row batch must be replayed.
+An on-disk restart test seeds 662 application subscriptions, persists a partial
+137-row projection, reopens both stores, and converges to 662 projection rows,
+662 unique canonical keys, and 662 application subscriptions. Full local CI
+executed 1,802 tests, skipped 38, and failed 0.
+
+A single two-device integration test now exercises the core round trip through
+one shared projection: phone subscription metadata, playback progress, queue
+state, and global speed reach the Mac; newer Mac metadata, progress, queue
+removal, and speed then return to the phone. The test uses the production
+conflict timestamps and verifies the final application stores, not merely the
+projection rows. Full local CI executed 1,803 tests, skipped 38, and failed 0.
+
+Development build 182 contains the checkpointed subscription backfill and the
+core two-device round-trip proof. Its signed CloudKitDevelopment arm64 binary
+is 19,785,936 bytes, SHA-256
+`bd36401f96c45ddd4c90e3d266e156ec6464af0095b2a06a25291dcfebd21e3a`,
+modified 2026-08-08 00:46:19 -0700. It reports 1.1.0 (182), its runtime
+development gate is `YES`, and its entitlements include development push,
+`iCloud.media.payown.earshot`, and CloudKit. A single wireless iPhone
+over-install replaced build 181 and preserved database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration reports build
+182. The installer did not launch the app, and no data reset ran.
+
+B2 coordinator-level deletion and folder-conflict coverage now proves two
+previously indirect safety contracts. A remote subscription tombstone delivered
+while that podcast is playing synchronously unloads `PlayerService` before the
+podcast/episode cascade, and subsequent pause/seek persistence cannot resurrect
+the episode. A remote three-folder cycle deterministically detaches the
+lexicographically greatest folder, persists an acyclic hierarchy, and emits
+exactly one conflict-repair notification. Full local CI executed 1,805 tests,
+skipped 38, and failed 0.
+
+The B2 audit also closed two device-owned cleanup races. If a background
+download finishes after its episode was removed locally or by remote sync, the
+terminal handler now removes the unowned audio file without writing through a
+deleted SwiftData object. Artwork-cache teardown now awaits URLSession
+invalidation and a bounded 250-millisecond URLCache SQLite drain before reset
+moves or removes the cache directory. The focused directory-removal test emitted
+no SQLite API-violation diagnostics; full local CI executed 1,806 tests, skipped
+38, and failed 0.
+
+Development build 183 contains those cleanup corrections. Its signed
+CloudKitDevelopment arm64 binary is 19,795,984 bytes, SHA-256
+`6f6b17ccf1a2d2d43059d8fa2815e292de2684c2f3d67714f508da5abaa52b39`,
+modified 2026-08-08 01:02:40 -0700. It reports 1.1.0 (183), carries development
+push plus the `iCloud.media.payown.earshot` CloudKit entitlement, and was
+wirelessly over-installed on the iPhone while preserving database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`. After launch, a read-only projection
+snapshot had SQLite integrity `ok` and exactly matched the running
+Designed-for-iPhone Mac projection in both EXCEPT directions for all persisted
+columns: 662 podcasts, 4 episode states, 1 queue item, 4 settings, 0 bookmarks,
+31 history sessions, and 0 folders. This is a same-state convergence check, not
+a completed bidirectional mutation, offline, account-change, or VoiceOver test.

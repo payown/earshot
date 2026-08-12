@@ -315,4 +315,33 @@ final class IdentityRepairServiceTests: XCTestCase {
         XCTAssertEqual(podcast.episodes?.count, 1)
         XCTAssertEqual(otherPodcast.episodes?.count, 2)
     }
+
+    func testTargetedEpisodeRepairCanLimitWorkToIncomingGUIDs() throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        context.insert(podcast)
+        for guid in ["incoming", "unrelated"] {
+            for index in 0..<2 {
+                let episode = Episode(
+                    guid: guid,
+                    title: "Episode \(index)",
+                    audioURL: "https://example.com/\(guid)-\(index).mp3",
+                    createdAt: index == 0 ? oldDate : newDate
+                )
+                episode.podcast = podcast
+                context.insert(episode)
+            }
+        }
+
+        let report = try IdentityRepairService(context: context).repairEpisodes(
+            in: podcast,
+            matchingGUIDs: ["incoming"]
+        )
+        try context.save()
+
+        XCTAssertEqual(report.episodesInspected, 2)
+        XCTAssertEqual(report.episodesRemoved, 1)
+        XCTAssertEqual(podcast.episodes?.filter { $0.guid == "incoming" }.count, 1)
+        XCTAssertEqual(podcast.episodes?.filter { $0.guid == "unrelated" }.count, 2)
+    }
 }

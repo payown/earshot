@@ -176,6 +176,7 @@ final class AppRuntime {
     private var resetInFlight = false
     private(set) var cloudKitEventMonitor: CloudKitEventMonitor?
     private var cloudProjectionCoordinator: CloudProjectionCoordinator?
+    private var cloudProjectionActivationTask: Task<Void, Error>?
     private var cloudAccountObserver: NSObjectProtocol?
     private(set) var cloudSyncAvailability: CloudSyncAvailability
 
@@ -676,6 +677,10 @@ final class AppRuntime {
         resetInFlight = true
         NotificationCenter.default.post(name: .earshotWillDeleteEpisodes, object: nil)
         await BackgroundFeedRefresher.cancelAndWait()
+        let cloudActivation = cloudProjectionActivationTask
+        cloudActivation?.cancel()
+        _ = try? await cloudActivation?.value
+        cloudProjectionActivationTask = nil
         do {
             try cloudProjectionCoordinator?.markAllSubscriptionsDeleted()
         } catch {
@@ -696,7 +701,7 @@ final class AppRuntime {
         settings.releasePersistence()
         tips.releasePersistence()
         entitlements.releasePersistence()
-        ArtworkCache.shared.tearDown()
+        await ArtworkCache.shared.tearDown()
         ArtworkCache.resetShared()
         entitlementContainer = nil
         boundRootServicesContainer = nil
@@ -726,7 +731,7 @@ final class AppRuntime {
     func clearThisDeviceData() async -> Bool {
         guard resetTask == nil else { return false }
         _ = await downloads.clearAllDownloads()
-        ArtworkCache.shared.tearDown()
+        await ArtworkCache.shared.tearDown()
         ArtworkCache.resetShared()
         return true
     }
@@ -851,14 +856,49 @@ final class AppRuntime {
     func activateCloudProjectionIfNeeded(container: ModelContainer) async throws {
         guard mode == .normal,
               CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(),
-              cloudProjectionCoordinator == nil else { return }
-        guard await prepareCloudAccount() else { return }
-        let coordinator = try CloudProjectionCoordinator.make(
-            applicationContainer: container
-        )
-        try coordinator.start()
-        cloudProjectionCoordinator = coordinator
-        cloudSyncAvailability = .available
+              cloudProjectionCoordinator == nil,
+              !resetInFlight else { return }
+        if let cloudProjectionActivationTask {
+            try await cloudProjectionActivationTask.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self, await prepareCloudAccount() else { return }
+            try Task.checkCancellation()
+            guard !resetInFlight, cloudProjectionCoordinator == nil else { return }
+            let coordinator = try CloudProjectionCoordinator.make(
+                applicationContainer: container
+            )
+            try Task.checkCancellation()
+            try coordinator.start()
+            if Task.isCancelled || resetInFlight {
+                await coordinator.stop()
+                return
+            }
+            cloudProjectionCoordinator = coordinator
+            cloudSyncAvailability = .available
+        }
+        cloudProjectionActivationTask = task
+        defer { cloudProjectionActivationTask = nil }
+        try await task.value
+    }
+
+    /// Retries a previously unavailable account when the app next becomes
+    /// active. This is event-driven (no timer or playback-path polling), and an
+    /// account-change pause still requires the user's explicit confirmation.
+    func retryCloudProjectionWhenActive() async {
+        guard cloudSyncAvailability != .accountChanged,
+              let container = readyContainer else { return }
+        do {
+            try await activateCloudProjectionIfNeeded(container: container)
+        } catch is CancellationError {
+            // Reset and account replacement intentionally cancel activation.
+        } catch {
+            cloudSyncAvailability = .temporarilyUnavailable
+            AppLog.data.error(
+                "Cloud foreground retry failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     private func prepareCloudAccount() async -> Bool {
@@ -901,6 +941,10 @@ final class AppRuntime {
     }
 
     private func handleCloudAccountChange() async {
+        let activation = cloudProjectionActivationTask
+        activation?.cancel()
+        _ = try? await activation?.value
+        cloudProjectionActivationTask = nil
         await cloudProjectionCoordinator?.stop()
         cloudProjectionCoordinator = nil
         cloudSyncAvailability = .checking
@@ -924,6 +968,10 @@ final class AppRuntime {
         guard mode == .normal,
               CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(),
               case .ready(let container, _) = phase else { return }
+        let activation = cloudProjectionActivationTask
+        activation?.cancel()
+        _ = try? await activation?.value
+        cloudProjectionActivationTask = nil
         await cloudProjectionCoordinator?.stop()
         cloudProjectionCoordinator = nil
         cloudSyncAvailability = .checking
@@ -1219,7 +1267,10 @@ struct EarshotApp: App {
                 BackgroundFeedRefresher.scheduleNext()
             case .active:
                 guard let container = runtime.readyContainer else { return }
-                Task { await BackgroundFeedRefresher.runRefresh(container: container) }
+                Task {
+                    await runtime.retryCloudProjectionWhenActive()
+                    await BackgroundFeedRefresher.runRefresh(container: container)
+                }
             default:
                 break
             }

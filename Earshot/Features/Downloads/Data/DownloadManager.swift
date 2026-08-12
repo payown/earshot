@@ -608,7 +608,18 @@ final class DownloadManager {
         // returns, so it observes the persisted state below.
         resolveWaiters(for: taskKey, success: true)
         guard let context = container?.mainContext,
-              let episode = DownloadTaskKey.episode(matching: taskKey, in: context) else { return }
+              let episode = DownloadTaskKey.episode(matching: taskKey, in: context) else {
+            // A local or remotely delivered unfollow can delete the episode
+            // while its background URLSession task is still finishing. The
+            // delegate has already moved the temporary file into Downloads by
+            // this point. With no surviving natural-key owner, retaining it
+            // would leak device storage forever; never attempt to write through
+            // the deleted SwiftData model.
+            if let url = DownloadPaths.resolveLocalURL(storedValue: fileName) {
+                try? FileManager.default.removeItem(at: url)
+            }
+            return
+        }
         // Store only the file NAME: iOS relocates the app container on every
         // app update, so an absolute path goes stale (#575). Reads resolve the
         // name against the current container via `Episode.localAudioURL`.
@@ -620,6 +631,12 @@ final class DownloadManager {
         Announcer.announce("Downloaded \(episode.title)")
         AppLog.networking.info("Download finished: \(episode.title, privacy: .public)")
     }
+
+    #if DEBUG
+    static func setContainerForTesting(_ container: ModelContainer?) {
+        self.container = container
+    }
+    #endif
 
     private static func fail(taskKey: String) {
         resolveWaiters(for: taskKey, success: false)

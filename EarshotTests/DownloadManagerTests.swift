@@ -188,6 +188,23 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, DownloadStatus.none)
     }
 
+    func test_finishedDownloadAfterEpisodeDeletionRemovesOrphanedFile() throws {
+        let name = "earshot-test-orphan-completion-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        DownloadManager.setContainerForTesting(nil)
+        defer { DownloadManager.setContainerForTesting(nil) }
+
+        DownloadManager.handle(PendingDownloadTerminalEvent(
+            taskKey: "https://example.com/deleted-feed|deleted-episode",
+            outcome: .finished(fileName: name)
+        ))
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: fileURL.path),
+            "a completion with no surviving episode must not leak downloaded audio"
+        )
+    }
+
     // MARK: DownloadCleanup — delete downloads after played
 
     func test_removeDownloadAfterPlayed_enabled_deletesFileAndResetsState() throws {

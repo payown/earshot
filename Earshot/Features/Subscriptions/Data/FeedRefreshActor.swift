@@ -15,6 +15,25 @@ import SwiftData
 /// carry guids and counts, never an `Episode` or `Podcast`).
 @ModelActor
 actor FeedRefreshActor {
+    /// A `ModelContext` adopts the executor on which it is created. Constructing
+    /// this actor directly from `SubscriptionRepository` (which is `@MainActor`)
+    /// therefore pinned the supposedly-background refresh to the UI thread. Do
+    /// the construction itself in a detached task so every subsequent actor call
+    /// uses a genuinely background serial model executor.
+    nonisolated static func makeBackground(
+        modelContainer: ModelContainer
+    ) async -> FeedRefreshActor {
+        await Task.detached(priority: .utility) {
+            FeedRefreshActor(modelContainer: modelContainer)
+        }.value
+    }
+
+#if DEBUG
+    /// Direct executor assertion used by the regression test for the device-
+    /// measured main-thread refresh stall.
+    func isExecutingOnMainThreadForTesting() -> Bool { Thread.isMainThread }
+#endif
+
     /// How many feeds are processed between `ModelContext.save()` calls. The old
     /// code saved once per podcast; batching cuts the save count ~10x for a large
     /// library while still bounding how much un-persisted work is at risk if the
@@ -28,6 +47,10 @@ actor FeedRefreshActor {
     // import faster in isolation but could starve the foreground UI; two proved
     // responsive in the build-169 device test, so build 170 measures the middle.
     private static let subscribeFetchConcurrency = 3
+    /// Whole-library refresh uses the same bounded network overlap as OPML.
+    /// Parsed results are still applied serially on this model actor, so this
+    /// never creates concurrent SwiftData writers.
+    private static let refreshFetchConcurrency = 3
     /// Bulk subscription outcomes retain their newly inserted Episode objects
     /// until a save gives them permanent IDs. Keep this smaller than refresh's
     /// metadata-only batch so large back catalogs cannot accumulate ten feeds'
@@ -38,6 +61,16 @@ actor FeedRefreshActor {
     /// the newest-date high-water mark, that older history stays dismissed and is
     /// never mistaken for newly published Inbox content.
     private static let opmlInitialEpisodeLimit = 10
+    /// A relationship-free synced subscription arrives with its source device's
+    /// feed high-water mark but no local episode catalog. Seed a small usable
+    /// catalog on first refresh; older feed history remains refetchable metadata,
+    /// not CloudKit state.
+    private static let syncedShellInitialEpisodeLimit = 10
+    /// An established subscription refreshes frequently, so it should ingest
+    /// only the newest genuinely-new rows. Rebuilding historical gaps made a
+    /// single 45,436-episode inverse relationship monopolize SwiftData and block
+    /// the UI even from a background context. Older local rows are preserved.
+    private static let ordinaryRefreshNewEpisodeLimit = 10
     /// A single unresponsive feed must not hold an OPML import at the URLSession
     /// resource timeout. The normal feed refresh path keeps its existing policy;
     /// this shorter ceiling applies only to bulk import prefetches.
@@ -80,10 +113,11 @@ actor FeedRefreshActor {
     /// of `SubscriptionRepository.refresh` exactly (dedup-by-guid, inbox high-water
     /// mark, future-date clamp, migrated-shell backfill, auto-queue enrollment).
     ///
-    /// `isCancelled` is checked before each feed so a background-task expiration
-    /// (#381) stops the loop promptly. `onProgress` is marshaled to the main actor
-    /// and is intentionally cheap (two ints) so it can't reintroduce a per-feed
-    /// main-actor stall.
+    /// `isCancelled` is checked before the initial request and after every
+    /// completion so a background-task expiration (#381) stops scheduling new
+    /// work and cancels outstanding requests promptly. `onProgress` is marshaled
+    /// to the main actor and is intentionally cheap (two ints) so it can't
+    /// reintroduce a per-feed main-actor stall.
     ///
     /// Returns one ``RefreshProgress`` per podcast that completed without throwing;
     /// the caller decides which earn a notification.
@@ -95,61 +129,104 @@ actor FeedRefreshActor {
     ) async -> [RefreshProgress] {
         let podcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
         let total = podcasts.count
-        var results: [RefreshProgress] = []
-        var sinceLastSave = 0
+        var completed = 0
+        let results = await withTaskGroup(
+            of: (Int, ParsedFeed?, String?).self,
+            returning: [RefreshProgress].self
+        ) { group in
+            var resultByInputIndex: [Int: RefreshProgress] = [:]
+            var pendingByInputIndex: [Int: ApplyOutcome] = [:]
+            var sinceLastSave = 0
+            var nextIndex = 0
+            var activeFetches = 0
 
-        // Rows whose `outcome.newEpisodeIDs` must be resolved AFTER a save —
-        // `persistentModelID` is temporary for a newly-inserted `Episode` until the
-        // context saves, mirroring the identical problem solved for
-        // `SubscribeOutcome`/`pendingIndexByResult` in `subscribeAll` below.
-        var pendingIndexByApply: [Int: ApplyOutcome] = [:]
-
-        func flushPending() {
-            saveIfNeededOrLog()
-            for (index, applyOutcome) in pendingIndexByApply {
-                results[index].outcome = applyOutcome.result()
-            }
-            pendingIndexByApply.removeAll()
-            sinceLastSave = 0
-        }
-
-        for (index, podcast) in podcasts.enumerated() {
-            guard !isCancelled() else {
-                AppLog.subscriptions.info("refreshAll stopped early (cancelled) after \(index) of \(total)")
-                break
-            }
-            let title = podcast.title
-            let url = podcast.feedURL
-            do {
-                let repair = try IdentityRepairService(context: modelContext)
-                    .repairEpisodes(in: podcast)
-                if repair.didChange { try modelContext.save() }
-                // The fetch (network I/O) and the synchronous parse inside it both
-                // run on this background actor, never the main thread.
-                let parsed = try await feed.fetch(url)
-                let applyOutcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
-                let resultIndex = results.count
-                results.append(
-                    RefreshProgress(
-                        feedURL: url,
-                        podcastTitle: title,
-                        notificationEnabled: podcast.notificationEnabled ?? false,
-                        outcome: applyOutcome.refreshOutcome
-                    )
-                )
-                pendingIndexByApply[resultIndex] = applyOutcome
-                sinceLastSave += 1
-                if sinceLastSave >= Self.saveBatchSize {
-                    flushPending()
+            func flushPending() {
+                saveIfNeededOrLog()
+                for (index, applyOutcome) in pendingByInputIndex {
+                    guard var progress = resultByInputIndex[index] else { continue }
+                    progress.outcome = applyOutcome.result()
+                    resultByInputIndex[index] = progress
                 }
-            } catch {
-                AppLog.subscriptions.error("Refresh failed for \(title, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                pendingByInputIndex.removeAll()
+                sinceLastSave = 0
             }
-            await onProgress(index + 1, total)
-        }
 
-        // Flush the final partial batch and resolve its IDs.
-        flushPending()
+            func addFetch(at index: Int) {
+                let url = podcasts[index].feedURL
+                group.addTask {
+                    do {
+                        return (index, try await feed.fetch(url), nil)
+                    } catch {
+                        return (index, nil, error.localizedDescription)
+                    }
+                }
+                activeFetches += 1
+            }
+
+            // Start one request so an already-expiring BG task retains the exact
+            // prompt-cancellation behavior. After that first completion, keep a
+            // maximum of three network requests in flight.
+            if !isCancelled(), nextIndex < total {
+                addFetch(at: nextIndex)
+                nextIndex += 1
+            }
+
+            while let (inputIndex, parsed, errorDescription) = await group.next() {
+                activeFetches -= 1
+                let podcast = podcasts[inputIndex]
+                let title = podcast.title
+                let url = podcast.feedURL
+                if let parsed {
+                    do {
+                        let repairGUIDs = ordinaryRefreshCandidates(
+                            from: Self.deduplicatedEpisodes(parsed.episodes),
+                            podcast: podcast,
+                            now: .now
+                        ).map(\.guid)
+                        let repair = try IdentityRepairService(context: modelContext)
+                            .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
+                        if repair.didChange { try modelContext.save() }
+                        let applyOutcome = apply(
+                            parsed, to: podcast, autoQueueEnabled: autoQueueEnabled
+                        )
+                        resultByInputIndex[inputIndex] = RefreshProgress(
+                            feedURL: url,
+                            podcastTitle: title,
+                            notificationEnabled: podcast.notificationEnabled ?? false,
+                            outcome: applyOutcome.refreshOutcome
+                        )
+                        pendingByInputIndex[inputIndex] = applyOutcome
+                        sinceLastSave += 1
+                        if sinceLastSave >= Self.saveBatchSize { flushPending() }
+                    } catch {
+                        AppLog.subscriptions.error(
+                            "Refresh failed for \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        )
+                    }
+                } else {
+                    AppLog.subscriptions.error(
+                        "Refresh failed for \(title, privacy: .public): \(errorDescription ?? "Unknown error", privacy: .public)"
+                    )
+                }
+                completed += 1
+                await onProgress(completed, total)
+
+                if isCancelled() {
+                    group.cancelAll()
+                    AppLog.subscriptions.info(
+                        "refreshAll stopped early (cancelled) after \(completed) of \(total)"
+                    )
+                    break
+                }
+                while activeFetches < Self.refreshFetchConcurrency, nextIndex < total {
+                    addFetch(at: nextIndex)
+                    nextIndex += 1
+                }
+            }
+
+            flushPending()
+            return resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] }
+        }
         // Newly ingested episodes can change the inbox count — signal the tab
         // badge once, at the end of the whole operation rather than per batch,
         // so it refreshes without polling on every save (#736).
@@ -167,9 +244,15 @@ actor FeedRefreshActor {
         guard let podcast = try PodcastIdentityService(context: modelContext)
             .existing(feedURL: canonical)
         else { return nil }
-        let repair = try IdentityRepairService(context: modelContext).repairEpisodes(in: podcast)
-        if repair.didChange { try modelContext.save() }
         let parsed = try await feed.fetch(canonical)
+        let repairGUIDs = ordinaryRefreshCandidates(
+            from: Self.deduplicatedEpisodes(parsed.episodes),
+            podcast: podcast,
+            now: .now
+        ).map(\.guid)
+        let repair = try IdentityRepairService(context: modelContext)
+            .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
+        if repair.didChange { try modelContext.save() }
         let applyOutcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
         // Save BEFORE resolving `newEpisodeIDs` — persistentModelID is temporary
         // for a newly-inserted Episode until the context saves (same reason
@@ -585,7 +668,8 @@ actor FeedRefreshActor {
         // First refresh of a freshly-migrated shell (no episodes AND no mark):
         // backfill the whole catalog pre-dismissed and seed the mark. Guarded on
         // episodes.isEmpty so a normally-subscribed podcast never takes this path.
-        if (podcast.episodes?.isEmpty ?? true) && podcast.lastSeenPubDate == nil {
+        let hasStoredEpisodes = hasEpisodes(for: podcast)
+        if !hasStoredEpisodes && podcast.lastSeenPubDate == nil {
             for item in parsedEpisodes {
                 let episode = Self.makeEpisode(from: item)
                 episode.podcast = podcast
@@ -600,10 +684,40 @@ actor FeedRefreshActor {
             return ApplyOutcome(refreshOutcome: .backfill, newEpisodes: [])
         }
 
-        let existingGUIDs = Set((podcast.episodes ?? []).map(\.guid))
+        // Compact CloudKit synchronization deliberately transfers subscription
+        // metadata without the refetchable episode catalog. Such a podcast has a
+        // high-water mark copied from the source device but no episodes locally.
+        // Running the ordinary diff over the full feed would eagerly rebuild an
+        // unbounded history; inserting none would leave a clean second device
+        // with an unusable empty podcast. Seed only the newest ten. Rows at or
+        // before the transferred mark are backlog and stay dismissed; genuinely
+        // newer rows retain the normal Inbox/notification semantics.
+        if !hasStoredEpisodes, podcast.lastSeenPubDate != nil {
+            return seedSyncedShell(
+                from: parsedEpisodes,
+                podcast: podcast,
+                autoQueueEnabled: autoQueueEnabled,
+                now: now
+            )
+        }
+
         // Clamp an already-future mark back to now so a previously-poisoned mark
         // can't keep real new episodes out of the inbox (#296).
         let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
+        // Automatic refresh is not a historical-catalog rebuild. Keep only the
+        // newest ten genuinely-new, non-future publications. This preserves all
+        // existing history while bounding relationship maintenance for feeds
+        // whose GUID format or retained catalog has changed.
+        let candidateEpisodes = ordinaryRefreshCandidates(
+            from: parsedEpisodes,
+            podcast: podcast,
+            now: now
+        )
+        let existingEpisodes = episodes(
+            in: podcast,
+            matchingGUIDs: candidateEpisodes.map(\.guid)
+        )
+        let existingGUIDs = Set(existingEpisodes.map(\.guid))
         // Gate matches the former `podcast.autoQueue && queue != nil`: with no
         // queue capability, an autoQueue podcast's new episodes go to the inbox.
         let autoQueueOn = podcast.autoQueue && autoQueueEnabled
@@ -616,11 +730,11 @@ actor FeedRefreshActor {
         // Lookup by guid for the republish pass below (#397), built once instead
         // of a per-item linear scan.
         let existingByGUID = Dictionary(
-            (podcast.episodes ?? []).map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
+            existingEpisodes.map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
         )
-        resurfaceRepublished(parsedEpisodes, existingByGUID: existingByGUID, now: now)
+        resurfaceRepublished(candidateEpisodes, existingByGUID: existingByGUID, now: now)
 
-        for item in parsedEpisodes where !existingGUIDs.contains(item.guid) {
+        for item in candidateEpisodes where !existingGUIDs.contains(item.guid) {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
             let pub = item.pubDate ?? .distantPast
@@ -675,6 +789,98 @@ actor FeedRefreshActor {
         return ApplyOutcome(
             refreshOutcome: RefreshOutcome(added: added, wasBackfill: false, newestNewEpisodeGUID: newestNewGUID),
             newEpisodes: newEpisodes
+        )
+    }
+
+    private func hasEpisodes(for podcast: Podcast) -> Bool {
+        let podcastID = podcast.persistentModelID
+        let descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.podcast?.persistentModelID == podcastID }
+        )
+        return ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
+    }
+
+    private func ordinaryRefreshCandidates(
+        from parsedEpisodes: [ParsedEpisode],
+        podcast: Podcast,
+        now: Date
+    ) -> [ParsedEpisode] {
+        let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
+        return Array(parsedEpisodes
+            .filter {
+                let pub = $0.pubDate ?? .distantPast
+                return pub > mark && pub <= now
+            }
+            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+            .prefix(Self.ordinaryRefreshNewEpisodeLimit))
+    }
+
+    /// Fetch only rows that can participate in this refresh. In particular, do
+    /// not fault `podcast.episodes`: the real device has one 45,436-row inverse
+    /// relationship, and materializing it caused the build-178 hang samples.
+    private func episodes(in podcast: Podcast, matchingGUIDs guids: [String]) -> [Episode] {
+        guard !guids.isEmpty else { return [] }
+        let podcastID = podcast.persistentModelID
+        let descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate {
+                $0.podcast?.persistentModelID == podcastID && guids.contains($0.guid)
+            }
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
+    private func seedSyncedShell(
+        from parsedEpisodes: [ParsedEpisode],
+        podcast: Podcast,
+        autoQueueEnabled: Bool,
+        now: Date
+    ) -> ApplyOutcome {
+        let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
+        let seed = parsedEpisodes
+            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
+            .prefix(Self.syncedShellInitialEpisodeLimit)
+        let autoQueueOn = podcast.autoQueue && autoQueueEnabled
+        var genuinelyNew: [Episode] = []
+        var autoQueued: [Episode] = []
+        var newestNewGUID: String?
+        var newestNewPub = Date.distantPast
+
+        for item in seed {
+            let episode = Self.makeEpisode(from: item)
+            episode.podcast = podcast
+            let pub = item.pubDate ?? .distantPast
+            let isNewEpisode = pub > mark && pub <= now
+            episode.inboxDismissed = !isNewEpisode || autoQueueOn
+            modelContext.insert(episode)
+            if isNewEpisode {
+                genuinelyNew.append(episode)
+                if pub >= newestNewPub {
+                    newestNewPub = pub
+                    newestNewGUID = episode.guid
+                }
+                if autoQueueOn { autoQueued.append(episode) }
+            }
+        }
+
+        podcast.lastSeenPubDate = max(
+            mark,
+            Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? mark
+        )
+        LocalStateStore.setRefreshedAt(now, on: podcast, in: modelContext)
+        if !autoQueued.isEmpty {
+            enqueueAtEnd(autoQueued)
+            enforceQueueCap(for: podcast)
+        }
+        AppLog.subscriptions.info(
+            "Seeded synced subscription \(podcast.title, privacy: .public) with \(seed.count) recent episode(s); \(genuinelyNew.count) genuinely new"
+        )
+        return ApplyOutcome(
+            refreshOutcome: RefreshOutcome(
+                added: genuinelyNew.count,
+                wasBackfill: false,
+                newestNewEpisodeGUID: newestNewGUID
+            ),
+            newEpisodes: genuinelyNew
         )
     }
 
