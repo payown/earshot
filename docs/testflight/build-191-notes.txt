@@ -1,0 +1,35 @@
+### Chapter 59 - Build 191
+
+*The long list*
+
+**What changed**
+
+Importing a large OPML subscription list no longer makes Earshot difficult to use while it works. In a real-device test with 1,184 entries, the import finished in 183 seconds instead of 229 seconds. The earlier build had one pause lasting more than two seconds. This build had no main-thread stalls at all.
+
+Earshot now checks existing subscriptions in one bounded pass instead of repeating the same lookup for every address. It parses the OPML away from the interface, avoids duplicate subscriptions, saves successful work in batches, and can report partial completion separately from total failure. VoiceOver progress and completion announcements remain available without repeatedly moving focus.
+
+**What to test**
+
+Import a large OPML file while VoiceOver is running. Continue moving through Earshot while the import proceeds. The app should remain responsive, progress should not keep pulling VoiceOver focus away from you, and the final announcement should clearly say whether the import completed, partly completed, was cancelled, or failed.
+
+Import the same file again. Earshot should not create duplicate subscriptions. If possible, cancel a large import and retry it. Already completed subscriptions should remain, and the retry should safely finish the remaining work.
+
+Kashe found the old list in a folder named Moving Day.
+
+It held years of listening. News from three cities, interviews Renata sent her, a language show she kept promising to restart, and the quiet history program she saved for long drives.
+
+She opened the file in Earshot.
+
+The phone grew slow beneath her fingers. Each swipe arrived late. A button could be there and still feel out of reach. Kashe set the phone down and waited for the list to finish deciding what belonged where.
+
+With the next build, she tried again.
+
+The list was just as long, but the phone stayed with her. She moved through the screens, checked the Inbox, and returned to Library without losing her place. Earshot kept sorting the addresses while VoiceOver kept answering.
+
+When the final message came, Kashe opened the language show.
+
+The lessons were all there, including the one she had stopped halfway through before Moving Day.
+
+Renata asked whether the import was faster.
+
+“Yes,” Kashe said. “But better than that, I did not have to leave.”

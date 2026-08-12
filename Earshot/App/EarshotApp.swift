@@ -1238,7 +1238,8 @@ struct EarshotApp: App {
                                 // scene-phase hook does not fire for initial active.
                                 guard !isRunningTests, !isScreenshotRun else { return }
                                 await BackgroundFeedRefresher.runRefresh(
-                                    container: container
+                                    container: container,
+                                    trigger: .coldLaunch
                                 )
                             }
                             .task {
@@ -1269,7 +1270,10 @@ struct EarshotApp: App {
                 guard let container = runtime.readyContainer else { return }
                 Task {
                     await runtime.retryCloudProjectionWhenActive()
-                    await BackgroundFeedRefresher.runRefresh(container: container)
+                    await BackgroundFeedRefresher.runRefresh(
+                        container: container,
+                        trigger: .foreground
+                    )
                 }
             default:
                 break
@@ -1321,7 +1325,10 @@ private extension Scene {
             // still leaves a future request queued.
             await MainActor.run { BackgroundFeedRefresher.scheduleNext() }
             guard let readyContainer = await container() else { return }
-            await BackgroundFeedRefresher.runRefresh(container: readyContainer)
+            await BackgroundFeedRefresher.runRefresh(
+                container: readyContainer,
+                trigger: .backgroundTask
+            )
         }
     }
 }

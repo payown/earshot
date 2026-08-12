@@ -87,7 +87,7 @@ struct SubscriptionsView: View {
                             .accessibilityFocused($focusedRowID, equals: podcast.persistentModelID)
                     }
                 }
-                .refreshable { await performRefresh() }
+                .refreshable { await performRefresh(trigger: .manualPullToRefresh) }
             }
         }
         // Persistent multi-select bar (#757): its primary button's label carries
@@ -154,7 +154,7 @@ struct SubscriptionsView: View {
             }
             ToolbarItem(placement: .topBarLeading) {
                 Button {
-                    Task { await performRefresh() }
+                    Task { await performRefresh(trigger: .manualToolbar) }
                 } label: {
                     Label(
                         isRefreshing ? "Refreshing library" : "Refresh library",
@@ -577,7 +577,7 @@ struct SubscriptionsView: View {
         return parts.joined(separator: ", ")
     }
 
-    private func performRefresh() async {
+    private func performRefresh(trigger: FeedRefreshTrigger) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         Announcer.announce("Refreshing library")
@@ -593,13 +593,19 @@ struct SubscriptionsView: View {
         // path actually finds new episodes must be the path that notifies, or the
         // notification is lost (#421). deliver() coalesces per podcast by a stable
         // identifier, so the same show notifying from both paths can never stack.
-        let notifications = await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).refreshAll()
-        AppSettingsStore(context: context).setDate(Date(), for: SettingsKey.lastFeedRefresh)
-        if !notifications.isEmpty {
-            await NotificationService().deliver(notifications)
+        let report = await SubscriptionRepository(
+            context: context,
+            downloader: downloads,
+            isEntitled: entitlements.isEntitled
+        ).refreshAllReport(trigger: trigger)
+        if report.completion == .full {
+            AppSettingsStore(context: context).setDate(Date(), for: SettingsKey.lastFeedRefresh)
+        }
+        if !report.notifications.isEmpty {
+            await NotificationService().deliver(report.notifications)
         }
         loadPodcasts()
-        Announcer.announce("Library refreshed")
+        Announcer.announce(report.announcement)
     }
 
     /// Fetches only the scalar fields needed to construct and operate Library
@@ -607,6 +613,8 @@ struct SubscriptionsView: View {
     /// demand; merely entering Library cannot materialize every show's inverse
     /// episode relationship.
     private func loadPodcasts() {
+        let interval = PerformanceSignposts.signposter.beginInterval("LibraryReload")
+        defer { PerformanceSignposts.signposter.endInterval("LibraryReload", interval) }
         var descriptor = FetchDescriptor<Podcast>(sortBy: [SortDescriptor(\.title)])
         descriptor.propertiesToFetch = [
             \Podcast.feedURL,

@@ -3,6 +3,17 @@ import SwiftData
 import os
 @testable import Earshot
 
+@Model
+private final class SaveFailureProbe {
+    var key: String
+    var payload: String
+
+    init(key: String, payload: String) {
+        self.key = key
+        self.payload = payload
+    }
+}
+
 /// Proves the whole-library refresh writes happen on ``FeedRefreshActor``'s own
 /// background context (not the caller's main context) while still producing the
 /// same inserted/deduped episodes — the threading fix for VoiceOver sluggishness
@@ -11,6 +22,196 @@ import os
 /// `ModelContext`.
 @MainActor
 final class FeedRefreshActorTests: XCTestCase {
+
+    func testSwiftDataContextStateAfterRealSaveDisabledFailure() throws {
+        let schema = Schema([SaveFailureProbe.self])
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "swiftdata-save-failure-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storeURL = directory.appending(path: "probe.store")
+        var seedContainer: ModelContainer? = try ModelContainer(
+            for: schema,
+            configurations: ModelConfiguration(schema: schema, url: storeURL)
+        )
+        _ = seedContainer?.mainContext
+        seedContainer = nil
+        let container = try ModelContainer(
+            for: schema,
+            configurations: ModelConfiguration(schema: schema, url: storeURL, allowsSave: false)
+        )
+        let context = ModelContext(container)
+        context.insert(SaveFailureProbe(key: "valid", payload: "valid"))
+
+        let firstError: Error
+        do {
+            try context.save()
+            return XCTFail("Expected save to fail")
+        } catch {
+            firstError = error
+        }
+        XCTAssertTrue(context.hasChanges)
+        XCTAssertEqual(context.insertedModelsArray.count, 1)
+        XCTAssertEqual(context.changedModelsArray.count, 0)
+        XCTAssertEqual(
+            try ModelContext(container).fetchCount(FetchDescriptor<SaveFailureProbe>()), 0
+        )
+
+        let secondError: Error
+        do {
+            try context.save()
+            return XCTFail("Expected retry to fail")
+        } catch {
+            secondError = error
+        }
+        context.insert(SaveFailureProbe(key: "later-valid", payload: "later-valid"))
+        let thirdError: Error
+        do {
+            try context.save()
+            return XCTFail("Expected later save to fail")
+        } catch {
+            thirdError = error
+        }
+
+        XCTAssertEqual((firstError as NSError).domain, (secondError as NSError).domain)
+        XCTAssertEqual((firstError as NSError).code, (secondError as NSError).code)
+        XCTAssertEqual((firstError as NSError).domain, (thirdError as NSError).domain)
+        XCTAssertEqual((firstError as NSError).code, (thirdError as NSError).code)
+        XCTAssertEqual(context.insertedModelsArray.count, 2)
+        XCTAssertEqual(context.changedModelsArray.count, 0)
+        XCTAssertEqual(
+            try ModelContext(container).fetchCount(FetchDescriptor<SaveFailureProbe>()), 0
+        )
+    }
+
+    func testRefreshAllReportsFailedFeedsWhenEveryBatchSaveFails() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "refresh-all-save-failure-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storeURL = directory.appending(path: "earshot.store")
+        let oldDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let newDate = Date(timeIntervalSince1970: 1_780_000_000)
+        var feeds: [String: ParsedFeed] = [:]
+
+        do {
+            let writable = try makeOnDiskEarshotContainer(at: storeURL, allowsSave: true)
+            let context = ModelContext(writable)
+            for index in 0..<15 {
+                let feedURL = "https://example.com/feed-\(index).xml"
+                let podcast = Podcast(
+                    feedURL: feedURL, title: "Show \(index)", lastSeenPubDate: oldDate
+                )
+                let old = Episode(
+                    guid: "old-\(index)", title: "Old \(index)",
+                    audioURL: "https://example.com/old-\(index).mp3", pubDate: oldDate
+                )
+                old.podcast = podcast
+                context.insert(podcast)
+                context.insert(old)
+                feeds[feedURL] = parsedFeed([
+                    parsedEpisode("old-\(index)", oldDate),
+                    parsedEpisode("new-\(index)", newDate),
+                ])
+            }
+            try context.save()
+        }
+
+        let readOnly = try makeOnDiskEarshotContainer(at: storeURL, allowsSave: false)
+        let actor = FeedRefreshActor(modelContainer: readOnly)
+        let report = await actor.refreshAllReport(
+            feed: OutOfOrderDistinctFeed(feeds: feeds),
+            autoQueueEnabled: false,
+            trigger: .manualToolbar,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+        let durable = try ModelContext(readOnly).fetch(FetchDescriptor<Episode>())
+
+        XCTAssertEqual(report.results.count, 0)
+        XCTAssertEqual(report.failed, 15)
+        XCTAssertEqual(report.intendedInsertions, 15)
+        XCTAssertEqual(report.durableInsertions, 0)
+        XCTAssertEqual(durable.filter { $0.guid.hasPrefix("old-") }.count, 15)
+        XCTAssertEqual(durable.filter { $0.guid.hasPrefix("new-") }.count, 0)
+        let hasPendingChanges = await actor.hasPendingChangesForTesting()
+        XCTAssertFalse(hasPendingChanges)
+    }
+
+    func testDuplicateIdentityGraphDoesNotPoisonUnrelatedRefreshes() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "identity-repair-probe-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storeURL = directory.appending(path: "earshot.store")
+        let container = try makeOnDiskEarshotContainer(at: storeURL, allowsSave: true)
+        let oldDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let newDate = Date(timeIntervalSince1970: 1_780_000_000)
+        let duplicateFeedURL = "https://example.com/duplicate.xml"
+        var feeds: [String: ParsedFeed] = [:]
+
+        do {
+            let context = ModelContext(container)
+            let winner = Podcast(
+                feedURL: duplicateFeedURL, title: "Winner",
+                createdAt: Date(timeIntervalSince1970: 1), lastSeenPubDate: oldDate
+            )
+            let loser = Podcast(
+                feedURL: duplicateFeedURL, title: "Loser",
+                createdAt: Date(timeIntervalSince1970: 2), lastSeenPubDate: oldDate
+            )
+            context.insert(winner)
+            context.insert(loser)
+            for index in 0..<2 {
+                let episode = Episode(
+                    guid: "duplicate-guid", title: "Duplicate \(index)",
+                    audioURL: "https://example.com/duplicate-\(index).mp3", pubDate: oldDate
+                )
+                episode.podcast = winner
+                context.insert(episode)
+            }
+            let crossPodcast = Episode(
+                guid: "duplicate-guid", title: "Cross podcast",
+                audioURL: "https://example.com/cross.mp3", pubDate: oldDate
+            )
+            crossPodcast.podcast = loser
+            context.insert(crossPodcast)
+            feeds[duplicateFeedURL] = parsedFeed([parsedEpisode("duplicate-guid", newDate)])
+
+            for index in 0..<4 {
+                let feedURL = "https://example.com/healthy-\(index).xml"
+                context.insert(Podcast(
+                    feedURL: feedURL, title: "Healthy \(index)", lastSeenPubDate: oldDate
+                ))
+                feeds[feedURL] = parsedFeed([parsedEpisode("healthy-new-\(index)", newDate)])
+            }
+            try context.save()
+        }
+
+        let results = await FeedRefreshActor(modelContainer: container).refreshAll(
+            feed: OutOfOrderDistinctFeed(feeds: feeds),
+            autoQueueEnabled: false,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+        let durable = try ModelContext(container).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(results.count, 6)
+        XCTAssertEqual(durable.filter { $0.guid.hasPrefix("healthy-new-") }.count, 4)
+        XCTAssertEqual(durable.filter { $0.guid == "duplicate-guid" }.count, 2)
+    }
+
+    private func makeOnDiskEarshotContainer(
+        at storeURL: URL, allowsSave: Bool
+    ) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: EarshotSchemaV10.self)
+        return try ModelContainer(
+            for: schema,
+            configurations: ModelConfiguration(
+                schema: schema, url: storeURL, allowsSave: allowsSave,
+                cloudKitDatabase: .none
+            )
+        )
+    }
 
     private func cleanContainer() -> ModelContainer {
         _ = TestStore.freshContext() // wipe the shared in-memory store first
@@ -526,6 +727,47 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).filter { $0.guid == "b" }.count, 3)
     }
 
+    /// A failed batch must be discarded before later feeds are applied. SwiftData
+    /// otherwise leaves the failed graph dirty and every later save retries it.
+    func testActorRefreshAllRollsBackFailedBatchAndLaterBatchPersists() async throws {
+        let container = cleanContainer()
+        do {
+            let seedContext = ModelContext(container)
+            for index in 0..<15 {
+                let podcast = Podcast(
+                    feedURL: "https://x/rollback-\(index).xml",
+                    title: "Show \(index)",
+                    lastSeenPubDate: d1
+                )
+                let oldEpisode = Episode(
+                    guid: "old", title: "Old", audioURL: "https://x/old.mp3", pubDate: d1
+                )
+                oldEpisode.podcast = podcast
+                seedContext.insert(podcast)
+                seedContext.insert(oldEpisode)
+            }
+            try seedContext.save()
+        }
+        let actor = FeedRefreshActor(modelContainer: container)
+        await actor.forceNextSaveFailureForTesting()
+
+        let report = await actor.refreshAllReport(
+            feed: FakeFeed(parsedFeed([parsedEpisode("new", d2)])),
+            autoQueueEnabled: false,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+
+        let durableNewEpisodes = try episodes(container).filter { $0.guid == "new" }
+        let hasPendingChanges = await actor.hasPendingChangesForTesting()
+        XCTAssertEqual(durableNewEpisodes.count, 5, "Only the later successful batch persists")
+        XCTAssertFalse(hasPendingChanges)
+        XCTAssertEqual(report.results.count, 5, "Unsaved feeds must not be reported as successful")
+        XCTAssertEqual(report.failed, 10)
+        XCTAssertEqual(report.intendedInsertions, 15)
+        XCTAssertEqual(report.durableInsertions, 5)
+    }
+
     /// Whole-library refresh overlaps at most three network requests. The first
     /// request completes alone to preserve prompt background-task cancellation;
     /// the next three rendezvous here, proving the steady-state window reaches
@@ -745,6 +987,68 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(already.count, 1, "The re-imported URL is already subscribed")
         XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<Podcast>()).count, 2)
         XCTAssertEqual(try episodes(container).count, 2, "No duplicate episode rows")
+    }
+
+    /// Canonical variants resolve through the bulk identity map without another
+    /// network request or a duplicate podcast row.
+    func testActorSubscribeAllBulkIdentityMatchesCanonicalVariants() async throws {
+        final class CountingFeed: FeedFetching, @unchecked Sendable {
+            let calls = OSAllocatedUnfairLock(initialState: 0)
+            let parsed: ParsedFeed
+            init(_ parsed: ParsedFeed) { self.parsed = parsed }
+            func fetch(_ urlString: String) async throws -> ParsedFeed {
+                calls.withLock { $0 += 1 }
+                return parsed
+            }
+        }
+        let container = cleanContainer()
+        let seed = ModelContext(container)
+        seed.insert(Podcast(feedURL: "https://example.com/feed.xml", title: "Existing"))
+        try seed.save()
+        let fetcher = CountingFeed(parsedFeed([parsedEpisode("a", d1)]))
+        let actor = FeedRefreshActor(modelContainer: container)
+
+        let results = await actor.subscribeAll(
+            feedURLs: [" HTTPS://EXAMPLE.COM:443/feed.xml#fragment "],
+            feed: fetcher,
+            inboxSeedCount: 3
+        )
+
+        XCTAssertEqual(results.count, 1)
+        XCTAssertTrue(results[0].alreadySubscribed)
+        XCTAssertEqual(fetcher.calls.withLock { $0 }, 0)
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<Podcast>()), 1)
+    }
+
+    /// Cancellation preserves completed save batches; retrying the same input is
+    /// idempotent and completes the remaining feeds without duplicate rows.
+    func testActorSubscribeAllCancellationThenRetryIsIdempotent() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let fetcher = FakeFeed(parsedFeed([parsedEpisode("a", d1)]))
+        let urls = (0..<24).map { "https://cancel\($0).example/feed" }
+        let state = OSAllocatedUnfairLock(initialState: (progress: 0, cancelled: false))
+
+        let partial = await actor.subscribeAll(
+            feedURLs: urls,
+            feed: fetcher,
+            inboxSeedCount: 3,
+            isCancelled: { state.withLock { $0.cancelled } },
+            onProgress: { _, _, _ in
+                state.withLock {
+                    $0.progress += 1
+                    if $0.progress == 11 { $0.cancelled = true }
+                }
+            }
+        )
+
+        XCTAssertGreaterThanOrEqual(partial.count, 10, "The first completed batch remains durable")
+        XCTAssertLessThan(partial.count, urls.count)
+
+        let retried = await actor.subscribeAll(feedURLs: urls, feed: fetcher, inboxSeedCount: 3)
+        XCTAssertEqual(retried.count, urls.count)
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<Podcast>()), urls.count)
+        XCTAssertEqual(try episodes(container).count, urls.count, "Retry creates no duplicate episodes")
     }
 
     /// Cancellation before the first feed processes nothing.

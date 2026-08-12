@@ -121,6 +121,34 @@ private actor ConcurrentTaskBarrier {
 
 @MainActor
 final class SubscriptionRepositoryTests: XCTestCase {
+    func testRefreshReportAnnouncementsDistinguishFullPartialAndFailure() {
+        func report(
+            succeeded: Int, total: Int, failed: Int, cancelled: Bool = false
+        ) -> SubscriptionRefreshReport {
+            SubscriptionRefreshReport(
+                notifications: [], attempted: succeeded + failed, total: total,
+                succeeded: succeeded, failed: failed, cancelled: cancelled,
+                intendedInsertions: 0, durableInsertions: 0
+            )
+        }
+
+        XCTAssertEqual(
+            report(succeeded: 3, total: 3, failed: 0).announcement,
+            "Library refreshed"
+        )
+        XCTAssertEqual(
+            report(succeeded: 2, total: 3, failed: 1).announcement,
+            "Library partially refreshed, 2 of 3 feeds"
+        )
+        XCTAssertEqual(
+            report(succeeded: 0, total: 3, failed: 3).announcement,
+            "Library refresh failed"
+        )
+        XCTAssertEqual(
+            report(succeeded: 0, total: 3, failed: 0, cancelled: true).announcement,
+            "Library refresh failed"
+        )
+    }
 
     private let d1 = Date(timeIntervalSince1970: 1_700_000_000)
     private let d2 = Date(timeIntervalSince1970: 1_700_100_000)

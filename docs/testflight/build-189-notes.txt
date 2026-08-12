@@ -1,0 +1,29 @@
+### Chapter 58 - Build 189
+
+*Every shelf, every time*
+
+**What changed**
+
+Library refresh works again. Builds 176 through 188 could say a refresh had started but never ask any podcast feed for updates. New episodes then stayed out of Library and Inbox. The problem began with commit 5bb49b0 in the build 176 tree. Build 155 and the App Store version were not affected.
+
+Build 188 also made refresh reports honest. If saving fails, Earshot now clears the unsaved work before continuing. It no longer counts episodes as added until they are safely stored. VoiceOver distinguishes a complete refresh, a partial refresh, and a failed refresh instead of always saying “Library refreshed.” Refresh logs now record which path started the refresh, how many feeds were attempted, how many episodes were intended and saved, and whether each save succeeded. Feed addresses, episode identifiers, and titles stay out of those logs.
+
+**What to test**
+
+Open Library and activate “Refresh library.” VoiceOver should say “Refreshing library.” Leave Earshot open until it announces “Library refreshed.” Confirm that a newly published episode appears on its podcast screen and in Inbox when that podcast is included there.
+
+Try again without a network connection. Earshot should report that the refresh failed, not claim that the library refreshed. Restore the connection and refresh once more. It should complete normally.
+
+Kashe had stopped trusting the button.
+
+It still spoke when she pressed it. It still said the work was done. But the morning show stayed on yesterday, and the interview Renata had mentioned never arrived. A polite answer was worse than no answer when the shelves behind it had not moved.
+
+The next build spoke differently. Kashe pressed Refresh library and waited. This time the phone took its time. One feed followed another until the whole row was checked.
+
+The missing interview appeared.
+
+She turned off the network and tried once more. Earshot said the refresh had failed. Short, plain, and true.
+
+Kashe turned the network back on. The next refresh finished, and the shelves matched the day again.
+
+“Keep that answer,” she told Renata. “The honest one.”

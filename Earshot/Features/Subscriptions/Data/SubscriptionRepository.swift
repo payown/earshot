@@ -12,6 +12,15 @@ protocol FeedFetching: Sendable {
     func fetch(_ urlString: String) async throws -> ParsedFeed
 }
 
+enum FeedRefreshTrigger: String, Sendable {
+    case manualToolbar
+    case manualPullToRefresh
+    case coldLaunch
+    case foreground
+    case backgroundTask
+    case unspecified
+}
+
 // `FeedService: FeedFetching` is declared in FeedService.swift (same file as the
 // type) because `FeedFetching` refines `Sendable`: Swift 6 requires a `Sendable`
 // conformance to live in the type's own source file so the compiler can verify
@@ -58,6 +67,40 @@ struct RefreshOutcome: Sendable {
     var newEpisodeIDs: [PersistentIdentifier] = []
 
     static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisodeGUID: nil, newEpisodeIDs: [])
+}
+
+struct SubscriptionRefreshReport: Sendable {
+    enum Completion: Sendable, Equatable {
+        case full
+        case partial(succeeded: Int, total: Int)
+        case failure
+    }
+
+    let notifications: [NewEpisodeNotification]
+    let attempted: Int
+    let total: Int
+    let succeeded: Int
+    let failed: Int
+    let cancelled: Bool
+    let intendedInsertions: Int
+    let durableInsertions: Int
+
+    var completion: Completion {
+        if !cancelled, failed == 0, succeeded == total { return .full }
+        if succeeded > 0 { return .partial(succeeded: succeeded, total: total) }
+        return .failure
+    }
+
+    var announcement: String {
+        switch completion {
+        case .full:
+            "Library refreshed"
+        case let .partial(succeeded, total):
+            "Library partially refreshed, \(succeeded) of \(total) feeds"
+        case .failure:
+            "Library refresh failed"
+        }
+    }
 }
 
 /// Owns subscribe and refresh logic for podcasts. Views call into this instead
@@ -324,29 +367,50 @@ final class SubscriptionRepository {
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
     ) async -> [NewEpisodeNotification] {
+        await refreshAllReport(isCancelled: isCancelled, onProgress: onProgress).notifications
+    }
+
+    @discardableResult
+    func refreshAllReport(
+        trigger: FeedRefreshTrigger = .unspecified,
+        isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
+        onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
+    ) async -> SubscriptionRefreshReport {
         // Hand the whole per-feed loop — fetch, parse, diff, insert, save — to a
         // background `@ModelActor` so none of it runs on the main thread and
         // starves VoiceOver (#382). The actor returns lightweight value-type
         // results; only the cheap progress callback hops back to the main actor.
         let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
         let progress = onProgress
-        let results = await actor.refreshAll(
+        let actorReport = await actor.refreshAllReport(
             feed: feed,
             autoQueueEnabled: autoQueueEnabled,
+            trigger: trigger,
+            isEntitled: isEntitled,
             isCancelled: isCancelled,
             onProgress: { completed, total in
                 progress?(completed, total)
             }
         )
+        let results = actorReport.results
 
         // Pull the background context's writes into the main context so the UI
         // (and any held `Podcast`/`Episode` objects) reflect the refresh. Only the
         // podcasts that actually gained episodes need their `.episodes` re-faulted,
         // and one at a time — never the whole Episode table (#696).
+        let mergeInterval = PerformanceSignposts.signposter.beginInterval(
+            "MainContextMerge",
+            "resultCount=\(results.count)"
+        )
         let affectedIDs = results
             .filter { $0.outcome.added > 0 }
             .compactMap { self.podcast(forFeedURL: $0.feedURL)?.persistentModelID }
         mergeBackgroundWrites(affectedPodcastIDs: affectedIDs)
+        PerformanceSignposts.signposter.endInterval(
+            "MainContextMerge",
+            mergeInterval,
+            "affectedCount=\(affectedIDs.count)"
+        )
 
         // Auto-download the newest `autoDownloadCount` genuinely-new episodes per
         // podcast (never a backfill pass — `newEpisodeIDs` is empty there). This is
@@ -378,7 +442,16 @@ final class SubscriptionRepository {
                 )
             )
         }
-        return notifications
+        return SubscriptionRefreshReport(
+            notifications: notifications,
+            attempted: actorReport.attempted,
+            total: actorReport.total,
+            succeeded: results.count,
+            failed: actorReport.failed,
+            cancelled: actorReport.cancelled,
+            intendedInsertions: actorReport.intendedInsertions,
+            durableInsertions: actorReport.durableInsertions
+        )
     }
 
     /// One feed's outcome from a bulk ``subscribeAll(feedURLs:onProgress:)``, resolved
@@ -401,6 +474,8 @@ final class SubscriptionRepository {
         /// How many requested feed URLs were NOT attempted because of the
         /// free-tier cap (0 for Plus users, 0 when already under the cap). #635.
         let skippedForCap: Int
+        let failed: Int
+        let cancelled: Bool
     }
 
     /// Subscribes to every URL in `feedURLs` in ONE background pass, reconciling the
@@ -439,7 +514,7 @@ final class SubscriptionRepository {
             return canonical
         }
         guard !canonicalFeedURLs.isEmpty else {
-            return BulkSubscribeResult(outcomes: [], skippedForCap: 0)
+            return BulkSubscribeResult(outcomes: [], skippedForCap: 0, failed: 0, cancelled: false)
         }
 
         var allowedURLs = canonicalFeedURLs
@@ -453,7 +528,11 @@ final class SubscriptionRepository {
             allowedURLs = Array(canonicalFeedURLs.prefix(allowedCount))
             skippedForCap = canonicalFeedURLs.count - allowedURLs.count
         }
-        guard !allowedURLs.isEmpty else { return BulkSubscribeResult(outcomes: [], skippedForCap: skippedForCap) }
+        guard !allowedURLs.isEmpty else {
+            return BulkSubscribeResult(
+                outcomes: [], skippedForCap: skippedForCap, failed: 0, cancelled: false
+            )
+        }
 
         // Resolve the inbox seed count on the main actor (AppSettingsStore is
         // @MainActor) so the bulk OPML path seeds the inbox identically to the
@@ -466,6 +545,17 @@ final class SubscriptionRepository {
         let results = await actor.subscribeAll(
             feedURLs: allowedURLs, feed: feed, inboxSeedCount: inboxSeedCount, onProgress: onProgress
         )
+
+        let reconciliationInterval = PerformanceSignposts.signposter.beginInterval(
+            "OPMLReconciliation",
+            "resultCount=\(results.count)"
+        )
+        defer {
+            PerformanceSignposts.signposter.endInterval(
+                "OPMLReconciliation",
+                reconciliationInterval
+            )
+        }
 
         // Reconcile the main context ONCE for the entire batch (the essential fix:
         // this used to run once per feed).
@@ -497,7 +587,12 @@ final class SubscriptionRepository {
         if !outcomes.isEmpty {
             NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
         }
-        return BulkSubscribeResult(outcomes: outcomes, skippedForCap: skippedForCap)
+        return BulkSubscribeResult(
+            outcomes: outcomes,
+            skippedForCap: skippedForCap,
+            failed: max(0, allowedURLs.count - results.count),
+            cancelled: Task.isCancelled
+        )
     }
 
     /// Auto-downloads the N most recent episodes (global `autoDownloadCount`; 0 =

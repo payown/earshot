@@ -713,6 +713,8 @@ private struct AllInboxCandidates<Content: View>: View {
     }
 
     private func reload() {
+        let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
+        defer { PerformanceSignposts.signposter.endInterval("InboxReload", interval) }
         candidates = InboxRepository(context: context).inboxEpisodes()
     }
 }
@@ -768,6 +770,8 @@ struct FolderScopedInboxCandidates<Content: View>: View {
     }
 
     private func reload() {
+        let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
+        defer { PerformanceSignposts.signposter.endInterval("InboxReload", interval) }
         candidates = InboxRepository(context: context).inboxEpisodes(in: folder)
         loaded = true
     }

@@ -80,7 +80,12 @@ enum OPMLFileImporter {
         let outcome = await OPMLImportService(context: context, downloader: downloader, isEntitled: isEntitled).importOPML(
             opml,
             onResolveTotal: { total in
+                let interval = PerformanceSignposts.signposter.beginInterval(
+                    "OPMLProgressCallback",
+                    "completed=0 total=\(total)"
+                )
                 progress?.start(total: total)
+                PerformanceSignposts.signposter.endInterval("OPMLProgressCallback", interval)
             },
             onProgress: { completed, total, title in
                 progress?.advance(completed: completed, total: total, title: title)
@@ -97,7 +102,12 @@ enum OPMLFileImporter {
         // it to the correct singular/plural spoken form first.
         let imported = String(localized: "Imported ^[\(outcome.importedCount) podcast](inflect: true)")
         let message: String
-        if outcome.skippedForCapCount > 0 {
+        if outcome.cancelled {
+            message = "Import cancelled. \(imported)."
+        } else if outcome.failedCount > 0 {
+            let failed = String(localized: "^[\(outcome.failedCount) podcast](inflect: true)")
+            message = "\(imported). \(failed) could not be imported."
+        } else if outcome.skippedForCapCount > 0 {
             // Free-tier cap (#635): tell the user how many were skipped and why,
             // with an upgrade mention. This announcement is the only accessible
             // surface for OPML import outcome in the app (no persistent status UI),

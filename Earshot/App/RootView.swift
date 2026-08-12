@@ -54,6 +54,8 @@ private struct InboxTabBadge: View {
     }
 
     private func recompute() {
+        let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
+        defer { PerformanceSignposts.signposter.endInterval("InboxReload", interval) }
         count = InboxRepository(context: context).inboxCount(optInOnly: optInOnly)
     }
 }

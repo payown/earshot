@@ -79,6 +79,30 @@ actor PodcastIdentityWriteGate {
 struct PodcastIdentityService {
     let context: ModelContext
 
+    /// Resolves a whole import against one deliberately narrow fetch. Import used
+    /// to call ``existing(feedURL:)`` once per URL; Core Data consequently executed
+    /// and populated relationship faults hundreds of times on the actor executor.
+    /// Fetch only scalar identity fields once, then classify in memory.
+    func existingByCanonicalFeedURL(for feedURLs: [String]) throws -> [String: Podcast] {
+        let requested = Set(feedURLs.map(FeedURLIdentity.canonical))
+        guard !requested.isEmpty else { return [:] }
+
+        var descriptor = FetchDescriptor<Podcast>()
+        descriptor.propertiesToFetch = [\Podcast.feedURL, \Podcast.title, \Podcast.createdAt]
+        let podcasts = try context.fetch(descriptor)
+        var matches: [String: Podcast] = [:]
+        for podcast in podcasts {
+            let canonical = FeedURLIdentity.canonical(podcast.feedURL)
+            guard requested.contains(canonical) else { continue }
+            if let current = matches[canonical] {
+                matches[canonical] = Self.deterministicPodcast(in: [current, podcast])
+            } else {
+                matches[canonical] = podcast
+            }
+        }
+        return matches
+    }
+
     func existing(feedURL: String) throws -> Podcast? {
         let canonical = FeedURLIdentity.canonical(feedURL)
         let exact = try context.fetch(
