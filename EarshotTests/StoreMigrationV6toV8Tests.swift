@@ -1030,7 +1030,11 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         XCTAssertEqual(Set(localEpisodes.map(\.episodeGUID)), ["downloaded", "pending"])
         XCTAssertEqual(LocalAppSettingIdentity.value(for: SettingsKey.lastFeedRefresh, in: context), "123")
         XCTAssertNil(AppSettingIdentity.value(for: SettingsKey.lastFeedRefresh, in: context))
-        XCTAssertEqual(AppSettingIdentity.value(for: SettingsKey.wifiOnlyDownloads, in: context), "false")
+        XCTAssertEqual(
+            LocalAppSettingIdentity.value(for: SettingsKey.wifiOnlyDownloads, in: context),
+            "false"
+        )
+        XCTAssertNil(AppSettingIdentity.value(for: SettingsKey.wifiOnlyDownloads, in: context))
         let duplicatePodcast = Podcast(
             feedURL: "HTTPS://EXAMPLE.COM:443/feed.xml#duplicate", title: "New metadata"
         )
@@ -1702,13 +1706,16 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try autoreleasepool {
             let container = try StoreMigration.openOrMigrate(at: storeURL)
             container.mainContext.insert(AppSetting(
-                key: SettingsKey.wifiOnlyDownloads, value: "post-marker-duplicate"
+                key: SettingsKey.themeOverride, value: "first-post-marker-row"
+            ))
+            container.mainContext.insert(AppSetting(
+                key: SettingsKey.themeOverride, value: "second-post-marker-row"
             ))
             try container.mainContext.save()
         }
 
         let reopened = try StoreMigration.openOrMigrate(at: storeURL)
-        let key = SettingsKey.wifiOnlyDownloads
+        let key = SettingsKey.themeOverride
         let rows = try reopened.mainContext.fetch(FetchDescriptor<AppSetting>(
             predicate: #Predicate { $0.key == key }
         ))

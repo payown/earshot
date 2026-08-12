@@ -1,6 +1,7 @@
 import CoreData
 import Foundation
 import OSLog
+import Observation
 
 extension Notification.Name {
     /// A completed, successful CloudKit import may change rows held by views
@@ -75,10 +76,13 @@ struct CloudKitEventSnapshot: Equatable, Sendable {
 }
 
 @MainActor
+@Observable
 final class CloudKitEventMonitor {
     static let defaultCapacity = 100
 
     private(set) var events: [CloudKitEventSnapshot] = []
+
+    var latestEvent: CloudKitEventSnapshot? { events.last }
     private let capacity: Int
     private let center: NotificationCenter
     private var observer: NSObjectProtocol?

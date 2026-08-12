@@ -84,6 +84,13 @@ struct SettingsScreen: View {
                 .accessibilityHint("Listening stats and how long history is kept")
 
                 NavigationLink {
+                    CloudSyncSettingsView()
+                } label: {
+                    Label("iCloud Sync", systemImage: "icloud")
+                }
+                .accessibilityHint("Sync status and what stays on this device")
+
+                NavigationLink {
                     PrivacySettingsView()
                 } label: {
                     Label("Privacy", systemImage: "hand.raised")
@@ -95,7 +102,7 @@ struct SettingsScreen: View {
                 } label: {
                     Label("Data", systemImage: "externaldrive")
                 }
-                .accessibilityHint("Export, import, and delete your local data")
+                .accessibilityHint("Export, import, clear this device, or delete the synced library everywhere")
 
                 NavigationLink {
                     HelpSettingsView()

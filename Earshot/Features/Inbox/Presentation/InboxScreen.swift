@@ -89,11 +89,8 @@ struct InboxScreen: View {
                     inboxContent(candidates: candidates)
                 }
             } else {
-                AllInboxCandidates { normalCandidates, optedInCandidates in
-                    inboxContent(
-                        candidates: settings.inboxOptInOnly
-                            ? optedInCandidates : normalCandidates
-                    )
+                AllInboxCandidates(optInOnly: settings.inboxOptInOnly) { candidates in
+                    inboxContent(candidates: candidates)
                 }
             }
         }
@@ -673,36 +670,50 @@ struct InboxScreen: View {
     }
 }
 
-/// Global Inbox candidates stay in their two store-queryable modes. Keeping
-/// these queries in a conditional child means SwiftUI tears them down while a
-/// folder filter is active instead of continuing to materialize the global
-/// candidate set behind the scoped UI (#763).
+/// Global Inbox candidates stay in their selected store-queryable mode. Keeping
+/// this fetch in a conditional child means SwiftUI tears it down while a folder
+/// filter is active instead of continuing to materialize the global candidate
+/// set behind the scoped UI (#763). It is event-driven rather than a live
+/// `@Query`: unrelated SwiftData saves must not repeatedly run the relationship
+/// predicate on the main actor while VoiceOver is using the app.
 private struct AllInboxCandidates<Content: View>: View {
-    @Query private var normalCandidates: [Episode]
-    @Query private var optedInCandidates: [Episode]
+    @Environment(\.modelContext) private var context
 
-    let content: ([Episode], [Episode]) -> Content
+    let optInOnly: Bool
+    let content: ([Episode]) -> Content
+    @State private var candidates: [Episode]?
 
-    init(@ViewBuilder content: @escaping ([Episode], [Episode]) -> Content) {
-        var normalDescriptor = FetchDescriptor<Episode>(
-            predicate: InboxQuery.normalUnplayed,
-            sortBy: [SortDescriptor(\Episode.pubDate, order: .reverse)]
-        )
-        normalDescriptor.relationshipKeyPathsForPrefetching = [\Episode.podcast]
-        _normalCandidates = Query(normalDescriptor)
-
-        var optedInDescriptor = FetchDescriptor<Episode>(
-            predicate: InboxQuery.optInOnlyUnplayed,
-            sortBy: [SortDescriptor(\Episode.pubDate, order: .reverse)]
-        )
-        optedInDescriptor.relationshipKeyPathsForPrefetching = [\Episode.podcast]
-        _optedInCandidates = Query(optedInDescriptor)
-
+    init(optInOnly: Bool, @ViewBuilder content: @escaping ([Episode]) -> Content) {
+        self.optInOnly = optInOnly
         self.content = content
     }
 
     var body: some View {
-        content(normalCandidates, optedInCandidates)
+        Group {
+            if let candidates {
+                content(candidates)
+            } else {
+                ProgressView("Loading inbox")
+                    .accessibilityLabel("Loading inbox")
+            }
+        }
+        .task(id: optInOnly) { reload() }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .earshotInboxDidChange)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            reload()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .earshotQueueDidChange)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            reload()
+        }
+    }
+
+    private func reload() {
+        candidates = InboxRepository(context: context).inboxEpisodes()
     }
 }
 

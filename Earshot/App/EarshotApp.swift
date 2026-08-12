@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Observation
+import CloudKit
 import UIKit
 import UserNotifications
 
@@ -173,8 +174,10 @@ final class AppRuntime {
     private var preparedDownloadContainer: ModelContainer?
     private var resetTask: Task<Bool, Never>?
     private var resetInFlight = false
-    private var cloudKitEventMonitor: CloudKitEventMonitor?
+    private(set) var cloudKitEventMonitor: CloudKitEventMonitor?
     private var cloudProjectionCoordinator: CloudProjectionCoordinator?
+    private var cloudAccountObserver: NSObjectProtocol?
+    private(set) var cloudSyncAvailability: CloudSyncAvailability
 
     init(
         load: StoreLoad? = nil,
@@ -213,6 +216,9 @@ final class AppRuntime {
         self.recoveryCapacity = recoveryCapacity
         self.fileResetOperation = fileResetOperation
         self.launchSleep = launchSleep
+        cloudSyncAvailability = mode == .normal
+            && CloudKitLaunchPolicy.isDevelopmentMirroringEnabled()
+            ? .checking : .disabled
         let router = NotificationRouter()
         notificationRouter = router
         notificationDelegate = NotificationDelegate(router: router)
@@ -715,6 +721,16 @@ final class AppRuntime {
         return result
     }
 
+    /// Removes device-owned downloads and rendered artwork without changing the
+    /// synced library, playback state, folders, history, or preferences.
+    func clearThisDeviceData() async -> Bool {
+        guard resetTask == nil else { return false }
+        _ = await downloads.clearAllDownloads()
+        ArtworkCache.shared.tearDown()
+        ArtworkCache.resetShared()
+        return true
+    }
+
     func loadRecoveryDownloadUsageIfNeeded() async {
         guard !recoveryUsageLoaded, recoveryStorageState != nil else { return }
         recoveryUsageLoaded = true
@@ -808,6 +824,17 @@ final class AppRuntime {
         processServicesStarted = true
         UNUserNotificationCenter.current().delegate = notificationDelegate
         await NotificationService().registerCategories()
+        if CloudKitLaunchPolicy.isDevelopmentMirroringEnabled() {
+            cloudAccountObserver = NotificationCenter.default.addObserver(
+                forName: .CKAccountChanged,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    await self?.handleCloudAccountChange()
+                }
+            }
+        }
     }
 
     /// Configures the StoreKit-backed service exactly once and only with the real
@@ -825,11 +852,101 @@ final class AppRuntime {
         guard mode == .normal,
               CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(),
               cloudProjectionCoordinator == nil else { return }
+        guard await prepareCloudAccount() else { return }
         let coordinator = try CloudProjectionCoordinator.make(
             applicationContainer: container
         )
         try coordinator.start()
         cloudProjectionCoordinator = coordinator
+        cloudSyncAvailability = .available
+    }
+
+    private func prepareCloudAccount() async -> Bool {
+        let container = CKContainer(identifier: CloudKitLaunchPolicy.containerIdentifier)
+        do {
+            switch try await container.accountStatus() {
+            case .available:
+                let current = try await container.userRecordID().recordName
+                let previous = CloudAccountIdentityStore.value()
+                switch CloudAccountContinuityDecision.evaluate(
+                    previous: previous,
+                    current: current
+                ) {
+                case .firstAccount:
+                    CloudAccountIdentityStore.set(current)
+                case .unchanged:
+                    break
+                case .changed:
+                    cloudSyncAvailability = .accountChanged
+                    return false
+                }
+                cloudSyncAvailability = .available
+                return true
+            case .noAccount:
+                cloudSyncAvailability = .signedOut
+            case .restricted:
+                cloudSyncAvailability = .restricted
+            case .couldNotDetermine, .temporarilyUnavailable:
+                cloudSyncAvailability = .temporarilyUnavailable
+            @unknown default:
+                cloudSyncAvailability = .temporarilyUnavailable
+            }
+        } catch {
+            cloudSyncAvailability = .temporarilyUnavailable
+            AppLog.data.error(
+                "Cloud account check failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+        return false
+    }
+
+    private func handleCloudAccountChange() async {
+        await cloudProjectionCoordinator?.stop()
+        cloudProjectionCoordinator = nil
+        cloudSyncAvailability = .checking
+        guard case .ready(let container, _) = phase else { return }
+        do {
+            try await activateCloudProjectionIfNeeded(container: container)
+        } catch {
+            cloudSyncAvailability = .temporarilyUnavailable
+            AppLog.data.error(
+                "Cloud account-change reconciliation failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    /// Continues only after the user explicitly accepts the currently signed-in
+    /// iCloud account. The old projection belongs to the previous account, so it
+    /// must not be reopened or uploaded. Removing it leaves the application and
+    /// device-local stores untouched; the new projection is rebuilt from the
+    /// current private database and this device's existing library.
+    func connectToCurrentCloudAccount() async {
+        guard mode == .normal,
+              CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(),
+              case .ready(let container, _) = phase else { return }
+        await cloudProjectionCoordinator?.stop()
+        cloudProjectionCoordinator = nil
+        cloudSyncAvailability = .checking
+        let cloudContainer = CKContainer(
+            identifier: CloudKitLaunchPolicy.containerIdentifier
+        )
+        do {
+            guard try await cloudContainer.accountStatus() == .available else {
+                cloudSyncAvailability = .temporarilyUnavailable
+                return
+            }
+            let current = try await cloudContainer.userRecordID().recordName
+            try ModelContainerFactory.removeStoreFilesVerifiably(
+                at: CloudProjectionCoordinator.storeURL
+            )
+            CloudAccountIdentityStore.set(current)
+            try await activateCloudProjectionIfNeeded(container: container)
+        } catch {
+            cloudSyncAvailability = .temporarilyUnavailable
+            AppLog.data.error(
+                "Cloud account recovery failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     var rootServiceActivationStatus: RootServiceActivationStatus {

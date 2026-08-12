@@ -14,6 +14,9 @@ extension Notification.Name {
     static let earshotMirroredSettingDidChange = Notification.Name(
         "earshotMirroredSettingDidChange"
     )
+    static let earshotFolderSyncConflictRepaired = Notification.Name(
+        "earshotFolderSyncConflictRepaired"
+    )
 }
 
 struct EpisodeUserStateSnapshot: Sendable, Equatable {
@@ -190,6 +193,9 @@ final class CloudFolderProjection {
 
 @MainActor
 final class CloudProjectionCoordinator {
+    static let storeURL = URL.applicationSupportDirectory
+        .appending(path: "earshot-cloud-projection.store")
+
     private struct PodcastValue: Equatable {
         let feedURL: String
         let title: String
@@ -268,7 +274,7 @@ final class CloudProjectionCoordinator {
         let configuration = ModelConfiguration(
             "CloudProjection",
             schema: schema,
-            url: URL.applicationSupportDirectory.appending(path: "earshot-cloud-projection.store"),
+            url: storeURL,
             cloudKitDatabase: CloudKitLaunchPolicy.projectionDatabase()
         )
         let projectionContainer = try ModelContainer(for: schema, configurations: configuration)
@@ -1452,28 +1458,44 @@ final class CloudProjectionCoordinator {
     ) throws -> Bool {
         let rows = try cloudContext.fetch(FetchDescriptor<CloudSettingProjection>())
             .filter { $0.deletedAt == nil && AppSettingScope.isMirrored($0.key) }
-        var newestByKey: [String: CloudSettingProjection] = [:]
         var newestByDevice: [String: CloudSettingProjection] = [:]
         for row in rows.sorted(by: Self.settingProjectionOrder) {
             let key = AppSettingIdentity.canonicalKey(row.key)
             let deviceKey = "\(key)\u{1f}\(row.sourceDeviceID)"
             if newestByDevice[deviceKey] == nil {
                 newestByDevice[deviceKey] = row
-                if newestByKey[key] == nil { newestByKey[key] = row }
             } else {
                 cloudContext.delete(row)
             }
         }
+        let newestByKey = Dictionary(
+            grouping: newestByDevice.values,
+            by: { AppSettingIdentity.canonicalKey($0.key) }
+        )
         var changed = false
         for key in newestByKey.keys.sorted() {
-            guard let row = newestByKey[key],
-                  AppSettingIdentity.value(for: key, in: appContext) != row.value else { continue }
-            try AppSettingIdentity.setValue(row.value, for: key, in: appContext)
+            guard let contributions = newestByKey[key],
+                  let value = Self.mergedSettingValue(key: key, rows: contributions),
+                  AppSettingIdentity.value(for: key, in: appContext) != value else { continue }
+            try AppSettingIdentity.setValue(value, for: key, in: appContext)
             changed = true
         }
         if appContext.hasChanges { try appContext.save() }
         if cloudContext.hasChanges { try cloudContext.save() }
         return changed
+    }
+
+    private static func mergedSettingValue(
+        key: String,
+        rows: [CloudSettingProjection]
+    ) -> String? {
+        if key == SettingsKey.grandfatheredPodcastCount {
+            return rows.compactMap { Int($0.value) }.max().map(String.init)
+        }
+        if key == SettingsKey.podcastCapGatingIntroduced {
+            return rows.contains { ($0.value as NSString).boolValue } ? "true" : "false"
+        }
+        return rows.sorted(by: settingProjectionOrder).first?.value
     }
 
     private func applyRemoteBookmarks(
@@ -1661,10 +1683,15 @@ final class CloudProjectionCoordinator {
                 changed = true
             }
         }
+        let requestedParents = Dictionary(uniqueKeysWithValues: newestByID.values
+            .filter { $0.deletedAt == nil }
+            .map { ($0.folderID, $0.parentFolderID) })
+        let parentRepair = FolderSyncConflictPolicy.repairCycles(in: requestedParents)
         for row in newestByID.values.sorted(by: Self.folderProjectionOrder)
         where row.deletedAt == nil {
             guard let folder = folderByCloudID[row.folderID] else { continue }
-            let parent = row.parentFolderID.flatMap { folderByCloudID[$0] }
+            let parentID = parentRepair.parents[row.folderID] ?? nil
+            let parent = parentID.flatMap { folderByCloudID[$0] }
             if folder.parent?.persistentModelID != parent?.persistentModelID,
                !FolderLogic.wouldCreateCycle(moving: folder, under: parent) {
                 folder.parent = parent
@@ -1758,6 +1785,9 @@ final class CloudProjectionCoordinator {
         if appContext.hasChanges { try appContext.save() }
         if cloudContext.hasChanges { try cloudContext.save() }
         knownLocalFolderIDs = Set(folderByCloudID.keys)
+        if !parentRepair.detachedFolderIDs.isEmpty {
+            center.post(name: .earshotFolderSyncConflictRepaired, object: nil)
+        }
         return changed
     }
 

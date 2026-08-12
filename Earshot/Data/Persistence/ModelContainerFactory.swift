@@ -310,6 +310,23 @@ enum ModelContainerFactory {
         }
     }
 
+    /// Removes one specific store family and fails if any member cannot be
+    /// removed. Account recovery uses this stricter form so it can never reopen
+    /// a previous iCloud account's projection after silently ignoring an I/O
+    /// error. Sibling application stores are outside the resolved file set.
+    static func removeStoreFilesVerifiably(at url: URL) throws {
+        let fm = FileManager.default
+        let files = ["", "-wal", "-shm", "-journal"].map { suffix in
+            url.deletingPathExtension().appendingPathExtension("store" + suffix)
+        }
+        for file in files where fm.fileExists(atPath: file.path) {
+            try fm.removeItem(at: file)
+        }
+        guard !files.contains(where: { fm.fileExists(atPath: $0.path) }) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+    }
+
 }
 
 /// A trivial model used only as the test-host's container schema. Intentionally

@@ -523,6 +523,56 @@ architecture.
   the Mac imported 41,200 episodes but zero podcasts, leaving Library empty.
   Development is moving to a separate compact projection store with subscription
   parents first and feed catalogs local. Production CloudKit is not deployed.
+- #811's replacement compact-projection run on development build 174 converged
+  all 662 subscription records to both the iPhone and Designed-for-iPhone Mac
+  stores. The projection also converged 2 meaningful episode-state records, 1
+  queue intent, 4 shared settings, and 31 listening sessions; this library had
+  no bookmarks or folders to exercise those paths physically. The iPhone
+  projection contained 700 CloudKit metadata rows and passed SQLite integrity;
+  the Mac projection matched those counts and also passed integrity.
+- The development container still contains roughly 242,000 obsolete records
+  from the rejected full-graph experiment. Successful imports took 77 seconds
+  on the iPhone and 123 seconds on the Mac while SwiftData skipped those old
+  record types. These figures are contaminated and are not clean compact-sync
+  performance measurements. Production remains undeployed and clean.
+- The Mac's pre-existing partial application store has one orphaned queued
+  episode whose podcast relationship is nil. The compact queue intent reached
+  the Mac projection, but cannot become a local QueueItem until its podcast/feed
+  metadata exists locally. Subscription convergence is complete; queue
+  materialization for this damaged legacy row remains an explicit B2/B6 case.
+- Build 174 has not completed the two-device matrix or a physical VoiceOver
+  status-screen pass. Do not treat this development result as the 1.1 release
+  gate or deploy the production CloudKit schema from it.
+- Account continuity now fails closed. If the CloudKit user record changes,
+  Earshot stops the projection coordinator and leaves the local library usable
+  with sync paused. A user-confirmed recovery keeps both application stores,
+  verifiably removes only the previous account's local projection-store family,
+  and then connects to the current private account. The default remains paused;
+  no two accounts are silently merged.
+- Automated compact-sync coverage now includes a real on-disk close/reopen of a
+  completed 662-subscription backfill, idempotent everywhere-delete tombstones,
+  nested-folder deletion, simultaneous queue add/reorder/remove in both record
+  arrival orders, current-item preservation at the data boundary, coordinator
+  observer shutdown, and coalescing 100 import notifications into one apply.
+- Latest account-safe development build 174 binary: 14,833,280 bytes, SHA-256
+  `934ce259d262369cda95ff2e57526b84d5cfbbc42a3fc99816bb4f302d15738e`,
+  built 2026-08-07 23:20:58 -0700. Its signed entitlements contain the
+  development push environment, `iCloud.media.payown.earshot`, and CloudKit.
+  Wireless over-install preserved the application container. After both apps
+  relaunched, read-only iPhone and Mac projection snapshots matched at 662
+  podcasts, 4 episode states, 1 queue intent, 4 shared settings, 0 bookmarks,
+  31 listening sessions, 0 folders, and 702 CloudKit metadata rows; both
+  integrity checks returned `ok`.
+- The first 662-subscription Mac launch exposed a separate large-library Inbox
+  performance regression: the global Inbox's live SwiftData query re-ran while
+  the feed refresh saved the rebuilt catalog. A 2026-08-07 sample attributed
+  977 of 1,461 samples to `AllInboxCandidates.body`; RSS reached 337 MB in the
+  observed run. The global Inbox now performs an event-driven bounded fetch on
+  Inbox and queue changes instead of observing every unrelated store save.
+  On the same Mac library, the background refresh finished 3 minutes 42 seconds
+  after launch; Earshot then measured 0.7% CPU, and all 319 main-thread samples
+  in a two-second follow-up were idle. This does not make the feed rebuild cheap:
+  it separates that finite work from a persistent SwiftUI query loop.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.

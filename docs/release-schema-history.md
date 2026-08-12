@@ -92,6 +92,15 @@ episode catalog from blocking 662 subscription parents. Production CloudKit is
 still disabled and undeployed. Fresh-store schema remains V10; supported
 migration sources remain V5 and V6.
 
+Build 174 is the development-only end-to-end compact CloudKit synchronization
+build. It extends build 173's relationship-free projection to subscriptions,
+meaningful episode playback state, queue order, shared settings, bookmarks,
+listening history, and nested folder membership while keeping refetchable episode
+catalogs, downloaded audio, caches, entitlement state, and other device-owned data
+local. It also separates device-only clearing from an explicitly confirmed synced-
+library deletion. Production CloudKit remains disabled and undeployed. Fresh-store
+schema remains V10; supported migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App

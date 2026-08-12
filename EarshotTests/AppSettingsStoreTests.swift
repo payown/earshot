@@ -37,21 +37,39 @@ final class AppSettingsStoreTests: XCTestCase {
         store.setInt(2, for: SettingsKey.autoDownloadCount)
         store.setInt(3, for: SettingsKey.autoDownloadCount)
 
-        let rows = try context.fetch(FetchDescriptor<AppSetting>())
+        let rows = try context.fetch(FetchDescriptor<LocalAppSetting>())
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(store.int(SettingsKey.autoDownloadCount, default: 0), 3)
     }
 
-    func testWriteSelfHealsDuplicateRowsAndNewestWriteWins() throws {
+    func testDeviceLocalWriteOverridesLegacyMirroredValue() throws {
         let context = TestStore.freshContext()
         context.insert(AppSetting(key: SettingsKey.autoDownloadCount, value: "1"))
         context.insert(AppSetting(key: SettingsKey.autoDownloadCount, value: "2"))
 
         AppSettingsStore(context: context).setRawValue("7", for: SettingsKey.autoDownloadCount)
 
-        let rows = try context.fetch(FetchDescriptor<AppSetting>())
+        let rows = try context.fetch(FetchDescriptor<LocalAppSetting>())
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows.first?.value, "7")
+        XCTAssertEqual(
+            AppSettingsStore(context: context).int(SettingsKey.autoDownloadCount, default: 0),
+            7
+        )
+    }
+
+    func testDownloadPreferencesAreDeviceLocalWhilePlaybackSpeedMirrors() {
+        for key in [
+            SettingsKey.autoDownloadCount,
+            SettingsKey.downloadRetentionDays,
+            SettingsKey.wifiOnlyDownloads,
+            SettingsKey.deleteDownloadAfterPlayed,
+            SettingsKey.autoDownloadQueued,
+            SettingsKey.downloadsPlayedFilter,
+        ] {
+            XCTAssertTrue(AppSettingScope.isLocal(key), key)
+        }
+        XCTAssertFalse(AppSettingScope.isLocal(SettingsKey.globalSpeed))
     }
 
     func testPerPodcastWriteMergesLegacyURLKeyVariants() throws {

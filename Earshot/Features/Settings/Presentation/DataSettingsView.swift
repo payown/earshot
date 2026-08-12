@@ -16,6 +16,7 @@ struct DataSettingsView: View {
 
     @State private var exportURL: ExportFile?
     @State private var confirmingReset = false
+    @State private var confirmingDeviceClear = false
     @State private var importingOPML = false
     /// Presents the Earshot Plus paywall (#632) when an OPML import gets
     /// trimmed by the free-tier podcast cap. Set from `OPMLFileImporter`'s
@@ -46,9 +47,15 @@ struct DataSettingsView: View {
                 }
 
                 Button(role: .destructive) {
+                    confirmingDeviceClear = true
+                } label: {
+                    Label("Clear this device", systemImage: "externaldrive.badge.xmark")
+                }
+
+                Button(role: .destructive) {
                     confirmingReset = true
                 } label: {
-                    Label("Delete all local data", systemImage: "trash")
+                    Label("Delete synced library everywhere", systemImage: "trash")
                 }
             }
         }
@@ -61,14 +68,24 @@ struct DataSettingsView: View {
             handleImport(result)
         }
         .confirmationDialog(
-            "Delete all local data?",
+            "Delete synced library everywhere?",
             isPresented: $confirmingReset,
             titleVisibility: .visible
         ) {
-            Button("Delete everything", role: .destructive) { factoryReset() }
+            Button("Delete synced library everywhere", role: .destructive) { factoryReset() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Removes every podcast, episode, download, and setting on this device. This can't be undone.")
+            Text("Removes your podcast library and listening data from every device, and removes downloads from this device. This can't be undone.")
+        }
+        .confirmationDialog(
+            "Clear this device?",
+            isPresented: $confirmingDeviceClear,
+            titleVisibility: .visible
+        ) {
+            Button("Clear this device", role: .destructive) { clearThisDevice() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Removes downloaded audio and cached artwork from this device. Your synced library stays available on every device.")
         }
         // Earshot Plus paywall (#632), dismissible via its own explicit Close
         // button, never drag-only.
@@ -120,8 +137,15 @@ struct DataSettingsView: View {
             // Keep the existing announcement byte-for-byte and at its existing
             // delay; the new container routes the root to onboarding.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                Announcer.announce("All local data deleted. Podcasts you follow and downloads removed.")
+                Announcer.announce("Synced library deleted from every device.")
             }
+        }
+    }
+
+    private func clearThisDevice() {
+        Task { @MainActor in
+            guard await runtime.clearThisDeviceData() else { return }
+            Announcer.announce("Downloaded audio and cached artwork removed from this device.")
         }
     }
 }
