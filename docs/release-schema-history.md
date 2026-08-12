@@ -85,6 +85,13 @@ from every five to every fifteen wall-clock seconds. Play, pause, seek, rate
 changes, episode changes, and background persistence remain immediate. Fresh-store
 schema remains V10; supported migration sources remain V5 and V6.
 
+Build 173 is the development-only compact CloudKit projection feasibility build.
+It returns both V10 application stores to local-only operation and mirrors a
+separate relationship-free subscription projection, preventing the 232,921-row
+episode catalog from blocking 662 subscription parents. Production CloudKit is
+still disabled and undeployed. Fresh-store schema remains V10; supported
+migration sources remain V5 and V6.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App

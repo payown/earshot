@@ -496,7 +496,7 @@ same pull request, following the procedure at
 The iCloud tracking hierarchy is being reconciled against the merged V10 code.
 Issues #771 and #772 describe obsolete V7 implementation work that landed and
 advanced through V10. Issue #773's build-161 checklist is superseded by the
-real-device build-171 V10 migration result. Actual mirroring remains disabled;
+real-device build-171 V10 migration result. Production mirroring remains disabled;
 the current 1.1 release gate and implementation order live in
 `docs/icloud-sync-v1.1-plan.md`.
 
@@ -518,6 +518,11 @@ architecture.
 - #599 remains the open 1.1 parent. CloudKit is deliberately disabled in V10;
   implementation is now ordered through #811-#817 in
   `docs/icloud-sync-v1.1-plan.md`.
+- #811's 2026-08-07 physical B1 run rejected mirroring the complete V10 graph.
+  The iPhone queued 232,921 episode records ahead of all 662 podcast records;
+  the Mac imported 41,200 episodes but zero podcasts, leaving Library empty.
+  Development is moving to a separate compact projection store with subscription
+  parents first and feed catalogs local. Production CloudKit is not deployed.
 - #711, `measure and safely bound SwiftData WAL growth on large stores`: open.
   The WAL-growth cause is still a hypothesis. Do not add raw checkpointing
   without the evidence and safety gates specified in the issue.

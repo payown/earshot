@@ -1723,6 +1723,7 @@ final class PlayerService {
             DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
         }
         saveContext()
+        postEpisodeUserStateChanges([episode], playedChangedExplicitly: true)
         // The finished episode just left the inbox — refresh the tab badge
         // (the badge no longer polls on every position save, #736).
         NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
@@ -1748,6 +1749,7 @@ final class PlayerService {
         guard let context, context.hasChanges else { return }
         do {
             try context.save()
+            if let currentEpisode { postEpisodeUserStateChanges([currentEpisode]) }
         } catch {
             AppLog.player.error("Failed to persist playback state: \(error.localizedDescription, privacy: .public)")
         }

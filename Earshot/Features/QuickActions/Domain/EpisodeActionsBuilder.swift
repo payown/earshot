@@ -145,7 +145,12 @@ func buildEpisodeActions(
                 if nowPlayed {
                     DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
                 }
-                saveQuickAction(context, "played state")
+                if saveQuickAction(context, "played state") {
+                    postEpisodeUserStateChanges(
+                        [episode],
+                        playedChangedExplicitly: true
+                    )
+                }
                 // The rotor path's only announcement (#579). The sighted swipe
                 // announces on its own path (InboxScreen.markPlayed) and never
                 // runs this runner, so exactly one announcement fires per
@@ -207,8 +212,9 @@ func buildEpisodeActions(
 /// Saves the context, logging (not throwing) on failure — Quick Action runners
 /// are fire-and-forget from a VoiceOver gesture.
 @MainActor
-func saveQuickAction(_ context: ModelContext, _ what: String) {
-    guard context.hasChanges else { return }
+@discardableResult
+func saveQuickAction(_ context: ModelContext, _ what: String) -> Bool {
+    guard context.hasChanges else { return false }
     do {
         try context.save()
         // User-triggered played/include/exclude mutations can change both the
@@ -216,7 +222,9 @@ func saveQuickAction(_ context: ModelContext, _ what: String) {
         // Quick Action saves may cause one harmless event-driven recompute; this
         // path runs only on an explicit action, never playback-position saves.
         NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+        return true
     } catch {
         AppLog.quickActions.error("Failed to save \(what, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        return false
     }
 }

@@ -180,14 +180,14 @@ struct PodcastSettingsView: View {
             // navigating top to bottom. A plain Toggle gets the system
             // "On"/"Off" announcement for free, matching `autoQueue` above.
             if settings.inboxOptInOnly {
-                Toggle("Include in Inbox", isOn: $podcast.inboxIncluded)
+                Toggle("Include in Inbox", isOn: inboxIncludedBinding)
             } else {
                 // Companion to the opt-in Toggle above, for normal mode (#671):
                 // with "Opt-in podcasts only" off, every podcast is in the
                 // inbox by default and this is the only way to keep one
                 // specific noisy podcast out of it. Mutually exclusive with
                 // the branch above since only one inbox mode is ever active.
-                Toggle("Exclude from Inbox", isOn: $podcast.inboxExcluded)
+                Toggle("Exclude from Inbox", isOn: inboxExcludedBinding)
             }
             inboxMaxPicker
             inboxAgeLimitPicker
@@ -380,6 +380,7 @@ struct PodcastSettingsView: View {
             set: { isOn in
                 let decision = NotificationPermissionTrigger.apply(newValue: isOn)
                 podcast.notificationEnabled = decision.persistedValue
+                persistPodcastProjectionChange()
                 if decision.shouldRequestAuthorization { authRequestToken += 1 }
             }
         )
@@ -467,6 +468,7 @@ struct PodcastSettingsView: View {
             set: { newValue in
                 QueueRepository(context: modelContext)
                     .setAutoQueue(newValue, for: podcast)
+                persistPodcastProjectionChange()
             }
         )
     }
@@ -475,7 +477,10 @@ struct PodcastSettingsView: View {
     private var speedOverrideBinding: Binding<Double?> {
         Binding(
             get: { podcast.speedOverride },
-            set: { podcast.speedOverride = $0 }
+            set: {
+                podcast.speedOverride = $0
+                persistPodcastProjectionChange()
+            }
         )
     }
 
@@ -483,7 +488,10 @@ struct PodcastSettingsView: View {
     private var introSkipBinding: Binding<Int?> {
         Binding(
             get: { podcast.introSkipSeconds },
-            set: { podcast.introSkipSeconds = $0 }
+            set: {
+                podcast.introSkipSeconds = $0
+                persistPodcastProjectionChange()
+            }
         )
     }
 
@@ -491,7 +499,10 @@ struct PodcastSettingsView: View {
     private var queueAgeLimitBinding: Binding<Int?> {
         Binding(
             get: { podcast.queueAgeLimitDays },
-            set: { podcast.queueAgeLimitDays = $0 }
+            set: {
+                podcast.queueAgeLimitDays = $0
+                persistPodcastProjectionChange()
+            }
         )
     }
 
@@ -514,6 +525,7 @@ struct PodcastSettingsView: View {
                 podcast.inboxMaxEpisodes = newValue
                 AppSettingsStore(context: modelContext)
                     .setPodcastInboxCap(newValue, forFeedURL: podcast.feedURL)
+                persistPodcastProjectionChange()
             }
         )
     }
@@ -522,8 +534,45 @@ struct PodcastSettingsView: View {
     private var inboxAgeLimitBinding: Binding<Int?> {
         Binding(
             get: { podcast.inboxAgeLimitHours },
-            set: { podcast.inboxAgeLimitHours = $0 }
+            set: {
+                podcast.inboxAgeLimitHours = $0
+                persistPodcastProjectionChange()
+            }
         )
+    }
+
+    private var inboxIncludedBinding: Binding<Bool> {
+        Binding(
+            get: { podcast.inboxIncluded },
+            set: {
+                podcast.inboxIncluded = $0
+                persistPodcastProjectionChange()
+            }
+        )
+    }
+
+    private var inboxExcludedBinding: Binding<Bool> {
+        Binding(
+            get: { podcast.inboxExcluded },
+            set: {
+                podcast.inboxExcluded = $0
+                persistPodcastProjectionChange()
+            }
+        )
+    }
+
+    private func persistPodcastProjectionChange() {
+        do {
+            if modelContext.hasChanges { try modelContext.save() }
+            NotificationCenter.default.post(
+                name: .earshotSubscriptionsDidChange,
+                object: nil
+            )
+        } catch {
+            AppLog.data.error(
+                "Failed to persist podcast settings: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     // MARK: Helpers

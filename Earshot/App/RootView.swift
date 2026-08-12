@@ -323,6 +323,9 @@ struct RootView: View {
                 )
                 tips.configure(context: modelContext)
                 ExpirationService(context: modelContext).runExpiration()
+                try await runtime.activateCloudProjectionIfNeeded(
+                    container: modelContext.container
+                )
                 StatsRepository(context: modelContext).applyRetention(
                     days: settings.historyRetentionDays
                 )

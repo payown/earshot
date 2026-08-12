@@ -115,6 +115,28 @@ diagnostic monitor without polling. Physical testing must still establish that
 SwiftData emits them for this split configuration, and an event completion must
 not be presented as proof that every device has converged.
 
+#### B1 physical-device gate result, 2026-08-07
+
+The full `FutureMirrored` graph failed the bounded-bootstrap gate on build 172.
+A read-only, base-file snapshot of the iPhone store contained 662 podcasts and
+232,921 episodes. Its CloudKit metadata showed all 232,921 episode rows queued,
+225,721 still needing upload, while all 662 podcast rows still needed upload.
+The Mac had imported 41,200 episodes, zero podcasts, and held 41,200 pending
+Episode-to-Podcast relationships. This explains the observed 1,950-versus-1,935
+Inbox divergence and empty Mac Library: CloudKit was working through the much
+larger child table before the subscription parents arrived.
+
+The device files also measured a 488.2 MB `default.store` and a 1.41 GB WAL.
+The full-graph design is therefore rejected; waiting longer is not an acceptable
+production architecture. Development now uses a separate, relationship-free
+projection store. The existing application and device-local stores both remain
+local-only. Subscription records seed first and contain no episode relationship;
+feed catalog episodes are refetched locally. A later projection will sync only
+meaningful episode user state with explicit conflict metadata, never the entire
+feed catalog. The existing development CloudKit environment must be cleared
+before the projection's two-device test so stale full-graph records cannot be
+mistaken for projection results. Production CloudKit remains undeployed.
+
 ### B2. V11 conflict metadata and deterministic reconciliation (#812)
 
 Goal: make convergence preserve user intent instead of relying blindly on

@@ -541,3 +541,21 @@ The helper-only measurement was zero across fourteen entity types; the factory
 measurement was `AppSetting=2`. The 0.030273333 s figure excludes the
 `AppRuntime.resetLocalData()` service-release preamble, including download
 recovery cancellation, which remains unmeasured.
+
+## iCloud B1 scale-gate result, 2026-08-07
+
+The initial development-only full-graph mirror did not meet the bounded sync
+gate. A read-only iPhone base-store snapshot measured 662 podcasts and 232,921
+episodes. CloudKit metadata showed 225,721 episode records still needing upload
+and all 662 podcast records still needing upload. The Mac had received 41,200
+episodes, zero podcasts, and 41,200 unresolved Episode-to-Podcast relationships.
+The observed empty Mac Library was therefore an export-order and data-shape
+failure, not evidence that CloudKit was disconnected.
+
+The full graph is rejected. The replacement development architecture keeps both
+existing V10 stores local-only and uses a separate relationship-free CloudKit
+projection. Subscription records seed before any episode user state; fetched
+episode catalog metadata remains local and is refetched per device. Production
+CloudKit remains undeployed. The development container must be cleared before
+testing the replacement so obsolete full-graph records cannot contaminate the
+result.

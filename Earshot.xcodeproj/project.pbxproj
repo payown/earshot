@@ -274,10 +274,12 @@
 		D230960318B3980406115950 /* SelectableRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E3F6353E351979E747A388 /* SelectableRow.swift */; };
 		D2ACE04F1A94DF80EF1D670E /* QueueItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B6092B4EFAE230806253B94 /* QueueItem.swift */; };
 		D2B8AD24BFABD2ADCCD65729 /* TranscriptFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A05B29910F10DF6F5C6F7CB4 /* TranscriptFormat.swift */; };
+		D3E7DBE772962272EFC90D6F /* CloudProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EF8A2526FB022E5E3ED21E9 /* CloudProjection.swift */; };
 		D42E542BF3A8A79E39DC70FA /* OptionStepLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B357DAC84CCC33219624171F /* OptionStepLogicTests.swift */; };
 		D466FE5826600E4D347FBFED /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7436039DC8D115F1F457E3C3 /* ShareSheet.swift */; };
 		D54067DEEB545D783885F125 /* DownloadsFilterAnnouncement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 344A2BC729138551B4C60DB6 /* DownloadsFilterAnnouncement.swift */; };
 		D5C89FEE68669F3EC90C8CBA /* MailComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D047C968CE1D5423AA6844E6 /* MailComposeView.swift */; };
+		D5DF248F001AF8A3A1E600D4 /* CloudProjectionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45FDE6422326EEBB9F6527F5 /* CloudProjectionCoordinatorTests.swift */; };
 		D5EB2437A4B5F6D7BD8A91C2 /* ChapterListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEB2A38FE56D11CB0ECDD09F /* ChapterListView.swift */; };
 		D815CE08317FF26E49A7EFA2 /* EpisodeSearchFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED66627EB2B945774CCE169B /* EpisodeSearchFilterTests.swift */; };
 		D8303D40B17EC04481B13C22 /* TabBadgeFormatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A75305271794B66E7428788 /* TabBadgeFormatTests.swift */; };
@@ -405,6 +407,7 @@
 		2D427D5DE0B2E076644ADA1F /* DownloadManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadManagerTests.swift; sourceTree = "<group>"; };
 		2DE6692C5C3E4749C0B62772 /* NotificationCenterProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCenterProtocol.swift; sourceTree = "<group>"; };
 		2E58EA94F8C5F6FB11D19715 /* FolderLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderLogicTests.swift; sourceTree = "<group>"; };
+		2EF8A2526FB022E5E3ED21E9 /* CloudProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProjection.swift; sourceTree = "<group>"; };
 		2F1A89ED656B293E9E1D991D /* RecoveryDownloadRemoval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryDownloadRemoval.swift; sourceTree = "<group>"; };
 		30FAC1A82C939CF4C1F79EB9 /* PrivacySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacySettingsView.swift; sourceTree = "<group>"; };
 		322477FFF25BBCE7462C75D9 /* StoreKitTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKitTest.framework; path = System/Library/Frameworks/StoreKitTest.framework; sourceTree = SDKROOT; };
@@ -442,6 +445,7 @@
 		446E3CD362BA5EC597F7DF75 /* TranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptView.swift; sourceTree = "<group>"; };
 		4472F3032B074607E6FDCC90 /* SecureURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureURL.swift; sourceTree = "<group>"; };
 		450C66B85D5547A1E0E62D21 /* BookmarkShareLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkShareLogicTests.swift; sourceTree = "<group>"; };
+		45FDE6422326EEBB9F6527F5 /* CloudProjectionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProjectionCoordinatorTests.swift; sourceTree = "<group>"; };
 		4638BF38BD5D15F30DD349BF /* FolderDetailLabelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderDetailLabelTests.swift; sourceTree = "<group>"; };
 		46500BE41B67940E468A98FA /* RetryPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetryPolicyTests.swift; sourceTree = "<group>"; };
 		4728275D0F503536DAC8C87F /* QueueLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueLogicTests.swift; sourceTree = "<group>"; };
@@ -716,6 +720,7 @@
 				58EF6C73A139CF1EDE219A40 /* AppSettingsStore.swift */,
 				6B342E68678AEC0FFAE66859 /* CloudKitEventMonitor.swift */,
 				F2237691ACC276910FF9CAF4 /* CloudKitLaunchPolicy.swift */,
+				2EF8A2526FB022E5E3ED21E9 /* CloudProjection.swift */,
 				DF69017C7C2090E496CBC830 /* EarshotSchema.swift */,
 				52A120256FB53824821318A4 /* EarshotSchemaV1.swift */,
 				75AA4BC50202563D2746E805 /* IdentityRepairService.swift */,
@@ -915,6 +920,7 @@
 				3EAB7EEAFAFF14EF3F9DFA14 /* ChapterSleepTests.swift */,
 				5FA6D87DE65511C67184C9D6 /* CloudKitEventMonitorTests.swift */,
 				C5A91F9AF1812A9FFC39767E /* CloudKitLaunchPolicyTests.swift */,
+				45FDE6422326EEBB9F6527F5 /* CloudProjectionCoordinatorTests.swift */,
 				338EA98CF90A517F0214201F /* ContrastAuditTests.swift */,
 				278A76C6E3AB1F92AFACB741 /* CoreServicesTests.swift */,
 				2D427D5DE0B2E076644ADA1F /* DownloadManagerTests.swift */,
@@ -1747,6 +1753,7 @@
 				DA8A89E9C242146855F938FE /* ChapterSkipLogic.swift in Sources */,
 				580FA7FCB5DD4315BA3A7EB8 /* CloudKitEventMonitor.swift in Sources */,
 				2821183881F8E67631F2F43C /* CloudKitLaunchPolicy.swift in Sources */,
+				D3E7DBE772962272EFC90D6F /* CloudProjection.swift in Sources */,
 				A3FB4153E4416BC7D50401C6 /* ContextualTip.swift in Sources */,
 				6DDCE8372585E12C5A979647 /* DataSettingsView.swift in Sources */,
 				90B302BC78F413A2F575AC1A /* DownloadGate.swift in Sources */,
@@ -1946,6 +1953,7 @@
 				C6B3280AFB232F881A85A4B4 /* ChapterSleepTests.swift in Sources */,
 				49FA7FA0FD58D24FD216A65B /* CloudKitEventMonitorTests.swift in Sources */,
 				C7FFE7CA3DC6BA90BD4972C5 /* CloudKitLaunchPolicyTests.swift in Sources */,
+				D5DF248F001AF8A3A1E600D4 /* CloudProjectionCoordinatorTests.swift in Sources */,
 				EA932C39B04426E2CAD3F337 /* ContrastAuditTests.swift in Sources */,
 				51AB6A682FF34A1A768BCF68 /* CoreServicesTests.swift in Sources */,
 				2B45B84062C387D339236F1D /* DownloadManagerTests.swift in Sources */,
@@ -2096,7 +2104,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 172;
+				CURRENT_PROJECT_VERSION = 173;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -2183,7 +2191,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 172;
+				CURRENT_PROJECT_VERSION = 173;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -2282,7 +2290,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 172;
+				CURRENT_PROJECT_VERSION = 173;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

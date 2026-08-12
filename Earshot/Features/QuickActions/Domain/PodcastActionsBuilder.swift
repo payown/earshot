@@ -31,7 +31,7 @@ func buildPodcastActions(
             ) {
                 let newValue = !(podcast.notificationEnabled ?? false)
                 podcast.notificationEnabled = newValue
-                saveQuickAction(context, "notifications")
+                savePodcastQuickAction(context, "notifications")
                 Announcer.announce(newValue ? "Notifications on" : "Notifications off")
             }
         case .toggleAutoQueue:
@@ -42,7 +42,7 @@ func buildPodcastActions(
             ) {
                 let newValue = !podcast.autoQueue
                 QueueRepository(context: context).setAutoQueue(newValue, for: podcast)
-                saveQuickAction(context, "auto-queue")
+                savePodcastQuickAction(context, "auto-queue")
                 Announcer.announce(newValue ? "Auto-queue on" : "Auto-queue off")
             }
         case .toggleInboxInclude:
@@ -52,7 +52,7 @@ func buildPodcastActions(
                 isDestructive: false
             ) {
                 podcast.inboxIncluded.toggle()
-                saveQuickAction(context, "inbox-include")
+                savePodcastQuickAction(context, "inbox-include")
                 Announcer.announce(podcast.inboxIncluded ? "Added to inbox" : "Removed from inbox")
             }
         case .toggleInboxExclude:
@@ -66,7 +66,7 @@ func buildPodcastActions(
                 isDestructive: false
             ) {
                 podcast.inboxExcluded.toggle()
-                saveQuickAction(context, "inbox-exclude")
+                savePodcastQuickAction(context, "inbox-exclude")
                 Announcer.announce(podcast.inboxExcluded ? "Excluded from inbox" : "Included in inbox")
             }
         case .unsubscribe:
@@ -94,4 +94,12 @@ func buildPodcastActions(
             }
         }
     }
+}
+
+@MainActor
+@discardableResult
+func savePodcastQuickAction(_ context: ModelContext, _ what: String) -> Bool {
+    guard saveQuickAction(context, what) else { return false }
+    NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
+    return true
 }

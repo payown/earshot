@@ -204,6 +204,8 @@ final class SubscriptionRepository {
         // unless "Auto-download queued episodes" is on and something is queued.
         await downloader?.downloadQueuedIfEnabled()
 
+        NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
+
         return podcast
     }
 
@@ -255,6 +257,7 @@ final class SubscriptionRepository {
         context.delete(podcast)
         do {
             try context.save()
+            NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
             AppLog.subscriptions.info("Unsubscribed from \(title, privacy: .public)")
             return true
         } catch {
@@ -490,6 +493,9 @@ final class SubscriptionRepository {
                     episodeIDs: result.episodeIDs
                 )
             )
+        }
+        if !outcomes.isEmpty {
+            NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
         }
         return BulkSubscribeResult(outcomes: outcomes, skippedForCap: skippedForCap)
     }
