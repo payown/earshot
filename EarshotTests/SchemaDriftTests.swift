@@ -102,6 +102,22 @@ final class SchemaDriftTests: XCTestCase {
 
 @MainActor
 final class CloudKitSchemaCompatibilityTests: XCTestCase {
+    func testV10ConfigurationMembershipPermanentlySeparatesLocalData() {
+        XCTAssertEqual(
+            Set(Schema(EarshotSchemaV10.mirroredModels).entities.map(\.name)),
+            [
+                "Podcast", "Episode", "QueueItem", "ListeningSession",
+                "Bookmark", "PodcastFolder", "FolderMembership",
+                "RecentlyExpired", "QuickActionConfig", "AppSetting",
+                "EpisodeFolderMembership",
+            ]
+        )
+        XCTAssertEqual(
+            Set(Schema(EarshotSchemaV10.localModels).entities.map(\.name)),
+            ["LocalPodcastState", "LocalEpisodeState", "LocalAppSetting"]
+        )
+    }
+
     func testV10MirroredSchemaIsCloudKitCompatible() {
         for entity in Schema(EarshotSchemaV10.mirroredModels).entities {
             for attribute in entity.attributes {

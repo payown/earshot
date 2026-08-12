@@ -173,6 +173,7 @@ final class AppRuntime {
     private var preparedDownloadContainer: ModelContainer?
     private var resetTask: Task<Bool, Never>?
     private var resetInFlight = false
+    private var cloudKitEventMonitor: CloudKitEventMonitor?
 
     init(
         load: StoreLoad? = nil,
@@ -214,6 +215,11 @@ final class AppRuntime {
         let router = NotificationRouter()
         notificationRouter = router
         notificationDelegate = NotificationDelegate(router: router)
+        if mode == .normal && CloudKitLaunchPolicy.isDevelopmentMirroringEnabled() {
+            let monitor = CloudKitEventMonitor()
+            monitor.start()
+            cloudKitEventMonitor = monitor
+        }
         if let load { install(load) }
     }
 

@@ -224,6 +224,15 @@ struct SubscriptionsView: View {
         }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
         .task { loadPodcasts() }
+        // Library intentionally avoids a live `@Query<Podcast>` because that
+        // faults the inverse episode graph and froze large VoiceOver libraries.
+        // Reload once after a completed CloudKit import so remote subscriptions
+        // appear without polling or restoring that unbounded hot path.
+        .onReceive(NotificationCenter.default.publisher(
+            for: .earshotCloudKitImportDidFinish
+        )) { _ in
+            loadPodcasts()
+        }
         // Confirm the reorder for VoiceOver: the menu dismisses and the list
         // silently re-sorts, so without this the change gives no feedback. Mirrors
         // StatsScreen's period Picker. Announcer no-ops when VoiceOver is off.

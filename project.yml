@@ -1,12 +1,14 @@
 name: Earshot
 options:
   bundleIdPrefix: media.payown
+  defaultConfig: Release
   deploymentTarget:
     iOS: "18.0"
   createIntermediateGroups: true
 configs:
   Debug: debug
   Release: release
+  CloudKitDevelopment: release
 fileGroups:
   - Earshot/Testing
 settings:
@@ -34,11 +36,23 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         DEVELOPMENT_TEAM: "72PH974742"
         CODE_SIGN_STYLE: Automatic
+        EARSHOT_DEVELOPMENT_CLOUDKIT_ENABLED: NO
         ENABLE_PREVIEWS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       configs:
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        CloudKitDevelopment:
+          EARSHOT_DEVELOPMENT_CLOUDKIT_ENABLED: YES
+    entitlements:
+      path: Earshot/App/Earshot.entitlements
+      properties:
+        aps-environment: development
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.media.payown.earshot
+        com.apple.developer.icloud-services:
+          - CloudKit
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)media.payown.earshot
   EarshotTests:
     type: bundle.unit-test
     platform: iOS
@@ -67,3 +81,9 @@ schemes:
     run:
       config: Debug
       storeKitConfiguration: Earshot/Testing/Configuration.storekit
+  Earshot CloudKit Development:
+    build:
+      targets:
+        Earshot: all
+    run:
+      config: CloudKitDevelopment

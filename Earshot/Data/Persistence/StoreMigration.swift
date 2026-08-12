@@ -912,7 +912,8 @@ enum StoreMigration {
         let full = Schema(versionedSchema: EarshotSchemaV10.self)
         let mirrored = ModelConfiguration(
             "FutureMirrored", schema: Schema(EarshotSchemaV10.mirroredModels),
-            url: mirroredURL, cloudKitDatabase: .none
+            url: mirroredURL,
+            cloudKitDatabase: CloudKitLaunchPolicy.mirroredDatabase()
         )
         let local = ModelConfiguration(
             "DeviceLocal", schema: Schema(EarshotSchemaV10.localModels),
