@@ -1695,6 +1695,7 @@ final class PlayerService {
         )
         context.insert(session)
         saveContext()
+        NotificationCenter.default.post(name: .earshotListeningHistoryDidChange, object: nil)
     }
 
     /// Resets per-episode tick tracking when a new episode loads.

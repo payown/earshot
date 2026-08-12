@@ -1,6 +1,12 @@
 import Foundation
 import SwiftData
 
+extension Notification.Name {
+    static let earshotListeningHistoryDidChange = Notification.Name(
+        "earshotListeningHistoryDidChange"
+    )
+}
+
 /// Aggregates ``ListeningSession`` rows into ``ListeningStats``, applies the
 /// history retention policy, deletes all history, and exports sessions as CSV.
 /// Mirrors the Flutter `StatsRepositoryImpl`. Pure math lives in ``StatsLogic``.
@@ -191,6 +197,7 @@ final class StatsRepository {
         guard context.hasChanges else { return }
         do {
             try context.save()
+            NotificationCenter.default.post(name: .earshotListeningHistoryDidChange, object: nil)
         } catch {
             AppLog.data.error("Stats save failed: \(error.localizedDescription, privacy: .public)")
         }

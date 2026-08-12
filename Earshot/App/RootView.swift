@@ -291,6 +291,11 @@ struct RootView: View {
         .onChange(of: settings.skipBackSeconds) { _, _ in
             player.updateRemoteSkipIntervals()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply)
+        ) { _ in
+            settings.configure(context: modelContext)
+        }
         .task {
             let activationCompleted = await runtime.activateRootServices(
                 for: modelContext.container

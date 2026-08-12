@@ -176,6 +176,8 @@ enum AppSettingScope {
         }
         return !mirroredKeys.contains(canonical)
     }
+
+    static func isMirrored(_ key: String) -> Bool { !isLocal(key) }
 }
 
 /// Documented defaults for settings not yet written by the user.
@@ -269,6 +271,12 @@ final class AppSettingsStore {
                 try AppSettingIdentity.setValue(value, for: key, in: context)
             }
             save()
+            if AppSettingScope.isMirrored(key) {
+                NotificationCenter.default.post(
+                    name: .earshotMirroredSettingDidChange,
+                    object: AppSettingIdentity.canonicalKey(key)
+                )
+            }
         } catch {
             AppLog.data.error(
                 "Setting write failed for \(key, privacy: .private): \(error.localizedDescription, privacy: .public)"

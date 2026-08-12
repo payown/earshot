@@ -29,7 +29,15 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
         XCTAssertEqual(
             Set(projection.schema.entities.map(\.name)),
-            ["CloudEpisodeStateProjection", "CloudPodcastProjection"]
+            [
+                "CloudEpisodeStateProjection",
+                "CloudPodcastProjection",
+                "CloudQueueItemProjection",
+                "CloudSettingProjection",
+                "CloudBookmarkProjection",
+                "CloudListeningSessionProjection",
+                "CloudFolderProjection",
+            ]
         )
     }
 
@@ -341,6 +349,256 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(episode.isPlayed)
     }
 
+    func testQueueProjectionConvergesOrderAndRemovalAcrossDevices() throws {
+        let phone = try makeApplicationContainer()
+        let phonePodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let phoneA = Episode(guid: "a", title: "A", audioURL: "https://example.com/a")
+        let phoneB = Episode(guid: "b", title: "B", audioURL: "https://example.com/b")
+        phoneA.podcast = phonePodcast
+        phoneB.podcast = phonePodcast
+        phone.mainContext.insert(phonePodcast)
+        phone.mainContext.insert(phoneA)
+        phone.mainContext.insert(phoneB)
+        phone.mainContext.insert(QueueItem(episode: phoneB, position: 0))
+        phone.mainContext.insert(QueueItem(episode: phoneA, position: 1))
+        try phone.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainer()
+        let macPodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let macA = Episode(guid: "a", title: "A", audioURL: "https://example.com/a")
+        let macB = Episode(guid: "b", title: "B", audioURL: "https://example.com/b")
+        macA.podcast = macPodcast
+        macB.podcast = macPodcast
+        mac.mainContext.insert(macPodcast)
+        mac.mainContext.insert(macA)
+        mac.mainContext.insert(macB)
+        try mac.mainContext.save()
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+
+        try macCoordinator.reconcile()
+
+        XCTAssertEqual(
+            try mac.mainContext.fetch(FetchDescriptor<QueueItem>(
+                sortBy: [SortDescriptor(\.position)]
+            )).compactMap { $0.episode?.guid },
+            ["b", "a"]
+        )
+
+        let rows = try projection.mainContext.fetch(
+            FetchDescriptor<CloudQueueItemProjection>()
+        )
+        XCTAssertEqual(rows.count, 2)
+        let removal = CloudQueueItemProjection()
+        removal.feedURL = "https://example.com/feed"
+        removal.episodeGUID = "b"
+        removal.sourceDeviceID = "phone-2"
+        removal.isQueued = false
+        removal.modifiedAt = Date(timeIntervalSinceNow: 100)
+        projection.mainContext.insert(removal)
+        try projection.mainContext.save()
+        try macCoordinator.reconcile()
+
+        XCTAssertEqual(
+            try mac.mainContext.fetch(FetchDescriptor<QueueItem>())
+                .compactMap { $0.episode?.guid },
+            ["a"]
+        )
+    }
+
+    func testNewestMirroredSettingWinsWithoutCopyingLocalSettings() throws {
+        let phone = try makeApplicationContainer()
+        let phoneSettings = AppSettingsStore(context: phone.mainContext)
+        phoneSettings.setDouble(1.5, for: SettingsKey.globalSpeed)
+        phoneSettings.setRawValue("phone-only", for: SettingsKey.lastPlayingEpisodeID)
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainer()
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try macCoordinator.reconcile()
+        let macSettings = AppSettingsStore(context: mac.mainContext)
+        XCTAssertEqual(macSettings.double(SettingsKey.globalSpeed, default: 1), 1.5)
+        XCTAssertNil(macSettings.rawValue(SettingsKey.lastPlayingEpisodeID))
+
+        macSettings.setDouble(2, for: SettingsKey.globalSpeed)
+        try macCoordinator.publishLocalSettingChange(
+            key: SettingsKey.globalSpeed,
+            now: .distantFuture
+        )
+        try phoneCoordinator.reconcile()
+
+        XCTAssertEqual(phoneSettings.double(SettingsKey.globalSpeed, default: 1), 2)
+    }
+
+    func testBookmarksArriveAfterCatalogAndDeletionPropagates() throws {
+        let phone = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "episode", title: "Episode", audioURL: "https://example.com/audio")
+        episode.podcast = podcast
+        phone.mainContext.insert(podcast)
+        phone.mainContext.insert(episode)
+        let bookmark = Bookmark(
+            episode: episode,
+            positionSeconds: 42,
+            note: "Remember",
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        phone.mainContext.insert(bookmark)
+        try phone.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainer()
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try macCoordinator.reconcile()
+        XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<Bookmark>()).isEmpty)
+
+        let macPodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let macEpisode = Episode(guid: "episode", title: "Episode", audioURL: "https://example.com/audio")
+        macEpisode.podcast = macPodcast
+        mac.mainContext.insert(macPodcast)
+        mac.mainContext.insert(macEpisode)
+        try mac.mainContext.save()
+        try macCoordinator.reconcile()
+        XCTAssertEqual(try mac.mainContext.fetch(FetchDescriptor<Bookmark>()).first?.note, "Remember")
+
+        phone.mainContext.delete(bookmark)
+        try phone.mainContext.save()
+        try phoneCoordinator.publishLocalBookmarkChanges(now: Date(timeIntervalSince1970: 200))
+        try macCoordinator.reconcile()
+        XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<Bookmark>()).isEmpty)
+    }
+
+    func testListeningHistorySyncsWithoutRequiringEpisodeCatalog() throws {
+        let phone = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        phone.mainContext.insert(podcast)
+        let session = ListeningSession(
+            podcast: podcast,
+            durationSeconds: 90,
+            speed: 1.5,
+            date: Date(timeIntervalSince1970: 100)
+        )
+        phone.mainContext.insert(session)
+        try phone.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainer()
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try macCoordinator.reconcile()
+        let imported = try XCTUnwrap(
+            mac.mainContext.fetch(FetchDescriptor<ListeningSession>()).first
+        )
+        XCTAssertEqual(imported.durationSeconds, 90)
+        XCTAssertEqual(imported.speed, 1.5)
+        XCTAssertEqual(imported.podcast?.feedURL, "https://example.com/feed")
+
+        phone.mainContext.delete(session)
+        try phone.mainContext.save()
+        try phoneCoordinator.publishLocalListeningHistoryChanges(
+            now: Date(timeIntervalSince1970: 200)
+        )
+        try macCoordinator.reconcile()
+        XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<ListeningSession>()).isEmpty)
+    }
+
+    func testNestedFoldersAndMembershipsConvergeWithoutCycles() throws {
+        let phone = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "episode", title: "Episode", audioURL: "https://example.com/audio")
+        episode.podcast = podcast
+        phone.mainContext.insert(podcast)
+        phone.mainContext.insert(episode)
+        let parent = PodcastFolder(name: "Parent", createdAt: Date(timeIntervalSince1970: 10))
+        let child = PodcastFolder(name: "Child", createdAt: Date(timeIntervalSince1970: 20))
+        child.parent = parent
+        phone.mainContext.insert(parent)
+        phone.mainContext.insert(child)
+        phone.mainContext.insert(FolderMembership(folder: child, podcast: podcast, sortOrder: 2))
+        phone.mainContext.insert(EpisodeFolderMembership(folder: child, episode: episode, sortOrder: 3))
+        try phone.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let phoneCoordinator = CloudProjectionCoordinator(
+            applicationContainer: phone,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        try phoneCoordinator.reconcile()
+
+        let mac = try makeApplicationContainer()
+        let macPodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let macEpisode = Episode(guid: "episode", title: "Episode", audioURL: "https://example.com/audio")
+        macEpisode.podcast = macPodcast
+        mac.mainContext.insert(macPodcast)
+        mac.mainContext.insert(macEpisode)
+        try mac.mainContext.save()
+        let macCoordinator = CloudProjectionCoordinator(
+            applicationContainer: mac,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+        try macCoordinator.reconcile()
+
+        let macFolders = try mac.mainContext.fetch(FetchDescriptor<PodcastFolder>())
+        let macChild = try XCTUnwrap(macFolders.first { $0.name == "Child" })
+        XCTAssertEqual(macChild.parent?.name, "Parent")
+        XCTAssertEqual(macChild.memberships?.first?.podcast?.feedURL, "https://example.com/feed")
+        XCTAssertEqual(
+            try mac.mainContext.fetch(FetchDescriptor<EpisodeFolderMembership>())
+                .first?.episode?.guid,
+            "episode"
+        )
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV10.self)
         return try ModelContainer(
@@ -365,6 +623,11 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let schema = Schema([
             CloudPodcastProjection.self,
             CloudEpisodeStateProjection.self,
+            CloudQueueItemProjection.self,
+            CloudSettingProjection.self,
+            CloudBookmarkProjection.self,
+            CloudListeningSessionProjection.self,
+            CloudFolderProjection.self,
         ])
         return try ModelContainer(
             for: schema,

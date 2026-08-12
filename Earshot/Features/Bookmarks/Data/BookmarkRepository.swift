@@ -1,6 +1,10 @@
 import Foundation
 import SwiftData
 
+extension Notification.Name {
+    static let earshotBookmarksDidChange = Notification.Name("earshotBookmarksDidChange")
+}
+
 /// SwiftData-backed bookmark store: add a saved position (with an optional note)
 /// to an episode, list an episode's bookmarks in position order, and delete one.
 /// Mirrors the Flutter `BookmarkRepositoryImpl`.
@@ -41,6 +45,7 @@ final class BookmarkRepository {
         guard context.hasChanges else { return }
         do {
             try context.save()
+            NotificationCenter.default.post(name: .earshotBookmarksDidChange, object: nil)
         } catch {
             AppLog.data.error("Bookmark save failed: \(error.localizedDescription, privacy: .public)")
         }
