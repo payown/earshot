@@ -131,7 +131,7 @@ actor FeedRefreshActor {
         let total = podcasts.count
         var completed = 0
         let results = await withTaskGroup(
-            of: (Int, ParsedFeed?, String?).self,
+            of: (Int, String, ParsedFeed?, String?).self,
             returning: [RefreshProgress].self
         ) { group in
             var resultByInputIndex: [Int: RefreshProgress] = [:]
@@ -155,9 +155,9 @@ actor FeedRefreshActor {
                 let url = podcasts[index].feedURL
                 group.addTask {
                     do {
-                        return (index, try await feed.fetch(url), nil)
+                        return (index, url, try await feed.fetch(url), nil)
                     } catch {
-                        return (index, nil, error.localizedDescription)
+                        return (index, url, nil, error.localizedDescription)
                     }
                 }
                 activeFetches += 1
@@ -171,11 +171,24 @@ actor FeedRefreshActor {
                 nextIndex += 1
             }
 
-            while let (inputIndex, parsed, errorDescription) = await group.next() {
+            while let (inputIndex, requestedURL, parsed, errorDescription) = await group.next() {
                 activeFetches -= 1
-                let podcast = podcasts[inputIndex]
+                // Resolve the destination again by the URL captured inside the
+                // network task. This prevents a stale fetched-model/index pair
+                // from ever attaching one feed's episodes to another podcast
+                // while CloudKit subscription inserts and feed requests overlap.
+                guard let podcast = try? PodcastIdentityService(context: modelContext)
+                    .existing(feedURL: requestedURL) else {
+                    completed += 1
+                    await onProgress(completed, total)
+                    while activeFetches < Self.refreshFetchConcurrency, nextIndex < total {
+                        addFetch(at: nextIndex)
+                        nextIndex += 1
+                    }
+                    continue
+                }
                 let title = podcast.title
-                let url = podcast.feedURL
+                let url = requestedURL
                 if let parsed {
                     do {
                         let repairGUIDs = ordinaryRefreshCandidates(

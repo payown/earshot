@@ -557,6 +557,48 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(maximumActiveFetches, 3)
     }
 
+    /// Each concurrent response is applied to the podcast identified by the
+    /// URL captured in that request, even when later requests finish first.
+    func testActorRefreshAllCorrelatesOutOfOrderResultsByRequestedFeedURL() async throws {
+        let container = cleanContainer()
+        let urls = (0..<4).map { "https://x/feed\($0).xml" }
+        do {
+            let seedContext = ModelContext(container)
+            for (index, url) in urls.enumerated() {
+                let podcast = Podcast(feedURL: url, title: "Show \(index)", lastSeenPubDate: d1)
+                let existing = parsedEpisode("old-\(index)", d1)
+                let episode = Episode(
+                    guid: existing.guid,
+                    title: existing.title,
+                    audioURL: existing.audioURL,
+                    pubDate: existing.pubDate
+                )
+                episode.podcast = podcast
+                seedContext.insert(podcast)
+                seedContext.insert(episode)
+            }
+            try seedContext.save()
+        }
+        let feeds = Dictionary(uniqueKeysWithValues: urls.enumerated().map { index, url in
+            (url, parsedFeed([parsedEpisode("new-\(index)", d2)]))
+        })
+
+        _ = await FeedRefreshActor(modelContainer: container).refreshAll(
+            feed: OutOfOrderDistinctFeed(feeds: feeds),
+            autoQueueEnabled: false,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+
+        let stored = try episodes(container)
+        for (index, url) in urls.enumerated() {
+            XCTAssertEqual(
+                stored.filter { $0.podcast?.feedURL == url }.map(\.guid).sorted(),
+                ["new-\(index)", "old-\(index)"]
+            )
+        }
+    }
+
     // MARK: subscribeAll (bulk OPML path)
 
     /// Bulk subscribe inserts every feed's podcast + backlog on the actor's own
@@ -769,6 +811,31 @@ private actor RefreshConcurrencyFeed: FeedFetching {
     }
 
     func maximumActiveFetches() -> Int { maximumActive }
+}
+
+private actor OutOfOrderDistinctFeed: FeedFetching {
+    let feeds: [String: ParsedFeed]
+
+    init(feeds: [String: ParsedFeed]) {
+        self.feeds = feeds
+    }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        let index = feeds.keys.sorted().firstIndex(of: urlString) ?? 0
+        if index > 0 {
+            try await Task.sleep(for: .milliseconds((4 - index) * 10))
+        }
+        return feeds[urlString] ?? ParsedFeed(
+            title: "Missing",
+            artworkURL: nil,
+            description: nil,
+            author: nil,
+            websiteURL: nil,
+            language: nil,
+            category: nil,
+            episodes: []
+        )
+    }
 }
 
 /// Captures progress callback values across the actor boundary.

@@ -3,8 +3,10 @@ import Foundation
 /// Canonical URLs for Earshot's hosted privacy policy, surfaced from
 /// Settings → Privacy and used for the App Store Connect privacy-policy field.
 ///
-/// Earshot collects no data (see `PrivacyInfo.xcprivacy` = Data Not Collected,
-/// #533). The hosted page states exactly that. ``collectionURL`` deep-links to
+/// Earshot and Payown Media collect no data (see `PrivacyInfo.xcprivacy` = Data
+/// Not Collected, #533). User-library synchronization uses the user's private
+/// CloudKit database, which Payown Media cannot access. The hosted page states
+/// exactly that. ``collectionURL`` deep-links to
 /// the "what we collect" section of the same page so the two Settings links
 /// don't need two separate pages to maintain.
 ///

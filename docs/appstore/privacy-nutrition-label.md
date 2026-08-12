@@ -96,10 +96,13 @@ No access to the user's address book/contacts.
 
 ## User Content: Not Collected
 
-Subscriptions, queue, folders, bookmarks, and listening history are all
-stored locally on-device only (SwiftData) and never uploaded to Payown
-Media or any third party, per the privacy policy and confirmed by the
-architecture. There is no backend Earshot talks to for user data at all.
+Subscriptions, queue, folders, bookmarks, playback state, listening history,
+and shared preferences can synchronize through CloudKit in the user's private
+iCloud database. Payown Media operates no sync backend and cannot access those
+private records. Apple's guidance says developers are not responsible for
+declaring data collected only by Apple, so this remains **Not Collected** by
+Earshot or Payown Media. Downloaded audio, cached artwork, entitlement state,
+and download preferences remain device-local.
 
 ## Browsing History: Not Collected
 

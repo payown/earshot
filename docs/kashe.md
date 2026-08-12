@@ -447,6 +447,11 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   (Chapter 51)
 - Her dry, independent line for normalizing friction instead of reporting it:
   "You don't report the weather" (Chapter 51)
+- On the 1.1 release-candidate upgrade, Kashe checks the Thursday queue, a
+  six-minute playback position, and the downloaded small weekly show; all
+  survive. The new VoiceOver-readable Refresh library button gives her a manual
+  way to ask for a late news episode instead of waiting and blaming the feed.
+  She tells Renata, "The drawers stayed shut. He added a handle" (Chapter 57)
 - Her Thursday client is out past a grain elevator where the cell signal quits
   for good; she reaches it by a gravel road. On Sunday planning nights (Chapter
   43) she used to run a second chore after building the queue: manually download
@@ -1913,6 +1918,50 @@ not a hand warmer with a podcast attached.
 She put it back in her pocket.
 
 That was the whole review.
+
+---
+
+### Chapter 57 — Build 187
+
+*Everything where she left it*
+
+**What changed**
+
+This build is the 1.1 release candidate. It upgrades an existing Earshot library without asking you to delete and start over. The tested upgrade preserved 100 podcasts, 27,755 episodes, the queue and its order, playback positions, played state, settings, listening history, and downloaded audio.
+
+Library now has a “Refresh library” button on both iPhone and Mac. VoiceOver says when refresh starts and when it finishes. Pull to refresh still works on iPhone.
+
+**What to test**
+
+Install this build over the Earshot version you already use. Do not delete the app first. Let all three upgrade steps finish, then confirm your podcasts, Inbox count, queue order, saved positions, played episodes, settings, history, and downloads are still there.
+
+Open Library and find “Refresh library.” Activate it. VoiceOver should say “Refreshing library,” remain responsive while feeds update, then say “Library refreshed.” Activating it again while refresh is running should not start a second refresh.
+
+Kashe waited until after the last client.
+
+Not because the update looked dangerous. Updates rarely look dangerous. They sit there under a button with two calm sentences and leave the danger to your imagination.
+
+Her Thursday queue was already built. The long interview was paused a little past six minutes. The small weekly show was downloaded for the road beyond the grain elevator. She knew all three facts without checking, which meant she cared whether the app did too.
+
+She installed the build.
+
+VoiceOver counted three steps. Kashe stood at the kitchen counter with one hand on the phone and the other still holding her keys. When Earshot opened, the Inbox had its count. The queue had its order. The interview knew the second where she'd stopped.
+
+She checked the download anyway.
+
+Downloaded.
+
+“Fine,” she said, to nobody.
+
+The next morning one of her news shows was late. Usually she'd wait and blame the feed. You don't report the weather. But Library had a button now: Refresh library.
+
+She pressed it. Earshot said it was refreshing. A moment later, it said it was done. The new episode was there.
+
+No empty shelves. No rebuilding Sunday night's work. No wondering whether the app had heard her.
+
+At the first red light, she sent Renata a message.
+
+“Tell him the drawers stayed shut. He added a handle.”
 
 ---
 

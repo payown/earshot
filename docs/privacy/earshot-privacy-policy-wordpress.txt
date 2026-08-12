@@ -12,7 +12,7 @@ WORDPRESS INSTRUCTIONS
 BEGIN WORDPRESS CONTENT
 
 <!-- wp:paragraph -->
-<p><em>Effective July 15, 2026</em></p>
+<p><em>Effective August 8, 2026</em></p>
 <!-- /wp:paragraph -->
 
 <!-- wp:paragraph -->
@@ -20,7 +20,7 @@ BEGIN WORDPRESS CONTENT
 <!-- /wp:paragraph -->
 
 <!-- wp:paragraph -->
-<p>The short version: Earshot does not collect information about you. There is no Earshot account, no sign-in, no advertising, and no tracking. Your subscriptions, listening history, and settings stay on your device.</p>
+<p>The short version: Earshot does not collect information about you. There is no Earshot account, no advertising, and no tracking. Your library can sync between your devices through your private iCloud account; Payown Media LLC cannot access that private database.</p>
 <!-- /wp:paragraph -->
 
 <!-- wp:heading {"level":2,"anchor":"what-we-collect"} -->
@@ -28,13 +28,13 @@ BEGIN WORDPRESS CONTENT
 <!-- /wp:heading -->
 
 <!-- wp:paragraph -->
-<p>Earshot does not collect, store off your device, or share:</p>
+<p>Earshot collects nothing for Payown Media LLC. Specifically, Earshot does not collect for Payown Media LLC, use for tracking, or share:</p>
 <!-- /wp:paragraph -->
 
 <!-- wp:list -->
 <ul class="wp-block-list">
 <li>Your identity. Earshot has no account or login.</li>
-<li>Your podcast subscriptions, listening history, queue, folders, bookmarks, or settings.</li>
+<li>Your podcast subscriptions, listening history, queue, folders, bookmarks, or settings. These stay on your devices and in your private iCloud account; Payown Media LLC cannot access them.</li>
 <li>Analytics or usage data. Earshot contains no analytics SDK.</li>
 <li>Crash reports. Earshot contains no third-party crash-reporting service.</li>
 <li>Advertising identifiers. Earshot has no advertising and does not access an advertising identifier.</li>
@@ -43,15 +43,15 @@ BEGIN WORDPRESS CONTENT
 <!-- /wp:list -->
 
 <!-- wp:heading {"level":2} -->
-<h2 class="wp-block-heading">What stays on your device</h2>
+<h2 class="wp-block-heading">Where your data is stored</h2>
 <!-- /wp:heading -->
 
 <!-- wp:paragraph -->
-<p>Your podcast subscriptions, listening history, queue, folders, bookmarks, playback position, downloads, and settings are stored locally on your device. Earshot does not upload this information to Payown Media LLC or anyone else.</p>
+<p>Your podcast subscriptions, listening history, queue, folders, bookmarks, playback position, and shared preferences are stored locally and can synchronize through Apple's CloudKit service in your private iCloud account. Synchronization is automatic when iCloud is available. Payown Media LLC does not operate a sync server and cannot read your private CloudKit records.</p>
 <!-- /wp:paragraph -->
 
 <!-- wp:paragraph -->
-<p>If you delete Earshot, its locally stored data is ordinarily deleted with it. Data may remain in a device backup controlled by you or Apple, depending on your device and backup settings.</p>
+<p>Downloaded audio, cached artwork, purchase entitlement state, and download preferences remain device-local and are not synchronized through CloudKit. Deleting Earshot from one device ordinarily removes that device's local data, but does not by itself delete a synchronized library from iCloud or your other devices. Earshot provides separate actions to clear only this device or to delete the synchronized library everywhere.</p>
 <!-- /wp:paragraph -->
 
 <!-- wp:heading {"level":2} -->
@@ -67,11 +67,12 @@ BEGIN WORDPRESS CONTENT
 <li>Podcast publishers and hosting providers to retrieve podcast feeds, episode audio, transcripts, chapters, and artwork.</li>
 <li>The public podcast directory when you search for podcasts.</li>
 <li>Apple services when Earshot retrieves product information, processes purchases, or verifies purchase status through StoreKit.</li>
+<li>Apple's CloudKit service when Earshot synchronizes your library through your private iCloud account.</li>
 </ul>
 <!-- /wp:list -->
 
 <!-- wp:paragraph -->
-<p>Those requests go directly to the relevant service. As with any internet connection, the service may receive technical information needed to respond to the request, such as your IP address. Earshot does not add an Earshot account identifier, advertising identifier, or tracking identifier to these requests. Each external service is responsible for its own privacy practices.</p>
+<p>Those requests go directly to the relevant service. As with any internet connection, the service may receive technical information needed to respond to the request, such as your IP address. CloudKit uses your Apple account to provide your private database; Earshot does not send that account identity to Payown Media LLC. Podcast and search requests do not include an Earshot account identifier, advertising identifier, or tracking identifier. Each external service is responsible for its own privacy practices.</p>
 <!-- /wp:paragraph -->
 
 <!-- wp:heading {"level":2} -->

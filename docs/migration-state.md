@@ -19,6 +19,11 @@ Current source declares:
 - Supported SwiftData migration sources: V5 and V6
 
 The public App Store binary is version 1.0.0, build 155, and creates V5.
+
+The realistic physical upgrade gate completed on 2026-08-08 with 100 podcasts
+and 27,755 episodes. Build 155 V5 migrated to build 186 V10 with all copied
+stores intact; measured preservation and development-only two-device results are
+recorded in `docs/device-test-artifacts/2026-08-08-v5-v10-upgrade.md`.
 Build 161 was TestFlight and creates V6. The old claim that public build 157
 shipped V6 was false and caused every public V5 library to hit an unsupported
 schema guard.
@@ -887,3 +892,133 @@ Designed-for-iPhone Mac projection in both EXCEPT directions for all persisted
 columns: 662 podcasts, 4 episode states, 1 queue item, 4 settings, 0 bookmarks,
 31 history sessions, and 0 folders. This is a same-state convergence check, not
 a completed bidirectional mutation, offline, account-change, or VoiceOver test.
+
+The offline/reconnect audit then found that a launch-time signed-out or
+temporarily unavailable account was reported safely but projection activation
+was not retried solely because the app returned active. Foreground activation
+now retries without polling, while an account-change pause still requires
+explicit confirmation. One owned activation task serializes overlapping root,
+account-notification, and foreground requests; reset and account replacement
+cancel and await it before persistent-file work. Focused lifecycle/reset tests
+executed 11 tests with 0 failures, and full local CI executed 1,806 tests,
+skipped 38, and failed 0. This is build 184; physical offline/reconnect remains
+to be exercised.
+
+The signed build-184 CloudKitDevelopment arm64 binary is 19,821,216 bytes,
+SHA-256 `b423ef9a13b909d0fe47de1a455f6d1230da1054d80175fed13481e9bcc2998f`,
+modified 2026-08-08 01:10:45 -0700. A wireless over-install preserved iPhone
+database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; read-only enumeration
+reports 1.1.0 (184). The app launched successfully and the compact projection
+WAL advanced at 01:11 local time. No reset or data deletion ran.
+
+The tracked privacy-policy sources and App Store privacy questionnaire record
+now describe private-iCloud synchronization accurately. Synchronized library
+state lives locally and in the user's private CloudKit database, which Payown
+Media cannot access; downloads, artwork cache, entitlement state, and download
+preferences remain device-local. The App Store answer remains “Data Not
+Collected” because Earshot has no developer-accessible sync backend. Publishing
+the revised WordPress source and re-verifying App Store Connect remain release
+operations, not claims established by this repository change.
+
+A build-184 read-only physical boundary audit proves that device-owned state is
+not present in either compact projection schema: neither the iPhone snapshot nor
+the live Mac projection contains a download, entitlement, or audio table or
+column, and both integrity checks returned `ok`. The separate device-local
+stores intentionally differ: the iPhone reports 2 downloaded episode-state rows
+and an active lifetime entitlement, while the Mac reports 1 downloaded row and
+no entitlement. Those differences survived exact projection convergence, which
+is direct evidence that audio ownership and StoreKit-derived state did not cross
+devices. The inspection did not modify either store.
+
+Build 184 was then launched through Xcode on the Apple-silicon Mac as Designed
+for iPhone with the CloudKit Development scheme. The running app reported 1.1.0
+(184), development push, `iCloud.media.payown.earshot`, and CloudKit
+entitlements. Fresh read-only iPhone and Mac projection snapshots both passed
+SQLite `integrity_check`. Excluding only SwiftData's device-local bookkeeping
+columns (`Z_PK`, `Z_ENT`, and `Z_OPT`), bidirectional `EXCEPT` comparisons found
+zero differing rows for all seven projection entities. Both sides contained 662
+podcasts, 4 episode states, 1 queue item, 4 settings, 0 bookmarks, 31 listening
+sessions, and 0 folders. This verifies same-state physical convergence on build
+184; it does not claim the still-unperformed mutation, offline, account-change,
+VoiceOver, or thermal matrix.
+
+### Build-184 physical queue failure, 2026-08-08
+
+User-reported: the iPhone showed 1,962 Inbox episodes and the Mac showed 1,957.
+That difference is expected because episode catalogs and Inbox derivation are
+device-local. Five queue items added on the iPhone appeared on the Mac. Two
+episodes subsequently added on the Mac did not appear in the iPhone queue after
+approximately one minute.
+
+Read-only inspection found all 12 per-device queue contributions in both compact
+projection stores, including the two Mac additions. CloudKit transport therefore
+completed; the iPhone application store still contained only the five original
+queue items. The two Mac episode keys were unavailable under the projected feed
+in the iPhone's bounded catalog, so queue reconciliation skipped them. The Mac
+store also contained 20 unrelated episodes attached to the Apple Watch and
+Accessibility feed, although the live source contains only its original 2015
+episode. Those rows were created during the build-184 Mac launch refresh and are
+cross-feed catalog corruption, not sync latency.
+
+Build 185 addresses both boundaries. A completed concurrent fetch is resolved
+again by its captured requested feed URL before applying parsed episodes. Queue
+projection rows carry optional episode metadata, allowing a receiving device to
+create a dismissed local episode shell when the episode is absent from its
+refetchable catalog. The shell is queue-only and does not enter Inbox. Focused
+coverage executes out-of-order three-request feed completion and remote queue
+materialization against an application store with no matching episode.
+
+Build 185 then completed 1,808 local-CI tests with 38 skips and 0 failures. The
+signed CloudKitDevelopment arm64 executable installed on iPhone measured
+14,950,768 bytes, SHA-256
+`2c1745573da336203fe18ee51c04a84e24938bb6f36fac83849f2945df34ee29`,
+and modification time 2026-08-08 08:12:51 -0700. Both the existing Mac and
+iPhone projection stores opened with the added optional queue columns. The Mac
+backfilled episode metadata into its seven existing queue contributions and
+Core Data reported a successful eight-record CloudKit export with no error.
+The locked iPhone had not imported those field updates by the final read-only
+snapshot, so visible Mac-to-iPhone queue materialization is not yet claimed.
+Wireless over-install preserved iPhone database UUID
+`0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; no reset or data deletion ran.
+
+### Build-186 targeted AppleInsider queue repair, 2026-08-08
+
+Fresh read-only application-store inspection found exactly one queue row across
+both devices without a usable episode/feed projection key: Mac queue position 9,
+GUID `4fae1d7d-53fe-4215-a2e7-53ca1a813e98`. The same Mac store contains one
+correctly attributed AppleInsider episode with the same GUID, title, and audio
+URL; the iPhone has no unprojectable queue row. Both compact stores already
+matched at 17 active device contributions resolving to nine episode keys, so
+the tenth Mac item was local orphan residue rather than failed CloudKit
+transport or an unsubscribed-feed shell failure.
+
+Build 186 implements only the approved manifest repair: it requires the exact
+GUID, title, audio URL, canonical AppleInsider feed, one orphan source, and one
+unqueued target before moving the existing queue relationship and removing the
+orphan episode. Ambiguity is a logged no-op. Any other unprojectable queue item
+is logged and preserved; there is no general recovery behavior. Focused
+projection verification executed 29 tests with 0 failures. The first full local
+CI run executed 1,810 tests, skipped 38, and failed 0 before the build-number
+bump and project regeneration; the post-regeneration gate remains required
+before installation.
+
+The post-regeneration full local CI gate also executed 1,810 tests, skipped 38,
+and failed 0. Signed CloudKitDevelopment build 186 then launched on the
+Designed-for-iPhone Mac. The repair removed orphan episode PK 521, preserved
+the existing queue item's position 9 and `addedAt`, attached it to the sole
+correct AppleInsider row PK 239134, and published one queued contribution under
+`https://feeds.transistor.fm/appleinsider` plus GUID
+`4fae1d7d-53fe-4215-a2e7-53ca1a813e98`. Post-repair application and projection
+integrity checks both returned `ok`; the Mac had zero unprojectable queue rows.
+A read-only iPhone snapshot at 09:43 still had nine queue rows and had not yet
+imported the corrected AppleInsider contribution. The phone was not modified or
+reinstalled, so visible ten-item convergence remains unproved.
+
+The build-186 device-test candidate adds development-only initial compact-
+projection seed markers so migration time, durable local projection time, and
+CloudKit export time can be measured independently. Start, completion, and
+failure markers share a run identifier; completion reports monotonic duration
+and all seven entity counts. The ordinary Release configuration keeps
+`EarshotDevelopmentCloudKitEnabled=NO`, does not construct the projection
+coordinator or projection store, and is approved for a migration-only 1.1.0
+TestFlight release. Production CloudKit remains disabled and undeployed.

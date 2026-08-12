@@ -764,3 +764,83 @@ episode-state rows, 1 queue row, 4 setting rows, 0 bookmark rows, 31 listening
 sessions, and 0 folder rows. No mutation was introduced for that observation,
 so it does not substitute for the remaining two-direction, offline,
 account-change, heat, or physical VoiceOver matrix.
+
+An availability-path review subsequently found that a launch-time signed-out
+or temporarily unavailable account stayed local-only until another launch or
+account-change notification. Build 184 adds an event-driven retry whenever the
+app next becomes active. Projection activation is now one serialized,
+cancellable task; reset and account replacement cancel and await it before
+persistent-file operations, so a delayed account response cannot reopen the
+projection mid-reset. Focused lifecycle/reset coverage executed 11 tests with 0
+failures; full local CI executed 1,806 tests, skipped 38, and failed 0. Physical
+offline/reconnect behavior remains an explicit B6 measurement rather than an
+automated-test inference.
+
+The signed build-184 CloudKitDevelopment arm64 executable measured 19,821,216
+bytes with SHA-256
+`b423ef9a13b909d0fe47de1a455f6d1230da1054d80175fed13481e9bcc2998f`
+and modification time 2026-08-08 01:10:45 -0700. Wireless iPhone over-install
+retained database UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; installed-app
+enumeration reports 1.1.0 (184). The app launched successfully, and the compact
+projection WAL recorded activity at 01:11 local time. No reset or data deletion
+was performed.
+
+The checked-in hosted-policy HTML, WordPress source, and App Store privacy
+questionnaire record have been corrected for CloudKit. They now state that
+synchronized library data stays on the user's devices and in the user's private
+iCloud database, inaccessible to Payown Media, while downloads, artwork cache,
+entitlement state, and download preferences remain local. “Data Not Collected”
+remains the engineering recommendation because no developer-accessible backend
+receives the private records. The live WordPress page and App Store Connect must
+still be verified after publication.
+
+The build-184 device-local boundary was also inspected directly. Both the copied
+iPhone compact projection and live Mac compact projection passed SQLite
+integrity and contained no table or column whose schema represented downloads,
+audio, or entitlements. Their separate local stores retained different facts:
+2 downloaded episode-state rows plus an active lifetime entitlement on iPhone,
+versus 1 downloaded row and no entitlement on Mac. Exact library-projection
+convergence therefore did not copy those device-owned values. All inspection was
+read-only.
+
+The current build was subsequently run on the M3 Mac through Xcode's Designed
+for iPhone destination. Its wrapper identified 1.1.0 (184) and retained the
+development push and private CloudKit entitlements. Newly copied iPhone and Mac
+projection snapshots each returned `ok` from SQLite `integrity_check`.
+Bidirectional `EXCEPT` comparisons over every synchronized field returned zero
+differences for podcasts, episode state, queue, settings, bookmarks, listening
+history, and folders. SwiftData's per-store `Z_PK`, `Z_ENT`, and `Z_OPT`
+bookkeeping columns were deliberately excluded because they are not synchronized
+application data. Counts remained 662, 4, 1, 4, 0, 31, and 0 respectively. This
+is build-184 same-state convergence evidence, not a substitute for physical
+two-way mutation, offline/reconnect, account-change, VoiceOver, or heat tests.
+
+The first physical mutation exposed a narrower failure. User-reported Inbox
+counts were 1,962 on iPhone and 1,957 on Mac, an allowed difference because each
+device owns its refetched episode catalog. Five iPhone queue additions reached
+the Mac, while two later Mac additions did not become visible on iPhone after
+approximately one minute. Read-only snapshots showed that both projection stores
+already contained all 12 per-device contributions. The transport succeeded, but
+the iPhone could not resolve the two Mac keys to local episodes. Inspection also
+found that the Mac launch refresh had attached 20 unrelated episodes to Apple's
+one-episode Watch Accessibility feed, establishing cross-feed local-catalog
+corruption rather than an iCloud delay.
+
+Build 185 re-resolves every completed concurrent feed request by its captured
+requested URL before choosing a SwiftData destination. It also adds optional
+episode metadata to queue contributions. When a winning queued key is absent
+from the receiving catalog, reconciliation can now create one dismissed episode
+shell and the queue item without surfacing that shell in Inbox. Legacy projection
+rows remain readable; a row without metadata continues to wait for a matching
+local feed episode. Production CloudKit remains disabled and undeployed.
+
+Build-185 verification executed 1,808 tests, skipped 38, and failed 0. The
+signed development executable installed on iPhone was 14,950,768 bytes with
+SHA-256 `2c1745573da336203fe18ee51c04a84e24938bb6f36fac83849f2945df34ee29`
+and modification time 2026-08-08 08:12:51 -0700. Existing projection stores on
+both devices upgraded in place. Mac startup populated metadata on all seven
+Mac-origin queue contributions, followed by a successful eight-record CloudKit
+export. A later read-only iPhone snapshot still had the legacy empty fields;
+the phone had locked and could not be foregrounded remotely, so end-to-end
+visible receipt remains unproved. The over-install retained iPhone database
+UUID `0F67C7B0-13A0-4B40-98DC-B28FB925ED84`; no reset or deletion occurred.

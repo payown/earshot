@@ -113,6 +113,20 @@ final class CloudEpisodeStateProjection {
 final class CloudQueueItemProjection {
     var feedURL: String = ""
     var episodeGUID: String = ""
+    // Queue membership must remain usable when the destination's deliberately
+    // local, bounded episode catalog has not retained this episode. These
+    // optional fields let reconciliation create one dismissed episode shell;
+    // legacy projection rows remain readable and simply wait for a feed fetch.
+    var episodeTitle: String?
+    var episodeAudioURL: String?
+    var episodeDescription: String?
+    var episodeDurationSeconds: Int?
+    var episodePubDate: Date?
+    var episodeArtworkURL: String?
+    var episodeNumber: Int?
+    var episodeSeasonNumber: Int?
+    var episodeChapterURL: String?
+    var episodeTranscriptURL: String?
     var sourceDeviceID: String = ""
     var isQueued: Bool = false
     var position: Int = 0
@@ -191,6 +205,22 @@ final class CloudFolderProjection {
     init() {}
 }
 
+struct CompactProjectionSeedCounts: Equatable {
+    let podcasts: Int
+    let episodeStates: Int
+    let queueItems: Int
+    let settings: Int
+    let bookmarks: Int
+    let listeningSessions: Int
+    let folders: Int
+}
+
+enum CompactProjectionSeedMarker: Equatable {
+    case start(runID: String)
+    case complete(runID: String, durationSeconds: Double, counts: CompactProjectionSeedCounts)
+    case failure(runID: String, durationSeconds: Double, error: String)
+}
+
 @MainActor
 final class CloudProjectionCoordinator {
     /// Initial subscription projection is restartable at natural-key boundaries.
@@ -251,18 +281,28 @@ final class CloudProjectionCoordinator {
     private var knownLocalSessionIDs: Set<String> = []
     private var knownLocalFolderIDs: Set<String> = []
     private let deviceID: String
+    private let seedInstrumentationEnabled: () -> Bool
+    private let seedMarkerRecorder: (CompactProjectionSeedMarker) -> Void
     private var isApplyingRemote = false
 
     init(
         applicationContainer: ModelContainer,
         projectionContainer: ModelContainer,
         center: NotificationCenter = .default,
-        deviceID: String = CloudProjectionDeviceIdentity.value()
+        deviceID: String = CloudProjectionDeviceIdentity.value(),
+        seedInstrumentationEnabled: @escaping () -> Bool = {
+            CloudKitLaunchPolicy.isDevelopmentMirroringEnabled()
+        },
+        seedMarkerRecorder: @escaping (CompactProjectionSeedMarker) -> Void = {
+            CloudProjectionCoordinator.logSeedMarker($0)
+        }
     ) {
         self.applicationContainer = applicationContainer
         self.projectionContainer = projectionContainer
         self.center = center
         self.deviceID = deviceID
+        self.seedInstrumentationEnabled = seedInstrumentationEnabled
+        self.seedMarkerRecorder = seedMarkerRecorder
     }
 
     static func make(applicationContainer: ModelContainer) throws -> CloudProjectionCoordinator {
@@ -422,7 +462,64 @@ final class CloudProjectionCoordinator {
                 }
             }
         }
-        try reconcile()
+        guard seedInstrumentationEnabled() else {
+            try reconcile()
+            return
+        }
+        let runID = UUID().uuidString
+        let clock = ContinuousClock()
+        let started = clock.now
+        seedMarkerRecorder(.start(runID: runID))
+        do {
+            try reconcile()
+            seedMarkerRecorder(.complete(
+                runID: runID,
+                durationSeconds: Self.seconds(clock.now - started),
+                counts: try compactProjectionCounts()
+            ))
+        } catch {
+            seedMarkerRecorder(.failure(
+                runID: runID,
+                durationSeconds: Self.seconds(clock.now - started),
+                error: error.localizedDescription
+            ))
+            throw error
+        }
+    }
+
+    private func compactProjectionCounts() throws -> CompactProjectionSeedCounts {
+        let context = projectionContainer.mainContext
+        return try CompactProjectionSeedCounts(
+            podcasts: context.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
+            episodeStates: context.fetchCount(FetchDescriptor<CloudEpisodeStateProjection>()),
+            queueItems: context.fetchCount(FetchDescriptor<CloudQueueItemProjection>()),
+            settings: context.fetchCount(FetchDescriptor<CloudSettingProjection>()),
+            bookmarks: context.fetchCount(FetchDescriptor<CloudBookmarkProjection>()),
+            listeningSessions: context.fetchCount(FetchDescriptor<CloudListeningSessionProjection>()),
+            folders: context.fetchCount(FetchDescriptor<CloudFolderProjection>())
+        )
+    }
+
+    private static func seconds(_ duration: Duration) -> Double {
+        let components = duration.components
+        return Double(components.seconds) + Double(components.attoseconds) / 1e18
+    }
+
+    private static func logSeedMarker(_ marker: CompactProjectionSeedMarker) {
+        switch marker {
+        case .start(let runID):
+            AppLog.data.info(
+                "compact-projection-seed-start runID=\(runID, privacy: .public)"
+            )
+        case .complete(let runID, let duration, let counts):
+            AppLog.data.info(
+                "compact-projection-seed-complete runID=\(runID, privacy: .public) durationSeconds=\(duration, privacy: .public) podcasts=\(counts.podcasts, privacy: .public) episodeStates=\(counts.episodeStates, privacy: .public) queueItems=\(counts.queueItems, privacy: .public) settings=\(counts.settings, privacy: .public) bookmarks=\(counts.bookmarks, privacy: .public) listeningSessions=\(counts.listeningSessions, privacy: .public) folders=\(counts.folders, privacy: .public)"
+            )
+        case .failure(let runID, let duration, let error):
+            AppLog.data.error(
+                "compact-projection-seed-failed runID=\(runID, privacy: .public) durationSeconds=\(duration, privacy: .public) error=\(error, privacy: .public)"
+            )
+        }
     }
 
     func stop() async {
@@ -681,17 +778,29 @@ final class CloudProjectionCoordinator {
         let appContext = applicationContainer.mainContext
         let cloudContext = projectionContainer.mainContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
-        if onlyIfCloudEmpty, !rows.isEmpty { return }
 
         let items = try appContext.fetch(FetchDescriptor<QueueItem>(
             sortBy: [SortDescriptor(\.position)]
         ))
-        var current: [EpisodeKey: Int] = [:]
+        var current: [EpisodeKey: (position: Int, episode: Episode)] = [:]
         for item in items {
             guard let episode = item.episode,
-                  let key = Self.episodeKey(for: episode),
-                  current[key] == nil else { continue }
-            current[key] = item.position
+                  let key = Self.episodeKey(for: episode) else {
+                AppLog.data.error(
+                    "Queue projection skipped unprojectable item at position \(item.position, privacy: .public); missing usable episode or feed key"
+                )
+                continue
+            }
+            guard current[key] == nil else { continue }
+            current[key] = (item.position, episode)
+        }
+        if onlyIfCloudEmpty, !rows.isEmpty {
+            for row in rows where row.sourceDeviceID == deviceID && row.deletedAt == nil {
+                guard let item = current[Self.episodeKey(for: row)] else { continue }
+                Self.copyEpisodeMetadata(item.episode, to: row)
+            }
+            if cloudContext.hasChanges { try cloudContext.save() }
+            return
         }
 
         var ownByKey: [EpisodeKey: CloudQueueItemProjection] = [:]
@@ -718,8 +827,12 @@ final class CloudProjectionCoordinator {
                 ownByKey[key] = inserted
                 return inserted
             }()
-            let queued = current[key] != nil
-            let position = current[key] ?? 0
+            let item = current[key]
+            let queued = item != nil
+            let position = item?.position ?? 0
+            if let episode = item?.episode {
+                Self.copyEpisodeMetadata(episode, to: row)
+            }
             if row.isQueued != queued || row.position != position || row.deletedAt != nil {
                 row.isQueued = queued
                 row.position = position
@@ -1220,6 +1333,22 @@ final class CloudProjectionCoordinator {
         return episodeKey(for: lhs) < episodeKey(for: rhs)
     }
 
+    private static func copyEpisodeMetadata(
+        _ episode: Episode,
+        to row: CloudQueueItemProjection
+    ) {
+        row.episodeTitle = episode.title
+        row.episodeAudioURL = episode.audioURL
+        row.episodeDescription = episode.episodeDescription
+        row.episodeDurationSeconds = episode.durationSeconds
+        row.episodePubDate = episode.pubDate
+        row.episodeArtworkURL = episode.artworkURL
+        row.episodeNumber = episode.episodeNumber
+        row.episodeSeasonNumber = episode.seasonNumber
+        row.episodeChapterURL = episode.chapterURL
+        row.episodeTranscriptURL = episode.transcriptURL
+    }
+
     private static func settingProjectionOrder(
         _ lhs: CloudSettingProjection,
         _ rhs: CloudSettingProjection
@@ -1421,7 +1550,39 @@ final class CloudProjectionCoordinator {
         for (key, contributions) in grouped {
             winners[key] = contributions.sorted(by: Self.queueProjectionOrder).first
         }
-        let episodes = applicationEpisodes(matching: Set(winners.keys))
+        var episodes = applicationEpisodes(matching: Set(winners.keys))
+        for key in winners.keys.sorted() where episodes[key] == nil {
+            guard let winner = winners[key],
+                  winner.isQueued,
+                  let metadata = grouped[key]?.sorted(by: Self.queueProjectionOrder).first(where: {
+                      $0.episodeTitle?.isEmpty == false && $0.episodeAudioURL?.isEmpty == false
+                  }),
+                  let title = metadata.episodeTitle,
+                  !title.isEmpty,
+                  let audioURL = metadata.episodeAudioURL,
+                  !audioURL.isEmpty,
+                  let podcast = try PodcastIdentityService(context: appContext)
+                    .existing(feedURL: key.feedURL)
+            else { continue }
+            let episode = Episode(
+                guid: key.guid,
+                title: title,
+                audioURL: audioURL,
+                episodeDescription: metadata.episodeDescription,
+                durationSeconds: metadata.episodeDurationSeconds,
+                pubDate: metadata.episodePubDate,
+                artworkURL: metadata.episodeArtworkURL,
+                episodeNumber: metadata.episodeNumber,
+                seasonNumber: metadata.episodeSeasonNumber,
+                chapterURL: metadata.episodeChapterURL,
+                transcriptURL: metadata.episodeTranscriptURL,
+                status: .inQueue,
+                inboxDismissed: true
+            )
+            episode.podcast = podcast
+            appContext.insert(episode)
+            episodes[key] = episode
+        }
         let existing = try appContext.fetch(FetchDescriptor<QueueItem>(
             sortBy: [SortDescriptor(\.position)]
         ))
