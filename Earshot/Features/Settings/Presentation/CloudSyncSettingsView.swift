@@ -9,6 +9,10 @@ struct CloudSyncSettingsView: View {
         Form {
             Section("iCloud Sync") {
                 LabeledContent("Status", value: statusText)
+                LabeledContent(
+                    "Last completed on this device",
+                    value: lastCompletedText
+                )
                 Text(statusExplanation)
             }
 
@@ -58,6 +62,16 @@ struct CloudSyncSettingsView: View {
             availability: runtime.cloudSyncAvailability,
             event: runtime.cloudKitEventMonitor?.latestEvent
         )
+    }
+
+    private var lastCompletedText: String {
+        guard runtime.cloudSyncAvailability == .available else {
+            return "Unavailable"
+        }
+        guard let date = runtime.cloudKitEventMonitor?.lastSuccessfulEventDate else {
+            return "Not yet recorded"
+        }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

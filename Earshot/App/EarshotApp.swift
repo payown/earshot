@@ -917,6 +917,7 @@ final class AppRuntime {
                 case .unchanged:
                     break
                 case .changed:
+                    cloudKitEventMonitor?.clearLastSuccessfulEventDate()
                     cloudSyncAvailability = .accountChanged
                     return false
                 }

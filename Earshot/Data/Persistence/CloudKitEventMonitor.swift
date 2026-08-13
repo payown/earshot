@@ -79,20 +79,32 @@ struct CloudKitEventSnapshot: Equatable, Sendable {
 @Observable
 final class CloudKitEventMonitor {
     static let defaultCapacity = 100
+    nonisolated static let lastSuccessfulEventDateKey =
+        "cloudkit_last_successful_event_date"
 
     private(set) var events: [CloudKitEventSnapshot] = []
+    /// End of the newest successful CloudKit event completed by THIS device.
+    /// This is deliberately not called "fully synced": Apple's public event
+    /// stream cannot prove that every other device has received the records.
+    private(set) var lastSuccessfulEventDate: Date?
 
     var latestEvent: CloudKitEventSnapshot? { events.last }
     private let capacity: Int
     private let center: NotificationCenter
+    private let defaults: UserDefaults
     private var observer: NSObjectProtocol?
 
     init(
         capacity: Int = defaultCapacity,
-        center: NotificationCenter = .default
+        center: NotificationCenter = .default,
+        defaults: UserDefaults = .standard
     ) {
         self.capacity = max(1, capacity)
         self.center = center
+        self.defaults = defaults
+        self.lastSuccessfulEventDate = defaults.object(
+            forKey: Self.lastSuccessfulEventDateKey
+        ) as? Date
     }
 
     func start() {
@@ -129,9 +141,22 @@ final class CloudKitEventMonitor {
         AppLog.data.info(
             "CloudKit event kind=\(event.kind.rawValue, privacy: .public) succeeded=\(event.succeeded, privacy: .public) durationSeconds=\(duration, privacy: .public) error=\(errorDescription, privacy: .public)"
         )
+        if event.succeeded,
+           let endDate = event.endDate,
+           endDate > (lastSuccessfulEventDate ?? .distantPast) {
+            lastSuccessfulEventDate = endDate
+            defaults.set(endDate, forKey: Self.lastSuccessfulEventDateKey)
+        }
         if event.kind == .import, event.endDate != nil, event.succeeded {
             center.post(name: .earshotCloudKitImportDidFinish, object: nil)
         }
+    }
+
+    /// Prevents a completion timestamp from the previous iCloud account from
+    /// being presented as evidence about the newly selected account.
+    func clearLastSuccessfulEventDate() {
+        lastSuccessfulEventDate = nil
+        defaults.removeObject(forKey: Self.lastSuccessfulEventDateKey)
     }
 
 }

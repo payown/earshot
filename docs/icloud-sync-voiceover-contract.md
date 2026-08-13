@@ -11,10 +11,11 @@ The screen uses a native `Form` and native sections. Expected VoiceOver order is
 1. Back button, then the `iCloud Sync` navigation title.
 2. `iCloud Sync` section heading.
 3. `Status`, with the current status text as its value.
-4. The matching status explanation.
-5. `What syncs` section heading and its two explanatory paragraphs.
-6. `Timing` section heading and its explanatory paragraph.
-7. When an account change is detected, the `Account Change` heading, action button, and explanation.
+4. `Last completed on this device`, with a local completion date, `Not yet recorded`, or `Unavailable` as its value.
+5. The matching status explanation.
+6. `What syncs` section heading and its two explanatory paragraphs.
+7. `Timing` section heading and its explanatory paragraph.
+8. When an account change is detected, the `Account Change` heading, action button, and explanation.
 
 No code programmatically moves focus when an event changes. Routine CloudKit events make no VoiceOver announcement and do not intentionally steal focus. Opening the native confirmation alert is expected to move focus into the alert; cancelling or completing it is expected to return through native SwiftUI alert behavior. Both expectations require physical confirmation.
 
@@ -36,6 +37,14 @@ The status row is native `LabeledContent`: name `Status`, with one of these valu
 | Account changed | Paused after account change | Synchronization is paused so a different iCloud account cannot silently merge with this library. Your local library has not been deleted. |
 
 The row and explanations are static text; they have no button trait, hint, or custom action. State is always expressed in text and does not depend on color or an icon.
+
+The second native `LabeledContent` row is named `Last completed on this device`.
+It reports the newest successful setup, import, or export event completed by this
+device, persists that value across launches, and clears it when an iCloud account
+change is detected. It deliberately does not say `Last synced`: Apple's public
+event stream cannot prove that every other device has received the changes.
+While account access is available but no completion has been observed it says
+`Not yet recorded`; in other availability states it says `Unavailable`.
 
 ## Account-change action
 
