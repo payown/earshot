@@ -207,7 +207,10 @@ actor FeedRefreshActor {
         trigger: FeedRefreshTrigger = .unspecified,
         isEntitled: Bool? = nil,
         isCancelled: @Sendable () -> Bool,
-        onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
+        onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void,
+        onInboxChange: @MainActor @Sendable () -> Void = {
+            NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+        }
     ) async -> RefreshRun {
         let wholeRefresh = PerformanceSignposts.signposter.beginInterval("WholeRefresh")
         defer {
@@ -232,14 +235,16 @@ actor FeedRefreshActor {
         var batchIndex = 0
         var sinceLastSave = 0
         var nextIndex = 0
+        var postedIncrementalInboxChange = false
 
-        func flushPending() {
-            guard !pendingByInputIndex.isEmpty else { return }
+        func flushPending() -> Bool {
+            guard !pendingByInputIndex.isEmpty else { return false }
             batchIndex += 1
             let batchIntended = pendingByInputIndex.values.reduce(0) {
                 $0 + $1.insertedCount
             }
             intendedInsertions += batchIntended
+            var madeNewContentDurable = false
             if saveIfNeededOrLog(
                 correlationID: correlationID,
                 batchIndex: batchIndex,
@@ -247,6 +252,7 @@ actor FeedRefreshActor {
                 intendedInsertions: batchIntended
             ) {
                 durableInsertions += batchIntended
+                madeNewContentDurable = batchIntended > 0
                 for (index, applyOutcome) in pendingByInputIndex {
                     guard var progress = resultByInputIndex[index] else { continue }
                     progress.outcome = applyOutcome.result()
@@ -260,6 +266,7 @@ actor FeedRefreshActor {
             }
             pendingByInputIndex.removeAll()
             sinceLastSave = 0
+            return madeNewContentDurable
         }
 
         let cancelledAtFirstSchedule = isCancelled()
@@ -335,7 +342,15 @@ actor FeedRefreshActor {
                         )
                         pendingByInputIndex[inputIndex] = applyOutcome
                         sinceLastSave += 1
-                        if sinceLastSave >= Self.saveBatchSize { flushPending() }
+                        if sinceLastSave >= Self.saveBatchSize,
+                           flushPending(), !postedIncrementalInboxChange {
+                            // Surface the first durable new-content batch while a
+                            // large library continues refreshing. Limit the whole
+                            // run to this early signal plus the final signal below
+                            // so Inbox reloads cannot become a per-batch hot path.
+                            postedIncrementalInboxChange = true
+                            await onInboxChange()
+                        }
                     } catch {
                         modelContext.rollback()
                         failed += 1
@@ -360,7 +375,7 @@ actor FeedRefreshActor {
                 }
             }
         }
-        flushPending()
+        _ = flushPending()
         let report = RefreshRun(
             results: resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] },
             attempted: completed,
@@ -370,10 +385,10 @@ actor FeedRefreshActor {
             intendedInsertions: intendedInsertions,
             durableInsertions: durableInsertions
         )
-        // Newly ingested episodes can change the inbox count — signal the tab
-        // badge once, at the end of the whole operation rather than per batch,
-        // so it refreshes without polling on every save (#736).
-        NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+        // Reconcile the final durable state even if an early batch was already
+        // surfaced. A run emits at most two Inbox changes: first durable content
+        // and final completion, never one notification per save batch (#736).
+        await onInboxChange()
         AppLog.subscriptions.info(
             "refresh=\(correlationID, privacy: .public) summary trigger=\(trigger.rawValue, privacy: .public) attempted=\(report.attempted) total=\(report.total) succeeded=\(report.results.count) failed=\(report.failed) cancelled=\(report.cancelled) intendedInsertions=\(report.intendedInsertions) durableInsertions=\(report.durableInsertions)"
         )

@@ -799,6 +799,41 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(maximumActiveFetches, 3)
     }
 
+    func testActorRefreshAllSurfacesFirstDurableBatchBeforeCompletion() async throws {
+        let container = cleanContainer()
+        let urls = (0..<12).map { "https://x/feed\($0).xml" }
+        do {
+            let seedContext = ModelContext(container)
+            for (index, url) in urls.enumerated() {
+                seedContext.insert(Podcast(
+                    feedURL: url,
+                    title: "Show \(index)",
+                    lastSeenPubDate: d1
+                ))
+            }
+            try seedContext.save()
+        }
+        let feeds = Dictionary(uniqueKeysWithValues: urls.enumerated().map { index, url in
+            (url, parsedFeed([parsedEpisode("new-\(index)", d2)]))
+        })
+        var completed = 0
+        var inboxChangeProgress: [Int] = []
+
+        let report = await FeedRefreshActor(modelContainer: container).refreshAllReport(
+            feed: OutOfOrderDistinctFeed(feeds: feeds),
+            autoQueueEnabled: false,
+            isCancelled: { false },
+            onProgress: { current, _ in completed = current },
+            onInboxChange: { inboxChangeProgress.append(completed) }
+        )
+
+        XCTAssertEqual(report.durableInsertions, urls.count)
+        XCTAssertEqual(inboxChangeProgress.count, 2)
+        XCTAssertLessThan(inboxChangeProgress[0], urls.count)
+        XCTAssertEqual(inboxChangeProgress[1], urls.count)
+        XCTAssertEqual(try episodes(container).count, urls.count)
+    }
+
     /// Each concurrent response is applied to the podcast identified by the
     /// URL captured in that request, even when later requests finish first.
     func testActorRefreshAllCorrelatesOutOfOrderResultsByRequestedFeedURL() async throws {
