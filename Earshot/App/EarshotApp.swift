@@ -1266,6 +1266,11 @@ struct EarshotApp: App {
             guard runtime.shouldRunBackgroundServices else { return }
             switch phase {
             case .background:
+                // Playback keeps Earshot executable after lock. Do not let a
+                // foreground-owned whole-library refresh consume that allowance
+                // indefinitely in the user's pocket; the OS background task is
+                // still scheduled below and can start a separately owned pass.
+                BackgroundFeedRefresher.cancelForSceneBackground()
                 BackgroundFeedRefresher.scheduleNext()
             case .active:
                 guard let container = runtime.readyContainer else { return }

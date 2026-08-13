@@ -1224,6 +1224,37 @@ final class FeedRefreshActorTests: XCTestCase {
     }
 
     /// Cancellation before the first feed processes nothing.
+    func testActorRefreshAllResumesWithLeastRecentlyRefreshedFeed() async throws {
+        let container = cleanContainer()
+        let neverURL = "https://x/never.xml"
+        let oldestURL = "https://x/oldest.xml"
+        let newestURL = "https://x/newest.xml"
+        do {
+            let context = ModelContext(container)
+            for url in [newestURL, neverURL, oldestURL] {
+                context.insert(Podcast(feedURL: url, title: url, lastSeenPubDate: d1))
+            }
+            context.insert(LocalPodcastState(feedURL: oldestURL, refreshedAt: d2))
+            context.insert(LocalPodcastState(feedURL: newestURL, refreshedAt: d3))
+            try context.save()
+        }
+        let fetcher = RecordingFeed(parsedFeed([parsedEpisode("a", d1)]))
+        let actor = FeedRefreshActor(modelContainer: container)
+
+        for expected in [neverURL, oldestURL] {
+            let cancelled = OSAllocatedUnfairLock(initialState: false)
+            let report = await actor.refreshAllReport(
+                feed: fetcher,
+                autoQueueEnabled: false,
+                isCancelled: { cancelled.withLock { $0 } },
+                onProgress: { _, _ in cancelled.withLock { $0 = true } }
+            )
+            let fetchedURL = await fetcher.lastURL()
+            XCTAssertEqual(report.attempted, 1)
+            XCTAssertEqual(fetchedURL, expected)
+        }
+    }
+
     func testActorRefreshAllCancelledImmediatelyDoesNothing() async throws {
         let container = cleanContainer()
         do {
@@ -1252,6 +1283,20 @@ private final class FakeFeed: FeedFetching, @unchecked Sendable {
     let feed: ParsedFeed
     init(_ feed: ParsedFeed) { self.feed = feed }
     func fetch(_ urlString: String) async throws -> ParsedFeed { feed }
+}
+
+private actor RecordingFeed: FeedFetching {
+    let feed: ParsedFeed
+    private var urls: [String] = []
+
+    init(_ feed: ParsedFeed) { self.feed = feed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        urls.append(urlString)
+        return feed
+    }
+
+    func lastURL() -> String? { urls.last }
 }
 
 /// Lets the first request finish immediately, then holds the next requests

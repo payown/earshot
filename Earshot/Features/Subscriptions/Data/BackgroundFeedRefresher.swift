@@ -31,6 +31,20 @@ enum BackgroundFeedRefresher {
     /// unlinking the store files. Main-actor isolated, so no locking is needed.
     @MainActor private static var activeRefreshTask: Task<Bool, Never>?
     @MainActor private static var activeRefreshID: UUID?
+    @MainActor private static var activeRefreshTrigger: FeedRefreshTrigger?
+
+    /// Stops foreground-owned feed work when the scene leaves the foreground.
+    /// Audio playback can keep the process executable after lock, so allowing a
+    /// cold-launch/foreground pass to continue there turns that audio allowance
+    /// into minutes of network, XML, and persistence work. A later foreground or
+    /// OS-scheduled refresh resumes with the least-recently-refreshed feeds first.
+    @MainActor
+    static func cancelForSceneBackground() {
+        guard activeRefreshTrigger == .coldLaunch || activeRefreshTrigger == .foreground else {
+            return
+        }
+        activeRefreshTask?.cancel()
+    }
 
     /// Cancels the refresh that currently owns a model container and waits for
     /// its actor work to finish. Reset calls this before releasing services or
@@ -96,10 +110,12 @@ enum BackgroundFeedRefresher {
             )
         }
         activeRefreshID = refreshID
+        activeRefreshTrigger = trigger
         activeRefreshTask = task
         let result = await task.value
         if activeRefreshID == refreshID {
             activeRefreshID = nil
+            activeRefreshTrigger = nil
             activeRefreshTask = nil
         }
         return result

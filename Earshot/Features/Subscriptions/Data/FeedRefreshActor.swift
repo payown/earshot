@@ -221,7 +221,27 @@ actor FeedRefreshActor {
         }
         let correlationID = UUID().uuidString.lowercased()
         let taskCancelledAtEntry = Task.isCancelled
-        let podcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
+        let fetchedPodcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
+        let refreshDatePairs: [(String, Date)] =
+            (try? modelContext.fetch(FetchDescriptor<LocalPodcastState>()))?.compactMap {
+                guard let refreshedAt = $0.refreshedAt else { return nil }
+                return (FeedURLIdentity.canonical($0.feedURL), refreshedAt)
+            } ?? []
+        let refreshDates = Dictionary(refreshDatePairs, uniquingKeysWith: max)
+        // A foreground pass may be cancelled when the scene backgrounds. Start
+        // the next pass with feeds that have never refreshed, then oldest first,
+        // so short sessions make fair forward progress instead of repeatedly
+        // spending their budget on the same prefix of a large library.
+        let podcasts = fetchedPodcasts.sorted { lhs, rhs in
+            let lhsDate = refreshDates[FeedURLIdentity.canonical(lhs.feedURL)]
+            let rhsDate = refreshDates[FeedURLIdentity.canonical(rhs.feedURL)]
+            switch (lhsDate, rhsDate) {
+            case (nil, .some): return true
+            case (.some, nil): return false
+            case let (lhs?, rhs?) where lhs != rhs: return lhs < rhs
+            default: return lhs.feedURL < rhs.feedURL
+            }
+        }
         let total = podcasts.count
         let eligibleFeedCount = podcasts.count
         let entitlementValue = isEntitled.map(String.init) ?? "unknown"
