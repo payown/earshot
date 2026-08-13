@@ -227,6 +227,10 @@ final class CloudProjectionCoordinator {
     /// Checkpoint frequently enough that a force quit replays at most this many
     /// small, relationship-free rows rather than one all-or-nothing library seed.
     private static let subscriptionBackfillSaveBatchSize = 50
+    /// Listening history may predate CloudKit activation. Checkpoint missing
+    /// semantic rows so an interrupted first reconciliation resumes without
+    /// replaying one unbounded save or duplicating already durable sessions.
+    private static let listeningHistoryBackfillSaveBatchSize = 50
     static let storeURL = URL.applicationSupportDirectory
         .appending(path: "earshot-cloud-projection.store")
 
@@ -688,7 +692,7 @@ final class CloudProjectionCoordinator {
             appContext: appContext,
             cloudContext: cloudContext
         )
-        try publishLocalListeningHistoryChanges(now: .now, onlyIfCloudEmpty: true)
+        try publishLocalListeningHistoryChanges(now: .now)
         applicationChanged = historyChanged || applicationChanged
         let folderChanged = try applyRemoteFolders(
             appContext: appContext,
@@ -937,14 +941,10 @@ final class CloudProjectionCoordinator {
         if cloudContext.hasChanges { try cloudContext.save() }
     }
 
-    func publishLocalListeningHistoryChanges(
-        now: Date = .now,
-        onlyIfCloudEmpty: Bool = false
-    ) throws {
+    func publishLocalListeningHistoryChanges(now: Date = .now) throws {
         let appContext = applicationContainer.mainContext
         let cloudContext = projectionContainer.mainContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudListeningSessionProjection>())
-        if onlyIfCloudEmpty, !rows.isEmpty { return }
         let sessions = try appContext.fetch(FetchDescriptor<ListeningSession>())
         var activeByKey: [String: CloudListeningSessionProjection] = [:]
         for row in rows.filter({ $0.deletedAt == nil }).sorted(by: Self.sessionProjectionOrder) {
@@ -952,6 +952,7 @@ final class CloudProjectionCoordinator {
             if activeByKey[key] == nil { activeByKey[key] = row }
         }
         var currentIDs: Set<String> = []
+        var insertedRowsSinceSave = 0
         for session in sessions.sorted(by: { $0.date < $1.date }) {
             guard let podcast = session.podcast ?? session.episode?.podcast else { continue }
             let guid = session.episode?.guid
@@ -974,11 +975,16 @@ final class CloudProjectionCoordinator {
                 inserted.sourceDeviceID = deviceID
                 cloudContext.insert(inserted)
                 activeByKey[key] = inserted
+                insertedRowsSinceSave += 1
                 return inserted
             }()
             currentIDs.insert(row.sessionID)
+            if insertedRowsSinceSave >= Self.listeningHistoryBackfillSaveBatchSize {
+                try cloudContext.save()
+                insertedRowsSinceSave = 0
+            }
         }
-        if !onlyIfCloudEmpty, !knownLocalSessionIDs.isEmpty {
+        if !knownLocalSessionIDs.isEmpty {
             for row in rows where knownLocalSessionIDs.contains(row.sessionID)
                 && !currentIDs.contains(row.sessionID) && row.deletedAt == nil {
                 row.deletedAt = now
