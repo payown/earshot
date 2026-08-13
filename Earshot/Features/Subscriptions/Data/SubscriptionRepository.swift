@@ -69,6 +69,13 @@ struct RefreshOutcome: Sendable {
     static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisodeGUID: nil, newEpisodeIDs: [])
 }
 
+/// Result of one explicit historical-catalog page. Historical rows are always
+/// pre-dismissed, so this type intentionally carries no Inbox/notification data.
+struct OlderEpisodePageOutcome: Sendable, Equatable {
+    let inserted: Int
+    let hasMore: Bool
+}
+
 struct SubscriptionRefreshReport: Sendable {
     enum Completion: Sendable, Equatable {
         case full
@@ -352,6 +359,27 @@ final class SubscriptionRepository {
         // .earshotQueueDidChange), so trigger the queued-download sweep here on the
         // main actor, where the downloader lives. No-op unless the setting is on.
         await downloader?.downloadQueuedIfEnabled()
+        return outcome
+    }
+
+    /// Fetches one bounded page of catalog rows that ordinary refresh purposely
+    /// leaves behind. The actor scans feed identities in bounded chunks and the
+    /// main context is reconciled only after the durable background save.
+    func loadOlderEpisodes(
+        for podcast: Podcast,
+        pageSize: Int = 10
+    ) async throws -> OlderEpisodePageOutcome {
+        let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
+        guard let outcome = try await actor.loadOlderEpisodes(
+            feedURL: podcast.feedURL,
+            feed: feed,
+            pageSize: pageSize
+        ) else {
+            return OlderEpisodePageOutcome(inserted: 0, hasMore: false)
+        }
+        if outcome.inserted > 0 {
+            mergeBackgroundWrites(affectedPodcastIDs: [podcast.persistentModelID])
+        }
         return outcome
     }
 

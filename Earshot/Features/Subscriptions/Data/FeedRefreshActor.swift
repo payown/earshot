@@ -123,6 +123,9 @@ actor FeedRefreshActor {
     /// single 45,436-episode inverse relationship monopolize SwiftData and block
     /// the UI even from a background context. Older local rows are preserved.
     private static let ordinaryRefreshNewEpisodeLimit = 10
+    /// Store lookups used by explicit historical paging stay bounded even when
+    /// the remote feed contains tens of thousands of items.
+    private static let olderEpisodeIdentityChunkSize = 50
     /// A single unresponsive feed must not hold an OPML import at the URLSession
     /// resource timeout. The normal feed refresh path keeps its existing policy;
     /// this shorter ceiling applies only to bulk import prefetches.
@@ -420,6 +423,79 @@ actor FeedRefreshActor {
         // `subscribe(feedURL:feed:inboxSeedCount:)` above saves before `result()`).
         try saveIfNeeded()
         return applyOutcome.result()
+    }
+
+    /// Inserts the next missing historical page without ever classifying it as
+    /// new Inbox content. Re-fetching and scanning the feed makes the operation
+    /// restartable: a cancellation or failed save leaves no cursor to corrupt,
+    /// and the next attempt resumes from durable GUID identity.
+    func loadOlderEpisodes(
+        feedURL: String,
+        feed: FeedFetching,
+        pageSize: Int = 10
+    ) async throws -> OlderEpisodePageOutcome? {
+        let canonical = FeedURLIdentity.canonical(feedURL)
+        guard let podcast = try PodcastIdentityService(context: modelContext)
+            .existing(feedURL: canonical)
+        else { return nil }
+
+        guard pageSize > 0 else {
+            return OlderEpisodePageOutcome(inserted: 0, hasMore: true)
+        }
+        let parsed = try await feed.fetch(canonical)
+        try Task.checkCancellation()
+        let catalog = Self.deduplicatedEpisodes(parsed.episodes)
+            .enumerated()
+            .sorted { lhs, rhs in
+                let leftDate = lhs.element.pubDate ?? .distantPast
+                let rightDate = rhs.element.pubDate ?? .distantPast
+                return leftDate == rightDate ? lhs.offset < rhs.offset : leftDate > rightDate
+            }
+            .map(\.element)
+
+        var missing: [ParsedEpisode] = []
+        for start in stride(
+            from: 0,
+            to: catalog.count,
+            by: Self.olderEpisodeIdentityChunkSize
+        ) {
+            try Task.checkCancellation()
+            let end = min(start + Self.olderEpisodeIdentityChunkSize, catalog.count)
+            let chunk = Array(catalog[start..<end])
+            let existingGUIDs = Set(
+                episodes(in: podcast, matchingGUIDs: chunk.map(\.guid)).map(\.guid)
+            )
+            for item in chunk where !existingGUIDs.contains(item.guid) {
+                missing.append(item)
+                if missing.count > pageSize { break }
+            }
+            if missing.count > pageSize { break }
+        }
+
+        let page = missing.prefix(pageSize)
+        guard !page.isEmpty else {
+            return OlderEpisodePageOutcome(inserted: 0, hasMore: false)
+        }
+        let repair = try IdentityRepairService(context: modelContext)
+            .repairEpisodes(in: podcast, matchingGUIDs: page.map(\.guid))
+        if repair.didChange { try saveWithSignpost() }
+
+        var inserted = 0
+        let existingAfterRepair = Set(
+            episodes(in: podcast, matchingGUIDs: page.map(\.guid)).map(\.guid)
+        )
+        for item in page where !existingAfterRepair.contains(item.guid) {
+            let episode = Self.makeEpisode(from: item)
+            episode.podcast = podcast
+            episode.inboxDismissed = true
+            modelContext.insert(episode)
+            inserted += 1
+        }
+        try saveIfNeeded()
+        return OlderEpisodePageOutcome(
+            inserted: inserted,
+            hasMore: missing.count > pageSize
+        )
     }
 
     /// Subscribes to `feedURL` on the background context: the fetch (network I/O)

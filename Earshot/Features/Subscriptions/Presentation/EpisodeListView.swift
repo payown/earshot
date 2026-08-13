@@ -30,6 +30,7 @@ struct EpisodeListView: View {
     // button and the screen-level rotor action so both entry points drive the
     // exact same confirm-then-execute flow instead of duplicating it.
     @State private var confirmingMarkAllPlayed = false
+    @State private var olderEpisodesState: OlderEpisodesState = .ready
     // Episode multi-select (#758). `selection` is the shared ``MultiSelectState``
     // holder (keyed on persistent identity); `batchRequest` presents the shared
     // ``FolderPickerView`` for the whole selection. Entering selection mode swaps
@@ -163,6 +164,9 @@ struct EpisodeListView: View {
                          ? "^[\(filteredSortedEpisodes.count) unheard episode](inflect: true)"
                          : "^[\(filteredSortedEpisodes.count) episode](inflect: true)")
                 }
+            }
+            Section {
+                olderEpisodesControl
             }
         }
         .onAppear {
@@ -599,12 +603,66 @@ struct EpisodeListView: View {
         }
     }
 
+    @ViewBuilder
+    private var olderEpisodesControl: some View {
+        switch olderEpisodesState {
+        case .loading:
+            LabeledContent("Older episodes", value: "Loading")
+                .accessibilityAddTraits(.updatesFrequently)
+        case .end:
+            LabeledContent("Older episodes", value: "All available episodes loaded")
+        case .failed:
+            Button("Retry loading older episodes") {
+                Task { await loadOlderEpisodes() }
+            }
+            .accessibilityHint("Loads the next 10 older episodes from this podcast")
+        case .ready:
+            Button("Load 10 older episodes") {
+                Task { await loadOlderEpisodes() }
+            }
+            .accessibilityHint("Adds older episodes without placing them in Inbox")
+        }
+    }
+
+    private func loadOlderEpisodes() async {
+        guard olderEpisodesState != .loading else { return }
+        olderEpisodesState = .loading
+        do {
+            let outcome = try await SubscriptionRepository(
+                context: context,
+                downloader: downloads,
+                isEntitled: entitlements.isEntitled
+            ).loadOlderEpisodes(for: podcast)
+            olderEpisodesState = outcome.hasMore ? .ready : .end
+            if outcome.inserted > 0 {
+                Announcer.announce("Loaded \(outcome.inserted) older episodes")
+            } else {
+                Announcer.announce("All available episodes loaded")
+            }
+        } catch is CancellationError {
+            olderEpisodesState = .ready
+        } catch {
+            olderEpisodesState = .failed
+            AppLog.subscriptions.error(
+                "Loading older episodes failed: \(error.localizedDescription, privacy: .public)"
+            )
+            Announcer.announce("Couldn't load older episodes")
+        }
+    }
+
     private func shareItems(for episode: Episode) -> [Any] {
         if let url = URL(string: episode.audioURL) {
             return [episode.title, url]
         }
         return [episode.title]
     }
+}
+
+private enum OlderEpisodesState: Equatable {
+    case ready
+    case loading
+    case end
+    case failed
 }
 
 /// Pure VoiceOver completion wording for "Mark all as played" (#640).
