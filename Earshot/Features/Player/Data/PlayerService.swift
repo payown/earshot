@@ -111,6 +111,9 @@ final class PlayerService {
     /// Clears a folder playback origin when its backing folder (or containing
     /// deleted subtree) is removed through FolderRepository.
     @ObservationIgnored private var folderDeletionObserver: NSObjectProtocol?
+    /// Refreshes the in-memory slider/VoiceOver position after CloudKit applies
+    /// a newer episode-state projection to SwiftData (#825).
+    @ObservationIgnored private var cloudProjectionObserver: NSObjectProtocol?
     /// One-shot flag for the deleted-instance guard log (#574) so a tick storm
     /// against a deleted episode doesn't spam the log. Reset on episode load.
     @ObservationIgnored private var didLogDeletedEpisodeGuard = false
@@ -1944,6 +1947,41 @@ final class PlayerService {
                 )
             }
         }
+        cloudProjectionObserver = NotificationCenter.default.addObserver(
+            forName: .earshotCloudProjectionDidApply,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshProjectedPlaybackPosition() }
+        }
+    }
+
+    /// Reconciles the player-owned presentation cache with the episode row that
+    /// CloudKit just updated. This is intentionally independent of view state:
+    /// the Now Playing scrubber and its existing VoiceOver value both observe
+    /// `currentPositionSeconds`, so updating that single source refreshes every
+    /// open presentation without changing accessibility semantics.
+    ///
+    /// While paused, follow the projected row exactly so explicit remote rewinds
+    /// work. While playing or buffering with playback intent, never move behind
+    /// the live local clock: its per-tick position lives in UserDefaults and can
+    /// legitimately be ahead of the coarsely persisted SwiftData row (#736).
+    func refreshProjectedPlaybackPosition() {
+        guard !currentEpisodeIsTransient,
+              let episode = currentEpisode,
+              !episode.isDeleted else { return }
+        let target = PlaybackLogic.projectedPlaybackPosition(
+            current: currentPositionSeconds,
+            projected: episode.positionSeconds,
+            isActivelyPlaying: intendsToPlay
+        )
+        guard target != currentPositionSeconds else { return }
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 1))
+        currentPositionSeconds = target
+        lastPersistedSecond = Int(target)
+        lastNowPlayingSyncSecond = nil
+        writeLivePosition(episode, second: Int(target))
+        updateNowPlayingInfo()
     }
 
     /// Reacts to `.earshotWillDeleteEpisodes` (#574). With a podcast ID in
