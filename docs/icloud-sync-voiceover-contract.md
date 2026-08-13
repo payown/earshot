@@ -17,7 +17,7 @@ The screen uses a native `Form` and native sections. Expected VoiceOver order is
 7. `Timing` section heading and its explanatory paragraph.
 8. When an account change is detected, the `Account Change` heading, action button, and explanation.
 
-No code programmatically moves focus when an event changes. Routine CloudKit events make no VoiceOver announcement and do not intentionally steal focus. Opening the native confirmation alert is expected to move focus into the alert; cancelling or completing it is expected to return through native SwiftUI alert behavior. Both expectations require physical confirmation.
+No code programmatically moves focus when an event changes. Routine CloudKit events make no VoiceOver announcement and do not intentionally steal focus. A newly completed failure or newly persistent account-availability failure is announced once without moving focus. Opening the native confirmation alert is expected to move focus into the alert; cancelling or completing it is expected to return through native SwiftUI alert behavior. Both focus expectations require physical confirmation.
 
 ## Status name and value matrix
 
@@ -56,10 +56,12 @@ Activating it opens a native alert titled `Connect to Current iCloud Account?` w
 
 The alert actions are native buttons named `Connect` and `Cancel`; Cancel has the cancel role. The initiating button's following static text says: `This device's library is kept. Earshot discards only the previous account's local sync cache before connecting.`
 
+After the requested operation finishes, Earshot announces either `Connected to the current iCloud account` or `Couldn't connect to the current iCloud account. Your local library remains available.` The failure result is assertive; the successful result is polite. Routine automatic success remains silent.
+
 ## Audit result and open physical checks
 
 Source audit found no missing accessible names, custom controls, icon-only meaning, or code-driven routine speech. Native controls provide their roles and states. Automated tests cover every status string and distinguish in-progress and failed events.
 
-One acceptance gap remains: a persistent failure that appears while the screen is already open changes visible text but is not explicitly announced, and the requested account-connect operation has no one-time spoken success or failure result. Adding those announcements would change accessibility semantics and therefore requires Michael's explicit approval before implementation.
+Michael approved the scoped persistent-failure and requested reconnect-result announcements on 2026-08-12. Automated tests prove that successful and in-flight routine events stay silent, each new persistent failure produces one deterministic message, repeated observation of the same failure produces none, and reconnect success/failure wording is explicit.
 
 Physical verification must record the exact spoken output, focus location after opening/dismissing the alert, disabled/busy announcement while connecting, Dynamic Type layout, absence of routine sync chatter, and behavior on both iPhone and the Designed-for-iPhone Mac build.
