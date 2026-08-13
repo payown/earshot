@@ -1965,4 +1965,70 @@ At the first red light, she sent Renata a message.
 
 ---
 
-*More chapters added here as Earshot ships.*
+Chapter 58, Build 189
+
+Every shelf, every time
+
+Library refresh works again, and its answers distinguish complete, partial, and failed work. Kashe had stopped trusting a button that said it was done while yesterday's shows stayed on the shelf. She tried the new build, watched the missing interview arrive, then turned off the network. This time Earshot said the refresh failed. Short, plain, and true.
+
+“Keep that answer,” she told Renata. “The honest one.”
+
+Chapter 59, Build 191
+
+The long list
+
+Kashe found the old list in a folder named Moving Day. It held years of listening: news from three cities, interviews Renata sent her, a language show she kept promising to restart, and the quiet history program she saved for long drives.
+
+The first time she imported it, the phone grew slow beneath her fingers. With the next build, the list was just as long, but the phone stayed with her. She moved through the screens while Earshot kept sorting and VoiceOver kept answering.
+
+Renata asked whether the import was faster.
+
+“Yes,” Kashe said. “But better than that, I did not have to leave.”
+
+Chapter 60, Build 192
+
+The other pocket
+
+What changed
+
+Earshot now shows whether iCloud is syncing and when it last completed. Queue, folders, playback position, and listening history reconcile across devices without claiming success early. Persistent failures are announced once instead of repeatedly interrupting VoiceOver.
+
+New Inbox episodes appear after the first durable refresh batch instead of waiting for a large library to finish. A podcast can also load older episodes 10 at a time.
+
+Profiling found that build 191 could keep refreshing hundreds of feeds after lock. This build stops foreground-owned refresh work at lock, preserves real iOS background tasks, and later resumes with feeds that have waited longest.
+
+What to test
+
+In iCloud settings, confirm active and last-completed status. Make a queue or folder change on one device and confirm it reaches another. Try an offline change, reconnect, and confirm it propagates.
+
+Play at 1x, lock the phone, and leave it in your pocket for 30 minutes. It should settle instead of staying warm. Confirm audio and VoiceOver controls keep working.
+
+Open a large podcast and load older episodes. Each activation should add the next 10 without flooding Inbox.
+
+Kashe changed the queue in the kitchen.
+
+The phone was by the coffee maker. Her other device was zipped in her work bag beside the blood pressure cuff. She moved the long interview below the morning news and left without checking twice.
+
+At the first driveway, she opened the bag. The queue had changed there too.
+
+Plenty of apps promise that one screen will know what happened on another. Kashe treated those promises like weather forecasts for next month.
+
+Earshot told her when iCloud had last finished. Not a spinner left forever. A time she could hold it to.
+
+On the long drive, she played the language show and locked the phone. It stayed in her pocket past the grain elevator without checking the whole library.
+
+At the client’s house, she touched the back of the phone out of habit.
+
+Cool.
+
+That evening she opened an older show and asked for 10 more episodes. They arrived without burying the Inbox.
+
+Renata called while Kashe was moving the interview again, this time on the device from her bag.
+
+“Does the other one know?” Renata asked.
+
+Kashe listened to the sync status finish.
+
+“It knows,” she said. “And now it tells me when.”
+
+More chapters added here as Earshot ships.

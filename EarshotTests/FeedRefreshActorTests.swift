@@ -240,6 +240,14 @@ final class FeedRefreshActorTests: XCTestCase {
         )
     }
 
+    private func undatedEpisode(_ guid: String) -> ParsedEpisode {
+        ParsedEpisode(
+            guid: guid, title: "Ep \(guid)", audioURL: "https://x/\(guid).mp3",
+            description: nil, pubDate: nil, durationSeconds: nil, artworkURL: nil,
+            episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+    }
+
     private func parsedFeed(_ episodes: [ParsedEpisode]) -> ParsedFeed {
         ParsedFeed(
             title: "Show", artworkURL: nil, description: nil, author: "Host",
@@ -799,6 +807,41 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(maximumActiveFetches, 3)
     }
 
+    func testActorRefreshAllSurfacesFirstDurableBatchBeforeCompletion() async throws {
+        let container = cleanContainer()
+        let urls = (0..<12).map { "https://x/feed\($0).xml" }
+        do {
+            let seedContext = ModelContext(container)
+            for (index, url) in urls.enumerated() {
+                seedContext.insert(Podcast(
+                    feedURL: url,
+                    title: "Show \(index)",
+                    lastSeenPubDate: d1
+                ))
+            }
+            try seedContext.save()
+        }
+        let feeds = Dictionary(uniqueKeysWithValues: urls.enumerated().map { index, url in
+            (url, parsedFeed([parsedEpisode("new-\(index)", d2)]))
+        })
+        var completed = 0
+        var inboxChangeProgress: [Int] = []
+
+        let report = await FeedRefreshActor(modelContainer: container).refreshAllReport(
+            feed: OutOfOrderDistinctFeed(feeds: feeds),
+            autoQueueEnabled: false,
+            isCancelled: { false },
+            onProgress: { current, _ in completed = current },
+            onInboxChange: { inboxChangeProgress.append(completed) }
+        )
+
+        XCTAssertEqual(report.durableInsertions, urls.count)
+        XCTAssertEqual(inboxChangeProgress.count, 2)
+        XCTAssertLessThan(inboxChangeProgress[0], urls.count)
+        XCTAssertEqual(inboxChangeProgress[1], urls.count)
+        XCTAssertEqual(try episodes(container).count, urls.count)
+    }
+
     /// Each concurrent response is applied to the podcast identified by the
     /// URL captured in that request, even when later requests finish first.
     func testActorRefreshAllCorrelatesOutOfOrderResultsByRequestedFeedURL() async throws {
@@ -946,6 +989,135 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(refreshedPodcast.lastSeenPubDate, d1.addingTimeInterval(25))
     }
 
+    func testLoadOlderEpisodesPagesTenThenTenThenEndAndDismissesHistory() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/history.xml"
+        let seed = ModelContext(container)
+        let podcast = Podcast(
+            feedURL: feedURL,
+            title: "History",
+            lastSeenPubDate: d1.addingTimeInterval(25)
+        )
+        for index in 16...25 {
+            let episode = Episode(
+                guid: "episode-\(index)",
+                title: "Episode \(index)",
+                audioURL: "https://x/\(index).mp3",
+                pubDate: d1.addingTimeInterval(Double(index))
+            )
+            episode.podcast = podcast
+            seed.insert(episode)
+        }
+        seed.insert(podcast)
+        try seed.save()
+
+        let catalog = (1...25).map { index in
+            parsedEpisode("episode-\(index)", d1.addingTimeInterval(Double(index)))
+        }
+        let actor = FeedRefreshActor(modelContainer: container)
+
+        let firstOptional = try await actor.loadOlderEpisodes(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed(catalog)),
+            pageSize: 10
+        )
+        let first = try XCTUnwrap(firstOptional)
+        XCTAssertEqual(first, OlderEpisodePageOutcome(inserted: 10, hasMore: true))
+
+        let secondOptional = try await actor.loadOlderEpisodes(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed(catalog)),
+            pageSize: 10
+        )
+        let second = try XCTUnwrap(secondOptional)
+        XCTAssertEqual(second, OlderEpisodePageOutcome(inserted: 5, hasMore: false))
+
+        let endOptional = try await actor.loadOlderEpisodes(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed(catalog)),
+            pageSize: 10
+        )
+        let end = try XCTUnwrap(endOptional)
+        XCTAssertEqual(end, OlderEpisodePageOutcome(inserted: 0, hasMore: false))
+        let stored = try episodes(container)
+        XCTAssertEqual(stored.count, 25)
+        XCTAssertTrue(stored.filter { (1...15).contains(Int($0.guid.dropFirst(8)) ?? 0) }
+            .allSatisfy(\.inboxDismissed))
+    }
+
+    func testLoadOlderEpisodesDeduplicatesGUIDAndHandlesMissingDates() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/undated-history.xml"
+        let seed = ModelContext(container)
+        let podcast = Podcast(feedURL: feedURL, title: "Undated")
+        let newest = Episode(
+            guid: "newest",
+            title: "Newest",
+            audioURL: "https://x/newest.mp3",
+            pubDate: d1
+        )
+        newest.podcast = podcast
+        seed.insert(podcast)
+        seed.insert(newest)
+        try seed.save()
+
+        var duplicate = undatedEpisode("old-a")
+        duplicate.title = "Duplicate payload"
+        let catalog = [
+            parsedEpisode("newest", d1),
+            undatedEpisode("old-a"),
+            duplicate,
+            undatedEpisode("old-b"),
+        ]
+        let outcomeOptional = try await FeedRefreshActor(modelContainer: container)
+            .loadOlderEpisodes(
+                feedURL: feedURL,
+                feed: FakeFeed(parsedFeed(catalog)),
+                pageSize: 10
+            )
+        let outcome = try XCTUnwrap(outcomeOptional)
+
+        XCTAssertEqual(outcome, OlderEpisodePageOutcome(inserted: 2, hasMore: false))
+        XCTAssertEqual(Set(try episodes(container).map(\.guid)), ["newest", "old-a", "old-b"])
+    }
+
+    func testLoadOlderEpisodesFailureCanRetryWithoutDuplicates() async throws {
+        final class FailOnceFeed: FeedFetching, @unchecked Sendable {
+            private let calls = OSAllocatedUnfairLock(initialState: 0)
+            let parsed: ParsedFeed
+            init(_ parsed: ParsedFeed) { self.parsed = parsed }
+            func fetch(_ urlString: String) async throws -> ParsedFeed {
+                let call = calls.withLock { value in
+                    value += 1
+                    return value
+                }
+                if call == 1 { throw URLError(.timedOut) }
+                return parsed
+            }
+        }
+        let container = cleanContainer()
+        let feedURL = "https://x/retry-history.xml"
+        let seed = ModelContext(container)
+        seed.insert(Podcast(feedURL: feedURL, title: "Retry"))
+        try seed.save()
+        let feed = FailOnceFeed(parsedFeed([undatedEpisode("old")]))
+        let actor = FeedRefreshActor(modelContainer: container)
+
+        do {
+            _ = try await actor.loadOlderEpisodes(feedURL: feedURL, feed: feed)
+            XCTFail("Expected the first request to fail")
+        } catch {
+            XCTAssertEqual(try episodes(container).count, 0)
+        }
+        let retryOptional = try await actor.loadOlderEpisodes(
+            feedURL: feedURL,
+            feed: feed
+        )
+        let retry = try XCTUnwrap(retryOptional)
+        XCTAssertEqual(retry, OlderEpisodePageOutcome(inserted: 1, hasMore: false))
+        XCTAssertEqual(try episodes(container).map(\.guid), ["old"])
+    }
+
     /// A feed that throws is logged and skipped — the rest of the batch still
     /// subscribes and the result array omits the failed feed.
     func testActorSubscribeAllSkipsFailingFeedAndContinues() async throws {
@@ -1052,6 +1224,37 @@ final class FeedRefreshActorTests: XCTestCase {
     }
 
     /// Cancellation before the first feed processes nothing.
+    func testActorRefreshAllResumesWithLeastRecentlyRefreshedFeed() async throws {
+        let container = cleanContainer()
+        let neverURL = "https://x/never.xml"
+        let oldestURL = "https://x/oldest.xml"
+        let newestURL = "https://x/newest.xml"
+        do {
+            let context = ModelContext(container)
+            for url in [newestURL, neverURL, oldestURL] {
+                context.insert(Podcast(feedURL: url, title: url, lastSeenPubDate: d1))
+            }
+            context.insert(LocalPodcastState(feedURL: oldestURL, refreshedAt: d2))
+            context.insert(LocalPodcastState(feedURL: newestURL, refreshedAt: d3))
+            try context.save()
+        }
+        let fetcher = RecordingFeed(parsedFeed([parsedEpisode("a", d1)]))
+        let actor = FeedRefreshActor(modelContainer: container)
+
+        for expected in [neverURL, oldestURL] {
+            let cancelled = OSAllocatedUnfairLock(initialState: false)
+            let report = await actor.refreshAllReport(
+                feed: fetcher,
+                autoQueueEnabled: false,
+                isCancelled: { cancelled.withLock { $0 } },
+                onProgress: { _, _ in cancelled.withLock { $0 = true } }
+            )
+            let fetchedURL = await fetcher.lastURL()
+            XCTAssertEqual(report.attempted, 1)
+            XCTAssertEqual(fetchedURL, expected)
+        }
+    }
+
     func testActorRefreshAllCancelledImmediatelyDoesNothing() async throws {
         let container = cleanContainer()
         do {
@@ -1080,6 +1283,20 @@ private final class FakeFeed: FeedFetching, @unchecked Sendable {
     let feed: ParsedFeed
     init(_ feed: ParsedFeed) { self.feed = feed }
     func fetch(_ urlString: String) async throws -> ParsedFeed { feed }
+}
+
+private actor RecordingFeed: FeedFetching {
+    let feed: ParsedFeed
+    private var urls: [String] = []
+
+    init(_ feed: ParsedFeed) { self.feed = feed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        urls.append(urlString)
+        return feed
+    }
+
+    func lastURL() -> String? { urls.last }
 }
 
 /// Lets the first request finish immediately, then holds the next requests

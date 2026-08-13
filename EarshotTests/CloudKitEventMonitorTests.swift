@@ -3,6 +3,22 @@ import XCTest
 
 @MainActor
 final class CloudKitEventMonitorTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var defaultsSuiteName: String!
+
+    override func setUp() {
+        super.setUp()
+        defaultsSuiteName = "CloudKitEventMonitorTests.\(UUID())"
+        defaults = UserDefaults(suiteName: defaultsSuiteName)!
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: defaultsSuiteName)
+        defaults = nil
+        defaultsSuiteName = nil
+        super.tearDown()
+    }
+
     func testMonitorKeepsOnlyItsBoundedNewestEvents() {
         let monitor = CloudKitEventMonitor(capacity: 2)
         let first = snapshot(kind: .setup, second: 1)
@@ -78,6 +94,62 @@ final class CloudKitEventMonitorTests: XCTestCase {
         ))
 
         XCTAssertEqual(refreshCount, 0)
+    }
+
+    func testNewestSuccessfulCompletionPersistsAcrossMonitorRestart() {
+        let older = snapshot(kind: .import, second: 10)
+        let newer = snapshot(kind: .export, second: 20)
+        let monitor = CloudKitEventMonitor(defaults: defaults)
+
+        monitor.record(newer)
+        monitor.record(older)
+
+        XCTAssertEqual(
+            monitor.lastSuccessfulEventDate,
+            Date(timeIntervalSince1970: 21)
+        )
+        XCTAssertEqual(
+            CloudKitEventMonitor(defaults: defaults).lastSuccessfulEventDate,
+            Date(timeIntervalSince1970: 21)
+        )
+    }
+
+    func testFailedAndInFlightEventsDoNotReplaceLastSuccessfulCompletion() {
+        let monitor = CloudKitEventMonitor(defaults: defaults)
+        monitor.record(snapshot(kind: .setup, second: 10))
+        monitor.record(CloudKitEventSnapshot(
+            identifier: UUID(),
+            storeIdentifier: "FutureMirrored",
+            kind: .export,
+            startDate: Date(timeIntervalSince1970: 20),
+            endDate: nil,
+            succeeded: false,
+            errorDescription: nil
+        ))
+        monitor.record(CloudKitEventSnapshot(
+            identifier: UUID(),
+            storeIdentifier: "FutureMirrored",
+            kind: .export,
+            startDate: Date(timeIntervalSince1970: 30),
+            endDate: Date(timeIntervalSince1970: 31),
+            succeeded: false,
+            errorDescription: "failed"
+        ))
+
+        XCTAssertEqual(
+            monitor.lastSuccessfulEventDate,
+            Date(timeIntervalSince1970: 11)
+        )
+    }
+
+    func testAccountChangeClearRemovesPersistedCompletion() {
+        let monitor = CloudKitEventMonitor(defaults: defaults)
+        monitor.record(snapshot(kind: .import, second: 10))
+
+        monitor.clearLastSuccessfulEventDate()
+
+        XCTAssertNil(monitor.lastSuccessfulEventDate)
+        XCTAssertNil(CloudKitEventMonitor(defaults: defaults).lastSuccessfulEventDate)
     }
 
     private func snapshot(

@@ -1132,6 +1132,127 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<ListeningSession>()).isEmpty)
     }
 
+    func testPartialListeningHistoryBackfillResumesOnDiskWithoutDuplicates() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let applicationURL = directory.appending(path: "application.store")
+        let localURL = directory.appending(path: "local.store")
+        let projectionURL = directory.appending(path: "projection.store")
+        let sessionCount = 139
+        let partialProjectionCount = 46
+
+        try autoreleasepool {
+            let app = try makeOnDiskApplicationContainer(
+                applicationURL: applicationURL,
+                localURL: localURL
+            )
+            let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+            app.mainContext.insert(podcast)
+            for index in 0..<sessionCount {
+                app.mainContext.insert(ListeningSession(
+                    podcast: podcast,
+                    durationSeconds: index + 1,
+                    speed: 1.5,
+                    date: Date(timeIntervalSince1970: TimeInterval(index + 1))
+                ))
+            }
+            try app.mainContext.save()
+
+            let projection = try makeOnDiskProjectionContainer(at: projectionURL)
+            for index in 0..<partialProjectionCount {
+                let row = CloudListeningSessionProjection()
+                row.sessionID = "existing-\(index)"
+                row.feedURL = "https://example.com/feed"
+                row.durationSeconds = index + 1
+                row.speed = 1.5
+                row.date = Date(timeIntervalSince1970: TimeInterval(index + 1))
+                row.modifiedAt = Date(timeIntervalSince1970: 500)
+                row.sourceDeviceID = "remote"
+                projection.mainContext.insert(row)
+            }
+            try projection.mainContext.save()
+        }
+
+        for _ in 0..<2 {
+            try autoreleasepool {
+                let app = try makeOnDiskApplicationContainer(
+                    applicationURL: applicationURL,
+                    localURL: localURL
+                )
+                let projection = try makeOnDiskProjectionContainer(at: projectionURL)
+                try CloudProjectionCoordinator(
+                    applicationContainer: app,
+                    projectionContainer: projection,
+                    center: NotificationCenter(),
+                    deviceID: "phone"
+                ).reconcile()
+
+                let rows = try projection.mainContext.fetch(
+                    FetchDescriptor<CloudListeningSessionProjection>()
+                )
+                XCTAssertEqual(rows.count, sessionCount)
+                XCTAssertEqual(Set(rows.map { $0.sessionID }).count, sessionCount)
+                XCTAssertEqual(
+                    Set(rows.map {
+                        "\($0.feedURL)|\($0.durationSeconds)|\($0.speed)|\($0.date.timeIntervalSince1970)"
+                    }).count,
+                    sessionCount
+                )
+                XCTAssertEqual(
+                    try app.mainContext.fetchCount(FetchDescriptor<ListeningSession>()),
+                    sessionCount
+                )
+            }
+        }
+    }
+
+    func testListeningHistoryBackfillPreservesTombstoneAcrossRestart() throws {
+        let app = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(ListeningSession(
+            podcast: podcast,
+            durationSeconds: 90,
+            speed: 1.5,
+            date: Date(timeIntervalSince1970: 100)
+        ))
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let tombstone = CloudListeningSessionProjection()
+        tombstone.sessionID = "deleted-session"
+        tombstone.feedURL = "https://example.com/feed"
+        tombstone.durationSeconds = 90
+        tombstone.speed = 1.5
+        tombstone.date = Date(timeIntervalSince1970: 100)
+        tombstone.modifiedAt = Date(timeIntervalSince1970: 200)
+        tombstone.deletedAt = Date(timeIntervalSince1970: 200)
+        tombstone.sourceDeviceID = "remote"
+        projection.mainContext.insert(tombstone)
+        try projection.mainContext.save()
+
+        for _ in 0..<2 {
+            try CloudProjectionCoordinator(
+                applicationContainer: app,
+                projectionContainer: projection,
+                center: NotificationCenter(),
+                deviceID: "phone"
+            ).reconcile()
+
+            XCTAssertTrue(
+                try app.mainContext.fetch(FetchDescriptor<ListeningSession>()).isEmpty
+            )
+            let rows = try projection.mainContext.fetch(
+                FetchDescriptor<CloudListeningSessionProjection>()
+            )
+            XCTAssertEqual(rows.count, 1)
+            XCTAssertEqual(rows.first?.sessionID, "deleted-session")
+            XCTAssertNotNil(rows.first?.deletedAt)
+        }
+    }
+
     func testNestedFoldersAndMembershipsConvergeWithoutCycles() throws {
         let phone = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")

@@ -74,6 +74,20 @@ extension PlaybackLogic {
 /// source resolution, speed resolution, and the completion / resume threshold.
 enum PlaybackLogic {
 
+    /// Resolves a CloudKit-projected position against the live transport.
+    /// Paused playback follows the projection exactly, including an explicit
+    /// rewind. While playback is active, the local clock is newer than its
+    /// coarsely persisted row, so a lower projected value must not move it
+    /// backward; genuinely newer remote progress may still advance it.
+    static func projectedPlaybackPosition(
+        current: Double,
+        projected: Int,
+        isActivelyPlaying: Bool
+    ) -> Double {
+        let projected = Double(max(0, projected))
+        return isActivelyPlaying ? max(max(0, current), projected) : projected
+    }
+
     /// Fraction of an episode's duration at which it counts as "played". Past
     /// this point we mark it played and restart from the top on the next play.
     static let playedThreshold = 0.95

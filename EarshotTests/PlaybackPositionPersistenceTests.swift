@@ -48,6 +48,7 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
         let ctx = TestStore.freshContext()
         let player = PlayerService()
         player.configure(context: ctx)
+        defer { player.stopAndUnload() }
 
         let episode = makeEpisode(ctx)
         episode.positionSeconds = 10 // durable value from the last anchor
@@ -66,6 +67,7 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
         let ctx = TestStore.freshContext()
         let player = PlayerService()
         player.configure(context: ctx)
+        defer { player.stopAndUnload() }
 
         let other = makeEpisode(ctx, guid: "other")
         setLive(other, 999)          // live position belongs to a different episode
@@ -86,6 +88,7 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
         let ctx = TestStore.freshContext()
         let player = PlayerService()
         player.configure(context: ctx)
+        defer { player.stopAndUnload() }
         clearLive()
 
         let episode = makeEpisode(ctx)
@@ -96,5 +99,53 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
 
         XCTAssertEqual(Int(player.currentPositionSeconds), 33,
                        "with no live value, resume at the durable position")
+    }
+
+    /// A CloudKit reconcile occurs while the app remains open. The player owns a
+    /// separate observable position cache, so its notification hook must update
+    /// the visible scrubber/VoiceOver value without requiring relaunch.
+    func test_cloudProjectionNotificationRefreshesLoadedPausedPosition() async {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        clearLive()
+
+        let episode = makeEpisode(ctx)
+        episode.positionSeconds = 274
+        try? ctx.save()
+        player.load(episode)
+
+        episode.positionSeconds = 379
+        try? ctx.save()
+        NotificationCenter.default.post(name: .earshotCloudProjectionDidApply, object: nil)
+        await Task.yield()
+
+        XCTAssertEqual(Int(player.currentPositionSeconds), 379)
+    }
+
+    /// The projection merge marks explicit rewinds by timestamp; once it has
+    /// selected that value, the paused player must not let the larger crash-
+    /// recovery cache hide it.
+    func test_cloudProjectionRefreshHonorsExplicitRewindAndReplacesLiveCache() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+
+        let episode = makeEpisode(ctx)
+        episode.positionSeconds = 379
+        try? ctx.save()
+        setLive(episode, 379)
+        player.load(episode)
+
+        episode.positionSeconds = 80
+        try? ctx.save()
+        player.refreshProjectedPlaybackPosition()
+
+        XCTAssertEqual(Int(player.currentPositionSeconds), 80)
+        player.load(episode)
+        XCTAssertEqual(Int(player.currentPositionSeconds), 80,
+                       "the old larger live cache must not undo a projected rewind")
     }
 }

@@ -4,6 +4,42 @@ import XCTest
 /// Unit tests for the pure playback rules. No AVFoundation, no real files.
 final class PlaybackLogicTests: XCTestCase {
 
+    func testProjectedPositionFollowsForwardProgressWhilePaused() {
+        XCTAssertEqual(
+            PlaybackLogic.projectedPlaybackPosition(
+                current: 274, projected: 379, isActivelyPlaying: false
+            ),
+            379
+        )
+    }
+
+    func testProjectedPositionFollowsExplicitRewindWhilePaused() {
+        XCTAssertEqual(
+            PlaybackLogic.projectedPlaybackPosition(
+                current: 379, projected: 80, isActivelyPlaying: false
+            ),
+            80
+        )
+    }
+
+    func testProjectedPositionCannotMoveActivePlaybackBackward() {
+        XCTAssertEqual(
+            PlaybackLogic.projectedPlaybackPosition(
+                current: 379, projected: 274, isActivelyPlaying: true
+            ),
+            379
+        )
+    }
+
+    func testProjectedPositionCanAdvanceActivePlayback() {
+        XCTAssertEqual(
+            PlaybackLogic.projectedPlaybackPosition(
+                current: 274, projected: 379, isActivelyPlaying: true
+            ),
+            379
+        )
+    }
+
     // MARK: Folder playback origin
 
     func testFolderStartSetsOrigin() {

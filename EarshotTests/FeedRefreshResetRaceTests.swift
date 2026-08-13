@@ -7,6 +7,7 @@ private actor InFlightFeedFetcher: FeedFetching {
     private let feed: ParsedFeed
     private var started = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var observedCancellation = false
 
     init(feed: ParsedFeed) { self.feed = feed }
 
@@ -16,8 +17,14 @@ private actor InFlightFeedFetcher: FeedFetching {
         waiters.removeAll()
         for waiter in pending { waiter.resume() }
         while !Task.isCancelled {
-            try await Task.sleep(for: .milliseconds(5))
+            do {
+                try await Task.sleep(for: .milliseconds(5))
+            } catch {
+                observedCancellation = true
+                throw error
+            }
         }
+        observedCancellation = true
         throw CancellationError()
     }
 
@@ -25,6 +32,8 @@ private actor InFlightFeedFetcher: FeedFetching {
         guard !started else { return }
         await withCheckedContinuation { waiters.append($0) }
     }
+
+    func wasCancelledByOwner() -> Bool { observedCancellation }
 }
 
 private actor LaunchStartSignal {
@@ -46,6 +55,64 @@ private actor LaunchStartSignal {
 
 @MainActor
 final class FeedRefreshResetRaceTests: XCTestCase {
+    func testSceneBackgroundCancellationStopsInFlightForegroundRefresh() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        container.mainContext.insert(
+            Podcast(feedURL: "https://example.com/feed.xml", title: "Example")
+        )
+        try container.mainContext.save()
+        let feed = ParsedFeed(
+            title: "Example", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: []
+        )
+        let fetcher = InFlightFeedFetcher(feed: feed)
+        let refresh = Task { @MainActor in
+            await BackgroundFeedRefresher.runRefresh(
+                container: container, trigger: .foreground, force: true,
+                notifier: NotificationService(), feed: fetcher
+            )
+        }
+        await fetcher.waitUntilStarted()
+
+        BackgroundFeedRefresher.cancelForSceneBackground()
+
+        let result = await refresh.value
+        XCTAssertFalse(result)
+    }
+
+    func testSceneBackgroundCancellationPreservesOSBackgroundRefresh() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        container.mainContext.insert(
+            Podcast(feedURL: "https://example.com/feed.xml", title: "Example")
+        )
+        try container.mainContext.save()
+        let feed = ParsedFeed(
+            title: "Example", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: []
+        )
+        let fetcher = InFlightFeedFetcher(feed: feed)
+        let refresh = Task { @MainActor in
+            await BackgroundFeedRefresher.runRefresh(
+                container: container, trigger: .backgroundTask, force: true,
+                isCancelled: { false }, notifier: NotificationService(), feed: fetcher
+            )
+        }
+        await fetcher.waitUntilStarted()
+
+        BackgroundFeedRefresher.cancelForSceneBackground()
+        await Task.yield()
+        let cancelledByScene = await fetcher.wasCancelledByOwner()
+        XCTAssertFalse(cancelledByScene)
+        await BackgroundFeedRefresher.cancelAndWait()
+
+        _ = await refresh.value
+        // If scene cancellation incorrectly owned the BGTask, Task cancellation
+        // above is redundant but still lets this bounded fake return. The actor
+        // must have remained active until its true owner cancelled it.
+        let cancelledByOwner = await fetcher.wasCancelledByOwner()
+        XCTAssertTrue(cancelledByOwner)
+    }
+
     func testLaunchCannotRaceResetAgainstSameDisposableStore() async throws {
         let root = FileManager.default.temporaryDirectory
             .appending(path: "EarshotLaunchResetRace-\(UUID().uuidString)", directoryHint: .isDirectory)

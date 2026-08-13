@@ -123,6 +123,9 @@ actor FeedRefreshActor {
     /// single 45,436-episode inverse relationship monopolize SwiftData and block
     /// the UI even from a background context. Older local rows are preserved.
     private static let ordinaryRefreshNewEpisodeLimit = 10
+    /// Store lookups used by explicit historical paging stay bounded even when
+    /// the remote feed contains tens of thousands of items.
+    private static let olderEpisodeIdentityChunkSize = 50
     /// A single unresponsive feed must not hold an OPML import at the URLSession
     /// resource timeout. The normal feed refresh path keeps its existing policy;
     /// this shorter ceiling applies only to bulk import prefetches.
@@ -207,7 +210,10 @@ actor FeedRefreshActor {
         trigger: FeedRefreshTrigger = .unspecified,
         isEntitled: Bool? = nil,
         isCancelled: @Sendable () -> Bool,
-        onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
+        onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void,
+        onInboxChange: @MainActor @Sendable () -> Void = {
+            NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+        }
     ) async -> RefreshRun {
         let wholeRefresh = PerformanceSignposts.signposter.beginInterval("WholeRefresh")
         defer {
@@ -215,7 +221,27 @@ actor FeedRefreshActor {
         }
         let correlationID = UUID().uuidString.lowercased()
         let taskCancelledAtEntry = Task.isCancelled
-        let podcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
+        let fetchedPodcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
+        let refreshDatePairs: [(String, Date)] =
+            (try? modelContext.fetch(FetchDescriptor<LocalPodcastState>()))?.compactMap {
+                guard let refreshedAt = $0.refreshedAt else { return nil }
+                return (FeedURLIdentity.canonical($0.feedURL), refreshedAt)
+            } ?? []
+        let refreshDates = Dictionary(refreshDatePairs, uniquingKeysWith: max)
+        // A foreground pass may be cancelled when the scene backgrounds. Start
+        // the next pass with feeds that have never refreshed, then oldest first,
+        // so short sessions make fair forward progress instead of repeatedly
+        // spending their budget on the same prefix of a large library.
+        let podcasts = fetchedPodcasts.sorted { lhs, rhs in
+            let lhsDate = refreshDates[FeedURLIdentity.canonical(lhs.feedURL)]
+            let rhsDate = refreshDates[FeedURLIdentity.canonical(rhs.feedURL)]
+            switch (lhsDate, rhsDate) {
+            case (nil, .some): return true
+            case (.some, nil): return false
+            case let (lhs?, rhs?) where lhs != rhs: return lhs < rhs
+            default: return lhs.feedURL < rhs.feedURL
+            }
+        }
         let total = podcasts.count
         let eligibleFeedCount = podcasts.count
         let entitlementValue = isEntitled.map(String.init) ?? "unknown"
@@ -232,14 +258,16 @@ actor FeedRefreshActor {
         var batchIndex = 0
         var sinceLastSave = 0
         var nextIndex = 0
+        var postedIncrementalInboxChange = false
 
-        func flushPending() {
-            guard !pendingByInputIndex.isEmpty else { return }
+        func flushPending() -> Bool {
+            guard !pendingByInputIndex.isEmpty else { return false }
             batchIndex += 1
             let batchIntended = pendingByInputIndex.values.reduce(0) {
                 $0 + $1.insertedCount
             }
             intendedInsertions += batchIntended
+            var madeNewContentDurable = false
             if saveIfNeededOrLog(
                 correlationID: correlationID,
                 batchIndex: batchIndex,
@@ -247,6 +275,7 @@ actor FeedRefreshActor {
                 intendedInsertions: batchIntended
             ) {
                 durableInsertions += batchIntended
+                madeNewContentDurable = batchIntended > 0
                 for (index, applyOutcome) in pendingByInputIndex {
                     guard var progress = resultByInputIndex[index] else { continue }
                     progress.outcome = applyOutcome.result()
@@ -260,6 +289,7 @@ actor FeedRefreshActor {
             }
             pendingByInputIndex.removeAll()
             sinceLastSave = 0
+            return madeNewContentDurable
         }
 
         let cancelledAtFirstSchedule = isCancelled()
@@ -335,7 +365,15 @@ actor FeedRefreshActor {
                         )
                         pendingByInputIndex[inputIndex] = applyOutcome
                         sinceLastSave += 1
-                        if sinceLastSave >= Self.saveBatchSize { flushPending() }
+                        if sinceLastSave >= Self.saveBatchSize,
+                           flushPending(), !postedIncrementalInboxChange {
+                            // Surface the first durable new-content batch while a
+                            // large library continues refreshing. Limit the whole
+                            // run to this early signal plus the final signal below
+                            // so Inbox reloads cannot become a per-batch hot path.
+                            postedIncrementalInboxChange = true
+                            await onInboxChange()
+                        }
                     } catch {
                         modelContext.rollback()
                         failed += 1
@@ -360,7 +398,7 @@ actor FeedRefreshActor {
                 }
             }
         }
-        flushPending()
+        _ = flushPending()
         let report = RefreshRun(
             results: resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] },
             attempted: completed,
@@ -370,10 +408,10 @@ actor FeedRefreshActor {
             intendedInsertions: intendedInsertions,
             durableInsertions: durableInsertions
         )
-        // Newly ingested episodes can change the inbox count — signal the tab
-        // badge once, at the end of the whole operation rather than per batch,
-        // so it refreshes without polling on every save (#736).
-        NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+        // Reconcile the final durable state even if an early batch was already
+        // surfaced. A run emits at most two Inbox changes: first durable content
+        // and final completion, never one notification per save batch (#736).
+        await onInboxChange()
         AppLog.subscriptions.info(
             "refresh=\(correlationID, privacy: .public) summary trigger=\(trigger.rawValue, privacy: .public) attempted=\(report.attempted) total=\(report.total) succeeded=\(report.results.count) failed=\(report.failed) cancelled=\(report.cancelled) intendedInsertions=\(report.intendedInsertions) durableInsertions=\(report.durableInsertions)"
         )
@@ -405,6 +443,79 @@ actor FeedRefreshActor {
         // `subscribe(feedURL:feed:inboxSeedCount:)` above saves before `result()`).
         try saveIfNeeded()
         return applyOutcome.result()
+    }
+
+    /// Inserts the next missing historical page without ever classifying it as
+    /// new Inbox content. Re-fetching and scanning the feed makes the operation
+    /// restartable: a cancellation or failed save leaves no cursor to corrupt,
+    /// and the next attempt resumes from durable GUID identity.
+    func loadOlderEpisodes(
+        feedURL: String,
+        feed: FeedFetching,
+        pageSize: Int = 10
+    ) async throws -> OlderEpisodePageOutcome? {
+        let canonical = FeedURLIdentity.canonical(feedURL)
+        guard let podcast = try PodcastIdentityService(context: modelContext)
+            .existing(feedURL: canonical)
+        else { return nil }
+
+        guard pageSize > 0 else {
+            return OlderEpisodePageOutcome(inserted: 0, hasMore: true)
+        }
+        let parsed = try await feed.fetch(canonical)
+        try Task.checkCancellation()
+        let catalog = Self.deduplicatedEpisodes(parsed.episodes)
+            .enumerated()
+            .sorted { lhs, rhs in
+                let leftDate = lhs.element.pubDate ?? .distantPast
+                let rightDate = rhs.element.pubDate ?? .distantPast
+                return leftDate == rightDate ? lhs.offset < rhs.offset : leftDate > rightDate
+            }
+            .map(\.element)
+
+        var missing: [ParsedEpisode] = []
+        for start in stride(
+            from: 0,
+            to: catalog.count,
+            by: Self.olderEpisodeIdentityChunkSize
+        ) {
+            try Task.checkCancellation()
+            let end = min(start + Self.olderEpisodeIdentityChunkSize, catalog.count)
+            let chunk = Array(catalog[start..<end])
+            let existingGUIDs = Set(
+                episodes(in: podcast, matchingGUIDs: chunk.map(\.guid)).map(\.guid)
+            )
+            for item in chunk where !existingGUIDs.contains(item.guid) {
+                missing.append(item)
+                if missing.count > pageSize { break }
+            }
+            if missing.count > pageSize { break }
+        }
+
+        let page = missing.prefix(pageSize)
+        guard !page.isEmpty else {
+            return OlderEpisodePageOutcome(inserted: 0, hasMore: false)
+        }
+        let repair = try IdentityRepairService(context: modelContext)
+            .repairEpisodes(in: podcast, matchingGUIDs: page.map(\.guid))
+        if repair.didChange { try saveWithSignpost() }
+
+        var inserted = 0
+        let existingAfterRepair = Set(
+            episodes(in: podcast, matchingGUIDs: page.map(\.guid)).map(\.guid)
+        )
+        for item in page where !existingAfterRepair.contains(item.guid) {
+            let episode = Self.makeEpisode(from: item)
+            episode.podcast = podcast
+            episode.inboxDismissed = true
+            modelContext.insert(episode)
+            inserted += 1
+        }
+        try saveIfNeeded()
+        return OlderEpisodePageOutcome(
+            inserted: inserted,
+            hasMore: missing.count > pageSize
+        )
     }
 
     /// Subscribes to `feedURL` on the background context: the fetch (network I/O)
