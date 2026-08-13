@@ -1,7 +1,7 @@
 # iCloud Sync VoiceOver contract
 
-Date: 2026-08-12  
-Scope: `CloudSyncSettingsView` on iOS SwiftUI  
+Date: 2026-08-12
+Scope: `CloudSyncSettingsView` on iOS SwiftUI
 Evidence level: source and automated-test audit; physical iPhone and Designed-for-iPhone Mac verification remains required by #815.
 
 ## Reading order and focus

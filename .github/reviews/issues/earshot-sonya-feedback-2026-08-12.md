@@ -1,6 +1,6 @@
 # Sonya beta feedback triage — Earshot
 
-> Generated 2026-08-12 from Sonya's email and Michael's reply.  
+> Generated 2026-08-12 from Sonya's email and Michael's reply.
 > Quill Cast-specific comments were excluded at Michael's request.
 
 ## Outcome
