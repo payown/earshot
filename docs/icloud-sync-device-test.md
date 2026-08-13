@@ -2,9 +2,10 @@
 
 The measured 2026-08-08 build-155 V5 to build-186 V10 upgrade and two-device
 record is in
-`docs/device-test-artifacts/2026-08-08-v5-v10-upgrade.md`. It is the completed
-migration-only 1.1.0 release gate; the remaining sync matrix below is deferred
-to 1.2.0.
+`docs/device-test-artifacts/2026-08-08-v5-v10-upgrade.md`. It completed the
+migration portion of the 1.1.0 gate. The remaining sync matrix below is also a
+blocking 1.1.0 release requirement; see
+`docs/releases/1.1.0-icloud-release-gate.md`.
 
 Status: development CloudKit only. Do not use this document against production
 CloudKit until the production schema has been reviewed and deployed.
