@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sonya beta feedback triage — Earshot</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; }
+    body { margin: 0 auto; max-width: 72rem; padding: 1rem; }
+    .skip-link { position: absolute; left: -10000px; }
+    .skip-link:focus { left: 1rem; top: 1rem; padding: .5rem; background: Canvas; color: CanvasText; }
+    table { border-collapse: collapse; width: 100%; }
+    caption { font-weight: 700; text-align: left; margin-bottom: .5rem; }
+    th, td { border: 1px solid GrayText; padding: .6rem; text-align: left; vertical-align: top; }
+    th { background: color-mix(in srgb, CanvasText 10%, Canvas); }
+    a { text-underline-offset: .18em; }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <header><h1>Sonya beta feedback triage — Earshot</h1><p>Generated 2026-08-12. Quill Cast-specific comments were excluded at Michael's request.</p></header>
+  <main id="main-content">
+    <section aria-labelledby="outcome"><h2 id="outcome">Outcome</h2><p>Three new issues were required, one existing issue was updated, and the remaining items are implemented or already tracked.</p>
+      <table><caption>Disposition of every in-scope feedback item</caption><thead><tr><th scope="col">Feedback</th><th scope="col">Disposition</th><th scope="col">Tracking</th></tr></thead><tbody>
+        <tr><td>Assign podcast to folder</td><td>Implemented</td><td>#754, #756, #757, #761</td></tr>
+        <tr><td>Large podcast sluggishness</td><td>Addressed; physical regression remains</td><td>#820</td></tr>
+        <tr><td>Add/remove Quick Actions</td><td>New issue</td><td><a href="https://github.com/payown/earshot/issues/834">Issue #834</a></td></tr>
+        <tr><td>Export audio from Queue</td><td>Implemented</td><td>#363, #401, #553</td></tr>
+        <tr><td>Search within a podcast</td><td>Existing issue updated</td><td><a href="https://github.com/payown/earshot/issues/457">Issue #457</a></td></tr>
+        <tr><td>Delete download when played</td><td>Implemented</td><td>Build 191</td></tr>
+        <tr><td>Delete all downloads</td><td>Implemented</td><td>Build 191</td></tr>
+        <tr><td>Download all in Inbox and Queue</td><td>New issue</td><td><a href="https://github.com/payown/earshot/issues/835">Issue #835</a></td></tr>
+        <tr><td>Only ten recent episodes reachable</td><td>New 1.1 correctness issue</td><td><a href="https://github.com/payown/earshot/issues/833">Issue #833</a></td></tr>
+        <tr><td>Auto-download Queue</td><td>Implemented</td><td>Existing default behavior</td></tr>
+      </tbody></table>
+    </section>
+    <section aria-labelledby="findings"><h2 id="findings">Important findings</h2><p>The ten-episode limitation is confirmed in the ingestion code and has no historical paging path. Quick Actions support accessible reordering but cannot persist removal. Podcast search can use feed metadata and does not require transcripts.</p></section>
+    <section aria-labelledby="release"><h2 id="release">Release relationship</h2><p>Issue #833 is a 1.1 correctness blocker. Issues #834 and #835 are enhancements and are not automatically release blockers. The iCloud release gate remains #817.</p></section>
+  </main>
+</body>
+</html>
