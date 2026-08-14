@@ -1,0 +1,5 @@
+Chapter 61, Build 195
+
+Fixes Auto-Queue when refreshing one podcast from its episode list. New episodes found by that Refresh button now enter the queue and publish to iCloud like background and whole-library refreshes.
+
+Development iCloud testing only. Do not deploy the production CloudKit schema.
