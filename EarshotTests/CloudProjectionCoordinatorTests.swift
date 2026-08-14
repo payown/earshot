@@ -448,6 +448,77 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 0)
     }
 
+    func testRemoteUnfollowDelayDoesNotDeleteRapidRefollow() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 30)
+        let projection = try makeProjectionContainer()
+        let tombstone = CloudPodcastProjection()
+        tombstone.feedURL = "https://example.com/feed"
+        tombstone.title = "Show"
+        tombstone.deletedAt = Date.distantFuture
+        tombstone.modifiedAt = Date.distantFuture
+        tombstone.sourceDeviceID = "mac"
+        projection.mainContext.insert(tombstone)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone",
+            remotePodcastDeletionDelayNanoseconds: 20_000_000
+        )
+
+        try coordinator.reconcile()
+        tombstone.deletedAt = nil
+        tombstone.modifiedAt = .now
+        try projection.mainContext.save()
+
+        try await Task.sleep(nanoseconds: 40_000_000)
+
+        XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 1)
+        XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 1)
+    }
+
+    func testRepeatedReconciliationSchedulesOneDelayedRemoteDelete() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 30)
+        let projection = try makeProjectionContainer()
+        let tombstone = CloudPodcastProjection()
+        tombstone.feedURL = "https://example.com/feed"
+        tombstone.title = "Show"
+        tombstone.deletedAt = Date.distantFuture
+        tombstone.modifiedAt = Date.distantFuture
+        tombstone.sourceDeviceID = "mac"
+        projection.mainContext.insert(tombstone)
+        try projection.mainContext.save()
+        let center = NotificationCenter()
+        var notificationCount = 0
+        let token = center.addObserver(
+            forName: .earshotWillDeleteEpisodes,
+            object: nil,
+            queue: nil
+        ) { _ in
+            MainActor.assumeIsolated { notificationCount += 1 }
+        }
+        defer { center.removeObserver(token) }
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: center,
+            deviceID: "phone",
+            remotePodcastDeletionDelayNanoseconds: 20_000_000
+        )
+
+        try coordinator.reconcile()
+        try coordinator.reconcile()
+
+        XCTAssertEqual(notificationCount, 1)
+        XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 1)
+
+        try await Task.sleep(nanoseconds: 40_000_000)
+
+        XCTAssertEqual(notificationCount, 1)
+        XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 0)
+    }
+
     func testDuplicateCloudRowsConvergeToNewestRecord() throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
