@@ -180,6 +180,12 @@ struct EpisodeListView: View {
         .navigationTitle(podcast.title)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)) { note in
+            guard let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey]
+                    as? PersistentIdentifier,
+                  deletedPodcastID == podcast.persistentModelID else { return }
+            dismiss()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply)) { _ in
             if podcast.isDeleted { dismiss() }
         }
