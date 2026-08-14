@@ -23,12 +23,16 @@ struct EpisodeSelectableRow: View {
     let onToggle: () -> Void
 
     var body: some View {
-        SelectableRow(
-            isSelected: isSelected,
-            accessibilityLabel: accessibilityLabel,
-            onToggle: onToggle
-        ) {
-            EpisodeRowContent(episode: episode, includesPodcastName: includesPodcastName)
+        if episode.isDeleted {
+            EmptyView()
+        } else {
+            SelectableRow(
+                isSelected: isSelected,
+                accessibilityLabel: accessibilityLabel,
+                onToggle: onToggle
+            ) {
+                EpisodeRowContent(episode: episode, includesPodcastName: includesPodcastName)
+            }
         }
     }
 
@@ -40,7 +44,8 @@ struct EpisodeSelectableRow: View {
     /// the same whether or not selection mode is on — only the checkmark and the
     /// `.isSelected` trait change.
     private var accessibilityLabel: String {
-        EpisodeRowLabel.label(
+        guard !episode.isDeleted else { return "" }
+        return EpisodeRowLabel.label(
             episodeTitle: episode.title,
             podcastName: includesPodcastName ? episode.podcast?.title : nil,
             seasonNumber: settings.showEpisodeNumbers ? episode.seasonNumber : nil,
