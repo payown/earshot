@@ -6,7 +6,9 @@
 
 Build 193 includes the final live playback-position refresh from PR #837. The
 playback-heat investigation is already confirmed resolved and is not repeated
-here. Do not deploy the CloudKit production schema during this test.
+here. Michael also confirmed bounded older-episode paging working on a physical
+device on 2026-08-13, closing #833. Do not deploy the CloudKit production schema
+during this test.
 
 Record the local time for every action and arrival. If a change does not arrive,
 record how long you waited and the status shown on each device. Do not reinstall
@@ -70,19 +72,7 @@ This is the physical gate for #821.
   large library refresh to finish.
 - [ ] Record the visible status, first-result time, and final podcast count.
 
-## Test 5: older episode paging with VoiceOver
-
-This is the physical gate for #833. Prefer a feed with at least 4,000 episodes.
-
-- [ ] Open the podcast and locate Load 10 Older Episodes with VoiceOver.
-- [ ] Activate it once and confirm exactly the next 10 episodes appear.
-- [ ] Confirm focus remains stable and the new state is announced once.
-- [ ] Activate it again and confirm the next page appears without duplicates.
-- [ ] Confirm the historical episodes do not flood Inbox.
-- [ ] Confirm VoiceOver remains responsive and record any delay or unexpected
-  announcement.
-
-## Test 6: concurrent deletion safety
+## Test 5: concurrent deletion safety
 
 Use only a disposable podcast. Unfollowing it removes its local catalog.
 
