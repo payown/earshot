@@ -25,3 +25,11 @@ Build 197 failure: `Earshot-2026-08-14-125400.ips`, SIGTRAP on the main thread
 in `Episode.isPlayed.getter` from `EpisodeRow.accessibilityLabel.getter`. The
 guard/deletion race proves the fix must order dismissal before deletion rather
 than attempt another read-time guard.
+
+## Physical result
+
+Build 198 passed the crash regression on iPhone: the Mac's offline unfollow
+synced after reconnect, playback stopped, and Earshot remained foregrounded.
+The tester was viewing the full Now Playing sheet rather than the podcast episode
+list; that sheet remained open after its episode unloaded. Build 199 addresses
+that remaining stale-presentation behavior.
