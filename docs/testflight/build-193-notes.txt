@@ -1,0 +1,23 @@
+Chapter 61, Build 193
+
+The same position, without reopening
+
+What changed
+
+Earshot now refreshes an open paused player from the position that iCloud saved,
+even when the player still holds an older in-memory episode. The Now Playing
+position and its existing VoiceOver value update without relaunching the app.
+
+This build also includes build 192's honest iCloud status, bounded older-episode
+paging, durable refresh results, and lock-time feed-refresh fix.
+
+What to test
+
+Leave Now Playing open on one device. Play and pause the same episode on the
+other device, then confirm the new position appears without relaunching. Test an
+offline queue change across force quit and reconnect. On a large podcast, load
+older episodes 10 at a time and confirm VoiceOver focus remains stable.
+
+The physical-device heat issue is already confirmed resolved and does not need
+another timed run unless the phone becomes warm or VoiceOver responsiveness
+regresses.
