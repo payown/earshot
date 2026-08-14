@@ -11,11 +11,20 @@ episode identity clears.
 
 ## Regression gate
 
-- [ ] Follow a disposable podcast and refresh its catalog on both devices.
-- [ ] On iPhone, play an episode and open the full Now Playing screen.
-- [ ] Put Mac offline, unfollow the podcast there, and reconnect.
-- [ ] Confirm playback stops without another interruption.
-- [ ] Confirm Earshot remains foregrounded and responsive.
-- [ ] Confirm the full Now Playing screen dismisses automatically.
+- [x] Follow a disposable podcast and refresh its catalog on both devices.
+- [x] On iPhone, play an episode and open the full Now Playing screen.
+- [x] Put Mac offline, unfollow the podcast there, and reconnect.
+- [x] Confirm playback stops without another interruption.
+- [x] Confirm Earshot remains foregrounded and responsive.
+- [x] Confirm the full Now Playing screen dismisses automatically.
 - [ ] Record the exact VoiceOver announcement and resulting focus location.
-- [ ] Confirm the podcast disappears from both devices without resurrection.
+- [x] Confirm the podcast disappears from both devices without resurrection.
+
+## Physical result
+
+Build 199 passed on the real iPhone/Mac Development pair. Playback stopped,
+Earshot remained foregrounded, and the full Now Playing sheet dismissed cleanly.
+The Mac application store no longer contained Swift over Coffee, its cloud row
+was tombstoned, and no new Earshot crash report appeared on the iPhone. Michael
+reported that the flow "worked perfectly." Exact VoiceOver announcement/focus
+wording remains to be recorded.
