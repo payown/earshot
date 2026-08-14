@@ -17,7 +17,7 @@ episode identity clears.
 - [x] Confirm playback stops without another interruption.
 - [x] Confirm Earshot remains foregrounded and responsive.
 - [x] Confirm the full Now Playing screen dismisses automatically.
-- [ ] Record the exact VoiceOver announcement and resulting focus location.
+- [x] Record the exact VoiceOver announcement and resulting focus location.
 - [x] Confirm the podcast disappears from both devices without resurrection.
 
 ## Physical result
@@ -26,5 +26,7 @@ Build 199 passed on the real iPhone/Mac Development pair. Playback stopped,
 Earshot remained foregrounded, and the full Now Playing sheet dismissed cleanly.
 The Mac application store no longer contained Swift over Coffee, its cloud row
 was tombstoned, and no new Earshot crash report appeared on the iPhone. Michael
-reported that the flow "worked perfectly." Exact VoiceOver announcement/focus
-wording remains to be recorded.
+reported that the flow "worked perfectly." No separate VoiceOver announcement
+was reported; after the sheet closed, focus moved to the Folders button at the
+top of Queue. Swift over Coffee was also confirmed absent from the iPhone
+Library.
