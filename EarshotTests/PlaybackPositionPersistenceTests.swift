@@ -124,6 +124,37 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
         XCTAssertEqual(Int(player.currentPositionSeconds), 379)
     }
 
+    /// A real CloudKit import can save through another context, leaving the
+    /// player's retained Episode instance stale even though the store is current.
+    /// The notification hook must resolve the durable row rather than trusting
+    /// that retained object; the original same-instance test did not model this.
+    func test_cloudProjectionNotificationRefreshesStaleLoadedEpisodeReference() async throws {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        clearLive()
+
+        let episode = makeEpisode(ctx)
+        episode.positionSeconds = 274
+        try ctx.save()
+        player.load(episode)
+
+        let writer = ModelContext(ctx.container)
+        let imported = try XCTUnwrap(
+            writer.model(for: episode.persistentModelID) as? Episode
+        )
+        imported.positionSeconds = 379
+        try writer.save()
+        XCTAssertEqual(episode.positionSeconds, 274,
+                       "the loaded player reference should model the stale device instance")
+
+        NotificationCenter.default.post(name: .earshotCloudProjectionDidApply, object: nil)
+        await Task.yield()
+
+        XCTAssertEqual(Int(player.currentPositionSeconds), 379)
+    }
+
     /// The projection merge marks explicit rewinds by timestamp; once it has
     /// selected that value, the paused player must not let the larger crash-
     /// recovery cache hide it.
