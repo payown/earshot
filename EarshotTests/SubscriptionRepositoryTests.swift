@@ -441,6 +441,17 @@ final class SubscriptionRepositoryTests: XCTestCase {
         try ctx.save()
         fakeDownloader.reset()
 
+        let queueChange = expectation(description: "auto-queue publishes queue change")
+        queueChange.assertForOverFulfill = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .earshotQueueDidChange,
+            object: nil,
+            queue: nil
+        ) { _ in
+            queueChange.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
         fetcher.feed = feed([episode("a", d1), episode("b", d2)])
         _ = try await repo.refresh(podcast)
 
@@ -450,6 +461,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
             fakeDownloader.downloaded.map(\.guid), ["b"],
             "Auto-queued episodes are still eligible for auto-download"
         )
+        await fulfillment(of: [queueChange], timeout: 1)
     }
 
     /// A backfill refresh (migrated shell) must NOT auto-download -- its inserted
