@@ -1,0 +1,5 @@
+Chapter 61, Build 196
+
+Fixes a crash when another device unfollows the podcast whose episode list is open. Earshot now stops reading the deleted episode relationship and safely closes the stale screen after iCloud reconciliation.
+
+Development iCloud testing only. Do not deploy the production CloudKit schema.
