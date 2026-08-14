@@ -1969,10 +1969,21 @@ final class PlayerService {
     func refreshProjectedPlaybackPosition() {
         guard !currentEpisodeIsTransient,
               let episode = currentEpisode,
-              !episode.isDeleted else { return }
+              !episode.isDeleted,
+              let context else { return }
+        // A CloudKit import may be saved through a different ModelContext. The
+        // player deliberately retains its loaded Episode for the lifetime of the
+        // AVPlayer item, so that instance can still expose its pre-import value
+        // even though the durable row is already current. Resolve the same row
+        // by its stable identifier in a fresh context before refreshing the
+        // observable player cache (#825, physical iPhone-to-Mac verification).
+        let persistedContext = ModelContext(context.container)
+        guard let persistedEpisode = persistedContext.model(
+            for: episode.persistentModelID
+        ) as? Episode else { return }
         let target = PlaybackLogic.projectedPlaybackPosition(
             current: currentPositionSeconds,
-            projected: episode.positionSeconds,
+            projected: persistedEpisode.positionSeconds,
             isActivelyPlaying: intendsToPlay
         )
         guard target != currentPositionSeconds else { return }
