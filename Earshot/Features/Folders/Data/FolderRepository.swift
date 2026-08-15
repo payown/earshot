@@ -58,7 +58,7 @@ final class FolderRepository {
 
     /// The podcasts in `folder`, in the folder's membership order then title.
     func podcasts(in folder: PodcastFolder) -> [Podcast] {
-        (folder.memberships ?? [])
+        membershipsByFolderID()[folder.persistentModelID, default: []]
             .sorted { lhs, rhs in
                 if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
                 return (lhs.podcast?.title ?? "") < (rhs.podcast?.title ?? "")
@@ -79,9 +79,26 @@ final class FolderRepository {
 
     /// The folders a podcast currently belongs to.
     func folders(containing podcast: Podcast) -> [PodcastFolder] {
-        folders().filter { folder in
-            (folder.memberships ?? []).contains { $0.podcast?.persistentModelID == podcast.persistentModelID }
-        }
+        let podcastID = podcast.persistentModelID
+        let folderIDs: Set<PersistentIdentifier> = Set(allMemberships().compactMap {
+            membership -> PersistentIdentifier? in
+            membership.podcast?.persistentModelID == podcastID
+                ? membership.folder?.persistentModelID
+                : nil
+        })
+        return folders().filter { folderIDs.contains($0.persistentModelID) }
+    }
+
+    func folders(containingAny podcasts: [Podcast]) -> [PodcastFolder] {
+        let podcastIDs = Set(podcasts.map(\.persistentModelID))
+        guard !podcastIDs.isEmpty else { return [] }
+        let folderIDs: Set<PersistentIdentifier> = Set(allMemberships().compactMap {
+            membership -> PersistentIdentifier? in
+            guard membership.podcast.map({ podcastIDs.contains($0.persistentModelID) }) == true
+            else { return nil }
+            return membership.folder?.persistentModelID
+        })
+        return folders().filter { folderIDs.contains($0.persistentModelID) }
     }
 
     /// The folders nested directly under `parent`, or the top-level folders when
@@ -223,17 +240,18 @@ final class FolderRepository {
     /// Adds `podcast` to `folder` at the end. Idempotent: an existing membership
     /// is left untouched.
     func add(_ podcast: Podcast, to folder: PodcastFolder) {
-        guard !(folder.memberships ?? []).contains(where: {
+        let existing = membershipsByFolderID()[folder.persistentModelID, default: []]
+        guard !existing.contains(where: {
             $0.podcast?.persistentModelID == podcast.persistentModelID
         }) else { return }
-        let nextOrder = ((folder.memberships ?? []).map(\.sortOrder).max() ?? -1) + 1
+        let nextOrder = (existing.map(\.sortOrder).max() ?? -1) + 1
         let membership = FolderMembership(folder: folder, podcast: podcast, sortOrder: nextOrder)
         context.insert(membership)
         save()
     }
 
     func remove(_ podcast: Podcast, from folder: PodcastFolder) {
-        let matches = (folder.memberships ?? []).filter {
+        let matches = membershipsByFolderID()[folder.persistentModelID, default: []].filter {
             $0.podcast?.persistentModelID == podcast.persistentModelID
         }
         for membership in matches { context.delete(membership) }
@@ -248,8 +266,10 @@ final class FolderRepository {
         where membership.podcast?.persistentModelID == podcast.persistentModelID {
             context.delete(membership)
         }
+        let byFolderID = Dictionary(grouping: existing) { $0.folder?.persistentModelID }
         for folder in targets {
-            let nextOrder = ((folder.memberships ?? []).map(\.sortOrder).max() ?? -1) + 1
+            let nextOrder = (byFolderID[folder.persistentModelID, default: []]
+                .map(\.sortOrder).max() ?? -1) + 1
             context.insert(FolderMembership(folder: folder, podcast: podcast, sortOrder: nextOrder))
         }
         save()
@@ -260,7 +280,7 @@ final class FolderRepository {
         let orderByID = Dictionary(
             uniqueKeysWithValues: ordered.enumerated().map { ($1.persistentModelID, $0) }
         )
-        for membership in folder.memberships ?? [] {
+        for membership in membershipsByFolderID()[folder.persistentModelID, default: []] {
             guard let id = membership.podcast?.persistentModelID,
                   let index = orderByID[id] else { continue }
             membership.sortOrder = index
@@ -277,10 +297,11 @@ final class FolderRepository {
     /// mirroring the single-item ``add(_:to:)``.
     func addPodcasts(_ podcasts: [Podcast], to folder: PodcastFolder) {
         guard !podcasts.isEmpty else { return }
-        var nextOrder = ((folder.memberships ?? []).map(\.sortOrder).max() ?? -1) + 1
+        let existing = membershipsByFolderID()[folder.persistentModelID, default: []]
+        var nextOrder = (existing.map(\.sortOrder).max() ?? -1) + 1
         // Seed with the folder's current members so both existing memberships and
         // repeats inside `podcasts` collapse to a single insert.
-        var seen = Set((folder.memberships ?? []).compactMap { $0.podcast?.persistentModelID })
+        var seen = Set(existing.compactMap { $0.podcast?.persistentModelID })
         for podcast in podcasts {
             guard seen.insert(podcast.persistentModelID).inserted else { continue }
             context.insert(FolderMembership(folder: folder, podcast: podcast, sortOrder: nextOrder))
@@ -332,7 +353,7 @@ final class FolderRepository {
     func removePodcasts(_ podcasts: [Podcast], from folder: PodcastFolder) {
         guard !podcasts.isEmpty else { return }
         let ids = Set(podcasts.map(\.persistentModelID))
-        for membership in folder.memberships ?? []
+        for membership in membershipsByFolderID()[folder.persistentModelID, default: []]
         where membership.podcast.map({ ids.contains($0.persistentModelID) }) == true {
             context.delete(membership)
         }
@@ -509,10 +530,16 @@ final class FolderRepository {
     /// title. Intended for later OPML export and folder-wide queueing. New in
     /// folders phase 1 (#752).
     func subtreeSubscriptions(of folder: PodcastFolder) -> [Podcast] {
+        let memberships = membershipsByFolderID()
         var seen = Set<PersistentIdentifier>()
         var result: [Podcast] = []
         for node in FolderLogic.flattenSubtree(folder) {
-            for membership in node.memberships ?? [] {
+            // Fetch FolderMembership rows directly instead of faulting the
+            // folder's to-many relationship. On a freshly migrated large store,
+            // SwiftData populated every inverse relationship while resolving
+            // `node.memberships`, blocking the main thread until iOS's scene
+            // watchdog terminated build 202.
+            for membership in memberships[node.persistentModelID, default: []] {
                 guard let podcast = membership.podcast else { continue }
                 if seen.insert(podcast.persistentModelID).inserted {
                     result.append(podcast)
@@ -520,6 +547,23 @@ final class FolderRepository {
             }
         }
         return result.sorted { $0.title < $1.title }
+    }
+
+    /// Folder membership is small relative to the episode catalog. Fetching the
+    /// join rows directly avoids SwiftData's expensive to-many relationship
+    /// population while keeping one store request per repository operation.
+    private func allMemberships() -> [FolderMembership] {
+        (try? context.fetch(FetchDescriptor<FolderMembership>())) ?? []
+    }
+
+    private func membershipsByFolderID()
+        -> [PersistentIdentifier: [FolderMembership]] {
+        Dictionary(grouping: allMemberships()) { membership in
+            membership.folder?.persistentModelID
+        }.reduce(into: [:]) { result, element in
+            guard let folderID = element.key else { return }
+            result[folderID] = element.value
+        }
     }
 
     /// Maps each podcast to the top-level folder whose subtree contains it, for

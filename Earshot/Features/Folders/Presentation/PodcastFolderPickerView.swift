@@ -26,6 +26,7 @@ struct PodcastFolderPickerView: View {
     /// live. The hierarchy is rebuilt from this flat list.
     @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
     private var allFolders: [PodcastFolder]
+    @Query private var memberships: [FolderMembership]
 
     @State private var showingCreate = false
     @State private var newName = ""
@@ -128,7 +129,12 @@ struct PodcastFolderPickerView: View {
     // MARK: Membership
 
     private func isMember(_ folder: PodcastFolder) -> Bool {
-        (folder.memberships ?? []).contains { $0.podcast?.persistentModelID == podcast.persistentModelID }
+        let podcastID = podcast.persistentModelID
+        let folderID = folder.persistentModelID
+        return memberships.contains {
+            $0.podcast?.persistentModelID == podcastID
+                && $0.folder?.persistentModelID == folderID
+        }
     }
 
     private func toggle(_ folder: PodcastFolder) {

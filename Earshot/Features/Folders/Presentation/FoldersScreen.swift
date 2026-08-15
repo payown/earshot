@@ -9,6 +9,7 @@ struct FoldersScreen: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
     private var folders: [PodcastFolder]
+    @Query private var memberships: [FolderMembership]
 
     @State private var showingCreate = false
     @State private var newName = ""
@@ -142,7 +143,7 @@ struct FoldersScreen: View {
     private func rowContent(for item: FolderTreeItem) -> some View {
         let folder = item.folder
         let childCount = folder.children?.count ?? 0
-        let podcastCount = folder.memberships?.count ?? 0
+        let podcastCount = podcastCount(in: folder)
         // Cap visual indentation so a deeply nested tree remains readable at
         // large Dynamic Type. VoiceOver receives the complete breadcrumb.
         let visualDepth = min(item.depth, 4)
@@ -164,11 +165,16 @@ struct FoldersScreen: View {
         FolderTreeLabel.row(
             path: FolderLogic.folderPath(item.folder).map(\.name),
             subfolderCount: item.folder.children?.count ?? 0,
-            podcastCount: item.folder.memberships?.count ?? 0,
+            podcastCount: podcastCount(in: item.folder),
             isExpanded: item.hasChildren ? item.isExpanded : nil,
             position: index + 1,
             total: total
         )
+    }
+
+    private func podcastCount(in folder: PodcastFolder) -> Int {
+        let folderID = folder.persistentModelID
+        return memberships.lazy.filter { $0.folder?.persistentModelID == folderID }.count
     }
 
     private func rowHint(for item: FolderTreeItem) -> String {

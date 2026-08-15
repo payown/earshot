@@ -86,6 +86,7 @@ struct FolderDetailScreen: View {
     // iOS mirrors swipe actions into the VoiceOver rotor, which duplicated the
     // row's custom "Remove from folder" action (#577).
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Query private var podcastMemberships: [FolderMembership]
 
     private var repository: FolderRepository { FolderRepository(context: context) }
 
@@ -96,9 +97,9 @@ struct FolderDetailScreen: View {
     private var subfolders: [PodcastFolder] {
         // Read through the tracked `children` relationship — NOT a detached
         // `FetchDescriptor` — so SwiftUI's Observation re-renders when a non-drag
-        // reorder mutates a child's `sortOrder`. This mirrors how `members` reads
-        // through `folder.memberships`: a bare repository fetch wouldn't be
-        // observed, so the row would announce "Moved…" while the list stayed put.
+        // reorder mutates a child's `sortOrder`. Podcast membership changes are
+        // observed separately through `podcastMemberships`, avoiding an inverse
+        // relationship fault while keeping row counts live.
         // Sorted by `sortOrder` then name to match `FolderRepository.childFolders(of:)`.
         (folder.children ?? []).sorted { lhs, rhs in
             if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
@@ -334,7 +335,7 @@ struct FolderDetailScreen: View {
             FolderDetailLabel.subfolderRow(
                 name: child.name,
                 subfolderCount: child.children?.count ?? 0,
-                podcastCount: child.memberships?.count ?? 0
+                podcastCount: podcastCount(in: child)
             )
         )
         .accessibilityHint("Use the actions rotor to move this subfolder without dragging.")
@@ -374,11 +375,18 @@ struct FolderDetailScreen: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(child.name).font(.headline)
-                Text("^[\(child.children?.count ?? 0) subfolder](inflect: true), ^[\(child.memberships?.count ?? 0) podcast](inflect: true)")
+                Text("^[\(child.children?.count ?? 0) subfolder](inflect: true), ^[\(podcastCount(in: child)) podcast](inflect: true)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func podcastCount(in folder: PodcastFolder) -> Int {
+        let folderID = folder.persistentModelID
+        return podcastMemberships.lazy.filter {
+            $0.folder?.persistentModelID == folderID
+        }.count
     }
 
     // MARK: Podcasts

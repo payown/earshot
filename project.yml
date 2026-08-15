@@ -14,7 +14,7 @@ fileGroups:
 settings:
   base:
     MARKETING_VERSION: "1.1.0"
-    CURRENT_PROJECT_VERSION: "202"
+    CURRENT_PROJECT_VERSION: "203"
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
 targets:
