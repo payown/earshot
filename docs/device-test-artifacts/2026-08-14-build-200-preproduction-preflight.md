@@ -99,3 +99,90 @@ background chatter remain manual gates.
   confirmation and a disposable dataset.
 - Review the CloudKit Production deployment preview. Do not confirm deployment
   until Michael separately authorizes it.
+
+## Physical test continuation, 2026-08-15
+
+### Test 1: iCloud status and VoiceOver baseline — passed
+
+Michael verified the complete Settings → iCloud Sync screen on both the physical
+iPhone and the build 200 Designed-for-iPhone Mac app. Status and last-completed
+content were good on both devices; VoiceOver reading order and focus were good,
+with no repeated announcement or spontaneous focus movement observed.
+
+### Test 2: routine synchronization silence and focus — passed
+
+From the build 200 Mac app, Michael queued “History-Making Black Cambridge
+Professor Found Dead After Accusations Of Plagiarism” from True Crime Reality
+(dated August 15, 2026). It reached the physical iPhone in approximately one
+minute. Routine synchronization produced no unexpected VoiceOver speech,
+repeated status message, or spontaneous focus movement.
+
+### Test 3: offline mutation, force quit, restart, and reconnect — passed
+
+With Mac Wi-Fi disabled, the build 200 app kept its local library usable and
+queued “SYMHC Classics: Jethro Tull” from Stuff You Missed in History Class.
+The queue mutation survived a force quit and offline relaunch. After reconnect,
+background, and foreground, the episode reached the physical iPhone in
+approximately 30–45 seconds. There was no unexpected VoiceOver speech, focus
+movement, crash, or other observed problem.
+
+### Test 4: background/foreground reverse delivery — passed
+
+With the Mac app hidden on its iCloud Sync screen, Michael queued an episode on
+the physical iPhone, waited with Earshot backgrounded, and foregrounded the Mac
+app. The iPhone-to-Mac queue change arrived, routine synchronization remained
+silent, VoiceOver focus remained stable, and no other problem was observed.
+
+### Test 5: largest Dynamic Type visual layout — deferred to testers
+
+Michael explicitly deferred visual clipping, overlap, and truncation inspection
+to sighted external testers because it is not independently verifiable through
+his VoiceOver workflow. Native SwiftUI layout and VoiceOver reachability remain
+covered in source and automated review. This visual inspection is a tester
+feedback item, not a pre-deployment CloudKit schema gate.
+
+### Test 6: unavailable network and recovery — passed
+
+With Mac Wi-Fi disabled and the app relaunched offline, the local library
+remained usable. The iCloud screen temporarily reported “Status, Syncing.” After
+reconnect and foreground recovery it reported “Status, Available” and “Last
+completed on this device, Aug 15, 2026 at 8:59 AM.” There was no failure
+announcement, repeated speech, focus problem, data loss, crash, or reinstall.
+
+### Test 7: destructive confirmation accessibility and cancellation — passed
+
+On the physical iPhone, both Clear This Device and Delete Synced Library
+Everywhere presented modal confirmation dialogs. VoiceOver focus remained
+inside each dialog and could not reach background controls. iOS exposed the
+nondestructive action as the native “Dismiss popup” option rather than a
+separate Cancel element. Both dialogs dismissed correctly, focus returned
+usefully, and no deletion occurred.
+
+### Test 8: folder create, rename, and deletion convergence — passed
+
+Michael created the empty disposable “Build 200 Phone Test” folder on iPhone,
+confirmed it on Mac, renamed it to “Build 200 Mac Test” on Mac, confirmed the
+rename on iPhone, then deleted it on iPhone and confirmed deletion on Mac. All
+operations synchronized successfully, the folder did not resurrect, and no
+VoiceOver, focus, crash, or other problem was observed.
+
+### Test 9: bookmark, playback progress, and explicit rewind — passed
+
+Michael completed the combined build 200 test on the physical iPhone and
+Designed-for-iPhone Mac. Forward playback progress synchronized from iPhone to
+Mac, a bookmark created from the iPhone player appeared on Mac, and an explicit
+Mac rewind synchronized back to the iPhone without the newer forward position
+overwriting it. VoiceOver, focus, playback, and app stability all passed.
+
+## Safe Development matrix result
+
+Tests 1–4 and 6–9 passed. Together they cover status presentation, routine
+silence, both sync directions, offline mutation durability across force quit,
+reconnect, background/foreground delivery, network-unavailable recovery,
+destructive-dialog cancellation, folder create/rename/delete without
+resurrection, bookmark delivery, forward progress, and explicit rewind.
+
+Test 5's visual largest-Dynamic-Type inspection is intentionally deferred to
+sighted testers. Actual account switching and committed destructive reset remain
+under #814 and require a disposable account/dataset; they were not run against
+Michael's 1,045-podcast Development library.
