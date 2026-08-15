@@ -352,6 +352,14 @@ final class SubscriptionRepository {
         // episodes and advanced high-water mark immediately. Only THIS podcast's
         // episodes need re-faulting.
         mergeBackgroundWrites(affectedPodcastIDs: [podcast.persistentModelID])
+        // Refresh-time auto-queue mutates the queue on the background actor, so
+        // QueueRepository never gets a chance to publish its normal change
+        // notification. Notify after the durable save and main-context merge so
+        // CloudProjectionCoordinator exports the new item and queue consumers
+        // refresh from committed state.
+        if autoQueueEnabled, !outcome.newEpisodeIDs.isEmpty {
+            NotificationCenter.default.post(name: .earshotQueueDidChange, object: nil)
+        }
         if downloader != nil, !outcome.newEpisodeIDs.isEmpty {
             await autoDownloadRecent(episodeIDsPerPodcast: [outcome.newEpisodeIDs])
         }
@@ -439,6 +447,14 @@ final class SubscriptionRepository {
             mergeInterval,
             "affectedCount=\(affectedIDs.count)"
         )
+
+        // See refresh(_:): the background auto-queue path bypasses
+        // QueueRepository, so publish one coalesced notification for the whole
+        // refresh pass. A harmless extra scan is preferable to leaving a new
+        // local queue item outside the CloudKit projection.
+        if autoQueueEnabled, results.contains(where: { !$0.outcome.newEpisodeIDs.isEmpty }) {
+            NotificationCenter.default.post(name: .earshotQueueDidChange, object: nil)
+        }
 
         // Auto-download the newest `autoDownloadCount` genuinely-new episodes per
         // podcast (never a backfill pass — `newEpisodeIDs` is empty there). This is

@@ -62,7 +62,12 @@ struct EpisodeListView: View {
     /// default ``EpisodeSortOrder/latestFirst`` which preserves the pre-existing
     /// newest-first order). The filter is applied on top of this (#459).
     private var sortedEpisodes: [Episode] {
-        settings.episodeSortOrder.sorted(podcast.episodes ?? [])
+        // A remote unfollow can delete this podcast while its episode screen is
+        // still visible. SwiftData traps if a deleted model's relationship is
+        // faulted, so never touch `episodes` once deletion has begun; the cloud
+        // projection notification below dismisses the now-stale destination.
+        guard !podcast.isDeleted else { return [] }
+        return settings.episodeSortOrder.sorted(podcast.episodes ?? [])
     }
 
     /// The visible set: the active filter applied to the sorted episodes.
@@ -175,6 +180,15 @@ struct EpisodeListView: View {
         .navigationTitle(podcast.title)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)) { note in
+            guard let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey]
+                    as? PersistentIdentifier,
+                  deletedPodcastID == podcast.persistentModelID else { return }
+            dismiss()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply)) { _ in
+            if podcast.isDeleted { dismiss() }
+        }
         // Persistent episode multi-select bar (#758): Add to folder is primary and
         // its label carries the live count ("Add 3 episodes to folder") — the
         // accessibility source of truth for the count. Move to folder follows, and
@@ -595,7 +609,12 @@ struct EpisodeListView: View {
 
     private func refresh() async {
         do {
-            try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).refresh(podcast)
+            try await SubscriptionRepository(
+                context: context,
+                downloader: downloads,
+                queue: QueueRepository(context: context),
+                isEntitled: entitlements.isEntitled
+            ).refresh(podcast)
             Announcer.announce("\(podcast.title) refreshed")
         } catch {
             AppLog.subscriptions.error("Refresh failed: \(error.localizedDescription, privacy: .public)")

@@ -10,6 +10,11 @@ blocking 1.1.0 release requirement; see
 Status: development CloudKit only. Do not use this document against production
 CloudKit until the production schema has been reviewed and deployed.
 
+The playback-heat investigation tracked by #820 was confirmed resolved by
+Michael on a physical iPhone on 2026-08-13. It is not part of the remaining
+development build-193 matrix. Repeat heat profiling only if the remaining tests
+reproduce warmth, playback interruption, or VoiceOver unresponsiveness.
+
 Devices:
 
 - Michael's iPhone running the current development build.
@@ -190,33 +195,6 @@ podcast.
 9. Confirm later pause and seek commands do not recreate the podcast or episode.
 
 10. Record all times and whether any download file remained for that podcast.
-
-## Pass 6: VoiceOver and playback heat
-
-Run each sample for 30 minutes while both devices are online and occasional sync
-changes are made on the other device.
-
-1. Play at 1x for 30 minutes.
-
-2. Record start time, end time, battery percentage, perceived temperature, and
-VoiceOver responsiveness.
-
-3. Play at 1.5x for 30 minutes.
-
-4. Record start time, end time, battery percentage, perceived temperature, and
-VoiceOver responsiveness.
-
-5. Play at 2x for 30 minutes.
-
-6. Record start time, end time, battery percentage, perceived temperature, and
-VoiceOver responsiveness.
-
-7. During each sample, make one queue or playback-position change on the Mac.
-
-8. Record its iPhone arrival time.
-
-9. A pass requires no unexpected heating, no VoiceOver freeze, no routine sync
-announcement, no playback interruption, and no backward progress movement.
 
 ## Final record
 

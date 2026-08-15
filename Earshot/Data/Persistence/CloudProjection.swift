@@ -280,6 +280,7 @@ final class CloudProjectionCoordinator {
     private var historyObserver: NSObjectProtocol?
     private var folderObserver: NSObjectProtocol?
     private var reconcileTask: Task<Void, Never>?
+    private var pendingRemotePodcastDeletionFeedURLs: Set<String> = []
     private var knownLocalFeedURLs: Set<String> = []
     private var knownLocalBookmarkIDs: Set<String> = []
     private var knownLocalSessionIDs: Set<String> = []
@@ -287,6 +288,7 @@ final class CloudProjectionCoordinator {
     private let deviceID: String
     private let seedInstrumentationEnabled: () -> Bool
     private let seedMarkerRecorder: (CompactProjectionSeedMarker) -> Void
+    private let remotePodcastDeletionDelayNanoseconds: UInt64
     private var isApplyingRemote = false
 
     init(
@@ -299,7 +301,8 @@ final class CloudProjectionCoordinator {
         },
         seedMarkerRecorder: @escaping (CompactProjectionSeedMarker) -> Void = {
             CloudProjectionCoordinator.logSeedMarker($0)
-        }
+        },
+        remotePodcastDeletionDelayNanoseconds: UInt64 = 0
     ) {
         self.applicationContainer = applicationContainer
         self.projectionContainer = projectionContainer
@@ -307,6 +310,7 @@ final class CloudProjectionCoordinator {
         self.deviceID = deviceID
         self.seedInstrumentationEnabled = seedInstrumentationEnabled
         self.seedMarkerRecorder = seedMarkerRecorder
+        self.remotePodcastDeletionDelayNanoseconds = remotePodcastDeletionDelayNanoseconds
     }
 
     static func make(applicationContainer: ModelContainer) throws -> CloudProjectionCoordinator {
@@ -328,7 +332,12 @@ final class CloudProjectionCoordinator {
         let projectionContainer = try ModelContainer(for: schema, configurations: configuration)
         return CloudProjectionCoordinator(
             applicationContainer: applicationContainer,
-            projectionContainer: projectionContainer
+            projectionContainer: projectionContainer,
+            // SwiftUI can keep an outgoing VoiceOver row alive for part of the
+            // navigation-pop transition. Stop playback and dismiss first, then
+            // let that transition finish before the cascade invalidates the
+            // row's SwiftData models.
+            remotePodcastDeletionDelayNanoseconds: 750_000_000
         )
     }
 
@@ -607,8 +616,15 @@ final class CloudProjectionCoordinator {
             if row.deletedAt != nil {
                 if let podcast = try PodcastIdentityService(context: appContext)
                     .existing(feedURL: row.feedURL) {
-                    applicationChanged = SubscriptionRepository(context: appContext)
-                        .unsubscribe(podcast) || applicationChanged
+                    if remotePodcastDeletionDelayNanoseconds == 0 {
+                        // Tests and non-UI coordinators retain deterministic,
+                        // synchronous reconciliation.
+                        applicationChanged = SubscriptionRepository(context: appContext)
+                            .unsubscribe(podcast) || applicationChanged
+                    } else {
+                        scheduleRemotePodcastDeletion(podcast, feedURL: row.feedURL)
+                        applicationChanged = true
+                    }
                 }
                 continue
             }
@@ -702,6 +718,48 @@ final class CloudProjectionCoordinator {
         applicationChanged = folderChanged || applicationChanged
         if applicationChanged {
             center.post(name: .earshotCloudProjectionDidApply, object: nil)
+        }
+    }
+
+    /// A remote tombstone can arrive while the deleted podcast's episode list is
+    /// still on screen. Notify the player and presentation synchronously, then
+    /// postpone the destructive cascade until SwiftUI has completed its pop
+    /// transition. Otherwise VoiceOver may request a final label from an Episode
+    /// that SwiftData invalidated between two property reads.
+    private func scheduleRemotePodcastDeletion(_ podcast: Podcast, feedURL: String) {
+        let key = FeedURLIdentity.canonical(feedURL)
+        guard pendingRemotePodcastDeletionFeedURLs.insert(key).inserted else { return }
+
+        center.post(
+            name: .earshotWillDeleteEpisodes,
+            object: nil,
+            userInfo: [PlayerService.willDeletePodcastIDKey: podcast.persistentModelID]
+        )
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: remotePodcastDeletionDelayNanoseconds)
+            defer { pendingRemotePodcastDeletionFeedURLs.remove(key) }
+
+            // A rapid refollow may clear the tombstone while the dismissal is in
+            // flight. Re-check the winning cloud row before deleting local data.
+            let rows = (try? projectionContainer.mainContext.fetch(
+                FetchDescriptor<CloudPodcastProjection>()
+            )) ?? []
+            guard rows.contains(where: {
+                FeedURLIdentity.canonical($0.feedURL) == key && $0.deletedAt != nil
+            }) else { return }
+            guard let current = try? PodcastIdentityService(
+                context: applicationContainer.mainContext
+            ).existing(feedURL: key) else { return }
+
+            isApplyingRemote = true
+            let changed = SubscriptionRepository(context: applicationContainer.mainContext)
+                .unsubscribe(current)
+            isApplyingRemote = false
+            if changed {
+                center.post(name: .earshotCloudProjectionDidApply, object: nil)
+            }
         }
     }
 

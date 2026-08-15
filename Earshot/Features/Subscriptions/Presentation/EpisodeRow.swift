@@ -70,27 +70,36 @@ struct EpisodeRow: View {
 
     @ViewBuilder
     var body: some View {
-        let primary = actions.first
-        let base = rowButton(primaryLabel: primary.map { $0.label(for: episode) }) {
-            if let primary { performAction(primary) }
-        }
-        .episodeActionsRotor(
-            actions,
-            supplementalActions: supplementalActions,
-            episode: episode,
-            perform: performAction,
-            performSupplemental: performSupplementalAction
-        )
-        if voiceOverEnabled {
-            base
+        // A remote unfollow cascades through this episode while SwiftUI is
+        // dismissing its podcast destination. VoiceOver can ask an outgoing row
+        // for one final label during that transition. Deleted SwiftData models
+        // trap when any persisted property is faulted, so remove the entire row
+        // before constructing its label, visuals, or rotor actions.
+        if episode.isDeleted {
+            EmptyView()
         } else {
-            base.episodeActionsContextMenu(
+            let primary = actions.first
+            let base = rowButton(primaryLabel: primary.map { $0.label(for: episode) }) {
+                if let primary { performAction(primary) }
+            }
+            .episodeActionsRotor(
                 actions,
                 supplementalActions: supplementalActions,
                 episode: episode,
                 perform: performAction,
                 performSupplemental: performSupplementalAction
             )
+            if voiceOverEnabled {
+                base
+            } else {
+                base.episodeActionsContextMenu(
+                    actions,
+                    supplementalActions: supplementalActions,
+                    episode: episode,
+                    perform: performAction,
+                    performSupplemental: performSupplementalAction
+                )
+            }
         }
     }
 
@@ -133,7 +142,8 @@ struct EpisodeRow: View {
     }
 
     private var accessibilityLabel: String {
-        EpisodeRowLabel.label(
+        guard !episode.isDeleted else { return "" }
+        return EpisodeRowLabel.label(
             episodeTitle: episode.title,
             podcastName: includesPodcastName ? episode.podcast?.title : nil,
             // Numbering is spoken only when the user has opted in (#452); pass nil
@@ -155,6 +165,7 @@ struct EpisodeRow: View {
     /// cached summary (#495), comma-joined. Empty when the episode is played with
     /// no description, so VoiceOver announces no stray value.
     private var accessibilityValue: String {
+        guard !episode.isDeleted else { return "" }
         var parts: [String] = []
         if let time = EpisodeTimeLogic.spokenText(
             positionSeconds: episode.positionSeconds,
@@ -188,14 +199,17 @@ struct EpisodeRowContent: View {
     var includesPodcastName = false
 
     var body: some View {
-        // Castro-style "X min left" / total length, computed purely from stored
-        // progress (#493). Cheap arithmetic, safe to evaluate per realization.
-        let timeText = EpisodeTimeLogic.visibleText(
-            positionSeconds: episode.positionSeconds,
-            durationSeconds: episode.durationSeconds,
-            isPlayed: episode.isPlayed
-        )
-        VStack(alignment: .leading, spacing: 4) {
+        if episode.isDeleted {
+            EmptyView()
+        } else {
+            // Castro-style "X min left" / total length, computed purely from stored
+            // progress (#493). Cheap arithmetic, safe to evaluate per realization.
+            let timeText = EpisodeTimeLogic.visibleText(
+                positionSeconds: episode.positionSeconds,
+                durationSeconds: episode.durationSeconds,
+                isPlayed: episode.isPlayed
+            )
+            VStack(alignment: .leading, spacing: 4) {
             Text(episode.title)
                 .font(.body)
                 .multilineTextAlignment(.leading)
@@ -259,8 +273,9 @@ struct EpisodeRowContent: View {
                 // spoken state rides in the wrapper's single `accessibilityLabel`.
                 DownloadStateBadge(status: episode.downloadStatus)
             }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// True when this row's episode is the one loaded in the player. Compared by

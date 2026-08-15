@@ -1,0 +1,5 @@
+Chapter 61, Build 197
+
+Fixes the remaining crash when another device unfollows the podcast whose episode list is open. Outgoing episode rows now stop reading their deleted models while the screen closes, including during VoiceOver's final accessibility pass.
+
+Development iCloud testing only. Do not deploy the production CloudKit schema.

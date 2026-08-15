@@ -163,6 +163,13 @@ struct NowPlayingScreen: View {
             try? await Task.sleep(for: .milliseconds(500))
             titleFocused = true
         }
+        // Deleting the loaded episode clears the player's observed identity
+        // before SwiftData performs the cascade. Close this modal at that same
+        // boundary instead of leaving a stale, empty Now Playing destination on
+        // screen after a remote unfollow.
+        .onChange(of: player.nowPlayingEpisodeID) { _, episodeID in
+            if episodeID == nil { dismiss() }
+        }
     }
 
     // MARK: Artwork (with hold-to-fast-forward, #373)
