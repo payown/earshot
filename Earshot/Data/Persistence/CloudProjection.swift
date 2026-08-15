@@ -1091,7 +1091,11 @@ final class CloudProjectionCoordinator {
         let rows = try cloudContext.fetch(FetchDescriptor<CloudFolderProjection>())
         if onlyIfCloudEmpty, !rows.isEmpty { return }
         let folders = try appContext.fetch(FetchDescriptor<PodcastFolder>())
+        let podcastMemberships = try appContext.fetch(FetchDescriptor<FolderMembership>())
         let episodeMemberships = try appContext.fetch(FetchDescriptor<EpisodeFolderMembership>())
+        let podcastMembershipsByFolderID = Dictionary(grouping: podcastMemberships) {
+            $0.folder?.persistentModelID
+        }
         var activeByCreatedAt: [UInt64: CloudFolderProjection] = [:]
         for row in rows.filter({ $0.deletedAt == nil }).sorted(by: Self.folderProjectionOrder) {
             let key = row.createdAt.timeIntervalSinceReferenceDate.bitPattern
@@ -1115,7 +1119,13 @@ final class CloudProjectionCoordinator {
         for folder in folders.sorted(by: Self.folderOrder) {
             guard let row = rowByFolderID[folder.persistentModelID] else { continue }
             currentIDs.insert(row.folderID)
-            let podcastMembers = (folder.memberships ?? []).compactMap { membership -> CloudFolderPodcastMember? in
+            // Do not fault PodcastFolder.memberships here. A first production
+            // reconciliation after V5 migration can otherwise populate large
+            // inverse graphs synchronously on the main actor (build 202
+            // watchdog incident). Direct join-row fetches stay proportional to
+            // the small membership table rather than the episode catalog.
+            let podcastMembers = podcastMembershipsByFolderID[folder.persistentModelID, default: []]
+                .compactMap { membership -> CloudFolderPodcastMember? in
                 guard let feedURL = membership.podcast?.feedURL else { return nil }
                 return CloudFolderPodcastMember(
                     feedURL: FeedURLIdentity.canonical(feedURL),
@@ -1924,6 +1934,10 @@ final class CloudProjectionCoordinator {
             }
         }
         let existingFolders = try appContext.fetch(FetchDescriptor<PodcastFolder>())
+        let allPodcastMemberships = try appContext.fetch(FetchDescriptor<FolderMembership>())
+        let podcastMembershipsByFolderID = Dictionary(grouping: allPodcastMemberships) {
+            $0.folder?.persistentModelID
+        }
         var folderByCreatedAt: [UInt64: PodcastFolder] = [:]
         for folder in existingFolders.sorted(by: Self.folderOrder) {
             let key = folder.createdAt.timeIntervalSinceReferenceDate.bitPattern
@@ -1979,7 +1993,7 @@ final class CloudProjectionCoordinator {
                 from: row.podcastMembersJSON
             ) ?? []
             var existingPodcastMembers: [String: FolderMembership] = [:]
-            for member in folder.memberships ?? [] {
+            for member in podcastMembershipsByFolderID[folder.persistentModelID, default: []] {
                 guard let feedURL = member.podcast?.feedURL else { continue }
                 let feed = FeedURLIdentity.canonical(feedURL)
                 if existingPodcastMembers[feed] == nil {

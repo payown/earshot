@@ -4,6 +4,102 @@ import XCTest
 
 @MainActor
 final class CloudProjectionCoordinatorTests: XCTestCase {
+    /// Reproduces the build-202 failure shape: a cold, production-sized catalog
+    /// with more OPML subscriptions than the reported 60-feed library, followed
+    /// by first compact-projection reconciliation and a folder-subtree read.
+    /// This is opt-in because constructing 54,000 persisted Episodes is too
+    /// expensive for every unit-test run; it is mandatory for release candidates.
+    func testLargeMigratedLibraryFirstProjectionAndFolderReadStayBelowWatchdog() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["RUN_CLOUD_PROJECTION_SCALE"] != nil,
+            "Set TEST_RUNNER_RUN_CLOUD_PROJECTION_SCALE=1 for the build-202 watchdog regression."
+        )
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "cloud-watchdog-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let applicationURL = root.appending(path: "application.store")
+        let localURL = root.appending(path: "local.store")
+        let projectionURL = root.appending(path: "projection.store")
+        let feedCount = 120
+        let episodesPerFeed = 450
+
+        try autoreleasepool {
+            let app = try makeOnDiskApplicationContainer(
+                applicationURL: applicationURL,
+                localURL: localURL
+            )
+            let context = app.mainContext
+            let parent = PodcastFolder(name: "Imported", createdAt: Date(timeIntervalSince1970: 1))
+            let child = PodcastFolder(name: "Large OPML", createdAt: Date(timeIntervalSince1970: 2))
+            child.parent = parent
+            context.insert(parent)
+            context.insert(child)
+            for feedIndex in 0..<feedCount {
+                let podcast = Podcast(
+                    feedURL: "https://scale.example/\(feedIndex)/feed",
+                    title: String(format: "Show %03d", feedIndex)
+                )
+                context.insert(podcast)
+                context.insert(FolderMembership(
+                    folder: child,
+                    podcast: podcast,
+                    sortOrder: feedIndex
+                ))
+                for episodeIndex in 0..<episodesPerFeed {
+                    let episode = Episode(
+                        guid: "\(feedIndex)-\(episodeIndex)",
+                        title: "Episode \(episodeIndex)",
+                        audioURL: "https://scale.example/\(feedIndex)/\(episodeIndex).mp3"
+                    )
+                    episode.podcast = podcast
+                    context.insert(episode)
+                }
+                if feedIndex.isMultiple(of: 5) { try context.save() }
+            }
+            try context.save()
+        }
+
+        let app = try makeOnDiskApplicationContainer(
+            applicationURL: applicationURL,
+            localURL: localURL
+        )
+        let projection = try makeOnDiskProjectionContainer(at: projectionURL)
+        let started = ContinuousClock.now
+        try CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "scale-phone"
+        ).reconcile()
+        let folders = try app.mainContext.fetch(FetchDescriptor<PodcastFolder>())
+        let parent = try XCTUnwrap(folders.first { $0.name == "Imported" })
+        let subscriptions = FolderRepository(context: app.mainContext)
+            .subtreeSubscriptions(of: parent)
+        let elapsed = ContinuousClock.now - started
+        let components = elapsed.components
+        let seconds = Double(components.seconds) + Double(components.attoseconds) / 1e18
+
+        XCTAssertEqual(subscriptions.count, feedCount)
+        XCTAssertEqual(
+            try app.mainContext.fetchCount(FetchDescriptor<Episode>()),
+            feedCount * episodesPerFeed
+        )
+        XCTAssertEqual(
+            try projection.mainContext.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
+            feedCount
+        )
+        XCTAssertLessThan(
+            seconds,
+            5,
+            "First reconciliation and folder scope consumed half the iOS scene watchdog budget"
+        )
+        print(String(format:
+            "CLOUDWATCHDOG|feeds|%d|episodes|%d|seconds|%.3f",
+            feedCount, feedCount * episodesPerFeed, seconds
+        ))
+    }
+
     func testDevelopmentSeedMarkersBracketDurableProjectionWithAllEntityCounts() throws {
         let app = try makeApplicationContainer()
         app.mainContext.insert(Podcast(feedURL: "https://example.com/feed", title: "Show"))

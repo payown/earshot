@@ -9,6 +9,7 @@ struct FolderPodcastPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var folder: PodcastFolder
     @Query(sort: \Podcast.title) private var podcasts: [Podcast]
+    @Query private var memberships: [FolderMembership]
 
     var body: some View {
         NavigationStack {
@@ -61,7 +62,12 @@ struct FolderPodcastPickerView: View {
     }
 
     private func isMember(_ podcast: Podcast) -> Bool {
-        (folder.memberships ?? []).contains { $0.podcast?.persistentModelID == podcast.persistentModelID }
+        let podcastID = podcast.persistentModelID
+        let folderID = folder.persistentModelID
+        return memberships.contains {
+            $0.podcast?.persistentModelID == podcastID
+                && $0.folder?.persistentModelID == folderID
+        }
     }
 
     private func toggle(_ podcast: Podcast) {

@@ -213,12 +213,8 @@ struct PodcastSettingsView: View {
     /// breadcrumb path. Recomputed whenever the body re-evaluates — including
     /// when the picker sheet is dismissed after an immediate-write edit.
     private var containingFolders: [PodcastFolder] {
-        allFolders
-            .filter { folder in
-                (folder.memberships ?? []).contains {
-                    $0.podcast?.persistentModelID == podcast.persistentModelID
-                }
-            }
+        guard !allFolders.isEmpty else { return [] }
+        return FolderRepository(context: modelContext).folders(containing: podcast)
             .sorted { FolderLogic.pathString($0) < FolderLogic.pathString($1) }
     }
 

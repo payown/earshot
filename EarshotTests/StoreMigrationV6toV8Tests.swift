@@ -1782,6 +1782,50 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             try integrityCheck(at: StoreMigration.localStoreURL(for: storeURL)), ["ok"]
         )
         assertRealStatePreserved(try realV10StateSnapshot(), sourceState)
+
+        // Build 202 was terminated during the first production reconciliation
+        // after this migration path. Exercise that transition against the real
+        // 53,946-episode fixture, not only the synthetic scale store.
+        let projectionSchema = Schema([
+            CloudPodcastProjection.self,
+            CloudEpisodeStateProjection.self,
+            CloudQueueItemProjection.self,
+            CloudSettingProjection.self,
+            CloudBookmarkProjection.self,
+            CloudListeningSessionProjection.self,
+            CloudFolderProjection.self,
+        ])
+        let projection = try ModelContainer(
+            for: projectionSchema,
+            configurations: ModelConfiguration(
+                "RealV5PostMigrationProjection",
+                schema: projectionSchema,
+                isStoredInMemoryOnly: true,
+                cloudKitDatabase: .none
+            )
+        )
+        let reconcileStart = DispatchTime.now().uptimeNanoseconds
+        try CloudProjectionCoordinator(
+            applicationContainer: migrated,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "real-v5-fixture"
+        ).reconcile()
+        let reconcileElapsed = Double(
+            DispatchTime.now().uptimeNanoseconds - reconcileStart
+        ) / 1_000_000_000
+        XCTAssertEqual(
+            try projection.mainContext.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
+            10
+        )
+        XCTAssertLessThan(
+            reconcileElapsed, 5,
+            "First post-migration reconciliation consumed half the iOS scene watchdog budget"
+        )
+        print(String(format:
+            "REALV5POSTMIGRATION|episodes|%d|projectionSeconds|%.3f",
+            53_946, reconcileElapsed
+        ))
         let afterBytes = try storeSetSize()
         print(String(format:
             "REALV5MIGRATION|seconds|%.3f|beforeBytes|%lld|afterBytes|%lld"
