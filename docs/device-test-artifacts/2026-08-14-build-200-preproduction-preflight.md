@@ -215,4 +215,6 @@ integrity checks. The targeted settings, reset-race, projection, and orphan
 cleanup regressions pass. The final full build-201 run passed 1,808 tests with
 26 documented skips and zero failures. The replacement signed 1.1.0 (201)
 Release archive at `/tmp/Earshot-build201-final.xcarchive` passed strict code
-signature verification. This destructive-reset gate is closed.
+signature verification. Michael then confirmed through the physical iPhone UI
+and VoiceOver workflow that the Library was fully empty. This destructive-reset
+gate is closed.
