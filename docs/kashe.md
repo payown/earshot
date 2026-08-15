@@ -456,6 +456,10 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   position move between them, while a downloaded show stays only on the device
   that downloaded it. Her line to Renata is, "Both copies. Not the same copy"
   (Chapter 62)
+- The small player now has a physical home above the tabs that VoiceOver can
+  find under Kashe's finger, not only by flicking backward from the tab bar. A
+  podcast's episode order is also one reversible choice—oldest to newest or
+  newest to oldest—and changing it never starts the show (Chapter 63)
 - Her Thursday client is out past a grain elevator where the cell signal quits
   for good; she reaches it by a gravel road. On Sunday planning nights (Chapter
   43) she used to run a second chore after building the queue: manually download
@@ -2076,5 +2080,62 @@ Kashe checked the downloaded show for the gravel road. Still downloaded, only he
 “Both copies?” Renata asked later.
 
 “Both copies,” Kashe said. “Not the same copy.”
+
+---
+
+### Chapter 63 — Build 202
+
+*Where her finger says it is*
+
+**What changed**
+
+The mini player now stays in its own place above the tab bar on iOS 26. With
+VoiceOver, you can find the title and playback controls by exploring that part
+of the screen with one finger, as well as by swiping.
+
+Podcast episode sorting is now one reversible control: “Sort oldest to newest”
+or “Sort newest to oldest.” It never starts playback or changes the queue.
+
+This build uses Earshot's production private-iCloud schema. Followed podcasts,
+folders, queue state, playback position, bookmarks, listening history, and
+shared settings can synchronize between devices. Downloads and purchase access
+stay on the device where they belong.
+
+**What to test**
+
+With VoiceOver on, start an episode and move one finger upward from the tab bar.
+Confirm you can find the mini player and each visible control where it appears.
+
+Open a podcast and activate the chronological sort control twice. Confirm the
+episode order reverses each time, the button name changes, and no audio starts.
+
+On two devices using the same iCloud account, change the queue, a folder, a
+bookmark, or playback position and confirm it arrives. Try one change offline,
+reopen Earshot, reconnect, and report how long it takes. Report missing data,
+repeated announcements, unusual warmth, or unexpected focus movement.
+
+Kashe found the player the old way because the old way worked.
+
+She put VoiceOver on Library and flicked back once. Now Playing. She had done it
+often enough that the motion belonged to her hand, not her attention.
+
+Then Renata asked her to touch where the player was.
+
+Kashe slid one finger upward from Library. The episode title met her there. A
+little farther across: skip back, pause, skip forward. The controls occupied the
+same place under her finger that they occupied on the screen.
+
+“That is better,” she said. Not because swiping was difficult. Because a thing
+should be where it says it is.
+
+In the podcast list she found another old workaround removed. The button no
+longer promised an order and then began talking. It offered oldest to newest.
+She pressed it. The list reversed and stayed quiet. The same button now offered
+newest to oldest.
+
+On the other device, the queue change from the kitchen arrived. The download
+for the gravel road did not. Both copies, still. Each thing in its proper place.
+
+Kashe put the phone in her pocket without checking a second time.
 
 More chapters added here as Earshot ships.
