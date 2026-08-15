@@ -183,7 +183,9 @@ destructive-dialog cancellation, folder create/rename/delete without
 resurrection, bookmark delivery, forward progress, and explicit rewind.
 
 Test 5's visual largest-Dynamic-Type inspection is intentionally deferred to
-sighted testers. Actual account switching remains under #814.
+sighted testers. On 2026-08-15 Michael explicitly waived the remaining
+signed-out/unavailable and account-change device cases and accepted them as
+tester-feedback coverage; #814 is complete.
 
 ### Test 10: committed destructive reset — build 200 failed; build 201 fix in verification
 
