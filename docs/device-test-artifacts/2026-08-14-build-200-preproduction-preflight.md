@@ -183,6 +183,36 @@ destructive-dialog cancellation, folder create/rename/delete without
 resurrection, bookmark delivery, forward progress, and explicit rewind.
 
 Test 5's visual largest-Dynamic-Type inspection is intentionally deferred to
-sighted testers. Actual account switching and committed destructive reset remain
-under #814 and require a disposable account/dataset; they were not run against
-Michael's 1,045-podcast Development library.
+sighted testers. Actual account switching remains under #814.
+
+### Test 10: committed destructive reset — build 200 failed; build 201 fix in verification
+
+Michael explicitly authorized deleting the Development library and invoked
+Delete Synced Library Everywhere from the Mac while Earshot was open on the
+iPhone. The Mac cleared its application rows and created tombstones for all
+library projections, but then became unresponsive; the iPhone remained
+populated. A process sample captured at
+`/tmp/Earshot-build200-everywhere-delete-hang.sample.txt` showed the main thread
+stuck during root-service activation when the fresh replacement container
+synchronously saved podcast-cap initialization settings while SwiftUI was
+attaching SwiftData observers.
+
+The post-failure Mac snapshot is retained at
+`/tmp/Earshot-build200-failed-everywhere-delete-mac`; integrity checks passed for
+all three stores. The fix initializes both one-time settings in one save before
+publishing the replacement container. Build 201 reopened the exact failed-state
+Mac database successfully. Its main thread was idle in the normal application
+event loop in `/tmp/Earshot-build201-post-delete.sample.txt`, with neither the
+former settings-save frame nor the SwiftData notification deadlock present.
+The first build-200 phone import removed subscriptions but exposed a second
+launch race: cold feed refresh left 33 detached Episode rows and one detached
+ListeningSession after their Podcasts were deleted. Build 201 now waits for an
+active refresh before remote cascade deletion and removes invalid orphan rows
+during reconciliation. After installing build 201 without invoking Delete
+again, the phone converged to zero Podcasts, Episodes, QueueItems, Bookmarks,
+ListeningSessions, and PodcastFolders. All three phone SQLite stores passed
+integrity checks. The targeted settings, reset-race, projection, and orphan
+cleanup regressions pass. The final full build-201 run passed 1,808 tests with
+26 documented skips and zero failures. The replacement signed 1.1.0 (201)
+Release archive at `/tmp/Earshot-build201-final.xcarchive` passed strict code
+signature verification. This destructive-reset gate is closed.

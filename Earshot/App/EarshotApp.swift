@@ -715,7 +715,13 @@ final class AppRuntime {
             guard deleted, let self else { return false }
             let engine = StoreMigrationEngine()
             let load = await ModelContainerFactory.makeShared(using: engine)
-            guard case .ready = load else { return false }
+            guard case .ready(let container) = load else { return false }
+            // Seed one-time launch settings before publishing the replacement
+            // container. Publishing first lets RootView synchronously save while
+            // SwiftUI is attaching its SwiftData observers, which can deadlock
+            // the main thread immediately after Delete Synced Library Everywhere.
+            AppSettingsStore(context: container.mainContext)
+                .introducePodcastCapGatingIfNeeded(currentPodcastCount: 0)
             self.install(load)
             return true
         }

@@ -503,8 +503,31 @@ final class AppSettingsStore {
     /// launch `.task`, before any subscribe action can occur.
     func introducePodcastCapGatingIfNeeded(currentPodcastCount: Int) {
         guard !podcastCapGatingIntroduced() else { return }
-        setInt(currentPodcastCount, for: SettingsKey.grandfatheredPodcastCount)
-        setBool(true, for: SettingsKey.podcastCapGatingIntroduced)
+        do {
+            try AppSettingIdentity.setValue(
+                String(currentPodcastCount),
+                for: SettingsKey.grandfatheredPodcastCount,
+                in: context
+            )
+            try AppSettingIdentity.setValue(
+                "true",
+                for: SettingsKey.podcastCapGatingIntroduced,
+                in: context
+            )
+            try context.save()
+            NotificationCenter.default.post(
+                name: .earshotMirroredSettingDidChange,
+                object: SettingsKey.grandfatheredPodcastCount
+            )
+            NotificationCenter.default.post(
+                name: .earshotMirroredSettingDidChange,
+                object: SettingsKey.podcastCapGatingIntroduced
+            )
+        } catch {
+            AppLog.data.error(
+                "Podcast cap initialization failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     private func save() {
