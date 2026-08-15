@@ -187,6 +187,11 @@ struct RootView: View {
             .tabItem { Label("Settings", systemImage: "gearshape") }
             .tag(RootTab.settings)
         }
+        // On iOS 26, make the player a native persistent tab accessory. Unlike
+        // a per-tab safe-area inset, the system owns its geometry relative to
+        // the floating tab bar, so VoiceOver Explore by Touch finds the player
+        // where it is visibly presented (#840).
+        .modifier(TabPlayerAccessory())
         // Native UITabBarItem badge for the Inbox unread count (#321 follow-up):
         // re-applies whenever `inboxBadgeCount` changes. Replaces SwiftUI's
         // `.badge`, which double-announced the count under VoiceOver.
@@ -521,16 +526,21 @@ enum RootTab: Hashable {
     }
 }
 
-/// Per-tab chrome: the mini player inset above the system tab bar. Applied to
-/// each tab's `NavigationStack` rather than to the `TabView` — attaching an inset
-/// to the TabView itself pushes it into the TabView's safe area, which overlaps
-/// and hides the system tab bar (#366). Attached to the tab content, it floats
-/// correctly and the system handles positioning across devices and Dynamic Type
-/// sizes. `NowPlayingBar` renders nothing while nothing is loaded, so it adds no
-/// inset until needed.
+/// Per-tab chrome for systems before iOS 26. The legacy mini-player inset stays
+/// on each tab's `NavigationStack`; attaching that inset to the `TabView` itself
+/// overlaps and hides the system tab bar (#366). iOS 26 instead uses the native
+/// `tabViewBottomAccessory` installed by ``TabPlayerAccessory`` below (#840).
 private struct TabChrome: ViewModifier {
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
+        if #available(iOS 26.0, *) {
+            // The TabView-level accessory supplies the mini player on iOS 26.
+            // Keep the content priority that established the desired flick
+            // order in #730 without creating five hidden player instances.
+            content
+                .accessibilitySortPriority(1)
+        } else {
+            content
             // Reading order (#730): the mini player sits visually at the BOTTOM
             // (just above the tab bar) and touch exploration finds it there, but
             // safeAreaInset content is declared first, so VoiceOver flick order
@@ -547,5 +557,23 @@ private struct TabChrome: ViewModifier {
                     // Read LAST, after the tab's content (priority 1 above).
                     .accessibilitySortPriority(0)
             }
+        }
+    }
+}
+
+/// Hosts the mini player in the system-managed tab accessory introduced in
+/// iOS 26. Earlier systems retain the proven per-tab safe-area inset above.
+private struct TabPlayerAccessory: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .tabViewBottomAccessory {
+                    NowPlayingBar()
+                        .accessibilitySortPriority(0)
+                }
+        } else {
+            content
+        }
     }
 }
