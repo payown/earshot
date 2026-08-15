@@ -17,7 +17,7 @@ until the pre-production gate passes and Michael explicitly approves each action
 - [x] Schema tests prove both V10 application stores use CloudKit `.none` and
   only the seven-entity compact projection uses the private container.
 - [x] Full non-StoreKit suite passes with only documented skips.
-- [ ] GitHub Actions passes on the exact candidate commit.
+- [x] GitHub Actions passes on the exact candidate commit.
 - [x] Signed Release archive and local App Store Connect export report build 200, the production APS environment,
   `iCloud.media.payown.earshot`, CloudKit service, and the expected team.
 - [x] Exported Info.plist contains `EarshotCloudKitEnabled=YES`.
@@ -29,6 +29,7 @@ until the pre-production gate passes and Michael explicitly approves each action
 
 - Focused CloudKit launch-policy/schema gate: 10 executed, 0 failed.
 - Full local CI: 1,845 executed, 38 documented skips, 0 failed.
+- GitHub Actions run `31856466206`: passed in 1 minute 27 seconds.
 - First full-suite attempt ran no tests because the dedicated simulator rejected
   launch as `Busy`. After a clean boot of that simulator, the unchanged candidate
   passed. This was runner state, not a product or test failure.
