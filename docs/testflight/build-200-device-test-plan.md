@@ -46,13 +46,10 @@ until the pre-production gate passes and Michael explicitly approves each action
   team `72PH974742`, `get-task-allow=false`, and beta reports active.
 - Notes length: 2,361 characters.
 
-### Open source blocker: Privacy footer approval
+### Privacy footer correction
 
-`PrivacySettingsView` still says subscriptions, listening history, and settings
-“stay on this device.” That statement predates production sync and is false for
-build 200. The hosted privacy policy and App Store privacy inventory already
-describe private iCloud correctly. Repository rules require Michael's explicit
-approval before changing this user-facing VoiceOver-readable copy.
+Michael approved the replacement wording, and `PrivacySettingsView` now
+accurately describes private-iCloud synchronization and device-local data.
 
 Proposed replacement footer:
 
@@ -61,8 +58,8 @@ Proposed replacement footer:
 > Downloads, purchase access, and device-only settings stay on this device. No
 > crash reporting, analytics, third-party trackers, or advertising IDs.
 
-Do not mark build 200 ready or upload it until the approved wording is in the
-candidate and the affected presentation tests pass.
+Focused Settings tests passed after the correction. This source blocker is
+closed; physical VoiceOver verification remains part of Phase A.
 
 ## Phase A: development-environment safety batch
 
