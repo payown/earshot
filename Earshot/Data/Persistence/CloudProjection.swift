@@ -297,7 +297,7 @@ final class CloudProjectionCoordinator {
         center: NotificationCenter = .default,
         deviceID: String = CloudProjectionDeviceIdentity.value(),
         seedInstrumentationEnabled: @escaping () -> Bool = {
-            CloudKitLaunchPolicy.isDevelopmentMirroringEnabled()
+            CloudKitLaunchPolicy.isMirroringEnabled()
         },
         seedMarkerRecorder: @escaping (CompactProjectionSeedMarker) -> Void = {
             CloudProjectionCoordinator.logSeedMarker($0)
@@ -638,6 +638,8 @@ final class CloudProjectionCoordinator {
             }
             applicationChanged = applicationChanged || result.inserted
         }
+        applicationChanged = try removeOrphanedLibraryRows(in: appContext)
+            || applicationChanged
         if appContext.hasChanges {
             try appContext.save()
             applicationChanged = true
@@ -741,6 +743,12 @@ final class CloudProjectionCoordinator {
             try? await Task.sleep(nanoseconds: remotePodcastDeletionDelayNanoseconds)
             defer { pendingRemotePodcastDeletionFeedURLs.remove(key) }
 
+            // Cold-launch feed refresh and CloudKit import can begin together.
+            // Let any refresh unwind before deleting its Podcast, or that refresh
+            // can save newly fetched Episodes after the cascade and leave them
+            // detached from every subscription.
+            await BackgroundFeedRefresher.cancelAndWait()
+
             // A rapid refollow may clear the tombstone while the dismissal is in
             // flight. Re-check the winning cloud row before deleting local data.
             let rows = (try? projectionContainer.mainContext.fetch(
@@ -756,11 +764,32 @@ final class CloudProjectionCoordinator {
             isApplyingRemote = true
             let changed = SubscriptionRepository(context: applicationContainer.mainContext)
                 .unsubscribe(current)
+            let removedOrphans = (try? removeOrphanedLibraryRows(
+                in: applicationContainer.mainContext
+            )) ?? false
+            if applicationContainer.mainContext.hasChanges {
+                try? applicationContainer.mainContext.save()
+            }
             isApplyingRemote = false
-            if changed {
+            if changed || removedOrphans {
                 center.post(name: .earshotCloudProjectionDidApply, object: nil)
             }
         }
+    }
+
+    /// Removes invalid residue from a refresh that raced an older build's
+    /// remote-unfollow cascade. Episodes cannot be useful without a Podcast,
+    /// and unsubscribe intentionally removes that podcast's listening history.
+    private func removeOrphanedLibraryRows(in context: ModelContext) throws -> Bool {
+        let sessions = try context.fetch(FetchDescriptor<ListeningSession>(
+            predicate: #Predicate { $0.podcast == nil }
+        ))
+        let episodes = try context.fetch(FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.podcast == nil }
+        ))
+        for session in sessions { context.delete(session) }
+        for episode in episodes { context.delete(episode) }
+        return !sessions.isEmpty || !episodes.isEmpty
     }
 
     /// Writes only meaningful, user-authored episode state. A 232,000-row feed

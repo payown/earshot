@@ -3,32 +3,32 @@ import SwiftData
 @testable import Earshot
 
 final class CloudKitLaunchPolicyTests: XCTestCase {
-    func testDevelopmentMirroringIsDisabledWhenBuildSettingIsAbsent() {
-        XCTAssertFalse(CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(infoDictionary: [:]))
+    func testMirroringIsDisabledWhenBuildSettingIsAbsent() {
+        XCTAssertFalse(CloudKitLaunchPolicy.isMirroringEnabled(infoDictionary: [:]))
     }
 
     func testDevelopmentMirroringIsDisabledByOrdinaryBuildDefault() {
-        XCTAssertFalse(CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(
+        XCTAssertFalse(CloudKitLaunchPolicy.isMirroringEnabled(
             infoDictionary: [CloudKitLaunchPolicy.infoKey: "NO"]
         ))
     }
 
     func testExplicitCommandLineBuildOverrideEnablesDevelopmentMirroring() {
-        XCTAssertTrue(CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(
+        XCTAssertTrue(CloudKitLaunchPolicy.isMirroringEnabled(
             infoDictionary: [CloudKitLaunchPolicy.infoKey: "YES"]
         ))
     }
 
     func testBooleanInfoDictionaryValuesAreAccepted() {
-        XCTAssertTrue(CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(
+        XCTAssertTrue(CloudKitLaunchPolicy.isMirroringEnabled(
             infoDictionary: [CloudKitLaunchPolicy.infoKey: true]
         ))
-        XCTAssertFalse(CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(
+        XCTAssertFalse(CloudKitLaunchPolicy.isMirroringEnabled(
             infoDictionary: [CloudKitLaunchPolicy.infoKey: false]
         ))
     }
 
-    func testDevelopmentBuildMirrorsProjectionButNotApplicationStore() {
+    func testEnabledBuildMirrorsProjectionButNotApplicationStore() {
         let enabled = [CloudKitLaunchPolicy.infoKey: "YES"]
         XCTAssertTrue(
             String(describing: CloudKitLaunchPolicy.mirroredDatabase(infoDictionary: enabled))

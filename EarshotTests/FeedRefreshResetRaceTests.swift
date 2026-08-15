@@ -155,7 +155,10 @@ final class FeedRefreshResetRaceTests: XCTestCase {
 
         XCTAssertTrue(reset)
         XCTAssertFalse(ModelContainerFactory.hasStoreFiles(at: primary))
-        XCTAssertNotNil(runtime.readyContainer)
+        let replacement = try XCTUnwrap(runtime.readyContainer)
+        let replacementSettings = AppSettingsStore(context: replacement.mainContext)
+        XCTAssertTrue(replacementSettings.podcastCapGatingIntroduced())
+        XCTAssertEqual(replacementSettings.grandfatheredPodcastCount(), 0)
     }
 
     func testResetCancelsInFlightRefreshBeforeDisposableFileReset() async throws {

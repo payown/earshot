@@ -102,6 +102,43 @@ final class SchemaDriftTests: XCTestCase {
 
 @MainActor
 final class CloudKitSchemaCompatibilityTests: XCTestCase {
+    func testCompactProjectionHasOnlyApprovedRelationshipFreeEntities() {
+        let projection = Schema([
+            CloudPodcastProjection.self,
+            CloudEpisodeStateProjection.self,
+            CloudQueueItemProjection.self,
+            CloudSettingProjection.self,
+            CloudBookmarkProjection.self,
+            CloudListeningSessionProjection.self,
+            CloudFolderProjection.self,
+        ])
+        XCTAssertEqual(
+            Set(projection.entities.map(\.name)),
+            [
+                "CloudPodcastProjection",
+                "CloudEpisodeStateProjection",
+                "CloudQueueItemProjection",
+                "CloudSettingProjection",
+                "CloudBookmarkProjection",
+                "CloudListeningSessionProjection",
+                "CloudFolderProjection",
+            ]
+        )
+        for entity in projection.entities {
+            XCTAssertTrue(entity.relationships.isEmpty, "Unexpected relationship: \(entity.name)")
+            for attribute in entity.attributes {
+                XCTAssertFalse(
+                    attribute.options.contains(.unique),
+                    "Unexpected unique attribute: \(entity.name).\(attribute.name)"
+                )
+                XCTAssertTrue(
+                    attribute.isOptional || attribute.defaultValue != nil,
+                    "Missing CloudKit default: \(entity.name).\(attribute.name)"
+                )
+            }
+        }
+    }
+
     func testV10ConfigurationMembershipPermanentlySeparatesLocalData() {
         XCTAssertEqual(
             Set(Schema(EarshotSchemaV10.mirroredModels).entities.map(\.name)),

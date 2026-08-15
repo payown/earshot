@@ -210,6 +210,25 @@ entities. The instrumentation is gated by
 not create, seed, or open the projection store. Version 1.1.0 is approved as a
 migration-only TestFlight release with that Release gate remaining `NO`.
 
+Builds 187 through 199 are development-only compact-CloudKit verification and
+correction builds. They retain fresh-store schema V10 and the supported V5/V6
+migration floor. Their measured device work covers feed ingestion, bounded
+refresh and OPML import, honest iCloud status, queue and playback reconciliation,
+concurrent remote unfollow, and safe Now Playing dismissal. Build 199 passed the
+final two-device remote-unfollow presentation test and is recorded in
+`docs/testflight/build-199-device-test-plan.md`. None of these builds deployed a
+production CloudKit schema.
+
+Build 200 is the first production-release candidate that enables the compact
+private CloudKit projection in the Release configuration. Debug remains
+local-only; the explicit CloudKit Development configuration remains available
+for pre-production testing. The signing profile selects the CloudKit environment.
+Both V10 application stores remain local-only and only the relationship-free
+seven-entity projection is eligible for private CloudKit mirroring. Fresh-store
+schema remains V10; supported migration sources remain V5 and V6. Production
+schema deployment and TestFlight upload remain separate, explicitly approved
+release actions.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App
