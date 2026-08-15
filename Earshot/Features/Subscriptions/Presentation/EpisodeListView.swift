@@ -102,20 +102,6 @@ struct EpisodeListView: View {
         )
     }
 
-    /// Persists and announces only on a genuine user change. The global sort is
-    /// loaded by ``SettingsStore/configure(context:)`` (not by this view), so the
-    /// binding fires only on a real pick and never speaks on load.
-    private var sortSelection: Binding<EpisodeSortOrder> {
-        Binding(
-            get: { settings.episodeSortOrder },
-            set: { newValue in
-                guard newValue != settings.episodeSortOrder else { return }
-                settings.episodeSortOrder = newValue
-                Announcer.announce(newValue.announcement)
-            }
-        )
-    }
-
     var body: some View {
         List {
             Section {
@@ -132,7 +118,7 @@ struct EpisodeListView: View {
             }
             if !filteredSortedEpisodes.isEmpty {
                 Section {
-                    bingeButton
+                    chronologicalSortButton
                 }
             }
             if sortedEpisodes.isEmpty && podcast.refreshedAt == nil {
@@ -224,20 +210,6 @@ struct EpisodeListView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Picker("Sort episodes", selection: sortSelection) {
-                        ForEach(EpisodeSortOrder.allCases) { order in
-                            Text(order.title).tag(order)
-                        }
-                    }
-                } label: {
-                    Label("Sort episodes", systemImage: "arrow.up.arrow.down")
-                }
-                // Speak the active order on the menu button itself so VoiceOver
-                // users know the current sort without opening the menu.
-                .accessibilityValue(settings.episodeSortOrder.title)
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 // Bulk "Mark all as played" (#640) for shows with hundreds or
                 // thousands of episodes, where scrolling to mark each one is
@@ -515,28 +487,17 @@ struct EpisodeListView: View {
         Announcer.announce(MarkAllPlayedAnnouncement.text(count: count), assertive: true)
     }
 
-    /// Podcast-level "Play oldest first" binge entry point (#488). Seeds the
-    /// queue with the active-filter set and starts the oldest episode, so
-    /// auto-advance continues through this podcast oldest→newest instead of
-    /// jumping to an unrelated inbox episode.
-    private var bingeButton: some View {
-        Button(action: playOldestFirst) {
-            Label("Play oldest first", systemImage: "play.circle")
+    /// A reversible chronological sort control. Sorting changes only the list's
+    /// presentation; it never starts playback or mutates the queue.
+    private var chronologicalSortButton: some View {
+        let target = settings.episodeSortOrder.chronologicalToggleTarget
+        return Button {
+            settings.episodeSortOrder = target
+            Announcer.announce(target.announcement)
+        } label: {
+            Label(settings.episodeSortOrder.chronologicalToggleTitle, systemImage: "arrow.up.arrow.down")
         }
-        .accessibilityLabel("Play oldest first")
-        .accessibilityHint("Plays this podcast's episodes from oldest to newest")
-    }
-
-    /// Starts the binge run from the currently visible (filtered) episodes.
-    private func playOldestFirst() {
-        let episodes = filteredSortedEpisodes
-        guard !episodes.isEmpty else { return }
-        let repo = QueueRepository(context: context)
-        guard let first = repo.bingeOldestFirst(podcast, episodes: episodes) else { return }
-        // playFromEpisodeList so the binge honors the #562 open-player setting (Item 1).
-        player.playFromEpisodeList(first)
-        let noun = episodes.count == 1 ? "episode" : "episodes"
-        Announcer.announce("Playing \(podcast.title) oldest first, \(episodes.count) \(noun)")
+        .accessibilityHint("Changes the episode order without starting playback")
     }
 
     private var header: some View {

@@ -4,8 +4,8 @@ import XCTest
 /// Unit tests for the pure ``EpisodeSortOrder`` ordering logic (#459).
 ///
 /// Ordering is pure and testable without a model context (mirrors
-/// ``EpisodeListFilterTests`` and ``LibrarySortTests``). Covers alphabetical
-/// article-stripping reuse, date ascending/descending, undated-last behavior,
+/// ``EpisodeListFilterTests`` and ``LibrarySortTests``). Covers date
+/// ascending/descending, undated-last behavior,
 /// deterministic tie-breaking, and the label/announcement strings.
 @MainActor
 final class EpisodeSortOrderTests: XCTestCase {
@@ -34,51 +34,32 @@ final class EpisodeSortOrderTests: XCTestCase {
     // MARK: title
 
     func testTitles() {
-        XCTAssertEqual(EpisodeSortOrder.alphabetical.title, "Alphabetical")
-        XCTAssertEqual(EpisodeSortOrder.latestFirst.title, "Latest first")
-        XCTAssertEqual(EpisodeSortOrder.latestLast.title, "Latest last")
+        XCTAssertEqual(EpisodeSortOrder.latestFirst.title, "Newest to oldest")
+        XCTAssertEqual(EpisodeSortOrder.latestLast.title, "Oldest to newest")
     }
 
     // MARK: announcement
 
     func testAnnouncementWording() {
-        XCTAssertEqual(EpisodeSortOrder.alphabetical.announcement, "Sorted by Alphabetical")
-        XCTAssertEqual(EpisodeSortOrder.latestFirst.announcement, "Sorted by Latest first")
-        XCTAssertEqual(EpisodeSortOrder.latestLast.announcement, "Sorted by Latest last")
+        XCTAssertEqual(EpisodeSortOrder.latestFirst.announcement, "Sorted by Newest to oldest")
+        XCTAssertEqual(EpisodeSortOrder.latestLast.announcement, "Sorted by Oldest to newest")
     }
 
     // MARK: rawValue round-trip
 
     func testRawValuesRoundTrip() {
-        for order in EpisodeSortOrder.allCases {
+        for order in [EpisodeSortOrder.latestFirst, .latestLast] {
             XCTAssertEqual(EpisodeSortOrder(rawValue: order.rawValue), order)
         }
     }
 
-    // MARK: alphabetical — reuses LibrarySort (leading articles ignored)
+    // MARK: chronological toggle
 
-    func testAlphabeticalIgnoresLeadingArticle() {
-        // "The Daily" must file under D, so it sorts after "Comedy" and
-        // before "Economics" — proving the leading article is stripped the
-        // same way the Library list treats it.
-        let episodes = [
-            makeEpisode("1", title: "Economics"),
-            makeEpisode("2", title: "The Daily"),
-            makeEpisode("3", title: "Comedy"),
-        ]
-        let sorted = EpisodeSortOrder.alphabetical.sorted(episodes)
-        XCTAssertEqual(sorted.map(\.title), ["Comedy", "The Daily", "Economics"])
-    }
-
-    func testAlphabeticalUsesNaturalNumberOrder() {
-        // localizedStandardCompare (via LibrarySort) orders 2 before 10.
-        let episodes = [
-            makeEpisode("1", title: "Episode 10"),
-            makeEpisode("2", title: "Episode 2"),
-            makeEpisode("3", title: "Episode 1"),
-        ]
-        let sorted = EpisodeSortOrder.alphabetical.sorted(episodes)
-        XCTAssertEqual(sorted.map(\.title), ["Episode 1", "Episode 2", "Episode 10"])
+    func testChronologicalToggleIsReversible() {
+        XCTAssertEqual(EpisodeSortOrder.latestFirst.chronologicalToggleTarget, .latestLast)
+        XCTAssertEqual(EpisodeSortOrder.latestFirst.chronologicalToggleTitle, "Sort oldest to newest")
+        XCTAssertEqual(EpisodeSortOrder.latestLast.chronologicalToggleTarget, .latestFirst)
+        XCTAssertEqual(EpisodeSortOrder.latestLast.chronologicalToggleTitle, "Sort newest to oldest")
     }
 
     // MARK: latestFirst — pubDate descending
@@ -179,7 +160,7 @@ final class EpisodeSortOrderTests: XCTestCase {
     // MARK: empty input
 
     func testEmptyListStaysEmpty() {
-        for order in EpisodeSortOrder.allCases {
+        for order in [EpisodeSortOrder.latestFirst, .latestLast] {
             XCTAssertTrue(order.sorted([]).isEmpty)
         }
     }

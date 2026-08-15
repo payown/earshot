@@ -4,14 +4,10 @@ import Foundation
 /// a String raw value under ``SettingsKey/episodeSortOrder``.
 ///
 /// Kept pure so the ordering rules are unit-testable without a model context
-/// (mirrors ``EpisodeListFilter`` and ``LibrarySort``). Alphabetical reuses
-/// ``LibrarySort/titlesInOrder(_:_:)`` so leading articles are ignored the same
-/// way the Library list treats them, and ties everywhere fall back to that
+/// (mirrors ``EpisodeListFilter`` and ``LibrarySort``). Date ties fall back to
 /// article-aware title order so the result is stable and deterministic
 /// (important for predictable VoiceOver focus).
-enum EpisodeSortOrder: String, Codable, CaseIterable, Identifiable {
-    /// A→Z by title, ignoring a leading article (see ``LibrarySort``).
-    case alphabetical
+enum EpisodeSortOrder: String, Codable, Identifiable {
     /// Newest published first. The default for a podcast's episode list, which
     /// preserves the pre-existing pubDate-descending order.
     case latestFirst
@@ -23,9 +19,8 @@ enum EpisodeSortOrder: String, Codable, CaseIterable, Identifiable {
     /// User-facing label for the sort menu.
     var title: String {
         switch self {
-        case .alphabetical: return "Alphabetical"
-        case .latestFirst: return "Latest first"
-        case .latestLast: return "Latest last"
+        case .latestFirst: return "Newest to oldest"
+        case .latestLast: return "Oldest to newest"
         }
     }
 
@@ -35,13 +30,25 @@ enum EpisodeSortOrder: String, Codable, CaseIterable, Identifiable {
         "Sorted by \(title)"
     }
 
+    /// The single podcast-screen control toggles only between chronological
+    /// directions.
+    var chronologicalToggleTarget: EpisodeSortOrder {
+        self == .latestLast ? .latestFirst : .latestLast
+    }
+
+    /// Describes the action the chronological toggle will perform.
+    var chronologicalToggleTitle: String {
+        switch chronologicalToggleTarget {
+        case .latestFirst: return "Sort newest to oldest"
+        case .latestLast: return "Sort oldest to newest"
+        }
+    }
+
     /// Orders episodes by this sort. `latestFirst`/`latestLast` order by
     /// `pubDate`; episodes with no `pubDate` always sort last regardless of
     /// direction, so undated episodes never jump to the top.
     func sorted(_ episodes: [Episode]) -> [Episode] {
         switch self {
-        case .alphabetical:
-            return episodes.sorted { LibrarySort.titlesInOrder($0.title, $1.title) }
         case .latestFirst:
             return episodes.sorted {
                 Self.inDateOrder(
