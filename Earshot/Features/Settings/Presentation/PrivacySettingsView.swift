@@ -30,7 +30,7 @@ struct PrivacySettingsView: View {
                 // No section header: the "Privacy" navigation title already names
                 // the screen, so a matching header would be a redundant VoiceOver
                 // heading stop.
-                Text("Your subscriptions, listening history, and settings stay on this device. No crash reporting, no analytics, no third-party trackers, no advertising IDs.")
+                Text("Your subscriptions, queue, folders, bookmarks, playback state, listening history, and shared settings can sync through your private iCloud account. Downloads, purchase access, and device-only settings stay on this device. No crash reporting, analytics, third-party trackers, or advertising IDs.")
             }
         }
         .navigationTitle("Privacy")
