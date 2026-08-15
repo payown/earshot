@@ -32,7 +32,19 @@ struct NowPlayingBar: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+            // Make the semantic container own the same full-width rectangle the
+            // user sees above the tab bar. Without an explicit width, SwiftUI can
+            // expose only the inset's fitting-size container to VoiceOver: its
+            // children remain reachable by swiping but may not be found when the
+            // user explores their visible positions by touch (#840).
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
             .background(.regularMaterial)
+            // Keep every transport button individually navigable while giving
+            // the rendered bar—not the conditional safe-area wrapper—the named
+            // accessibility-container frame (#490, #840).
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Now Playing")
             // Play-state ("Playing" / "Paused") is announced once at the RootView
             // TabView level, not here: this bar is inset into all five tabs (#366),
             // so a per-bar .onChange would announce up to five times per toggle.

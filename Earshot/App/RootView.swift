@@ -543,15 +543,7 @@ private struct TabChrome: ViewModifier {
             // not on the combined composite (which would tag both equally).
             .accessibilitySortPriority(1)
             .safeAreaInset(edge: .bottom) {
-                // Group the mini player's transport controls into one named
-                // accessibility container so reaching the bar reads as a "Now
-                // Playing" group rather than loose buttons (#490). `.contain`
-                // keeps each control individually navigable. NowPlayingBar still
-                // renders (and insets) nothing while idle, so the #366 layout —
-                // the bar never covering the system tab bar — is unchanged.
                 NowPlayingBar()
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("Now Playing")
                     // Read LAST, after the tab's content (priority 1 above).
                     .accessibilitySortPriority(0)
             }
