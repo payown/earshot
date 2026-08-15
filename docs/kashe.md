@@ -452,6 +452,10 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   survive. The new VoiceOver-readable Refresh library button gives her a manual
   way to ask for a late news episode instead of waiting and blaming the feed.
   She tells Renata, "The drawers stayed shut. He added a handle" (Chapter 57)
+- Kashe distinguishes private sync from making two devices into one: queue and
+  position move between them, while a downloaded show stays only on the device
+  that downloaded it. Her line to Renata is, "Both copies. Not the same copy"
+  (Chapter 62)
 - Her Thursday client is out past a grain elevator where the cell signal quits
   for good; she reaches it by a gravel road. On Sunday planning nights (Chapter
   43) she used to run a second chore after building the queue: manually download
@@ -2030,5 +2034,47 @@ Renata called while Kashe was moving the interview again, this time on the devic
 Kashe listened to the sync status finish.
 
 “It knows,” she said. “And now it tells me when.”
+
+---
+
+### Chapter 62 — Build 200
+
+*Both copies*
+
+**What changed**
+
+This is the first Earshot 1.1 production iCloud release candidate. Earshot privately syncs followed podcasts, folders, queue order, playback position, played state, bookmarks, listening history, and shared settings. Episode catalogs and downloaded audio stay on each device.
+
+The iCloud screen reports when work is active and when this device last completed an operation. Routine syncing stays quiet. Persistent failures are announced once.
+
+Remote unfollow is safer. If another device removes the podcast that is currently playing, playback stops, the full Now Playing screen closes, and Earshot remains open.
+
+Known limitation: removing an individual episode from Inbox does not sync in 1.1. Each device builds Inbox from its own local episode catalog.
+
+**What to test**
+
+Install over your existing Earshot copy. Do not delete the app first. Confirm your library, queue, positions, history, settings, and downloads survive.
+
+Make queue, folder, playback-position, and bookmark changes on each device. Try one change offline, close and reopen Earshot, reconnect, and confirm it reaches the other device. Downloads and Earshot Plus access must remain local to the correct device/account.
+
+With VoiceOver, check Settings, iCloud Sync. Routine work should not interrupt or move focus. Report any missing data, crash, unusual warmth, repeated announcement, or control that becomes hard to reach.
+
+Kashe moved the interview on the phone before she left the kitchen.
+
+At the first driveway, she opened the other copy. The interview was where she'd put it. She listened for a minute, paused, and put that device away.
+
+Back in the car, the phone knew the new place.
+
+For weeks she'd treated this like a trick that might stop working if she looked at it too closely. One pocket knew something. The other pocket learned it. She still checked.
+
+That evening she turned off the network, moved the news show, and closed Earshot. Renata would have called this trying to break it. Kashe called it Tuesday.
+
+She reopened the app before reconnecting. The queue was still there. When the network returned, the other copy caught up.
+
+Kashe checked the downloaded show for the gravel road. Still downloaded, only here, exactly where she'd left it.
+
+“Both copies?” Renata asked later.
+
+“Both copies,” Kashe said. “Not the same copy.”
 
 More chapters added here as Earshot ships.
