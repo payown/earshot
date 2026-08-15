@@ -14,7 +14,7 @@ fileGroups:
 settings:
   base:
     MARKETING_VERSION: "1.1.0"
-    CURRENT_PROJECT_VERSION: "199"
+    CURRENT_PROJECT_VERSION: "200"
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
 targets:
@@ -36,14 +36,16 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         DEVELOPMENT_TEAM: "72PH974742"
         CODE_SIGN_STYLE: Automatic
-        EARSHOT_DEVELOPMENT_CLOUDKIT_ENABLED: NO
+        EARSHOT_CLOUDKIT_ENABLED: NO
         ENABLE_PREVIEWS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       configs:
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        Release:
+          EARSHOT_CLOUDKIT_ENABLED: YES
         CloudKitDevelopment:
-          EARSHOT_DEVELOPMENT_CLOUDKIT_ENABLED: YES
+          EARSHOT_CLOUDKIT_ENABLED: YES
     entitlements:
       path: Earshot/App/Earshot.entitlements
       properties:

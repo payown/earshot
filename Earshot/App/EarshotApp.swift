@@ -218,12 +218,12 @@ final class AppRuntime {
         self.fileResetOperation = fileResetOperation
         self.launchSleep = launchSleep
         cloudSyncAvailability = mode == .normal
-            && CloudKitLaunchPolicy.isDevelopmentMirroringEnabled()
+            && CloudKitLaunchPolicy.isMirroringEnabled()
             ? .checking : .disabled
         let router = NotificationRouter()
         notificationRouter = router
         notificationDelegate = NotificationDelegate(router: router)
-        if mode == .normal && CloudKitLaunchPolicy.isDevelopmentMirroringEnabled() {
+        if mode == .normal && CloudKitLaunchPolicy.isMirroringEnabled() {
             let monitor = CloudKitEventMonitor()
             monitor.start()
             cloudKitEventMonitor = monitor
@@ -829,7 +829,7 @@ final class AppRuntime {
         processServicesStarted = true
         UNUserNotificationCenter.current().delegate = notificationDelegate
         await NotificationService().registerCategories()
-        if CloudKitLaunchPolicy.isDevelopmentMirroringEnabled() {
+        if CloudKitLaunchPolicy.isMirroringEnabled() {
             cloudAccountObserver = NotificationCenter.default.addObserver(
                 forName: .CKAccountChanged,
                 object: nil,
@@ -855,7 +855,7 @@ final class AppRuntime {
 
     func activateCloudProjectionIfNeeded(container: ModelContainer) async throws {
         guard mode == .normal,
-              CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(),
+              CloudKitLaunchPolicy.isMirroringEnabled(),
               cloudProjectionCoordinator == nil,
               !resetInFlight else { return }
         if let cloudProjectionActivationTask {
@@ -967,7 +967,7 @@ final class AppRuntime {
     /// current private database and this device's existing library.
     func connectToCurrentCloudAccount() async {
         guard mode == .normal,
-              CloudKitLaunchPolicy.isDevelopmentMirroringEnabled(),
+              CloudKitLaunchPolicy.isMirroringEnabled(),
               case .ready(let container, _) = phase else { return }
         let activation = cloudProjectionActivationTask
         activation?.cancel()

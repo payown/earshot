@@ -1,19 +1,18 @@
 import Foundation
 import SwiftData
 
-/// Development-only gate for the B1 CloudKit feasibility work (#811).
+/// Build-time gate for Earshot's compact private CloudKit projection.
 ///
-/// Ordinary Debug and Release builds leave this setting at `NO`, preserving the
-/// build-172 local-only behavior. A deliberate local build may override
-/// `EARSHOT_DEVELOPMENT_CLOUDKIT_ENABLED=YES`; its generated Info.plist then
-/// opts only the compact sync projection into Earshot's private development
-/// container. Both application stores remain explicitly `.none`: uploading the
-/// complete episode catalog failed the B1 bounded-bootstrap gate.
+/// Debug builds remain local-only. The deliberate development configuration and
+/// Release/TestFlight builds opt only the compact sync projection into Earshot's
+/// private container. The signing profile selects the CloudKit environment.
+/// Both application stores remain explicitly `.none`: uploading the complete
+/// episode catalog failed the B1 bounded-bootstrap gate.
 enum CloudKitLaunchPolicy {
     static let containerIdentifier = "iCloud.media.payown.earshot"
-    static let infoKey = "EarshotDevelopmentCloudKitEnabled"
+    static let infoKey = "EarshotCloudKitEnabled"
 
-    static func isDevelopmentMirroringEnabled(
+    static func isMirroringEnabled(
         infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]
     ) -> Bool {
         switch infoDictionary[infoKey] {
@@ -35,7 +34,7 @@ enum CloudKitLaunchPolicy {
     static func projectionDatabase(
         infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]
     ) -> ModelConfiguration.CloudKitDatabase {
-        guard isDevelopmentMirroringEnabled(infoDictionary: infoDictionary) else {
+        guard isMirroringEnabled(infoDictionary: infoDictionary) else {
             return .none
         }
         return .private(containerIdentifier)

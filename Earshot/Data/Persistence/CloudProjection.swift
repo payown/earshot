@@ -297,7 +297,7 @@ final class CloudProjectionCoordinator {
         center: NotificationCenter = .default,
         deviceID: String = CloudProjectionDeviceIdentity.value(),
         seedInstrumentationEnabled: @escaping () -> Bool = {
-            CloudKitLaunchPolicy.isDevelopmentMirroringEnabled()
+            CloudKitLaunchPolicy.isMirroringEnabled()
         },
         seedMarkerRecorder: @escaping (CompactProjectionSeedMarker) -> Void = {
             CloudProjectionCoordinator.logSeedMarker($0)
