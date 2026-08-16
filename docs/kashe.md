@@ -2194,4 +2194,57 @@ Then she closed it and opened it a third time.
 
 “A door does not only have to open once,” she said.
 
+---
+
+### Chapter 65 — Build 206
+
+*The broken thread*
+
+**What changed**
+
+Build 205 received two TestFlight crash reports from the same tester. One came
+while VoiceOver was reading continuously; another came after Earshot moved to
+the background. VoiceOver did not cause either crash. Both reports exposed the
+same broken listening-history relationship during private iCloud
+reconciliation.
+
+Build 206 repairs invalid older history links before SwiftData can open them.
+If the podcast still exists, Earshot preserves the listening record and removes
+only a missing episode link. If no podcast identity survives, it removes only
+that unusable history row. Cloud reconciliation now resolves history identity
+away from the partially loaded models that could trigger the crash. No
+VoiceOver wording or focus behavior changed.
+
+**What to test**
+
+Install this build over build 205 without deleting Earshot. Open it, move it to
+the background, and return several times. Play and pause an episode long enough
+to create listening history, then repeat those launch checks. With VoiceOver,
+use a two-finger swipe down to Read All in Library, Inbox, and Settings, iCloud
+Sync while synchronization is active. If convenient, unfollow a disposable
+show, let iCloud settle, and reopen Earshot. Confirm the Library, playback
+position, listening statistics, and iCloud status remain usable.
+
+If Earshot crashes, always submit the crash through TestFlight and include the
+approximate time and action. Submit every occurrence, even after reporting one:
+the crash log—not a screenshot or comment alone—is what lets us identify the
+signature and prove whether the repair held.
+
+Kashe found two torn threads in the ledger.
+
+Renata had been reading the shelf aloud when the first one snapped. The second
+waited until the ledger was carried into the next room. Neither the voice nor
+the doorway had cut it; both had merely pulled on the same old break.
+
+Kashe repaired the thread before opening the ledger. Where the title still had
+a home, she kept the hours and tied them back to it. Where only an episode name
+had vanished, she kept the listening time. Only the line with no surviving
+home was set aside.
+
+Then she opened the ledger, let Renata read from the first shelf to the last,
+closed the door, and opened it again.
+
+This time the thread held. If it ever broke again, Kashe asked for the torn
+piece itself—not only a description of the sound it made.
+
 More chapters added here as Earshot ships.
