@@ -1,0 +1,26 @@
+Chapter 65, Build 206
+
+Build 205 could crash during launch or after moving to the background while
+private iCloud listening history was reconciling. One report happened while
+VoiceOver Read All was active, but Read All did not cause the crash; it exposed
+the timing. Build 206 repairs invalid older history links before SwiftData can
+open them and keeps history reconciliation away from unsafe relationship
+property reads. Valid listening history is preserved whenever its podcast can
+still be identified. VoiceOver wording and focus behavior are unchanged.
+
+What to test
+
+Install over build 205 without deleting Earshot. Open Earshot, background it,
+and return several times. Play and pause an episode long enough to add listening
+history, then repeat the launch and background-return checks. With VoiceOver,
+use a two-finger swipe down to Read All in Library, Inbox, and Settings, iCloud
+Sync while synchronization is active. If convenient, unfollow a disposable
+show, allow iCloud to sync, and reopen Earshot. Confirm Library, listening
+history/statistics, playback position, and iCloud status remain usable.
+
+Crash logs are crucial. If Earshot closes unexpectedly or TestFlight offers a
+crash notification, always submit the crash through TestFlight and tell us the
+approximate time and exact action. Please submit every occurrence, even if an
+earlier crash was already reported: repeated logs let us group the signature
+and verify whether this fix worked. A crash log is much more useful than a
+screenshot or a comment alone.

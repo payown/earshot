@@ -1,5 +1,6 @@
 import CoreData
 import Foundation
+import SQLite3
 import SwiftData
 
 /// Why a terminal store-open failure happened, so ``ModelContainerFactory`` can
@@ -319,6 +320,7 @@ enum StoreMigration {
             do {
                 let container = try profiled("completed-final-open") {
                     try failIfInjected(at: .beforeCompletedFinalOpen)
+                    try repairDanglingListeningHistoryRelationships(at: url)
                     return try openFinal(mirroredURL: url, localURL: localURL)
                 }
                 let context = ModelContext(container)
@@ -1252,6 +1254,9 @@ enum StoreMigration {
     private static func finishOpeningFinal(
         mirroredURL: URL, localURL: URL
     ) throws -> ModelContainer {
+        try profiled("final-listening-history-relationship-repair") {
+            try repairDanglingListeningHistoryRelationships(at: mirroredURL)
+        }
         let container = try profiled("final-two-store-open") {
             try openFinal(mirroredURL: mirroredURL, localURL: localURL)
         }
@@ -1294,6 +1299,67 @@ enum StoreMigration {
             try context.save()
         }
         return container
+    }
+
+    /// Repairs relationship foreign keys before SwiftData opens the V10 store.
+    /// A dangling to-one is represented as a future fault; asking that object
+    /// for even its persistent identifier traps in SwiftData and cannot be
+    /// caught. SQL is therefore the only safe repair boundary for stores left
+    /// by an interrupted older-build cascade.
+    ///
+    /// Preserve the history row when its Episode still identifies a live
+    /// Podcast, degrade an invalid Episode to podcast-level history, and remove
+    /// only rows for which no live Podcast identity survives. The transaction
+    /// is idempotent and runs before every settled-store open because corruption
+    /// may have been synchronized after an earlier repair.
+    private static func repairDanglingListeningHistoryRelationships(at url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(
+            url.path, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil
+        ) == SQLITE_OK, let database else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_close(database) }
+        let sql = """
+            BEGIN IMMEDIATE;
+            UPDATE ZLISTENINGSESSION
+            SET ZPODCAST = (
+                SELECT ZPODCAST FROM ZEPISODE
+                WHERE ZEPISODE.Z_PK = ZLISTENINGSESSION.ZEPISODE
+            )
+            WHERE (ZPODCAST IS NULL OR NOT EXISTS (
+                SELECT 1 FROM ZPODCAST
+                WHERE ZPODCAST.Z_PK = ZLISTENINGSESSION.ZPODCAST
+            )) AND EXISTS (
+                SELECT 1 FROM ZEPISODE JOIN ZPODCAST
+                    ON ZPODCAST.Z_PK = ZEPISODE.ZPODCAST
+                WHERE ZEPISODE.Z_PK = ZLISTENINGSESSION.ZEPISODE
+            );
+            UPDATE ZLISTENINGSESSION
+            SET ZEPISODE = NULL
+            WHERE ZEPISODE IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM ZEPISODE
+                WHERE ZEPISODE.Z_PK = ZLISTENINGSESSION.ZEPISODE
+            );
+            DELETE FROM ZLISTENINGSESSION
+            WHERE ZPODCAST IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM ZPODCAST
+                WHERE ZPODCAST.Z_PK = ZLISTENINGSESSION.ZPODCAST
+            );
+            COMMIT;
+            """
+        var errorMessage: UnsafeMutablePointer<CChar>?
+        guard sqlite3_exec(database, sql, nil, nil, &errorMessage) == SQLITE_OK else {
+            let message = errorMessage.map { String(cString: $0) } ?? "unknown SQLite error"
+            sqlite3_free(errorMessage)
+            _ = sqlite3_exec(database, "ROLLBACK", nil, nil, nil)
+            throw NSError(
+                domain: "EarshotListeningHistoryRepair",
+                code: Int(sqlite3_errcode(database)),
+                userInfo: [NSLocalizedDescriptionKey: message]
+            )
+        }
     }
 
 }

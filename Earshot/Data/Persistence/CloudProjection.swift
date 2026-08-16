@@ -267,6 +267,77 @@ final class CloudProjectionCoordinator {
         }
     }
 
+    /// A value snapshot of one local history row. Relationship objects may be
+    /// SwiftData future faults whose stored-property getters trap when their
+    /// destination row was deleted by an older build. Persistent identifiers
+    /// remain safe to carry into an independent resolver context.
+    private struct LocalListeningSessionSnapshot {
+        let session: ListeningSession
+        let directPodcastID: PersistentIdentifier?
+        let episodeID: PersistentIdentifier?
+        let durationSeconds: Int
+        let speed: Double
+        let date: Date
+    }
+
+    private struct ResolvedListeningSession {
+        let session: ListeningSession
+        let feedURL: String
+        let episodeGUID: String?
+        let durationSeconds: Int
+        let speed: Double
+        let date: Date
+    }
+
+    private struct EpisodeIdentity {
+        let guid: String
+        let podcastID: PersistentIdentifier?
+    }
+
+    /// Resolves relationship identifiers in a private context so the partial
+    /// Podcast fetches used by large-library reconciliation never poison the
+    /// application context's relationship faults. No stored property is read
+    /// from a Podcast or Episode object reached through ListeningSession.
+    private final class ListeningHistoryIdentityResolver {
+        private let context: ModelContext
+        private var feedURLByPodcastID: [PersistentIdentifier: String] = [:]
+        private var episodeByID: [PersistentIdentifier: EpisodeIdentity] = [:]
+        private var missingEpisodeIDs: Set<PersistentIdentifier> = []
+
+        init(container: ModelContainer) throws {
+            context = ModelContext(container)
+            context.autosaveEnabled = false
+            var descriptor = FetchDescriptor<Podcast>()
+            descriptor.propertiesToFetch = [\Podcast.feedURL]
+            for podcast in try context.fetch(descriptor) {
+                feedURLByPodcastID[podcast.persistentModelID] = podcast.feedURL
+            }
+        }
+
+        func feedURL(for podcastID: PersistentIdentifier) -> String? {
+            feedURLByPodcastID[podcastID]
+        }
+
+        func episode(for episodeID: PersistentIdentifier) throws -> EpisodeIdentity? {
+            if let cached = episodeByID[episodeID] { return cached }
+            if missingEpisodeIDs.contains(episodeID) { return nil }
+            var descriptor = FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.persistentModelID == episodeID }
+            )
+            descriptor.fetchLimit = 1
+            guard let episode = try context.fetch(descriptor).first else {
+                missingEpisodeIDs.insert(episodeID)
+                return nil
+            }
+            let identity = EpisodeIdentity(
+                guid: episode.guid,
+                podcastID: episode.podcast?.persistentModelID
+            )
+            episodeByID[episodeID] = identity
+            return identity
+        }
+    }
+
     private let applicationContainer: ModelContainer
     private let projectionContainer: ModelContainer
     private let center: NotificationCenter
@@ -794,15 +865,87 @@ final class CloudProjectionCoordinator {
     /// remote-unfollow cascade. Episodes cannot be useful without a Podcast,
     /// and unsubscribe intentionally removes that podcast's listening history.
     private func removeOrphanedLibraryRows(in context: ModelContext) throws -> Bool {
+        let history = try resolvedLocalListeningSessions(in: context)
         let sessions = try context.fetch(FetchDescriptor<ListeningSession>(
             predicate: #Predicate { $0.podcast == nil }
         ))
         let episodes = try context.fetch(FetchDescriptor<Episode>(
             predicate: #Predicate { $0.podcast == nil }
         ))
-        for session in sessions { context.delete(session) }
+        for session in sessions where !session.isDeleted { context.delete(session) }
         for episode in episodes { context.delete(episode) }
-        return !sessions.isEmpty || !episodes.isEmpty
+        return history.repaired || !sessions.isEmpty || !episodes.isEmpty
+    }
+
+    /// Builds semantic history values without ever reading a stored property on
+    /// a model reached through a ListeningSession relationship. This is the
+    /// build-205 crash boundary: a dangling Podcast future fault allowed the
+    /// relationship getter to return an object, then trapped at `feedURL`.
+    ///
+    /// A valid Episode can repair a missing direct Podcast relationship. A valid
+    /// Podcast preserves a session whose Episode was deleted. Only a row with no
+    /// surviving Podcast identity is irrecoverable and removed; a remote active
+    /// projection can recreate it later from its scalar feed URL.
+    private func resolvedLocalListeningSessions(
+        in context: ModelContext
+    ) throws -> (sessions: [ResolvedListeningSession], repaired: Bool) {
+        let resolver = try ListeningHistoryIdentityResolver(container: applicationContainer)
+        var descriptor = FetchDescriptor<ListeningSession>()
+        descriptor.propertiesToFetch = [
+            \ListeningSession.episode,
+            \ListeningSession.podcast,
+            \ListeningSession.durationSeconds,
+            \ListeningSession.speed,
+            \ListeningSession.date,
+        ]
+        let snapshots = try context.fetch(descriptor).map { session in
+            LocalListeningSessionSnapshot(
+                session: session,
+                directPodcastID: session.podcast?.persistentModelID,
+                episodeID: session.episode?.persistentModelID,
+                durationSeconds: session.durationSeconds,
+                speed: session.speed,
+                date: session.date
+            )
+        }
+        var repaired = false
+        var resolved: [ResolvedListeningSession] = []
+        resolved.reserveCapacity(snapshots.count)
+
+        for snapshot in snapshots {
+            let episode = try snapshot.episodeID.flatMap { try resolver.episode(for: $0) }
+            let directFeedURL = snapshot.directPodcastID.flatMap(resolver.feedURL(for:))
+            let episodeFeedURL = episode?.podcastID.flatMap(resolver.feedURL(for:))
+            guard let feedURL = directFeedURL ?? episodeFeedURL,
+                  let podcastID = directFeedURL == nil
+                    ? episode?.podcastID : snapshot.directPodcastID else {
+                context.delete(snapshot.session)
+                repaired = true
+                continue
+            }
+
+            if directFeedURL == nil {
+                var podcastDescriptor = FetchDescriptor<Podcast>(
+                    predicate: #Predicate { $0.persistentModelID == podcastID }
+                )
+                podcastDescriptor.fetchLimit = 1
+                snapshot.session.podcast = try context.fetch(podcastDescriptor).first
+                repaired = true
+            }
+            if snapshot.episodeID != nil, episode == nil {
+                snapshot.session.episode = nil
+                repaired = true
+            }
+            resolved.append(ResolvedListeningSession(
+                session: snapshot.session,
+                feedURL: feedURL,
+                episodeGUID: episode?.guid,
+                durationSeconds: snapshot.durationSeconds,
+                speed: snapshot.speed,
+                date: snapshot.date
+            ))
+        }
+        return (resolved, repaired)
     }
 
     /// Writes only meaningful, user-authored episode state. A 232,000-row feed
@@ -1046,7 +1189,8 @@ final class CloudProjectionCoordinator {
         let appContext = applicationContainer.mainContext
         let cloudContext = projectionContainer.mainContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudListeningSessionProjection>())
-        let sessions = try appContext.fetch(FetchDescriptor<ListeningSession>())
+        let local = try resolvedLocalListeningSessions(in: appContext)
+        if local.repaired, appContext.hasChanges { try appContext.save() }
         var activeByKey: [String: CloudListeningSessionProjection] = [:]
         for row in rows.filter({ $0.deletedAt == nil }).sorted(by: Self.sessionProjectionOrder) {
             let key = Self.sessionSemanticKey(row)
@@ -1054,12 +1198,10 @@ final class CloudProjectionCoordinator {
         }
         var currentIDs: Set<String> = []
         var insertedRowsSinceSave = 0
-        for session in sessions.sorted(by: { $0.date < $1.date }) {
-            guard let podcast = session.podcast ?? session.episode?.podcast else { continue }
-            let guid = session.episode?.guid
+        for session in local.sessions.sorted(by: { $0.date < $1.date }) {
             let key = Self.sessionSemanticKey(
-                feedURL: podcast.feedURL,
-                guid: guid,
+                feedURL: session.feedURL,
+                guid: session.episodeGUID,
                 duration: session.durationSeconds,
                 speed: session.speed,
                 date: session.date
@@ -1067,8 +1209,8 @@ final class CloudProjectionCoordinator {
             let row = activeByKey[key] ?? {
                 let inserted = CloudListeningSessionProjection()
                 inserted.sessionID = UUID().uuidString.lowercased()
-                inserted.feedURL = FeedURLIdentity.canonical(podcast.feedURL)
-                inserted.episodeGUID = guid
+                inserted.feedURL = FeedURLIdentity.canonical(session.feedURL)
+                inserted.episodeGUID = session.episodeGUID
                 inserted.durationSeconds = max(0, session.durationSeconds)
                 inserted.speed = session.speed
                 inserted.date = session.date
@@ -1878,20 +2020,19 @@ final class CloudProjectionCoordinator {
                 cloudContext.delete(row)
             }
         }
-        let existing = try appContext.fetch(FetchDescriptor<ListeningSession>())
+        let local = try resolvedLocalListeningSessions(in: appContext)
         var localByKey: [String: ListeningSession] = [:]
-        for session in existing {
-            guard let podcast = session.podcast ?? session.episode?.podcast else { continue }
+        for session in local.sessions {
             let key = Self.sessionSemanticKey(
-                feedURL: podcast.feedURL,
-                guid: session.episode?.guid,
+                feedURL: session.feedURL,
+                guid: session.episodeGUID,
                 duration: session.durationSeconds,
                 speed: session.speed,
                 date: session.date
             )
-            if localByKey[key] == nil { localByKey[key] = session }
+            if localByKey[key] == nil { localByKey[key] = session.session }
         }
-        var changed = false
+        var changed = local.repaired
         var locallyPresentIDs: Set<String> = []
         for row in newestByID.values.sorted(by: Self.sessionProjectionOrder) {
             let key = Self.sessionSemanticKey(row)

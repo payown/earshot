@@ -1,3 +1,4 @@
+import SQLite3
 import SwiftData
 import XCTest
 @testable import Earshot
@@ -1414,6 +1415,125 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<ListeningSession>()).isEmpty)
     }
 
+    /// Reproduces the two build-205 TestFlight crashes: an old history row can
+    /// retain a Podcast foreign key after its destination row has disappeared.
+    /// SwiftData then supplies a future fault whose first stored-property read
+    /// traps instead of throwing. Reconciliation must discard only that
+    /// irrecoverable history row and remain idempotent across later launches.
+    func testDanglingListeningSessionPodcastIsRepairedWithoutFaulting() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let applicationURL = directory.appending(path: "application.store")
+        let projectionURL = directory.appending(path: "projection.store")
+
+        try autoreleasepool {
+            let app = try StoreMigration.openOrMigrate(at: applicationURL)
+            let podcast = Podcast(feedURL: "https://example.com/dangling", title: "Show")
+            app.mainContext.insert(podcast)
+            app.mainContext.insert(ListeningSession(
+                podcast: podcast,
+                durationSeconds: 90,
+                speed: 1.5,
+                date: Date(timeIntervalSince1970: 100)
+            ))
+            try app.mainContext.save()
+        }
+        try executeSQLite(
+            at: applicationURL,
+            sql: "UPDATE ZLISTENINGSESSION SET ZPODCAST = 999999"
+        )
+
+        for _ in 0..<2 {
+            try autoreleasepool {
+                let app = try StoreMigration.openOrMigrate(at: applicationURL)
+                let projection = try makeOnDiskProjectionContainer(at: projectionURL)
+                try CloudProjectionCoordinator(
+                    applicationContainer: app,
+                    projectionContainer: projection,
+                    center: NotificationCenter(),
+                    deviceID: "phone"
+                ).reconcile()
+
+                XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 1)
+                XCTAssertEqual(
+                    try app.mainContext.fetchCount(FetchDescriptor<ListeningSession>()),
+                    0
+                )
+                XCTAssertEqual(
+                    try projection.mainContext.fetchCount(
+                        FetchDescriptor<CloudListeningSessionProjection>()
+                    ),
+                    0
+                )
+            }
+        }
+    }
+
+    /// A missing Episode must not cost the user an otherwise valid podcast-level
+    /// history record. This is the complementary dangling-reference shape.
+    func testDanglingListeningSessionEpisodePreservesPodcastHistory() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let applicationURL = directory.appending(path: "application.store")
+        let projectionURL = directory.appending(path: "projection.store")
+
+        try autoreleasepool {
+            let app = try StoreMigration.openOrMigrate(at: applicationURL)
+            let podcast = Podcast(feedURL: "https://example.com/preserved", title: "Show")
+            let episode = Episode(
+                guid: "missing-episode",
+                title: "Episode",
+                audioURL: "https://example.com/episode.mp3"
+            )
+            episode.podcast = podcast
+            app.mainContext.insert(podcast)
+            app.mainContext.insert(episode)
+            app.mainContext.insert(ListeningSession(
+                episode: episode,
+                podcast: podcast,
+                durationSeconds: 120,
+                speed: 1.25,
+                date: Date(timeIntervalSince1970: 200)
+            ))
+            try app.mainContext.save()
+        }
+        try executeSQLite(
+            at: applicationURL,
+            sql: "UPDATE ZLISTENINGSESSION SET ZEPISODE = 999999"
+        )
+
+        for _ in 0..<2 {
+            try autoreleasepool {
+                let app = try StoreMigration.openOrMigrate(at: applicationURL)
+                let projection = try makeOnDiskProjectionContainer(at: projectionURL)
+                try CloudProjectionCoordinator(
+                    applicationContainer: app,
+                    projectionContainer: projection,
+                    center: NotificationCenter(),
+                    deviceID: "phone"
+                ).reconcile()
+
+                let session = try XCTUnwrap(
+                    app.mainContext.fetch(FetchDescriptor<ListeningSession>()).first
+                )
+                XCTAssertNil(session.episode)
+                XCTAssertEqual(session.podcast?.feedURL, "https://example.com/preserved")
+                let row = try XCTUnwrap(
+                    projection.mainContext.fetch(
+                        FetchDescriptor<CloudListeningSessionProjection>()
+                    ).first
+                )
+                XCTAssertEqual(row.feedURL, "https://example.com/preserved")
+                XCTAssertNil(row.episodeGUID)
+                XCTAssertEqual(row.durationSeconds, 120)
+            }
+        }
+    }
+
     func testPartialListeningHistoryBackfillResumesOnDiskWithoutDuplicates() throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
@@ -1747,6 +1867,19 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         container.mainContext.insert(episode)
         try container.mainContext.save()
         return container
+    }
+
+    private func executeSQLite(at url: URL, sql: String) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_close(database) }
+        guard sqlite3_exec(database, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, nil)
+                == SQLITE_OK,
+              sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw CocoaError(.fileWriteUnknown)
+        }
     }
 
     private func applicationEpisode(in container: ModelContainer) throws -> Episode? {
