@@ -968,6 +968,35 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(episode.isPlayed)
     }
 
+    func testLivePositionSnapshotPublishesWithoutSavingApplicationEpisode() throws {
+        let app = try makeApplicationContainerWithEpisode(position: 10)
+        let projection = try makeProjectionContainer()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        let snapshot = try XCTUnwrap(EpisodeUserStateSnapshot(
+            episode: episode,
+            positionSeconds: 180
+        ))
+
+        try coordinator.publishLocalEpisodeStateChanges(
+            snapshots: [snapshot],
+            now: Date(timeIntervalSince1970: 200)
+        )
+
+        XCTAssertEqual(episode.positionSeconds, 10,
+                       "compact publication must not mutate the application store")
+        let row = try XCTUnwrap(projection.mainContext.fetch(
+            FetchDescriptor<CloudEpisodeStateProjection>()
+        ).first)
+        XCTAssertEqual(row.positionSeconds, 180)
+        XCTAssertEqual(row.positionUpdatedAt, Date(timeIntervalSince1970: 200))
+    }
+
     func testQueueProjectionConvergesOrderAndRemovalAcrossDevices() throws {
         let phone = try makeApplicationContainer()
         let phonePodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")

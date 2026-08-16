@@ -27,14 +27,27 @@ struct EpisodeUserStateSnapshot: Sendable, Equatable {
     let playedChangedExplicitly: Bool
 
     @MainActor
-    init?(episode: Episode, playedChangedExplicitly: Bool = false) {
+    init?(
+        episode: Episode,
+        positionSeconds: Int? = nil,
+        playedChangedExplicitly: Bool = false
+    ) {
         guard let feedURL = episode.podcast?.feedURL, !episode.guid.isEmpty else { return nil }
         self.feedURL = FeedURLIdentity.canonical(feedURL)
         self.guid = episode.guid
-        self.positionSeconds = max(0, episode.positionSeconds)
+        self.positionSeconds = max(0, positionSeconds ?? episode.positionSeconds)
         self.isPlayed = episode.isPlayed
         self.playedChangedExplicitly = playedChangedExplicitly
     }
+}
+
+@MainActor
+func postEpisodeUserStateSnapshots(_ snapshots: [EpisodeUserStateSnapshot]) {
+    guard !snapshots.isEmpty else { return }
+    NotificationCenter.default.post(
+        name: .earshotEpisodeUserStateDidChange,
+        object: snapshots
+    )
 }
 
 @MainActor
@@ -48,11 +61,7 @@ func postEpisodeUserStateChanges(
             playedChangedExplicitly: playedChangedExplicitly
         )
     }
-    guard !snapshots.isEmpty else { return }
-    NotificationCenter.default.post(
-        name: .earshotEpisodeUserStateDidChange,
-        object: snapshots
-    )
+    postEpisodeUserStateSnapshots(snapshots)
 }
 
 /// Relationship-free subscription record used by the B1 development gate.
@@ -1374,10 +1383,17 @@ final class CloudProjectionCoordinator {
     ) throws {
         guard !snapshots.isEmpty else { return }
         let cloudContext = projectionContainer.mainContext
-        let rows = try cloudContext.fetch(FetchDescriptor<CloudEpisodeStateProjection>())
+        let changedGUIDs = Array(Set(snapshots.map(\.guid)))
+        let sourceDeviceID = deviceID
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudEpisodeStateProjection>(
+            predicate: #Predicate {
+                $0.sourceDeviceID == sourceDeviceID
+                    && $0.deletedAt == nil
+                    && changedGUIDs.contains($0.episodeGUID)
+            }
+        ))
         var ownByKey: [EpisodeKey: CloudEpisodeStateProjection] = [:]
         for row in rows
-            .filter({ $0.sourceDeviceID == deviceID && $0.deletedAt == nil })
             .sorted(by: Self.episodeProjectionOrder) {
             let key = Self.episodeKey(for: row)
             if ownByKey[key] == nil {

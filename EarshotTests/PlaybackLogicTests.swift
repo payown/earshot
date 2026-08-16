@@ -382,6 +382,37 @@ final class PlaybackLogicTests: XCTestCase {
         XCTAssertGreaterThan(PlaybackLogic.positionPersistInterval, 1)
     }
 
+    func testPlaybackPositionProjectionUsesBoundedWallClockCadence() {
+        XCTAssertFalse(PlaybackLogic.shouldProjectPlaybackPosition(
+            currentSecond: 59,
+            lastProjectedSecond: 0,
+            playbackRate: 1
+        ))
+        XCTAssertTrue(PlaybackLogic.shouldProjectPlaybackPosition(
+            currentSecond: 60,
+            lastProjectedSecond: 0,
+            playbackRate: 1
+        ))
+        XCTAssertFalse(PlaybackLogic.shouldProjectPlaybackPosition(
+            currentSecond: 119,
+            lastProjectedSecond: 0,
+            playbackRate: 2
+        ))
+        XCTAssertTrue(PlaybackLogic.shouldProjectPlaybackPosition(
+            currentSecond: 120,
+            lastProjectedSecond: 0,
+            playbackRate: 2
+        ))
+    }
+
+    func testPlaybackPositionProjectionPublishesBackwardDiscontinuity() {
+        XCTAssertTrue(PlaybackLogic.shouldProjectPlaybackPosition(
+            currentSecond: 30,
+            lastProjectedSecond: 300,
+            playbackRate: 1
+        ))
+    }
+
     func testMediaIntervalScalesWithAcceleratedPlayback() {
         XCTAssertEqual(PlaybackLogic.mediaSeconds(forWallClockSeconds: 1, playbackRate: 1), 1)
         XCTAssertEqual(PlaybackLogic.mediaSeconds(forWallClockSeconds: 1, playbackRate: 1.5), 1.5)

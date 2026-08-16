@@ -270,6 +270,29 @@ enum PlaybackLogic {
     /// progress on an abrupt kill, while keeping the run loop responsive.
     static let positionPersistInterval = 5
 
+    /// How often uninterrupted playback publishes its current position to the
+    /// compact CloudKit projection. This never saves the application store, so
+    /// it cannot invalidate the large-library `@Query` graph that caused #736.
+    /// Pause, seek, episode switch, and background remain immediate anchors.
+    static let positionProjectionInterval = 60
+
+    /// Whether uninterrupted playback has advanced far enough to publish one
+    /// compact position projection. The media-time threshold is scaled from a
+    /// wall-clock cadence so 2x playback does not double CloudKit write traffic.
+    static func shouldProjectPlaybackPosition(
+        currentSecond: Int,
+        lastProjectedSecond: Int,
+        playbackRate: Double,
+        wallClockInterval: Int = positionProjectionInterval
+    ) -> Bool {
+        let mediaInterval = Int(ceil(mediaSeconds(
+            forWallClockSeconds: Double(wallClockInterval),
+            playbackRate: playbackRate
+        )))
+        if currentSecond < lastProjectedSecond { return true }
+        return currentSecond - lastProjectedSecond >= mediaInterval
+    }
+
     /// Converts a wall-clock cadence into media seconds. AVPlayer's periodic
     /// observer interval is measured in item time, so an unscaled one-second
     /// interval fires twice per real second at 2x playback.

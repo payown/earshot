@@ -128,6 +128,33 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
         XCTAssertFalse(episode.isPlayed, "Seeking near the end must not complete the episode")
     }
 
+    /// Explicit transport anchors still publish immediately; the one-minute
+    /// cadence is only a fallback for uninterrupted playback.
+    func test_seekPublishesExactPositionSnapshotImmediately() throws {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        clearLive()
+
+        let episode = makeEpisode(ctx)
+        player.load(episode)
+        var received: EpisodeUserStateSnapshot?
+        let observer = NotificationCenter.default.addObserver(
+            forName: .earshotEpisodeUserStateDidChange,
+            object: nil,
+            queue: nil
+        ) { notification in
+            received = (notification.object as? [EpisodeUserStateSnapshot])?.last
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        player.seek(to: 180)
+
+        XCTAssertEqual(try XCTUnwrap(received).positionSeconds, 180)
+        XCTAssertEqual(episode.positionSeconds, 180)
+    }
+
     /// A CloudKit reconcile occurs while the app remains open. The player owns a
     /// separate observable position cache, so its notification hook must update
     /// the visible scrubber/VoiceOver value without requiring relaunch.

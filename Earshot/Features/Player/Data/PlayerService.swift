@@ -169,6 +169,12 @@ final class PlayerService {
     // `nil` forces the next tick to write.
     @ObservationIgnored private var lastPersistedSecond: Int?
 
+    // The application store deliberately stays untouched during uninterrupted
+    // playback (#736). Publish one relationship-free projection row on a bounded
+    // wall-clock cadence so another device can receive progress even before the
+    // next pause/background anchor, without re-materializing the local library.
+    @ObservationIgnored private var lastProjectedSecond: Int = 0
+
     // Now-playing elapsed-time throttle (#412). The periodic time observer fires
     // every second, but reading and rewriting the whole cross-process
     // `MPNowPlayingInfoCenter.nowPlayingInfo` dictionary every second is a
@@ -1498,6 +1504,7 @@ final class PlayerService {
         }
 
         persistPositionThrottled(currentSecond: Int(currentSeconds))
+        publishPositionProjectionThrottled(currentSecond: Int(currentSeconds))
         recordListeningTick()
         updateNowPlayingElapsedThrottled(currentSecond: Int(currentSeconds))
         // Chapter auto-skip reads the episode's guid; skip it on a deleted
@@ -1636,6 +1643,27 @@ final class PlayerService {
         writeLivePosition(episode, second: max(0, currentSecond))
     }
 
+    /// Publishes only a value snapshot to the compact CloudKit projection. It
+    /// does not mutate or save the application `ModelContext`; consequently the
+    /// large Inbox/Library query graph receives no invalidation on this path.
+    private func publishPositionProjectionThrottled(currentSecond: Int) {
+        guard !currentEpisodeIsTransient,
+              let episode = currentEpisode,
+              !episode.isDeleted,
+              !episode.isPlayed else { return }
+        guard PlaybackLogic.shouldProjectPlaybackPosition(
+            currentSecond: currentSecond,
+            lastProjectedSecond: lastProjectedSecond,
+            playbackRate: currentEffectiveRate
+        ) else { return }
+        guard let snapshot = EpisodeUserStateSnapshot(
+            episode: episode,
+            positionSeconds: currentSecond
+        ) else { return }
+        lastProjectedSecond = currentSecond
+        postEpisodeUserStateSnapshots([snapshot])
+    }
+
     // MARK: Private — listening-session recording
 
     /// Accumulates the position advance since the last tick (dropping seeks/skips)
@@ -1697,6 +1725,9 @@ final class PlayerService {
         accumulatedListenSeconds = 0
         // Force the next tick to persist this episode's first position.
         lastPersistedSecond = nil
+        // Periodic Cloud publication begins after one full bounded interval;
+        // play/load itself must not manufacture an immediate zero-position row.
+        lastProjectedSecond = Int(max(0, currentPositionSeconds))
     }
 
     private func markCurrentEpisodePlayed() {
@@ -1743,7 +1774,21 @@ final class PlayerService {
         guard let context, context.hasChanges else { return }
         do {
             try context.save()
-            if let currentEpisode { postEpisodeUserStateChanges([currentEpisode]) }
+            if let currentEpisode {
+                // The five-second tick lives in UserDefaults, so the Episode row
+                // can be intentionally stale during playback. Never let an
+                // unrelated context save publish that stale value as an explicit
+                // rewind over the newer compact projection.
+                let position = currentEpisode.isPlayed
+                    ? 0 : Int(max(0, currentPositionSeconds))
+                if let snapshot = EpisodeUserStateSnapshot(
+                    episode: currentEpisode,
+                    positionSeconds: position
+                ) {
+                    lastProjectedSecond = position
+                    postEpisodeUserStateSnapshots([snapshot])
+                }
+            }
         } catch {
             AppLog.player.error("Failed to persist playback state: \(error.localizedDescription, privacy: .public)")
         }
