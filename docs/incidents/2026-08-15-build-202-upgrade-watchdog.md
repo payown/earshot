@@ -1,7 +1,6 @@
 # Build 202 App Store upgrade watchdog
 
-Status: build 203 migration fix verified; build 205 repeated-launch fix profiled;
-final VoiceOver confirmation pending
+Status: fixed and physically verified in build 205
 Date: 2026-08-15
 Owner: @payown
 
@@ -108,7 +107,7 @@ projection. Result: V5 to V10 migration in 1.874 seconds and first projection of
 the 53,946-episode migrated library in 0.199 seconds. Both application stores
 passed SQLite integrity checks and an episode save survived reopening.
 
-## Build 205 physical profiling and remaining gate
+## Build 205 physical profiling and completed gate
 
 A signed Release build 205 with the Production CloudKit entitlement was
 installed over the affected 169,946-episode phone library. The original
@@ -118,8 +117,8 @@ phone runs iOS 27 while the available simulator runs iOS 26.5, so the captured
 iOS 27 Core Data store cannot be opened by that older simulator runtime; exact
 store validation is intentionally performed on the physical phone.
 
-Before any TestFlight upload, Michael must confirm on the installed build 205
-that a cold launch and a background-to-foreground return reach Library promptly,
-VoiceOver remains responsive, and the existing podcasts are usable. Any crash,
-forced relaunch, missing subscription, unbounded Syncing state, or VoiceOver
-freeze fails the gate and blocks upload.
+Michael then installed the exact signed build 205 over App Store build 155 and
+the imported library without deleting the app. Cold launches and
+background-to-foreground returns completed in approximately 1–1.5 seconds.
+VoiceOver remained responsive and the imported library was intact and usable.
+This closes the physical pre-TestFlight gate.

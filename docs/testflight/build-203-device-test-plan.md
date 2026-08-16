@@ -1,30 +1,35 @@
-# Build 203 pre-TestFlight device test
+# Build 205 pre-TestFlight device test
 
 Owner: Michael Babcock
-Candidate: Earshot 1.1.0 build 203
+Candidate: Earshot 1.1.0 build 205
 Purpose: reproduce the exact build-202 failure path before upload
 
-Do not upload build 203 until this test passes.
+Status: passed on 2026-08-15
 
 ## Agent-completed preflight
 
-- [x] Build number is 203 in `project.yml` and the regenerated Xcode project.
-- [x] Focused folder and Cloud tests: 132 passed, 1 opt-in skip, 0 failed.
-- [x] 120-feed/54,000-episode cold projection and folder read: 0.092 seconds.
-- [x] Real build-155 fixture: 53,946 episodes migrated V5 to V10 in 1.874
-  seconds; first post-migration projection completed in 0.199 seconds.
-- [x] Full non-StoreKit suite: 1,846 executed, 39 documented skips, 0 failed.
+- [x] Build number is 205 in `project.yml` and the regenerated Xcode project.
+- [x] Final focused Cloud projection run: 35 passed, 0 failed.
+- [x] Production-shaped 99-subscription, 948-tombstone, 53,944-episode
+  projection: first reconciliation 0.307 seconds; repeated reconciliation
+  0.305 seconds. The gate is 5 seconds.
+- [x] The build-155 fixture migration and first projection remain covered; the
+  exact iOS 27 production store was profiled on the physical phone because the
+  iOS 26.5 simulator runtime cannot open its newer Core Data store format.
+- [x] Full non-StoreKit suite: 1,835 executed, 28 documented skips, 0 failed.
 - [x] Signed Release archive and local App Store Connect export verified.
 - [x] Export has Production CloudKit/APNs, the expected container, privacy
   manifest, beta reports, and `get-task-allow=false`.
-- [ ] Exact physical upgrade reproduction below.
+- [x] Exact physical upgrade reproduction below. Cold launches and background
+  returns completed in approximately 1–1.5 seconds, VoiceOver remained
+  responsive, and the imported library remained intact and usable.
 
 1. Install public App Store Earshot 1.0.0 build 155 on the iPhone.
 2. Import an OPML file containing at least 60 subscriptions. A larger file is
    welcome but is not required; automated coverage already uses 120 feeds and
    54,000 episodes.
 3. Open Library and confirm the imported podcasts are present.
-4. Without deleting Earshot or its data, install the signed build-203 candidate
+4. Without deleting Earshot or its data, install the signed build-205 candidate
    over build 155 from the Mac.
 5. Launch Earshot and complete **Upgrading your library database**.
 6. Keep Earshot in the foreground until Library appears. Do not force quit it.
