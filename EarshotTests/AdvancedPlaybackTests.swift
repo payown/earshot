@@ -320,6 +320,32 @@ final class AdvancedPlaybackTests: XCTestCase {
         XCTAssertEqual(after.queue, before.queue, "Completion must not insert a QueueItem")
     }
 
+    func test_persistentEpisode_actualEndMarksPlayedAndClearsPosition() async {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+
+        let episode = makeEpisode(ctx)
+        episode.durationSeconds = 100
+        episode.positionSeconds = 99
+        QueueRepository(context: ctx).add(episode)
+        player.load(episode)
+
+        NotificationCenter.default.post(
+            name: AVPlayerItem.didPlayToEndTimeNotification, object: nil
+        )
+
+        for _ in 0..<200 {
+            if episode.isPlayed { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertTrue(episode.isPlayed, "Actual end-of-item must still complete the episode")
+        XCTAssertEqual(episode.positionSeconds, 0)
+        XCTAssertNil(player.nowPlayingEpisode, "A completed final queue item should unload")
+    }
+
     // MARK: Now-playing identity mirror (Item 2)
 
     func test_play_setsNowPlayingEpisodeID() {
@@ -962,10 +988,9 @@ final class AdvancedPlaybackTests: XCTestCase {
 
     /// Mirrors the ``PlaybackLogicTests`` coverage of `shouldPersistTick`'s
     /// `isPlayed` guard, but against the eager anchor `pause()` uses
-    /// (`persistCurrentPosition()`). If the episode was marked played (position
-    /// zeroed) while a stale `currentPositionSeconds` was still in flight —
-    /// exactly the window between the 95%-played tick and the item actually
-    /// finishing — a later `pause()` must not overwrite the zeroed position.
+    /// (`persistCurrentPosition()`). If an explicit Mark as Played zeroed the
+    /// position while a stale `currentPositionSeconds` was still in flight, a
+    /// later `pause()` must not overwrite that zeroed position.
     func test_pause_afterEpisodeMarkedPlayed_doesNotOverwriteZeroedPosition() {
         let ctx = TestStore.freshContext()
         let player = PlayerService()

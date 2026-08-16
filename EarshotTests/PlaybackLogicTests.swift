@@ -202,124 +202,82 @@ final class PlaybackLogicTests: XCTestCase {
         XCTAssertEqual(url?.absoluteString, "https://example.com/stream.mp3")
     }
 
-    // MARK: Completion / resume logic
+    // MARK: Playback start position
 
-    func testBelowThresholdResumesAtPosition() {
-        // 50 of 100 seconds -> resume at 50, not played.
-        let decision = PlaybackLogic.completionDecision(position: 50, duration: 100)
-        XCTAssertFalse(decision.shouldMarkPlayed)
-        XCTAssertEqual(decision.resumePosition, 50)
+    func testSavedPositionResumesExactly() {
+        XCTAssertEqual(PlaybackLogic.playbackStartPosition(position: 50, duration: 100), 50)
     }
 
-    func testAtThresholdMarksPlayedAndRestarts() {
-        // Exactly 95% -> played, restart from 0.
-        let decision = PlaybackLogic.completionDecision(position: 95, duration: 100)
-        XCTAssertTrue(decision.shouldMarkPlayed)
-        XCTAssertEqual(decision.resumePosition, 0)
+    func testPositionAtNinetyFivePercentStillResumes() {
+        XCTAssertEqual(
+            PlaybackLogic.playbackStartPosition(position: 95, duration: 100),
+            95,
+            "Near-end progress must remain reachable so listeners can skip outro ads"
+        )
     }
 
-    func testPastThresholdMarksPlayedAndRestarts() {
-        let decision = PlaybackLogic.completionDecision(position: 99, duration: 100)
-        XCTAssertTrue(decision.shouldMarkPlayed)
-        XCTAssertEqual(decision.resumePosition, 0)
+    func testPositionPastNinetyFivePercentStillResumes() {
+        XCTAssertEqual(
+            PlaybackLogic.playbackStartPosition(position: 99, duration: 100),
+            99,
+            "Only actual end-of-item or an explicit action marks an episode played"
+        )
     }
 
-    func testUnknownDurationNeverMarksPlayed() {
-        let decision = PlaybackLogic.completionDecision(position: 500, duration: nil)
-        XCTAssertFalse(decision.shouldMarkPlayed)
-        XCTAssertEqual(decision.resumePosition, 500)
+    func testUnknownDurationResumesAtSavedPosition() {
+        XCTAssertEqual(PlaybackLogic.playbackStartPosition(position: 500, duration: nil), 500)
     }
 
-    func testZeroDurationNeverMarksPlayed() {
-        let decision = PlaybackLogic.completionDecision(position: 10, duration: 0)
-        XCTAssertFalse(decision.shouldMarkPlayed)
-        XCTAssertEqual(decision.resumePosition, 10)
+    func testZeroDurationResumesAtSavedPosition() {
+        XCTAssertEqual(PlaybackLogic.playbackStartPosition(position: 10, duration: 0), 10)
     }
 
     func testNegativePositionClampsToZero() {
-        let decision = PlaybackLogic.completionDecision(position: -5, duration: 100)
-        XCTAssertFalse(decision.shouldMarkPlayed)
-        XCTAssertEqual(decision.resumePosition, 0)
+        XCTAssertEqual(PlaybackLogic.playbackStartPosition(position: -5, duration: 100), 0)
     }
 
     // MARK: Intro skip (#456)
 
     func testFreshStart_withIntroSkip_resumesPastIntro() {
-        // Never played (position 0) + a configured intro skip -> start past it.
-        let decision = PlaybackLogic.completionDecision(position: 0, duration: 1800, introSkipSeconds: 45)
-        XCTAssertFalse(decision.shouldMarkPlayed)
-        XCTAssertEqual(decision.resumePosition, 45)
+        let position = PlaybackLogic.playbackStartPosition(
+            position: 0, duration: 1800, introSkipSeconds: 45
+        )
+        XCTAssertEqual(position, 45)
     }
 
     func testFreshStart_noIntroSkip_resumesAtZero() {
-        // nil intro skip must not change existing zero-position behavior.
-        let decision = PlaybackLogic.completionDecision(position: 0, duration: 1800, introSkipSeconds: nil)
-        XCTAssertEqual(decision.resumePosition, 0)
+        let position = PlaybackLogic.playbackStartPosition(
+            position: 0, duration: 1800, introSkipSeconds: nil
+        )
+        XCTAssertEqual(position, 0)
     }
 
     func testFreshStart_zeroIntroSkip_resumesAtZero() {
-        // 0 means "no skip configured" — must not be treated as skip-to-0.
-        let decision = PlaybackLogic.completionDecision(position: 0, duration: 1800, introSkipSeconds: 0)
-        XCTAssertEqual(decision.resumePosition, 0)
+        let position = PlaybackLogic.playbackStartPosition(
+            position: 0, duration: 1800, introSkipSeconds: 0
+        )
+        XCTAssertEqual(position, 0)
     }
 
     func testAlreadyInProgress_introSkipDoesNotReapply() {
-        // Resuming existing progress must never be pushed forward again by the
-        // intro skip — that only applies to a genuinely fresh start.
-        let decision = PlaybackLogic.completionDecision(position: 200, duration: 1800, introSkipSeconds: 45)
-        XCTAssertEqual(decision.resumePosition, 200)
-    }
-
-    func testIntroSkip_clampedToNotExceedDuration() {
-        // A misconfigured skip longer than the episode must not seek past the end.
-        let decision = PlaybackLogic.completionDecision(position: 0, duration: 30, introSkipSeconds: 999)
-        XCTAssertLessThan(decision.resumePosition, 30)
-    }
-
-    func testIntroSkip_clampNearDuration_doesNotFalselyMarkPlayed() {
-        // shouldMarkPlayed reflects real listening progress (position 0), not
-        // the skip-adjusted starting point — must never be true on a fresh start.
-        let decision = PlaybackLogic.completionDecision(position: 0, duration: 30, introSkipSeconds: 999)
-        XCTAssertFalse(decision.shouldMarkPlayed, "A fresh start must never be auto-marked played")
-        XCTAssertLessThan(decision.resumePosition, 30, "The intro skip must still apply")
-    }
-
-    /// Regression for a follow-up caught in review of #456: PlayerService's
-    /// periodic tick recomputes completionDecision every second using the LIVE
-    /// current position, with no knowledge of introSkipSeconds (nor should it —
-    /// the tick handler doesn't know why the position is where it is). If the
-    /// intro-skip clamp only avoided exceeding the raw duration (`duration - 1`),
-    /// a large skip on a short episode could land the start position so close to
-    /// the 95% played threshold that the very NEXT tick — within about a second
-    /// of real playback, sometimes with essentially none — crosses it and marks
-    /// the episode played, despite the listener having heard almost nothing. The
-    /// clamp must leave enough real margin that at least a couple of seconds of
-    /// genuine listening are required before a tick checking the resulting
-    /// position (with no intro-skip knowledge, exactly as the real tick call
-    /// site does) can cross the threshold.
-    func testIntroSkip_clampStaysComfortablyBelowPlayedThreshold() {
-        let decision = PlaybackLogic.completionDecision(position: 0, duration: 30, introSkipSeconds: 999)
-
-        // Simulate the very next tick landing at EXACTLY the skip-adjusted
-        // position (zero additional real listening) -- exactly what
-        // PlayerService.handleTick computes, with no introSkipSeconds argument.
-        let immediateTick = PlaybackLogic.completionDecision(position: decision.resumePosition, duration: 30)
-        XCTAssertFalse(
-            immediateTick.shouldMarkPlayed,
-            "The skip's landing position alone must not be one tick away from played"
+        let position = PlaybackLogic.playbackStartPosition(
+            position: 200, duration: 1800, introSkipSeconds: 45
         )
+        XCTAssertEqual(position, 200)
+    }
 
-        // One more real second of listening still must not cross the threshold.
-        let oneSecondLater = PlaybackLogic.completionDecision(position: decision.resumePosition + 1, duration: 30)
-        XCTAssertFalse(
-            oneSecondLater.shouldMarkPlayed,
-            "A single additional real second must not be enough to cross the threshold"
+    func testIntroSkip_clampedToLeavePlayableTail() {
+        let position = PlaybackLogic.playbackStartPosition(
+            position: 0, duration: 30, introSkipSeconds: 999
         )
+        XCTAssertEqual(position, 28, "An oversized intro skip must leave two playable seconds")
     }
 
     func testIntroSkip_unknownDuration_appliesAsIs() {
-        let decision = PlaybackLogic.completionDecision(position: 0, duration: nil, introSkipSeconds: 45)
-        XCTAssertEqual(decision.resumePosition, 45)
+        let position = PlaybackLogic.playbackStartPosition(
+            position: 0, duration: nil, introSkipSeconds: 45
+        )
+        XCTAssertEqual(position, 45)
     }
 
     // MARK: Speed resolution

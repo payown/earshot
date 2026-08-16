@@ -101,6 +101,33 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
                        "with no live value, resume at the durable position")
     }
 
+    /// Regression: reaching 95% used to mark the episode played, zero its
+    /// position, and make outro ads impossible to skip. Near-end progress must
+    /// load unchanged and the transport must remain seekable until actual end.
+    func test_nearEndPositionRemainsUnplayedAndSeekable() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        clearLive()
+
+        let episode = makeEpisode(ctx)
+        episode.durationSeconds = 100
+        episode.positionSeconds = 96
+        try? ctx.save()
+
+        player.load(episode)
+
+        XCTAssertEqual(Int(player.currentPositionSeconds), 96)
+        XCTAssertFalse(episode.isPlayed)
+
+        player.seek(to: 99)
+
+        XCTAssertEqual(Int(player.currentPositionSeconds), 99)
+        XCTAssertEqual(episode.positionSeconds, 99)
+        XCTAssertFalse(episode.isPlayed, "Seeking near the end must not complete the episode")
+    }
+
     /// A CloudKit reconcile occurs while the app remains open. The player owns a
     /// separate observable position cache, so its notification hook must update
     /// the visible scrubber/VoiceOver value without requiring relaunch.

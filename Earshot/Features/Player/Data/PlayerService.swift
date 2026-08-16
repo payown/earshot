@@ -289,8 +289,8 @@ final class PlayerService {
 
     // MARK: Public playback API
 
-    /// Loads and starts playing an episode. Resumes from the saved position when
-    /// the episode is below the played threshold, otherwise starts from the top.
+    /// Loads and starts playing an episode. Resumes from its saved position;
+    /// only actual playback completion or an explicit action marks it played.
     func play(_ episode: Episode) {
         play(episode, preparedItem: nil, originEvent: .started(nil))
     }
@@ -494,15 +494,16 @@ final class PlayerService {
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
 
-        // Resume position: honor saved progress unless past the threshold.
-        let decision = PlaybackLogic.completionDecision(
+        // Always honor saved progress, including the final five percent. Ads or
+        // credits near the end remain seekable until playback actually finishes.
+        let resume = PlaybackLogic.playbackStartPosition(
             position: resumePosition(for: episode),
             duration: episode.durationSeconds,
             introSkipSeconds: episode.podcast?.introSkipSeconds
         )
-        if decision.resumePosition > 0 {
-            player.seek(to: CMTime(seconds: Double(decision.resumePosition), preferredTimescale: 1))
-            currentPositionSeconds = Double(decision.resumePosition)
+        if resume > 0 {
+            player.seek(to: CMTime(seconds: Double(resume), preferredTimescale: 1))
+            currentPositionSeconds = Double(resume)
         } else {
             currentPositionSeconds = 0
         }
@@ -557,12 +558,11 @@ final class PlayerService {
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
 
-        let decision = PlaybackLogic.completionDecision(
+        let resume = PlaybackLogic.playbackStartPosition(
             position: resumePosition(for: episode),
             duration: episode.durationSeconds,
             introSkipSeconds: episode.podcast?.introSkipSeconds
         )
-        let resume = decision.resumePosition
         if resume > 0 {
             player.seek(to: CMTime(seconds: Double(resume), preferredTimescale: 1))
         }
@@ -1069,8 +1069,8 @@ final class PlayerService {
 
     /// Manual "mark as played" for the loaded episode: marks it played, removes
     /// it from the queue, and advances to the next queue item WITHOUT playing the
-    /// current one to the end. Distinct from the automatic 95% mark in
-    /// ``handleTick``. No-op when nothing is loaded. Announces the result.
+    /// current one to the end. Distinct from natural end-of-item completion.
+    /// No-op when nothing is loaded. Announces the result.
     func markCurrentPlayedAndAdvance() {
         guard let finished = currentEpisode, let context else { return }
 
@@ -1509,13 +1509,6 @@ final class PlayerService {
         updateCurrentChapter()
 
         guard !episodeWasDeleted else { return }
-
-        // Mark played once we cross the threshold.
-        let duration = currentEpisode?.durationSeconds ?? (durationSeconds > 0 ? Int(durationSeconds) : nil)
-        let decision = PlaybackLogic.completionDecision(position: Int(currentSeconds), duration: duration)
-        if decision.shouldMarkPlayed, let episode = currentEpisode, !episode.isPlayed {
-            markCurrentEpisodePlayed()
-        }
     }
 
     /// Logs the deleted-instance guard once per loaded episode (#574) so the
@@ -1594,13 +1587,10 @@ final class PlayerService {
             logDeletedEpisodeGuardOnce("position persist")
             return
         }
-        // Same race as the throttled tick (issue #653): `markCurrentEpisodePlayed()`
-        // zeros the position but doesn't reset `lastPersistedSecond`, and this
-        // eager path shares the same durability contract. `pause()` in particular
-        // can land in the narrow window after the 95%-played threshold trips but
-        // before the item actually finishes/advances — without this guard it
-        // would overwrite the just-zeroed position with the in-flight
-        // `currentPositionSeconds`. Once played, there's nothing left to persist.
+        // Same stale-write defense as the throttled tick (issue #653). An
+        // explicit Mark as Played can zero the position while an in-flight player
+        // clock still reports the old value. Once played, there is nothing left
+        // to persist.
         guard !episode.isPlayed else { return }
         let second = Int(max(0, currentPositionSeconds))
         episode.positionSeconds = second
