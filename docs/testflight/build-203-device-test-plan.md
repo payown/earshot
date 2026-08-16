@@ -17,9 +17,12 @@ Status: passed on 2026-08-15
   exact iOS 27 production store was profiled on the physical phone because the
   iOS 26.5 simulator runtime cannot open its newer Core Data store format.
 - [x] Full non-StoreKit suite: 1,835 executed, 28 documented skips, 0 failed.
-- [x] Signed Release archive and local App Store Connect export verified.
+- [x] Signed Release archive and final App Store distribution export verified.
 - [x] Export has Production CloudKit/APNs, the expected container, privacy
   manifest, beta reports, and `get-task-allow=false`.
+- [x] App Store Connect processed build 205 as VALID, assigned it to both
+  tester groups, retained Chapter 64 as What to Test, and approved external
+  beta review.
 - [x] Exact physical upgrade reproduction below. Cold launches and background
   returns completed in approximately 1–1.5 seconds, VoiceOver remained
   responsive, and the imported library remained intact and usable.
