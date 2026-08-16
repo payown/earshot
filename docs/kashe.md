@@ -460,6 +460,10 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   find under Kashe's finger, not only by flicking backward from the tab bar. A
   podcast's episode order is also one reversible choice—oldest to newest or
   newest to oldest—and changing it never starts the show (Chapter 63)
+- Kashe tests a large-library upgrade twice: first with the retired build 203
+  candidate, then with build 205. The first fix did not hold on later launches.
+  Both launches now stay responsive, and she tells Renata, "A door does not
+  only have to open once" (Chapter 64)
 - Her Thursday client is out past a grain elevator where the cell signal quits
   for good; she reaches it by a gravel road. On Sunday planning nights (Chapter
   43) she used to run a second chore after building the queue: manually download
@@ -2140,46 +2144,54 @@ Kashe put the phone in her pocket without checking a second time.
 
 ---
 
-### Chapter 64 — Build 203
+### Chapter 64 — Build 205
 
-*The long shelf opens*
+*The door opens twice*
 
 **What changed**
 
-Build 203 fixes a crash that could occur after upgrading a large library from
-the App Store version. Folder and iCloud preparation now read the small folder
-membership table directly instead of asking SwiftData to open a much larger
-relationship graph all at once.
+The build 203 candidate fixed the upgrade crash, but device testing found that
+opening Earshot again could still take about 30 seconds and leave VoiceOver
+barely responsive. That candidate was retired before TestFlight distribution.
 
-No folder behavior or VoiceOver wording has changed. The mini player remains
-discoverable by touch, podcast sorting remains a reversible oldest/newest
-control, and private iCloud synchronization uses the production schema.
+Build 205 fixes the repeated-launch delay. iCloud reconciliation now reads the
+small identity records it needs once instead of reopening a huge episode
+library hundreds of times. Launch progress also no longer holds the Library
+behind VoiceOver announcements. No VoiceOver wording or folder behavior has
+changed.
+
+The tested App Store upgrade preserved the imported library. Cold launches and
+returns from the background completed in about one to one and a half seconds.
 
 **What to test**
 
 Install this build over the App Store version without deleting Earshot. Large
-OPML libraries are especially useful. Complete the database upgrade and confirm
-Library appears without a crash or long freeze.
+OPML libraries are especially useful. Complete the database upgrade, confirm
+Library appears, then close and reopen Earshot several times. Return from the
+background too. Each launch should stay under five seconds.
 
-With VoiceOver, move through Library and Folders, open a folder, add and remove
-a podcast, and confirm the app responds normally. Check Settings, iCloud Sync;
-temporary Syncing is expected, but it must settle to Available. Report any
-missing subscription, crash, repeated relaunch, stuck Syncing state, or VoiceOver
-delay.
+With VoiceOver, move through Library and Folders while iCloud synchronizes.
+Check Settings, iCloud Sync; temporary Syncing is expected, but it must settle
+to Available. Report any missing subscription, crash, stuck Syncing state, or
+VoiceOver delay.
 
-Kashe had a shelf of shows long enough that she no longer remembered when she
-had added each one.
+Kashe opened the long shelf again.
 
-The new copy opened the shelf carefully. It did not pull every box into the
-hallway just to find the folder label. It read the labels, opened the door, and
-let her keep moving.
+The first fix had carried every box through the upgrade without dropping one.
+Then she came back later and waited at the same door while VoiceOver struggled
+to answer. That copy never went any farther.
 
-Renata waited on the phone while the library upgraded.
+This time the Library opened before Renata finished asking whether it had.
+The interview still knew where she'd stopped. The Thursday folder was where
+she'd left it.
 
-“Still there?”
+Kashe closed Earshot and opened it again.
 
-Kashe moved through the folders, found the interview, and heard iCloud finish.
+“Still there?” Renata asked.
 
-“All of it,” she said.
+Kashe moved through the folders. VoiceOver stayed with her while iCloud finished.
+Then she closed it and opened it a third time.
+
+“A door does not only have to open once,” she said.
 
 More chapters added here as Earshot ships.

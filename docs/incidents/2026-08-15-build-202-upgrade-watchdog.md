@@ -1,6 +1,6 @@
 # Build 202 App Store upgrade watchdog
 
-Status: fixed in build 203 source; physical upgrade verification pending
+Status: fixed and physically verified in build 205
 Date: 2026-08-15
 Owner: @payown
 
@@ -33,6 +33,17 @@ large relationship graph synchronously. The watchdog report identifies sampled
 work at termination, so the frame is evidence of the blocking path rather than
 a complete accounting of the preceding ten seconds.
 
+Build 203 fixed that one-time migration path, but the captured production store
+then exposed a separate repeated-launch problem. It contained 99 current
+subscriptions, 169,946 episodes, and 1,047 Cloud podcast projections, of which
+948 were deletion tombstones left by the approved Delete Everywhere test.
+Every tombstone performed a broad Podcast fetch after its exact feed lookup
+missed. Core Data populated Podcast-to-Episodes inverse faults on each fetch,
+turning reconciliation into multiplicative work on the main thread. A build 204
+System Trace symbolicated the 38.83-second hang through
+`PodcastIdentityService.existing(feedURL:)` and
+`CloudProjectionCoordinator.reconcile()`.
+
 ## Correction
 
 - Folder membership reads and mutations fetch `FolderMembership` join rows
@@ -43,6 +54,15 @@ a complete accounting of the preceding ten seconds.
   fetch for every rendered row.
 - Labels, values, hints, traits, rotor actions, focus behavior, and spoken
   announcements are unchanged.
+- Build 205 resolves all Cloud podcast rows against one scalar-only Podcast
+  snapshot and reuses scalar-only Podcast fetches in episode-state lookup and
+  local subscription publication. Episode relationship size therefore does not
+  affect subscription reconciliation.
+- Launch progress announcements no longer serialize or gate publication of the
+  ready UI. The final “Earshot is ready” announcement retains its bounded wait.
+- Inbox notifications posted while remote state is being applied no longer
+  schedule a redundant reconciliation; external feed-refresh notifications
+  still do.
 
 Moving the entire projection coordinator to a new background actor was considered
 but deliberately excluded from this release hotfix. The measured critical path
@@ -77,19 +97,28 @@ TEST_RUNNER_RUN_CLOUD_PROJECTION_SCALE=1 xcodebuild test \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-Result: 120 subscriptions, 54,000 episodes, first reconciliation plus folder
-subtree read in 0.092 seconds. The gate is 5 seconds.
+The build 205 gate reproduces the captured shape with 99 subscriptions, 948
+tombstones, 53,944 episodes, one 12,000-episode relationship, and meaningful
+episode state. First reconciliation completed in 0.307 seconds and repeated
+reconciliation in 0.305 seconds. The gate is 5 seconds.
 
 The opt-in real build-155 fixture test now includes first post-migration Cloud
 projection. Result: V5 to V10 migration in 1.874 seconds and first projection of
 the 53,946-episode migrated library in 0.199 seconds. Both application stores
 passed SQLite integrity checks and an episode save survived reopening.
 
-## Remaining physical gate
+## Build 205 physical profiling and completed gate
 
-Before any TestFlight upload, repeat the reported App Store build 155 upgrade
-sequence with at least 60 OPML subscriptions. The app must remain responsive
-through migration, reach Library without a relaunch, retain imported podcasts,
-and remain usable with VoiceOver while first production synchronization settles.
-Any crash, forced relaunch, missing subscription, unbounded Syncing state, or
-VoiceOver freeze fails the gate and blocks upload.
+A signed Release build 205 with the Production CloudKit entitlement was
+installed over the affected 169,946-episode phone library. The original
+30–40-second hang did not recur. The final repeated-launch Time Profiler run
+reported one 0.543-second episode-state pause and no watchdog-scale hang. The
+phone runs iOS 27 while the available simulator runs iOS 26.5, so the captured
+iOS 27 Core Data store cannot be opened by that older simulator runtime; exact
+store validation is intentionally performed on the physical phone.
+
+Michael then installed the exact signed build 205 over App Store build 155 and
+the imported library without deleting the app. Cold launches and
+background-to-foreground returns completed in approximately 1–1.5 seconds.
+VoiceOver remained responsive and the imported library was intact and usable.
+This closes the physical pre-TestFlight gate.

@@ -157,7 +157,6 @@ final class AppRuntime {
     private var launchAttemptID: UUID?
     private var pendingStoreLoad: StoreLoad?
     private var heartbeatTask: Task<Void, Never>?
-    private var pendingAnnouncementTask: Task<Void, Never>?
     private var completionAnnouncementAttemptID: UUID?
     private var progressRevision = 0
     private var isSceneActive = true
@@ -431,11 +430,6 @@ final class AppRuntime {
         "\(preparationAccessibilityLabel). \(initialPreparationValue)"
     static let firstHeartbeatDelay: Duration = .seconds(5)
     static let subsequentHeartbeatDelay: Duration = .seconds(8)
-    /// UIKit occasionally omits `announcementDidFinishNotification`. Preparation
-    /// speech is useful status, but it must never become a gate that prevents a
-    /// successfully migrated store from publishing the ready UI.
-    static let stageAnnouncementTimeout: Duration = .seconds(8)
-
     private func receive(_ progress: StoreMigrationProgress, attemptID: UUID) {
         guard launchAttemptID == attemptID, case .unavailable = phase else { return }
         if !showsLaunchPreparation {
@@ -469,10 +463,6 @@ final class AppRuntime {
         }
 
         if case .ready(let container) = load, showsLaunchPreparation {
-            let queuedAnnouncements = pendingAnnouncementTask
-            pendingAnnouncementTask = nil
-            await queuedAnnouncements?.value
-            guard launchAttemptID == attemptID else { return }
             while launchAnnouncer.isVoiceOverRunning {
                 guard isSceneActive else {
                     pendingStoreLoad = load
@@ -566,26 +556,16 @@ final class AppRuntime {
         requiredProgressRevision: Int? = nil
     ) {
         guard showsLaunchPreparation, isSceneActive else { return }
-        let previousAnnouncement = pendingAnnouncementTask
-        pendingAnnouncementTask = Task { @MainActor [weak self] in
-            await previousAnnouncement?.value
-            guard let self,
-                  !Task.isCancelled,
-                  self.launchAttemptID == attemptID,
-                  requiredProgressRevision.map({
-                      Self.heartbeatIsCurrent(
-                          candidateRevision: $0,
-                          currentRevision: self.progressRevision,
-                          isSceneActive: self.isSceneActive
-                      )
-                  }) ?? self.isSceneActive,
-                  case .unavailable = self.phase else { return }
-            _ = await self.launchAnnouncer.announceLaunch(
-                message,
-                assertive: false,
-                timeout: Self.stageAnnouncementTimeout
-            )
-        }
+        guard launchAttemptID == attemptID,
+              requiredProgressRevision.map({
+                  Self.heartbeatIsCurrent(
+                      candidateRevision: $0,
+                      currentRevision: progressRevision,
+                      isSceneActive: isSceneActive
+                  )
+              }) ?? isSceneActive,
+              case .unavailable = phase else { return }
+        launchAnnouncer.announce(message, assertive: false)
     }
 
     static func heartbeatIsCurrent(
@@ -597,8 +577,6 @@ final class AppRuntime {
     }
 
     private func cancelAnnouncementWork() {
-        pendingAnnouncementTask?.cancel()
-        pendingAnnouncementTask = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
     }
