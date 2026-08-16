@@ -491,7 +491,7 @@ struct RootView: View {
             }
         case let .playEpisode(_, episodeGUID):
             if let episode = episode(guid: episodeGUID, in: podcast) {
-                player.play(episode)
+                player.playWithHandoff(episode)
             }
         }
 

@@ -1,0 +1,255 @@
+import CloudKit
+import SwiftData
+import XCTest
+@testable import Earshot
+
+actor FakePlaybackHandoffClient: PlaybackHandoffClient {
+    nonisolated let isEnabled = true
+    var fetched: PlaybackHandoffSnapshot?
+    var fetchDelayNanoseconds: UInt64 = 0
+    private(set) var published: [PlaybackHandoffSnapshot] = []
+
+    init(fetched: PlaybackHandoffSnapshot? = nil) {
+        self.fetched = fetched
+    }
+
+    func setFetchDelay(_ nanoseconds: UInt64) {
+        fetchDelayNanoseconds = nanoseconds
+    }
+
+    func fetchLatest(
+        for identity: PlaybackHandoffIdentity
+    ) async throws -> PlaybackHandoffSnapshot? {
+        if fetchDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: fetchDelayNanoseconds)
+        }
+        guard fetched?.identity == identity else { return nil }
+        return fetched
+    }
+
+    func publish(_ snapshot: PlaybackHandoffSnapshot) async throws {
+        published.append(snapshot)
+    }
+}
+
+@MainActor
+final class PlaybackHandoffTests: XCTestCase {
+    private func makeEpisode(
+        _ context: ModelContext,
+        position: Int = 0
+    ) -> Episode {
+        let podcast = Podcast(feedURL: "HTTPS://Example.com/feed/", title: "Show")
+        context.insert(podcast)
+        let episode = Episode(
+            guid: "episode-1",
+            title: "Episode",
+            audioURL: "https://example.com/episode.mp3"
+        )
+        episode.podcast = podcast
+        episode.positionSeconds = position
+        context.insert(episode)
+        try? context.save()
+        return episode
+    }
+
+    private func identity() throws -> PlaybackHandoffIdentity {
+        try XCTUnwrap(
+            PlaybackHandoffIdentity(
+                feedURL: "https://example.com/feed/",
+                guid: "episode-1"
+            )
+        )
+    }
+
+    func testRecordIdentityIsCanonicalAndDeterministic() throws {
+        let first = try XCTUnwrap(
+            PlaybackHandoffIdentity(
+                feedURL: "HTTPS://Example.com/feed/",
+                guid: "episode-1"
+            )
+        )
+        let second = try identity()
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.recordName, second.recordName)
+        XCTAssertEqual(first.recordName.count, 75)
+        XCTAssertTrue(first.recordName.hasPrefix("handoff-v1-"))
+    }
+
+    func testCloudRecordRoundTripPreservesRewindAndRate() throws {
+        let snapshot = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 80,
+            playbackRate: 1.5,
+            eventID: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            eventDate: Date(timeIntervalSince1970: 1_800_000_000),
+            sourceDeviceID: "phone"
+        )
+        let record = CKRecord(
+            recordType: CloudKitPlaybackHandoffClient.Schema.recordType,
+            recordID: CKRecord.ID(recordName: snapshot.identity.recordName)
+        )
+
+        CloudKitPlaybackHandoffClient.apply(snapshot, to: record)
+
+        XCTAssertEqual(CloudKitPlaybackHandoffClient.snapshot(from: record), snapshot)
+        XCTAssertEqual(
+            (record[CloudKitPlaybackHandoffClient.Schema.positionSeconds] as? NSNumber)?.intValue,
+            80,
+            "A rewind must remain 80 rather than being merged with a prior larger position"
+        )
+    }
+
+    func testDelayedOlderBoundaryCannotOverwriteNewerBoundary() throws {
+        let old = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 300,
+            playbackRate: 2,
+            eventID: UUID(),
+            eventDate: Date(timeIntervalSince1970: 100),
+            sourceDeviceID: "mac"
+        )
+        let newerRewind = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 80,
+            playbackRate: 1.5,
+            eventID: UUID(),
+            eventDate: Date(timeIntervalSince1970: 200),
+            sourceDeviceID: "phone"
+        )
+
+        XCTAssertTrue(PlaybackHandoffOrdering.shouldAccept(incoming: newerRewind, over: old))
+        XCTAssertFalse(PlaybackHandoffOrdering.shouldAccept(incoming: old, over: newerRewind))
+        XCTAssertFalse(
+            PlaybackHandoffOrdering.shouldAccept(incoming: newerRewind, over: newerRewind),
+            "Retrying the same event must be idempotent"
+        )
+    }
+
+    func testResumeAppliesExplicitFetchPositionAndRateBeforePlaying() async throws {
+        let context = TestStore.freshContext()
+        let remote = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 180,
+            playbackRate: 1.5,
+            sourceDeviceID: "phone"
+        )
+        let client = FakePlaybackHandoffClient(fetched: remote)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 20)
+        player.load(episode)
+
+        player.resume()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(Int(player.currentPositionSeconds), 180)
+        XCTAssertEqual(player.effectiveRate, 1.5)
+        XCTAssertEqual(episode.positionSeconds, 180)
+        XCTAssertNil(
+            episode.podcast?.speedOverride,
+            "A handoff rate is session state and must not rewrite the podcast preference"
+        )
+    }
+
+    func testResumeFallsBackToLocalStateAtDeadline() async throws {
+        let context = TestStore.freshContext()
+        let remote = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 999,
+            playbackRate: 2,
+            sourceDeviceID: "phone"
+        )
+        let client = FakePlaybackHandoffClient(fetched: remote)
+        await client.setFetchDelay(10_000_000_000)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 42)
+        player.load(episode)
+
+        let start = ContinuousClock.now
+        player.resume()
+        try await Task.sleep(nanoseconds: 1_700_000_000)
+
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(Int(player.currentPositionSeconds), 42)
+        XCTAssertEqual(player.effectiveRate, 1)
+        XCTAssertLessThan(start.duration(to: .now), .seconds(3))
+    }
+
+    func testSeekPublishesOneExactBoundaryWithoutWaitingForCloudKit() async throws {
+        let context = TestStore.freshContext()
+        let client = FakePlaybackHandoffClient()
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context)
+        player.load(episode)
+
+        player.seek(to: 73)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let published = await client.published
+        XCTAssertEqual(published.last?.identity, try identity())
+        XCTAssertEqual(published.last?.positionSeconds, 73)
+        XCTAssertEqual(published.last?.playbackRate, 1)
+    }
+
+    func testPauseCancelsLateFetchWithoutSeekingOrRestarting() async throws {
+        let context = TestStore.freshContext()
+        let remote = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 500,
+            playbackRate: 2,
+            sourceDeviceID: "phone"
+        )
+        let client = FakePlaybackHandoffClient(fetched: remote)
+        await client.setFetchDelay(500_000_000)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 25)
+        player.load(episode)
+
+        player.resume()
+        player.pause()
+        try await Task.sleep(nanoseconds: 700_000_000)
+
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(Int(player.currentPositionSeconds), 25)
+        XCTAssertEqual(player.effectiveRate, 1)
+    }
+
+    func testPendingOutboxKeepsNewerRewindAndSurvivesRecreation() throws {
+        let suite = "PlaybackHandoffTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let identity = try identity()
+        let newerRewind = PlaybackHandoffSnapshot(
+            identity: identity,
+            positionSeconds: 80,
+            playbackRate: 1.5,
+            eventID: UUID(),
+            eventDate: Date(timeIntervalSince1970: 200),
+            sourceDeviceID: "phone"
+        )
+        let delayedOld = PlaybackHandoffSnapshot(
+            identity: identity,
+            positionSeconds: 300,
+            playbackRate: 2,
+            eventID: UUID(),
+            eventDate: Date(timeIntervalSince1970: 100),
+            sourceDeviceID: "mac"
+        )
+        var store = PlaybackHandoffPendingStore(defaults: defaults)
+
+        store.save(newerRewind)
+        store.save(delayedOld)
+
+        let restored = PlaybackHandoffPendingStore(defaults: defaults)
+        XCTAssertEqual(restored.snapshot(for: identity), newerRewind)
+    }
+}
