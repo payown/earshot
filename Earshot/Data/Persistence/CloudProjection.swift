@@ -434,11 +434,16 @@ final class CloudProjectionCoordinator {
             forName: .earshotSubscriptionsDidChange,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
+            let changedFeedURL = notification.object as? String
             MainActor.assumeIsolated {
                 guard self?.isApplyingRemote == false else { return }
                 do {
-                    try self?.publishLocalSubscriptionChanges()
+                    if let feedURL = changedFeedURL {
+                        try self?.publishLocalSubscriptionChange(feedURL: feedURL)
+                    } else {
+                        try self?.publishLocalSubscriptionChanges()
+                    }
                 } catch {
                     AppLog.data.error(
                         "Cloud subscription projection failed: \(error.localizedDescription, privacy: .public)"
@@ -1493,6 +1498,41 @@ final class CloudProjectionCoordinator {
         }
         if cloudContext.hasChanges { try cloudContext.save() }
         knownLocalFeedURLs = Set(localByFeed.keys)
+    }
+
+    /// Updates one subscription projection without walking the full library.
+    /// Player controls use this path for per-podcast settings that can change
+    /// repeatedly while a slider is adjusted. Both lookups use stable feed URL
+    /// keys, keeping the work independent of library size.
+    func publishLocalSubscriptionChange(feedURL: String, now: Date = .now) throws {
+        let appContext = applicationContainer.mainContext
+        let cloudContext = projectionContainer.mainContext
+        let storedFeedURL = feedURL
+        var podcastDescriptor = FetchDescriptor<Podcast>(
+            predicate: #Predicate { $0.feedURL == storedFeedURL }
+        )
+        podcastDescriptor.fetchLimit = 1
+        guard let podcast = try appContext.fetch(podcastDescriptor).first else { return }
+
+        let canonicalFeedURL = FeedURLIdentity.canonical(podcast.feedURL)
+        var projectionDescriptor = FetchDescriptor<CloudPodcastProjection>(
+            predicate: #Predicate { $0.feedURL == canonicalFeedURL }
+        )
+        projectionDescriptor.fetchLimit = 1
+        let row = try cloudContext.fetch(projectionDescriptor).first ?? {
+            let inserted = CloudPodcastProjection()
+            inserted.feedURL = canonicalFeedURL
+            cloudContext.insert(inserted)
+            return inserted
+        }()
+        if row.deletedAt != nil || value(podcast) != value(row) {
+            copy(podcast, to: row)
+            row.deletedAt = nil
+            row.modifiedAt = now
+            row.sourceDeviceID = deviceID
+        }
+        if cloudContext.hasChanges { try cloudContext.save() }
+        knownLocalFeedURLs.insert(canonicalFeedURL)
     }
 
     /// Records the destructive intent before the application-store transaction.

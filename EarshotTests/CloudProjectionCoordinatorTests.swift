@@ -216,6 +216,37 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testTargetedSubscriptionNotificationUpdatesOnlyNamedPodcast() throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let center = NotificationCenter()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: center,
+            deviceID: "phone"
+        )
+        try coordinator.start()
+        let first = Podcast(feedURL: "https://example.com/first", title: "First")
+        let second = Podcast(feedURL: "https://example.com/second", title: "Second")
+        app.mainContext.insert(first)
+        app.mainContext.insert(second)
+        try app.mainContext.save()
+        center.post(name: .earshotSubscriptionsDidChange, object: nil)
+
+        first.speedOverride = 1.5
+        second.speedOverride = 1.75
+        try app.mainContext.save()
+        center.post(name: .earshotSubscriptionsDidChange, object: first.feedURL)
+
+        let rows = try projection.mainContext.fetch(
+            FetchDescriptor<CloudPodcastProjection>()
+        )
+        let values = Dictionary(uniqueKeysWithValues: rows.map { ($0.feedURL, $0.speedOverride) })
+        XCTAssertEqual(values[first.feedURL]!, 1.5)
+        XCTAssertNil(values[second.feedURL]!)
+    }
+
     func testBurstOfRemoteImportNotificationsCoalescesAndStopsCleanly() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()

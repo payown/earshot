@@ -828,7 +828,12 @@ final class PlayerService {
         guard let podcast = currentEpisode?.podcast else { return }
         let clamped = PlaybackLogic.clampedSpeed(speed)
         podcast.speedOverride = clamped
-        saveContext()
+        if saveContext() {
+            NotificationCenter.default.post(
+                name: .earshotSubscriptionsDidChange,
+                object: podcast.feedURL
+            )
+        }
         applyRate()
         if announce {
             Announcer.announce("Speed set to \(PlaybackLogic.spokenRate(clamped)) for this podcast")
@@ -840,7 +845,12 @@ final class PlayerService {
     func clearPodcastSpeedOverride() {
         guard let podcast = currentEpisode?.podcast else { return }
         podcast.speedOverride = nil
-        saveContext()
+        if saveContext() {
+            NotificationCenter.default.post(
+                name: .earshotSubscriptionsDidChange,
+                object: podcast.feedURL
+            )
+        }
         applyRate()
         let global = settings?.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
             ?? SettingsDefault.globalSpeed
@@ -854,8 +864,16 @@ final class PlayerService {
     func setGlobalSpeed(_ speed: Double, announce: Bool = true) {
         let clamped = PlaybackLogic.clampedSpeed(speed)
         settings?.setDouble(clamped, for: SettingsKey.globalSpeed)
+        let podcastWithClearedOverride = currentEpisode?.podcast.flatMap { podcast in
+            podcast.speedOverride == nil ? nil : podcast
+        }
         currentEpisode?.podcast?.speedOverride = nil
-        saveContext()
+        if saveContext(), let podcastWithClearedOverride {
+            NotificationCenter.default.post(
+                name: .earshotSubscriptionsDidChange,
+                object: podcastWithClearedOverride.feedURL
+            )
+        }
         applyRate()
         if announce {
             Announcer.announce("Speed set to \(PlaybackLogic.spokenRate(clamped)) globally")
@@ -1770,8 +1788,10 @@ final class PlayerService {
         )
     }
 
-    private func saveContext() {
-        guard let context, context.hasChanges else { return }
+    @discardableResult
+    private func saveContext() -> Bool {
+        guard let context else { return false }
+        guard context.hasChanges else { return true }
         do {
             try context.save()
             if let currentEpisode {
@@ -1789,8 +1809,10 @@ final class PlayerService {
                     postEpisodeUserStateSnapshots([snapshot])
                 }
             }
+            return true
         } catch {
             AppLog.player.error("Failed to persist playback state: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
