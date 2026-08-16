@@ -111,8 +111,8 @@ final class PlayerService {
     /// Clears a folder playback origin when its backing folder (or containing
     /// deleted subtree) is removed through FolderRepository.
     @ObservationIgnored private var folderDeletionObserver: NSObjectProtocol?
-    /// Refreshes the in-memory slider/VoiceOver position after CloudKit applies
-    /// a newer episode-state projection to SwiftData (#825).
+    /// Refreshes the in-memory playback position and per-podcast rate after
+    /// CloudKit applies newer projections through another SwiftData context.
     @ObservationIgnored private var cloudProjectionObserver: NSObjectProtocol?
     /// One-shot flag for the deleted-instance guard log (#574) so a tick storm
     /// against a deleted episode doesn't spam the log. Reset on episode load.
@@ -1987,7 +1987,10 @@ final class PlayerService {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.refreshProjectedPlaybackPosition() }
+            Task { @MainActor in
+                self?.refreshProjectedPlaybackPosition()
+                self?.refreshProjectedPlaybackRate()
+            }
         }
     }
 
@@ -2028,6 +2031,29 @@ final class PlayerService {
         lastNowPlayingSyncSecond = nil
         writeLivePosition(episode, second: Int(target))
         updateNowPlayingInfo()
+    }
+
+    /// Reconciles the loaded player's per-podcast speed with the durable row
+    /// after CloudKit imports through another `ModelContext`. The retained
+    /// `Episode` graph can otherwise keep its pre-import `speedOverride`, so a
+    /// cross-device handoff resumes at the right position but the wrong rate.
+    /// Reapplying while paused updates `AVPlayer.defaultRate`; reapplying while
+    /// playing also changes the live rate without restarting the episode.
+    func refreshProjectedPlaybackRate() {
+        guard !currentEpisodeIsTransient,
+              let episode = currentEpisode,
+              !episode.isDeleted,
+              let loadedPodcast = episode.podcast,
+              let context else { return }
+        let persistedContext = ModelContext(context.container)
+        guard let persistedEpisode = persistedContext.model(
+            for: episode.persistentModelID
+        ) as? Episode,
+              let persistedPodcast = persistedEpisode.podcast else { return }
+        let projectedOverride = persistedPodcast.speedOverride
+        guard loadedPodcast.speedOverride != projectedOverride else { return }
+        loadedPodcast.speedOverride = projectedOverride
+        applyRate()
     }
 
     /// Reacts to `.earshotWillDeleteEpisodes` (#574). With a podcast ID in

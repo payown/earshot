@@ -209,6 +209,43 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
         XCTAssertEqual(Int(player.currentPositionSeconds), 379)
     }
 
+    /// Podcast projection imports can also arrive through another context. An
+    /// already-loaded player must adopt both a newly synced override and a
+    /// remotely cleared override without requiring an episode reload.
+    func test_cloudProjectionNotificationRefreshesStalePlaybackRate() async throws {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+
+        let episode = makeEpisode(ctx)
+        player.load(episode)
+        XCTAssertEqual(player.effectiveRate, 1)
+
+        let writer = ModelContext(ctx.container)
+        let imported = try XCTUnwrap(
+            writer.model(for: episode.persistentModelID) as? Episode
+        )
+        imported.podcast?.speedOverride = 2
+        try writer.save()
+        XCTAssertNil(episode.podcast?.speedOverride,
+                     "the loaded podcast should model the stale device instance")
+
+        NotificationCenter.default.post(name: .earshotCloudProjectionDidApply, object: nil)
+        await Task.yield()
+
+        XCTAssertEqual(player.effectiveRate, 2)
+        XCTAssertEqual(player.debugDefaultRate, 2)
+
+        imported.podcast?.speedOverride = nil
+        try writer.save()
+        NotificationCenter.default.post(name: .earshotCloudProjectionDidApply, object: nil)
+        await Task.yield()
+
+        XCTAssertEqual(player.effectiveRate, 1)
+        XCTAssertEqual(player.debugDefaultRate, 1)
+    }
+
     /// The projection merge marks explicit rewinds by timestamp; once it has
     /// selected that value, the paused player must not let the larger crash-
     /// recovery cache hide it.
