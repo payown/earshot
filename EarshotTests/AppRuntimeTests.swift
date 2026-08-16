@@ -633,8 +633,7 @@ final class AppRuntimeTests: XCTestCase {
             StoreMigrationProgress.openingAndRepairing.announcement,
             "Earshot is ready.",
         ])
-        XCTAssertEqual(announcer.events.first?.timeout, AppRuntime.stageAnnouncementTimeout)
-        XCTAssertEqual(AppRuntime.stageAnnouncementTimeout, .seconds(8))
+        XCTAssertNil(announcer.events.first?.timeout)
     }
 
     func testInitialScenePhaseChurnDoesNotRepeatCompletedReady() async throws {
@@ -738,7 +737,6 @@ final class AppRuntimeTests: XCTestCase {
         )
         XCTAssertEqual(AppRuntime.firstHeartbeatDelay, .seconds(5))
         XCTAssertEqual(AppRuntime.subsequentHeartbeatDelay, .seconds(8))
-        XCTAssertEqual(AppRuntime.stageAnnouncementTimeout, .seconds(8))
         XCTAssertEqual(StoreMigrationProgress.preparingAndValidating.announcement,
                        "Preparing Earshot. Step 1 of 3. Preparing your library data.")
         XCTAssertEqual(StoreMigrationProgress.migratingMirroredStore.announcement,

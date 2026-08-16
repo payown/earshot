@@ -1849,6 +1849,37 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         )
     }
 
+    /// Measures an already-migrated production device store. Build 203 proved
+    /// the one-time migration and first projection, but a 169,946-episode store
+    /// still spent about 30 seconds on every subsequent preparation screen.
+    func testRealCurrentLargeStoreReopensWithinLaunchBudget() async throws {
+        let variable = "CURRENT_LARGE_STORE_DIRECTORY"
+        guard let path = ProcessInfo.processInfo.environment[variable] else {
+            throw XCTSkip("Set TEST_RUNNER_\(variable) to a copied V10 application-support directory")
+        }
+        try copyStoreSet(from: URL(fileURLWithPath: path, isDirectory: true))
+        XCTAssertEqual(try storeMajorVersion(at: storeURL), 10)
+
+        let started = ContinuousClock.now
+        let reopened = try await StoreMigrationEngine().openOrMigrate(at: storeURL)
+        let elapsed = ContinuousClock.now - started
+        let components = elapsed.components
+        let seconds = Double(components.seconds) + Double(components.attoseconds) / 1e18
+        let podcastCount = try reopened.mainContext.fetchCount(FetchDescriptor<Podcast>())
+        let episodeCount = try reopened.mainContext.fetchCount(FetchDescriptor<Episode>())
+
+        XCTAssertEqual(podcastCount, 99)
+        XCTAssertEqual(episodeCount, 169_946)
+        XCTAssertLessThan(
+            seconds, 5,
+            "An already-migrated library must reopen with margin inside the scene watchdog"
+        )
+        print(String(format:
+            "REALCURRENTOPEN|podcasts|%d|episodes|%d|seconds|%.3f",
+            podcastCount, episodeCount, seconds
+        ))
+    }
+
     /// Opt-in proof against a disposable copy of the untouched build-161 V6
     /// backup, not a freshly constructed scale fixture.
     func testRealBuild161V6FixtureThroughRetainedColumnSchema() async throws {

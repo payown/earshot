@@ -392,7 +392,13 @@ final class CloudProjectionCoordinator {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.scheduleReconciliation() }
+            MainActor.assumeIsolated {
+                // Reconciliation itself posts this notification after applying
+                // remote episode or queue state. That work is already current;
+                // only an external catalog refresh needs another pass.
+                guard self?.isApplyingRemote == false else { return }
+                self?.scheduleReconciliation()
+            }
         }
         queueObserver = center.addObserver(
             forName: .earshotQueueDidChange,
@@ -611,11 +617,15 @@ final class CloudProjectionCoordinator {
             }
         }
 
+        let podcastIdentity = PodcastIdentityService(context: appContext)
+        var localByFeed = try podcastIdentity.existingByCanonicalFeedURL(
+            for: Array(cloudByFeed.keys)
+        )
         var applicationChanged = false
         for row in cloudByFeed.values.sorted(by: Self.projectionOrder) {
+            let key = FeedURLIdentity.canonical(row.feedURL)
             if row.deletedAt != nil {
-                if let podcast = try PodcastIdentityService(context: appContext)
-                    .existing(feedURL: row.feedURL) {
+                if let podcast = localByFeed[key] {
                     if remotePodcastDeletionDelayNanoseconds == 0 {
                         // Tests and non-UI coordinators retain deterministic,
                         // synchronous reconciliation.
@@ -628,15 +638,18 @@ final class CloudProjectionCoordinator {
                 }
                 continue
             }
-            let result = try PodcastIdentityService(context: appContext).fetchOrCreate(
-                feedURL: row.feedURL
-            ) { canonical in
-                Podcast(feedURL: canonical, title: row.title, createdAt: row.createdAt)
+            let podcast: Podcast
+            if let existing = localByFeed[key] {
+                podcast = existing
+            } else {
+                podcast = Podcast(feedURL: key, title: row.title, createdAt: row.createdAt)
+                appContext.insert(podcast)
+                localByFeed[key] = podcast
+                applicationChanged = true
             }
-            if value(row) != value(result.podcast) {
-                copy(row, to: result.podcast)
+            if value(row) != value(podcast) {
+                copy(row, to: podcast)
             }
-            applicationChanged = applicationChanged || result.inserted
         }
         applicationChanged = try removeOrphanedLibraryRows(in: appContext)
             || applicationChanged
@@ -645,7 +658,7 @@ final class CloudProjectionCoordinator {
             applicationChanged = true
         }
 
-        let podcasts = try appContext.fetch(FetchDescriptor<Podcast>())
+        let podcasts = try podcastIdentity.scalarPodcasts()
             .sorted { FeedURLIdentity.canonical($0.feedURL) < FeedURLIdentity.canonical($1.feedURL) }
         var subscriptionRowsSinceSave = 0
         for podcast in podcasts {
@@ -827,7 +840,8 @@ final class CloudProjectionCoordinator {
 
         // Existing projection keys that are no longer meaningful must be
         // distinguished from episodes not yet refetched on this device.
-        let existingForOwnKeys = applicationEpisodes(matching: Set(ownByKey.keys))
+        let existingForOwnKeys = onlyMissingOwnRows
+            ? [:] : applicationEpisodes(matching: Set(ownByKey.keys))
         let keys = Set(localByKey.keys).union(ownByKey.keys).sorted()
         for key in keys {
             if onlyMissingOwnRows, ownByKey[key] != nil { continue }
@@ -1277,7 +1291,7 @@ final class CloudProjectionCoordinator {
     func publishLocalSubscriptionChanges(now: Date = .now) throws {
         let appContext = applicationContainer.mainContext
         let cloudContext = projectionContainer.mainContext
-        let podcasts = try appContext.fetch(FetchDescriptor<Podcast>())
+        let podcasts = try PodcastIdentityService(context: appContext).scalarPodcasts()
         // Legacy stores can contain duplicate spellings of the same feed URL.
         // Launch repair normally coalesces them, but projection must remain
         // total even if a save notification arrives before that repair.
@@ -1550,7 +1564,7 @@ final class CloudProjectionCoordinator {
         guard !keys.isEmpty else { return [:] }
         let keysByFeed = Dictionary(grouping: keys, by: \.feedURL)
         let context = applicationContainer.mainContext
-        let podcasts = (try? context.fetch(FetchDescriptor<Podcast>())) ?? []
+        let podcasts = (try? PodcastIdentityService(context: context).scalarPodcasts()) ?? []
         var result: [EpisodeKey: Episode] = [:]
         for podcast in podcasts {
             let feed = FeedURLIdentity.canonical(podcast.feedURL)

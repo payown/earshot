@@ -79,6 +79,24 @@ actor PodcastIdentityWriteGate {
 struct PodcastIdentityService {
     let context: ModelContext
 
+    /// Fetches Podcast values without asking Core Data to populate any inverse
+    /// relationships. Callers that only need subscription metadata must not make
+    /// their cost proportional to the number of Episodes in the library.
+    func scalarPodcasts() throws -> [Podcast] {
+        var descriptor = FetchDescriptor<Podcast>()
+        descriptor.propertiesToFetch = [
+            \Podcast.feedURL, \Podcast.title, \Podcast.author,
+            \Podcast.podcastDescription, \Podcast.artworkURL, \Podcast.websiteURL,
+            \Podcast.language, \Podcast.category, \Podcast.autoQueue,
+            \Podcast.notificationEnabled, \Podcast.speedOverride,
+            \Podcast.trimSilenceOverride, \Podcast.introSkipSeconds,
+            \Podcast.queueAgeLimitDays, \Podcast.inboxMaxEpisodes,
+            \Podcast.inboxAgeLimitHours, \Podcast.inboxExcluded,
+            \Podcast.inboxIncluded, \Podcast.createdAt, \Podcast.lastSeenPubDate,
+        ]
+        return try context.fetch(descriptor)
+    }
+
     /// Resolves a whole import against one deliberately narrow fetch. Import used
     /// to call ``existing(feedURL:)`` once per URL; Core Data consequently executed
     /// and populated relationship faults hundreds of times on the actor executor.
@@ -87,9 +105,7 @@ struct PodcastIdentityService {
         let requested = Set(feedURLs.map(FeedURLIdentity.canonical))
         guard !requested.isEmpty else { return [:] }
 
-        var descriptor = FetchDescriptor<Podcast>()
-        descriptor.propertiesToFetch = [\Podcast.feedURL, \Podcast.title, \Podcast.createdAt]
-        let podcasts = try context.fetch(descriptor)
+        let podcasts = try scalarPodcasts()
         var matches: [String: Podcast] = [:]
         for podcast in podcasts {
             let canonical = FeedURLIdentity.canonical(podcast.feedURL)
@@ -105,12 +121,16 @@ struct PodcastIdentityService {
 
     func existing(feedURL: String) throws -> Podcast? {
         let canonical = FeedURLIdentity.canonical(feedURL)
-        let exact = try context.fetch(
-            FetchDescriptor<Podcast>(predicate: #Predicate { $0.feedURL == canonical })
+        var exactDescriptor = FetchDescriptor<Podcast>(
+            predicate: #Predicate { $0.feedURL == canonical }
         )
+        exactDescriptor.propertiesToFetch = [
+            \Podcast.feedURL, \Podcast.title, \Podcast.createdAt,
+        ]
+        let exact = try context.fetch(exactDescriptor)
         if let winner = Self.deterministicPodcast(in: exact) { return winner }
 
-        let legacyMatches = try context.fetch(FetchDescriptor<Podcast>())
+        let legacyMatches = try scalarPodcasts()
             .filter { FeedURLIdentity.canonical($0.feedURL) == canonical }
         return Self.deterministicPodcast(in: legacyMatches)
     }

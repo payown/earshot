@@ -4,9 +4,9 @@ import XCTest
 
 @MainActor
 final class CloudProjectionCoordinatorTests: XCTestCase {
-    /// Reproduces the build-202 failure shape: a cold, production-sized catalog
-    /// with more OPML subscriptions than the reported 60-feed library, followed
-    /// by first compact-projection reconciliation and a folder-subtree read.
+    /// Reproduces the build-204 failure shape: a cold catalog with 99 current
+    /// subscriptions, 948 remote deletion tombstones left by Delete Everywhere,
+    /// and one unusually large Podcast-to-Episodes relationship.
     /// This is opt-in because constructing 54,000 persisted Episodes is too
     /// expensive for every unit-test run; it is mandatory for release candidates.
     func testLargeMigratedLibraryFirstProjectionAndFolderReadStayBelowWatchdog() throws {
@@ -21,8 +21,10 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let applicationURL = root.appending(path: "application.store")
         let localURL = root.appending(path: "local.store")
         let projectionURL = root.appending(path: "projection.store")
-        let feedCount = 120
-        let episodesPerFeed = 450
+        let feedCount = 99
+        let tombstoneCount = 948
+        let largeFeedEpisodeCount = 12_000
+        let ordinaryFeedEpisodeCount = 428
 
         try autoreleasepool {
             let app = try makeOnDiskApplicationContainer(
@@ -46,12 +48,17 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                     podcast: podcast,
                     sortOrder: feedIndex
                 ))
-                for episodeIndex in 0..<episodesPerFeed {
+                let episodeCount = feedIndex == 0
+                    ? largeFeedEpisodeCount : ordinaryFeedEpisodeCount
+                for episodeIndex in 0..<episodeCount {
                     let episode = Episode(
                         guid: "\(feedIndex)-\(episodeIndex)",
                         title: "Episode \(episodeIndex)",
                         audioURL: "https://scale.example/\(feedIndex)/\(episodeIndex).mp3"
                     )
+                    if feedIndex == 0, episodeIndex == 0 {
+                        episode.positionSeconds = 120
+                    }
                     episode.podcast = podcast
                     context.insert(episode)
                 }
@@ -65,39 +72,68 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             localURL: localURL
         )
         let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-        let started = ContinuousClock.now
-        try CloudProjectionCoordinator(
+        for feedIndex in 0..<feedCount {
+            let row = CloudPodcastProjection()
+            row.feedURL = "https://scale.example/\(feedIndex)/feed"
+            row.title = String(format: "Show %03d", feedIndex)
+            projection.mainContext.insert(row)
+        }
+        for index in 0..<tombstoneCount {
+            let row = CloudPodcastProjection()
+            row.feedURL = "https://deleted.example/\(index)/feed"
+            row.title = "Deleted Show \(index)"
+            row.deletedAt = Date(timeIntervalSince1970: 10)
+            projection.mainContext.insert(row)
+        }
+        try projection.mainContext.save()
+
+        let coordinator = CloudProjectionCoordinator(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
             deviceID: "scale-phone"
-        ).reconcile()
+        )
+        let firstStarted = ContinuousClock.now
+        try coordinator.reconcile()
+        let firstSeconds = secondsSince(firstStarted)
+        let secondStarted = ContinuousClock.now
+        try coordinator.reconcile()
+        let secondSeconds = secondsSince(secondStarted)
         let folders = try app.mainContext.fetch(FetchDescriptor<PodcastFolder>())
         let parent = try XCTUnwrap(folders.first { $0.name == "Imported" })
         let subscriptions = FolderRepository(context: app.mainContext)
             .subtreeSubscriptions(of: parent)
-        let elapsed = ContinuousClock.now - started
-        let components = elapsed.components
-        let seconds = Double(components.seconds) + Double(components.attoseconds) / 1e18
+        let expectedEpisodeCount = largeFeedEpisodeCount
+            + (feedCount - 1) * ordinaryFeedEpisodeCount
 
         XCTAssertEqual(subscriptions.count, feedCount)
         XCTAssertEqual(
             try app.mainContext.fetchCount(FetchDescriptor<Episode>()),
-            feedCount * episodesPerFeed
+            expectedEpisodeCount
         )
         XCTAssertEqual(
             try projection.mainContext.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
-            feedCount
+            feedCount + tombstoneCount
         )
         XCTAssertLessThan(
-            seconds,
+            firstSeconds,
             5,
-            "First reconciliation and folder scope consumed half the iOS scene watchdog budget"
+            "First tombstone reconciliation consumed half the iOS scene watchdog budget"
+        )
+        XCTAssertLessThan(
+            secondSeconds,
+            5,
+            "Repeated tombstone reconciliation consumed half the iOS scene watchdog budget"
         )
         print(String(format:
-            "CLOUDWATCHDOG|feeds|%d|episodes|%d|seconds|%.3f",
-            feedCount, feedCount * episodesPerFeed, seconds
+            "CLOUDWATCHDOG|feeds|%d|tombstones|%d|episodes|%d|firstSeconds|%.3f|secondSeconds|%.3f",
+            feedCount, tombstoneCount, expectedEpisodeCount, firstSeconds, secondSeconds
         ))
+    }
+
+    private func secondsSince(_ start: ContinuousClock.Instant) -> Double {
+        let components = (ContinuousClock.now - start).components
+        return Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
 
     func testDevelopmentSeedMarkersBracketDurableProjectionWithAllEntityCounts() throws {
