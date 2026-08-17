@@ -1,6 +1,7 @@
 # Direct playback handoff plan
 
-Status: implementation in progress on `codex/direct-playback-handoff`.
+Status: implemented and device-tested on `codex/direct-playback-handoff`;
+pending Production schema promotion and release integration.
 
 ## Outcome
 
@@ -99,6 +100,22 @@ to synchronize persistent speed preferences eventually.
    this document.
 7. Upload a new TestFlight build to both tester groups and explicitly request
    handoff, energy, and crash feedback.
+
+## Development verification — 2026-08-16
+
+- The Development private-database record type contains the eight application
+  fields in this contract plus CloudKit's six required metadata fields.
+- CloudKit initially inferred 20 queryable, searchable, or sortable indexes for
+  the application fields. All 20 were removed because handoff uses direct
+  record-ID lookup and never issues a query.
+- CloudKit's standard `_world`, `_icloud`, and `_creator` grants apply to the
+  public database. Earshot uses only `privateCloudDatabase`; Apple documents
+  that private records remain accessible only to their owning user.
+- Physical iPhone and Designed-for-iPhone-on-Mac testing passed in both
+  directions for exact position and playback rate, rewind, fast-forward,
+  offline fallback, offline outbox recovery, outbox persistence across force
+  quit, and later-intent conflict resolution.
+- VoiceOver remained responsive during the bounded offline fallback.
 
 Older builds ignore the new record. New builds seeing no record immediately use
 their existing local/projection state, so rollout does not require a bulk data
