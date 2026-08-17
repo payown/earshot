@@ -7,7 +7,6 @@ import SwiftData
 struct NowPlayingBar: View {
     @Environment(PlayerService.self) private var player
     @Environment(\.modelContext) private var context
-    @State private var showingNowPlaying = false
 
     var body: some View {
         if let title = player.currentTitle {
@@ -48,7 +47,6 @@ struct NowPlayingBar: View {
             // Play-state ("Playing" / "Paused") is announced once at the RootView
             // TabView level, not here: this bar is inset into all five tabs (#366),
             // so a per-bar .onChange would announce up to five times per toggle.
-            .sheet(isPresented: $showingNowPlaying) { NowPlayingScreen() }
         }
     }
 
@@ -56,7 +54,11 @@ struct NowPlayingBar: View {
     /// player controls (sleep timer + chapters).
     private func nowPlayingInfo(title: String) -> some View {
         Button {
-            showingNowPlaying = true
+            // Present from RootView's single stable sheet host. This bar is
+            // recreated when its tab/safe-area inset refreshes; local @State
+            // presentation can therefore disappear immediately during a
+            // CloudKit or query-driven rebuild, especially on iOS-on-Mac.
+            player.pendingFullPlayerPresentation = true
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: sleepTimerActive ? "moon.zzz.fill" : "waveform")

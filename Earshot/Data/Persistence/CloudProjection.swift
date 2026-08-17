@@ -27,14 +27,27 @@ struct EpisodeUserStateSnapshot: Sendable, Equatable {
     let playedChangedExplicitly: Bool
 
     @MainActor
-    init?(episode: Episode, playedChangedExplicitly: Bool = false) {
+    init?(
+        episode: Episode,
+        positionSeconds: Int? = nil,
+        playedChangedExplicitly: Bool = false
+    ) {
         guard let feedURL = episode.podcast?.feedURL, !episode.guid.isEmpty else { return nil }
         self.feedURL = FeedURLIdentity.canonical(feedURL)
         self.guid = episode.guid
-        self.positionSeconds = max(0, episode.positionSeconds)
+        self.positionSeconds = max(0, positionSeconds ?? episode.positionSeconds)
         self.isPlayed = episode.isPlayed
         self.playedChangedExplicitly = playedChangedExplicitly
     }
+}
+
+@MainActor
+func postEpisodeUserStateSnapshots(_ snapshots: [EpisodeUserStateSnapshot]) {
+    guard !snapshots.isEmpty else { return }
+    NotificationCenter.default.post(
+        name: .earshotEpisodeUserStateDidChange,
+        object: snapshots
+    )
 }
 
 @MainActor
@@ -48,11 +61,7 @@ func postEpisodeUserStateChanges(
             playedChangedExplicitly: playedChangedExplicitly
         )
     }
-    guard !snapshots.isEmpty else { return }
-    NotificationCenter.default.post(
-        name: .earshotEpisodeUserStateDidChange,
-        object: snapshots
-    )
+    postEpisodeUserStateSnapshots(snapshots)
 }
 
 /// Relationship-free subscription record used by the B1 development gate.
@@ -425,11 +434,16 @@ final class CloudProjectionCoordinator {
             forName: .earshotSubscriptionsDidChange,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
+            let changedFeedURL = notification.object as? String
             MainActor.assumeIsolated {
                 guard self?.isApplyingRemote == false else { return }
                 do {
-                    try self?.publishLocalSubscriptionChanges()
+                    if let feedURL = changedFeedURL {
+                        try self?.publishLocalSubscriptionChange(feedURL: feedURL)
+                    } else {
+                        try self?.publishLocalSubscriptionChanges()
+                    }
                 } catch {
                     AppLog.data.error(
                         "Cloud subscription projection failed: \(error.localizedDescription, privacy: .public)"
@@ -1374,10 +1388,17 @@ final class CloudProjectionCoordinator {
     ) throws {
         guard !snapshots.isEmpty else { return }
         let cloudContext = projectionContainer.mainContext
-        let rows = try cloudContext.fetch(FetchDescriptor<CloudEpisodeStateProjection>())
+        let changedGUIDs = Array(Set(snapshots.map(\.guid)))
+        let sourceDeviceID = deviceID
+        let rows = try cloudContext.fetch(FetchDescriptor<CloudEpisodeStateProjection>(
+            predicate: #Predicate {
+                $0.sourceDeviceID == sourceDeviceID
+                    && $0.deletedAt == nil
+                    && changedGUIDs.contains($0.episodeGUID)
+            }
+        ))
         var ownByKey: [EpisodeKey: CloudEpisodeStateProjection] = [:]
         for row in rows
-            .filter({ $0.sourceDeviceID == deviceID && $0.deletedAt == nil })
             .sorted(by: Self.episodeProjectionOrder) {
             let key = Self.episodeKey(for: row)
             if ownByKey[key] == nil {
@@ -1477,6 +1498,41 @@ final class CloudProjectionCoordinator {
         }
         if cloudContext.hasChanges { try cloudContext.save() }
         knownLocalFeedURLs = Set(localByFeed.keys)
+    }
+
+    /// Updates one subscription projection without walking the full library.
+    /// Player controls use this path for per-podcast settings that can change
+    /// repeatedly while a slider is adjusted. Both lookups use stable feed URL
+    /// keys, keeping the work independent of library size.
+    func publishLocalSubscriptionChange(feedURL: String, now: Date = .now) throws {
+        let appContext = applicationContainer.mainContext
+        let cloudContext = projectionContainer.mainContext
+        let storedFeedURL = feedURL
+        var podcastDescriptor = FetchDescriptor<Podcast>(
+            predicate: #Predicate { $0.feedURL == storedFeedURL }
+        )
+        podcastDescriptor.fetchLimit = 1
+        guard let podcast = try appContext.fetch(podcastDescriptor).first else { return }
+
+        let canonicalFeedURL = FeedURLIdentity.canonical(podcast.feedURL)
+        var projectionDescriptor = FetchDescriptor<CloudPodcastProjection>(
+            predicate: #Predicate { $0.feedURL == canonicalFeedURL }
+        )
+        projectionDescriptor.fetchLimit = 1
+        let row = try cloudContext.fetch(projectionDescriptor).first ?? {
+            let inserted = CloudPodcastProjection()
+            inserted.feedURL = canonicalFeedURL
+            cloudContext.insert(inserted)
+            return inserted
+        }()
+        if row.deletedAt != nil || value(podcast) != value(row) {
+            copy(podcast, to: row)
+            row.deletedAt = nil
+            row.modifiedAt = now
+            row.sourceDeviceID = deviceID
+        }
+        if cloudContext.hasChanges { try cloudContext.save() }
+        knownLocalFeedURLs.insert(canonicalFeedURL)
     }
 
     /// Records the destructive intent before the application-store transaction.

@@ -85,6 +85,16 @@ final class PlayerService {
     // MARK: Private engine state
 
     @ObservationIgnored private let player = AVPlayer()
+    @ObservationIgnored private let playbackHandoff: any PlaybackHandoffClient
+    /// A direct handoff fetch is bounded and cancellable. A new transport action
+    /// supersedes the old request so a late response can never seek the wrong
+    /// episode or start audio after the user has paused again.
+    @ObservationIgnored private var playbackHandoffTask: Task<Void, Never>?
+    @ObservationIgnored private var playbackHandoffGeneration = 0
+    /// Session-only exact rate received with a handoff. It takes precedence for
+    /// the loaded episode without rewriting the user's global/per-show settings;
+    /// any deliberate local speed change clears it.
+    @ObservationIgnored private var handoffRateOverride: Double?
     @ObservationIgnored private var context: ModelContext?
     @ObservationIgnored private var settings: AppSettingsStore?
     @ObservationIgnored private var currentEpisode: Episode?
@@ -111,8 +121,8 @@ final class PlayerService {
     /// Clears a folder playback origin when its backing folder (or containing
     /// deleted subtree) is removed through FolderRepository.
     @ObservationIgnored private var folderDeletionObserver: NSObjectProtocol?
-    /// Refreshes the in-memory slider/VoiceOver position after CloudKit applies
-    /// a newer episode-state projection to SwiftData (#825).
+    /// Refreshes the in-memory playback position and per-podcast rate after
+    /// CloudKit applies newer projections through another SwiftData context.
     @ObservationIgnored private var cloudProjectionObserver: NSObjectProtocol?
     /// One-shot flag for the deleted-instance guard log (#574) so a tick storm
     /// against a deleted episode doesn't spam the log. Reset on episode load.
@@ -142,6 +152,12 @@ final class PlayerService {
     @ObservationIgnored private var likelyToKeepUpObservation: NSKeyValueObservation?
     @ObservationIgnored private var stallObserver: NSObjectProtocol?
 
+    init(
+        playbackHandoff: any PlaybackHandoffClient = PlaybackHandoffClientFactory.make()
+    ) {
+        self.playbackHandoff = playbackHandoff
+    }
+
     /// Generation token for the sleep-timer volume fade (review P1-4). Each fade
     /// captures the current value; every queued fade step bails if it no longer
     /// matches, so a new play/resume during the ~0.6s fade can cancel the
@@ -168,6 +184,12 @@ final class PlayerService {
     // switch / session-flush paths still save eagerly so durability is intact.
     // `nil` forces the next tick to write.
     @ObservationIgnored private var lastPersistedSecond: Int?
+
+    // The application store deliberately stays untouched during uninterrupted
+    // playback (#736). Publish one relationship-free projection row on a bounded
+    // wall-clock cadence so another device can receive progress even before the
+    // next pause/background anchor, without re-materializing the local library.
+    @ObservationIgnored private var lastProjectedSecond: Int = 0
 
     // Now-playing elapsed-time throttle (#412). The periodic time observer fires
     // every second, but reading and rewriting the whole cross-process
@@ -245,6 +267,7 @@ final class PlayerService {
     /// Drops the old model context after the synchronous reset notification has
     /// unloaded playback and before the store files are moved.
     func releasePersistence() {
+        cancelHandoffOperation()
         context = nil
         settings = nil
     }
@@ -289,10 +312,18 @@ final class PlayerService {
 
     // MARK: Public playback API
 
-    /// Loads and starts playing an episode. Resumes from the saved position when
-    /// the episode is below the played threshold, otherwise starts from the top.
+    /// Loads and starts playing an episode. Resumes from its saved position;
+    /// only actual playback completion or an explicit action marks it played.
     func play(_ episode: Episode) {
+        cancelHandoffOperation()
         play(episode, preparedItem: nil, originEvent: .started(nil))
+    }
+
+    /// User-initiated start that does not alter queue membership or presentation.
+    /// Notification actions use this path; automatic queue advance uses `play(_:)`
+    /// so consecutive playback never waits on the network.
+    func playWithHandoff(_ episode: Episode) {
+        playAfterFetchingHandoff(episode, originEvent: .started(nil))
     }
 
     /// Plays `episode` from a user tap on an episode row (the "Play now" default
@@ -311,7 +342,7 @@ final class PlayerService {
         if let context {
             QueueRepository(context: context).add(episode)
         }
-        play(episode, preparedItem: nil, originEvent: .started(origin))
+        playAfterFetchingHandoff(episode, originEvent: .started(origin))
         if settings?.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
             ?? SettingsDefault.openPlayerOnPlay {
             pendingFullPlayerPresentation = true
@@ -340,6 +371,7 @@ final class PlayerService {
     /// Plays `episode` and jumps to an explicit start position. Backs
     /// jump-to-bookmark, where the saved position must be overridden.
     func play(_ episode: Episode, at startSeconds: Double) {
+        cancelHandoffOperation()
         play(episode, preparedItem: nil, originEvent: .started(nil))
         seek(to: startSeconds)
     }
@@ -418,7 +450,8 @@ final class PlayerService {
         _ episode: Episode,
         preparedItem: AVPlayerItem?,
         transient: Bool = false,
-        originEvent: PlaybackOriginEvent
+        originEvent: PlaybackOriginEvent,
+        handoff: PlaybackHandoffSnapshot? = nil
     ) {
         let item: AVPlayerItem
         if let preparedItem {
@@ -446,6 +479,7 @@ final class PlayerService {
 
         // Persist + record the session of whatever was playing before we swap.
         persistCurrentPosition()
+        publishCurrentPlaybackHandoff()
         flushListeningSession()
 
         // Cancel any running sleep timer when the user manually starts a new
@@ -479,6 +513,7 @@ final class PlayerService {
 
         setCurrentEpisode(episode)
         currentEpisodeIsTransient = transient
+        handoffRateOverride = handoff?.playbackRate
         didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
@@ -494,15 +529,21 @@ final class PlayerService {
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
 
-        // Resume position: honor saved progress unless past the threshold.
-        let decision = PlaybackLogic.completionDecision(
-            position: resumePosition(for: episode),
+        // Always honor saved progress, including the final five percent. Ads or
+        // credits near the end remain seekable until playback actually finishes.
+        if let handoff {
+            episode.positionSeconds = handoff.positionSeconds
+            writeLivePosition(episode, second: handoff.positionSeconds)
+            _ = saveContext()
+        }
+        let resume = PlaybackLogic.playbackStartPosition(
+            position: handoff?.positionSeconds ?? resumePosition(for: episode),
             duration: episode.durationSeconds,
             introSkipSeconds: episode.podcast?.introSkipSeconds
         )
-        if decision.resumePosition > 0 {
-            player.seek(to: CMTime(seconds: Double(decision.resumePosition), preferredTimescale: 1))
-            currentPositionSeconds = Double(decision.resumePosition)
+        if resume > 0 {
+            player.seek(to: CMTime(seconds: Double(resume), preferredTimescale: 1))
+            currentPositionSeconds = Double(resume)
         } else {
             currentPositionSeconds = 0
         }
@@ -520,9 +561,43 @@ final class PlayerService {
         loadChaptersForCurrentEpisode()
     }
 
+    /// User-initiated episode starts wait briefly for one explicit record fetch.
+    /// The outgoing item is paused first so it cannot continue speaking under the
+    /// bounded handoff delay. Automatic queue advance continues to use `play(_:)`
+    /// and therefore has no network gap between episodes.
+    private func playAfterFetchingHandoff(
+        _ episode: Episode,
+        originEvent: PlaybackOriginEvent
+    ) {
+        guard playbackHandoff.isEnabled,
+              let identity = playbackHandoffIdentity(for: episode) else {
+            play(episode, preparedItem: nil, originEvent: originEvent)
+            return
+        }
+        if isPlaying { pause() }
+        beginHandoffOperation()
+        let generation = playbackHandoffGeneration
+        playbackHandoffTask = Task { @MainActor [weak self, weak episode] in
+            guard let self else { return }
+            let fetched = await fetchPlaybackHandoff(identity: identity)
+            guard !Task.isCancelled,
+                  playbackHandoffGeneration == generation,
+                  let episode,
+                  !episode.isDeleted else { return }
+            playbackHandoffTask = nil
+            play(
+                episode,
+                preparedItem: nil,
+                originEvent: originEvent,
+                handoff: fetched
+            )
+        }
+    }
+
     /// Loads an episode paused, restoring its saved position. Used on launch to
     /// repopulate the Now Playing bar without starting audio.
     func load(_ episode: Episode, autoplay: Bool = false) {
+        cancelHandoffOperation()
         if autoplay {
             play(episode)
             return
@@ -548,6 +623,7 @@ final class PlayerService {
 
         setCurrentEpisode(episode)
         currentEpisodeIsTransient = false
+        handoffRateOverride = nil
         didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
         currentArtist = episode.podcast?.title ?? episode.podcast?.author
@@ -557,12 +633,11 @@ final class PlayerService {
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
 
-        let decision = PlaybackLogic.completionDecision(
+        let resume = PlaybackLogic.playbackStartPosition(
             position: resumePosition(for: episode),
             duration: episode.durationSeconds,
             introSkipSeconds: episode.podcast?.introSkipSeconds
         )
-        let resume = decision.resumePosition
         if resume > 0 {
             player.seek(to: CMTime(seconds: Double(resume), preferredTimescale: 1))
         }
@@ -591,6 +666,30 @@ final class PlayerService {
     }
 
     func resume() {
+        guard let episode = currentEpisode else { return }
+        guard playbackHandoff.isEnabled,
+              !currentEpisodeIsTransient,
+              let identity = playbackHandoffIdentity(for: episode) else {
+            resumeImmediately()
+            return
+        }
+        beginHandoffOperation()
+        let generation = playbackHandoffGeneration
+        playbackHandoffTask = Task { @MainActor [weak self, weak episode] in
+            guard let self else { return }
+            let fetched = await fetchPlaybackHandoff(identity: identity)
+            guard !Task.isCancelled,
+                  playbackHandoffGeneration == generation,
+                  let episode,
+                  !episode.isDeleted,
+                  currentEpisode === episode else { return }
+            if let fetched { applyFetchedHandoff(fetched, to: episode) }
+            playbackHandoffTask = nil
+            resumeImmediately()
+        }
+    }
+
+    private func resumeImmediately() {
         guard currentEpisode != nil else { return }
         // Resuming during a sleep-timer fade supersedes it (P1-4).
         cancelFadeIfNeeded()
@@ -604,10 +703,12 @@ final class PlayerService {
     }
 
     func pause() {
+        cancelHandoffOperation()
         player.pause()
         isPlaying = false
         intendsToPlay = false
         persistCurrentPosition()
+        publishCurrentPlaybackHandoff()
         flushListeningSession()
         updateNowPlayingInfo()
     }
@@ -630,6 +731,7 @@ final class PlayerService {
         // `StatsRepository.removeSessions`; harmless.) After the clears below,
         // nothing episode-referencing is ever written again.
         persistCurrentPosition()
+        publishCurrentPlaybackHandoff()
         flushListeningSession()
 
         // Supersede any in-flight sleep-timer fade and clear the timer itself:
@@ -660,6 +762,7 @@ final class PlayerService {
         // Drop every episode-derived reference and observable surface.
         setCurrentEpisode(nil)
         currentEpisodeIsTransient = false
+        handoffRateOverride = nil
         currentTitle = nil
         currentArtist = nil
         durationSeconds = 0
@@ -739,6 +842,7 @@ final class PlayerService {
         player.seek(to: CMTime(seconds: clamped, preferredTimescale: 1))
         currentPositionSeconds = clamped
         persistCurrentPosition()
+        publishCurrentPlaybackHandoff()
         updateNowPlayingInfo()
     }
 
@@ -766,6 +870,7 @@ final class PlayerService {
     /// The playback rate that applies to the loaded episode (per-podcast override
     /// or the global speed). Also the speed recorded on listening sessions.
     private var currentEffectiveRate: Double {
+        if let handoffRateOverride { return handoffRateOverride }
         let global = settings?.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
             ?? SettingsDefault.globalSpeed
         return PlaybackLogic.effectivePlaybackRate(
@@ -811,7 +916,13 @@ final class PlayerService {
 
     /// Re-applies the effective rate to the player. Call when the global speed —
     /// or the current podcast's override — changes mid-playback.
-    func reapplyRate() { applyRate() }
+    func reapplyRate() {
+        // This entry point is driven by an explicit local settings change. That
+        // intent supersedes a session-only rate received during handoff.
+        handoffRateOverride = nil
+        applyRate()
+        publishCurrentPlaybackHandoff()
+    }
 
     /// Sets the per-podcast speed override on the current episode's podcast and
     /// immediately re-applies the rate. No-op when nothing is loaded. Announces
@@ -821,9 +932,16 @@ final class PlayerService {
     func setPodcastSpeedOverride(_ speed: Double, announce: Bool = true) {
         guard let podcast = currentEpisode?.podcast else { return }
         let clamped = PlaybackLogic.clampedSpeed(speed)
+        handoffRateOverride = nil
         podcast.speedOverride = clamped
-        saveContext()
+        if saveContext() {
+            NotificationCenter.default.post(
+                name: .earshotSubscriptionsDidChange,
+                object: podcast.feedURL
+            )
+        }
         applyRate()
+        publishCurrentPlaybackHandoff()
         if announce {
             Announcer.announce("Speed set to \(PlaybackLogic.spokenRate(clamped)) for this podcast")
         }
@@ -833,9 +951,16 @@ final class PlayerService {
     /// global speed takes effect. No-op when nothing is loaded.
     func clearPodcastSpeedOverride() {
         guard let podcast = currentEpisode?.podcast else { return }
+        handoffRateOverride = nil
         podcast.speedOverride = nil
-        saveContext()
+        if saveContext() {
+            NotificationCenter.default.post(
+                name: .earshotSubscriptionsDidChange,
+                object: podcast.feedURL
+            )
+        }
         applyRate()
+        publishCurrentPlaybackHandoff()
         let global = settings?.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
             ?? SettingsDefault.globalSpeed
         Announcer.announce("Speed reset to global \(PlaybackLogic.spokenRate(global))")
@@ -847,10 +972,20 @@ final class PlayerService {
     /// from a VoiceOver-adjustable control that already re-reads its own value.
     func setGlobalSpeed(_ speed: Double, announce: Bool = true) {
         let clamped = PlaybackLogic.clampedSpeed(speed)
+        handoffRateOverride = nil
         settings?.setDouble(clamped, for: SettingsKey.globalSpeed)
+        let podcastWithClearedOverride = currentEpisode?.podcast.flatMap { podcast in
+            podcast.speedOverride == nil ? nil : podcast
+        }
         currentEpisode?.podcast?.speedOverride = nil
-        saveContext()
+        if saveContext(), let podcastWithClearedOverride {
+            NotificationCenter.default.post(
+                name: .earshotSubscriptionsDidChange,
+                object: podcastWithClearedOverride.feedURL
+            )
+        }
         applyRate()
+        publishCurrentPlaybackHandoff()
         if announce {
             Announcer.announce("Speed set to \(PlaybackLogic.spokenRate(clamped)) globally")
         }
@@ -1069,8 +1204,8 @@ final class PlayerService {
 
     /// Manual "mark as played" for the loaded episode: marks it played, removes
     /// it from the queue, and advances to the next queue item WITHOUT playing the
-    /// current one to the end. Distinct from the automatic 95% mark in
-    /// ``handleTick``. No-op when nothing is loaded. Announces the result.
+    /// current one to the end. Distinct from natural end-of-item completion.
+    /// No-op when nothing is loaded. Announces the result.
     func markCurrentPlayedAndAdvance() {
         guard let finished = currentEpisode, let context else { return }
 
@@ -1498,6 +1633,7 @@ final class PlayerService {
         }
 
         persistPositionThrottled(currentSecond: Int(currentSeconds))
+        publishPositionProjectionThrottled(currentSecond: Int(currentSeconds))
         recordListeningTick()
         updateNowPlayingElapsedThrottled(currentSecond: Int(currentSeconds))
         // Chapter auto-skip reads the episode's guid; skip it on a deleted
@@ -1509,13 +1645,6 @@ final class PlayerService {
         updateCurrentChapter()
 
         guard !episodeWasDeleted else { return }
-
-        // Mark played once we cross the threshold.
-        let duration = currentEpisode?.durationSeconds ?? (durationSeconds > 0 ? Int(durationSeconds) : nil)
-        let decision = PlaybackLogic.completionDecision(position: Int(currentSeconds), duration: duration)
-        if decision.shouldMarkPlayed, let episode = currentEpisode, !episode.isPlayed {
-            markCurrentEpisodePlayed()
-        }
     }
 
     /// Logs the deleted-instance guard once per loaded episode (#574) so the
@@ -1579,7 +1708,108 @@ final class PlayerService {
     /// `@Query` invalidation costs nothing the user can feel.
     func persistForBackground() {
         persistCurrentPosition()
+        publishCurrentPlaybackHandoff()
         flushListeningSession()
+    }
+
+    // MARK: Direct CloudKit playback handoff
+
+    private static let playbackHandoffFetchTimeoutNanoseconds: UInt64 = 1_500_000_000
+
+    private func playbackHandoffIdentity(for episode: Episode) -> PlaybackHandoffIdentity? {
+        PlaybackHandoffIdentity(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+    }
+
+    private func currentPlaybackHandoffSnapshot() -> PlaybackHandoffSnapshot? {
+        guard playbackHandoff.isEnabled,
+              !currentEpisodeIsTransient,
+              let episode = currentEpisode,
+              !episode.isDeleted,
+              currentPositionSeconds.isFinite,
+              let identity = playbackHandoffIdentity(for: episode) else { return nil }
+        return PlaybackHandoffSnapshot(
+            identity: identity,
+            positionSeconds: Int(max(0, currentPositionSeconds)),
+            playbackRate: currentEffectiveRate
+        )
+    }
+
+    /// Uploads only at durable playback boundaries. This is intentionally absent
+    /// from the periodic tick so direct handoff cannot create sustained radio,
+    /// battery, or main-thread pressure on long listening sessions.
+    private func publishCurrentPlaybackHandoff() {
+        guard let snapshot = currentPlaybackHandoffSnapshot() else { return }
+        let client = playbackHandoff
+        Task {
+            do {
+                try await client.publish(snapshot)
+                AppLog.data.debug(
+                    "Published direct playback handoff at second \(snapshot.positionSeconds, privacy: .public)"
+                )
+            } catch is CancellationError {
+                // The client persisted the pending boundary before network I/O.
+            } catch {
+                AppLog.data.info(
+                    "Direct playback handoff upload deferred: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private func fetchPlaybackHandoff(
+        identity: PlaybackHandoffIdentity
+    ) async -> PlaybackHandoffSnapshot? {
+        let client = playbackHandoff
+        return await withCheckedContinuation { continuation in
+            let race = PlaybackHandoffFetchRace(continuation)
+            Task {
+                do {
+                    let snapshot = try await client.fetchLatest(for: identity)
+                    await race.resolve(snapshot)
+                } catch is CancellationError {
+                    await race.resolve(nil)
+                } catch {
+                    AppLog.data.info(
+                        "Direct playback handoff fetch fell back to local state: \(error.localizedDescription, privacy: .public)"
+                    )
+                    await race.resolve(nil)
+                }
+            }
+            Task {
+                try? await Task.sleep(
+                    nanoseconds: Self.playbackHandoffFetchTimeoutNanoseconds
+                )
+                await race.resolve(nil)
+            }
+        }
+    }
+
+    private func applyFetchedHandoff(
+        _ snapshot: PlaybackHandoffSnapshot,
+        to episode: Episode
+    ) {
+        guard playbackHandoffIdentity(for: episode) == snapshot.identity else { return }
+        let position = snapshot.positionSeconds
+        episode.positionSeconds = position
+        handoffRateOverride = snapshot.playbackRate
+        player.seek(to: CMTime(seconds: Double(position), preferredTimescale: 1))
+        currentPositionSeconds = Double(position)
+        lastPersistedSecond = position
+        lastProjectedSecond = position
+        lastNowPlayingSyncSecond = nil
+        writeLivePosition(episode, second: position)
+        _ = saveContext()
+        applyRate()
+    }
+
+    private func beginHandoffOperation() {
+        playbackHandoffGeneration &+= 1
+        playbackHandoffTask?.cancel()
+        playbackHandoffTask = nil
+    }
+
+    private func cancelHandoffOperation() {
+        beginHandoffOperation()
     }
 
     /// Eagerly writes the current position to disk (used by pause, seek, episode
@@ -1594,13 +1824,10 @@ final class PlayerService {
             logDeletedEpisodeGuardOnce("position persist")
             return
         }
-        // Same race as the throttled tick (issue #653): `markCurrentEpisodePlayed()`
-        // zeros the position but doesn't reset `lastPersistedSecond`, and this
-        // eager path shares the same durability contract. `pause()` in particular
-        // can land in the narrow window after the 95%-played threshold trips but
-        // before the item actually finishes/advances — without this guard it
-        // would overwrite the just-zeroed position with the in-flight
-        // `currentPositionSeconds`. Once played, there's nothing left to persist.
+        // Same stale-write defense as the throttled tick (issue #653). An
+        // explicit Mark as Played can zero the position while an in-flight player
+        // clock still reports the old value. Once played, there is nothing left
+        // to persist.
         guard !episode.isPlayed else { return }
         let second = Int(max(0, currentPositionSeconds))
         episode.positionSeconds = second
@@ -1644,6 +1871,27 @@ final class PlayerService {
         // switch / background), and `resumePosition` reads this back after a
         // crash so we still recover within ~5s.
         writeLivePosition(episode, second: max(0, currentSecond))
+    }
+
+    /// Publishes only a value snapshot to the compact CloudKit projection. It
+    /// does not mutate or save the application `ModelContext`; consequently the
+    /// large Inbox/Library query graph receives no invalidation on this path.
+    private func publishPositionProjectionThrottled(currentSecond: Int) {
+        guard !currentEpisodeIsTransient,
+              let episode = currentEpisode,
+              !episode.isDeleted,
+              !episode.isPlayed else { return }
+        guard PlaybackLogic.shouldProjectPlaybackPosition(
+            currentSecond: currentSecond,
+            lastProjectedSecond: lastProjectedSecond,
+            playbackRate: currentEffectiveRate
+        ) else { return }
+        guard let snapshot = EpisodeUserStateSnapshot(
+            episode: episode,
+            positionSeconds: currentSecond
+        ) else { return }
+        lastProjectedSecond = currentSecond
+        postEpisodeUserStateSnapshots([snapshot])
     }
 
     // MARK: Private — listening-session recording
@@ -1707,6 +1955,9 @@ final class PlayerService {
         accumulatedListenSeconds = 0
         // Force the next tick to persist this episode's first position.
         lastPersistedSecond = nil
+        // Periodic Cloud publication begins after one full bounded interval;
+        // play/load itself must not manufacture an immediate zero-position row.
+        lastProjectedSecond = Int(max(0, currentPositionSeconds))
     }
 
     private func markCurrentEpisodePlayed() {
@@ -1721,12 +1972,14 @@ final class PlayerService {
         }
         episode.isPlayed = true
         episode.positionSeconds = 0
+        currentPositionSeconds = 0
         // Auto-delete the download once played, when the user opted in. Uses the
         // player's own context so it lands in the same saveContext() below.
         if let context {
             DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
         }
         saveContext()
+        publishCurrentPlaybackHandoff()
         postEpisodeUserStateChanges([episode], playedChangedExplicitly: true)
         // The finished episode just left the inbox — refresh the tab badge
         // (the badge no longer polls on every position save, #736).
@@ -1749,13 +2002,31 @@ final class PlayerService {
         )
     }
 
-    private func saveContext() {
-        guard let context, context.hasChanges else { return }
+    @discardableResult
+    private func saveContext() -> Bool {
+        guard let context else { return false }
+        guard context.hasChanges else { return true }
         do {
             try context.save()
-            if let currentEpisode { postEpisodeUserStateChanges([currentEpisode]) }
+            if let currentEpisode {
+                // The five-second tick lives in UserDefaults, so the Episode row
+                // can be intentionally stale during playback. Never let an
+                // unrelated context save publish that stale value as an explicit
+                // rewind over the newer compact projection.
+                let position = currentEpisode.isPlayed
+                    ? 0 : Int(max(0, currentPositionSeconds))
+                if let snapshot = EpisodeUserStateSnapshot(
+                    episode: currentEpisode,
+                    positionSeconds: position
+                ) {
+                    lastProjectedSecond = position
+                    postEpisodeUserStateSnapshots([snapshot])
+                }
+            }
+            return true
         } catch {
             AppLog.player.error("Failed to persist playback state: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
@@ -1952,7 +2223,10 @@ final class PlayerService {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.refreshProjectedPlaybackPosition() }
+            Task { @MainActor in
+                self?.refreshProjectedPlaybackPosition()
+                self?.refreshProjectedPlaybackRate()
+            }
         }
     }
 
@@ -1993,6 +2267,30 @@ final class PlayerService {
         lastNowPlayingSyncSecond = nil
         writeLivePosition(episode, second: Int(target))
         updateNowPlayingInfo()
+    }
+
+    /// Reconciles the loaded player's per-podcast speed with the durable row
+    /// after CloudKit imports through another `ModelContext`. The retained
+    /// `Episode` graph can otherwise keep its pre-import `speedOverride`, so a
+    /// cross-device handoff resumes at the right position but the wrong rate.
+    /// Reapplying while paused updates `AVPlayer.defaultRate`; reapplying while
+    /// playing also changes the live rate without restarting the episode.
+    func refreshProjectedPlaybackRate() {
+        guard !currentEpisodeIsTransient,
+              let episode = currentEpisode,
+              !episode.isDeleted,
+              let loadedPodcast = episode.podcast,
+              let context else { return }
+        let persistedContext = ModelContext(context.container)
+        guard let persistedEpisode = persistedContext.model(
+            for: episode.persistentModelID
+        ) as? Episode,
+              let persistedPodcast = persistedEpisode.podcast else { return }
+        let projectedOverride = persistedPodcast.speedOverride
+        guard loadedPodcast.speedOverride != projectedOverride else { return }
+        handoffRateOverride = nil
+        loadedPodcast.speedOverride = projectedOverride
+        applyRate()
     }
 
     /// Reacts to `.earshotWillDeleteEpisodes` (#574). With a podcast ID in

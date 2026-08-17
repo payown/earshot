@@ -216,6 +216,37 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testTargetedSubscriptionNotificationUpdatesOnlyNamedPodcast() throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        let center = NotificationCenter()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: center,
+            deviceID: "phone"
+        )
+        try coordinator.start()
+        let first = Podcast(feedURL: "https://example.com/first", title: "First")
+        let second = Podcast(feedURL: "https://example.com/second", title: "Second")
+        app.mainContext.insert(first)
+        app.mainContext.insert(second)
+        try app.mainContext.save()
+        center.post(name: .earshotSubscriptionsDidChange, object: nil)
+
+        first.speedOverride = 1.5
+        second.speedOverride = 1.75
+        try app.mainContext.save()
+        center.post(name: .earshotSubscriptionsDidChange, object: first.feedURL)
+
+        let rows = try projection.mainContext.fetch(
+            FetchDescriptor<CloudPodcastProjection>()
+        )
+        let values = Dictionary(uniqueKeysWithValues: rows.map { ($0.feedURL, $0.speedOverride) })
+        XCTAssertEqual(values[first.feedURL]!, 1.5)
+        XCTAssertNil(values[second.feedURL]!)
+    }
+
     func testBurstOfRemoteImportNotificationsCoalescesAndStopsCleanly() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
@@ -966,6 +997,35 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try coordinator.reconcile()
 
         XCTAssertFalse(episode.isPlayed)
+    }
+
+    func testLivePositionSnapshotPublishesWithoutSavingApplicationEpisode() throws {
+        let app = try makeApplicationContainerWithEpisode(position: 10)
+        let projection = try makeProjectionContainer()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        let snapshot = try XCTUnwrap(EpisodeUserStateSnapshot(
+            episode: episode,
+            positionSeconds: 180
+        ))
+
+        try coordinator.publishLocalEpisodeStateChanges(
+            snapshots: [snapshot],
+            now: Date(timeIntervalSince1970: 200)
+        )
+
+        XCTAssertEqual(episode.positionSeconds, 10,
+                       "compact publication must not mutate the application store")
+        let row = try XCTUnwrap(projection.mainContext.fetch(
+            FetchDescriptor<CloudEpisodeStateProjection>()
+        ).first)
+        XCTAssertEqual(row.positionSeconds, 180)
+        XCTAssertEqual(row.positionUpdatedAt, Date(timeIntervalSince1970: 200))
     }
 
     func testQueueProjectionConvergesOrderAndRemovalAcrossDevices() throws {

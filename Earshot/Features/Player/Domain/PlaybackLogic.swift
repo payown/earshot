@@ -88,10 +88,6 @@ enum PlaybackLogic {
         return isActivelyPlaying ? max(max(0, current), projected) : projected
     }
 
-    /// Fraction of an episode's duration at which it counts as "played". Past
-    /// this point we mark it played and restart from the top on the next play.
-    static let playedThreshold = 0.95
-
     /// Resolves which URL to hand to the player for an episode.
     ///
     /// Prefers a downloaded local file when `downloadPath` is set and the file
@@ -181,17 +177,6 @@ enum PlaybackLogic {
     /// picker without silently rewriting it. Ties resolve to the lower value.
     static func nearestMenuSpeed(_ speed: Double) -> Double {
         speedMenuValues.min(by: { abs($0 - speed) < abs($1 - speed) }) ?? 1.0
-    }
-
-    // MARK: Completion / resume logic
-
-    /// The result of evaluating a playback position against its duration.
-    struct CompletionDecision: Equatable {
-        /// True once the episode crosses the played threshold (or completes).
-        let shouldMarkPlayed: Bool
-        /// Where a subsequent `play` should resume. Zero when the episode is
-        /// past the threshold (restart from the top) or has no saved progress.
-        let resumePosition: Int
     }
 
     /// The id of the episode to play next after `current` finishes: the queue
@@ -285,6 +270,29 @@ enum PlaybackLogic {
     /// progress on an abrupt kill, while keeping the run loop responsive.
     static let positionPersistInterval = 5
 
+    /// How often uninterrupted playback publishes its current position to the
+    /// compact CloudKit projection. This never saves the application store, so
+    /// it cannot invalidate the large-library `@Query` graph that caused #736.
+    /// Pause, seek, episode switch, and background remain immediate anchors.
+    static let positionProjectionInterval = 60
+
+    /// Whether uninterrupted playback has advanced far enough to publish one
+    /// compact position projection. The media-time threshold is scaled from a
+    /// wall-clock cadence so 2x playback does not double CloudKit write traffic.
+    static func shouldProjectPlaybackPosition(
+        currentSecond: Int,
+        lastProjectedSecond: Int,
+        playbackRate: Double,
+        wallClockInterval: Int = positionProjectionInterval
+    ) -> Bool {
+        let mediaInterval = Int(ceil(mediaSeconds(
+            forWallClockSeconds: Double(wallClockInterval),
+            playbackRate: playbackRate
+        )))
+        if currentSecond < lastProjectedSecond { return true }
+        return currentSecond - lastProjectedSecond >= mediaInterval
+    }
+
     /// Converts a wall-clock cadence into media seconds. AVPlayer's periodic
     /// observer interval is measured in item time, so an unscaled one-second
     /// interval fires twice per real second at 2x playback.
@@ -304,16 +312,10 @@ enum PlaybackLogic {
     /// write, or whenever the position jumped backwards (a seek/skip-back --
     /// want that reflected promptly). Pure so the cadence is unit-testable.
     ///
-    /// Always false once `isPlayed` is true (issue #653). The 95%-played
-    /// completion check and the throttled tick both run every second from the
-    /// same periodic handler, in that fixed order: the tick that crosses the
-    /// threshold marks the episode played and zeros its position, but nothing
-    /// resets `lastPersistedSecond` when that happens. On the VERY NEXT tick,
-    /// `currentSecond` has kept climbing past `lastPersistedSecond` (playback
-    /// hasn't actually stopped/advanced yet), so the interval-elapsed check
-    /// above would return true again and clobber the just-zeroed position with
-    /// a stale non-zero value. Once an episode is played, no throttled tick has
-    /// anything useful left to persist for it.
+    /// Always false once `isPlayed` is true (issue #653). Explicitly marking an
+    /// episode played can zero its durable position while a stale player tick is
+    /// still in flight. Once an episode is played, no throttled tick has anything
+    /// useful left to persist for it.
     ///
     /// - Parameters:
     ///   - currentSecond: The integer playback second for this tick.
@@ -373,55 +375,29 @@ enum PlaybackLogic {
         return currentSecond - last >= interval
     }
 
-    /// Decides whether an episode at `position` of `duration` seconds should be
-    /// marked played, and where to resume from on the next play.
+    /// Resolves where playback should begin. Saved progress is always honored,
+    /// including positions in the final five percent: only AVPlayer's actual-end
+    /// notification or an explicit user action marks an episode played.
     ///
-    /// - Below the threshold: resume from `position`.
-    /// - At or above the threshold (>= 95%): mark played and resume from 0.
-    /// - Unknown / non-positive duration: never auto-mark; resume from
-    ///   `position` so saved progress is honored — UNLESS `introSkipSeconds`
-    ///   applies (a genuinely fresh start), in which case resume from the skip
-    ///   amount instead (see below; there's no duration to clamp against).
-    /// - `introSkipSeconds` (#456): applied only on a genuinely fresh start
-    ///   (`position == 0`) — resuming existing progress is never pushed forward
-    ///   again. Clamped to stay comfortably BELOW the played threshold (not just
-    ///   below the raw duration) — see the note below on why.
-    ///   `shouldMarkPlayed` is always evaluated from REAL listening progress
-    ///   (`position`, before any skip is applied) — a large configured skip on a
-    ///   short episode must never be misread as "the listener finished it."
-    ///
-    /// Why the clamp targets the played threshold, not just the duration:
-    /// `PlayerService`'s periodic tick recomputes this decision every second
-    /// using the LIVE current position, with no knowledge of `introSkipSeconds`
-    /// (nor should it — the tick has no reason to know why the position is where
-    /// it is). If the skip only avoided exceeding the raw duration, a large skip
-    /// on a short episode could land so close to the threshold that the very
-    /// next tick — often within about a second of real playback — crosses it and
-    /// marks the episode played, despite the listener having heard almost
-    /// nothing. Clamping below the threshold with a small margin guarantees at
-    /// least a couple of seconds of genuine listening are required first.
-    static func completionDecision(
+    /// `introSkipSeconds` (#456) applies only on a genuinely fresh start. For a
+    /// known duration, leave two seconds of playable audio so an oversized intro
+    /// skip cannot jump directly beyond a short episode's end.
+    static func playbackStartPosition(
         position: Int,
         duration: Int?,
         introSkipSeconds: Int? = nil
-    ) -> CompletionDecision {
+    ) -> Int {
         let safePosition = max(0, position)
-        if let duration, duration > 0 {
-            let fraction = Double(safePosition) / Double(duration)
-            if fraction >= playedThreshold {
-                return CompletionDecision(shouldMarkPlayed: true, resumePosition: 0)
-            }
-        }
         var startPosition = safePosition
         if safePosition == 0, let skip = introSkipSeconds, skip > 0 {
             if let duration, duration > 0 {
-                let maxStart = max(0, Int(Double(duration) * playedThreshold) - 1)
+                let maxStart = max(0, duration - 2)
                 startPosition = min(skip, maxStart)
             } else {
                 startPosition = skip
             }
         }
-        return CompletionDecision(shouldMarkPlayed: false, resumePosition: startPosition)
+        return startPosition
     }
 
     // MARK: Scrubber VoiceOver step (#610)

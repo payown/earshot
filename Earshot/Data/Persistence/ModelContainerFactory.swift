@@ -333,6 +333,6 @@ enum ModelContainerFactory {
 /// excluded from ``EarshotSchemaV2``.
 @Model
 final class TestHostPlaceholder {
-    var n: Int
+    var n: Int = 0
     init(n: Int = 0) { self.n = n }
 }
