@@ -2247,4 +2247,63 @@ closed the door, and opened it again.
 This time the thread held. If it ever broke again, Kashe asked for the torn
 piece itself—not only a description of the sound it made.
 
+---
+
+### Chapter 66 — Build 209
+
+*The place between two voices*
+
+**What changed**
+
+Build 209 makes playback handoff deliberate. When you resume the same episode
+on another device, Earshot asks your private iCloud database for the newest
+position and playback rate before audio starts. The request has a short bound:
+offline or unavailable iCloud never prevents local playback, and a pending
+pause, seek, rewind, or rate change retries after the connection returns.
+
+The automatic download-cleanup setting is now called **Delete downloads when
+done**. It remains off by default. When enabled, one rule removes a downloaded
+episode after you finish it, mark it played, remove it from the queue, or clear
+the queue. Removing an episode still does not mark it played or inflate
+listening statistics. Automatic queue limits remain non-destructive.
+
+This candidate also contains build 206's repair for the private-iCloud
+listening-history crash. Builds 207 and 208 were direct device-verification
+builds; 209 is the next TestFlight candidate.
+
+**What to test**
+
+On two devices signed into the same iCloud account, play an episode on device A,
+change its playback rate, pause, and resume that episode on device B. Confirm
+both the position and rate arrive. Repeat from B to A, including one rewind and
+one skip forward. Then make a change offline, close Earshot, reconnect, and
+confirm the later device resumes from the offline change. Local playback should
+still begin promptly whenever iCloud is unavailable.
+
+In Settings, Downloads, turn on Delete downloads when done. Download a queued
+episode, choose Remove from queue, and confirm it also leaves Downloads without
+being marked played. Repeat with the setting off and confirm the download stays.
+If convenient, test Clear queue with the setting on.
+
+Open, background, and return to Earshot several times while iCloud is active.
+If Earshot closes unexpectedly, submit every crash through TestFlight and tell
+us the approximate time, device, episode, and action. Repeated crash logs are
+essential: the log itself is how we distinguish a new failure from the
+listening-history crash already repaired.
+
+Kashe paused the interview on her phone before opening the Mac.
+
+For years, the dangerous part had been the quiet between devices. One copy knew
+the sentence; the other only knew the beginning. This time Earshot checked the
+small note in iCloud before the second voice spoke. Four minutes and six
+seconds. One and a half speed. The same breath, continued in another room.
+
+Later she abandoned a downloaded panel discussion. She removed it from the
+queue and found the file gone too—not because Earshot had called it finished,
+but because she had said she was done. Her listening ledger remained honest.
+
+Renata asked what had changed.
+
+“The space between them,” Kashe said. “It finally remembers.”
+
 More chapters added here as Earshot ships.
