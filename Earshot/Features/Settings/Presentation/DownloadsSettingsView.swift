@@ -42,10 +42,10 @@ struct DownloadsSettingsView: View {
             }
 
             Section {
-                Toggle("Delete downloads after played", isOn: $settings.deleteDownloadAfterPlayed)
-                    .accessibilityHint("When on, an episode's download is removed automatically once you finish or mark it played")
+                Toggle("Delete downloads when done", isOn: $settings.deleteDownloadAfterPlayed)
+                    .accessibilityHint("When on, an episode's download is removed automatically once you finish it, mark it played, or remove it from the queue")
             } footer: {
-                Text("Frees storage as you go by removing each episode's download once it's marked played. Off by default.")
+                Text("Frees storage as you go by removing an episode's download when you finish it, mark it played, or remove it from the queue. Off by default.")
             }
 
             Section {

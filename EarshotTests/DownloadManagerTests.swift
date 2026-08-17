@@ -270,6 +270,79 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, DownloadStatus.none)
     }
 
+    func test_queueRemoval_withAutomaticCleanupOn_removesDownloadWithoutMarkingPlayed() throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let name = "earshot-test-queue-remove-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let podcast = Podcast(feedURL: "https://h/feed.xml", title: "Queue cleanup")
+        let episode = Episode(guid: "queue-on", title: "Removed", audioURL: "https://h/a.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        let queue = QueueRepository(context: context)
+        queue.add(episode)
+
+        queue.cancelFromQueue(episode)
+
+        XCTAssertNil(episode.queueItem)
+        XCTAssertFalse(episode.isPlayed, "Removing from the queue must not count as completion")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertNil(episode.downloadPath)
+        XCTAssertEqual(episode.downloadStatus, .none)
+    }
+
+    func test_queueRemoval_withAutomaticCleanupOff_keepsDownload() throws {
+        let context = TestStore.freshContext()
+        let name = "earshot-test-queue-remove-off-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let podcast = Podcast(feedURL: "https://h/feed-off.xml", title: "Queue cleanup off")
+        let episode = Episode(guid: "queue-off", title: "Kept", audioURL: "https://h/b.mp3",
+                              downloadStatus: .downloaded, downloadPath: name)
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        let queue = QueueRepository(context: context)
+        queue.add(episode)
+
+        queue.cancelFromQueue(episode)
+
+        XCTAssertNil(episode.queueItem)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertEqual(episode.downloadPath, name)
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+    }
+
+    func test_clearQueue_withAutomaticCleanupOn_removesAllDownloads() throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let firstName = "earshot-test-clear-queue-1-\(UUID().uuidString).mp3"
+        let secondName = "earshot-test-clear-queue-2-\(UUID().uuidString).mp3"
+        let firstURL = try plantDownloadFile(named: firstName)
+        let secondURL = try plantDownloadFile(named: secondName)
+        let podcast = Podcast(feedURL: "https://h/clear.xml", title: "Clear cleanup")
+        let first = Episode(guid: "clear-1", title: "First", audioURL: "https://h/1.mp3",
+                            downloadStatus: .downloaded, downloadPath: firstName)
+        let second = Episode(guid: "clear-2", title: "Second", audioURL: "https://h/2.mp3",
+                             downloadStatus: .downloaded, downloadPath: secondName)
+        first.podcast = podcast
+        second.podcast = podcast
+        context.insert(podcast)
+        context.insert(first)
+        context.insert(second)
+        let queue = QueueRepository(context: context)
+        queue.add([first, second])
+
+        queue.clear()
+
+        XCTAssertTrue(queue.queue().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: secondURL.path))
+        XCTAssertEqual(first.downloadStatus, .none)
+        XCTAssertEqual(second.downloadStatus, .none)
+    }
+
     // MARK: downloadQueuedIfEnabled — auto-download queued episodes
 
     func test_downloadQueuedIfEnabled_on_kicksQueuedNotDownloadedEpisodes() async {

@@ -727,9 +727,10 @@ final class DownloadManager {
 /// references.
 @MainActor
 enum DownloadCleanup {
-    /// Whether "Delete downloads after played" is on. Read once and reused when
-    /// clearing many episodes in a loop (e.g. Mark all as played) so a bulk
-    /// action doesn't refetch the setting per episode.
+    /// Whether automatic download cleanup is on. Read once and reused when
+    /// clearing many episodes in a loop (e.g. Mark all as played or Clear queue)
+    /// so a bulk action doesn't refetch the setting per episode. The stored key
+    /// retains its original name for compatibility.
     static func deleteAfterPlayedEnabled(_ context: ModelContext) -> Bool {
         AppSettingsStore(context: context)
             .bool(SettingsKey.deleteDownloadAfterPlayed, default: SettingsDefault.deleteDownloadAfterPlayed)
@@ -750,8 +751,8 @@ enum DownloadCleanup {
         ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
     }
 
-    /// Convenience for the single-episode mark-played paths: removes the download
-    /// only when the setting is on. Bulk callers should gate once with
+    /// Convenience for single-episode completion and deliberate queue-removal
+    /// paths: removes the download only when the setting is on. Bulk callers should gate once with
     /// ``deleteAfterPlayedEnabled(_:)`` and call ``removeDownloadFileAndState(_:in:)``.
     static func removeDownloadAfterPlayedIfEnabled(_ episode: Episode, in context: ModelContext) {
         guard deleteAfterPlayedEnabled(context) else { return }
