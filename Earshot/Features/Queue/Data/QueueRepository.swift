@@ -280,6 +280,11 @@ final class QueueRepository {
         remove(episode) {
             $0.status = .newEpisode
             $0.inboxDismissed = true
+            // Reuse the existing opt-in download cleanup rule. A deliberate
+            // queue removal means the listener is done with this episode just
+            // as surely as marking it played, but it still must not count as a
+            // completed listen.
+            DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: context)
         }
     }
 
@@ -312,8 +317,14 @@ final class QueueRepository {
     func clear() {
         let items = orderedItems()
         let episodes = items.compactMap(\.episode)
+        let shouldDeleteDownloads = DownloadCleanup.deleteAfterPlayedEnabled(context)
         for item in items {
-            item.episode?.isPlayed = false
+            if let episode = item.episode {
+                episode.isPlayed = false
+                if shouldDeleteDownloads {
+                    DownloadCleanup.removeDownloadFileAndState(episode, in: context)
+                }
+            }
             context.delete(item)
         }
         save()

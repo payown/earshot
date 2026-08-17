@@ -36,8 +36,9 @@ enum SettingsKey {
     static let inboxOptInOnly = "inbox_opt_in_only"
     static let wifiOnlyDownloads = "wifi_only_downloads"
     /// When on, an episode's downloaded file is deleted automatically once the
-    /// episode is marked played, from any mark-played path. Global, off by
-    /// default (destructive, opt-in).
+    /// listener marks it played, finishes it, or deliberately removes it from
+    /// the queue. The persisted key retains its original name for compatibility.
+    /// Global, off by default (destructive, opt-in).
     static let deleteDownloadAfterPlayed = "delete_download_after_played"
     /// When on, any episode added to the queue (manually or by auto-queue) is
     /// downloaded for offline playback, honoring the Wi-Fi-only gate. On by default.
