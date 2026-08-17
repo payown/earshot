@@ -2,20 +2,24 @@
 
 ## Impact
 
-Two TestFlight crash submissions from the same public-link tester showed the
+Three TestFlight crash submissions from the same public-link tester showed the
 same deterministic failure on an iPhone18,1 running iOS 26.6:
 
 - `ACi1Pd1lApbst2oge3QXpIg`, 2026-08-15 at 11:53 PM Pacific
 - `AFDpGQNt9m53SfzLNsGjxic`, 2026-08-16 at 5:26 AM Pacific
+- `AIaf0nunoAKbfl4iS1XS1c4`, 2026-08-16 at 6:38 PM Pacific
 
 The first report mentioned VoiceOver Read All. The second occurred after the
-app had moved to the background. Read All and VoiceOver were not the cause;
-they exposed different timings for the same launch-time iCloud reconciliation
-failure.
+app had moved to the background. The third said that opening the app caused a
+crash. Read All and VoiceOver were not the cause; the reports exposed different
+timings for the same launch-time iCloud reconciliation failure. Although the
+third submission arrived after newer builds were available, its crash metadata
+explicitly identifies Earshot 1.1.0 (205).
 
 ## Signature and cause
 
-Both symbolicated reports ended in an uncatchable `EXC_BREAKPOINT` / `SIGTRAP`:
+All three symbolicated reports ended in the same uncatchable `EXC_BREAKPOINT` /
+`SIGTRAP`:
 
 ```text
 _InvalidFutureBackingData.getValue
@@ -55,8 +59,13 @@ The Podcast fault is removed without a projection duplicate or crash. The
 Episode fault preserves its history duration, speed, date, and Podcast identity
 while safely dropping only the missing Episode association.
 
-Build 206 must not be promoted beyond TestFlight until testers exercise launch,
-background return, listening-history creation, iCloud reconciliation, and
-VoiceOver Read All. Every crash notification must be submitted through
-TestFlight with the approximate time and action; repeated reports are valuable
-because they prove whether failures share a signature rather than being noise.
+The focused dangling-history regression tests passed again on current `main`
+(which contains the build 206 repair and subsequent build 209 changes) on
+2026-08-16. The late third report is therefore evidence from the already
+superseded build 205, not evidence that the repair failed. Testers must update
+to the current build before evaluating this fix.
+
+Every crash notification must still be submitted through TestFlight with the
+approximate time, action, and installed build number. Repeated reports are
+valuable because they prove whether failures share a signature rather than
+being noise.
