@@ -1,0 +1,42 @@
+Chapter 66, Build 209
+
+Playback handoff now explicitly checks your private iCloud database before the
+same episode resumes on another device, carrying both the newest position and
+playback rate. Offline or unavailable iCloud never blocks local playback, and
+pending pause, seek, rewind, or rate changes retry after reconnection.
+
+The existing opt-in cleanup setting is now called Delete downloads when done.
+One switch removes a download after you finish or mark an episode played, remove
+it from the queue, or clear the queue. It remains off by default. Queue removal
+still does not mark the episode played, and automatic queue limits do not delete
+downloads.
+
+What to test
+
+On two devices using the same iCloud account, play and pause an episode on
+device A after changing the playback rate. Resume that episode on device B and
+confirm its position and rate. Repeat from B to A with a rewind and a skip
+forward. Make one change offline, close Earshot, reconnect, and confirm the
+offline change eventually wins. Playback should still begin promptly if iCloud
+is unavailable.
+
+In Settings, Downloads, enable Delete downloads when done. Download a queued
+episode, remove it from the queue, and confirm it leaves Downloads without being
+marked played. Disable the setting, repeat, and confirm the download stays.
+
+Build 209 also retains build 206's private-iCloud listening-history crash
+repair. Open, background, and return to Earshot several times while iCloud is
+active. If Earshot closes unexpectedly, submit every crash through TestFlight
+and tell us the approximate time, device, episode, and action. Repeated crash
+logs are essential: the log itself lets us distinguish a new failure from the
+crash already repaired.
+
+Kashe paused the interview on her phone before opening the Mac. Earshot checked
+the small note in iCloud before the second voice spoke: four minutes and six
+seconds, one and a half speed, the same breath continued in another room.
+
+Later she abandoned a downloaded panel discussion. She removed it from the
+queue and found the file gone too—not because Earshot had called it finished,
+but because she had said she was done. Her listening ledger remained honest.
+
+“The space between them,” Kashe said. “It finally remembers.”
