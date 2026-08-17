@@ -115,7 +115,8 @@ to synchronize persistent speed preferences eventually.
   directions for exact position and playback rate, rewind, fast-forward,
   offline fallback, offline outbox recovery, outbox persistence across force
   quit, and later-intent conflict resolution.
-- VoiceOver remained responsive during the bounded offline fallback.
+- VoiceOver remained responsive during the bounded offline fallback, and the
+  iPhone did not become noticeably warmer during the handoff test matrix.
 
 Older builds ignore the new record. New builds seeing no record immediately use
 their existing local/projection state, so rollout does not require a bulk data
