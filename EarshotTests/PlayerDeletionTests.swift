@@ -328,4 +328,46 @@ final class PlayerDeletionTests: XCTestCase {
             "No session referencing the deleted instance is inserted"
         )
     }
+
+    /// Backgrounding is a lifecycle boundary, not merely another persistence
+    /// sink. If reconciliation invalidated the retained model without the normal
+    /// pre-delete hook, the player must release it before later interruption,
+    /// lock-screen artwork, or end-of-item callbacks can fault stored properties.
+    func test_persistForBackground_deletedEpisodeWithoutNotification_unloadsPlayer() throws {
+        let ctx = TestStore.freshContext()
+        let (_, episode) = makePodcastWithEpisode(ctx)
+        let player = makePlayer(ctx)
+        player.load(episode)
+
+        ctx.delete(episode)
+        try ctx.save()
+
+        player.persistForBackground()
+
+        XCTAssertNil(player.nowPlayingEpisode)
+        XCTAssertNil(player.nowPlayingEpisodeID)
+        XCTAssertNil(player.currentTitle)
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    /// An audio interruption or an app-resign-active callback can pause before
+    /// the scene-background persistence anchor runs. A saved remote deletion
+    /// must therefore be detected at pause itself, without consulting any
+    /// property on the detached Episode.
+    func test_pause_savedDeletedEpisodeWithoutNotification_unloadsPlayer() throws {
+        let ctx = TestStore.freshContext()
+        let (_, episode) = makePodcastWithEpisode(ctx)
+        let player = makePlayer(ctx)
+        player.load(episode)
+
+        ctx.delete(episode)
+        try ctx.save()
+
+        player.pause()
+
+        XCTAssertNil(player.nowPlayingEpisode)
+        XCTAssertNil(player.nowPlayingEpisodeID)
+        XCTAssertNil(player.currentTitle)
+        XCTAssertFalse(player.isPlaying)
+    }
 }

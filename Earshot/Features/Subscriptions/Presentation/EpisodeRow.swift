@@ -23,6 +23,7 @@ struct EpisodeRowSupplementalAction: Identifiable, Equatable {
 /// That keeps a single selection component across podcast and episode
 /// multi-select instead of two divergent checkbox implementations.
 struct EpisodeRow: View {
+    @Environment(\.modelContext) private var context
     // Requires SettingsStore in the environment (injected at the app root in
     // EarshotApp). All current call sites render under that root; any future
     // #Preview or detached host must supply `.environment(SettingsStore())` or
@@ -78,26 +79,40 @@ struct EpisodeRow: View {
         if episode.isDeleted {
             EmptyView()
         } else {
-            let primary = actions.first
-            let base = rowButton(primaryLabel: primary.map { $0.label(for: episode) }) {
-                if let primary { performAction(primary) }
+            let episodeID = episode.persistentModelID
+            let presentations = EpisodeAction.presentations(actions, for: episode)
+            let primary = presentations.first
+            let base = rowButton(primaryLabel: primary?.label) {
+                guard let primary,
+                      PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                performAction(primary.action)
             }
             .episodeActionsRotor(
-                actions,
+                presentations,
                 supplementalActions: supplementalActions,
-                episode: episode,
-                perform: performAction,
-                performSupplemental: performSupplementalAction
+                perform: { action in
+                    guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                    performAction(action)
+                },
+                performSupplemental: { action in
+                    guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                    performSupplementalAction(action)
+                }
             )
             if voiceOverEnabled {
                 base
             } else {
                 base.episodeActionsContextMenu(
-                    actions,
+                    presentations,
                     supplementalActions: supplementalActions,
-                    episode: episode,
-                    perform: performAction,
-                    performSupplemental: performSupplementalAction
+                    perform: { action in
+                        guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                        performAction(action)
+                    },
+                    performSupplemental: { action in
+                        guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                        performSupplementalAction(action)
+                    }
                 )
             }
         }

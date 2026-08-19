@@ -104,6 +104,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
 - Her work means moving mobility equipment: wrestling a wheelchair into her
   trunk, blood pressure cuffs, seatbelts; she pauses constantly, both hands
   busy (Chapter 14)
+- She expects Earshot to survive the ordinary gaps in her workday, including
+  time in her pocket between client visits (Chapter 67)
 - The woman on her Tuesday route switched to Earshot and Kashe helped her
   bring her library over via OPML; Kashe is the tech helper in her circle and
   now recommends Earshot "without the asterisk" (Chapter 14)
@@ -2305,5 +2307,57 @@ but because she had said she was done. Her listening ledger remained honest.
 Renata asked what had changed.
 
 “The space between them,” Kashe said. “It finally remembers.”
+
+---
+
+### Chapter 67 — Build 210
+
+*The episode was still there*
+
+**What changed**
+
+Build 210 fixes a crash caused by an episode being removed through private
+iCloud while Earshot still held an older copy of it. The crash could appear
+while browsing an episode's VoiceOver Actions rotor, when Earshot moved to the
+background, when playback paused, or when the app became active again.
+
+Episode, Queue, and Library actions now keep plain labels and roles instead of
+asking a SwiftData object for them later. Before an action runs, Earshot checks
+that its episode or podcast still exists. The player also releases a removed
+episode before background persistence, interruption handling, lock-screen
+updates, or end-of-playback work can touch it. Private-iCloud orphan cleanup
+warns the player before deleting the loaded episode.
+
+The spoken labels, action order, traits, hints, and focus behavior are
+unchanged.
+
+**What to test**
+
+Play an episode, background Earshot for several minutes, and return. Repeat
+while paused and while audio is playing. Lock and unlock the phone, use the
+lock-screen pause control, and let one episode finish while Earshot is in the
+background. Playback should remain stable and resume from the expected place.
+
+While private iCloud sync is active, open the Actions rotor on Inbox, Queue,
+and Library rows. On another device, unfollow the same podcast or otherwise
+remove the row. Return to the first device and try the rotor again. The row may
+disappear, but Earshot must not close. Confirm the action names and order still
+match your Quick Actions settings.
+
+If Earshot closes unexpectedly, submit every TestFlight crash report and tell
+us the approximate time, device, episode, whether audio was playing, and
+whether the app was foregrounded or backgrounded.
+
+Kashe left the phone in her pocket between two visits. The episode had paused
+under a voicemail, iCloud had tidied a show she no longer followed, and the
+afternoon had moved on without asking permission.
+
+At the next stop she opened Earshot and waited for the little silence where an
+app decides whether it remembers you.
+
+The episode was still there. The play button worked. Nothing announced itself
+as a victory.
+
+That was the point.
 
 More chapters added here as Earshot ships.

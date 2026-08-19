@@ -58,6 +58,21 @@ enum PodcastAction: String, CaseIterable, Identifiable, Codable {
     var isDestructive: Bool { self == .unsubscribe }
 }
 
+extension PodcastAction {
+    static func presentations(
+        _ actions: [PodcastAction],
+        for podcast: Podcast
+    ) -> [DeferredActionPresentation<PodcastAction>] {
+        actions.map { action in
+            DeferredActionPresentation(
+                action: action,
+                label: action.label(for: podcast),
+                isDestructive: action.isDestructive
+            )
+        }
+    }
+}
+
 let defaultPodcastActions: [PodcastAction] = [
     .openDetail,
     .toggleNotifications,

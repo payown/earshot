@@ -89,7 +89,8 @@ func buildEpisodeActions(
     onAddToFolder: ((Episode) -> Void)? = nil,
     onMoveToFolder: ((Episode) -> Void)? = nil
 ) -> [QuickActionItem] {
-    order.compactMap { action -> QuickActionItem? in
+    let episodeID = episode.persistentModelID
+    return order.compactMap { action -> QuickActionItem? in
         switch action {
         case .playNow:
             return QuickActionItem(label: "Play now", isDestructive: false) {
@@ -107,7 +108,10 @@ func buildEpisodeActions(
                 if downloaded {
                     downloads.removeDownload(episode)
                 } else {
-                    Task { await downloads.download(episode) }
+                    Task { @MainActor in
+                        guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                        await downloads.download(episode)
+                    }
                 }
             }
         case .addToQueueTop:

@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 /// The single compensation point for iOS's reversed rotor emission (#572).
@@ -40,6 +41,49 @@ enum QuickActionsRotor {
 enum QuickActionsContextMenu {
     static func declarationOrder<T>(_ actions: [T]) -> [T] {
         actions
+    }
+}
+
+/// Immutable presentation for an action whose label or role originally came
+/// from a SwiftData model. SwiftUI can evaluate accessibility/context-menu
+/// builders long after the row body returned; carrying only values here keeps
+/// those deferred builders from faulting a model that a CloudKit cascade has
+/// since deleted.
+struct DeferredActionPresentation<Action: Identifiable>: Identifiable where Action.ID: Hashable {
+    let action: Action
+    let label: String
+    let isDestructive: Bool
+
+    var id: Action.ID { action.id }
+}
+
+/// Store-backed lifetime checks for activating an action captured by a row that
+/// may be leaving SwiftUI's hierarchy. A saved SwiftData deletion can leave the
+/// retained object's `isDeleted` flag false, so callers compare only its stable
+/// identity against a fresh context before touching the object again.
+enum PersistentModelLifetime {
+    static func episodeExists(
+        _ id: PersistentIdentifier,
+        in context: ModelContext
+    ) -> Bool {
+        let resolver = ModelContext(context.container)
+        var descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.persistentModelID == id }
+        )
+        descriptor.fetchLimit = 1
+        return ((try? resolver.fetchCount(descriptor)) ?? 0) > 0
+    }
+
+    static func podcastExists(
+        _ id: PersistentIdentifier,
+        in context: ModelContext
+    ) -> Bool {
+        let resolver = ModelContext(context.container)
+        var descriptor = FetchDescriptor<Podcast>(
+            predicate: #Predicate { $0.persistentModelID == id }
+        )
+        descriptor.fetchLimit = 1
+        return ((try? resolver.fetchCount(descriptor)) ?? 0) > 0
     }
 }
 
@@ -94,9 +138,8 @@ extension View {
     /// stable enum identifiers and one shared runner instead of rebuilding a
     /// UUID and captured closure for every action whenever SwiftUI recycles it.
     func episodeActionsRotor(
-        _ actions: [EpisodeAction],
+        _ actions: [DeferredActionPresentation<EpisodeAction>],
         supplementalActions: [EpisodeRowSupplementalAction] = [],
-        episode: Episode,
         perform: @escaping (EpisodeAction) -> Void,
         performSupplemental: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
     ) -> some View {
@@ -106,11 +149,11 @@ extension View {
                     Button(action.label) { performSupplemental(action) }
                 }
                 ForEach(actions.reversed()) { action in
-                    Button(action.label(for: episode)) { perform(action) }
+                    Button(action.label) { perform(action.action) }
                 }
             } else {
                 ForEach(actions) { action in
-                    Button(action.label(for: episode)) { perform(action) }
+                    Button(action.label) { perform(action.action) }
                 }
                 ForEach(supplementalActions) { action in
                     Button(action.label) { performSupplemental(action) }
@@ -124,9 +167,8 @@ extension View {
     /// user's configured order and dynamic destructive roles.
     @ViewBuilder
     func episodeActionsContextMenu(
-        _ actions: [EpisodeAction],
+        _ actions: [DeferredActionPresentation<EpisodeAction>],
         supplementalActions: [EpisodeRowSupplementalAction] = [],
-        episode: Episode,
         perform: @escaping (EpisodeAction) -> Void,
         performSupplemental: @escaping (EpisodeRowSupplementalAction) -> Void = { _ in }
     ) -> some View {
@@ -135,10 +177,10 @@ extension View {
         } else {
             contextMenu {
                 ForEach(QuickActionsContextMenu.declarationOrder(actions)) { action in
-                    Button(role: action.isDestructive(for: episode) ? .destructive : nil) {
-                        perform(action)
+                    Button(role: action.isDestructive ? .destructive : nil) {
+                        perform(action.action)
                     } label: {
-                        Text(action.label(for: episode))
+                        Text(action.label)
                     }
                 }
                 ForEach(QuickActionsContextMenu.declarationOrder(supplementalActions)) { action in
@@ -154,26 +196,24 @@ extension View {
 
     /// Stable-enum queue variant used by the potentially unbounded Queue list.
     func queueActionsRotor(
-        _ actions: [QueueItemAction],
-        episode: Episode,
+        _ actions: [DeferredActionPresentation<QueueItemAction>],
         perform: @escaping (QueueItemAction) -> Void
     ) -> some View {
         accessibilityActions {
             ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
-                Button(action.label(for: episode)) { perform(action) }
+                Button(action.label) { perform(action.action) }
             }
         }
     }
 
     /// Stable-enum podcast variant used by the Library's large lazy list.
     func podcastActionsRotor(
-        _ actions: [PodcastAction],
-        podcast: Podcast,
+        _ actions: [DeferredActionPresentation<PodcastAction>],
         perform: @escaping (PodcastAction) -> Void
     ) -> some View {
         accessibilityActions {
             ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
-                Button(action.label(for: podcast)) { perform(action) }
+                Button(action.label) { perform(action.action) }
             }
         }
     }
@@ -181,8 +221,7 @@ extension View {
     /// Sighted-only long-press companion for deferred podcast actions.
     @ViewBuilder
     func podcastActionsContextMenu(
-        _ actions: [PodcastAction],
-        podcast: Podcast,
+        _ actions: [DeferredActionPresentation<PodcastAction>],
         perform: @escaping (PodcastAction) -> Void
     ) -> some View {
         if actions.isEmpty {
@@ -191,9 +230,9 @@ extension View {
             contextMenu {
                 ForEach(QuickActionsContextMenu.declarationOrder(actions)) { action in
                     Button(role: action.isDestructive ? .destructive : nil) {
-                        perform(action)
+                        perform(action.action)
                     } label: {
-                        Text(action.label(for: podcast))
+                        Text(action.label)
                     }
                 }
             }

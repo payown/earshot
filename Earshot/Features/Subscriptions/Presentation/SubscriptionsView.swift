@@ -304,7 +304,9 @@ struct SubscriptionsView: View {
     /// selection mode (#757), otherwise the normal navigate-and-swipe row.
     @ViewBuilder
     private func rowContainer(for podcast: Podcast, readOnlyIDs: Set<PersistentIdentifier>) -> some View {
-        if selection.isSelecting {
+        if podcast.isDeleted {
+            EmptyView()
+        } else if selection.isSelecting {
             SelectableRow(
                 isSelected: selection.isSelected(podcast.persistentModelID),
                 accessibilityLabel: rowLabel(for: podcast, isReadOnly: readOnlyIDs.contains(podcast.persistentModelID)),
@@ -325,14 +327,17 @@ struct SubscriptionsView: View {
         // Keep only stable enum identifiers in the row; runnable UUID/closure
         // objects are constructed for the single action activated by the user.
         let actions = rotorActions(for: podcast)
+        let presentations = PodcastAction.presentations(actions, for: podcast)
+        let podcastID = podcast.persistentModelID
         let performAction = { (action: PodcastAction) in
+            guard PersistentModelLifetime.podcastExists(podcastID, in: context) else { return }
             perform(action, for: podcast)
         }
         let link = NavigationLink(value: podcast) {
             row(
                 for: podcast,
                 readOnlyIDs: readOnlyIDs,
-                actions: actions,
+                actions: presentations,
                 performAction: performAction
             )
         }
@@ -347,7 +352,7 @@ struct SubscriptionsView: View {
             // such assumption, so it's safe to defer.
             link
                 .podcastActionsContextMenu(
-                    actions, podcast: podcast, perform: performAction
+                    presentations, perform: performAction
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
@@ -424,7 +429,7 @@ struct SubscriptionsView: View {
     private func row(
         for podcast: Podcast,
         readOnlyIDs: Set<PersistentIdentifier>,
-        actions: [PodcastAction],
+        actions: [DeferredActionPresentation<PodcastAction>],
         performAction: @escaping (PodcastAction) -> Void
     ) -> some View {
         let isReadOnly = readOnlyIDs.contains(podcast.persistentModelID)
@@ -437,7 +442,7 @@ struct SubscriptionsView: View {
             .accessibilityLabel(rowLabel(for: podcast, isReadOnly: isReadOnly))
             // Rotor order goes through the shared helper, which compensates for
             // the OS emitting `.accessibilityActions` children in reverse (#572).
-            .podcastActionsRotor(actions, podcast: podcast, perform: performAction)
+            .podcastActionsRotor(actions, perform: performAction)
     }
 
     // MARK: Multi-select (#757)
