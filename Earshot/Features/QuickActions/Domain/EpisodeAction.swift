@@ -82,6 +82,21 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+extension EpisodeAction {
+    static func presentations(
+        _ actions: [EpisodeAction],
+        for episode: Episode
+    ) -> [DeferredActionPresentation<EpisodeAction>] {
+        actions.map { action in
+            DeferredActionPresentation(
+                action: action,
+                label: action.label(for: episode),
+                isDestructive: action.isDestructive(for: episode)
+            )
+        }
+    }
+}
+
 // `.unfollow` is deliberately LAST: destructive actions never default early,
 // and existing users who saved an order before it existed get it appended by
 // `QuickActionRepository.resolve()` with no migration.

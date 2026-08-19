@@ -112,7 +112,10 @@ func buildQueueActions(
                 if downloaded {
                     downloads.removeDownload(episode)
                 } else {
-                    Task { await downloads.download(episode) }
+                    Task { @MainActor in
+                        guard PersistentModelLifetime.episodeExists(id, in: context) else { return }
+                        await downloads.download(episode)
+                    }
                 }
             }
         case .moveToTop:

@@ -703,6 +703,7 @@ final class PlayerService {
     }
 
     func pause() {
+        guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         cancelHandoffOperation()
         player.pause()
         isPlaying = false
@@ -717,6 +718,7 @@ final class PlayerService {
     /// of the podcast whose episodes are about to be deleted. Absent means all
     /// local data is being wiped (factory reset).
     nonisolated static let willDeletePodcastIDKey = "podcastID"
+    nonisolated static let willDeleteEpisodeIDsKey = "episodeIDs"
 
     /// Stops playback and detaches the player from its episode entirely (#574).
     /// Runs (via `.earshotWillDeleteEpisodes`) BEFORE the loaded episode's model
@@ -733,6 +735,14 @@ final class PlayerService {
         persistCurrentPosition()
         publishCurrentPlaybackHandoff()
         flushListeningSession()
+
+        unloadWithoutPersisting()
+    }
+
+    /// Drops every retained episode reference without reading the model. A
+    /// saved SwiftData deletion can leave `isDeleted == false` on a detached
+    /// object even though stored-property access will trap.
+    private func unloadWithoutPersisting() {
 
         // Supersede any in-flight sleep-timer fade and clear the timer itself:
         // its episode (or the whole library) is going away, and PRD 5.5 clears
@@ -1707,6 +1717,7 @@ final class PlayerService {
     /// (#736). Saving here is off the visible view hot path, so the resulting
     /// `@Query` invalidation costs nothing the user can feel.
     func persistForBackground() {
+        guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         persistCurrentPosition()
         publishCurrentPlaybackHandoff()
         flushListeningSession()
@@ -2043,6 +2054,7 @@ final class PlayerService {
     }
 
     private func handlePlaybackEnded() {
+        guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         guard let finished = currentEpisode, let context else {
             isPlaying = false
             intendsToPlay = false
@@ -2199,8 +2211,13 @@ final class PlayerService {
             queue: nil
         ) { [weak self] note in
             let podcastID = note.userInfo?[Self.willDeletePodcastIDKey] as? PersistentIdentifier
+            let episodeIDs = note.userInfo?[Self.willDeleteEpisodeIDsKey]
+                as? Set<PersistentIdentifier>
             MainActor.assumeIsolated {
-                self?.handleWillDeleteEpisodes(podcastID: podcastID)
+                self?.handleWillDeleteEpisodes(
+                    podcastID: podcastID,
+                    episodeIDs: episodeIDs ?? []
+                )
             }
         }
         folderDeletionObserver = NotificationCenter.default.addObserver(
@@ -2298,7 +2315,25 @@ final class PlayerService {
     /// stop and unload; if only the gapless PRELOAD does, just drop the preload
     /// and leave unrelated playback running. With no podcast ID (factory
     /// reset): stop unconditionally when anything is loaded.
-    private func handleWillDeleteEpisodes(podcastID doomedPodcastID: PersistentIdentifier?) {
+    private func handleWillDeleteEpisodes(
+        podcastID doomedPodcastID: PersistentIdentifier?,
+        episodeIDs doomedEpisodeIDs: Set<PersistentIdentifier>
+    ) {
+        if !doomedEpisodeIDs.isEmpty {
+            let currentMatches = currentEpisode.map {
+                doomedEpisodeIDs.contains($0.persistentModelID)
+            } ?? false
+            let preloadMatches = preloadedEpisode.map {
+                doomedEpisodeIDs.contains($0.persistentModelID)
+            } ?? false
+            guard currentMatches || preloadMatches else { return }
+            guard currentMatches else {
+                clearPreload()
+                return
+            }
+            stopAndUnload()
+            return
+        }
         if let doomedPodcastID {
             let currentMatches = currentEpisode?.podcast?.persistentModelID == doomedPodcastID
             let preloadMatches = preloadedEpisode?.podcast?.persistentModelID == doomedPodcastID
@@ -2493,6 +2528,7 @@ final class PlayerService {
     }
 
     private func updateNowPlayingInfo() {
+        guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         var info: [String: Any] = [:]
         info[MPMediaItemPropertyTitle] = currentTitle ?? ""
         if let artist = currentArtist {
@@ -2523,6 +2559,26 @@ final class PlayerService {
             ($0.artworkURL ?? $0.podcast?.artworkURL).flatMap(URL.init)
         }
         Task { [weak self] in await self?.updateNowPlayingArtwork(from: artworkURL) }
+    }
+
+    /// Returns true after releasing a retained Episode whose row no longer
+    /// exists. Resolve by stable identity in a fresh context; never touch a
+    /// stored property on the retained instance to determine its validity.
+    @discardableResult
+    private func releaseInvalidCurrentEpisodeIfNeeded() -> Bool {
+        guard !currentEpisodeIsTransient,
+              let episode = currentEpisode,
+              let context else { return false }
+        let episodeID = episode.persistentModelID
+        let resolver = ModelContext(context.container)
+        var descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.persistentModelID == episodeID }
+        )
+        descriptor.fetchLimit = 1
+        guard (try? resolver.fetchCount(descriptor)) == 0 else { return false }
+        AppLog.player.error("Unloading a retained episode missing from the store")
+        unloadWithoutPersisting()
+        return true
     }
 
     /// Fetches artwork for the lock screen and Control Center through the shared

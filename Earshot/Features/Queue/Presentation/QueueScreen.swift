@@ -466,6 +466,7 @@ enum GroupedQueueDrag {
 /// reorder, or remove without a drag gesture. Swipe exposes the destructive
 /// actions; the context menu exposes the non-default ones.
 private struct QueueRow: View {
+    @Environment(\.modelContext) private var context
     // Requires SettingsStore in the environment (injected at the app root); every
     // QueueRow renders under QueueScreen, which is under that root. Gates the
     // opt-in season/episode numbering (#452).
@@ -481,8 +482,19 @@ private struct QueueRow: View {
     let actions: [QueueItemAction]
     let performAction: (QueueItemAction) -> Void
 
+    @ViewBuilder
     var body: some View {
-        let primary = actions.first
+        if episode.isDeleted {
+            EmptyView()
+        } else {
+            rowContent
+        }
+    }
+
+    private var rowContent: some View {
+        let episodeID = episode.persistentModelID
+        let presentations = QueueItemAction.presentations(actions, for: episode)
+        let primary = presentations.first
         // Castro-style "X min left" / total length, the same treatment EpisodeRow
         // gives every other list. The Queue was the original surface this was
         // requested for but #493 only reached the shared row, not this bespoke
@@ -493,8 +505,10 @@ private struct QueueRow: View {
             isPlayed: episode.isPlayed
         )
 
-        Button {
-            if let primary { performAction(primary) }
+        return Button {
+            guard let primary,
+                  PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+            performAction(primary.action)
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.title)
@@ -558,13 +572,21 @@ private struct QueueRow: View {
         // there's something to speak: `.accessibilityValue("")` makes VoiceOver
         // utter a stray pause, so a played/unknown-duration row omits it.
         .accessibilityValueIfPresent(accessibilityValue)
-        .accessibilityHint(primary.map { "Double tap to \($0.label(for: episode).lowercased())" } ?? "")
+        .accessibilityHint(primary.map { "Double tap to \($0.label.lowercased())" } ?? "")
         .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
         // Rotor order goes through the shared helper, which compensates for the
         // OS emitting `.accessibilityActions` children in reverse (#572). The
         // default double-tap and hint above keep the UN-reversed `actions.first`.
-        .queueActionsRotor(actions, episode: episode, perform: performAction)
-        .modifier(SightedRowActions(episode: episode, actions: actions, performAction: performAction))
+        .queueActionsRotor(presentations) { action in
+            guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+            performAction(action)
+        }
+        .modifier(SightedRowActions(
+            episodeID: episodeID,
+            context: context,
+            actions: presentations,
+            performAction: performAction
+        ))
     }
 
     /// True when this row's episode is the one loaded in the player, compared by
@@ -631,8 +653,9 @@ private extension View {
 /// from queue" appearing twice). With VoiceOver running these are redundant, so
 /// they're omitted — leaving `.accessibilityActions` as the single rotor source.
 private struct SightedRowActions: ViewModifier {
-    let episode: Episode
-    let actions: [QueueItemAction]
+    let episodeID: PersistentIdentifier
+    let context: ModelContext
+    let actions: [DeferredActionPresentation<QueueItemAction>]
     let performAction: (QueueItemAction) -> Void
     // Tracked by SwiftUI, so toggling VoiceOver while the Queue is on screen
     // re-evaluates and removes/restores the swipe + context actions immediately
@@ -645,18 +668,22 @@ private struct SightedRowActions: ViewModifier {
         } else {
             content
                 .swipeActions(edge: .trailing) {
-                    ForEach(actions.filter { $0.isDestructive(for: episode) }) { action in
-                        Button(role: .destructive) { performAction(action) } label: {
-                            Text(action.label(for: episode))
+                    ForEach(actions.filter(\.isDestructive)) { action in
+                        Button(role: .destructive) {
+                            guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                            performAction(action.action)
+                        } label: {
+                            Text(action.label)
                         }
                     }
                 }
                 .contextMenu {
                     ForEach(actions.dropFirst()) { action in
-                        Button(role: action.isDestructive(for: episode) ? .destructive : nil) {
-                            performAction(action)
+                        Button(role: action.isDestructive ? .destructive : nil) {
+                            guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                            performAction(action.action)
                         } label: {
-                            Text(action.label(for: episode))
+                            Text(action.label)
                         }
                     }
                 }

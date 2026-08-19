@@ -641,6 +641,35 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testReconcileUnloadsPlayerBeforeRemovingLoadedOrphan() throws {
+        let app = try makeApplicationContainer()
+        let orphan = Episode(
+            guid: "playing-orphan",
+            title: "Playing orphan",
+            audioURL: "https://example.com/orphan.mp3"
+        )
+        app.mainContext.insert(orphan)
+        try app.mainContext.save()
+
+        let player = PlayerService()
+        player.configure(context: app.mainContext)
+        player.load(orphan)
+        XCTAssertEqual(player.nowPlayingEpisodeID, orphan.persistentModelID)
+
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: try makeProjectionContainer(),
+            center: .default,
+            deviceID: "phone"
+        )
+
+        try coordinator.reconcile()
+
+        XCTAssertNil(player.nowPlayingEpisode)
+        XCTAssertNil(player.nowPlayingEpisodeID)
+        XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 0)
+    }
+
     func testRemoteUnfollowDelayDoesNotDeleteRapidRefollow() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 30)
         let projection = try makeProjectionContainer()

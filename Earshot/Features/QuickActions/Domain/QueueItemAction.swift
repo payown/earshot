@@ -42,6 +42,21 @@ enum QueueItemAction: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+extension QueueItemAction {
+    static func presentations(
+        _ actions: [QueueItemAction],
+        for episode: Episode
+    ) -> [DeferredActionPresentation<QueueItemAction>] {
+        actions.map { action in
+            DeferredActionPresentation(
+                action: action,
+                label: action.label(for: episode),
+                isDestructive: action.isDestructive(for: episode)
+            )
+        }
+    }
+}
+
 let defaultQueueItemActions: [QueueItemAction] = [
     .playNow,
     .removeFromQueue,

@@ -886,6 +886,14 @@ final class CloudProjectionCoordinator {
         let episodes = try context.fetch(FetchDescriptor<Episode>(
             predicate: #Predicate { $0.podcast == nil }
         ))
+        let episodeIDs = Set(episodes.map(\.persistentModelID))
+        if !episodeIDs.isEmpty {
+            center.post(
+                name: .earshotWillDeleteEpisodes,
+                object: nil,
+                userInfo: [PlayerService.willDeleteEpisodeIDsKey: episodeIDs]
+            )
+        }
         for session in sessions where !session.isDeleted { context.delete(session) }
         for episode in episodes { context.delete(episode) }
         return history.repaired || !sessions.isEmpty || !episodes.isEmpty
