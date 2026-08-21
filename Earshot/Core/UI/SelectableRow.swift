@@ -18,6 +18,7 @@ struct SelectableRow<Label: View>: View {
     /// NOT appended here — the `.isSelected` trait below conveys it, so the word
     /// is never duplicated.
     let accessibilityLabel: String
+    var accessibilityValue: String? = nil
     /// Toggles this row's membership in the selection.
     let onToggle: () -> Void
     /// The row's visual content, reused unchanged from the non-selecting row.
@@ -47,7 +48,17 @@ struct SelectableRow<Label: View>: View {
         // selection trait rather than fragmenting into checkmark + title.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
+        .modifier(OptionalSpokenValue(value: accessibilityValue))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityHint(isSelected ? "Double tap to deselect" : "Double tap to select")
+    }
+}
+
+struct OptionalSpokenValue: ViewModifier {
+    let value: String?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let value, !value.isEmpty { content.accessibilityValue(value) } else { content }
     }
 }

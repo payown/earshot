@@ -69,6 +69,27 @@ final class EpisodeRowLabelTests: XCTestCase {
         XCTAssertEqual(label, "The Big Rewrite, NosillaCast")
     }
 
+    func testConfiguredOptionalFieldsCanBeOmittedWithoutRemovingMandatoryState() {
+        let details = EpisodeSpokenDetails(
+            includesPodcastName: false,
+            includesPublishedDate: false,
+            includesDownloadStatus: false,
+            includesDuration: false,
+            descriptionMode: .off
+        )
+        let label = EpisodeRowLabel.label(
+            episodeTitle: "The Big Rewrite",
+            podcastName: "NosillaCast",
+            isPlayed: true,
+            pubDate: date,
+            downloadState: .downloaded,
+            isNowPlaying: true,
+            contextDetail: "position 2 of 5",
+            details: details
+        )
+        XCTAssertEqual(label, "Now Playing, The Big Rewrite, position 2 of 5, Played")
+    }
+
     // MARK: Season / episode numbering (#452)
 
     func testNumberBadgeBothNumbers() {

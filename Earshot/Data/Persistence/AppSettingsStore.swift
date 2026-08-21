@@ -52,6 +52,12 @@ enum SettingsKey {
     // ``AppSettingsStore/queueGrouping()``.
     static let groupQueueEpisodes = "group_queue_episodes"
     static let showEpisodeNumbers = "show_episode_numbers"
+    static let spokenEpisodePodcastName = "spoken_episode_podcast_name"
+    static let spokenEpisodePublishedDate = "spoken_episode_published_date"
+    static let spokenEpisodeDownloadStatus = "spoken_episode_download_status"
+    static let spokenEpisodeDuration = "spoken_episode_duration"
+    static let spokenEpisodeDescriptionMode = "spoken_episode_description_mode"
+    static let spokenPodcastDescriptionMode = "spoken_podcast_description_mode"
     // Whether playing an episode (the "Play now" default row action) also opens
     // the full player screen. Default true (#562).
     static let openPlayerOnPlay = "open_player_on_play"

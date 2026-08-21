@@ -17,14 +17,16 @@ enum EpisodeRowLabel {
         isPlayed: Bool,
         pubDate: Date?,
         downloadState: DownloadStatus? = nil,
-        isNowPlaying: Bool = false
+        isNowPlaying: Bool = false,
+        contextDetail: String? = nil,
+        details: EpisodeSpokenDetails = EpisodeSpokenDetails()
     ) -> String {
         // "Now Playing" leads the label so VoiceOver announces the current
         // episode's state before its title ("Now Playing, [title], …"). One state
         // regardless of playing or paused (Item 2). Callers that don't track
         // playback pass the default false and the prefix is omitted.
         var parts = isNowPlaying ? ["Now Playing", episodeTitle] : [episodeTitle]
-        if let podcastName, !podcastName.isEmpty {
+        if details.includesPodcastName, let podcastName, !podcastName.isEmpty {
             parts.append(podcastName)
         }
         // Spoken season/episode numbering, after the show name so VoiceOver reads
@@ -32,8 +34,9 @@ enum EpisodeRowLabel {
         if let numbering = spokenNumber(season: seasonNumber, episode: episodeNumber) {
             parts.append(numbering)
         }
+        if let contextDetail, !contextDetail.isEmpty { parts.append(contextDetail) }
         if isPlayed { parts.append("Played") }
-        if let pubDate {
+        if details.includesPublishedDate, let pubDate {
             parts.append(pubDate.formatted(date: .abbreviated, time: .omitted))
         }
         // Downloaded / streaming state, last so the user always hears — before
@@ -41,7 +44,7 @@ enum EpisodeRowLabel {
         // into this single comma-joined label so it's part of the one row element,
         // never a separate VoiceOver stop. Omitted entirely when a caller passes
         // nil (e.g. surfaces that don't carry the state).
-        if let downloadState {
+        if details.includesDownloadStatus, let downloadState {
             parts.append(spokenDownloadState(downloadState))
         }
         return parts.joined(separator: ", ")
