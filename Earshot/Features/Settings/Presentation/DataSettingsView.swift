@@ -7,10 +7,8 @@ import UniformTypeIdentifiers
 /// handlers those controls need.
 struct DataSettingsView: View {
     @Environment(\.modelContext) private var context
-    @Environment(OPMLImportProgress.self) private var importProgress
-    @Environment(DownloadManager.self) private var downloads
-    @Environment(EntitlementStore.self) private var entitlements
     @Environment(AppRuntime.self) private var runtime
+    @Environment(OPMLImportCoordinator.self) private var opmlImportCoordinator
 
     @Query private var podcasts: [Podcast]
 
@@ -22,7 +20,6 @@ struct DataSettingsView: View {
     /// trimmed by the free-tier podcast cap. Set from `OPMLFileImporter`'s
     /// `onCapSkipped` callback, in ADDITION to its existing Announcer outcome
     /// message — never instead of it.
-    @State private var showPaywall = false
 
     var body: some View {
         Form {
@@ -40,6 +37,26 @@ struct DataSettingsView: View {
                     ? "Follow a podcast to enable export."
                     : "Saves your podcast list as a file you can use as a backup")
 
+                if let pending = opmlImportCoordinator.pendingImport {
+                    Button {
+                        opmlImportCoordinator.prepareContinuation()
+                    } label: {
+                        if pending.latestResult.skippedForCap > 0 {
+                            Label(
+                                "Continue importing \(pending.latestResult.skippedForCap) podcasts",
+                                systemImage: "arrow.clockwise"
+                            )
+                        } else {
+                            Label("Continue pending OPML import", systemImage: "arrow.clockwise")
+                        }
+                    }
+
+                    Button(role: .destructive) {
+                        Task { try? await opmlImportCoordinator.discardPendingImport() }
+                    } label: {
+                        Label("Discard pending import", systemImage: "trash")
+                    }
+                }
                 Button {
                     importingOPML = true
                 } label: {
@@ -87,9 +104,6 @@ struct DataSettingsView: View {
         } message: {
             Text("Removes downloaded audio and cached artwork from this device. Your synced library stays available on every device.")
         }
-        // Earshot Plus paywall (#632), dismissible via its own explicit Close
-        // button, never drag-only.
-        .sheet(isPresented: $showPaywall) { PaywallView() }
     }
 
     // MARK: Export
@@ -118,14 +132,7 @@ struct DataSettingsView: View {
         // in-app picker, the share-sheet (onOpenURL), and onboarding all behave
         // identically (#OPML share sheet).
         Task {
-            await OPMLFileImporter.importFile(
-                at: url,
-                context: context,
-                progress: importProgress,
-                downloader: downloads,
-                isEntitled: entitlements.isEntitled,
-                onCapSkipped: { showPaywall = true }
-            )
+            await OPMLFileImporter.stageFile(at: url, coordinator: opmlImportCoordinator)
         }
     }
 

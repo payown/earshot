@@ -42,6 +42,15 @@ actor PendingOPMLImportStore {
         )
     }
 
+    /// Production store. `URL.applicationSupportDirectory` is process-local and
+    /// avoids making the app runtime initializer throwable.
+    static func live() -> PendingOPMLImportStore {
+        PendingOPMLImportStore(
+            rootURL: URL.applicationSupportDirectory
+                .appending(path: directoryName, directoryHint: .isDirectory)
+        )
+    }
+
     @discardableResult
     func stage(
         _ data: Data,

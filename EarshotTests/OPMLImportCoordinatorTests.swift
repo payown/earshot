@@ -49,6 +49,48 @@ final class OPMLImportCoordinatorTests: XCTestCase {
         XCTAssertEqual(staged.data, Data("second".utf8))
     }
 
+    func testRequestedReplacementKeepsExistingUntilConfirmed() async throws {
+        let coordinator = OPMLImportCoordinator(store: try makeStore())
+        let existing = try await coordinator.stage(Data("first".utf8), displayName: "first.opml")
+
+        try await coordinator.requestStage(Data("second".utf8), displayName: "second.opml")
+
+        guard case let .replacementRequested(pending, candidate) = coordinator.state else {
+            return XCTFail("Expected replacement confirmation")
+        }
+        XCTAssertEqual(pending, existing)
+        XCTAssertEqual(candidate.data, Data("second".utf8))
+        coordinator.cancelReplacement()
+        XCTAssertEqual(coordinator.state, .pending(existing))
+        let staged = try await coordinator.beginContinuation()
+        XCTAssertEqual(staged.data, Data("first".utf8))
+    }
+
+    func testConfirmedReplacementBecomesReadyToImport() async throws {
+        let coordinator = OPMLImportCoordinator(store: try makeStore())
+        _ = try await coordinator.stage(Data("first".utf8), displayName: "first.opml")
+        try await coordinator.requestStage(Data("second".utf8), displayName: "second.opml")
+
+        try await coordinator.confirmReplacement()
+
+        guard case let .readyToImport(metadata) = coordinator.state else {
+            return XCTFail("Expected replacement to be ready")
+        }
+        XCTAssertEqual(metadata.displayName, "second.opml")
+        let staged = try await coordinator.beginContinuation()
+        XCTAssertEqual(staged.data, Data("second".utf8))
+    }
+
+    func testNewRequestBecomesReadyWithoutConfirmation() async throws {
+        let coordinator = OPMLImportCoordinator(store: try makeStore())
+
+        try await coordinator.requestStage(Data("first".utf8), displayName: "first.opml")
+
+        guard case .readyToImport = coordinator.state else {
+            return XCTFail("Expected new import to be ready")
+        }
+    }
+
     func testCapCancellationAndFailureRemainRetryableAcrossRelaunch() async throws {
         for reason in [OPMLImportStopReason.freeTierLimit, .cancelled, .failed] {
             let store = try makeStore()

@@ -507,6 +507,7 @@ final class SubscriptionRepository {
         let feedURL: String
         let podcast: Podcast
         let episodeIDs: [PersistentIdentifier]
+        let alreadySubscribed: Bool
     }
 
     /// The result of a bulk ``subscribeAll(feedURLs:onProgress:)`` pass: the
@@ -624,7 +625,8 @@ final class SubscriptionRepository {
                 BulkSubscribeOutcome(
                     feedURL: podcast.feedURL,
                     podcast: podcast,
-                    episodeIDs: result.episodeIDs
+                    episodeIDs: result.episodeIDs,
+                    alreadySubscribed: result.alreadySubscribed
                 )
             )
         }

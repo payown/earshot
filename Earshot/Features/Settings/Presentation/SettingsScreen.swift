@@ -162,7 +162,7 @@ private struct EarshotPlusThankYouRow: View {
 /// new device, or an entitlement that lapsed locally — and announces the
 /// result to VoiceOver. Stateless: no entitlement status or upsell copy here,
 /// that's #632's paywall.
-private struct RestorePurchasesRow: View {
+struct RestorePurchasesRow: View {
     @Environment(EntitlementStore.self) private var entitlements
     @State private var isRestoring = false
     var isSecondary = false

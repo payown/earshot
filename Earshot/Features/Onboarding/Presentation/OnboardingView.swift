@@ -8,10 +8,7 @@ import UniformTypeIdentifiers
 struct OnboardingView: View {
     @Environment(AppRuntime.self) private var runtime
     @Environment(SettingsStore.self) private var settings
-    @Environment(\.modelContext) private var context
-    @Environment(OPMLImportProgress.self) private var importProgress
-    @Environment(DownloadManager.self) private var downloads
-    @Environment(EntitlementStore.self) private var entitlements
+    @Environment(OPMLImportCoordinator.self) private var opmlImportCoordinator
     @Environment(\.dismiss) private var dismiss
     @Query private var podcasts: [Podcast]
 
@@ -76,7 +73,7 @@ struct OnboardingView: View {
             return
         }
         Task {
-            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress, downloader: downloads, isEntitled: entitlements.isEntitled)
+            await OPMLFileImporter.stageFile(at: url, coordinator: opmlImportCoordinator)
         }
     }
 
