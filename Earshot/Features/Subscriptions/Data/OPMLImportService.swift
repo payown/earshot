@@ -5,7 +5,9 @@ import SwiftData
 /// how many feeds were actually imported, plus how many were skipped because of
 /// the free-tier podcast cap (#635; 0 for Plus users or when already under cap).
 struct OPMLImportOutcome {
-    let importedCount: Int
+    let addedCount: Int
+    let alreadyPresentCount: Int
+    var importedCount: Int { addedCount + alreadyPresentCount }
     /// How many requested feeds were skipped because of the free-tier cap
     /// (0 for Plus users). #635.
     let skippedForCapCount: Int
@@ -18,7 +20,22 @@ struct OPMLImportOutcome {
         failedCount: Int = 0,
         cancelled: Bool = false
     ) {
-        self.importedCount = importedCount
+        self.addedCount = importedCount
+        self.alreadyPresentCount = 0
+        self.skippedForCapCount = skippedForCapCount
+        self.failedCount = failedCount
+        self.cancelled = cancelled
+    }
+
+    init(
+        addedCount: Int,
+        alreadyPresentCount: Int,
+        skippedForCapCount: Int,
+        failedCount: Int,
+        cancelled: Bool
+    ) {
+        self.addedCount = addedCount
+        self.alreadyPresentCount = alreadyPresentCount
         self.skippedForCapCount = skippedForCapCount
         self.failedCount = failedCount
         self.cancelled = cancelled
@@ -161,7 +178,8 @@ final class OPMLImportService {
         await subscriptions.autoDownloadRecent(episodeIDsPerPodcast: result.outcomes.map(\.episodeIDs))
 
         return OPMLImportOutcome(
-            importedCount: result.outcomes.count,
+            addedCount: result.outcomes.count { !$0.alreadySubscribed },
+            alreadyPresentCount: result.outcomes.count { $0.alreadySubscribed },
             skippedForCapCount: result.skippedForCap,
             failedCount: result.failed,
             cancelled: result.cancelled

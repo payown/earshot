@@ -128,6 +128,10 @@ final class OPMLBulkImportTests: XCTestCase {
 
         XCTAssertEqual(first.importedCount, 2)
         XCTAssertEqual(second.importedCount, 2, "Re-import still resolves all feeds (now already-subscribed)")
+        XCTAssertEqual(first.addedCount, 2)
+        XCTAssertEqual(first.alreadyPresentCount, 0)
+        XCTAssertEqual(second.addedCount, 0)
+        XCTAssertEqual(second.alreadyPresentCount, 2)
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 2, "No duplicate podcasts")
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 1, "No duplicate memberships")
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<PodcastFolder>()).count, 1, "No duplicate folders")
@@ -249,6 +253,33 @@ final class OPMLBulkImportTests: XCTestCase {
 
         XCTAssertEqual(outcome.importedCount, 12)
         XCTAssertEqual(outcome.skippedForCapCount, 0)
+    }
+
+    func testReprocessingSameDocumentAfterEntitlementAddsOnlyRemainderAndKeepsFolders() async throws {
+        let ctx = TestStore.freshContext()
+        let feeds = (0..<12).map { "https://feed\($0).com/rss" }
+        let outlines = feeds.map {
+            "<outline type=\"rss\" text=\"\($0)\" xmlUrl=\"\($0)\"/>"
+        }.joined(separator: "\n")
+        let document = "<opml><body><outline text=\"News\">\(outlines)</outline></body></opml>"
+
+        let capped = await OPMLImportService(
+            context: ctx,
+            subscriptions: SubscriptionRepository(context: ctx, feed: fetcher(), isEntitled: false)
+        ).importOPML(document)
+        let continued = await OPMLImportService(
+            context: ctx,
+            subscriptions: SubscriptionRepository(context: ctx, feed: fetcher(), isEntitled: true)
+        ).importOPML(document)
+
+        XCTAssertEqual(capped.addedCount, 10)
+        XCTAssertEqual(capped.skippedForCapCount, 2)
+        XCTAssertEqual(continued.addedCount, 2)
+        XCTAssertEqual(continued.alreadyPresentCount, 10)
+        XCTAssertEqual(continued.skippedForCapCount, 0)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 12)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<PodcastFolder>()).count, 1)
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<FolderMembership>()).count, 12)
     }
 
     /// `isEntitled == nil` (the default) means the cap isn't enforced at this call

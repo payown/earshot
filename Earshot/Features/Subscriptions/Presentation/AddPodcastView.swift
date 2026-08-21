@@ -36,11 +36,8 @@ import UniformTypeIdentifiers
 /// subscribe or import updates the Library `@Query` automatically; the user can keep
 /// adding more, or close when finished.
 struct AddPodcastView: View {
-    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @Environment(OPMLImportProgress.self) private var importProgress
-    @Environment(DownloadManager.self) private var downloads
-    @Environment(EntitlementStore.self) private var entitlements
+    @Environment(OPMLImportCoordinator.self) private var opmlImportCoordinator
 
     @State private var showingAddByURL = false
     @State private var importingOPML = false
@@ -112,7 +109,7 @@ struct AddPodcastView: View {
             return
         }
         Task {
-            await OPMLFileImporter.importFile(at: url, context: context, progress: importProgress, downloader: downloads, isEntitled: entitlements.isEntitled)
+            await OPMLFileImporter.stageFile(at: url, coordinator: opmlImportCoordinator)
         }
     }
 }

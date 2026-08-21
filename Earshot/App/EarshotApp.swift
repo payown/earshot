@@ -125,6 +125,7 @@ final class AppRuntime {
     let tips = TipsStore()
     let entitlements = EntitlementStore()
     let importProgress = OPMLImportProgress()
+    let opmlImportCoordinator = OPMLImportCoordinator(store: .live())
     let notificationRouter: NotificationRouter
     let notificationDelegate: NotificationDelegate
 
@@ -1216,6 +1217,7 @@ struct EarshotApp: App {
                             .environment(runtime.settings)
                             .environment(runtime.tips)
                             .environment(runtime.importProgress)
+                            .environment(runtime.opmlImportCoordinator)
                             .environment(runtime.notificationRouter)
                             .environment(runtime.entitlements)
                             .task {

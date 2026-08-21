@@ -12,6 +12,115 @@ import SwiftData
 /// feeds were skipped and why, with an upgrade mention.
 @MainActor
 enum OPMLFileImporter {
+    enum ContinuationResult: Equatable, Sendable {
+        case completed(OPMLImportResultCounts)
+        case pending(OPMLImportResultCounts, OPMLImportStopReason)
+        case unreadable
+        case storageFailure
+    }
+
+    /// Copies a picked or externally opened file into app-owned storage while its
+    /// security scope is active. Import execution is owned by `RootView`.
+    static func stageFile(at url: URL, coordinator: OPMLImportCoordinator) async {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), String(data: data, encoding: .utf8) != nil else {
+            AppLog.data.error("OPML staging: couldn't read file at \(url.lastPathComponent, privacy: .public)")
+            await announceSettled("Couldn't read that OPML file")
+            return
+        }
+        do {
+            try await coordinator.requestStage(data, displayName: url.lastPathComponent)
+        } catch {
+            AppLog.data.error("OPML staging failed: \(error.localizedDescription, privacy: .public)")
+            await announceSettled("Couldn't save that OPML file for import")
+        }
+    }
+
+    /// Verifies and imports the coordinator's app-owned document. Retryable stops
+    /// retain the same bytes; only a complete pass removes them.
+    @discardableResult
+    static func continuePendingImport(
+        coordinator: OPMLImportCoordinator,
+        context: ModelContext,
+        progress: OPMLImportProgress? = nil,
+        downloader: EpisodeDownloading? = nil,
+        isEntitled: Bool
+    ) async -> ContinuationResult {
+        guard let staged = try? await coordinator.beginContinuation(),
+              let opml = String(data: staged.data, encoding: .utf8) else {
+            await announceSettled("Couldn't read the saved OPML file")
+            return .unreadable
+        }
+        defer { progress?.finish() }
+        let outcome = await OPMLImportService(
+            context: context,
+            downloader: downloader,
+            isEntitled: isEntitled
+        ).importOPML(
+            opml,
+            onResolveTotal: { progress?.start(total: $0) },
+            onProgress: { progress?.advance(completed: $0, total: $1, title: $2) }
+        )
+        let counts = OPMLImportResultCounts(
+            added: outcome.addedCount,
+            alreadyPresent: outcome.alreadyPresentCount,
+            failed: outcome.failedCount,
+            skippedForCap: outcome.skippedForCapCount
+        )
+        let summary = resultSummary(counts)
+        if outcome.cancelled {
+            guard await recordPending(counts, reason: .cancelled, coordinator: coordinator) else {
+                return .storageFailure
+            }
+            await announceSettled("Import cancelled. \(summary) You can continue later in Settings, Data.")
+            return .pending(counts, .cancelled)
+        }
+        if outcome.skippedForCapCount > 0 {
+            guard await recordPending(counts, reason: .freeTierLimit, coordinator: coordinator) else {
+                return .storageFailure
+            }
+            let skipped = String(localized: "^[\(outcome.skippedForCapCount) podcast](inflect: true)")
+            await announceSettled("\(summary) \(skipped) remain. Upgrade to Earshot Plus to continue without choosing the file again.")
+            return .pending(counts, .freeTierLimit)
+        }
+        if outcome.failedCount > 0 {
+            guard await recordPending(counts, reason: .failed, coordinator: coordinator) else {
+                return .storageFailure
+            }
+            let failed = String(localized: "^[\(outcome.failedCount) podcast](inflect: true)")
+            await announceSettled("\(summary) \(failed) could not be imported. You can retry in Settings, Data.")
+            return .pending(counts, .failed)
+        }
+        do {
+            try await coordinator.complete(result: counts)
+        } catch {
+            await announceSettled("The import finished, but Earshot couldn't clear its saved continuation file. You can discard it in Settings, Data.")
+            return .storageFailure
+        }
+        await announceSettled(summary)
+        return .completed(counts)
+    }
+
+    private static func resultSummary(_ counts: OPMLImportResultCounts) -> String {
+        let added = String(localized: "Added ^[\(counts.added) podcast](inflect: true).")
+        let existing = String(localized: "^[\(counts.alreadyPresent) podcast](inflect: true) already present.")
+        return "\(added) \(existing)"
+    }
+
+    private static func recordPending(
+        _ counts: OPMLImportResultCounts,
+        reason: OPMLImportStopReason,
+        coordinator: OPMLImportCoordinator
+    ) async -> Bool {
+        do {
+            try await coordinator.keepPending(result: counts, reason: reason)
+            return true
+        } catch {
+            await announceSettled("Earshot couldn't save this import to continue later.")
+            return false
+        }
+    }
 
     /// Imports the OPML file at `url` into the given model context. Returns the
     /// number of feeds imported, or `nil` if the file couldn't be read (a

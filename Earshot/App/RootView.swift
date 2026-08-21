@@ -69,10 +69,15 @@ struct RootView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(TipsStore.self) private var tips
     @Environment(OPMLImportProgress.self) private var importProgress
+    @Environment(OPMLImportCoordinator.self) private var opmlImportCoordinator
     @Environment(NotificationRouter.self) private var notificationRouter
     @Environment(EntitlementStore.self) private var entitlements
 
     @State private var showOnboarding = false
+    @State private var showOPMLPaywall = false
+    @State private var resumeImportAfterPaywall = false
+    @State private var confirmOPMLReplacement = false
+    @State private var rootServicesActivated = false
 
     /// Every queue row. SwiftData keeps this current, so it both drives the
     /// re-render when the queue changes AND supplies the rows the Queue tab badge
@@ -209,7 +214,25 @@ struct RootView: View {
         // the data-bound root exists is retained. Consume it once this final
         // container's RootView is ready (#781).
         .onChange(of: runtime.pendingIncomingFileURL) { _, url in
-            if url != nil { handlePendingIncomingFile() }
+            if url != nil, rootServicesActivated { handlePendingIncomingFile() }
+        }
+        .onChange(of: opmlImportCoordinator.state) { _, state in
+            if case .readyToImport = state, rootServicesActivated { continuePendingOPMLImport() }
+            if case .replacementRequested = state { confirmOPMLReplacement = true }
+        }
+        .confirmationDialog(
+            "Replace pending OPML import?",
+            isPresented: $confirmOPMLReplacement,
+            titleVisibility: .visible
+        ) {
+            Button("Replace pending import", role: .destructive) {
+                Task { try? await opmlImportCoordinator.confirmReplacement() }
+            }
+            Button("Keep pending import", role: .cancel) {
+                opmlImportCoordinator.cancelReplacement()
+            }
+        } message: {
+            Text("Earshot can keep one OPML file ready to continue. Replacing it discards the currently pending file.")
         }
         // Re-assert the native Inbox badge after a tab switch: SwiftUI can rebuild
         // the tab-bar items on selection change and transiently drop a manually
@@ -251,6 +274,7 @@ struct RootView: View {
                 .environment(runtime)
                 .environment(settings)
                 .environment(importProgress)
+                .environment(opmlImportCoordinator)
                 .environment(downloads)
                 .environment(entitlements)
         }
@@ -265,6 +289,19 @@ struct RootView: View {
             set: { player.pendingFullPlayerPresentation = $0 }
         )) {
             NowPlayingScreen()
+        }
+        .sheet(isPresented: $showOPMLPaywall, onDismiss: {
+            guard resumeImportAfterPaywall else { return }
+            resumeImportAfterPaywall = false
+            continuePendingOPMLImport()
+        }) {
+            PaywallView(showsRestorePurchases: true)
+        }
+        .onChange(of: entitlements.isEntitled) { wasEntitled, isEntitled in
+            guard !wasEntitled, isEntitled, showOPMLPaywall,
+                  opmlImportCoordinator.pendingImport?.stopReason == .freeTierLimit else { return }
+            resumeImportAfterPaywall = true
+            showOPMLPaywall = false
         }
         // Bulk OPML import progress, presented over whichever tab is active. The
         // binding is read-only off the shared state: it appears when an import calls
@@ -308,80 +345,7 @@ struct RootView: View {
         ) { _ in
             Announcer.announce("A folder sync conflict was repaired.")
         }
-        .task {
-            let activationCompleted = await runtime.activateRootServices(
-                for: modelContext.container
-            ) {
-                runtime.bindRootServicesIfNeeded(to: modelContext.container) {
-                    #if DEBUG
-                    // App Store screenshot capture (#643): seed the in-memory
-                    // store before configure/restore work reads it.
-                    if ScreenshotHarness.isSeeding {
-                        ScreenshotFixtures.seed(into: modelContext)
-                    }
-                    #endif
-                    player.configure(context: modelContext)
-                    quickActions.configure(context: modelContext)
-                    downloads.configure(context: modelContext)
-                }
-                // Repair interrupted downloads before resolving local files.
-                try Task.checkCancellation()
-                await downloads.reconcileStuckDownloads()
-                try Task.checkCancellation()
-                await downloads.reconcileDownloadPaths()
-                try Task.checkCancellation()
-                settings.configure(context: modelContext)
-                // Snapshot the existing library before any subscribe/import action.
-                let capSettings = AppSettingsStore(context: modelContext)
-                let currentPodcastCount =
-                    (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0
-                capSettings.introducePodcastCapGatingIfNeeded(
-                    currentPodcastCount: currentPodcastCount
-                )
-                tips.configure(context: modelContext)
-                ExpirationService(context: modelContext).runExpiration()
-                try await runtime.activateCloudProjectionIfNeeded(
-                    container: modelContext.container
-                )
-                StatsRepository(context: modelContext).applyRetention(
-                    days: settings.historyRetentionDays
-                )
-                PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
-            }
-            // No root may seed navigation/onboarding state until the shared
-            // activation has completed. A cancelled owner returns here; a second
-            // root waits for that owner or performs the retry itself.
-            guard activationCompleted else { return }
-            // Seed this RootView's launch tab after settings are available. This
-            // is view-local state, so it must also run if SwiftUI recreates the
-            // root after process services have already been activated.
-            if selectedTab == nil {
-                selectedTab = RootTab(launchScreen: settings.launchScreen)
-            }
-            // Show onboarding on first launch (after settings load so we don't
-            // flash). The Flutter→SwiftUI launch import that used to run here was
-            // removed with the rest of the abandoned migration feature (#580) —
-            // OPML is the only re-import path.
-            showOnboarding = !settings.onboardingComplete
-            #if DEBUG
-            // App Store screenshot capture (#643): route straight to the
-            // requested screen and never show onboarding. DEBUG + launch-arg only.
-            if ScreenshotHarness.isActive {
-                showOnboarding = false
-                ScreenshotHarness.apply(
-                    in: modelContext,
-                    player: player,
-                    selectTab: { selectedTab = $0 },
-                    pushLibrary: { libraryPath = $0 }
-                )
-            }
-            #endif
-            // Notification actions and Open-in URLs can arrive before RootView
-            // exists. Consume already-pending work after every store-backed
-            // service has been configured against this final container.
-            if let intent = notificationRouter.pendingIntent { route(intent) }
-            handlePendingIncomingFile()
-        }
+        .task { await activateRoot() }
         // Keep this outermost so RootView-owned presentations, especially the
         // automatic Now Playing sheet above, inherit the folder route as well as
         // the tab content. Placing it directly on TabView hides the origin button
@@ -392,6 +356,51 @@ struct RootView: View {
                 routeToPlaybackFolder(folderID)
             }
         )
+    }
+
+    private func activateRoot() async {
+        let activationCompleted = await runtime.activateRootServices(for: modelContext.container) {
+            runtime.bindRootServicesIfNeeded(to: modelContext.container) {
+                #if DEBUG
+                if ScreenshotHarness.isSeeding { ScreenshotFixtures.seed(into: modelContext) }
+                #endif
+                player.configure(context: modelContext)
+                quickActions.configure(context: modelContext)
+                downloads.configure(context: modelContext)
+            }
+            try Task.checkCancellation()
+            await downloads.reconcileStuckDownloads()
+            try Task.checkCancellation()
+            await downloads.reconcileDownloadPaths()
+            try Task.checkCancellation()
+            settings.configure(context: modelContext)
+            let capSettings = AppSettingsStore(context: modelContext)
+            let count = (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0
+            capSettings.introducePodcastCapGatingIfNeeded(currentPodcastCount: count)
+            tips.configure(context: modelContext)
+            ExpirationService(context: modelContext).runExpiration()
+            try await runtime.activateCloudProjectionIfNeeded(container: modelContext.container)
+            StatsRepository(context: modelContext).applyRetention(days: settings.historyRetentionDays)
+            PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
+        }
+        guard activationCompleted else { return }
+        if selectedTab == nil { selectedTab = RootTab(launchScreen: settings.launchScreen) }
+        showOnboarding = !settings.onboardingComplete
+        #if DEBUG
+        if ScreenshotHarness.isActive {
+            showOnboarding = false
+            ScreenshotHarness.apply(
+                in: modelContext,
+                player: player,
+                selectTab: { selectedTab = $0 },
+                pushLibrary: { libraryPath = $0 }
+            )
+        }
+        #endif
+        if let intent = notificationRouter.pendingIntent { route(intent) }
+        await opmlImportCoordinator.restorePendingImport()
+        rootServicesActivated = true
+        handlePendingIncomingFile()
     }
 
     // MARK: Launch tab (#492)
@@ -462,7 +471,23 @@ struct RootView: View {
         let ext = url.pathExtension.lowercased()
         guard ext == "opml" || ext == "xml" else { return }
         Task {
-            await OPMLFileImporter.importFile(at: url, context: modelContext, progress: importProgress, downloader: downloads, isEntitled: entitlements.isEntitled)
+            await OPMLFileImporter.stageFile(at: url, coordinator: opmlImportCoordinator)
+        }
+    }
+
+    private func continuePendingOPMLImport() {
+        guard !importProgress.isImporting else { return }
+        Task {
+            let result = await OPMLFileImporter.continuePendingImport(
+                coordinator: opmlImportCoordinator,
+                context: modelContext,
+                progress: importProgress,
+                downloader: downloads,
+                isEntitled: entitlements.isEntitled
+            )
+            if case .pending(_, .freeTierLimit) = result, !entitlements.isEntitled {
+                showOPMLPaywall = true
+            }
         }
     }
 

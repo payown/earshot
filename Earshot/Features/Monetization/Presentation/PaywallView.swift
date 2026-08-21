@@ -9,8 +9,7 @@ import UIKit
 /// schedule:
 ///   1. An 11th-subscribe attempt hits the free-tier cap (`SearchView`,
 ///      `PodcastPreviewView` — both catch `SubscriptionError.podcastCapReached`).
-///   2. An OPML import gets trimmed by the cap (`DataSettingsView`, via
-///      `OPMLFileImporter`'s `onCapSkipped` callback).
+///   2. An OPML import gets trimmed by the cap (the app-root import coordinator).
 ///   3. The persistent "Upgrade to Earshot Plus" row in Settings.
 ///
 /// All three Earshot Plus products (Monthly, Yearly, Lifetime) render with
@@ -29,10 +28,11 @@ import UIKit
 /// Dismissal (the top-leading "Close" button) works identically before,
 /// during, and after a purchase attempt — there is no guilt-tripping
 /// dismiss-path copy, no countdown, no "X spots left." A successful purchase
-/// does NOT auto-dismiss the sheet (deliberate — see the success banner
+/// does NOT normally auto-dismiss the sheet (deliberate — see the success banner
 /// below): the user closes it the same explicit way they would at any other
-/// point, so a VoiceOver user is never caught off guard by a timed
-/// disappearance mid-announcement.
+/// point. The resumable OPML flow is the explicit exception: its presenter
+/// dismisses only after `EntitlementStore` verifies access, then continues the
+/// requested import. No timer or inferred purchase can dismiss this view.
 ///
 /// VoiceOver reading order (top to bottom, matches visual layout — no
 /// `accessibilitySortPriority` overrides needed since the default List/VStack
@@ -51,9 +51,11 @@ struct PaywallView: View {
     @State private var openingManageSubscriptions = false
 
     let mode: PaywallPresentationMode
+    let showsRestorePurchases: Bool
 
-    init(mode: PaywallPresentationMode = .upgrade) {
+    init(mode: PaywallPresentationMode = .upgrade, showsRestorePurchases: Bool = false) {
         self.mode = mode
+        self.showsRestorePurchases = showsRestorePurchases
     }
 
     var body: some View {
@@ -223,6 +225,9 @@ struct PaywallView: View {
                 }
             }
             sharedLegalDisclosure
+            if showsRestorePurchases {
+                RestorePurchasesRow(isSecondary: true)
+            }
         }
     }
 
