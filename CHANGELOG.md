@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-20
+
+### Added
+
+- OPML imports that reach the free-plan limit can continue from the saved file after a verified Earshot Plus purchase or restore, including after relaunch.
+- Settings now includes device-local VoiceOver controls for episode-row details, episode description length, and Library podcast descriptions.
+
+### Changed
+
+- Episode speech is consistent across Inbox, Queue, Downloads, folders, search, podcast episode lists, and multi-select rows while preserving mandatory playback and interaction state.
+- Library rows can speak a brief or full sanitized podcast description without changing their accessible names, actions, or selection behavior.
+
 ### Folders Phase 3 complete — listening lens, Queue grouping, context menus, and OPML
 
 - Folders now work throughout listening: filter the Inbox by a folder subtree, review and play or queue a folder's new episodes, group the Queue by folder, and preserve nested folders in OPML exports. New subscriptions can be filed immediately, and episode or podcast rows offer touch context menus that mirror the VoiceOver Actions rotor. Large scrolling lists defer Quick Action work until activation so VoiceOver navigation stays responsive. (#761, #762, #763, #764)
