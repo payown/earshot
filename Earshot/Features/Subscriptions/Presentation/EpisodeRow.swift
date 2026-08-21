@@ -172,7 +172,8 @@ struct EpisodeRow: View {
             // stop (#513).
             downloadState: episode.downloadStatus,
             // "Now Playing" leads the spoken label (Item 2).
-            isNowPlaying: isNowPlaying
+            isNowPlaying: isNowPlaying,
+            details: settings.episodeSpokenDetails
         )
     }
 
@@ -180,19 +181,8 @@ struct EpisodeRow: View {
     /// cached summary (#495), comma-joined. Empty when the episode is played with
     /// no description, so VoiceOver announces no stray value.
     private var accessibilityValue: String {
-        guard !episode.isDeleted else { return "" }
-        var parts: [String] = []
-        if let time = EpisodeTimeLogic.spokenText(
-            positionSeconds: episode.positionSeconds,
-            durationSeconds: episode.durationSeconds,
-            isPlayed: episode.isPlayed
-        ) {
-            parts.append(time)
-        }
-        if let summary = EpisodeSummaryCache.shared.summary(for: episode) {
-            parts.append(summary)
-        }
-        return parts.joined(separator: ", ")
+        guard voiceOverEnabled, !episode.isDeleted else { return "" }
+        return EpisodeRowSpeech.value(for: episode, details: settings.episodeSpokenDetails)
     }
 }
 

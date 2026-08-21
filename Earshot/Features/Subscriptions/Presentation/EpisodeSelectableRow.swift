@@ -14,6 +14,7 @@ import SwiftUI
 struct EpisodeSelectableRow: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(PlayerService.self) private var player
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     let episode: Episode
     /// Mirrors ``EpisodeRow/includesPodcastName``: true in mixed-show lists
     /// (Inbox) so the spoken label names the show, false in single-show lists
@@ -29,6 +30,7 @@ struct EpisodeSelectableRow: View {
             SelectableRow(
                 isSelected: isSelected,
                 accessibilityLabel: accessibilityLabel,
+                accessibilityValue: accessibilityValue,
                 onToggle: onToggle
             ) {
                 EpisodeRowContent(episode: episode, includesPodcastName: includesPodcastName)
@@ -53,8 +55,15 @@ struct EpisodeSelectableRow: View {
             isPlayed: episode.isPlayed,
             pubDate: episode.pubDate,
             downloadState: episode.downloadStatus,
-            isNowPlaying: isNowPlaying
+            isNowPlaying: isNowPlaying,
+            details: settings.episodeSpokenDetails
         )
+    }
+
+    private var accessibilityValue: String? {
+        guard voiceOverEnabled else { return nil }
+        let value = EpisodeRowSpeech.value(for: episode, details: settings.episodeSpokenDetails)
+        return value.isEmpty ? nil : value
     }
 }
 

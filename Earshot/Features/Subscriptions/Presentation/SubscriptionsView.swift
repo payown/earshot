@@ -310,6 +310,10 @@ struct SubscriptionsView: View {
             SelectableRow(
                 isSelected: selection.isSelected(podcast.persistentModelID),
                 accessibilityLabel: rowLabel(for: podcast, isReadOnly: readOnlyIDs.contains(podcast.persistentModelID)),
+                accessibilityValue: voiceOverEnabled ? PodcastRowSpeech.value(
+                    for: podcast,
+                    mode: settings.spokenPodcastDescriptionMode
+                ) : nil,
                 onToggle: { selection.toggle(podcast.persistentModelID) }
             ) {
                 rowVisual(for: podcast, readOnlyIDs: readOnlyIDs)
@@ -440,6 +444,10 @@ struct SubscriptionsView: View {
         return rowVisual(for: podcast, readOnlyIDs: readOnlyIDs)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(rowLabel(for: podcast, isReadOnly: isReadOnly))
+            .modifier(OptionalSpokenValue(value: voiceOverEnabled ? PodcastRowSpeech.value(
+                for: podcast,
+                mode: settings.spokenPodcastDescriptionMode
+            ) : nil))
             // Rotor order goes through the shared helper, which compensates for
             // the OS emitting `.accessibilityActions` children in reverse (#572).
             .podcastActionsRotor(actions, perform: performAction)
@@ -576,10 +584,11 @@ struct SubscriptionsView: View {
     }
 
     private func rowLabel(for podcast: Podcast, isReadOnly: Bool) -> String {
-        var parts = [podcast.title]
-        if let author = podcast.author, !author.isEmpty { parts.append(author) }
-        if isReadOnly { parts.append("Read-only, upgrade to Earshot Plus to make changes") }
-        return parts.joined(separator: ", ")
+        PodcastRowSpeech.label(
+            title: podcast.title,
+            author: podcast.author,
+            isReadOnly: isReadOnly
+        )
     }
 
     private func performRefresh(trigger: FeedRefreshTrigger) async {

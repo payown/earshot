@@ -42,6 +42,13 @@ struct SettingsScreen: View {
 
             Section {
                 NavigationLink {
+                    AccessibilitySettingsView()
+                } label: {
+                    Label("Accessibility", systemImage: "accessibility")
+                }
+                .accessibilityHint("Choose what VoiceOver speaks in episode and podcast lists")
+
+                NavigationLink {
                     PlaybackSettingsView()
                 } label: {
                     Label("Playback", systemImage: "play.circle")

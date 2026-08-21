@@ -30,6 +30,26 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(store.wifiOnlyDownloads)
     }
 
+    func testAccessibilitySpeechDefaultsAndChangesPersist() {
+        let ctx = TestStore.freshContext()
+        let store = SettingsStore()
+        store.configure(context: ctx)
+        XCTAssertEqual(store.episodeSpokenDetails, EpisodeSpokenDetails())
+        XCTAssertEqual(store.spokenPodcastDescriptionMode, .brief)
+
+        store.spokenEpisodePodcastName = false
+        store.spokenEpisodeDuration = false
+        store.spokenEpisodeDescriptionMode = .full
+        store.spokenPodcastDescriptionMode = .off
+
+        let reloaded = SettingsStore()
+        reloaded.configure(context: ctx)
+        XCTAssertFalse(reloaded.spokenEpisodePodcastName)
+        XCTAssertFalse(reloaded.spokenEpisodeDuration)
+        XCTAssertEqual(reloaded.spokenEpisodeDescriptionMode, .full)
+        XCTAssertEqual(reloaded.spokenPodcastDescriptionMode, .off)
+    }
+
     /// Season/episode numbering is OFF by default and round-trips like any other
     /// boolean preference (#452). Default-off means rows show/speak no numbering
     /// until the user opts in.

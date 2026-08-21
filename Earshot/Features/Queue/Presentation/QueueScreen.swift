@@ -467,6 +467,7 @@ enum GroupedQueueDrag {
 /// actions; the context menu exposes the non-default ones.
 private struct QueueRow: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     // Requires SettingsStore in the environment (injected at the app root); every
     // QueueRow renders under QueueScreen, which is under that root. Gates the
     // opt-in season/episode numbering (#452).
@@ -597,38 +598,28 @@ private struct QueueRow: View {
     }
 
     private var accessibilityLabel: String {
-        // "Now Playing" leads the label so VoiceOver announces the current
-        // episode's state before its title, mirroring EpisodeRowLabel (Item 2).
-        var parts = isNowPlaying ? ["Now Playing", episode.title] : [episode.title]
-        if let podcast = episode.podcast?.title {
-            parts.append(podcast)
-        }
-        // Spoken "Season 2, Episode 14" when opted in, after the show name and
-        // before position — matching EpisodeRow's order (#452).
-        if settings.showEpisodeNumbers,
-           let numbering = EpisodeRowLabel.spokenNumber(
-               season: episode.seasonNumber, episode: episode.episodeNumber
-           ) {
-            parts.append(numbering)
-        }
-        if let position, let total {
-            parts.append("position \(position) of \(total)")
-        }
-        // Downloaded / streaming state, last, matching EpisodeRow's order (#513).
-        // Folded into this single label so it never becomes a separate stop.
-        parts.append(EpisodeRowLabel.spokenDownloadState(episode.downloadStatus))
-        return parts.joined(separator: ", ")
+        EpisodeRowLabel.label(
+            episodeTitle: episode.title,
+            podcastName: episode.podcast?.title,
+            seasonNumber: settings.showEpisodeNumbers ? episode.seasonNumber : nil,
+            episodeNumber: settings.showEpisodeNumbers ? episode.episodeNumber : nil,
+            isPlayed: episode.isPlayed,
+            pubDate: episode.pubDate,
+            downloadState: episode.downloadStatus,
+            isNowPlaying: isNowPlaying,
+            contextDetail: position.flatMap { position in
+                total.map { "position \(position) of \($0)" }
+            },
+            details: settings.episodeSpokenDetails
+        )
     }
 
     /// The row's VoiceOver value: the spoken time-left/length (#493/#504), or an
     /// empty string when the episode is played or has no known duration, so
     /// VoiceOver announces no stray value.
     private var accessibilityValue: String {
-        EpisodeTimeLogic.spokenText(
-            positionSeconds: episode.positionSeconds,
-            durationSeconds: episode.durationSeconds,
-            isPlayed: episode.isPlayed
-        ) ?? ""
+        guard voiceOverEnabled else { return "" }
+        return EpisodeRowSpeech.value(for: episode, details: settings.episodeSpokenDetails)
     }
 }
 

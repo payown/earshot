@@ -72,6 +72,19 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertFalse(AppSettingScope.isLocal(SettingsKey.globalSpeed))
     }
 
+    func testAccessibilitySpeechPreferencesAreDeviceLocal() {
+        for key in [
+            SettingsKey.spokenEpisodePodcastName,
+            SettingsKey.spokenEpisodePublishedDate,
+            SettingsKey.spokenEpisodeDownloadStatus,
+            SettingsKey.spokenEpisodeDuration,
+            SettingsKey.spokenEpisodeDescriptionMode,
+            SettingsKey.spokenPodcastDescriptionMode,
+        ] {
+            XCTAssertTrue(AppSettingScope.isLocal(key), key)
+        }
+    }
+
     func testPerPodcastWriteMergesLegacyURLKeyVariants() throws {
         let context = TestStore.freshContext()
         context.insert(

@@ -26,6 +26,25 @@ final class SettingsStore {
     var showEpisodeNumbers: Bool = SettingsDefault.showEpisodeNumbers { didSet { persist { $0.setBool(showEpisodeNumbers, for: SettingsKey.showEpisodeNumbers) } } }
     var openPlayerOnPlay: Bool = SettingsDefault.openPlayerOnPlay { didSet { persist { $0.setBool(openPlayerOnPlay, for: SettingsKey.openPlayerOnPlay) } } }
 
+    // Device-local VoiceOver verbosity. These keys are deliberately absent from
+    // AppSettingScope.mirroredKeys so another device cannot change row speech.
+    var spokenEpisodePodcastName = true { didSet { persist { $0.setBool(spokenEpisodePodcastName, for: SettingsKey.spokenEpisodePodcastName) } } }
+    var spokenEpisodePublishedDate = true { didSet { persist { $0.setBool(spokenEpisodePublishedDate, for: SettingsKey.spokenEpisodePublishedDate) } } }
+    var spokenEpisodeDownloadStatus = true { didSet { persist { $0.setBool(spokenEpisodeDownloadStatus, for: SettingsKey.spokenEpisodeDownloadStatus) } } }
+    var spokenEpisodeDuration = true { didSet { persist { $0.setBool(spokenEpisodeDuration, for: SettingsKey.spokenEpisodeDuration) } } }
+    var spokenEpisodeDescriptionMode: SpokenDescriptionMode = .brief { didSet { persist { $0.setRawValue(spokenEpisodeDescriptionMode.rawValue, for: SettingsKey.spokenEpisodeDescriptionMode) } } }
+    var spokenPodcastDescriptionMode: SpokenDescriptionMode = .brief { didSet { persist { $0.setRawValue(spokenPodcastDescriptionMode.rawValue, for: SettingsKey.spokenPodcastDescriptionMode) } } }
+
+    var episodeSpokenDetails: EpisodeSpokenDetails {
+        EpisodeSpokenDetails(
+            includesPodcastName: spokenEpisodePodcastName,
+            includesPublishedDate: spokenEpisodePublishedDate,
+            includesDownloadStatus: spokenEpisodeDownloadStatus,
+            includesDuration: spokenEpisodeDuration,
+            descriptionMode: spokenEpisodeDescriptionMode
+        )
+    }
+
     // Appearance (#461)
     var themeOverride: ThemeOverride = SettingsDefault.themeOverride { didSet { persist { $0.setThemeOverride(themeOverride) } } }
     var accentColor: AccentChoice = SettingsDefault.accentColor { didSet { persist { $0.setAccentChoice(accentColor) } } }
@@ -74,6 +93,16 @@ final class SettingsStore {
         queueGrouping = store.queueGrouping()
         showEpisodeNumbers = store.bool(SettingsKey.showEpisodeNumbers, default: SettingsDefault.showEpisodeNumbers)
         openPlayerOnPlay = store.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
+        spokenEpisodePodcastName = store.bool(SettingsKey.spokenEpisodePodcastName, default: true)
+        spokenEpisodePublishedDate = store.bool(SettingsKey.spokenEpisodePublishedDate, default: true)
+        spokenEpisodeDownloadStatus = store.bool(SettingsKey.spokenEpisodeDownloadStatus, default: true)
+        spokenEpisodeDuration = store.bool(SettingsKey.spokenEpisodeDuration, default: true)
+        spokenEpisodeDescriptionMode = SpokenDescriptionMode(
+            rawValue: store.rawValue(SettingsKey.spokenEpisodeDescriptionMode) ?? ""
+        ) ?? .brief
+        spokenPodcastDescriptionMode = SpokenDescriptionMode(
+            rawValue: store.rawValue(SettingsKey.spokenPodcastDescriptionMode) ?? ""
+        ) ?? .brief
         themeOverride = store.themeOverride()
         accentColor = store.accentChoice()
         layoutDensity = store.layoutDensity()
