@@ -2471,4 +2471,53 @@ Renata asked whether that counted as synchronization.
 
 “It counts as introducing yourself,” Kashe said. “Listening comes next.”
 
+---
+
+### Chapter 70 — Build 213
+
+*The shelf that held*
+
+**What changed**
+
+Build 213 makes Earshot more resilient when iCloud changes the library while
+the app is already using it. Inbox cleanup and automatic download deletion now
+work from stable episode identifiers instead of retaining SwiftData objects
+across asynchronous work. If iCloud removes an episode during cleanup, Earshot
+skips that vanished item instead of trying to update or delete it again.
+
+The Inbox screen also avoids keeping a stale fetched episode alive while it
+awaits repository work. These changes target recent crashes involving SwiftData
+objects that had become invalid after an iCloud merge. No spoken labels, rotor
+actions, focus behavior, or user-facing workflow has changed.
+
+**What to test**
+
+With iCloud sync enabled, launch Earshot repeatedly and move it between the
+foreground and background. Browse and clear Inbox items, especially while
+another device is changing the same library. Turn Delete downloads when done
+on, download an Inbox episode, then clear Inbox and confirm the download is
+removed without marking the episode played.
+
+Also repeat the Listening Places, Clear Queue, Library Published sorting, and
+refresh tests from build 212. Try an iCloud Drive folder and a Dropbox folder
+that Files has fully loaded. Confirm the device file updates after playback and
+the folder remains selected after relaunch.
+
+If Earshot closes unexpectedly, submit every TestFlight crash report and tell
+us the approximate time, screen, action, whether iCloud was enabled, and whether
+another device was active.
+
+Kashe returned to the library after the shelves had shifted overnight. A book
+she had meant to put away was already gone—not misplaced, simply carried to a
+different room by someone working from the same list.
+
+This time she did not reach for the empty space. She checked the number on her
+note, saw that the shelf had changed, and continued with the books still there.
+
+Renata watched her close the ledger without crossing anything out twice.
+
+“You trust the room now?” she asked.
+
+“I trust it to change,” Kashe said. “That is different.”
+
 More chapters added here as Earshot ships.
