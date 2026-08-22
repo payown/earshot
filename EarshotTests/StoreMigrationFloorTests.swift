@@ -171,7 +171,9 @@ final class StoreMigrationFloorTests: XCTestCase {
         try autoreleasepool {
             let container = try ModelContainer(
                 for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
+                configurations: ModelConfiguration(
+                    schema: schema, url: storeURL, cloudKitDatabase: .none
+                )
             )
             insert(container.mainContext)
             try container.mainContext.save()

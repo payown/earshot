@@ -590,7 +590,11 @@ final class SyncStorageTopologyTests: XCTestCase {
             let v6Schema = Schema(versionedSchema: SyncSplitPrototypeV6.self)
             let v6 = try ModelContainer(
                 for: v6Schema,
-                configurations: ModelConfiguration(schema: v6Schema, url: mirroredURL)
+                configurations: ModelConfiguration(
+                    schema: v6Schema,
+                    url: mirroredURL,
+                    cloudKitDatabase: .none
+                )
             )
             v6.mainContext.insert(SyncSplitPrototypeV6.Item(
                 key: "episode-key",
@@ -607,7 +611,11 @@ final class SyncStorageTopologyTests: XCTestCase {
             let bridge = try ModelContainer(
                 for: v7Schema,
                 migrationPlan: SyncSplitPrototypeBridgePlan.self,
-                configurations: ModelConfiguration(schema: v7Schema, url: mirroredURL)
+                configurations: ModelConfiguration(
+                    schema: v7Schema,
+                    url: mirroredURL,
+                    cloudKitDatabase: .none
+                )
             )
             return try bridge.mainContext
                 .fetch(FetchDescriptor<SyncSplitPrototypeV7.LocalState>())

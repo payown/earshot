@@ -14,6 +14,8 @@ import StoreKit
 /// this app has no backend and does all verification on-device via
 /// StoreKit 2 (see #631).
 struct ProductCatalogService: Sendable {
+    private let fetchProducts: @Sendable (Set<String>) async throws -> [Product]
+
     /// Thrown when StoreKit resolves some, but not all, of the requested
     /// product IDs. `Product.products(for:)` itself doesn't throw for
     /// unknown IDs — it just omits them from the result — so this wrapper
@@ -23,7 +25,13 @@ struct ProductCatalogService: Sendable {
         case productsNotFound(Set<EarshotPlusProduct>)
     }
 
-    init() {}
+    init(
+        fetchProducts: @escaping @Sendable (Set<String>) async throws -> [Product] = {
+            try await Product.products(for: $0)
+        }
+    ) {
+        self.fetchProducts = fetchProducts
+    }
 
     /// Fetches StoreKit `Product`s for the given catalog entries. Propagates
     /// any error `Product.products(for:)` throws (e.g. no network,
@@ -35,7 +43,7 @@ struct ProductCatalogService: Sendable {
 
         let requested = Set(ids)
         let rawIDs = Set(requested.map(\.rawValue))
-        let products = try await Product.products(for: rawIDs)
+        let products = try await fetchProducts(rawIDs)
 
         var resolved: [EarshotPlusProduct: Product] = [:]
         for product in products {

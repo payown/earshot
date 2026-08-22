@@ -35,7 +35,10 @@ final class StoreRecoveryTests: XCTestCase {
     private func v6Container() throws -> ModelContainer {
         let schema = Schema(versionedSchema: EarshotSchemaV6.self)
         return try ModelContainer(
-            for: schema, configurations: ModelConfiguration(schema: schema, url: storeURL)
+            for: schema,
+            configurations: ModelConfiguration(
+                schema: schema, url: storeURL, cloudKitDatabase: .none
+            )
         )
     }
 
@@ -86,7 +89,9 @@ final class StoreRecoveryTests: XCTestCase {
             let schema = Schema(versionedSchema: SchemaVFutureFixture.self)
             let container = try ModelContainer(
                 for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
+                configurations: ModelConfiguration(
+                    schema: schema, url: storeURL, cloudKitDatabase: .none
+                )
             )
             container.mainContext.insert(FutureOnlyEntity(value: 1))
             try container.mainContext.save()
