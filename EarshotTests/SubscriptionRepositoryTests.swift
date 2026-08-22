@@ -533,6 +533,8 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertEqual(two.episodes?.count, 2)
         XCTAssertTrue(one.episodes?.contains { $0.guid == "b" } == true)
         XCTAssertTrue(two.episodes?.contains { $0.guid == "b" } == true)
+        XCTAssertEqual(one.lastSeenPubDate, d2)
+        XCTAssertEqual(two.lastSeenPubDate, d2)
     }
 
     /// `autoDownloadCount == 0` means auto-download is off. This must hold on the
