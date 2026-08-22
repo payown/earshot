@@ -96,6 +96,25 @@ final class InboxExpirationServiceTests: XCTestCase {
                        ["Ep a-new-recent", "Ep b-new-mid", "Ep a-new-old", "Ep b-nil-date"])
     }
 
+    func testLiveEpisodeFilterDropsDeletedCachedCandidateBeforePersistedAccess() throws {
+        let ctx = TestStore.freshContext()
+        let p = podcast(ctx, "A")
+        let deleted = episode(ctx, "deleted", podcast: p)
+        let retained = episode(ctx, "retained", podcast: p)
+        try ctx.save()
+
+        // Matches AllInboxCandidates retaining a prior event-driven fetch while
+        // refresh identity repair deletes that Episode in the same view context.
+        let cached = [deleted, retained]
+        ctx.delete(deleted)
+        try ctx.save()
+
+        XCTAssertEqual(
+            InboxRepository.liveEpisodes(cached, in: ctx).map(\.persistentModelID),
+            [retained.persistentModelID]
+        )
+    }
+
     func testApplyLimitsDismissesByCount() {
         let ctx = TestStore.freshContext()
         let p = podcast(ctx, "A")
@@ -148,6 +167,27 @@ final class InboxExpirationServiceTests: XCTestCase {
 
         XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QueueItem>()), 0)
         XCTAssertEqual(ExpirationService(context: ctx).recentlyExpired().count, 1)
+        XCTAssertEqual(e.status, .expired)
+    }
+
+    func testExpirationReusesExistingRelationshipWhenQueuedAndExpiredConflict() throws {
+        let ctx = TestStore.freshContext()
+        let p = podcast(ctx, "A")
+        p.queueAgeLimitDays = 7
+        let e = episode(ctx, "conflict", podcast: p, status: .inQueue)
+        let existing = RecentlyExpired(episode: e, expiredAt: daysAgo(20))
+        ctx.insert(existing)
+        ctx.insert(QueueItem(episode: e, position: 0, addedAt: daysAgo(10)))
+        try ctx.save()
+        let existingID = existing.persistentModelID
+
+        ExpirationService(context: ctx).runExpiration(now: now)
+
+        let rows = try ctx.fetch(FetchDescriptor<RecentlyExpired>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.persistentModelID, existingID)
+        XCTAssertEqual(rows.first?.expiredAt, now)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QueueItem>()), 0)
         XCTAssertEqual(e.status, .expired)
     }
 

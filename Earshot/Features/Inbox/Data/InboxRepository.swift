@@ -93,6 +93,16 @@ final class InboxRepository {
         self.settings = AppSettingsStore(context: context)
     }
 
+    /// Removes models that SwiftData invalidated after an event-driven Inbox
+    /// snapshot was fetched. Refresh identity repair and CloudKit projection can
+    /// delete an Episode before the matching Inbox notification replaces the
+    /// view's cached array. Persisted-property access on that stale model traps
+    /// inside SwiftData, so callers must perform this backing-data-only guard
+    /// before reading status, title, or any relationship.
+    static func liveEpisodes(_ candidates: [Episode], in context: ModelContext) -> [Episode] {
+        candidates.filter { !$0.isDeleted && $0.modelContext == context }
+    }
+
     /// Inbox episodes, newest first.
     ///
     /// Relationship-based membership rules are translated to SQL. In

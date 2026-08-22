@@ -103,7 +103,12 @@ struct InboxScreen: View {
         // EpisodeStatus is stored as a Codable enum and is not translated by
         // SwiftData predicates. This bounded scalar check is safe; the expensive
         // Podcast relationship rules have already run in SQLite.
-        let inbox = candidates.filter { $0.status == .newEpisode }
+        // An event-driven snapshot can briefly retain an Episode that refresh
+        // identity repair or CloudKit projection has deleted. Check SwiftData's
+        // backing-data state before touching any persisted property; a stale
+        // `status` getter traps rather than throwing (TestFlight build 210).
+        let inbox = InboxRepository.liveEpisodes(candidates, in: context)
+            .filter { $0.status == .newEpisode }
         // What the list actually shows: the inbox narrowed by the search field
         // (#457). With no search active this IS `inbox` (same array, no copy).
         let visible = EpisodeSearchFilter.filter(inbox, query: searchText)
