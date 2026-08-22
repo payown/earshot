@@ -55,6 +55,45 @@ private actor LaunchStartSignal {
 
 @MainActor
 final class FeedRefreshResetRaceTests: XCTestCase {
+    func testManualRefreshCannotOverlapAutomaticRefresh() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        container.mainContext.insert(
+            Podcast(feedURL: "https://example.com/feed.xml", title: "Example")
+        )
+        try container.mainContext.save()
+        let feed = ParsedFeed(
+            title: "Example", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: []
+        )
+        let fetcher = InFlightFeedFetcher(feed: feed)
+        let automatic = Task { @MainActor in
+            await BackgroundFeedRefresher.runRefresh(
+                container: container, trigger: .coldLaunch, force: true,
+                notifier: NotificationService(), feed: fetcher
+            )
+        }
+        await fetcher.waitUntilStarted()
+        XCTAssertTrue(BackgroundFeedRefresher.isRefreshInProgress)
+
+        var manualOperationRan = false
+        let manualReport = await BackgroundFeedRefresher.runUserInitiatedRefresh(
+            trigger: .manualToolbar
+        ) {
+            manualOperationRan = true
+            return SubscriptionRefreshReport(
+                notifications: [], attempted: 0, total: 0, succeeded: 0,
+                failed: 0, cancelled: false, intendedInsertions: 0,
+                durableInsertions: 0
+            )
+        }
+
+        XCTAssertNil(manualReport)
+        XCTAssertFalse(manualOperationRan)
+        await BackgroundFeedRefresher.cancelAndWait()
+        _ = await automatic.value
+        XCTAssertFalse(BackgroundFeedRefresher.isRefreshInProgress)
+    }
+
     func testSceneBackgroundCancellationStopsInFlightForegroundRefresh() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         container.mainContext.insert(

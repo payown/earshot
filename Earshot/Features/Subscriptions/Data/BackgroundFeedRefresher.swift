@@ -2,6 +2,12 @@ import BackgroundTasks
 import Foundation
 import SwiftData
 
+extension Notification.Name {
+    static let earshotFeedRefreshActivityDidChange = Notification.Name(
+        "earshotFeedRefreshActivityDidChange"
+    )
+}
+
 /// Drives periodic background feed refresh via `BGAppRefreshTask`.
 ///
 /// Responsibilities:
@@ -20,6 +26,11 @@ import SwiftData
 /// dead end (`.claude/rules/database-migrations.md`).
 enum BackgroundFeedRefresher {
 
+    private enum ActiveRefreshResult: Sendable {
+        case automatic(Bool)
+        case userInitiated(SubscriptionRefreshReport)
+    }
+
     /// Stable identifier, registered in Info.plist. Matches the app bundle id
     /// namespace (`media.payown.earshot`).
     static let taskIdentifier = "media.payown.earshot.feedrefresh"
@@ -29,9 +40,12 @@ enum BackgroundFeedRefresher {
     /// call ``runRefresh`` near-simultaneously; the task is also retained here so
     /// a destructive store reset can cancel it and await its completion before
     /// unlinking the store files. Main-actor isolated, so no locking is needed.
-    @MainActor private static var activeRefreshTask: Task<Bool, Never>?
+    @MainActor private static var activeRefreshTask: Task<ActiveRefreshResult, Never>?
     @MainActor private static var activeRefreshID: UUID?
     @MainActor private static var activeRefreshTrigger: FeedRefreshTrigger?
+
+    @MainActor
+    static var isRefreshInProgress: Bool { activeRefreshTask != nil }
 
     /// Stops foreground-owned feed work when the scene leaves the foreground.
     /// Audio playback can keep the process executable after lock, so allowing a
@@ -100,25 +114,73 @@ enum BackgroundFeedRefresher {
 
         let refreshID = UUID()
         let task = Task { @MainActor in
-            await performRefresh(
+            ActiveRefreshResult.automatic(await performRefresh(
                 container: container,
                 trigger: trigger,
                 force: force,
                 isCancelled: isCancelled,
                 notifier: notifier,
                 feed: feed
-            )
+            ))
         }
-        activeRefreshID = refreshID
+        begin(task: task, id: refreshID, trigger: trigger)
+        let result = await task.value
+        finish(id: refreshID)
+        guard case .automatic(let didRun) = result else { return false }
+        return didRun
+    }
+
+    /// Runs a foreground, user-requested refresh through the same app-wide
+    /// ownership gate as cold-launch, foreground, and BGTask refreshes. The old
+    /// Library path constructed its own repository and could race the automatic
+    /// launch pass in a second SwiftData context, allowing both writers to
+    /// classify and insert the same feed entries concurrently.
+    @MainActor
+    static func runUserInitiatedRefresh(
+        trigger: FeedRefreshTrigger,
+        operation: @escaping @MainActor () async -> SubscriptionRefreshReport
+    ) async -> SubscriptionRefreshReport? {
+        guard activeRefreshTask == nil else {
+            AppLog.networking.info("Feed refresh already in progress; skipping user overlap")
+            return nil
+        }
+
+        let refreshID = UUID()
+        let task = Task { @MainActor in
+            ActiveRefreshResult.userInitiated(await operation())
+        }
+        begin(task: task, id: refreshID, trigger: trigger)
+        let result = await task.value
+        finish(id: refreshID)
+        guard case .userInitiated(let report) = result else { return nil }
+        return report
+    }
+
+    @MainActor
+    private static func begin(
+        task: Task<ActiveRefreshResult, Never>,
+        id: UUID,
+        trigger: FeedRefreshTrigger
+    ) {
+        activeRefreshID = id
         activeRefreshTrigger = trigger
         activeRefreshTask = task
-        let result = await task.value
-        if activeRefreshID == refreshID {
-            activeRefreshID = nil
-            activeRefreshTrigger = nil
-            activeRefreshTask = nil
-        }
-        return result
+        NotificationCenter.default.post(
+            name: .earshotFeedRefreshActivityDidChange,
+            object: nil
+        )
+    }
+
+    @MainActor
+    private static func finish(id: UUID) {
+        guard activeRefreshID == id else { return }
+        activeRefreshID = nil
+        activeRefreshTrigger = nil
+        activeRefreshTask = nil
+        NotificationCenter.default.post(
+            name: .earshotFeedRefreshActivityDidChange,
+            object: nil
+        )
     }
 
     @MainActor
