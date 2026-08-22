@@ -2321,7 +2321,13 @@ final class CloudProjectionCoordinator {
         target.inboxExcluded = source.inboxExcluded
         target.inboxIncluded = source.inboxIncluded
         target.createdAt = source.createdAt
-        target.lastSeenPubDate = source.lastSeenPubDate
+        // This is a feed high-water mark, not ordinary last-writer-wins
+        // metadata. A delayed CloudKit row must never rewind a device that has
+        // already refreshed farther; doing so left Library's Published order
+        // stale and made old feed entries eligible for reconsideration.
+        target.lastSeenPubDate = [target.lastSeenPubDate, source.lastSeenPubDate]
+            .compactMap { $0 }
+            .max()
     }
 
     private func value(_ source: CloudPodcastProjection) -> PodcastValue {
@@ -2380,7 +2386,12 @@ final class CloudProjectionCoordinator {
         target.inboxExcluded = source.inboxExcluded
         target.inboxIncluded = source.inboxIncluded
         target.createdAt = source.createdAt
-        target.lastSeenPubDate = source.lastSeenPubDate
+        // Publish the furthest high-water mark observed on either side. This
+        // converges devices monotonically even when CloudKit import delivery is
+        // delayed or another subscription field was edited independently.
+        target.lastSeenPubDate = [target.lastSeenPubDate, source.lastSeenPubDate]
+            .compactMap { $0 }
+            .max()
         target.modifiedAt = .now
         target.deletedAt = nil
         target.sourceDeviceID = deviceID

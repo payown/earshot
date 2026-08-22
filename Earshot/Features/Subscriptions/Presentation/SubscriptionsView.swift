@@ -15,6 +15,7 @@ struct SubscriptionsView: View {
     @State private var hasLoadedPodcasts = false
     @State private var showingAdd = false
     @State private var isRefreshing = false
+    @State private var sharedRefreshInProgress = false
     @State private var sharingPodcast: Podcast?
     @State private var pendingUnsubscribe: Podcast?
     // The pending "Add to folder" / "Move to folder" podcast Quick Action target
@@ -62,6 +63,10 @@ struct SubscriptionsView: View {
                 return lDate > rDate
             }
         }
+    }
+
+    private var refreshInProgress: Bool {
+        isRefreshing || sharedRefreshInProgress
     }
 
     var body: some View {
@@ -157,11 +162,11 @@ struct SubscriptionsView: View {
                     Task { await performRefresh(trigger: .manualToolbar) }
                 } label: {
                     Label(
-                        isRefreshing ? "Refreshing library" : "Refresh library",
+                        refreshInProgress ? "Refreshing library" : "Refresh library",
                         systemImage: "arrow.clockwise"
                     )
                 }
-                .disabled(isRefreshing)
+                .disabled(refreshInProgress)
             }
             if !podcasts.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -236,6 +241,14 @@ struct SubscriptionsView: View {
         }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
         .task { loadPodcasts() }
+        .task {
+            sharedRefreshInProgress = BackgroundFeedRefresher.isRefreshInProgress
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .earshotFeedRefreshActivityDidChange
+        )) { _ in
+            sharedRefreshInProgress = BackgroundFeedRefresher.isRefreshInProgress
+        }
         // Library intentionally avoids a live `@Query<Podcast>` because that
         // faults the inverse episode graph and froze large VoiceOver libraries.
         // Reload once after a completed CloudKit import so remote subscriptions
@@ -594,7 +607,6 @@ struct SubscriptionsView: View {
     private func performRefresh(trigger: FeedRefreshTrigger) async {
         guard !isRefreshing else { return }
         isRefreshing = true
-        Announcer.announce("Refreshing library")
         defer { isRefreshing = false }
 
         // Pull-to-refresh always forces (bypasses the FeedRefreshPolicy window)
@@ -607,16 +619,28 @@ struct SubscriptionsView: View {
         // path actually finds new episodes must be the path that notifies, or the
         // notification is lost (#421). deliver() coalesces per podcast by a stable
         // identifier, so the same show notifying from both paths can never stack.
-        let report = await SubscriptionRepository(
-            context: context,
-            downloader: downloads,
-            isEntitled: entitlements.isEntitled
-        ).refreshAllReport(trigger: trigger)
-        if report.completion == .full {
-            AppSettingsStore(context: context).setDate(Date(), for: SettingsKey.lastFeedRefresh)
-        }
-        if !report.notifications.isEmpty {
-            await NotificationService().deliver(report.notifications)
+        guard let report = await BackgroundFeedRefresher.runUserInitiatedRefresh(
+            trigger: trigger,
+            operation: {
+                Announcer.announce("Refreshing library")
+                let report = await SubscriptionRepository(
+                    context: context,
+                    downloader: downloads,
+                    isEntitled: entitlements.isEntitled
+                ).refreshAllReport(trigger: trigger)
+                if report.completion == .full {
+                    AppSettingsStore(context: context).setDate(
+                        Date(), for: SettingsKey.lastFeedRefresh
+                    )
+                }
+                if !report.notifications.isEmpty {
+                    await NotificationService().deliver(report.notifications)
+                }
+                return report
+            }
+        ) else {
+            Announcer.announce("Library refresh already in progress")
+            return
         }
         loadPodcasts()
         Announcer.announce(report.announcement)

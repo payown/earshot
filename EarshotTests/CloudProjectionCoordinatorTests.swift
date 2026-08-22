@@ -776,6 +776,72 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testReconciliationNeverRewindsFeedHighWaterMark() throws {
+        let app = try makeApplicationContainer()
+        let localMark = Date(timeIntervalSince1970: 300)
+        let local = Podcast(
+            feedURL: "https://example.com/feed.xml",
+            title: "Show",
+            lastSeenPubDate: localMark
+        )
+        app.mainContext.insert(local)
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let cloudMark = Date(timeIntervalSince1970: 100)
+        let cloud = CloudPodcastProjection()
+        cloud.feedURL = local.feedURL
+        cloud.title = local.title
+        cloud.lastSeenPubDate = cloudMark
+        projection.mainContext.insert(cloud)
+        try projection.mainContext.save()
+
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+
+        try coordinator.reconcile()
+
+        XCTAssertEqual(local.lastSeenPubDate, localMark)
+        XCTAssertEqual(cloud.lastSeenPubDate, localMark)
+    }
+
+    func testReconciliationAdvancesLocalFeedHighWaterMarkFromCloud() throws {
+        let app = try makeApplicationContainer()
+        let localMark = Date(timeIntervalSince1970: 100)
+        let local = Podcast(
+            feedURL: "https://example.com/feed.xml",
+            title: "Show",
+            lastSeenPubDate: localMark
+        )
+        app.mainContext.insert(local)
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        let cloudMark = Date(timeIntervalSince1970: 300)
+        let cloud = CloudPodcastProjection()
+        cloud.feedURL = local.feedURL
+        cloud.title = local.title
+        cloud.lastSeenPubDate = cloudMark
+        projection.mainContext.insert(cloud)
+        try projection.mainContext.save()
+
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+
+        try coordinator.reconcile()
+
+        XCTAssertEqual(local.lastSeenPubDate, cloudMark)
+        XCTAssertEqual(cloud.lastSeenPubDate, cloudMark)
+    }
+
     func testPublishingLegacyDuplicateLocalFeedURLsDoesNotTrap() throws {
         let app = try makeApplicationContainer()
         app.mainContext.insert(Podcast(
