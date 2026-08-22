@@ -106,6 +106,12 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   busy (Chapter 14)
 - She expects Earshot to survive the ordinary gaps in her workday, including
   time in her pocket between client visits (Chapter 67)
+- A large OPML library once stopped at the free-plan boundary, then continued
+  from the saved place after access was verified; afterward she tuned how much
+  VoiceOver said on each row (Chapter 68)
+- She listens on both her phone and Mac and wants an open folder record another
+  podcast player can eventually understand; in Chapter 69 Earshot begins by
+  writing its own listening places without yet reading another device's changes
 - The woman on her Tuesday route switched to Earshot and Kashe helped her
   bring her library over via OPML; Kashe is the tech helper in her circle and
   now recommends Earshot "without the asterisk" (Chapter 14)
@@ -2359,5 +2365,110 @@ The episode was still there. The play button worked. Nothing announced itself
 as a victory.
 
 That was the point.
+
+---
+
+### Chapter 68 — Build 211
+
+*The library learned to wait—and to speak your way*
+
+**What’s new**
+
+This build brings two features worth putting through their paces.
+
+Large OPML imports now remember where they stopped. If a listener reaches the
+free ten-podcast limit, Earshot safely keeps the remaining feeds and folder
+structure. After a verified Earshot Plus purchase or restore, the import
+continues automatically—no hunting for the file again, no duplicated
+subscriptions, and no lost folders. Pending work can also be continued or
+discarded from Settings > Data.
+
+VoiceOver listeners can now decide exactly how episode rows sound. Settings >
+Accessibility adds independent controls for podcast name, published date,
+download or streaming status, and duration or time remaining. Episode and
+Library podcast descriptions can be Off, Brief, or Full. The same choices
+follow you through Inbox, Queue, Downloads, folders, search, podcast episode
+lists, and multi-select.
+
+**What to test**
+
+Import an OPML file containing more than ten feeds and nested folders. Without
+Earshot Plus, confirm ten import and the remaining count is correct. Dismiss the
+paywall, relaunch, and continue from Settings > Data without selecting the file
+again. Test purchase, restore, discard, offline recovery, and force-quit
+recovery. Report any duplicate feed or folder membership.
+
+With VoiceOver on, change every row-detail toggle and each description mode.
+Check multiple lists. Speech should update immediately, stay accurate, contain
+no raw markup or repetition, preserve actions and focus, and remain fast while
+scrolling.
+
+Also exercise playback, background audio, downloads, queue state, and upgrading
+from 1.1.0. Send every crash report and include the screen, action, and
+approximate time.
+
+Kashe arrived at the station with a library too large for one crossing. Earshot
+carried ten shows aboard, marked the place, and promised the rest would not be
+forgotten.
+
+Later, access verified, the doors opened again. The remaining voices filed into
+their old folders without doubling back.
+
+On the ride home, Kashe tuned each episode row: less chatter here, more context
+there, every detail arriving in the order she chose.
+
+For once, the library did not decide how much to remember—or how much to say.
+She did.
+
+---
+
+### Chapter 69 — Build 212
+
+*The note beside the door*
+
+**What changed**
+
+Build 212 starts Listening Places, Earshot's open folder connection with QUILL
+Cast. Choose a folder in iCloud Drive, Dropbox, or another Files provider, and
+Earshot writes this device's positions and played state there. Readable podcast
+and episode names are optional and off by default. Version 1.2.0 writes only;
+reading another device's changes is planned for 1.2.1.
+
+Clear Queue now keeps removed episodes from returning to Inbox. With Delete
+downloads when done enabled, Clear Inbox removes those downloads without
+marking episodes played. Older iCloud data can no longer rewind the Library's
+Published order. Automatic and manual feed refreshes now share one in-progress
+state, so Refresh Library reports ongoing work and cannot start a competing
+refresh that may create duplicate candidates.
+
+**What to test**
+
+Choose Listening Places folders in iCloud Drive and another Files provider if
+available. Play, seek, pause, and mark episodes played. Confirm the device file
+keeps updating and the selected folder survives relaunch. Readable names should
+appear only when enabled. This build should not import another device's changes.
+
+Add Inbox episodes to Queue, use Clear Queue, and confirm they do not return.
+Repeat with the VoiceOver Actions rotor. With Delete downloads when done on,
+download an Inbox episode and clear Inbox; confirm the download leaves but the
+episode is not played. With the setting off, confirm the download remains.
+
+Sort Library by Published with iCloud active and refresh. New shows should move
+promptly. After a cold launch, Refresh Library should say “Refreshing library”
+and be unavailable during automatic work. Report duplicate listings or
+downloads. Test launch, background return, playback, and VoiceOver response.
+Submit every crash report with the approximate time and action.
+
+Kashe listened in the car, at the kitchen table, and sometimes from the Mac
+while the phone charged by the door. Each place remembered part of the day, but
+none could leave the others a note they all understood.
+
+She chose a folder and let Earshot write down where this phone had been. Not a
+private code and not a promise that the other places could answer yet. Just an
+open note beside the door, ready for the next voice to read.
+
+Renata asked whether that counted as synchronization.
+
+“It counts as introducing yourself,” Kashe said. “Listening comes next.”
 
 More chapters added here as Earshot ships.
