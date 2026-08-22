@@ -447,6 +447,11 @@ final class QueueRepositoryTests: XCTestCase {
 
         XCTAssertTrue(repo.queue().isEmpty)
         XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QueueItem>()), 0)
+        XCTAssertTrue(
+            eps.allSatisfy(\.inboxDismissed),
+            "Bulk clear must match individual removal and keep episodes out of Inbox"
+        )
+        XCTAssertTrue(eps.allSatisfy { !$0.isPlayed })
     }
 
     // MARK: grouping

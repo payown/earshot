@@ -87,14 +87,10 @@ final class InboxBadgeCountTests: XCTestCase {
         XCTAssertEqual(repo.inboxCount(optInOnly: true), 1)
     }
 
-    /// Regression guard for the `playedAt == nil` fetch: clearing the queue
-    /// reverts its episodes to `.newEpisode`, so a played-then-queued episode
-    /// resurfaces in the inbox. The badge counted it before this fix; it must
-    /// still count it. This holds only if `QueueRepository.clear()` restores the
-    /// "a `.newEpisode` episode is unplayed" invariant (clears `playedAt`) — a
-    /// raw `status = .newEpisode` would leave a stale `playedAt` that the unplayed
-    /// fetch silently drops, undercounting the badge.
-    func testClearedQueueRevertsPlayedEpisodeIntoInboxCount() {
+    /// Bulk Clear Queue must match the per-episode Remove from queue action: the
+    /// episode becomes unplayed but remains dismissed, so it cannot unexpectedly
+    /// return to Inbox (#David-2026-08-18).
+    func testClearedQueueKeepsEpisodeOutOfInbox() {
         let ctx = TestStore.freshContext()
         let p = podcast(ctx, "A")
         let e = episode(ctx, "played-then-queued", podcast: p, played: true)
@@ -105,7 +101,10 @@ final class InboxBadgeCountTests: XCTestCase {
         queue.clear()
 
         let repo = InboxRepository(context: ctx)
-        XCTAssertEqual(repo.inboxCount(optInOnly: false), 1)
+        XCTAssertFalse(e.isPlayed)
+        XCTAssertNil(e.playedAt)
+        XCTAssertTrue(e.inboxDismissed)
+        XCTAssertEqual(repo.inboxCount(optInOnly: false), 0)
     }
 
     /// The performance guard: the store fetch that backs the badge must EXCLUDE

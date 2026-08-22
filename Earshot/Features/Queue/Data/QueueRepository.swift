@@ -305,7 +305,8 @@ final class QueueRepository {
         postEpisodeUserStateChanges([episode], playedChangedExplicitly: true)
     }
 
-    /// Empties the queue, reverting every episode to `newEpisode`.
+    /// Empties the queue, reverting every episode to `newEpisode` while keeping
+    /// it dismissed from the inbox, matching ``cancelFromQueue(_:)``.
     ///
     /// Reverts through `isPlayed = false` rather than a raw `status = .newEpisode`
     /// so `playedAt` is cleared alongside `status`, preserving the invariant that
@@ -321,6 +322,7 @@ final class QueueRepository {
         for item in items {
             if let episode = item.episode {
                 episode.isPlayed = false
+                episode.inboxDismissed = true
                 if shouldDeleteDownloads {
                     DownloadCleanup.removeDownloadFileAndState(episode, in: context)
                 }

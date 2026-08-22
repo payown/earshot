@@ -209,7 +209,13 @@ final class InboxRepository {
     /// Hides exactly `episodes`, used by a folder-filtered Inbox so "Clear
     /// inbox" never dismisses episodes outside the visible scope (#763).
     func clearInbox(_ episodes: [Episode]) {
-        for episode in episodes { episode.inboxDismissed = true }
+        let shouldDeleteDownloads = DownloadCleanup.deleteAfterPlayedEnabled(context)
+        for episode in episodes {
+            episode.inboxDismissed = true
+            if shouldDeleteDownloads {
+                DownloadCleanup.removeDownloadFileAndState(episode, in: context)
+            }
+        }
         save()
     }
 

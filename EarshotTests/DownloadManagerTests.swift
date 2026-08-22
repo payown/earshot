@@ -270,6 +270,44 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(episode.downloadStatus, DownloadStatus.none)
     }
 
+    func test_clearInbox_withAutomaticCleanupOn_removesDownloadWithoutMarkingPlayed() throws {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
+        let name = "earshot-test-clear-inbox-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let episode = Episode(
+            guid: "clear-inbox-on", title: "Dismissed", audioURL: "https://h/inbox.mp3",
+            downloadStatus: .downloaded, downloadPath: name
+        )
+        context.insert(episode)
+
+        InboxRepository(context: context).clearInbox([episode])
+
+        XCTAssertTrue(episode.inboxDismissed)
+        XCTAssertFalse(episode.isPlayed, "Clearing Inbox must not count as a completed listen")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertNil(episode.downloadPath)
+        XCTAssertEqual(episode.downloadStatus, .none)
+    }
+
+    func test_clearInbox_withAutomaticCleanupOff_keepsDownload() throws {
+        let context = TestStore.freshContext()
+        let name = "earshot-test-clear-inbox-off-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let episode = Episode(
+            guid: "clear-inbox-off", title: "Dismissed", audioURL: "https://h/inbox.mp3",
+            downloadStatus: .downloaded, downloadPath: name
+        )
+        context.insert(episode)
+
+        InboxRepository(context: context).clearInbox([episode])
+
+        XCTAssertTrue(episode.inboxDismissed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertEqual(episode.downloadPath, name)
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+    }
+
     func test_queueRemoval_withAutomaticCleanupOn_removesDownloadWithoutMarkingPlayed() throws {
         let context = TestStore.freshContext()
         AppSettingsStore(context: context).setBool(true, for: SettingsKey.deleteDownloadAfterPlayed)
