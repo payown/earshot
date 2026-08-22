@@ -32,13 +32,17 @@ final class FeedRefreshActorTests: XCTestCase {
         let storeURL = directory.appending(path: "probe.store")
         var seedContainer: ModelContainer? = try ModelContainer(
             for: schema,
-            configurations: ModelConfiguration(schema: schema, url: storeURL)
+            configurations: ModelConfiguration(
+                schema: schema, url: storeURL, cloudKitDatabase: .none
+            )
         )
         _ = seedContainer?.mainContext
         seedContainer = nil
         let container = try ModelContainer(
             for: schema,
-            configurations: ModelConfiguration(schema: schema, url: storeURL, allowsSave: false)
+            configurations: ModelConfiguration(
+                schema: schema, url: storeURL, allowsSave: false, cloudKitDatabase: .none
+            )
         )
         let context = ModelContext(container)
         context.insert(SaveFailureProbe(key: "valid", payload: "valid"))

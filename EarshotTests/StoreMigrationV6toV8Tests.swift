@@ -239,7 +239,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try createDownloadFile(named: fixtureDownloadName)
         let schema = Schema(versionedSchema: EarshotSchemaV6.self)
         let container = try ModelContainer(for: schema, configurations:
-            ModelConfiguration(schema: schema, url: storeURL))
+            ModelConfiguration(schema: schema, url: storeURL, cloudKitDatabase: .none))
         let context = container.mainContext
         let podcast = EarshotSchemaV5.Podcast(
             feedURL: "HTTPS://Example.COM:443/feed.xml#old", title: "Migration Show",
@@ -290,7 +290,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try autoreleasepool {
             let container = try ModelContainer(
                 for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
+                configurations: ModelConfiguration(
+                    schema: schema, url: storeURL, cloudKitDatabase: .none
+                )
             )
             try populate(container.mainContext)
             try container.mainContext.save()
@@ -305,7 +307,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         let podcastCount = min(666, max(1, episodeCount))
         try autoreleasepool {
             let container = try ModelContainer(for: schema, configurations:
-                ModelConfiguration(schema: schema, url: storeURL))
+                ModelConfiguration(schema: schema, url: storeURL, cloudKitDatabase: .none))
             let context = container.mainContext
             var podcasts: [EarshotSchemaV5.Podcast] = []
             for index in 0..<podcastCount {
@@ -335,7 +337,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         for start in stride(from: 0, to: episodeCount, by: batchSize) {
             try autoreleasepool {
                 let container = try ModelContainer(for: schema, configurations:
-                    ModelConfiguration(schema: schema, url: storeURL))
+                    ModelConfiguration(schema: schema, url: storeURL, cloudKitDatabase: .none))
                 let context = container.mainContext
                 let podcasts = try context.fetch(FetchDescriptor<EarshotSchemaV5.Podcast>(
                     sortBy: [SortDescriptor(\.feedURL)]
@@ -477,7 +479,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try autoreleasepool {
             let container = try ModelContainer(
                 for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
+                configurations: ModelConfiguration(
+                    schema: schema, url: storeURL, cloudKitDatabase: .none
+                )
             )
             var descriptor = FetchDescriptor<EarshotSchemaV5.Episode>(
                 sortBy: [SortDescriptor(\.guid)]
@@ -1231,7 +1235,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
         try autoreleasepool {
             let container = try ModelContainer(
                 for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
+                configurations: ModelConfiguration(
+                    schema: schema, url: storeURL, cloudKitDatabase: .none
+                )
             )
             let context = container.mainContext
             let olderPodcast = EarshotSchemaV5.Podcast(
@@ -2021,7 +2027,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             let schema = Schema(versionedSchema: EarshotSchemaV6.self)
             let container = try ModelContainer(
                 for: schema,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
+                configurations: ModelConfiguration(
+                    schema: schema, url: storeURL, cloudKitDatabase: .none
+                )
             )
             var descriptor = FetchDescriptor<EarshotSchemaV5.Episode>(
                 predicate: #Predicate { $0.downloadPath == nil }
@@ -2328,7 +2336,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             let schema = Schema(versionedSchema: EarshotSchemaV7.self)
             let bridge = try ModelContainer(for: schema,
                 migrationPlan: EarshotBridgeMigrationPlan.self,
-                configurations: ModelConfiguration(schema: schema, url: storeURL))
+                configurations: ModelConfiguration(
+                    schema: schema, url: storeURL, cloudKitDatabase: .none
+                ))
             let marker = StoreMigration.bridgeCompletionKey
             let rows = try bridge.mainContext.fetch(FetchDescriptor<EarshotSchemaV7.LocalAppSetting>(
                 predicate: #Predicate { $0.key == marker }))
@@ -2350,7 +2360,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             _ = try ModelContainer(
                 for: schema,
                 migrationPlan: EarshotBridgeMigrationPlan.self,
-                configurations: ModelConfiguration(schema: schema, url: storeURL)
+                configurations: ModelConfiguration(
+                    schema: schema, url: storeURL, cloudKitDatabase: .none
+                )
             )
         })
         StoreMigration.injectedFailurePoint = nil
@@ -2391,8 +2403,9 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
 
         // A real force-quit clears process memory before the next launch.
         StoreMigration.injectedFailurePoint = nil
-        let recovered = try StoreMigration.openOrMigrate(at: storeURL)
-        try assertRecoveredFixture(recovered)
+        var recovered: ModelContainer? = try StoreMigration.openOrMigrate(at: storeURL)
+        try assertRecoveredFixture(XCTUnwrap(recovered))
+        recovered = nil
 
         // The recovered result itself must be a stable next-launch state.
         let reopened = try StoreMigration.openOrMigrate(at: storeURL)

@@ -28,25 +28,8 @@ final class ProductCatalogServiceTests: XCTestCase {
             .appendingPathComponent("Earshot/Testing/Configuration.storekit")
     }()
 
-    /// A deliberately incomplete config (5 of 6 catalog products -
-    /// `tipLarge` is missing) used only by
-    /// `testFetchThrowsProductsNotFoundWhenStoreKitConfigIsMissingAProduct`
-    /// to exercise the `CatalogError.productsNotFound` branch. None of the
-    /// other tests reach that branch because `Configuration.storekit`
-    /// always has all six IDs.
-    private static let incompleteConfigurationURL: URL = {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // EarshotTests/
-            .deletingLastPathComponent() // EarshotSwift/
-            .appendingPathComponent("Earshot/Testing/ConfigurationMissingProduct.storekit")
-    }()
-
     override func setUpWithError() throws {
         try super.setUpWithError()
-        try XCTSkipIf(
-            ProcessInfo.processInfo.environment["EARSHOT_SKIP_STOREKIT_TESTS"] != nil,
-            "Quarantined on the self-hosted CI runner: Xcode 26.5's `xcodebuild test` CLI can't serve SKTestSession products (SKInternalErrorDomain Code=3). Runs in the Xcode IDE and on the 26.3 toolchain. Un-quarantine tracked in #679."
-        )
         session = try SKTestSession(contentsOf: Self.configurationURL)
         session.resetToDefaultState()
         session.disableDialogs = true
@@ -130,18 +113,16 @@ final class ProductCatalogServiceTests: XCTestCase {
         XCTAssertNotNil(products[.plusYearly])
     }
 
-    /// Exercises the `CatalogError.productsNotFound` branch, which no other
-    /// test in this file reaches since `Configuration.storekit` always
-    /// resolves all six catalog IDs. Swaps in a StoreKit test session backed
-    /// by `ConfigurationMissingProduct.storekit`, which is identical except
-    /// `tipLarge` was deliberately omitted.
-    func testFetchThrowsProductsNotFoundWhenStoreKitConfigIsMissingAProduct() async throws {
-        session = try SKTestSession(contentsOf: Self.incompleteConfigurationURL)
-        session.resetToDefaultState()
-        session.disableDialogs = true
-        session.clearTransactions()
-
-        let service = ProductCatalogService()
+    /// Exercises `CatalogError.productsNotFound` deterministically while the
+    /// configured StoreKit session continues to supply real `Product` values.
+    /// Swapping StoreKit configurations inside one test process is unreliable:
+    /// the daemon can retain the catalog loaded by the first session.
+    func testFetchThrowsProductsNotFoundWhenStoreKitOmitsAProduct() async throws {
+        let service = ProductCatalogService { ids in
+            try await Product.products(for: ids).filter {
+                $0.id != EarshotPlusProduct.tipLarge.rawValue
+            }
+        }
         do {
             _ = try await service.fetchAll()
             XCTFail("expected CatalogError.productsNotFound to be thrown")

@@ -98,6 +98,13 @@ struct SettingsScreen: View {
                 .accessibilityHint("Sync status and what stays on this device")
 
                 NavigationLink {
+                    ListeningPlacesSettingsView()
+                } label: {
+                    Label("Listening Places", systemImage: "folder.badge.gearshape")
+                }
+                .accessibilityHint("Share listening positions through a folder you already sync")
+
+                NavigationLink {
                     PrivacySettingsView()
                 } label: {
                     Label("Privacy", systemImage: "hand.raised")
