@@ -1,0 +1,27 @@
+Chapter 68, Build 211
+
+The library learned to wait—and to speak your way
+
+What’s new
+
+This build brings two features worth putting through their paces.
+
+Large OPML imports now remember where they stopped. If a listener reaches the free ten-podcast limit, Earshot safely keeps the remaining feeds and folder structure. After a verified Earshot Plus purchase or restore, the import continues automatically—no hunting for the file again, no duplicated subscriptions, and no lost folders. Pending work can also be continued or discarded from Settings > Data.
+
+VoiceOver listeners can now decide exactly how episode rows sound. Settings > Accessibility adds independent controls for podcast name, published date, download or streaming status, and duration or time remaining. Episode and Library podcast descriptions can be Off, Brief, or Full. The same choices follow you through Inbox, Queue, Downloads, folders, search, podcast episode lists, and multi-select.
+
+What to test
+
+Import an OPML file containing more than ten feeds and nested folders. Without Earshot Plus, confirm ten import and the remaining count is correct. Dismiss the paywall, relaunch, and continue from Settings > Data without selecting the file again. Test purchase, restore, discard, offline recovery, and force-quit recovery. Report any duplicate feed or folder membership.
+
+With VoiceOver on, change every row-detail toggle and each description mode. Check multiple lists. Speech should update immediately, stay accurate, contain no raw markup or repetition, preserve actions and focus, and remain fast while scrolling.
+
+Also exercise playback, background audio, downloads, queue state, and upgrading from 1.1.0. Send every crash report and include the screen, action, and approximate time.
+
+Kashe arrived at the station with a library too large for one crossing. Earshot carried ten shows aboard, marked the place, and promised the rest would not be forgotten.
+
+Later, access verified, the doors opened again. The remaining voices filed into their old folders without doubling back.
+
+On the ride home, Kashe tuned each episode row: less chatter here, more context there, every detail arriving in the order she chose.
+
+For once, the library did not decide how much to remember—or how much to say. She did.
