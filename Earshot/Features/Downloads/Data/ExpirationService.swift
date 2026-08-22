@@ -41,11 +41,38 @@ final class ExpirationService {
     private func expireStale(now: Date) {
         let items = (try? context.fetch(FetchDescriptor<QueueItem>())) ?? []
         for item in items {
-            guard let episode = item.episode,
-                  let limit = episode.podcast?.queueAgeLimitDays,
+            // A projection/repair save can invalidate a fetched relationship.
+            // Never ask SwiftData for persisted values after its backing model
+            // has been deleted or detached from this context.
+            guard !item.isDeleted,
+                  item.modelContext == context,
+                  let episode = item.episode,
+                  !episode.isDeleted,
+                  episode.modelContext == context,
+                  let podcast = episode.podcast,
+                  !podcast.isDeleted,
+                  podcast.modelContext == context,
+                  let limit = podcast.queueAgeLimitDays,
                   ExpirationLogic.isExpired(addedAt: item.addedAt, ageLimitDays: limit, now: now)
             else { continue }
-            context.insert(RecentlyExpired(episode: episode, expiredAt: now))
+
+            // Queue and Recently Expired are independently synchronized. An
+            // interrupted or older write can therefore leave both one-to-one
+            // relationships attached to the same Episode. Creating a second
+            // RecentlyExpired row makes SwiftData update that occupied inverse
+            // relationship and assert. Reuse the live row as a repair instead.
+            if let existing = episode.recentlyExpired {
+                // An occupied inverse must never fall through to insertion,
+                // even if its destination was invalidated underneath this
+                // context. Leave that item untouched for the next clean fetch.
+                guard !existing.isDeleted, existing.modelContext == context else {
+                    AppLog.data.error("Skipped expiration with an invalid existing relationship")
+                    continue
+                }
+                existing.expiredAt = now
+            } else {
+                context.insert(RecentlyExpired(episode: episode, expiredAt: now))
+            }
             episode.status = .expired
             context.delete(item)
         }
