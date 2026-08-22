@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Listening Places can write this iPhone's episode positions and played state to a folder in iCloud Drive, Dropbox, or another Files provider using the open `listening-places/1` format shared with QUILL Cast. Earshot 1.2.0 writes outward only; importing another device's changes is deferred. Readable podcast and episode names are optional and off by default.
+
 ## [1.1.1] - 2026-08-20
 
 ### Added

@@ -155,6 +155,15 @@ enum SettingsKey {
     // that already existed before gating shipped — see PodcastCapPolicy.
     static let podcastCapGatingIntroduced = "podcast_cap_gating_introduced"
     static let grandfatheredPodcastCount = "grandfathered_podcast_count"
+
+    // Listening Places is intentionally device-local. A security-scoped folder
+    // bookmark cannot be used on another device, and mirroring it would both
+    // fail and disclose a local provider path.
+    static let listeningPlacesEnabled = "listening_places_enabled"
+    static let listeningPlacesBookmark = "listening_places_bookmark"
+    static let listeningPlacesFolderName = "listening_places_folder_name"
+    static let listeningPlacesDeviceID = "listening_places_device_id"
+    static let listeningPlacesIncludeLabels = "listening_places_include_labels"
 }
 
 enum AppSettingScope {

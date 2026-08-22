@@ -374,6 +374,7 @@ struct RootView: View {
             await downloads.reconcileDownloadPaths()
             try Task.checkCancellation()
             settings.configure(context: modelContext)
+            runtime.listeningPlaces.configure(context: modelContext)
             let capSettings = AppSettingsStore(context: modelContext)
             let count = (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0
             capSettings.introducePodcastCapGatingIfNeeded(currentPodcastCount: count)

@@ -122,6 +122,7 @@ final class AppRuntime {
     let quickActions = QuickActionStore()
     let downloads = DownloadManager()
     let settings = SettingsStore()
+    let listeningPlaces = ListeningPlacesService()
     let tips = TipsStore()
     let entitlements = EntitlementStore()
     let importProgress = OPMLImportProgress()
@@ -678,6 +679,7 @@ final class AppRuntime {
         player.releasePersistence()
         quickActions.releasePersistence()
         settings.releasePersistence()
+        listeningPlaces.releasePersistence()
         tips.releasePersistence()
         entitlements.releasePersistence()
         await ArtworkCache.shared.tearDown()
@@ -1215,6 +1217,7 @@ struct EarshotApp: App {
                             .environment(runtime.quickActions)
                             .environment(runtime.downloads)
                             .environment(runtime.settings)
+                            .environment(runtime.listeningPlaces)
                             .environment(runtime.tips)
                             .environment(runtime.importProgress)
                             .environment(runtime.opmlImportCoordinator)
@@ -1258,6 +1261,7 @@ struct EarshotApp: App {
                 // still scheduled below and can start a separately owned pass.
                 BackgroundFeedRefresher.cancelForSceneBackground()
                 BackgroundFeedRefresher.scheduleNext()
+                Task { await runtime.listeningPlaces.writeNow() }
             case .active:
                 guard let container = runtime.readyContainer else { return }
                 Task {
