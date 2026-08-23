@@ -1,7 +1,7 @@
 # Next TestFlight change inventory
 
-Status: source material only. This is not TestFlight copy and does not represent
-an uploaded build.
+Status: shipped as Chapter 71, build 232, to Internal Testing Group and Public
+Testers on 2026-08-23. The exact shipped copy is in `build-232-notes.txt`.
 
 The last shipped story is Chapter 70 for build 213. The next TestFlight upload
 must follow the maintenance contract in `docs/kashe.md`:
@@ -65,5 +65,5 @@ fall back to generic “bug fixes and performance improvements” copy.
 - [x] Verify the payload with `wc -m`; the exact build 232 chapter is 2,487
   characters.
 - [x] Obtain Michael’s explicit TestFlight-upload approval.
-- [ ] Upload using the checked-in notes file and verify App Store Connect shows
+- [x] Upload using the checked-in notes file and verify App Store Connect shows
   the same chapter.
