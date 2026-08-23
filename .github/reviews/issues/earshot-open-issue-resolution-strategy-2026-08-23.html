@@ -3,45 +3,70 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Earshot open-issue resolution strategy</title>
+  <title>Earshot remaining-issue resolution strategy</title>
   <style>
-    :root { color-scheme:light dark; --bg:#fff; --fg:#17202a; --surface:#f4f6f7; --border:#667085; --link:#0645ad; }
-    @media (prefers-color-scheme:dark) { :root { --bg:#111827; --fg:#f9fafb; --surface:#1f2937; --border:#9ca3af; --link:#8ec5ff; } }
-    body { margin:0 auto; max-width:78rem; padding:1.25rem; background:var(--bg); color:var(--fg); font:1rem/1.55 system-ui,sans-serif; }
-    .skip-link { position:absolute; left:-9999px; } .skip-link:focus { left:1rem; top:1rem; background:var(--bg); padding:.75rem; z-index:2; }
-    a { color:var(--link); } nav,section { margin-block:1.5rem; } .card { background:var(--surface); border:1px solid var(--border); border-radius:.5rem; padding:1rem; }
-    table { border-collapse:collapse; width:100%; } caption { font-weight:700; text-align:left; padding:.5rem 0; }
-    th,td { border:1px solid var(--border); padding:.55rem; text-align:left; vertical-align:top; } th { background:var(--surface); }
-    .table-wrap { overflow-x:auto; } .badge { border:1px solid var(--border); border-radius:1rem; padding:.1rem .5rem; white-space:nowrap; }
-    fieldset { border:1px solid var(--border); } li { margin-block:.35rem; }
+    body { font: 1rem/1.5 system-ui, sans-serif; max-width: 76rem; margin: 2rem auto; padding: 0 1rem; color: #171717; background: #fff; }
+    h1, h2 { line-height: 1.2; }
+    table { border-collapse: collapse; width: 100%; margin-block: 1rem 2rem; }
+    th, td { border: 1px solid #666; padding: .55rem; text-align: left; vertical-align: top; }
+    th { background: #eee; }
+    caption { font-weight: 700; text-align: left; margin-bottom: .4rem; }
+    code { background: #eee; padding: .1rem .25rem; }
   </style>
 </head>
 <body>
-  <a class="skip-link" href="#main-content">Skip to main content</a>
-  <header role="banner"><h1>Earshot open-issue resolution strategy</h1><p>Refreshed August 23, 2026 after build 232, main commit 67d35d9.</p></header>
-  <nav aria-label="Report sections" class="card"><h2>Sections</h2><ul><li><a href="#outcome">Outcome</a></li><li><a href="#priorities">Priority order</a></li><li><a href="#actions">Action plan</a></li><li><a href="#decisions">Blocked decisions</a></li></ul></nav>
-  <main id="main-content">
-    <section id="outcome" aria-labelledby="outcome-heading"><h2 id="outcome-heading">Outcome</h2><p>Eleven issues remain. None is a known release-blocking playback, download, or data-loss defect. Two medium features are actionable now; the rest need evidence, hardware, architecture, hosting, account-plan, or capability decisions.</p><p>All issues have zero GitHub reactions. Project-board status is unknown because the current token does not expose Projects.</p></section>
-    <section id="priorities" aria-labelledby="priorities-heading"><h2 id="priorities-heading">Priority order</h2><div class="table-wrap"><table>
-      <caption>All open Earshot issues in recommended execution order</caption>
-      <thead><tr><th scope="col">Order</th><th scope="col">Issue</th><th scope="col">Score</th><th scope="col">Confidence</th><th scope="col">Action</th></tr></thead>
+  <main>
+    <h1>Earshot remaining-issue resolution strategy</h1>
+    <p>Refreshed 2026-08-23 after build 234 against main commit <code>1fdfc77</code>. Scope: the 11 issues open when this cycle began. All had zero reactions.</p>
+
+    <h2>Outcome</h2>
+    <p>Three issues are complete and eight remain. Issues 465 and 550 were implemented, tested, merged, and closed. Issue 679 was stale: current code and CI had already removed its StoreKit quarantine, and all 12 StoreKit tests passed through plain Xcode 26.6 CLI and required CI.</p>
+    <p>The previous Unreleased changelog was archived under 1.2.0. The fresh section contains only the new 465 and 550 work.</p>
+
+    <h2>Completed in this cycle</h2>
+    <table>
+      <caption>Completed issues and evidence</caption>
+      <thead><tr><th scope="col">Issue</th><th scope="col">Result</th><th scope="col">Verification</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td><a href="https://github.com/payown/earshot/issues/465">#465 Podcast Quick Actions</a></td><td>0</td><td><span class="badge">High</span></td><td>Open the existing download-count, queue-age, and speed editors from configurable actions.</td></tr>
-        <tr><td>2</td><td><a href="https://github.com/payown/earshot/issues/550">#550 Morning lineup</a></td><td>0</td><td><span class="badge">Medium</span></td><td>Implement a manually saved and applied lineup; no scheduling.</td></tr>
-        <tr><td>3</td><td><a href="https://github.com/payown/earshot/issues/686">#686 iPad support</a></td><td>0</td><td><span class="badge">High</span></td><td>Prepare simulator evidence; require real-iPad VoiceOver QA before device-family changes.</td></tr>
-        <tr><td>4</td><td><a href="https://github.com/payown/earshot/issues/679">#679 StoreKit CI</a></td><td>1</td><td><span class="badge">High</span></td><td>Re-test when Xcode changes from 26.6.</td></tr>
-        <tr><td>5</td><td><a href="https://github.com/payown/earshot/issues/801">#801 migration margin</a></td><td>1</td><td><span class="badge">High</span></td><td>Keep as low-priority physical V6 assurance; do not alter the live store.</td></tr>
-        <tr><td>6</td><td><a href="https://github.com/payown/earshot/issues/680">#680 branch protection</a></td><td>1</td><td><span class="badge">High</span></td><td>Choose GitHub Pro or authorize a public-repository audit.</td></tr>
-        <tr><td>7</td><td><a href="https://github.com/payown/earshot/issues/571">#571 volume boost</a></td><td>0</td><td><span class="badge">High</span></td><td>Pair with an approved DSP architecture and device-listening project.</td></tr>
-        <tr><td>8</td><td><a href="https://github.com/payown/earshot/issues/570">#570 silence trimming</a></td><td>0</td><td><span class="badge">High</span></td><td>Do not ship a no-op toggle; first prove a safe audio engine.</td></tr>
-        <tr><td>9</td><td><a href="https://github.com/payown/earshot/issues/468">#468 local audio</a></td><td>0</td><td><span class="badge">High</span></td><td>Separate schema, Files import, lifecycle, and library architecture project.</td></tr>
-        <tr><td>10</td><td><a href="https://github.com/payown/earshot/issues/467">#467 Universal Links</a></td><td>0</td><td><span class="badge">High</span></td><td>Blocked on hosted AASA/web content and entitlement approval.</td></tr>
-        <tr><td>11</td><td><a href="https://github.com/payown/earshot/issues/454">#454 Live Activities</a></td><td>0</td><td><span class="badge">High</span></td><td>Defer until ActivityKit capability and product approval.</td></tr>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/465">465</a></th><td>Podcast Quick Actions open the existing download-count, queue-age-limit, and per-podcast-speed editors and focus their native adjustable controls.</td><td>1,934 applicable local tests and required CI passed; PR 894 merged.</td></tr>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/550">550</a></th><td>Queue options save, replace, apply, and clear an on-demand, private-iCloud-synced lineup with exact counts and preserved unrelated Queue order.</td><td>1,966 unit tests plus the UI smoke test and required CI passed; PR 895 merged.</td></tr>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/679">679</a></th><td>Confirmed stale and closed. No workflow flag or test guard remains.</td><td>All 12 StoreKit tests passed in plain Xcode 26.6 CLI and the required CI gate.</td></tr>
       </tbody>
-    </table></div></section>
-    <section id="actions" aria-labelledby="actions-heading"><h2 id="actions-heading">Action plan</h2><fieldset><legend>Immediate work</legend><div><input id="a1" type="checkbox" checked><label for="a1">Reset Unreleased after build 232 while retaining 1.2.0 history.</label></div><div><input id="a2" type="checkbox"><label for="a2">Implement and test #465.</label></div><div><input id="a3" type="checkbox"><label for="a3">Implement the manual saved-lineup slice for #550.</label></div><div><input id="a4" type="checkbox"><label for="a4">Re-test #679 after an Xcode upgrade.</label></div></fieldset></section>
-    <section id="decisions" aria-labelledby="decisions-heading"><h2 id="decisions-heading">Blocked decisions</h2><ul><li>#686 needs real-iPad VoiceOver and orientation testing before capability changes.</li><li>#680 needs GitHub Pro or a public-history/security audit.</li><li>#467 and #454 need explicit signing/capability approval and product prerequisites.</li><li>#570 and #571 need an approved DSP spike and device listening tests.</li><li>#468 needs a local-media identity and persistence design before schema work.</li></ul></section>
+    </table>
+
+    <h2>Remaining priority order</h2>
+    <table>
+      <caption>Eight remaining issues</caption>
+      <thead><tr><th scope="col">Order</th><th scope="col">Issue</th><th scope="col">Score</th><th scope="col">Status and next safe action</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><th scope="row"><a href="https://github.com/payown/earshot/issues/686">686 iPad support</a></th><td>4</td><td>Requires protected device-family change, real-iPad VoiceOver/layout QA, orientations, and screenshots.</td></tr>
+        <tr><td>2</td><th scope="row"><a href="https://github.com/payown/earshot/issues/571">571 volume boost</a></th><td>4</td><td>Build with 570’s shared processing pipeline; requires gain, limiter, route handling, persistence policy, and device listening.</td></tr>
+        <tr><td>3</td><th scope="row"><a href="https://github.com/payown/earshot/issues/570">570 silence trimming</a></th><td>4</td><td>Spike the audio-processing architecture first; verify saved-time accounting and audible quality on physical routes.</td></tr>
+        <tr><td>4</td><th scope="row"><a href="https://github.com/payown/earshot/issues/468">468 local audio import</a></th><td>3</td><td>Separate architecture phase covering identity, security-scoped files, metadata, deletion, backup, playback, and Library UI.</td></tr>
+        <tr><td>5</td><th scope="row"><a href="https://github.com/payown/earshot/issues/467">467 Universal Links</a></th><td>2</td><td>Needs approved HTTPS domain and URL format, hosted AASA, entitlement, and fallback.</td></tr>
+        <tr><td>6</td><th scope="row"><a href="https://github.com/payown/earshot/issues/454">454 Live Activities</a></th><td>2</td><td>Needs ActivityKit extension/capability, privacy and stale-state policy, throttling, layouts, and device validation.</td></tr>
+        <tr><td>7</td><th scope="row"><a href="https://github.com/payown/earshot/issues/801">801 migration margin</a></th><td>1</td><td>V5/V6 remain supported sources. Mac peaks are 2.87×/3.02× versus 4.5×; physical V6 high-water evidence is still missing.</td></tr>
+        <tr><td>8</td><th scope="row"><a href="https://github.com/payown/earshot/issues/680">680 branch protection</a></th><td>0</td><td>Private free repository still returns 403. Requires GitHub Pro or a public-repository audit and visibility change.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Recommended next execution batch</h2>
+    <ol>
+      <li>Get protected-scope approval and a real iPad before issue 686.</li>
+      <li>Prototype one disabled-by-default processing pipeline for issues 570 and 571; require physical route, clipping, battery, interruption, and VoiceOver responsiveness tests before shipping.</li>
+      <li>Choose issue 467’s share domain and URL contract, then perform entitlement and AASA work together.</li>
+      <li>Approve issue 468’s identity and file-lifecycle design before a schema or UI change.</li>
+      <li>Keep issues 801 and 680 open until external evidence or repository state changes.</li>
+    </ol>
+
+    <h2>Device checklist for build 234</h2>
+    <ol>
+      <li>Try the three new podcast settings actions and confirm VoiceOver lands on each intended adjustable control.</li>
+      <li>Save, alter, and apply a Queue lineup; confirm saved order and preservation of unrelated episodes.</li>
+      <li>Make a saved episode played or unavailable, apply again, and confirm the exact skipped count.</li>
+      <li>Replace and clear the lineup; clearing it must not clear the current Queue.</li>
+      <li>On a second device, confirm the lineup syncs but does not change that Queue until Apply is activated.</li>
+    </ol>
   </main>
-  <footer role="contentinfo"><p>Generated by the Issue Tracker workflow.</p></footer>
 </body>
 </html>
