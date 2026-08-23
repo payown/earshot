@@ -7,10 +7,14 @@ import UserNotifications
 /// All controls bind directly to the `Podcast` SwiftData model — changes persist
 /// immediately without a save button.
 ///
-/// Settings without a matching model field (e.g. per-podcast auto-download count)
-/// are deferred to a future issue once the data agent adds them to the model.
+enum PodcastSettingsFocus: Hashable {
+    case playbackSpeed
+    case queueAgeLimit
+}
+
 struct PodcastSettingsView: View {
     @Bindable var podcast: Podcast
+    let initialFocus: PodcastSettingsFocus?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -35,6 +39,12 @@ struct PodcastSettingsView: View {
     /// dismissing it re-evaluates this view's body and the Folders section below
     /// reads back the podcast's current memberships.
     @State private var showingFolderPicker = false
+    @AccessibilityFocusState private var focusedSetting: PodcastSettingsFocus?
+
+    init(podcast: Podcast, initialFocus: PodcastSettingsFocus? = nil) {
+        self.podcast = podcast
+        self.initialFocus = initialFocus
+    }
 
     /// Observed so the Folders section reflects folder creates/renames/deletes
     /// live. `Podcast` has no inverse to `FolderMembership` (the F2 decision), so
@@ -145,6 +155,7 @@ struct PodcastSettingsView: View {
             .sheet(isPresented: $showingFolderPicker) {
                 PodcastFolderPickerView(podcast: podcast)
             }
+            .onAppear { requestInitialFocus() }
         }
     }
 
@@ -416,6 +427,7 @@ struct PodcastSettingsView: View {
             selection: speedOverrideBinding,
             hint: "Playback speed for this podcast. Use global uses the app-wide setting. Flick up for faster."
         )
+        .accessibilityFocused($focusedSetting, equals: .playbackSpeed)
     }
 
     private var introSkipPicker: some View {
@@ -434,6 +446,7 @@ struct PodcastSettingsView: View {
             selection: queueAgeLimitBinding,
             hint: "Episodes older than this are automatically removed from the queue"
         )
+        .accessibilityFocused($focusedSetting, equals: .queueAgeLimit)
     }
 
     private var inboxMaxPicker: some View {
@@ -568,6 +581,13 @@ struct PodcastSettingsView: View {
             AppLog.data.error(
                 "Failed to persist podcast settings: \(error.localizedDescription, privacy: .public)"
             )
+        }
+    }
+
+    private func requestInitialFocus() {
+        guard let initialFocus else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            focusedSetting = initialFocus
         }
     }
 
