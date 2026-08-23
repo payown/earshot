@@ -39,6 +39,10 @@ struct EpisodeListView: View {
     // batch.
     @State private var selection = MultiSelectState()
     @State private var batchRequest: FolderPickRequest?
+    // Podcast-detail search (#457). Applied after the existing played/unheard
+    // filter and chronological sort, so it only narrows the list the user is
+    // already viewing and never changes either preference.
+    @State private var searchText = ""
     // Moves VoiceOver focus onto the first episode row when entering selection
     // mode, and to the Select/Done button on exit; keyed on the stable
     // PersistentIdentifier so focus rides the row across the select-mode toggle
@@ -73,6 +77,11 @@ struct EpisodeListView: View {
     /// The visible set: the active filter applied to the sorted episodes.
     private var filteredSortedEpisodes: [Episode] {
         filter.apply(to: sortedEpisodes)
+    }
+
+    /// The rows currently rendered after filter, sort, and search are composed.
+    private var visibleEpisodes: [Episode] {
+        EpisodeSearchFilter.filter(filteredSortedEpisodes, query: searchText)
     }
 
     /// Count of unplayed episodes across the WHOLE podcast, not just the
@@ -138,9 +147,14 @@ struct EpisodeListView: View {
                 Section {
                     emptyFilterState
                 }
+            } else if visibleEpisodes.isEmpty {
+                Section {
+                    NoSearchMatchesView(query: searchText)
+                        .accessibilityFocused($focusEmptyFilter)
+                }
             } else {
                 Section {
-                    ForEach(filteredSortedEpisodes) { episode in
+                    ForEach(visibleEpisodes) { episode in
                         rowContainer(for: episode)
                             // Lets the rotor mark-played runner hand VoiceOver focus
                             // to this row when its neighbor vanishes (#579).
@@ -152,8 +166,8 @@ struct EpisodeListView: View {
                     }
                 } header: {
                     Text(filter == .unheard
-                         ? "^[\(filteredSortedEpisodes.count) unheard episode](inflect: true)"
-                         : "^[\(filteredSortedEpisodes.count) episode](inflect: true)")
+                         ? "^[\(visibleEpisodes.count) unheard episode](inflect: true)"
+                         : "^[\(visibleEpisodes.count) episode](inflect: true)")
                 }
             }
             Section {
@@ -165,6 +179,11 @@ struct EpisodeListView: View {
         }
         .navigationTitle(podcast.title)
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchText, prompt: "Search episodes")
+        .onSubmit(of: .search) {
+            guard EpisodeSearchFilter.isActive(searchText) else { return }
+            Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: visibleEpisodes.count))
+        }
         .refreshable { await refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)) { note in
             guard let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey]
@@ -244,7 +263,7 @@ struct EpisodeListView: View {
             // while selecting it becomes "Done", which exits and announces the
             // change. Only offered when there are episodes to select. The batch
             // actions live in the bottom MultiSelectBar.
-            if !filteredSortedEpisodes.isEmpty {
+            if !visibleEpisodes.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     if selection.isSelecting {
                         Button("Done") { exitSelection(announce: true) }
@@ -252,7 +271,7 @@ struct EpisodeListView: View {
                             .accessibilityFocused($focusSelectButton)
                     } else {
                         Button {
-                            enterSelection(first: filteredSortedEpisodes.first)
+                            enterSelection(first: visibleEpisodes.first)
                         } label: {
                             Label("Select episodes", systemImage: "checkmark.circle")
                         }
@@ -361,7 +380,7 @@ struct EpisodeListView: View {
             // (#579). Capture the visible neighbor before the state changes.
             onMarkPlayed: { nowPlayed in
                 guard filter == .unheard, nowPlayed else { return }
-                let neighbor = neighborID(of: episode, in: filteredSortedEpisodes)
+                let neighbor = neighborID(of: episode, in: visibleEpisodes)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     if let neighbor {
                         focusedEpisode = neighbor
@@ -427,9 +446,9 @@ struct EpisodeListView: View {
         exitSelection(announce: false, focusDelay: 0.9)
     }
 
-    /// The selected episodes, in the current (filtered, sorted) display order.
+    /// The selected episodes, in the current filtered, sorted, searched display order.
     private func selectedEpisodes() -> [Episode] {
-        filteredSortedEpisodes.filter { selection.isSelected($0.persistentModelID) }
+        visibleEpisodes.filter { selection.isSelected($0.persistentModelID) }
     }
 
     /// Adds every selected episode to the end of the queue, in list order, then
