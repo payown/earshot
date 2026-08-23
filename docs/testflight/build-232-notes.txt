@@ -1,0 +1,50 @@
+### Chapter 71 — Build 232
+
+*The queue that asked first*
+
+**What changed**
+
+Build 232 makes long listening sessions easier to control. Repeated skips and
+near-end seeks no longer bounce backward. Podcast pages have in-place episode
+search. Rows can show time remaining, and VoiceOver speaks it only when that
+Accessibility option is enabled. Transcripts can be exported as timestamped,
+speaker-aware Markdown.
+
+Downloads now ask before doing large work. Download All handles at most 50
+eligible episodes per request and reports exactly what started, was skipped, or
+was deferred. Cancel active downloads stops unfinished transfers without
+deleting completed files. Clear All Downloads says approximately how much
+storage it will free. Optional completion notifications open the podcast feed.
+
+The full player can dismiss after the last episode ends. Remove from Inbox no
+longer marks an episode played. Quick Actions can be removed, restored, and
+reordered without dragging. Siri and Shortcuts can skip forward or back. For a
+legacy unsecured audio link, Earshot first tries HTTPS silently; if that fails,
+it asks before playing and remembers that podcast's approval on this device.
+
+**What to test**
+
+Near an episode's end, skip forward and back repeatedly and scrub into the last
+few minutes. The position must not jump backward. Search a podcast, change its
+heard filter and sort, export a transcript, and check time remaining with its
+Accessibility option both off and on.
+
+Choose Download All with more than 50 eligible episodes. Confirm only 50 start
+and the final counts are exact. Cancel active downloads and confirm finished
+files remain. Before clearing downloads, check that the episode count and
+approximate storage are announced. Test the optional completion notification.
+
+Also try Remove from Inbox, Quick Action editing, Siri skip in both directions,
+and natural completion of the final queued episode with player dismissal on.
+If you encounter the unsecured-audio warning, verify Cancel stops and Play
+episode works without another warning for that podcast on this device.
+
+Kashe had eight hundred voices waiting and one careless tap between them and
+her phone's storage. This time Earshot counted the first fifty and asked.
+
+She canceled halfway through. The finished episodes stayed. The unfinished
+ones stopped. Even the space she could recover had a number.
+
+Renata asked whether that felt slower.
+
+“No,” Kashe said. “It felt like I was the one holding the button.”
