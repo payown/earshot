@@ -346,6 +346,14 @@ struct RootView: View {
             Announcer.announce("A folder sync conflict was repaired.")
         }
         .task { await activateRoot() }
+        // A separate view-owned task keeps the legacy cleanup off the critical
+        // root-activation path and automatically cancels it if this container's
+        // RootView disappears during recovery/reset. Each batch is already
+        // durable, so the next RootView or launch safely resumes (#729).
+        .task(id: rootServicesActivated) {
+            guard rootServicesActivated else { return }
+            await dismissLegacyPlayedInboxRows()
+        }
         // Keep this outermost so RootView-owned presentations, especially the
         // automatic Now Playing sheet above, inherit the folder route as well as
         // the tab content. Placing it directly on TabView hides the origin button
@@ -402,6 +410,29 @@ struct RootView: View {
         await opmlImportCoordinator.restorePendingImport()
         rootServicesActivated = true
         handlePendingIncomingFile()
+    }
+
+    private func dismissLegacyPlayedInboxRows() async {
+        let maintenance = await InboxHistoryMaintenance.makeBackground(
+            modelContainer: modelContext.container
+        )
+        do {
+            let report = try await maintenance.dismissPlayedEpisodes()
+            if report.dismissed > 0 {
+                AppLog.data.info(
+                    "Dismissed \(report.dismissed) legacy played Inbox rows in \(report.batches) batches (#729)"
+                )
+                NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+            }
+        } catch is CancellationError {
+            AppLog.data.info(
+                "Legacy played Inbox cleanup paused; durable progress will resume next launch (#729)"
+            )
+        } catch {
+            AppLog.data.error(
+                "Legacy played Inbox cleanup failed and will retry next launch: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     // MARK: Launch tab (#492)

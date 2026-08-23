@@ -364,6 +364,10 @@ final class AdvancedPlaybackTests: XCTestCase {
         }
 
         XCTAssertTrue(episode.isPlayed, "Actual end-of-item must still complete the episode")
+        XCTAssertTrue(
+            episode.inboxDismissed,
+            "Natural completion must durably dismiss the episode from Inbox (#729)"
+        )
         XCTAssertEqual(episode.positionSeconds, 0)
         XCTAssertNil(player.nowPlayingEpisode, "A completed final queue item should unload")
     }

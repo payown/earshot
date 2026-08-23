@@ -37,6 +37,22 @@ final class DownloadPathsTests: XCTestCase {
         XCTAssertEqual(a, b)
     }
 
+    func testPrepareDownloadsDirectoryExcludesRedownloadableAudioFromBackup() throws {
+        let parent = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let downloads = parent.appendingPathComponent("Downloads", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+
+        try DownloadPaths.prepareDownloadsDirectory(at: downloads)
+        let first = try downloads.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertEqual(first.isExcludedFromBackup, true)
+
+        // Existing directories from earlier builds are repaired idempotently.
+        try DownloadPaths.prepareDownloadsDirectory(at: downloads)
+        let second = try downloads.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertEqual(second.isExcludedFromBackup, true)
+    }
+
     // MARK: storedFileName (#575)
 
     // Acceptance criterion: stored values are bare file names, legacy absolute

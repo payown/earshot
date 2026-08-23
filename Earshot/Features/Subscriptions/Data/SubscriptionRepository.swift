@@ -412,6 +412,14 @@ final class SubscriptionRepository {
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
     ) async -> SubscriptionRefreshReport {
+        let walStarted = ContinuousClock.now
+        StoreWALDiagnostics.log(.beforeFullRefresh)
+        defer {
+            StoreWALDiagnostics.log(
+                .afterFullRefresh,
+                elapsed: ContinuousClock.now - walStarted
+            )
+        }
         // Hand the whole per-feed loop — fetch, parse, diff, insert, save — to a
         // background `@ModelActor` so none of it runs on the main thread and
         // starves VoiceOver (#382). The actor returns lightweight value-type
