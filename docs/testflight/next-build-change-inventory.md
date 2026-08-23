@@ -46,17 +46,24 @@ fall back to generic “bug fixes and performance improvements” copy.
 - Build 230: Siri and Shortcuts provide Skip Forward and Skip Back actions. The
   built-in phrases use Earshot’s configured intervals; a Shortcut can supply a
   custom interval from 1 second through 10 minutes.
+- Build 231: Download All is capped at 50 eligible episodes per request, active
+  transfers can be cancelled without removing completed files, and Clear All
+  Downloads announces the approximate storage it will free.
+- Build 232: legacy HTTP media is tried over HTTPS first and, only when HTTPS is
+  unavailable, requires a per-podcast approval on this device before playback.
 
 ## Shipping checklist
 
-- [ ] Reconcile this inventory with `CHANGELOG.md` and every merge after build
+- [x] Reconcile this inventory with `CHANGELOG.md` and every merge after build
   230.
-- [ ] Choose the real final build number and the next chapter number.
-- [ ] Write one coherent Kashe chapter with plain-language “What changed” and
+- [x] Choose the real final build number and the next chapter number.
+- [x] Write one coherent Kashe chapter with plain-language “What changed” and
   “What to test” sections covering the inventory.
-- [ ] Append the chapter and update established story details in `docs/kashe.md`.
-- [ ] Save the exact same text as `docs/testflight/build-N-notes.txt`.
-- [ ] Verify the payload with `wc -m`; tighten it to 2,500 characters or fewer.
-- [ ] Obtain Michael’s explicit TestFlight-upload approval.
+- [x] Append the chapter to `docs/kashe.md`; it introduces no new durable story
+  facts requiring an established-details update.
+- [x] Save the exact same text as `docs/testflight/build-N-notes.txt`.
+- [x] Verify the payload with `wc -m`; the exact build 232 chapter is 2,487
+  characters.
+- [x] Obtain Michael’s explicit TestFlight-upload approval.
 - [ ] Upload using the checked-in notes file and verify App Store Connect shows
   the same chapter.

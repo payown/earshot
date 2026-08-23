@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Cleartext podcast audio now gets an HTTPS-first playback path. Earshot verifies the same enclosure over HTTPS without downloading its audio and uses it silently when available. If the podcast truly requires HTTP, Earshot explains the network risk before playback with Play episode and Cancel actions, then remembers an approval for that podcast on this device. Aggregate transport diagnostics remain on-device and contain counts only. (closes #709)
 - Manual Download All now starts at most 50 eligible episodes per confirmation and states the exact eligible, started, skipped, and deferred counts. Repeating the action starts the next bounded batch instead of silently creating hundreds of background transfers. Settings > Downloads adds a separate Cancel active downloads action that preserves completed audio, while Clear all downloads now reports the approximate device storage it will free. (#835)
 - In-progress episode rows now show and speak both time remaining and total duration when the Time remaining VoiceOver detail is enabled. Untouched, completed, and unknown-duration episodes keep their previous wording. (closes #552)
 - Downloads settings now labels the new-episode auto-download count explicitly as per podcast and explains that it applies after following and refreshing, includes new Inbox and Queue episodes, is not a global storage cap, and is separate from auto-downloading manually queued episodes. (closes #719)

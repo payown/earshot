@@ -165,13 +165,25 @@ final class PlayerService {
     @ObservationIgnored private var stallObserver: NSObjectProtocol?
 
     @ObservationIgnored private let audioSession: any PlayerAudioSession
+    @ObservationIgnored private let mediaHTTPSProbe: any MediaHTTPSProbing
+    @ObservationIgnored private var mediaResolutionGeneration = 0
+    @ObservationIgnored private var pendingCleartextPlaybackAction: (() -> Void)?
+    @ObservationIgnored private var pendingCleartextApprovalKey: String?
+    @ObservationIgnored private var currentPlaybackURL: URL?
+    @ObservationIgnored private var currentMediaResolutionComplete = true
+
+    /// Non-nil only after the HTTPS probe proved that the selected episode must
+    /// use cleartext HTTP and this device has not approved that podcast (#709).
+    private(set) var pendingCleartextPlaybackWarning: CleartextPlaybackWarning?
 
     init(
         playbackHandoff: any PlaybackHandoffClient = PlaybackHandoffClientFactory.make(),
-        audioSession: any PlayerAudioSession = AVAudioSession.sharedInstance()
+        audioSession: any PlayerAudioSession = AVAudioSession.sharedInstance(),
+        mediaHTTPSProbe: any MediaHTTPSProbing = MediaHTTPSProbe()
     ) {
         self.playbackHandoff = playbackHandoff
         self.audioSession = audioSession
+        self.mediaHTTPSProbe = mediaHTTPSProbe
     }
 
     /// Generation token for the sleep-timer volume fade (review P1-4). Each fade
@@ -358,8 +370,15 @@ final class PlayerService {
         if let context {
             QueueRepository(context: context).add(episode)
         }
-        playAfterFetchingHandoff(episode, originEvent: .started(origin))
-        if settings?.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
+        let delaysPresentationForHTTP = episode.localAudioURL == nil
+            && URL(string: episode.audioURL)?.scheme?.lowercased() == "http"
+        playAfterFetchingHandoff(
+            episode,
+            originEvent: .started(origin),
+            presentsFullPlayerWhenStarted: delaysPresentationForHTTP
+        )
+        if !delaysPresentationForHTTP,
+           settings?.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
             ?? SettingsDefault.openPlayerOnPlay {
             pendingFullPlayerPresentation = true
         }
@@ -368,6 +387,10 @@ final class PlayerService {
     /// The currently loaded episode, if any. Exposed read-only for features that
     /// act on the current item — e.g. bookmarking the current position.
     var nowPlayingEpisode: Episode? { currentEpisode }
+
+    /// Internal verification surface for the transport selected after #709's
+    /// HTTPS probe. The URL is never persisted or included in diagnostics.
+    var currentMediaURLForTesting: URL? { currentPlaybackURL }
 
     /// Sole writer of ``currentEpisode``. Sets the (`@ObservationIgnored`) episode
     /// and mirrors its identity into the observed ``nowPlayingEpisodeID`` so the
@@ -391,8 +414,28 @@ final class PlayerService {
     /// jump-to-bookmark, where the saved position must be overridden.
     func play(_ episode: Episode, at startSeconds: Double) {
         cancelHandoffOperation()
-        play(episode, preparedItem: nil, originEvent: .started(nil))
-        seek(to: startSeconds)
+        play(
+            episode,
+            preparedItem: nil,
+            originEvent: .started(nil),
+            startSecondsOverride: startSeconds
+        )
+    }
+
+    func approvePendingCleartextPlayback() {
+        guard let action = pendingCleartextPlaybackAction else {
+            clearPendingCleartextPlayback()
+            return
+        }
+        if let key = pendingCleartextApprovalKey {
+            settings?.setBool(true, for: key)
+        }
+        clearPendingCleartextPlayback(invalidateResolution: false)
+        action()
+    }
+
+    func cancelPendingCleartextPlayback() {
+        clearPendingCleartextPlayback()
     }
 
     /// Streams a one-off episode straight from a Search directory preview (#517)
@@ -459,6 +502,65 @@ final class PlayerService {
         return item
     }
 
+    private func beginMediaResolution() {
+        mediaResolutionGeneration &+= 1
+        pendingCleartextPlaybackWarning = nil
+        pendingCleartextPlaybackAction = nil
+        pendingCleartextApprovalKey = nil
+    }
+
+    private func clearPendingCleartextPlayback(invalidateResolution: Bool = true) {
+        if invalidateResolution { mediaResolutionGeneration &+= 1 }
+        pendingCleartextPlaybackWarning = nil
+        pendingCleartextPlaybackAction = nil
+        pendingCleartextApprovalKey = nil
+    }
+
+    private func resolveCleartextMediaURL(
+        _ cleartextURL: URL,
+        for episode: Episode,
+        generation: Int,
+        onResolved: @escaping @MainActor (URL) -> Void
+    ) {
+        Task { @MainActor [weak self, weak episode] in
+            guard let self else { return }
+            let secureURL = await mediaHTTPSProbe.secureAlternative(for: cleartextURL)
+            guard mediaResolutionGeneration == generation,
+                  let episode,
+                  !episode.isDeleted else { return }
+
+            if let secureURL {
+                AppLog.networking.info("Using verified HTTPS for podcast media (#709)")
+                onResolved(secureURL)
+                return
+            }
+
+            let approvalIdentity = episode.podcast?.feedURL
+                ?? cleartextURL.host(percentEncoded: false)
+                ?? cleartextURL.absoluteString
+            let approvalKey = SettingsKey.cleartextMediaApproval(identity: approvalIdentity)
+            if settings?.bool(approvalKey, default: false) == true {
+                AppLog.networking.notice("Using listener-approved cleartext podcast media (#709)")
+                onResolved(cleartextURL)
+                return
+            }
+
+            // Do not let the outgoing episode continue speaking beneath a
+            // security decision for the newly selected episode.
+            if isPlaying { pause() }
+            pendingCleartextApprovalKey = approvalKey
+            pendingCleartextPlaybackAction = { [weak self, weak episode] in
+                guard let self, let episode, !episode.isDeleted,
+                      self.mediaResolutionGeneration == generation else { return }
+                AppLog.networking.notice("Listener approved cleartext podcast media (#709)")
+                onResolved(cleartextURL)
+            }
+            pendingCleartextPlaybackWarning = CleartextPlaybackWarning(
+                episodeTitle: episode.title
+            )
+        }
+    }
+
     /// Shared play path. `preparedItem`, when supplied, is a pre-buffered
     /// `AVPlayerItem` from the gapless preload, used for near-seamless advance.
     /// `transient` is true only for a stream-only Search preview (#517): the
@@ -470,11 +572,19 @@ final class PlayerService {
         preparedItem: AVPlayerItem?,
         transient: Bool = false,
         originEvent: PlaybackOriginEvent,
-        handoff: PlaybackHandoffSnapshot? = nil
+        handoff: PlaybackHandoffSnapshot? = nil,
+        resolvedURL: URL? = nil,
+        startSecondsOverride: Double? = nil,
+        presentsFullPlayerWhenStarted: Bool = false
     ) {
+        if resolvedURL == nil {
+            beginMediaResolution()
+        }
         let item: AVPlayerItem
         if let preparedItem {
             item = preparedItem
+            currentPlaybackURL = nil
+            currentMediaResolutionComplete = true
         } else {
             guard let url = PlaybackLogic.resolvePlaybackURL(
                 downloadPath: episode.localAudioURL?.path,
@@ -483,7 +593,31 @@ final class PlayerService {
                 AppLog.player.error("Cannot play episode, no usable source: \(episode.audioURL, privacy: .public)")
                 return
             }
-            item = makePlayerItem(url: url)
+            if resolvedURL == nil, url.scheme?.lowercased() == "http" {
+                let generation = mediaResolutionGeneration
+                resolveCleartextMediaURL(
+                    url,
+                    for: episode,
+                    generation: generation
+                ) { [weak self, weak episode] resolved in
+                    guard let self, let episode, !episode.isDeleted else { return }
+                    self.play(
+                        episode,
+                        preparedItem: nil,
+                        transient: transient,
+                        originEvent: originEvent,
+                        handoff: handoff,
+                        resolvedURL: resolved,
+                        startSecondsOverride: startSecondsOverride,
+                        presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted
+                    )
+                }
+                return
+            }
+            let finalURL = resolvedURL ?? url
+            item = makePlayerItem(url: finalURL)
+            currentPlaybackURL = finalURL
+            currentMediaResolutionComplete = true
         }
 
         // A new episode supersedes any in-flight sleep-timer fade (P1-4).
@@ -555,14 +689,14 @@ final class PlayerService {
             writeLivePosition(episode, second: handoff.positionSeconds)
             _ = saveContext()
         }
-        let resume = PlaybackLogic.playbackStartPosition(
+        let resume = startSecondsOverride ?? Double(PlaybackLogic.playbackStartPosition(
             position: handoff?.positionSeconds ?? resumePosition(for: episode),
             duration: episode.durationSeconds,
             introSkipSeconds: episode.podcast?.introSkipSeconds
-        )
+        ))
         if resume > 0 {
-            player.seek(to: CMTime(seconds: Double(resume), preferredTimescale: 1))
-            currentPositionSeconds = Double(resume)
+            player.seek(to: CMTime(seconds: resume, preferredTimescale: 1))
+            currentPositionSeconds = resume
         } else {
             currentPositionSeconds = 0
         }
@@ -578,6 +712,11 @@ final class PlayerService {
         updateNowPlayingInfo()
         refreshPreload()
         loadChaptersForCurrentEpisode()
+        if presentsFullPlayerWhenStarted,
+           settings?.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
+            ?? SettingsDefault.openPlayerOnPlay {
+            pendingFullPlayerPresentation = true
+        }
     }
 
     /// User-initiated episode starts wait briefly for one explicit record fetch.
@@ -586,11 +725,17 @@ final class PlayerService {
     /// and therefore has no network gap between episodes.
     private func playAfterFetchingHandoff(
         _ episode: Episode,
-        originEvent: PlaybackOriginEvent
+        originEvent: PlaybackOriginEvent,
+        presentsFullPlayerWhenStarted: Bool = false
     ) {
         guard playbackHandoff.isEnabled,
               let identity = playbackHandoffIdentity(for: episode) else {
-            play(episode, preparedItem: nil, originEvent: originEvent)
+            play(
+                episode,
+                preparedItem: nil,
+                originEvent: originEvent,
+                presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted
+            )
             return
         }
         if isPlaying { pause() }
@@ -608,7 +753,8 @@ final class PlayerService {
                 episode,
                 preparedItem: nil,
                 originEvent: originEvent,
-                handoff: fetched
+                handoff: fetched,
+                presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted
             )
         }
     }
@@ -628,6 +774,7 @@ final class PlayerService {
             AppLog.player.error("Cannot load episode, no usable source: \(episode.audioURL, privacy: .public)")
             return
         }
+        beginMediaResolution()
         // Like the play() path, switching the loaded episode invalidates the
         // chapter list, the auto-skip loop guard, and any fast-forward scan.
         currentChapters = []
@@ -649,6 +796,8 @@ final class PlayerService {
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
 
         let item = makePlayerItem(url: url)
+        currentPlaybackURL = url
+        currentMediaResolutionComplete = url.scheme?.lowercased() != "http"
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
 
@@ -686,6 +835,22 @@ final class PlayerService {
 
     func resume() {
         guard let episode = currentEpisode else { return }
+        if !currentMediaResolutionComplete,
+           let cleartextURL = currentPlaybackURL,
+           cleartextURL.scheme?.lowercased() == "http" {
+            beginMediaResolution()
+            let generation = mediaResolutionGeneration
+            resolveCleartextMediaURL(
+                cleartextURL,
+                for: episode,
+                generation: generation
+            ) { [weak self, weak episode] resolvedURL in
+                guard let self, let episode, self.currentEpisode === episode else { return }
+                self.installResolvedURLForLoadedEpisode(resolvedURL)
+                self.resume()
+            }
+            return
+        }
         guard playbackHandoff.isEnabled,
               !currentEpisodeIsTransient,
               let identity = playbackHandoffIdentity(for: episode) else {
@@ -719,6 +884,17 @@ final class PlayerService {
         intendsToPlay = true
         pausedByInterruption = false
         updateNowPlayingInfo()
+    }
+
+    private func installResolvedURLForLoadedEpisode(_ url: URL) {
+        let item = makePlayerItem(url: url)
+        player.replaceCurrentItem(with: item)
+        observeCurrentItem(item)
+        if currentPositionSeconds > 0 {
+            player.seek(to: CMTime(seconds: currentPositionSeconds, preferredTimescale: 1))
+        }
+        currentPlaybackURL = url
+        currentMediaResolutionComplete = true
     }
 
     func pause() {
@@ -2288,6 +2464,13 @@ final class PlayerService {
             downloadPath: next.localAudioURL?.path,
             audioURL: next.audioURL
         ) else {
+            clearPreload()
+            return
+        }
+        // An HTTP enclosure must pass the HTTPS probe (and, when necessary, the
+        // approved warning) at the actual episode boundary. Preloading it here
+        // would create an AVPlayerItem that bypasses that decision (#709).
+        guard url.scheme?.lowercased() != "http" else {
             clearPreload()
             return
         }

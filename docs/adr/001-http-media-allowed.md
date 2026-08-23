@@ -49,3 +49,14 @@ Implemented on the SwiftUI app 2026-07-02:
 - Net effect: an HTTP-only host loses artwork/refresh/download (its data was
   never protected anyway) but its audio still plays; every host that also serves
   HTTPS is now fully protected.
+
+## HTTPS-first playback update (#709)
+
+Build 232 keeps the media-only ATS exception because physical-device diagnostics
+still found 113 HTTP episode enclosures among 3,132 episodes. Playback now sends
+a bounded HEAD request to the same enclosure over HTTPS first. A successful HTTPS
+response is used silently; URLs and hosts are cached only in memory and never
+added to the aggregate diagnostic file. If HTTPS is unavailable, Earshot pauses
+before cleartext playback and explains the confidentiality and integrity risk.
+The listener can Play episode or Cancel, and approval is remembered locally for
+that podcast. Completed downloads and local files never enter this warning path.
