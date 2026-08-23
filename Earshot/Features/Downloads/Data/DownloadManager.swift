@@ -3,6 +3,25 @@ import Network
 import Observation
 import SwiftData
 
+struct DownloadBatchReport: Equatable, Sendable {
+    let eligible: Int
+    let started: Int
+    let skipped: Int
+    let failed: Int
+    let wasCancelled: Bool
+
+    var announcement: String {
+        var parts = [
+            "Eligible \(eligible)",
+            "started \(started)",
+            "skipped \(skipped)",
+            "failed \(failed)",
+        ]
+        if wasCancelled { parts.append("cancelled") }
+        return "Download batch complete. " + parts.joined(separator: ", ") + "."
+    }
+}
+
 /// Downloads episode audio to the app's Documents/Downloads folder, gated on
 /// Wi-Fi when the user has "Wi-Fi only" enabled. Writes `downloadPath` /
 /// `downloadStatus` so the player prefers the local file. The pure gating
@@ -21,6 +40,9 @@ import SwiftData
 @MainActor
 @Observable
 final class DownloadManager {
+    /// Keep each main-actor enrollment slice small enough that a very large
+    /// filtered Inbox or Queue cannot monopolize VoiceOver or SwiftUI updates.
+    private static let batchEnrollmentSize = 20
     /// True when the current path is Wi-Fi (or wired). Drives the gate.
     private(set) var isOnWifi = true
 
@@ -214,12 +236,18 @@ final class DownloadManager {
     /// durable terminal-event journal, so this returns as soon as the task is
     /// enqueued — the transfer survives app suspension and store preparation.
     func download(_ episode: Episode) async {
+        await download(episode, announceWaiting: true)
+    }
+
+    private func download(_ episode: Episode, announceWaiting: Bool) async {
         guard let context else { return }
         guard episode.downloadStatus != .downloaded else { return }
         guard downloadsAllowed else {
             ActiveDownload.setDownloadStatus(.pending, on: episode, in: context)
             save()
-            Announcer.announce("Waiting for Wi-Fi to download \(episode.title)")
+            if announceWaiting {
+                Announcer.announce("Waiting for Wi-Fi to download \(episode.title)")
+            }
             AppLog.networking.info("Download gated (no Wi-Fi): \(episode.title, privacy: .public)")
             return
         }
@@ -247,6 +275,48 @@ final class DownloadManager {
         task.taskDescription = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
         task.resume()
         AppLog.networking.info("Download started (background): \(episode.title, privacy: .public)")
+    }
+
+    /// Enrolls an explicit user-selected batch through the same guarded path as
+    /// a single download. Downloaded, pending, and downloading episodes are
+    /// skipped before task creation, failed downloads remain retryable, and the
+    /// main actor yields every bounded slice. The caller owns the one final
+    /// accessibility announcement so Wi-Fi gating never chatters once per row.
+    func downloadAll(_ episodes: [Episode]) async -> DownloadBatchReport {
+        let eligibleEpisodes = episodes.filter {
+            $0.downloadStatus == .none || $0.downloadStatus == .failed
+        }
+        let skipped = episodes.count - eligibleEpisodes.count
+        var started = 0
+        var failed = 0
+        var wasCancelled = false
+
+        for (index, episode) in eligibleEpisodes.enumerated() {
+            if Task.isCancelled {
+                wasCancelled = true
+                break
+            }
+
+            await download(episode, announceWaiting: false)
+            switch episode.downloadStatus {
+            case .pending, .downloading, .downloaded:
+                started += 1
+            case .failed, .none:
+                failed += 1
+            }
+
+            if (index + 1).isMultiple(of: Self.batchEnrollmentSize) {
+                await Task.yield()
+            }
+        }
+
+        return DownloadBatchReport(
+            eligible: eligibleEpisodes.count,
+            started: started,
+            skipped: skipped,
+            failed: failed,
+            wasCancelled: wasCancelled
+        )
     }
 
     /// Downloads `episode` and suspends until the transfer reaches a TERMINAL

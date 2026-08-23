@@ -75,6 +75,50 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertNil(episode.downloadPath)
     }
 
+    func testDownloadAllReportsEligibleStartedSkippedAndFailed() async {
+        let context = TestStore.freshContext()
+        let invalid = Episode(guid: "batch-invalid", title: "Invalid", audioURL: "")
+        let downloaded = Episode(
+            guid: "batch-downloaded", title: "Downloaded",
+            audioURL: "https://h/downloaded.mp3", downloadStatus: .downloaded
+        )
+        let downloading = Episode(
+            guid: "batch-downloading", title: "Downloading",
+            audioURL: "https://h/downloading.mp3", downloadStatus: .downloading
+        )
+        let pending = Episode(
+            guid: "batch-pending", title: "Pending",
+            audioURL: "https://h/pending.mp3", downloadStatus: .pending
+        )
+        for episode in [invalid, downloaded, downloading, pending] {
+            context.insert(episode)
+        }
+        let manager = makeManager(context)
+
+        let report = await manager.downloadAll([invalid, downloaded, downloading, pending])
+
+        XCTAssertEqual(
+            report,
+            DownloadBatchReport(
+                eligible: 1, started: 0, skipped: 3, failed: 1, wasCancelled: false
+            )
+        )
+        XCTAssertEqual(invalid.downloadStatus, .failed)
+        XCTAssertEqual(downloading.downloadStatus, .downloading)
+        XCTAssertEqual(pending.downloadStatus, .pending)
+    }
+
+    func testDownloadBatchAnnouncementIncludesEveryOutcomeOnce() {
+        let report = DownloadBatchReport(
+            eligible: 9, started: 5, skipped: 3, failed: 1, wasCancelled: false
+        )
+
+        XCTAssertEqual(
+            report.announcement,
+            "Download batch complete. Eligible 9, started 5, skipped 3, failed 1."
+        )
+    }
+
     func testRemoveDownloadDeletesFileAndResetsState() throws {
         let context = TestStore.freshContext()
         // Post-#575 contract: downloadPath stores a bare file NAME; the file
