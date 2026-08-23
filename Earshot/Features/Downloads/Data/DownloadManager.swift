@@ -84,6 +84,10 @@ final class DownloadManager {
 
     /// The container terminal events resolve completed episodes against.
     @ObservationIgnored private static var container: ModelContainer?
+    /// Notification-center seam for proving that a persisted terminal event
+    /// reaches local notification scheduling without involving iOS in tests.
+    @ObservationIgnored private static var notificationCenter: any NotificationScheduling =
+        SystemNotificationCenter()
 
     /// Wires the shared session's delegate to the app's container and forces the
     /// session into existence so it can reconnect to any tasks that finished
@@ -699,12 +703,33 @@ final class DownloadManager {
         ActiveDownload.setDownloadStatus(.downloaded, on: episode, in: context)
         save(context, action: "complete")
         Announcer.announce("Downloaded \(episode.title)")
+        let shouldNotify = AppSettingsStore(context: context).bool(
+            SettingsKey.downloadCompletionNotifications,
+            default: SettingsDefault.downloadCompletionNotifications
+        )
+        if shouldNotify,
+           let feedURL = episode.podcast?.feedURL {
+            let title = episode.title
+            let guid = episode.guid
+            let center = notificationCenter
+            Task {
+                await NotificationService(center: center).deliverDownloadCompleted(
+                    episodeTitle: title,
+                    podcastFeedURL: feedURL,
+                    episodeGUID: guid
+                )
+            }
+        }
         AppLog.networking.info("Download finished: \(episode.title, privacy: .public)")
     }
 
     #if DEBUG
     static func setContainerForTesting(_ container: ModelContainer?) {
         self.container = container
+    }
+
+    static func setNotificationCenterForTesting(_ center: (any NotificationScheduling)?) {
+        notificationCenter = center ?? SystemNotificationCenter()
     }
     #endif
 

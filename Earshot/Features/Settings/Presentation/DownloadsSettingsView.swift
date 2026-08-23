@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+import UIKit
+import UserNotifications
 
 /// Settings → Downloads: Wi-Fi restriction and auto-download count. Extracted
 /// from the former single Settings form.
@@ -7,6 +9,7 @@ struct DownloadsSettingsView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(DownloadManager.self) private var downloads
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
 
     // Live count of downloaded episodes, refreshed on appear and after a clear.
     // A bounded SQL COUNT over `downloadPath != nil` (no object materialization),
@@ -14,6 +17,8 @@ struct DownloadsSettingsView: View {
     @State private var downloadCount = 0
     @State private var showClearAllConfirm = false
     @State private var isClearing = false
+    @State private var authRequestToken = 0
+    @State private var authorizationStatus: UNAuthorizationStatus?
 
     private static let downloadCounts = [0, 1, 3, 5, 10]
 
@@ -48,6 +53,51 @@ struct DownloadsSettingsView: View {
                     .accessibilityHint("When on, an episode's download is removed automatically once you finish it, mark it played, or remove it from the queue")
             } footer: {
                 Text("Frees storage as you go by removing an episode's download when you finish it, mark it played, or remove it from the queue. Off by default.")
+            }
+
+            Section {
+                Toggle(
+                    "Notify when downloads finish",
+                    isOn: downloadCompletionNotificationsBinding
+                )
+                .accessibilityHint("Sends a local notification after an episode finishes downloading")
+                .task(id: authRequestToken) {
+                    guard authRequestToken > 0 else { return }
+                    await NotificationService().requestAuthorization()
+                    await refreshAuthorizationStatus(announceIfStillProblematic: true)
+                }
+
+                if settings.downloadCompletionNotifications {
+                    switch authorizationStatus {
+                    case .denied:
+                        Label {
+                            Text("Notifications are turned off for Earshot. Enable them in Settings to get download alerts.")
+                        } icon: {
+                            Image(systemName: "bell.slash")
+                                .foregroundStyle(.orange)
+                        }
+                        Button("Open Settings") { openSystemSettings() }
+                            .accessibilityHint("Opens the Settings app to Earshot's notification permissions")
+                    case .notDetermined:
+                        Label {
+                            Text("Notifications haven't been turned on for Earshot yet.")
+                        } icon: {
+                            Image(systemName: "bell")
+                                .foregroundStyle(.orange)
+                        }
+                        Button("Enable Notifications") { authRequestToken += 1 }
+                            .accessibilityHint("Asks iOS for permission to send notifications")
+                    default:
+                        EmptyView()
+                    }
+                }
+            } footer: {
+                Text("Sends an on-device notification after an episode finishes downloading. Off by default.")
+            }
+            .task { await refreshAuthorizationStatus() }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                Task { await refreshAuthorizationStatus() }
             }
 
             Section {
@@ -99,5 +149,37 @@ struct DownloadsSettingsView: View {
             isClearing = false
             Announcer.announce(removed == 1 ? "Cleared 1 download" : "Cleared \(removed) downloads")
         }
+    }
+
+    private var downloadCompletionNotificationsBinding: Binding<Bool> {
+        Binding(
+            get: { settings.downloadCompletionNotifications },
+            set: { isOn in
+                let decision = NotificationPermissionTrigger.apply(newValue: isOn)
+                settings.downloadCompletionNotifications = decision.persistedValue
+                if decision.shouldRequestAuthorization { authRequestToken += 1 }
+            }
+        )
+    }
+
+    private func refreshAuthorizationStatus(announceIfStillProblematic: Bool = false) async {
+        let status = await NotificationService().currentAuthorizationStatus()
+        authorizationStatus = status
+        guard announceIfStillProblematic else { return }
+        switch status {
+        case .denied:
+            Announcer.announce(
+                "Notifications are off for Earshot in Settings. Enable them there to get download alerts."
+            )
+        case .notDetermined:
+            Announcer.announce("Notifications are still not enabled for Earshot.")
+        default:
+            break
+        }
+    }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 }

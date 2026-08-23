@@ -35,6 +35,10 @@ enum SettingsKey {
     static let chapterNavButtonsVisible = "chapter_nav_buttons_visible"
     static let inboxOptInOnly = "inbox_opt_in_only"
     static let wifiOnlyDownloads = "wifi_only_downloads"
+    /// Whether a completed background audio download produces a local
+    /// notification. Device-local because iOS notification authorization and
+    /// delivery are device-specific. Off by default (#453).
+    static let downloadCompletionNotifications = "download_completion_notifications"
     /// When on, an episode's downloaded file is deleted automatically once the
     /// listener marks it played, finishes it, or deliberately removes it from
     /// the queue. The persisted key retains its original name for compatibility.
@@ -208,6 +212,7 @@ enum SettingsDefault {
     static let skipForwardSeconds = 30
     static let skipBackSeconds = 15
     static let wifiOnlyDownloads = true
+    static let downloadCompletionNotifications = false
     /// Auto-delete downloads after played is OFF by default: it destroys files,
     /// so it must be an explicit opt-in.
     static let deleteDownloadAfterPlayed = false

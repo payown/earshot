@@ -13,6 +13,12 @@ final class AppSettingsStoreTests: XCTestCase {
         let store = try makeStore()
         XCTAssertEqual(store.int(SettingsKey.autoDownloadCount, default: SettingsDefault.autoDownloadCount), 0)
         XCTAssertEqual(store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads), true)
+        XCTAssertFalse(
+            store.bool(
+                SettingsKey.downloadCompletionNotifications,
+                default: SettingsDefault.downloadCompletionNotifications
+            )
+        )
         XCTAssertEqual(store.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed), 1.0)
         XCTAssertEqual(store.launchScreen(), .inbox)
         XCTAssertFalse(
@@ -83,6 +89,7 @@ final class AppSettingsStoreTests: XCTestCase {
             SettingsKey.autoDownloadCount,
             SettingsKey.downloadRetentionDays,
             SettingsKey.wifiOnlyDownloads,
+            SettingsKey.downloadCompletionNotifications,
             SettingsKey.deleteDownloadAfterPlayed,
             SettingsKey.autoDownloadQueued,
             SettingsKey.downloadsPlayedFilter,
