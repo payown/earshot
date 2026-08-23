@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-23
+
 ### Added
 
 - Earshot now provides Skip Forward and Skip Back actions to Siri and the Shortcuts app. The built-in Siri phrases use your configured intervals; in Shortcuts, either leave Seconds empty to use that setting or enter any custom interval from 1 second to 10 minutes, then invoke the shortcut by voice. Siri reports clearly when no episode is loaded. (closes #551)
