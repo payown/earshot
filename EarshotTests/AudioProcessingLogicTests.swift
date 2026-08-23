@@ -104,6 +104,105 @@ final class AudioProcessingLogicTests: XCTestCase {
         )
     }
 
+    func testSilenceCompactionPreservesShortPauseThenReducesLongPause() {
+        let configuration = SilenceDetectionConfiguration(
+            thresholdDecibels: -40,
+            minimumDurationSeconds: 0.35
+        )
+        var state = SilenceCompactionState()
+
+        XCTAssertEqual(
+            state.framesToKeep(
+                sourceFrames: 8_000,
+                rootMeanSquare: 0.001,
+                sampleRate: 48_000,
+                configuration: configuration
+            ),
+            8_000
+        )
+        XCTAssertEqual(
+            state.framesToKeep(
+                sourceFrames: 8_000,
+                rootMeanSquare: 0.001,
+                sampleRate: 48_000,
+                configuration: configuration
+            ),
+            8_000
+        )
+        XCTAssertEqual(
+            state.framesToKeep(
+                sourceFrames: 8_000,
+                rootMeanSquare: 0.001,
+                sampleRate: 48_000,
+                configuration: configuration
+            ),
+            800
+        )
+        XCTAssertEqual(
+            state.framesToKeep(
+                sourceFrames: 8_000,
+                rootMeanSquare: 0.001,
+                sampleRate: 48_000,
+                configuration: configuration
+            ),
+            1
+        )
+    }
+
+    func testSilenceCompactionResetsWhenSpeechReturns() {
+        let configuration = SilenceDetectionConfiguration(
+            thresholdDecibels: -40,
+            minimumDurationSeconds: 0.1
+        )
+        var state = SilenceCompactionState()
+
+        XCTAssertEqual(
+            state.framesToKeep(
+                sourceFrames: 4_800,
+                rootMeanSquare: 0,
+                sampleRate: 48_000,
+                configuration: configuration
+            ),
+            4_800
+        )
+        XCTAssertEqual(
+            state.framesToKeep(
+                sourceFrames: 4_800,
+                rootMeanSquare: 0,
+                sampleRate: 48_000,
+                configuration: configuration
+            ),
+            1
+        )
+        XCTAssertEqual(
+            state.framesToKeep(
+                sourceFrames: 4_800,
+                rootMeanSquare: 0.2,
+                sampleRate: 48_000,
+                configuration: configuration
+            ),
+            4_800
+        )
+        XCTAssertEqual(
+            state.framesToKeep(
+                sourceFrames: 4_800,
+                rootMeanSquare: 0,
+                sampleRate: 48_000,
+                configuration: configuration
+            ),
+            4_800
+        )
+    }
+
+    func testAudioProcessingMetricsConsumesDiscardedFramesOnce() {
+        let metrics = AudioProcessingMetrics()
+        metrics.prepare(sampleRate: 48_000)
+        metrics.recordDiscardedFrames(24_000)
+
+        XCTAssertEqual(metrics.consumeDiscardedSeconds(), 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(metrics.consumeDiscardedSeconds(), 0)
+    }
+
     func testMediaToolboxGainTapCanBeCreatedAndReleased() throws {
         var tap: MTAudioProcessingTap? = try AudioProcessingTapFactory.makeGainTap(
             configuration: AudioGainLimiterConfiguration(gain: 2)

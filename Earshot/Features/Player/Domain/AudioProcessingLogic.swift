@@ -60,6 +60,45 @@ struct SilenceDetectionConfiguration: Equatable, Sendable {
     }
 }
 
+/// Stateful, allocation-free decision logic for the real-time audio callback.
+/// Earshot preserves the beginning of every quiet span, then reduces the
+/// remainder to one frame per callback. Keeping one frame avoids presenting a
+/// zero-frame buffer, which media pipelines may interpret as end-of-stream.
+struct SilenceCompactionState: Sendable {
+    private(set) var consecutiveSilentFrames: Int64 = 0
+
+    mutating func reset() {
+        consecutiveSilentFrames = 0
+    }
+
+    mutating func framesToKeep(
+        sourceFrames: Int,
+        rootMeanSquare: Float,
+        sampleRate: Double,
+        configuration: SilenceDetectionConfiguration
+    ) -> Int {
+        guard sourceFrames > 0 else { return 0 }
+        guard SilenceDetectionLogic.isSilent(
+            rootMeanSquare: rootMeanSquare,
+            configuration: configuration
+        ) else {
+            consecutiveSilentFrames = 0
+            return sourceFrames
+        }
+
+        let minimumFrames = Int64(configuration.minimumFrameCount(sampleRate: sampleRate))
+        let previousFrames = consecutiveSilentFrames
+        consecutiveSilentFrames = min(
+            Int64.max - Int64(sourceFrames),
+            previousFrames
+        ) + Int64(sourceFrames)
+
+        guard previousFrames < minimumFrames else { return 1 }
+        let framesBeforeThreshold = minimumFrames - previousFrames
+        return min(sourceFrames, max(1, Int(framesBeforeThreshold)))
+    }
+}
+
 /// Pure silence classification used by the future timeline-compression stage.
 /// This deliberately does not claim time saved: accounting must use frames the
 /// shipping processor actually removes, never merely detected quiet frames.
