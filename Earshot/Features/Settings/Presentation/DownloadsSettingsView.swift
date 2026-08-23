@@ -32,13 +32,15 @@ struct DownloadsSettingsView: View {
             Section {
                 Toggle("Download on Wi-Fi only", isOn: $settings.wifiOnlyDownloads)
                 AdjustableOptionPicker(
-                    "Auto-download recent",
+                    "Auto-download new episodes per podcast",
                     options: autoDownloadAdjustableOptions,
                     selection: $settings.autoDownloadCount,
-                    hint: "How many recent episodes download automatically. Flick up for more, down to turn off."
+                    hint: "Sets how many newest episodes per podcast download when you follow or refresh. Includes new Inbox and Queue episodes. Flick up for more, down to turn off."
                 )
                 Toggle("Auto-download queued episodes", isOn: $settings.autoDownloadQueued)
                     .accessibilityHint("When on, episodes added to the queue download automatically so you can play them offline. The Wi-Fi-only setting still applies.")
+            } footer: {
+                Text("Downloads up to this many newest episodes per podcast when you follow it and after each refresh. New episodes may download whether they appear in Inbox or Queue. This is not a global storage cap. The separate Queue setting also downloads older episodes you add to Queue.")
             }
 
             Section {
