@@ -1,6 +1,20 @@
 import SwiftUI
 import SwiftData
 
+private enum PodcastQuickActionEditor: Identifiable {
+    case downloadCount
+    case podcast(Podcast, focus: PodcastSettingsFocus)
+
+    var id: String {
+        switch self {
+        case .downloadCount:
+            return "download-count"
+        case .podcast(let podcast, let focus):
+            return "\(podcast.persistentModelID)-\(String(describing: focus))"
+        }
+    }
+}
+
 struct SubscriptionsView: View {
     @Environment(AppRuntime.self) private var runtime
     @Environment(\.modelContext) private var context
@@ -18,6 +32,7 @@ struct SubscriptionsView: View {
     @State private var sharedRefreshInProgress = false
     @State private var sharingPodcast: Podcast?
     @State private var pendingUnsubscribe: Podcast?
+    @State private var quickActionEditor: PodcastQuickActionEditor?
     // The pending "Add to folder" / "Move to folder" podcast Quick Action target
     // (#756). Non-nil presents the shared `FolderPickerView` for the single podcast.
     @State private var folderPickRequest: FolderPickRequest?
@@ -215,6 +230,19 @@ struct SubscriptionsView: View {
         .sheet(isPresented: $showingAdd, onDismiss: loadPodcasts) { AddPodcastView() }
         .sheet(item: $sharingPodcast) { podcast in
             ShareSheet(items: shareItems(for: podcast))
+        }
+        .sheet(item: $quickActionEditor) { editor in
+            switch editor {
+            case .downloadCount:
+                NavigationStack {
+                    DownloadsSettingsView(
+                        initialFocus: .autoDownloadCount,
+                        showsDoneButton: true
+                    )
+                }
+            case .podcast(let podcast, let focus):
+                PodcastSettingsView(podcast: podcast, initialFocus: focus)
+            }
         }
         .folderPicker($folderPickRequest)
         // The multi-select batch picker (#757): same shared FolderPickerView, but
@@ -551,6 +579,15 @@ struct SubscriptionsView: View {
             onOpenDetail: {},
             onShare: { sharingPodcast = podcast },
             onUnsubscribe: { pendingUnsubscribe = podcast },
+            onChangeDownloadCount: {
+                quickActionEditor = .downloadCount
+            },
+            onChangeQueueAgeLimit: {
+                quickActionEditor = .podcast($0, focus: .queueAgeLimit)
+            },
+            onEditPodcastSpeed: {
+                quickActionEditor = .podcast($0, focus: .playbackSpeed)
+            },
             // Rotor "Add to folder" / "Move to folder" (#756): presents the
             // shared `FolderPickerView` for this single podcast. The picker files
             // it, announces, and dismisses.

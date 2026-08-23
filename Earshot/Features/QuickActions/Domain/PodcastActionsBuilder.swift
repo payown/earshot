@@ -12,6 +12,9 @@ func buildPodcastActions(
     onOpenDetail: @escaping () -> Void,
     onShare: @escaping () -> Void,
     onUnsubscribe: @escaping () -> Void,
+    onChangeDownloadCount: (() -> Void)? = nil,
+    onChangeQueueAgeLimit: ((Podcast) -> Void)? = nil,
+    onEditPodcastSpeed: ((Podcast) -> Void)? = nil,
     onAddToFolder: ((Podcast) -> Void)? = nil,
     onMoveToFolder: ((Podcast) -> Void)? = nil
 ) -> [QuickActionItem] {
@@ -68,6 +71,21 @@ func buildPodcastActions(
                 podcast.inboxExcluded.toggle()
                 savePodcastQuickAction(context, "inbox-exclude")
                 Announcer.announce(podcast.inboxExcluded ? "Excluded from inbox" : "Included in inbox")
+            }
+        case .changeDownloadCount:
+            guard let onChangeDownloadCount else { return nil }
+            return QuickActionItem(label: action.label, isDestructive: false) {
+                onChangeDownloadCount()
+            }
+        case .changeQueueAgeLimit:
+            guard let onChangeQueueAgeLimit else { return nil }
+            return QuickActionItem(label: action.label, isDestructive: false) {
+                onChangeQueueAgeLimit(podcast)
+            }
+        case .editPodcastSpeed:
+            guard let onEditPodcastSpeed else { return nil }
+            return QuickActionItem(label: action.label, isDestructive: false) {
+                onEditPodcastSpeed(podcast)
             }
         case .unsubscribe:
             return QuickActionItem(label: "Unfollow", isDestructive: true) {

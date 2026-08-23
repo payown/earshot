@@ -11,6 +11,9 @@ enum PodcastAction: String, CaseIterable, Identifiable, Codable {
     case toggleAutoQueue
     case toggleInboxInclude
     case toggleInboxExclude
+    case changeDownloadCount
+    case changeQueueAgeLimit
+    case editPodcastSpeed
     case unsubscribe
     case share
     // Folders phase 2 (#756). `addToFolder` files the podcast into a chosen
@@ -30,6 +33,9 @@ enum PodcastAction: String, CaseIterable, Identifiable, Codable {
         case .toggleAutoQueue: return "Toggle auto-queue"
         case .toggleInboxInclude: return "Toggle inbox inclusion"
         case .toggleInboxExclude: return "Toggle inbox exclusion"
+        case .changeDownloadCount: return "Change download count"
+        case .changeQueueAgeLimit: return "Change queue age limit"
+        case .editPodcastSpeed: return "Edit per-podcast speed"
         case .unsubscribe: return "Unfollow"
         case .share: return "Share podcast"
         // Folders phase 2 (#756). Activation opens the shared nested folder
@@ -79,6 +85,9 @@ let defaultPodcastActions: [PodcastAction] = [
     .toggleAutoQueue,
     .toggleInboxInclude,
     .toggleInboxExclude,
+    .changeDownloadCount,
+    .changeQueueAgeLimit,
+    .editPodcastSpeed,
     .unsubscribe,
     .share,
     // Folders phase 2 (#756): appended for new users; `QuickActionRepository.resolve()`

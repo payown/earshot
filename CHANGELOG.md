@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Podcast Quick Actions can now open the existing download-count, queue-age-limit, and per-podcast speed editors directly. Each action moves VoiceOver focus to its native adjustable control, remains configurable under Settings > Quick Actions, and adds no new data setting. (closes #465)
+
 ## [1.2.0] - 2026-08-23
 
 ### Added

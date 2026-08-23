@@ -2,12 +2,20 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
+enum DownloadsSettingsFocus: Hashable {
+    case autoDownloadCount
+}
+
 /// Settings → Downloads: Wi-Fi restriction and auto-download count. Extracted
 /// from the former single Settings form.
 struct DownloadsSettingsView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(DownloadManager.self) private var downloads
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
+
+    let initialFocus: DownloadsSettingsFocus?
+    let showsDoneButton: Bool
 
     // Compact count/size/activity snapshot. File traversal happens off-main in
     // DownloadManager so opening Settings stays responsive with large libraries.
@@ -18,6 +26,15 @@ struct DownloadsSettingsView: View {
     @State private var isCancelling = false
     @State private var authRequestToken = 0
     @State private var authorizationStatus: UNAuthorizationStatus?
+    @AccessibilityFocusState private var focusedSetting: DownloadsSettingsFocus?
+
+    init(
+        initialFocus: DownloadsSettingsFocus? = nil,
+        showsDoneButton: Bool = false
+    ) {
+        self.initialFocus = initialFocus
+        self.showsDoneButton = showsDoneButton
+    }
 
     private static let downloadCounts = [0, 1, 3, 5, 10]
 
@@ -41,6 +58,7 @@ struct DownloadsSettingsView: View {
                     selection: $settings.autoDownloadCount,
                     hint: "Sets how many newest episodes per podcast download when you follow or refresh. Includes new Inbox and Queue episodes. Flick up for more, down to turn off."
                 )
+                .accessibilityFocused($focusedSetting, equals: .autoDownloadCount)
                 Toggle("Auto-download queued episodes", isOn: $settings.autoDownloadQueued)
                     .accessibilityHint("When on, episodes added to the queue download automatically so you can play them offline. The Wi-Fi-only setting still applies.")
             } footer: {
@@ -131,7 +149,16 @@ struct DownloadsSettingsView: View {
             }
         }
         .navigationTitle("Downloads")
+        .toolbar {
+            if showsDoneButton {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityHint("Closes download settings")
+                }
+            }
+        }
         .task { await refreshStorageSummary() }
+        .onAppear { requestInitialFocus() }
         .confirmationDialog(
             "Cancel \(storageSummary.activeCount) active downloads?",
             isPresented: $showCancelActiveConfirm,
@@ -158,6 +185,13 @@ struct DownloadsSettingsView: View {
 
     private func refreshStorageSummary() async {
         storageSummary = await downloads.storageSummary()
+    }
+
+    private func requestInitialFocus() {
+        guard let initialFocus else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            focusedSetting = initialFocus
+        }
     }
 
     private func cancelActiveDownloads() {

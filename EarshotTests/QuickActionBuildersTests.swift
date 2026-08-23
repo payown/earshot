@@ -853,6 +853,63 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Turn off auto-queue", "Turn on notifications"])
     }
 
+    func testPodcastSettingsEditorActionsPreserveOrderAndInvokeCallbacks() {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/a.xml", title: "Show")
+        ctx.insert(podcast)
+        var opened: [String] = []
+
+        let items = buildPodcastActions(
+            podcast: podcast,
+            order: [.editPodcastSpeed, .changeDownloadCount, .changeQueueAgeLimit],
+            context: ctx,
+            onOpenDetail: {},
+            onShare: {},
+            onUnsubscribe: {},
+            onChangeDownloadCount: { opened.append("downloads") },
+            onChangeQueueAgeLimit: { _ in opened.append("queue") },
+            onEditPodcastSpeed: { _ in opened.append("speed") }
+        )
+
+        XCTAssertEqual(items.map(\.label), [
+            "Edit per-podcast speed",
+            "Change download count",
+            "Change queue age limit",
+        ])
+        items.forEach { $0.run() }
+        XCTAssertEqual(opened, ["speed", "downloads", "queue"])
+        XCTAssertTrue(items.allSatisfy { !$0.isDestructive })
+    }
+
+    func testPodcastSettingsEditorActionsAreOmittedWithoutPresentationCallbacks() {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/a.xml", title: "Show")
+        ctx.insert(podcast)
+
+        let items = buildPodcastActions(
+            podcast: podcast,
+            order: [.changeDownloadCount, .changeQueueAgeLimit, .editPodcastSpeed, .share],
+            context: ctx,
+            onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
+        )
+
+        XCTAssertEqual(items.map(\.label), ["Share podcast"])
+    }
+
+    func testDefaultPodcastActionsContainSettingsEditorsBeforeUnfollow() throws {
+        let editors: [PodcastAction] = [
+            .changeDownloadCount, .changeQueueAgeLimit, .editPodcastSpeed,
+        ]
+        for editor in editors {
+            XCTAssertTrue(PodcastAction.allCases.contains(editor))
+            XCTAssertTrue(defaultPodcastActions.contains(editor))
+            XCTAssertLessThan(
+                try XCTUnwrap(defaultPodcastActions.firstIndex(of: editor)),
+                try XCTUnwrap(defaultPodcastActions.firstIndex(of: .unsubscribe))
+            )
+        }
+    }
+
     func testPodcastAutoQueueOptInActionQueuesLatestRecentEpisode() throws {
         let ctx = TestStore.freshContext()
         let podcast = Podcast(feedURL: "https://x/a.xml", title: "Show")
