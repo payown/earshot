@@ -865,6 +865,24 @@ final class PlayerService {
         seek(by: -Double(skipBackSeconds))
     }
 
+    /// Skips forward by an explicit interval supplied by a system App Intent.
+    /// Returns false when no episode is loaded so Siri can report that outcome
+    /// instead of claiming a seek occurred (#551).
+    @discardableResult
+    func skipForward(seconds: Int) -> Bool {
+        guard currentEpisode != nil else { return false }
+        seek(by: Double(max(0, seconds)))
+        return true
+    }
+
+    /// Skips backward by an explicit interval supplied by a system App Intent.
+    @discardableResult
+    func skipBack(seconds: Int) -> Bool {
+        guard currentEpisode != nil else { return false }
+        seek(by: -Double(max(0, seconds)))
+        return true
+    }
+
     /// Seeks to an absolute position in seconds, clamped to the item duration.
     func seek(to seconds: Double) {
         // A deliberate local transport action is newer than any resume-time
