@@ -9,16 +9,14 @@ import SwiftUI
 ///
 /// 1. episode title
 /// 2. podcast title
-/// 3. the episode's cached brief description summary
+/// 3. the episode's cached full description
 ///
-/// Description matching deliberately goes through ``EpisodeSummaryCache`` — the
-/// same per-episode memo the VoiceOver row summaries use (#495) — rather than
-/// re-stripping `EpisodeSummary.plainText` per keystroke. That keeps the cost
-/// of a filter pass at an `NSCache` lookup per row (computed at most once per
-/// episode, and only for rows whose title/podcast didn't already match), so
-/// typing in the field can't regress scrolling on large lists. The tradeoff:
-/// the cached summary is capped (~140 chars), so only the opening of a long
-/// description is searchable. Title + podcast always match in full.
+/// Description matching deliberately goes through ``SpokenDescriptionCache``
+/// in full mode rather than re-stripping `EpisodeSummary.plainText` per
+/// keystroke. The cache is pressure-evictable and cost-bounded, while its key
+/// includes the source content hash so refreshed notes cannot return stale
+/// matches. This lets podcast-detail search find terms anywhere in feed notes,
+/// not only in the brief row-summary prefix.
 @MainActor
 enum EpisodeSearchFilter {
 
@@ -43,8 +41,12 @@ enum EpisodeSearchFilter {
            podcast.localizedStandardContains(trimmed) {
             return true
         }
-        if let summary = EpisodeSummaryCache.shared.summary(for: episode),
-           summary.localizedStandardContains(trimmed) {
+        if let description = SpokenDescriptionCache.shared.text(
+            identity: "episode-search:\(episode.guid)\u{1}\(episode.audioURL)",
+            html: episode.episodeDescription,
+            mode: .full,
+            briefLimit: 140
+        ), description.localizedStandardContains(trimmed) {
             return true
         }
         return false

@@ -72,7 +72,7 @@ final class EpisodeSearchFilterTests: XCTestCase {
         XCTAssertFalse(EpisodeSearchFilter.matches(e, query: "stellar"))
     }
 
-    // MARK: matches — cached description summary
+    // MARK: matches — cached full description
 
     func testMatchesCachedDescriptionSummary() {
         // Acceptance criterion: #457 — the description leg goes through
@@ -89,16 +89,16 @@ final class EpisodeSearchFilterTests: XCTestCase {
         XCTAssertTrue(EpisodeSearchFilter.matches(e, query: "xylophone"))
     }
 
-    func testDoesNotMatchTextBeyondSummaryCap() {
-        // Documented tradeoff: the cached summary is capped (~140 chars /
-        // first sentence), so a keyword only past the cap does not match.
+    func testMatchesTextBeyondBriefSummaryCap() {
+        // Podcast-detail search must find a term anywhere in feed notes, not
+        // only in the brief summary spoken by an episode row.
         let ctx = TestStore.freshContext()
         let filler = String(repeating: "waffle iron history ", count: 12) // 240 chars
         let e = makeEpisode(
             ctx, guid: "sf-cap", title: "Episode 4",
             description: "Intro. \(filler) zymurgy finale."
         )
-        XCTAssertFalse(EpisodeSearchFilter.matches(e, query: "zymurgy"))
+        XCTAssertTrue(EpisodeSearchFilter.matches(e, query: "zymurgy"))
     }
 
     func testNoMatchAnywhereReturnsFalse() {
