@@ -22,34 +22,36 @@
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <header>
     <h1>Earshot build 215 and backlog audit</h1>
-    <p>Generated 2026-08-22 after merging builds 215 and 216 and reviewing every open issue against current <code>main</code>.</p>
+    <p>Generated 2026-08-22 and finalized after merging builds 215 through 219 and reviewing every open issue against current <code>main</code>.</p>
   </header>
   <nav aria-label="Report sections"><ul>
     <li><a href="#outcome">Outcome</a></li><li><a href="#builds">Builds</a></li><li><a href="#closed">Closed issues</a></li><li><a href="#remaining">Remaining priorities</a></li><li><a href="#order">Execution order</a></li>
   </ul></nav>
   <main id="main-content">
     <section aria-labelledby="outcome"><h2 id="outcome">Outcome</h2>
-      <p>Build 215 is merged, fully tested, and confirmed on Michael's iPhone. Build 216 then closed the highest-priority autonomous follow-up and supplied physical evidence for another implemented bug. Ten issues are closed in this sweep. Twenty-six applicable issues remain with explicit priorities and autonomy/sign-off dispositions.</p>
+      <p>Build 215 is merged, fully tested, and confirmed on Michael's iPhone. Builds 216 through 219 completed the safe autonomous follow-ups: durable projection evidence, aggregate cleartext-media diagnostics, an injectable audio-session boundary, and the first UI integration smoke test. Eleven issues are closed in this sweep. Twenty-five applicable issues remain with explicit priorities and autonomy/sign-off dispositions.</p>
     </section>
     <section aria-labelledby="builds"><h2 id="builds">Build delivery</h2>
-      <table><caption>Build 215 and 216 results</caption><thead><tr><th scope="col">Issue</th><th scope="col">Result</th></tr></thead><tbody>
+      <table><caption>Build 215 through 219 results</caption><thead><tr><th scope="col">Issue</th><th scope="col">Result</th></tr></thead><tbody>
         <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/729">#729</a></th><td><span class="status">Closed.</span> Bounded, restart-safe played-history Inbox dismissal.</td></tr>
         <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/710">#710</a></th><td><span class="status">Closed.</span> Idempotent download-directory backup exclusion.</td></tr>
         <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/711">#711</a></th><td><span class="status">Open for evidence.</span> Read-only WAL measurements shipped; no unsafe checkpoint policy was guessed.</td></tr>
         <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/823">#823</a></th><td><span class="status">Closed.</span> Build 216 retains bounded projection seed markers.</td></tr>
         <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/819">#819</a></th><td><span class="status">Closed with physical evidence.</span> All 229 local sessions matched exactly; none missing; no duplicate semantic groups; both stores passed integrity.</td></tr>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/709">#709</a></th><td><span class="status">Open for evidence.</span> Build 217 added aggregate-only, bounded cleartext-media diagnostics without recording URLs, hosts, or content.</td></tr>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/388">#388</a></th><td><span class="status">Closed.</span> Builds 218 and 219 added an injectable audio-session boundary and the first real UI launch/navigation smoke test.</td></tr>
       </tbody></table>
       <p>Build 215 verification: 1,913 tests passed, 28 expected skips, zero failures; GitHub CI passed; 1.2.0 (215) installed and launched on the physical iPhone. Build 216 focused tests and CI also passed, and physical reconciliation completed in 0.316 seconds.</p>
     </section>
     <section aria-labelledby="closed"><h2 id="closed">Closed issue inventory</h2>
       <table><caption>Issues closed during the audit</caption><thead><tr><th scope="col">Issue</th><th scope="col">Closure basis</th></tr></thead><tbody>
-        <tr><th scope="row">#390</th><td>Swift 6 complete strict concurrency is current.</td></tr><tr><th scope="row">#513</th><td>Download behavior implemented; wording isolated in #719.</td></tr><tr><th scope="row">#524</th><td>Obsolete Flutter-era cleanup superseded.</td></tr><tr><th scope="row">#616</th><td>Earshot Plus implementation complete.</td></tr><tr><th scope="row">#617</th><td>Tip-jar placeholder completed by #636.</td></tr><tr><th scope="row">#695</th><td>Route guard and time-domain restoration implemented and tested.</td></tr><tr><th scope="row">#710</th><td>Build 215.</td></tr><tr><th scope="row">#729</th><td>Build 215.</td></tr><tr><th scope="row">#823</th><td>Build 216.</td></tr><tr><th scope="row">#819</th><td>Implementation plus physical exact convergence.</td></tr>
+        <tr><th scope="row">#390</th><td>Swift 6 complete strict concurrency is current.</td></tr><tr><th scope="row">#513</th><td>Download behavior implemented; wording isolated in #719.</td></tr><tr><th scope="row">#524</th><td>Obsolete Flutter-era cleanup superseded.</td></tr><tr><th scope="row">#616</th><td>Earshot Plus implementation complete.</td></tr><tr><th scope="row">#617</th><td>Tip-jar placeholder completed by #636.</td></tr><tr><th scope="row">#695</th><td>Route guard and time-domain restoration implemented and tested.</td></tr><tr><th scope="row">#710</th><td>Build 215.</td></tr><tr><th scope="row">#729</th><td>Build 215.</td></tr><tr><th scope="row">#823</th><td>Build 216.</td></tr><tr><th scope="row">#819</th><td>Implementation plus physical exact convergence.</td></tr><tr><th scope="row">#388</th><td>Builds 218 and 219 audio-session and UI integration coverage.</td></tr>
       </tbody></table>
     </section>
     <section aria-labelledby="remaining"><h2 id="remaining">Remaining priorities</h2>
       <h3>High — evidence, stability, and security</h3>
       <table><caption>High-priority issues</caption><thead><tr><th scope="col">Issue</th><th scope="col">Next action</th></tr></thead><tbody>
-        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/709">#709</a></th><td>Autonomous cleartext-media measurement; warning and ATS removal wait for evidence/review.</td></tr>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/709">#709</a></th><td>Aggregate measurement shipped; warning and ATS removal wait for collected evidence and review.</td></tr>
         <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/711">#711</a></th><td>Correlate WAL sizes with refresh/background/relaunch and VoiceOver latency.</td></tr>
         <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/696">#696</a></th><td>Representative 300+ feed physical import/relaunch acceptance.</td></tr>
         <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/801">#801</a></th><td>Controlled physical V6 migration fixture; never use the live store destructively.</td></tr>
@@ -61,7 +63,6 @@
         <tr><th scope="row">#690, #686</th><td>Reset is protected scope; iPad needs real hardware QA and device-family approval.</td></tr>
         <tr><th scope="row">#571, #570</th><td>Audio DSP projects require architecture spikes and device listening validation.</td></tr>
         <tr><th scope="row">#552, #551, #550, #465, #457</th><td>Presentation, Siri, lineup, actions, and search need scoped behavior/semantics.</td></tr>
-        <tr><th scope="row">#388</th><td>Audio-session seam and first UI/integration smoke test remain autonomous test work.</td></tr>
       </tbody></table>
       <h3>Low or externally blocked</h3>
       <table><caption>Low-priority or blocked issues</caption><thead><tr><th scope="col">Issues</th><th scope="col">Disposition</th></tr></thead><tbody>
@@ -71,7 +72,7 @@
       </tbody></table>
     </section>
     <section aria-labelledby="order"><h2 id="order">Recommended execution order</h2><ol>
-      <li>Implement #709's non-UI measurement layer.</li><li>Extend #388's remaining non-UI tests.</li><li>Collect normal-use #711 evidence.</li><li>Run controlled #696 and #801 device fixtures when safe test state is available.</li><li>Batch product and VoiceOver-semantic decisions before changing the remaining UI.</li>
+      <li>Collect build-217+ aggregate #709 evidence and normal-use #711 WAL/VoiceOver evidence.</li><li>Run controlled #696 and #801 device fixtures when safe test state is available.</li><li>Batch product and VoiceOver-semantic decisions before changing the remaining UI.</li><li>Schedule larger audio, iPad, local-library, and system-integration projects after their prerequisites are approved.</li>
     </ol><p>No issue was closed merely because it was old. Every retained issue has concrete outstanding acceptance, approval, hardware, entitlement, or external-state work.</p></section>
   </main>
 </body>
