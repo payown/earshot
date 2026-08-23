@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Earshot now provides Skip Forward and Skip Back actions to Siri and the Shortcuts app. The built-in Siri phrases use your configured intervals; in Shortcuts, either leave Seconds empty to use that setting or enter any custom interval from 1 second to 10 minutes, then invoke the shortcut by voice. Siri reports clearly when no episode is loaded. (closes #551)
 - Downloads can now notify you when an episode finishes downloading. Turn on “Notify when downloads finish” under Settings > Downloads; it is off by default, uses only an on-device notification, and explains how to enable iOS notification permission if it is unavailable. (closes #453)
 - Listening Places can write this iPhone's episode positions and played state to a folder in iCloud Drive, Dropbox, or another Files provider using the open `listening-places/1` format shared with QUILL Cast. Earshot 1.2.0 writes outward only; importing another device's changes is deferred. Readable podcast and episode names are optional and off by default.
 - Clearing the Inbox now removes those episodes' downloaded audio when “Delete downloads when done” is enabled, without marking the episodes played.

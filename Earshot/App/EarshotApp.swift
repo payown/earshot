@@ -4,6 +4,7 @@ import Observation
 import CloudKit
 import UIKit
 import UserNotifications
+import AppIntents
 
 /// The root data lifecycle. The data-bound view tree exists only in ``ready``;
 /// recovery and asynchronous preparation states carry no temporary
@@ -224,6 +225,7 @@ final class AppRuntime {
         let router = NotificationRouter()
         notificationRouter = router
         notificationDelegate = NotificationDelegate(router: router)
+        PlaybackSkipIntentBridge.shared.install(player: player)
         if mode == .normal && CloudKitLaunchPolicy.isMirroringEnabled() {
             let monitor = CloudKitEventMonitor()
             monitor.start()
@@ -1154,7 +1156,11 @@ struct EarshotApp: App {
     }
 
     init() {
-        if NSClassFromString("XCTestCase") != nil {
+        let runningTests = NSClassFromString("XCTestCase") != nil
+        if !runningTests {
+            EarshotAppShortcuts.updateAppShortcutParameters()
+        }
+        if runningTests {
             _runtime = State(initialValue: AppRuntime(
                 load: .ready(ModelContainerFactory.makeTestHostPlaceholder()),
                 mode: .testHost
