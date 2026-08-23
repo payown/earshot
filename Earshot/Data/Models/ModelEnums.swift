@@ -19,6 +19,48 @@ enum DownloadStatus: String, Codable, CaseIterable {
     case failed
 }
 
+/// Listener-selected gain applied before Earshot's soft limiter. The raw value
+/// is stable persistence; `nil` at the episode level means "use global".
+enum VolumeBoostLevel: String, Codable, CaseIterable, Identifiable, Sendable {
+    case off
+    case low
+    case medium
+    case high
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off: return "Off"
+        case .low: return "Low (+3 dB)"
+        case .medium: return "Medium (+6 dB)"
+        case .high: return "High (+9 dB)"
+        }
+    }
+
+    var spokenValue: String {
+        switch self {
+        case .off: return "off"
+        case .low: return "low, plus 3 decibels"
+        case .medium: return "medium, plus 6 decibels"
+        case .high: return "high, plus 9 decibels"
+        }
+    }
+
+    var gain: Float {
+        switch self {
+        case .off: return 1
+        case .low: return pow(10, 3 / 20)
+        case .medium: return pow(10, 6 / 20)
+        case .high: return pow(10, 9 / 20)
+        }
+    }
+
+    var processingConfiguration: AudioGainLimiterConfiguration {
+        AudioGainLimiterConfiguration(gain: gain)
+    }
+}
+
 /// Which Quick Action set a configuration row belongs to. Mirrors the Flutter
 /// drift `QuickActionContentType`; stored as its String raw value.
 enum QuickActionContentType: String, Codable, CaseIterable {

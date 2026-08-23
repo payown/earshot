@@ -30,7 +30,7 @@ enum MigrationBackupError: Error, Equatable, Sendable {
 /// Creates, catalogs, restores, and retires migration safety snapshots. A
 /// manifest is written last so a partial copy is never considered a backup.
 enum MigrationBackupManager {
-    static let targetSchemaMajor = 10
+    static let targetSchemaMajor = 11
     static let initialFreeSpaceMultiplier = 4.5
     static let retainedBackupFreeSpaceMultiplier = 3.5
     #if DEBUG

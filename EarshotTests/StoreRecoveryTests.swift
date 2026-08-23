@@ -258,7 +258,7 @@ final class StoreRecoveryTests: XCTestCase {
         try seedV6RecoveryStore()
         let backup = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
         XCTAssertEqual(backup.sourceSchemaMajor, 6)
-        XCTAssertEqual(backup.targetSchemaMajor, 10)
+        XCTAssertEqual(backup.targetSchemaMajor, 11)
         XCTAssertEqual(backup.format, .verifiedSnapshot)
         XCTAssertTrue(
             FileManager.default.fileExists(
@@ -369,10 +369,10 @@ final class StoreRecoveryTests: XCTestCase {
             at: MigrationBackupManager.backupRoot(for: storeURL),
             includingPropertiesForKeys: nil).count, 2)
 
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
         XCTAssertNotNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))
 
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
         XCTAssertNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))
     }
 
@@ -380,13 +380,13 @@ final class StoreRecoveryTests: XCTestCase {
         try seedV6RecoveryStore()
         let legacyDirectory = try XCTUnwrap(ModelContainerFactory.backupStoreFiles(at: storeURL))
 
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
         XCTAssertTrue(FileManager.default.fileExists(atPath: legacyDirectory.path))
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: legacyDirectory.appending(path: "migration-retention.json").path
         ))
 
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacyDirectory.path))
     }
 
@@ -394,8 +394,8 @@ final class StoreRecoveryTests: XCTestCase {
         try Data([0x00, 0x01, 0x02, 0x03, 0xFF]).write(to: storeURL)
         let resetBackup = try XCTUnwrap(ModelContainerFactory.backupStoreFiles(at: storeURL))
 
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 10)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: resetBackup.path))
     }

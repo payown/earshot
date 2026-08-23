@@ -25,6 +25,7 @@ struct PlayerControlsSheet: View {
                 }
 
                 sleepTimerSection
+                volumeBoostSection
                 chaptersSection
             }
             .navigationTitle("Player")
@@ -36,6 +37,48 @@ struct PlayerControlsSheet: View {
             }
             .sheet(isPresented: $showingChapters) {
                 ChapterListView()
+            }
+        }
+    }
+
+    // MARK: Volume boost
+
+    private var volumeBoostOptions: [AdjustableOptionPicker<VolumeBoostLevel?>.Option] {
+        var options: [AdjustableOptionPicker<VolumeBoostLevel?>.Option] = [
+            .init(value: nil, title: "Use Global", spoken: "use global, \(globalBoostSpokenValue)")
+        ]
+        options.append(contentsOf: VolumeBoostLevel.allCases.map {
+            .init(value: $0, title: $0.title, spoken: $0.spokenValue)
+        })
+        return options
+    }
+
+    private var globalBoostSpokenValue: String {
+        // When the override is nil, the effective level is the global level.
+        player.effectiveVolumeBoost.spokenValue
+    }
+
+    private var volumeBoostBinding: Binding<VolumeBoostLevel?> {
+        Binding(
+            get: { player.currentVolumeBoostOverride },
+            set: { player.setCurrentVolumeBoostOverride($0) }
+        )
+    }
+
+    @ViewBuilder
+    private var volumeBoostSection: some View {
+        if player.nowPlayingEpisode != nil {
+            Section {
+                AdjustableOptionPicker(
+                    "Boost for this episode",
+                    options: volumeBoostOptions,
+                    selection: volumeBoostBinding,
+                    hint: "Flick up for more boost, down for less or use global"
+                )
+            } header: {
+                Text("Volume boost")
+            } footer: {
+                Text("Use Global follows the volume boost selected in Playback Settings. Boost is limited to reduce clipping.")
             }
         }
     }

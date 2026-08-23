@@ -1,8 +1,16 @@
 import AVFoundation
+import SwiftData
 import XCTest
 @testable import Earshot
 
 final class AudioProcessingLogicTests: XCTestCase {
+    func testVolumeBoostLevelsResolveToApprovedDecibelGains() {
+        XCTAssertEqual(VolumeBoostLevel.off.gain, 1, accuracy: 0.000_001)
+        XCTAssertEqual(VolumeBoostLevel.low.gain, 1.412_538, accuracy: 0.000_001)
+        XCTAssertEqual(VolumeBoostLevel.medium.gain, 1.995_262, accuracy: 0.000_001)
+        XCTAssertEqual(VolumeBoostLevel.high.gain, 2.818_383, accuracy: 0.000_001)
+    }
+
     func testDisabledGainIsBitForBitPassThrough() {
         var samples: [Float] = [-1, -0.5, 0, 0.5, 1]
         let original = samples
@@ -129,5 +137,30 @@ final class AudioProcessingLogicTests: XCTestCase {
 
         XCTAssertEqual(mix.inputParameters.count, 1)
         XCTAssertNotNil(mix.inputParameters.first?.audioTapProcessor)
+    }
+
+    @MainActor
+    func testEpisodeOverridePersistsAndSurvivesDownloadRemoval() throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let episode = Episode(guid: "episode", title: "Quiet", audioURL: "https://example.com/a.mp3")
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+
+        LocalStateStore.setVolumeBoost(.high, on: episode, in: context)
+        LocalStateStore.setDownloadStatus(.downloaded, on: episode, in: context)
+        LocalStateStore.setDownloadPath("quiet.mp3", on: episode, in: context)
+        LocalStateStore.setDownloadStatus(.none, on: episode, in: context)
+        LocalStateStore.setDownloadPath(nil, on: episode, in: context)
+
+        XCTAssertEqual(LocalStateStore.volumeBoost(for: episode, in: context), .high)
+        let rows = try context.fetch(FetchDescriptor<LocalEpisodeState>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertNil(rows.first?.downloadPath)
+        XCTAssertEqual(rows.first?.downloadStatus, DownloadStatus.none)
+
+        LocalStateStore.setVolumeBoost(nil, on: episode, in: context)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<LocalEpisodeState>()), 0)
     }
 }

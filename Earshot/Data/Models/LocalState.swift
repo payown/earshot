@@ -49,6 +49,9 @@ final class LocalEpisodeState {
     var episodeGUID: String = ""
     var downloadStatusRaw: String = DownloadStatus.none.rawValue
     var downloadPath: String?
+    /// `nil` follows the global setting; a raw `off` explicitly disables boost
+    /// for this episode even when the global setting is enabled.
+    var volumeBoostRaw: String?
 
     var downloadStatus: DownloadStatus {
         get { DownloadStatus(rawValue: downloadStatusRaw) ?? .none }
@@ -59,12 +62,19 @@ final class LocalEpisodeState {
         podcastFeedURL: String,
         episodeGUID: String,
         downloadStatus: DownloadStatus = .none,
-        downloadPath: String? = nil
+        downloadPath: String? = nil,
+        volumeBoost: VolumeBoostLevel? = nil
     ) {
         self.podcastFeedURL = FeedURLIdentity.canonical(podcastFeedURL)
         self.episodeGUID = episodeGUID
         self.downloadStatusRaw = downloadStatus.rawValue
         self.downloadPath = downloadPath
+        self.volumeBoostRaw = volumeBoost?.rawValue
+    }
+
+    var volumeBoost: VolumeBoostLevel? {
+        get { volumeBoostRaw.flatMap(VolumeBoostLevel.init(rawValue:)) }
+        set { volumeBoostRaw = newValue?.rawValue }
     }
 }
 

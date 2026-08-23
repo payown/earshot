@@ -82,7 +82,8 @@ enum LocalStateStore {
     static func persist(_ episode: Episode, in context: ModelContext) {
         guard let key = key(for: episode) else { return }
         let rows = episodeRows(for: key, in: context)
-        if episode.downloadStatus == .none && episode.downloadPath == nil {
+        if episode.downloadStatus == .none && episode.downloadPath == nil
+            && rows.allSatisfy({ $0.volumeBoost == nil }) {
             LocalRuntimeState.shared.removeEpisode(episode.persistentModelID)
             for row in rows { context.delete(row) }
             return
@@ -155,6 +156,7 @@ enum LocalStateStore {
                 ? (preferred?.downloadStatus ?? .none)
                 : .downloaded
             survivor.downloadPath = downloaded?.downloadPath
+            survivor.volumeBoostRaw = ordered.compactMap(\.volumeBoostRaw).first
             for duplicate in ordered.dropFirst() { context.delete(duplicate) }
         }
 
@@ -169,7 +171,7 @@ enum LocalStateStore {
 
     /// Projects only rows represented in the small local tables into transient
     /// runtime state. Migration completion also repairs those bounded tables;
-    /// an ordinary V10 reopen trusts their durable invariants and does no repair.
+    /// an ordinary current-schema reopen trusts their durable invariants and does no repair.
     static func hydrate(in context: ModelContext, repairing: Bool = true) throws {
         LocalRuntimeState.shared.clear()
         if repairing { try repair(in: context) }
@@ -200,6 +202,39 @@ enum LocalStateStore {
         where FeedURLIdentity.canonical(row.feedURL) == feed {
             context.delete(row)
         }
+    }
+
+
+    static func volumeBoost(for episode: Episode, in context: ModelContext) -> VolumeBoostLevel? {
+        guard let key = key(for: episode) else { return nil }
+        return episodeRows(for: key, in: context)
+            .sorted { stableLocalID($0) < stableLocalID($1) }
+            .compactMap(\.volumeBoost)
+            .first
+    }
+
+    static func setVolumeBoost(
+        _ boost: VolumeBoostLevel?, on episode: Episode, in context: ModelContext
+    ) {
+        guard let key = key(for: episode) else { return }
+        let rows = episodeRows(for: key, in: context)
+            .sorted { stableLocalID($0) < stableLocalID($1) }
+        if boost == nil,
+           rows.allSatisfy({ $0.downloadStatus == .none && $0.downloadPath == nil }) {
+            for row in rows { context.delete(row) }
+            try? context.save()
+            return
+        }
+        let row = rows.first ?? LocalEpisodeState(
+            podcastFeedURL: key.feedURL,
+            episodeGUID: key.guid
+        )
+        if rows.isEmpty { context.insert(row) }
+        row.podcastFeedURL = key.feedURL
+        row.episodeGUID = key.guid
+        row.volumeBoost = boost
+        for duplicate in rows.dropFirst() { context.delete(duplicate) }
+        try? context.save()
     }
 }
 
