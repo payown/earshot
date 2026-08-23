@@ -7,6 +7,7 @@ struct DownloadBatchReport: Equatable, Sendable {
     let eligible: Int
     let started: Int
     let skipped: Int
+    let deferred: Int
     let failed: Int
     let wasCancelled: Bool
 
@@ -15,11 +16,47 @@ struct DownloadBatchReport: Equatable, Sendable {
             "Eligible \(eligible)",
             "started \(started)",
             "skipped \(skipped)",
+            "deferred \(deferred)",
             "failed \(failed)",
         ]
         if wasCancelled { parts.append("cancelled") }
         return "Download batch complete. " + parts.joined(separator: ", ") + "."
     }
+}
+
+/// A hard safety boundary for an explicit Inbox/Queue "Download All" request.
+/// Yielding enrollment work keeps VoiceOver responsive, but does not prevent a
+/// single confirmation from creating hundreds of background URLSession tasks.
+/// This policy does both: callers get exact counts, and the manager independently
+/// enforces the first 50 eligible episodes even if a presentation path regresses.
+struct ManualDownloadBatchPlan: Equatable, Sendable {
+    static let maximumEpisodeCount = 50
+
+    let selectedIndices: [Int]
+    let eligibleCount: Int
+    let skippedCount: Int
+    let deferredCount: Int
+
+    static func make(statuses: [DownloadStatus]) -> Self {
+        let eligibleIndices = statuses.indices.filter {
+            statuses[$0] == .none || statuses[$0] == .failed
+        }
+        let selected = Array(eligibleIndices.prefix(maximumEpisodeCount))
+        return Self(
+            selectedIndices: selected,
+            eligibleCount: eligibleIndices.count,
+            skippedCount: statuses.count - eligibleIndices.count,
+            deferredCount: eligibleIndices.count - selected.count
+        )
+    }
+}
+
+struct DownloadStorageSummary: Equatable, Sendable {
+    static let empty = Self(downloadedCount: 0, activeCount: 0, allocatedBytes: 0)
+
+    let downloadedCount: Int
+    let activeCount: Int
+    let allocatedBytes: Int64
 }
 
 /// Downloads episode audio to the app's Documents/Downloads folder, gated on
@@ -287,10 +324,8 @@ final class DownloadManager {
     /// main actor yields every bounded slice. The caller owns the one final
     /// accessibility announcement so Wi-Fi gating never chatters once per row.
     func downloadAll(_ episodes: [Episode]) async -> DownloadBatchReport {
-        let eligibleEpisodes = episodes.filter {
-            $0.downloadStatus == .none || $0.downloadStatus == .failed
-        }
-        let skipped = episodes.count - eligibleEpisodes.count
+        let plan = ManualDownloadBatchPlan.make(statuses: episodes.map(\.downloadStatus))
+        let eligibleEpisodes = plan.selectedIndices.map { episodes[$0] }
         var started = 0
         var failed = 0
         var wasCancelled = false
@@ -315,9 +350,10 @@ final class DownloadManager {
         }
 
         return DownloadBatchReport(
-            eligible: eligibleEpisodes.count,
+            eligible: plan.eligibleCount,
             started: started,
-            skipped: skipped,
+            skipped: plan.skippedCount,
+            deferred: plan.deferredCount,
             failed: failed,
             wasCancelled: wasCancelled
         )
@@ -488,6 +524,55 @@ final class DownloadManager {
         // not leave reconciliation chasing it (#701).
         ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
         save()
+    }
+
+    /// Counts completed and active downloads and measures the allocated bytes in
+    /// the Downloads directory. Directory traversal stays off the main actor;
+    /// only the compact scalar summary returns to SwiftUI.
+    func storageSummary() async -> DownloadStorageSummary {
+        guard let context else { return .empty }
+        save()
+
+        let completedDescriptor = FetchDescriptor<LocalEpisodeState>(
+            predicate: #Predicate { $0.downloadPath != nil }
+        )
+        let downloadedCount = (try? context.fetchCount(completedDescriptor)) ?? 0
+        let pending = await activeEpisodes(state: .pending, in: context)
+        let downloading = await activeEpisodes(state: .downloading, in: context)
+        let activeCount = Set((pending + downloading).map(\.persistentModelID)).count
+        let allocatedBytes = await Task.detached(priority: .utility) {
+            guard let directory = try? DownloadPaths.downloadsDirectory() else { return Int64(0) }
+            return RecoveryDownloadRemoval.allocatedBytes(in: directory)
+        }.value
+
+        return DownloadStorageSummary(
+            downloadedCount: downloadedCount,
+            activeCount: activeCount,
+            allocatedBytes: allocatedBytes
+        )
+    }
+
+    /// Stops pending and in-flight transfers without touching completed audio.
+    /// Cancellation happens before state reset so a late delegate callback sees
+    /// a non-downloading episode and cannot overwrite the reset with `.failed`.
+    @discardableResult
+    func cancelActiveDownloads() async -> Int {
+        guard let context else { return 0 }
+        let pending = await activeEpisodes(state: .pending, in: context)
+        let downloading = await activeEpisodes(state: .downloading, in: context)
+        var seen = Set<PersistentIdentifier>()
+        let affected = (pending + downloading).filter {
+            seen.insert($0.persistentModelID).inserted
+        }
+        guard !affected.isEmpty else { return 0 }
+
+        await Self.cancelAllTasks()
+        for episode in affected {
+            ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+        }
+        save()
+        AppLog.networking.info("Cancelled \(affected.count) active download(s)")
+        return affected.count
     }
 
     /// Removes every downloaded file and resets all download state in one pass —

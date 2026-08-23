@@ -101,7 +101,8 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(
             report,
             DownloadBatchReport(
-                eligible: 1, started: 0, skipped: 3, failed: 1, wasCancelled: false
+                eligible: 1, started: 0, skipped: 3, deferred: 0,
+                failed: 1, wasCancelled: false
             )
         )
         XCTAssertEqual(invalid.downloadStatus, .failed)
@@ -111,13 +112,57 @@ final class DownloadManagerTests: XCTestCase {
 
     func testDownloadBatchAnnouncementIncludesEveryOutcomeOnce() {
         let report = DownloadBatchReport(
-            eligible: 9, started: 5, skipped: 3, failed: 1, wasCancelled: false
+            eligible: 9, started: 5, skipped: 3, deferred: 0,
+            failed: 1, wasCancelled: false
         )
 
         XCTAssertEqual(
             report.announcement,
-            "Download batch complete. Eligible 9, started 5, skipped 3, failed 1."
+            "Download batch complete. Eligible 9, started 5, skipped 3, deferred 0, failed 1."
         )
+    }
+
+    func testManualDownloadBatchPlanCapsOneInvocationAtFifty() {
+        let statuses = Array(repeating: DownloadStatus.none, count: 831)
+
+        let plan = ManualDownloadBatchPlan.make(statuses: statuses)
+
+        XCTAssertEqual(plan.selectedIndices, Array(0..<50))
+        XCTAssertEqual(plan.eligibleCount, 831)
+        XCTAssertEqual(plan.skippedCount, 0)
+        XCTAssertEqual(plan.deferredCount, 781)
+    }
+
+    func testManualDownloadBatchPlanSkipsCompletedAndActiveWithoutConsumingLimit() {
+        let statuses: [DownloadStatus] = [
+            .downloaded, .downloading, .pending, .none, .failed,
+        ]
+
+        let plan = ManualDownloadBatchPlan.make(statuses: statuses)
+
+        XCTAssertEqual(plan.selectedIndices, [3, 4])
+        XCTAssertEqual(plan.eligibleCount, 2)
+        XCTAssertEqual(plan.skippedCount, 3)
+        XCTAssertEqual(plan.deferredCount, 0)
+    }
+
+    func testDownloadAllDefensivelyCapsCallerAndReportsDeferredEpisodes() async {
+        let context = TestStore.freshContext()
+        let episodes = (0..<60).map {
+            Episode(guid: "capped-\($0)", title: "Episode \($0)", audioURL: "")
+        }
+        for episode in episodes { context.insert(episode) }
+        let manager = makeManager(context)
+
+        let report = await manager.downloadAll(episodes)
+
+        XCTAssertEqual(report.eligible, 60)
+        XCTAssertEqual(report.started, 0)
+        XCTAssertEqual(report.skipped, 0)
+        XCTAssertEqual(report.deferred, 10)
+        XCTAssertEqual(report.failed, 50)
+        XCTAssertEqual(episodes.prefix(50).map(\.downloadStatus), Array(repeating: .failed, count: 50))
+        XCTAssertEqual(episodes.suffix(10).map(\.downloadStatus), Array(repeating: .none, count: 10))
     }
 
     func testRemoveDownloadDeletesFileAndResetsState() throws {
@@ -164,6 +209,57 @@ final class DownloadManagerTests: XCTestCase {
     }
 
     // MARK: clearAllDownloads
+
+    func test_cancelActiveDownloads_resetsActiveStateAndKeepsCompletedDownload() async throws {
+        let context = TestStore.freshContext()
+        let completedName = "earshot-test-cancel-kept-\(UUID().uuidString).mp3"
+        let completedFile = try plantDownloadFile(named: completedName)
+        let firstActive = Episode(
+            guid: "cancel-active-one", title: "Active one", audioURL: "https://h/one.mp3",
+            downloadStatus: .downloading
+        )
+        let secondActive = Episode(
+            guid: "cancel-active-two", title: "Active two", audioURL: "https://h/two.mp3",
+            downloadStatus: .downloading
+        )
+        let completed = Episode(
+            guid: "cancel-completed", title: "Completed", audioURL: "https://h/completed.mp3",
+            downloadStatus: .downloaded, downloadPath: completedName
+        )
+        try persistLocalDownloadState(for: [firstActive, secondActive, completed], in: context)
+        let manager = makeManager(context)
+
+        let cancelled = await manager.cancelActiveDownloads()
+
+        XCTAssertEqual(cancelled, 2)
+        XCTAssertEqual(firstActive.downloadStatus, .none)
+        XCTAssertEqual(secondActive.downloadStatus, .none)
+        XCTAssertEqual(completed.downloadStatus, .downloaded)
+        XCTAssertEqual(completed.downloadPath, completedName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: completedFile.path))
+    }
+
+    func test_storageSummaryReportsCompletedActiveAndAllocatedBytes() async throws {
+        let context = TestStore.freshContext()
+        let completedName = "earshot-test-summary-\(UUID().uuidString).mp3"
+        _ = try plantDownloadFile(named: completedName)
+        let completed = Episode(
+            guid: "summary-completed", title: "Completed", audioURL: "https://h/completed.mp3",
+            downloadStatus: .downloaded, downloadPath: completedName
+        )
+        let active = Episode(
+            guid: "summary-active", title: "Active", audioURL: "https://h/active.mp3",
+            downloadStatus: .downloading
+        )
+        try persistLocalDownloadState(for: [completed, active], in: context)
+        let manager = makeManager(context)
+
+        let summary = await manager.storageSummary()
+
+        XCTAssertEqual(summary.downloadedCount, 1)
+        XCTAssertEqual(summary.activeCount, 1)
+        XCTAssertGreaterThan(summary.allocatedBytes, 0)
+    }
 
     func test_clearAllDownloads_deletesEveryFileAndResetsState() async throws {
         let context = TestStore.freshContext()
