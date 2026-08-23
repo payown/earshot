@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import UserNotifications
 @testable import Earshot
 
 /// Main-actor behavior of `DownloadManager` that does NOT start a real background
@@ -247,6 +248,81 @@ final class DownloadManagerTests: XCTestCase {
             FileManager.default.fileExists(atPath: fileURL.path),
             "a completion with no surviving episode must not leak downloaded audio"
         )
+    }
+
+    func test_finishedDownloadSchedulesNotificationWhenEnabled() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(
+            guid: "notification-guid",
+            title: "Finished episode",
+            audioURL: "https://downloads.test/episode.mp3",
+            downloadStatus: .downloading
+        )
+        try persistLocalDownloadState(for: [episode], in: context)
+        AppSettingsStore(context: context).setBool(
+            true,
+            for: SettingsKey.downloadCompletionNotifications
+        )
+        let center = DownloadCompletionNotificationCenter()
+        DownloadManager.setContainerForTesting(context.container)
+        DownloadManager.setNotificationCenterForTesting(center)
+        defer {
+            DownloadManager.setContainerForTesting(nil)
+            DownloadManager.setNotificationCenterForTesting(nil)
+        }
+
+        DownloadManager.handle(PendingDownloadTerminalEvent(
+            taskKey: DownloadTaskKey.key(
+                feedURL: episode.podcast?.feedURL,
+                guid: episode.guid
+            ),
+            outcome: .finished(fileName: "notification-guid.mp3")
+        ))
+
+        for _ in 0..<100 where await center.addedRequestCount() == 0 {
+            await Task.yield()
+        }
+        let requests = await center.addedRequestSnapshots()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.title, "Download complete")
+        XCTAssertEqual(requests.first?.body, "Finished episode")
+        XCTAssertEqual(
+            requests.first?.categoryIdentifier,
+            NotificationService.downloadCompletedCategoryID
+        )
+        XCTAssertEqual(requests.first?.episodeGUID, "notification-guid")
+        XCTAssertEqual(episode.downloadStatus, .downloaded)
+        XCTAssertEqual(episode.downloadPath, "notification-guid.mp3")
+    }
+
+    func test_finishedDownloadDoesNotScheduleNotificationByDefault() async throws {
+        let context = TestStore.freshContext()
+        let episode = Episode(
+            guid: "quiet-guid",
+            title: "Quiet episode",
+            audioURL: "https://downloads.test/quiet.mp3",
+            downloadStatus: .downloading
+        )
+        try persistLocalDownloadState(for: [episode], in: context)
+        let center = DownloadCompletionNotificationCenter()
+        DownloadManager.setContainerForTesting(context.container)
+        DownloadManager.setNotificationCenterForTesting(center)
+        defer {
+            DownloadManager.setContainerForTesting(nil)
+            DownloadManager.setNotificationCenterForTesting(nil)
+        }
+
+        DownloadManager.handle(PendingDownloadTerminalEvent(
+            taskKey: DownloadTaskKey.key(
+                feedURL: episode.podcast?.feedURL,
+                guid: episode.guid
+            ),
+            outcome: .finished(fileName: "quiet-guid.mp3")
+        ))
+        await Task.yield()
+
+        let requestCount = await center.addedRequestCount()
+        XCTAssertEqual(requestCount, 0)
     }
 
     // MARK: DownloadCleanup — delete downloads after played
@@ -657,6 +733,40 @@ final class DownloadManagerTests: XCTestCase {
 
         XCTAssertEqual(done.downloadStatus, .downloaded)
         XCTAssertEqual(idle.downloadStatus, DownloadStatus.none)
+    }
+}
+
+private actor DownloadCompletionNotificationCenter: @preconcurrency NotificationScheduling {
+    struct RequestSnapshot: Sendable {
+        let title: String
+        let body: String
+        let categoryIdentifier: String
+        let episodeGUID: String?
+    }
+
+    private var addedRequests: [UNNotificationRequest] = []
+
+    func authorizationStatus() async -> UNAuthorizationStatus { .authorized }
+
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool { true }
+
+    func setNotificationCategories(_ categories: Set<UNNotificationCategory>) async {}
+
+    func add(_ request: UNNotificationRequest) async throws {
+        addedRequests.append(request)
+    }
+
+    func addedRequestCount() -> Int { addedRequests.count }
+
+    func addedRequestSnapshots() -> [RequestSnapshot] {
+        addedRequests.map {
+            RequestSnapshot(
+                title: $0.content.title,
+                body: $0.content.body,
+                categoryIdentifier: $0.content.categoryIdentifier,
+                episodeGUID: $0.content.userInfo[NotificationService.episodeGUIDKey] as? String
+            )
+        }
     }
 }
 

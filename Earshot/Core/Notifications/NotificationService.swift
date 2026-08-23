@@ -1,8 +1,8 @@
 import Foundation
 import UserNotifications
 
-/// Wraps local-notification scheduling for the per-podcast "new episodes"
-/// feature (PRD 5.10, #72). LOCAL notifications only — no remote push, no APNs.
+/// Wraps Earshot's local-notification scheduling. LOCAL notifications only —
+/// no remote push, no APNs.
 ///
 /// Responsibilities:
 ///   - Request notification authorization, idempotently (never re-prompts once
@@ -22,6 +22,7 @@ struct NotificationService: Sendable {
     /// Category identifier carrying the two action buttons. Stable so the system
     /// keeps matching delivered notifications to the registered actions.
     static let newEpisodesCategoryID = "media.payown.earshot.newEpisodes"
+    static let downloadCompletedCategoryID = "media.payown.earshot.downloadCompleted"
 
     /// Action identifiers. Stable strings the delegate matches on.
     static let addToQueueActionID = "media.payown.earshot.action.addToQueue"
@@ -61,9 +62,23 @@ struct NotificationService: Sendable {
         )
     }
 
+    /// Download-completion notifications have no custom actions. A default tap
+    /// uses the episode identity in `userInfo` to open its podcast.
+    static func downloadCompletedCategory() -> UNNotificationCategory {
+        UNNotificationCategory(
+            identifier: downloadCompletedCategoryID,
+            actions: [],
+            intentIdentifiers: [],
+            options: []
+        )
+    }
+
     /// Registers the category. Safe to call repeatedly (e.g. at launch).
     func registerCategories() async {
-        await center.setNotificationCategories([Self.newEpisodesCategory()])
+        await center.setNotificationCategories([
+            Self.newEpisodesCategory(),
+            Self.downloadCompletedCategory(),
+        ])
     }
 
     // MARK: Authorization
@@ -149,6 +164,42 @@ struct NotificationService: Sendable {
     func deliver(_ notifications: [NewEpisodeNotification]) async {
         for notification in notifications {
             await deliver(notification)
+        }
+    }
+
+    /// Delivers an immediate local notification after an audio download has
+    /// been committed to the on-device store. Failures never affect the
+    /// completed download (#453).
+    func deliverDownloadCompleted(
+        episodeTitle: String,
+        podcastFeedURL: String,
+        episodeGUID: String
+    ) async {
+        let content = UNMutableNotificationContent()
+        content.title = "Download complete"
+        content.body = episodeTitle
+        content.sound = .default
+        content.categoryIdentifier = Self.downloadCompletedCategoryID
+        content.userInfo = [
+            Self.podcastFeedURLKey: podcastFeedURL,
+            Self.episodeGUIDKey: episodeGUID,
+        ]
+
+        let request = UNNotificationRequest(
+            identifier: "\(Self.downloadCompletedCategoryID).\(podcastFeedURL).\(episodeGUID)",
+            content: content,
+            trigger: nil
+        )
+
+        do {
+            try await center.add(request)
+            AppLog.notifications.info(
+                "Delivered download-completion notification for \(episodeTitle, privacy: .public)"
+            )
+        } catch {
+            AppLog.notifications.error(
+                "Failed to deliver download-completion notification: \(error.localizedDescription, privacy: .public)"
+            )
         }
     }
 }

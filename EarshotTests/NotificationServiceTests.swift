@@ -65,6 +65,21 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(category.actions[1].title, "Play now")
     }
 
+    func testRegisterCategoriesIncludesNewEpisodesAndDownloadCompletion() async {
+        let mock = MockNotificationCenter(status: .authorized, grantResult: true)
+
+        await NotificationService(center: mock).registerCategories()
+
+        let identifiers = await mock.registeredCategoryIdentifiers()
+        XCTAssertEqual(
+            identifiers,
+            [
+                NotificationService.newEpisodesCategoryID,
+                NotificationService.downloadCompletedCategoryID,
+            ]
+        )
+    }
+
     // MARK: Decision logic
 
     func testNotifiesWhenEnabledAndAddedAndNotBackfill() {
@@ -268,6 +283,41 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(addedCount, 2)
     }
 
+    func testDeliverDownloadCompletedAddsEpisodeRequest() async {
+        let mock = MockNotificationCenter(status: .authorized, grantResult: true)
+
+        await NotificationService(center: mock).deliverDownloadCompleted(
+            episodeTitle: "The Last Chapter",
+            podcastFeedURL: "https://x/feed.xml",
+            episodeGUID: "episode-42"
+        )
+
+        let requests = await mock.addedRequestSnapshots()
+        let request = try? XCTUnwrap(requests.first)
+        XCTAssertEqual(request?.title, "Download complete")
+        XCTAssertEqual(request?.body, "The Last Chapter")
+        XCTAssertEqual(
+            request?.categoryIdentifier,
+            NotificationService.downloadCompletedCategoryID
+        )
+        XCTAssertEqual(request?.feedURL, "https://x/feed.xml")
+        XCTAssertEqual(request?.episodeGUID, "episode-42")
+    }
+
+    func testDeliverDownloadCompletedSwallowsAddErrors() async {
+        let mock = MockNotificationCenter(
+            status: .authorized,
+            grantResult: true,
+            throwOnAdd: true
+        )
+
+        await NotificationService(center: mock).deliverDownloadCompleted(
+            episodeTitle: "Episode",
+            podcastFeedURL: "feed",
+            episodeGUID: "guid"
+        )
+    }
+
     // MARK: Toggle-ON permission trigger (#421)
 
     func testToggleOnTriggersAuthorizationRequest() async {
@@ -358,6 +408,10 @@ private actor MockNotificationCenter: @preconcurrency NotificationScheduling {
     }
 
     func addedRequestCount() -> Int { addedRequests.count }
+
+    func registeredCategoryIdentifiers() -> Set<String> {
+        Set(setCategories.map(\.identifier))
+    }
 
     func addedRequestSnapshots() -> [RequestSnapshot] {
         addedRequests.map { request in

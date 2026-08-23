@@ -12,6 +12,7 @@ final class SettingsStoreTests: XCTestCase {
 
         store.globalSpeed = 1.5
         store.wifiOnlyDownloads = false
+        store.downloadCompletionNotifications = true
         store.skipForwardSeconds = 45
         store.launchScreen = .queue
 
@@ -20,6 +21,7 @@ final class SettingsStoreTests: XCTestCase {
         reloaded.configure(context: ctx)
         XCTAssertEqual(reloaded.globalSpeed, 1.5)
         XCTAssertFalse(reloaded.wifiOnlyDownloads)
+        XCTAssertTrue(reloaded.downloadCompletionNotifications)
         XCTAssertEqual(reloaded.skipForwardSeconds, 45)
         XCTAssertEqual(reloaded.launchScreen, .queue)
     }
@@ -28,6 +30,7 @@ final class SettingsStoreTests: XCTestCase {
         let store = SettingsStore()
         XCTAssertEqual(store.globalSpeed, SettingsDefault.globalSpeed)
         XCTAssertTrue(store.wifiOnlyDownloads)
+        XCTAssertFalse(store.downloadCompletionNotifications)
     }
 
     func testAccessibilitySpeechDefaultsAndChangesPersist() {

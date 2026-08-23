@@ -59,6 +59,7 @@ final class SettingsStore {
 
     // Downloads
     var wifiOnlyDownloads: Bool = SettingsDefault.wifiOnlyDownloads { didSet { persist { $0.setBool(wifiOnlyDownloads, for: SettingsKey.wifiOnlyDownloads) } } }
+    var downloadCompletionNotifications: Bool = SettingsDefault.downloadCompletionNotifications { didSet { persist { $0.setBool(downloadCompletionNotifications, for: SettingsKey.downloadCompletionNotifications) } } }
     var deleteDownloadAfterPlayed: Bool = SettingsDefault.deleteDownloadAfterPlayed { didSet { persist { $0.setBool(deleteDownloadAfterPlayed, for: SettingsKey.deleteDownloadAfterPlayed) } } }
     var autoDownloadQueued: Bool = SettingsDefault.autoDownloadQueued { didSet { persist { $0.setBool(autoDownloadQueued, for: SettingsKey.autoDownloadQueued) } } }
     var autoDownloadCount: Int = SettingsDefault.autoDownloadCount { didSet { persist { $0.setInt(autoDownloadCount, for: SettingsKey.autoDownloadCount) } } }
@@ -114,6 +115,10 @@ final class SettingsStore {
         inboxOptInOnly = store.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
         inboxDefaultCount = store.inboxDefaultCount()
         wifiOnlyDownloads = store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads)
+        downloadCompletionNotifications = store.bool(
+            SettingsKey.downloadCompletionNotifications,
+            default: SettingsDefault.downloadCompletionNotifications
+        )
         deleteDownloadAfterPlayed = store.bool(SettingsKey.deleteDownloadAfterPlayed, default: SettingsDefault.deleteDownloadAfterPlayed)
         autoDownloadQueued = store.bool(SettingsKey.autoDownloadQueued, default: SettingsDefault.autoDownloadQueued)
         autoDownloadCount = store.int(SettingsKey.autoDownloadCount, default: SettingsDefault.autoDownloadCount)
