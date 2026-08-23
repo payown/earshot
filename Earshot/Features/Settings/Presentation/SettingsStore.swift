@@ -25,6 +25,7 @@ final class SettingsStore {
     var queueGrouping: QueueGrouping = SettingsDefault.queueGrouping { didSet { persist { $0.setQueueGrouping(queueGrouping) } } }
     var showEpisodeNumbers: Bool = SettingsDefault.showEpisodeNumbers { didSet { persist { $0.setBool(showEpisodeNumbers, for: SettingsKey.showEpisodeNumbers) } } }
     var openPlayerOnPlay: Bool = SettingsDefault.openPlayerOnPlay { didSet { persist { $0.setBool(openPlayerOnPlay, for: SettingsKey.openPlayerOnPlay) } } }
+    var dismissPlayerWhenPlaybackEnds: Bool = SettingsDefault.dismissPlayerWhenPlaybackEnds { didSet { persist { $0.setBool(dismissPlayerWhenPlaybackEnds, for: SettingsKey.dismissPlayerWhenPlaybackEnds) } } }
 
     // Device-local VoiceOver verbosity. These keys are deliberately absent from
     // AppSettingScope.mirroredKeys so another device cannot change row speech.
@@ -93,6 +94,10 @@ final class SettingsStore {
         queueGrouping = store.queueGrouping()
         showEpisodeNumbers = store.bool(SettingsKey.showEpisodeNumbers, default: SettingsDefault.showEpisodeNumbers)
         openPlayerOnPlay = store.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
+        dismissPlayerWhenPlaybackEnds = store.bool(
+            SettingsKey.dismissPlayerWhenPlaybackEnds,
+            default: SettingsDefault.dismissPlayerWhenPlaybackEnds
+        )
         spokenEpisodePodcastName = store.bool(SettingsKey.spokenEpisodePodcastName, default: true)
         spokenEpisodePublishedDate = store.bool(SettingsKey.spokenEpisodePublishedDate, default: true)
         spokenEpisodeDownloadStatus = store.bool(SettingsKey.spokenEpisodeDownloadStatus, default: true)

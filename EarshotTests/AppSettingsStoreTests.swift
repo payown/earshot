@@ -15,6 +15,26 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads), true)
         XCTAssertEqual(store.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed), 1.0)
         XCTAssertEqual(store.launchScreen(), .inbox)
+        XCTAssertFalse(
+            store.bool(
+                SettingsKey.dismissPlayerWhenPlaybackEnds,
+                default: SettingsDefault.dismissPlayerWhenPlaybackEnds
+            )
+        )
+    }
+
+    func testDismissPlayerWhenPlaybackEndsPersistsAndMirrors() throws {
+        let context = TestStore.freshContext()
+        let settings = SettingsStore()
+        settings.configure(context: context)
+
+        XCTAssertFalse(settings.dismissPlayerWhenPlaybackEnds)
+        settings.dismissPlayerWhenPlaybackEnds = true
+
+        let reloaded = SettingsStore()
+        reloaded.configure(context: context)
+        XCTAssertTrue(reloaded.dismissPlayerWhenPlaybackEnds)
+        XCTAssertFalse(AppSettingScope.isLocal(SettingsKey.dismissPlayerWhenPlaybackEnds))
     }
 
     func testRoundTripsTypedValues() throws {

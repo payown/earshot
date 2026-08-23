@@ -94,6 +94,10 @@ final class MiniPlayerVisibilityTests: XCTestCase {
         }
 
         XCTAssertTrue(hidden, "natural completion with an empty queue hides the mini player")
+        XCTAssertNotNil(
+            player.completedPlaybackStopID,
+            "natural completion with no next episode emits the full-player dismissal event"
+        )
         XCTAssertNil(player.nowPlayingEpisodeID)
         XCTAssertTrue(storedLastPlaying(ctx).isEmpty,
                       "restore key cleared so launch doesn't repopulate the bar")
@@ -144,5 +148,9 @@ final class MiniPlayerVisibilityTests: XCTestCase {
 
         XCTAssertTrue(advanced, "completion with a next queued episode auto-advances")
         XCTAssertNotNil(player.currentTitle, "the bar stays — it now shows the next episode")
+        XCTAssertNil(
+            player.completedPlaybackStopID,
+            "auto-advance must keep the full player open"
+        )
     }
 }

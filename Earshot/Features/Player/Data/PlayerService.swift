@@ -64,6 +64,12 @@ final class PlayerService {
     /// auto-advance and resume use `play(_:)` directly and never raise the player.
     var pendingFullPlayerPresentation = false
 
+    /// Changes only when a natural item completion leaves nothing to play next.
+    /// RootView observes this one-shot event to optionally dismiss the full
+    /// player. Pause, seek, interruption, buffering, sleep-timer stops,
+    /// stop-after-current, and successful queue auto-advance never write it.
+    private(set) var completedPlaybackStopID: UUID?
+
     /// Session-local source context for the current playback run (folders phase
     /// 4). Identity-only and never persisted: Now Playing resolves the live
     /// folder name/path, while every source/advance/stop transition runs through
@@ -2213,6 +2219,7 @@ final class PlayerService {
             isPlaying = false
             intendsToPlay = false
             clearNowPlayingPresentation()
+            completedPlaybackStopID = UUID()
             Announcer.announce("Episode finished")
             return
         }
