@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Earshot open-issue resolution strategy</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; }
+    body { margin: 0 auto; max-width: 82rem; padding: 1rem; }
+    .skip-link { position: absolute; left: -10000px; }
+    .skip-link:focus { left: 1rem; top: 1rem; padding: .5rem; background: Canvas; color: CanvasText; }
+    nav ul { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; padding-left: 1.25rem; }
+    table { border-collapse: collapse; width: 100%; margin-block: 1rem 2rem; }
+    caption { font-weight: 700; text-align: left; margin-bottom: .5rem; }
+    th, td { border: 1px solid GrayText; padding: .6rem; text-align: left; vertical-align: top; }
+    th { background: color-mix(in srgb, CanvasText 10%, Canvas); }
+    a { text-underline-offset: .18em; }
+    .high { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <header>
+    <h1>Earshot open-issue resolution strategy</h1>
+    <p>Generated 2026-08-23 against build 220 and <code>main</code> commit <code>768ceef</code>.</p>
+    <p>All 25 issues have zero reactions. Project-board status is unknown because the current token lacks <code>read:project</code>.</p>
+  </header>
+  <nav aria-label="Report sections"><h2>Sections</h2><ul>
+    <li><a href="#outcome">Outcome</a></li><li><a href="#tests">Device tests</a></li><li><a href="#closures">Closure candidates</a></li><li><a href="#migration">Migration</a></li><li><a href="#decisions">Decision batch</a></li><li><a href="#larger">Larger projects</a></li><li><a href="#sequence">Execution sequence</a></li>
+  </ul></nav>
+  <main id="main-content">
+    <section id="outcome" aria-labelledby="outcome-heading"><h2 id="outcome-heading">Outcome</h2>
+      <p>Build 220 launched successfully on Michael's iPhone. Three issues are closure candidates, #801 should be narrowed and lowered rather than discarded, active diagnostics found 113 cleartext episodes, and the remaining work separates cleanly into product/VoiceOver decisions and larger prerequisite-bound projects.</p>
+    </section>
+    <section id="tests" aria-labelledby="tests-heading"><h2 id="tests-heading">Immediate device regression checklist</h2><ol>
+      <li><strong>Near-end skip:</strong> seek to about 95% with at least two minutes remaining and press Skip Forward repeatedly. It must never bounce backward.</li>
+      <li><strong>Queue completion:</strong> naturally finish the first of two queued episodes; verify played/Inbox state and configured continuation.</li>
+      <li><strong>Position durability:</strong> pause, background, reopen, and verify episode and position.</li>
+      <li><strong>VoiceOver:</strong> swipe through about ten rows in Library, Inbox, Queue, and Downloads; report pauses, garbling, or focus loss.</li>
+      <li><strong>Audio route:</strong> connect/disconnect Bluetooth or AirPods while playing and test Play/Pause plus Skip Forward.</li>
+      <li><strong>Search:</strong> search Inbox, Queue, and Downloads, then cancel and verify full-list focus.</li>
+    </ol><p>Do not erase app data or install a migration fixture on the live phone.</p></section>
+    <section id="closures" aria-labelledby="closures-heading"><h2 id="closures-heading">Closure candidates</h2>
+      <table><caption>Issues ready for confirmation</caption><thead><tr><th scope="col">Issue</th><th scope="col">Score</th><th scope="col">Confidence</th><th scope="col">Evidence and decision</th></tr></thead><tbody>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/690">#690</a></th><td>1</td><td class="high">High</td><td>Requested teardown exists; 20 focused tests passed with no Cache.db unlink violation. Approve closure.</td></tr>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/696">#696</a></th><td>2</td><td class="high">High</td><td>Physical 1,184-feed import reduced the acute spike to 6.6 MB; build 220 launches with 1,085 subscriptions. Close if current VoiceOver navigation is responsive.</td></tr>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/711">#711</a></th><td>2</td><td class="high">High</td><td>Current WALs are 8 KB and 1.38 MB, far below 32 MB. Close with no checkpoint policy if the four-tab pass is responsive.</td></tr>
+      </tbody></table>
+    </section>
+    <section id="migration" aria-labelledby="migration-heading"><h2 id="migration-heading">Migration decision: #801</h2>
+      <p>#801 is still technically applicable because V5 and V6 remain supported sources for V10 and the 4.5× gate still runs. It should be retitled to “Validate the supported V5/V6-to-V10 migration storage margin on device,” lowered from high priority, and tested only with a controlled old-store device fixture—not Michael's live V10 store.</p>
+    </section>
+    <section aria-labelledby="evidence-heading"><h2 id="evidence-heading">Evidence and external work</h2>
+      <table><caption>Active evidence and external blockers</caption><thead><tr><th scope="col">Issue</th><th scope="col">Current disposition</th></tr></thead><tbody>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/709">#709</a></th><td>3,103 sampled: 113 HTTP and 2,990 HTTPS. Keep ATS; test HTTPS substitution next.</td></tr>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/679">#679</a></th><td>Xcode 26.6 StoreKit runner defect remains; recheck with a newer Xcode.</td></tr>
+        <tr><th scope="row"><a href="https://github.com/payown/earshot/issues/680">#680</a></th><td>GitHub still returns 403; requires Pro or a public repository.</td></tr>
+      </tbody></table>
+    </section>
+    <section id="decisions" aria-labelledby="decisions-heading"><h2 id="decisions-heading">Product and VoiceOver decision batch</h2>
+      <table><caption>Bounded work after approval</caption><thead><tr><th scope="col">Order</th><th scope="col">Issue</th><th scope="col">What exists and what must be decided</th></tr></thead><tbody>
+        <tr><td>1</td><th scope="row"><a href="https://github.com/payown/earshot/issues/457">#457</a></th><td>Most search exists; narrow to title/description search within one podcast and approve the new search surface.</td></tr>
+        <tr><td>2</td><th scope="row"><a href="https://github.com/payown/earshot/issues/552">#552</a></th><td>Rows speak total before playback and remaining in progress. Decide whether to speak both.</td></tr>
+        <tr><td>3</td><th scope="row"><a href="https://github.com/payown/earshot/issues/719">#719</a></th><td>Preserve behavior and clarify per-podcast plus Inbox/Queue scope.</td></tr>
+        <tr><td>4</td><th scope="row"><a href="https://github.com/payown/earshot/issues/717">#717</a></th><td>Approve Markdown export from viewer/actions with timestamps and simple headings.</td></tr>
+        <tr><td>5</td><th scope="row"><a href="https://github.com/payown/earshot/issues/835">#835</a></th><td>Approve current-filtered-tab scope, exact count confirmation, bounded enrollment, and one final announcement.</td></tr>
+        <tr><td>6</td><th scope="row"><a href="https://github.com/payown/earshot/issues/718">#718</a></th><td>Recommended default-off dismissal only when playback stops at end of queue.</td></tr>
+        <tr><td>7</td><th scope="row"><a href="https://github.com/payown/earshot/issues/824">#824</a></th><td>Approve independent dismissal, projection, and last-write-wins conflict policy.</td></tr>
+        <tr><td>8</td><th scope="row"><a href="https://github.com/payown/earshot/issues/834">#834</a></th><td>Approve Enabled/Available lists, one-action minimum, and new-action policy.</td></tr>
+        <tr><td>9</td><th scope="row"><a href="https://github.com/payown/earshot/issues/465">#465</a></th><td>Decide whether new podcast actions open editors or adjust inline.</td></tr>
+        <tr><td>10</td><th scope="row"><a href="https://github.com/payown/earshot/issues/453">#453</a></th><td>Decide opt-in/default and foreground behavior for download-complete notifications.</td></tr>
+        <tr><td>11</td><th scope="row"><a href="https://github.com/payown/earshot/issues/550">#550</a></th><td>Choose saved queue template versus scheduled recurring lineup.</td></tr>
+      </tbody></table>
+    </section>
+    <section id="larger" aria-labelledby="larger-heading"><h2 id="larger-heading">Larger or prerequisite-bound projects</h2>
+      <table><caption>Projects that should not be rushed into the current batch</caption><thead><tr><th scope="col">Issues</th><th scope="col">Prerequisite</th></tr></thead><tbody>
+        <tr><th scope="row">#551</th><td>App Intent vocabulary and interval policy.</td></tr>
+        <tr><th scope="row">#570, #571</th><td>Shared audio DSP architecture, limiter, and device listening validation.</td></tr>
+        <tr><th scope="row">#686</th><td>Real iPad VoiceOver/layout QA, screenshots, orientations, and device-family approval.</td></tr>
+        <tr><th scope="row">#467</th><td>Hosted AASA content and associated-domains entitlement approval.</td></tr>
+        <tr><th scope="row">#468</th><td>Local-audio library model and import architecture.</td></tr>
+        <tr><th scope="row">#454</th><td>ActivityKit target/capability approval and stability work.</td></tr>
+      </tbody></table>
+    </section>
+    <section id="sequence" aria-labelledby="sequence-heading"><h2 id="sequence-heading">Recommended execution sequence</h2><ol>
+      <li>Get the build-220 VoiceOver and near-end playback result.</li>
+      <li>Close #690, #696, and #711 with confirmation; narrow/lower #801.</li>
+      <li>Implement approved #457, #552, #719, and #717 behavior.</li>
+      <li>Implement approved #835, #718, #824, and #834 actions in small device-tested builds.</li>
+      <li>Then address #465, #453, and a bounded #550 first slice.</li>
+      <li>Keep #709 instrumented and retain ATS while cleartext use remains.</li>
+    </ol></section>
+  </main>
+</body>
+</html>
