@@ -4,129 +4,149 @@ import SwiftData
 
 @MainActor
 final class QuickActionRepositoryTests: XCTestCase {
-
-    func testEpisodeOrderDefaultsWhenEmpty() {
+    func testEmptyStoreEnablesEveryDefaultAction() {
         let repo = QuickActionRepository(context: TestStore.freshContext())
-        XCTAssertEqual(repo.episodeOrder(), defaultEpisodeActions)
+
+        XCTAssertEqual(repo.episodeConfiguration(), QuickActionConfiguration(
+            enabled: defaultEpisodeActions, available: []
+        ))
+        XCTAssertEqual(repo.podcastConfiguration(), QuickActionConfiguration(
+            enabled: defaultPodcastActions, available: []
+        ))
+        XCTAssertEqual(repo.queueConfiguration(), QuickActionConfiguration(
+            enabled: defaultQueueItemActions, available: []
+        ))
     }
 
-    func testPodcastOrderDefaultsWhenEmpty() {
-        let repo = QuickActionRepository(context: TestStore.freshContext())
-        XCTAssertEqual(repo.podcastOrder(), defaultPodcastActions)
-    }
-
-    func testQueueOrderDefaultsWhenEmpty() {
-        let repo = QuickActionRepository(context: TestStore.freshContext())
-        XCTAssertEqual(repo.queueOrder(), defaultQueueItemActions)
-    }
-
-    func testEpisodeOrderRoundTrips() {
-        let ctx = TestStore.freshContext()
-        // A pre-#572 saved order: all 8 actions that existed before `.unfollow`.
-        let custom: [EpisodeAction] = [.share, .openShowNotes, .viewBookmarks, .markPlayed, .download, .addToQueueTop, .addToQueueBottom, .playNow]
-        QuickActionRepository(context: ctx).setEpisodeOrder(custom)
-
-        // A fresh repository over the same store reads the persisted order back
-        // exactly, and appends the newer `.unfollow` LAST — the no-migration
-        // guarantee for existing users' saved 8-action orders (#572).
-        let resolved = QuickActionRepository(context: ctx).episodeOrder()
-        XCTAssertEqual(Array(resolved.prefix(custom.count)), custom, "stored actions come back in saved order")
-        XCTAssertEqual(resolved.last, .unfollow, "actions added after the save are appended last")
-        XCTAssertEqual(resolved.count, EpisodeAction.allCases.count, "every action is present exactly once")
-    }
-
-    // MARK: #572 — `.unfollow` joins the episode set with no migration
-
-    func testFreshInstallEpisodeOrderEndsWithUnfollow() {
-        // Acceptance criterion: #572 — unfollow defaults last (destructive
-        // actions never default early), with nothing stored.
-        let repo = QuickActionRepository(context: TestStore.freshContext())
-        let order = repo.episodeOrder()
-        XCTAssertEqual(order, defaultEpisodeActions)
-        XCTAssertEqual(order.last, .unfollow)
-    }
-
-    func testEpisodeOrderRoundTripsAfterUserMovesUnfollow() {
-        // Acceptance criterion: #572 — once the user reorders `.unfollow`
-        // themselves, that position persists; resolve() must not force it last.
-        // The saved order here predates transcript/audio export and the folder
-        // actions, so resolve() appends those to the tail in `allCases`
-        // order (the same migration path #572 relies on).
-        let ctx = TestStore.freshContext()
-        let moved: [EpisodeAction] = [.unfollow, .share, .openShowNotes, .viewBookmarks, .markPlayed, .download, .addToQueueTop, .addToQueueBottom, .playNow]
-        QuickActionRepository(context: ctx).setEpisodeOrder(moved)
-
-        XCTAssertEqual(
-            QuickActionRepository(context: ctx).episodeOrder(),
-            moved + [.removeFromInbox, .exportTranscript, .exportAudio, .addToFolder, .moveToFolder]
+    func testEnabledAndAvailableOrdersRoundTripIndependently() {
+        let context = TestStore.freshContext()
+        let value = QuickActionConfiguration<EpisodeAction>(
+            enabled: [.share, .playNow],
+            available: [.unfollow, .download, .openShowNotes]
         )
+        let repo = QuickActionRepository(context: context)
+
+        repo.setEpisodeConfiguration(value)
+
+        let resolved = QuickActionRepository(context: context).episodeConfiguration()
+        XCTAssertEqual(resolved.enabled, value.enabled)
+        XCTAssertEqual(Array(resolved.available.prefix(value.available.count)), value.available)
+        XCTAssertEqual(Set(resolved.enabled + resolved.available), Set(EpisodeAction.allCases))
     }
 
-    func testPartialStoredOrderResolvesWithUnfollowAppended() {
-        // Acceptance criterion: #572 — a partial pre-unfollow save still
-        // resolves to the full set with `.unfollow` among the appended tail.
-        let ctx = TestStore.freshContext()
-        QuickActionRepository(context: ctx).setEpisodeOrder([.share, .playNow])
+    func testLegacyBareRowsKeepEveryActionEnabledInSavedOrder() throws {
+        let context = TestStore.freshContext()
+        context.insert(QuickActionConfig(
+            contentType: .episode, actionKey: EpisodeAction.share.rawValue, sortOrder: 0
+        ))
+        context.insert(QuickActionConfig(
+            contentType: .episode, actionKey: EpisodeAction.playNow.rawValue, sortOrder: 1
+        ))
+        try context.save()
 
-        let order = QuickActionRepository(context: ctx).episodeOrder()
-        XCTAssertEqual(Array(order.prefix(2)), [.share, .playNow])
-        XCTAssertTrue(order.contains(.unfollow))
-        XCTAssertEqual(order.count, EpisodeAction.allCases.count)
+        let value = QuickActionRepository(context: context).episodeConfiguration()
+
+        XCTAssertEqual(Array(value.enabled.prefix(2)), [.share, .playNow])
+        XCTAssertEqual(Set(value.enabled), Set(EpisodeAction.allCases))
+        XCTAssertTrue(value.available.isEmpty)
     }
 
-    func testSetReplacesRatherThanAppends() {
-        let ctx = TestStore.freshContext()
-        let repo = QuickActionRepository(context: ctx)
-        repo.setEpisodeOrder([.playNow, .share])
-        repo.setEpisodeOrder([.share, .playNow])
+    func testNewActionsJoinAvailableAfterUserHasCustomizedList() {
+        let context = TestStore.freshContext()
+        let repo = QuickActionRepository(context: context)
+        repo.setEpisodeConfiguration(QuickActionConfiguration(
+            enabled: [.share], available: [.playNow]
+        ))
 
-        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QuickActionConfig>()), 2)
+        let value = repo.episodeConfiguration()
+
+        XCTAssertEqual(value.enabled, [.share])
+        XCTAssertEqual(value.available.first, .playNow)
+        XCTAssertEqual(Set(value.enabled + value.available), Set(EpisodeAction.allCases))
     }
 
-    func testNewlyAddedActionsAppendAfterStoredOrder() {
-        let ctx = TestStore.freshContext()
-        // Persist only a subset (as if an older app version saved fewer actions).
-        QuickActionRepository(context: ctx).setEpisodeOrder([.share, .playNow])
+    func testRepositoryRejectsConfigurationWithNoEnabledAction() {
+        let context = TestStore.freshContext()
+        let repo = QuickActionRepository(context: context)
 
-        let order = QuickActionRepository(context: ctx).episodeOrder()
-        XCTAssertEqual(Array(order.prefix(2)), [.share, .playNow])
-        XCTAssertEqual(Set(order), Set(EpisodeAction.allCases), "every action is present")
+        repo.setEpisodeConfiguration(QuickActionConfiguration(
+            enabled: [], available: EpisodeAction.allCases
+        ))
+
+        XCTAssertEqual(repo.episodeConfiguration().enabled, defaultEpisodeActions)
+        XCTAssertTrue(repo.episodeConfiguration().available.isEmpty)
     }
 
-    func testSetsAreIndependentPerContentType() {
-        let ctx = TestStore.freshContext()
-        let repo = QuickActionRepository(context: ctx)
-        repo.setEpisodeOrder([.share, .playNow, .openShowNotes, .markPlayed, .addToQueueTop, .addToQueueBottom])
+    func testCorruptEncodedStateRepairsOneAvailableActionToEnabled() throws {
+        let context = TestStore.freshContext()
+        context.insert(QuickActionConfig(
+            contentType: .episode,
+            actionKey: "available:\(EpisodeAction.share.rawValue)",
+            sortOrder: 0
+        ))
+        try context.save()
 
-        // Podcast + queue still report their defaults.
+        let value = QuickActionRepository(context: context).episodeConfiguration()
+
+        XCTAssertEqual(value.enabled, [.share])
+        XCTAssertFalse(value.available.contains(.share))
+    }
+
+    func testDuplicateAndUnknownRowsDoNotDuplicateActions() throws {
+        let context = TestStore.freshContext()
+        for (index, key) in ["enabled:share", "enabled:share", "available:share", "available:futureAction"].enumerated() {
+            context.insert(QuickActionConfig(contentType: .episode, actionKey: key, sortOrder: index))
+        }
+        try context.save()
+
+        let value = QuickActionRepository(context: context).episodeConfiguration()
+
+        XCTAssertEqual(value.enabled, [.share])
+        XCTAssertEqual(value.available.filter { $0 == .share }.count, 0)
+        XCTAssertEqual(Set(value.enabled + value.available), Set(EpisodeAction.allCases))
+    }
+
+    func testContentTypesRemainIndependent() {
+        let context = TestStore.freshContext()
+        let repo = QuickActionRepository(context: context)
+        repo.setEpisodeConfiguration(QuickActionConfiguration(
+            enabled: [.share], available: EpisodeAction.allCases.filter { $0 != .share }
+        ))
+
+        XCTAssertEqual(repo.episodeOrder(), [.share])
         XCTAssertEqual(repo.podcastOrder(), defaultPodcastActions)
         XCTAssertEqual(repo.queueOrder(), defaultQueueItemActions)
     }
 
-    func testQueueOrderRoundTrips() {
-        let ctx = TestStore.freshContext()
-        // A pre-Item-3 saved order: all 7 actions that existed before `.download`.
-        let custom: [QueueItemAction] = [.removeFromQueue, .playNow, .moveUp, .moveDown, .moveToTop, .moveToBottom, .openShowNotes]
-        QuickActionRepository(context: ctx).setQueueOrder(custom)
+    func testStoreRemoveAddAndRelaunchPreserveBothOrders() {
+        let context = TestStore.freshContext()
+        let store = QuickActionStore()
+        store.configure(context: context)
 
-        // The stored order comes back exactly, with the newer `.download`
-        // appended LAST — the no-migration guarantee for existing users' saved
-        // queue orders (Item 3).
-        let resolved = QuickActionRepository(context: ctx).queueOrder()
-        XCTAssertEqual(Array(resolved.prefix(custom.count)), custom, "stored actions come back in saved order")
-        XCTAssertEqual(resolved.last, .download, "actions added after the save are appended last")
-        XCTAssertEqual(resolved.count, QueueItemAction.allCases.count, "every action is present exactly once")
+        XCTAssertTrue(store.removeEpisodeAction(.download))
+        XCTAssertFalse(store.episodeActions.contains(.download))
+        XCTAssertEqual(store.availableEpisodeActions.last, .download)
+        store.addEpisodeAction(.download)
+        XCTAssertEqual(store.episodeActions.last, .download)
+        XCTAssertFalse(store.availableEpisodeActions.contains(.download))
+
+        let relaunched = QuickActionStore()
+        relaunched.configure(context: context)
+        XCTAssertEqual(relaunched.episodeActions, store.episodeActions)
+        XCTAssertEqual(relaunched.availableEpisodeActions, store.availableEpisodeActions)
     }
 
-    func testPartialStoredQueueOrderResolvesWithDownloadAppended() {
-        // Acceptance criterion: Item 3 — a partial pre-download save still
-        // resolves to the full set with `.download` appended at the end.
-        let ctx = TestStore.freshContext()
-        QuickActionRepository(context: ctx).setQueueOrder([.playNow, .removeFromQueue])
+    func testStoreNeverRemovesLastEnabledAction() {
+        let context = TestStore.freshContext()
+        let repo = QuickActionRepository(context: context)
+        repo.setQueueConfiguration(QuickActionConfiguration(
+            enabled: [.playNow],
+            available: QueueItemAction.allCases.filter { $0 != .playNow }
+        ))
+        let store = QuickActionStore()
+        store.configure(context: context)
 
-        let order = QuickActionRepository(context: ctx).queueOrder()
-        XCTAssertEqual(Array(order.prefix(2)), [.playNow, .removeFromQueue])
-        XCTAssertEqual(order.last, .download, "download is appended at the end for existing users")
-        XCTAssertEqual(order.count, QueueItemAction.allCases.count)
+        XCTAssertFalse(store.removeQueueAction(.playNow))
+        XCTAssertEqual(store.queueActions, [.playNow])
     }
 }
