@@ -118,6 +118,7 @@ enum ModelContainerFactory {
 
     /// Test seam using the same migration/open path against a disposable store.
     static func makeShared(using engine: StoreMigrationEngine, at url: URL) async -> StoreLoad {
+        StoreWALDiagnostics.log(.beforeStoreOpen, at: url)
         do {
             let container = try await engine.openOrMigrate(at: url)
             MigrationBackupManager.noteSuccessfulTargetOpen(
@@ -163,6 +164,7 @@ enum ModelContainerFactory {
     /// can drive it against a temporary store.
     @MainActor
     static func load(at url: URL) -> StoreLoad {
+        StoreWALDiagnostics.log(.beforeStoreOpen, at: url)
         // 1. Normal path — open the current split store or migrate from the
         //    supported V5 floor. StoreMigration classifies unsupported pre-V5
         //    data separately from corruption and newer-than-app downgrades.

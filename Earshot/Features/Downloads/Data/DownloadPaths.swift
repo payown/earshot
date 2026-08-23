@@ -76,8 +76,23 @@ enum DownloadPaths {
         let dir = try FileManager.default
             .url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("Downloads", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try prepareDownloadsDirectory(at: dir)
         return dir
+    }
+
+    /// Creates the re-downloadable media directory and keeps it out of device
+    /// and iCloud backups (#710). Applying the resource value on every resolve
+    /// also repairs directories created by earlier builds; it is idempotent and
+    /// does not alter any downloaded file or playback state.
+    static func prepareDownloadsDirectory(at directory: URL) throws {
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var mutableDirectory = directory
+        try mutableDirectory.setResourceValues(values)
     }
 
     /// The stable on-disk destination for an episode's audio inside `directory`,

@@ -35,13 +35,11 @@ enum InboxQuery {
     // `status` cannot be expressed in a `#Predicate` — comparing the stored enum
     // to a case degenerates to an unsupported `\.newEpisode` key path, and even
     // when coaxed to compile it silently matches zero rows. So the store cannot
-    // filter to `.newEpisode` directly. But a played episode always carries a
-    // non-nil `playedAt` (see `Episode.isPlayed`'s setter), and played episodes
-    // are the bucket that grows without bound: `markCurrentEpisodePlayed` never
-    // dismisses them, so every episode ever finished stays `inboxDismissed ==
-    // false` forever and bloats ``normal``/``optInOnly``. Adding `playedAt ==
-    // nil` (a plain optional-`Date` comparison the store executes correctly)
-    // trims that unbounded played history out of the fetch. The result is a small
+    // filter to `.newEpisode` directly. A played episode always carries a non-nil
+    // `playedAt` (see `Episode.isPlayed`'s setter). Current completion paths also
+    // dismiss it, while ``InboxHistoryMaintenance`` repairs rows left by older
+    // builds. Keeping `playedAt == nil` here remains defense-in-depth during that
+    // bounded cleanup and trims played history out of the fetch. The result is a small
     // superset of the inbox — unplayed, non-dismissed episodes — over which the
     // exact `.newEpisode` check is a cheap in-memory pass. This keeps the badge's
     // per-save cost proportional to the (bounded) unplayed set instead of the
@@ -159,8 +157,8 @@ final class InboxRepository {
     /// library and filtering `status` in Swift. That re-runs on every `Episode`
     /// save — including the 5-second playback-position save — and on a large
     /// library each pass costs hundreds of ms to seconds (measured: ~320ms at
-    /// 10k rows, ~3s at 100k) because finished episodes are never dismissed, so
-    /// the non-dismissed set grows without bound over listening history. Once
+    /// 10k rows, ~3s at 100k) when older builds left finished episodes
+    /// non-dismissed and the set grew without bound over listening history. Once
     /// that per-save cost exceeds the save cadence the main thread saturates and
     /// iOS force-terminates the app under `cpu_resource_fatal` (~93% CPU / 60s).
     ///
