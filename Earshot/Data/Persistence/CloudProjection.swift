@@ -25,12 +25,15 @@ struct EpisodeUserStateSnapshot: Sendable, Equatable {
     let positionSeconds: Int
     let isPlayed: Bool
     let playedChangedExplicitly: Bool
+    let inboxDismissed: Bool
+    let inboxDismissedChangedExplicitly: Bool
 
     @MainActor
     init?(
         episode: Episode,
         positionSeconds: Int? = nil,
-        playedChangedExplicitly: Bool = false
+        playedChangedExplicitly: Bool = false,
+        inboxDismissedChangedExplicitly: Bool = false
     ) {
         guard let feedURL = episode.podcast?.feedURL, !episode.guid.isEmpty else { return nil }
         self.feedURL = FeedURLIdentity.canonical(feedURL)
@@ -38,6 +41,8 @@ struct EpisodeUserStateSnapshot: Sendable, Equatable {
         self.positionSeconds = max(0, positionSeconds ?? episode.positionSeconds)
         self.isPlayed = episode.isPlayed
         self.playedChangedExplicitly = playedChangedExplicitly
+        self.inboxDismissed = episode.inboxDismissed
+        self.inboxDismissedChangedExplicitly = inboxDismissedChangedExplicitly
     }
 }
 
@@ -53,12 +58,14 @@ func postEpisodeUserStateSnapshots(_ snapshots: [EpisodeUserStateSnapshot]) {
 @MainActor
 func postEpisodeUserStateChanges(
     _ episodes: [Episode],
-    playedChangedExplicitly: Bool = false
+    playedChangedExplicitly: Bool = false,
+    inboxDismissedChangedExplicitly: Bool = false
 ) {
     let snapshots = episodes.compactMap {
         EpisodeUserStateSnapshot(
             episode: $0,
-            playedChangedExplicitly: playedChangedExplicitly
+            playedChangedExplicitly: playedChangedExplicitly,
+            inboxDismissedChangedExplicitly: inboxDismissedChangedExplicitly
         )
     }
     postEpisodeUserStateSnapshots(snapshots)
@@ -110,6 +117,11 @@ final class CloudEpisodeStateProjection {
     var positionResetAt: Date?
     var isPlayed: Bool = false
     var playedUpdatedAt: Date = Date.distantPast
+    var inboxDismissed: Bool = false
+    /// Independent last-write-wins clock for explicit Inbox dismissal or a
+    /// later feed-authored re-entry. Legacy rows stay at distantPast and do not
+    /// alter Inbox membership.
+    var inboxDismissedUpdatedAt: Date = Date.distantPast
     var modifiedAt: Date = Date.distantPast
     var deletedAt: Date?
 
@@ -1441,6 +1453,9 @@ final class CloudProjectionCoordinator {
                 inserted.isPlayed = snapshot.isPlayed
                 inserted.playedUpdatedAt = snapshot.isPlayed
                     || snapshot.playedChangedExplicitly ? now : .distantPast
+                inserted.inboxDismissed = snapshot.inboxDismissed
+                inserted.inboxDismissedUpdatedAt = snapshot.inboxDismissedChangedExplicitly
+                    ? now : .distantPast
                 cloudContext.insert(inserted)
                 ownByKey[key] = inserted
                 return inserted
@@ -1456,6 +1471,11 @@ final class CloudProjectionCoordinator {
             if snapshot.playedChangedExplicitly {
                 row.isPlayed = snapshot.isPlayed
                 row.playedUpdatedAt = now
+                row.modifiedAt = now
+            }
+            if snapshot.inboxDismissedChangedExplicitly {
+                row.inboxDismissed = snapshot.inboxDismissed
+                row.inboxDismissedUpdatedAt = now
                 row.modifiedAt = now
             }
             if row.modifiedAt == .distantPast { row.modifiedAt = now }
@@ -1821,6 +1841,15 @@ final class CloudProjectionCoordinator {
             }
             let mergedPlayed = playedWinner?.isPlayed ?? false
 
+            let dismissalWinner = contributions
+                .filter { $0.inboxDismissedUpdatedAt != .distantPast }
+                .max {
+                    if $0.inboxDismissedUpdatedAt != $1.inboxDismissedUpdatedAt {
+                        return $0.inboxDismissedUpdatedAt < $1.inboxDismissedUpdatedAt
+                    }
+                    return $0.sourceDeviceID > $1.sourceDeviceID
+                }
+
             let resetWinner = contributions.compactMap { row in
                 row.positionResetAt.map { (date: $0, row: row) }
             }.max {
@@ -1849,6 +1878,11 @@ final class CloudProjectionCoordinator {
             }
             if episode.positionSeconds != mergedPosition {
                 episode.positionSeconds = mergedPosition
+                changed = true
+            }
+            if let dismissalWinner,
+               episode.inboxDismissed != dismissalWinner.inboxDismissed {
+                episode.inboxDismissed = dismissalWinner.inboxDismissed
                 changed = true
             }
         }

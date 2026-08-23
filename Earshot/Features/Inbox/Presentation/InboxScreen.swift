@@ -466,6 +466,12 @@ struct InboxScreen: View {
                         Label("Mark as played", systemImage: "checkmark.circle")
                     }
                     .tint(.green)
+                    Button {
+                        removeFromInbox(episode)
+                    } label: {
+                        Label("Remove from Inbox", systemImage: "tray.and.arrow.down")
+                    }
+                    .tint(.blue)
                 }
                 // Unfollow the whole show straight from one of its inbox episodes
                 // (#500), for sighted users; VoiceOver users reach the same flow
@@ -621,6 +627,12 @@ struct InboxScreen: View {
         }
     }
 
+    private func removeFromInbox(_ episode: Episode) {
+        focusAfterInboxRowLeaves(episode)
+        InboxRepository(context: context).dismiss(episode)
+        Announcer.announce("Removed from Inbox")
+    }
+
     /// Unfollows `podcast` via the centralized repository path shared with
     /// Library and search (#499/#500) — never an inline delete. The repo logs
     /// failures and returns whether the delete saved, so we announce success only
@@ -659,7 +671,8 @@ struct InboxScreen: View {
             supportsExport: true,
             supportsTranscriptExport: true,
             supportsAddToFolder: true,
-            supportsMoveToFolder: true
+            supportsMoveToFolder: true,
+            supportsRemoveFromInbox: true
         )
     }
 
@@ -685,7 +698,8 @@ struct InboxScreen: View {
             onExport: { exportEpisode = episode },
             onExportTranscript: { exportTranscriptEpisode = episode },
             onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
-            onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
+            onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) },
+            onRemoveFromInbox: { removeFromInbox(episode) }
         ).first?.run()
     }
 

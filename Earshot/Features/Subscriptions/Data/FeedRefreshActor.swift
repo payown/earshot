@@ -914,11 +914,13 @@ actor FeedRefreshActor {
     private struct ApplyOutcome {
         let refreshOutcome: RefreshOutcome
         let newEpisodes: [Episode]
+        let inboxReentryEpisodes: [Episode]
         let insertedCount: Int
 
         func result() -> RefreshOutcome {
             var outcome = refreshOutcome
             outcome.newEpisodeIDs = newEpisodes.map(\.persistentModelID)
+            outcome.inboxReentryEpisodeIDs = inboxReentryEpisodes.map(\.persistentModelID)
             return outcome
         }
     }
@@ -959,6 +961,7 @@ actor FeedRefreshActor {
             return ApplyOutcome(
                 refreshOutcome: .backfill,
                 newEpisodes: [],
+                inboxReentryEpisodes: [],
                 insertedCount: parsedEpisodes.count
             )
         }
@@ -1011,7 +1014,11 @@ actor FeedRefreshActor {
         let existingByGUID = Dictionary(
             existingEpisodes.map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
         )
-        resurfaceRepublished(candidateEpisodes, existingByGUID: existingByGUID, now: now)
+        let inboxReentries = resurfaceRepublished(
+            candidateEpisodes,
+            existingByGUID: existingByGUID,
+            now: now
+        )
 
         for item in candidateEpisodes where !existingGUIDs.contains(item.guid) {
             let episode = Self.makeEpisode(from: item)
@@ -1068,6 +1075,7 @@ actor FeedRefreshActor {
         return ApplyOutcome(
             refreshOutcome: RefreshOutcome(added: added, wasBackfill: false, newestNewEpisodeGUID: newestNewGUID),
             newEpisodes: newEpisodes,
+            inboxReentryEpisodes: inboxReentries,
             insertedCount: added
         )
     }
@@ -1161,6 +1169,7 @@ actor FeedRefreshActor {
                 newestNewEpisodeGUID: newestNewGUID
             ),
             newEpisodes: genuinelyNew,
+            inboxReentryEpisodes: [],
             insertedCount: seed.count
         )
     }
@@ -1217,7 +1226,8 @@ actor FeedRefreshActor {
     /// elsewhere in this function.
     private func resurfaceRepublished(
         _ items: [ParsedEpisode], existingByGUID: [String: Episode], now: Date
-    ) {
+    ) -> [Episode] {
+        var resurfaced: [Episode] = []
         for item in items {
             guard let existing = existingByGUID[item.guid] else { continue }
             guard let newPub = item.pubDate, newPub <= now else { continue }
@@ -1228,7 +1238,9 @@ actor FeedRefreshActor {
             existing.pubDate = newPub
             existing.status = .newEpisode
             existing.inboxDismissed = false
+            resurfaced.append(existing)
         }
+        return resurfaced
     }
 
     /// Appends episodes to the end of the queue on the background context. Mirrors

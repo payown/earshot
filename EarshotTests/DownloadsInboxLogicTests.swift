@@ -130,6 +130,26 @@ final class DownloadsInboxLogicTests: XCTestCase {
         XCTAssertTrue(repo.inboxEpisodes().isEmpty, "an un-played episode must not jump back into the inbox")
     }
 
+    @MainActor
+    func testDismissRemovesEpisodeWithoutMarkingItPlayed() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/feed.xml", title: "Show")
+        let episode = Episode(guid: "dismiss", title: "Dismiss", audioURL: "https://x/dismiss.mp3")
+        episode.podcast = podcast
+        ctx.insert(podcast)
+        ctx.insert(episode)
+        try ctx.save()
+
+        let repo = InboxRepository(context: ctx)
+        XCTAssertEqual(repo.inboxEpisodes().map(\.guid), ["dismiss"])
+
+        repo.dismiss(episode)
+
+        XCTAssertTrue(episode.inboxDismissed)
+        XCTAssertFalse(episode.isPlayed)
+        XCTAssertTrue(repo.inboxEpisodes().isEmpty)
+    }
+
     // MARK: EpisodeActionsBuilder — Mark-played Quick Action, both directions (#546)
 
     @MainActor

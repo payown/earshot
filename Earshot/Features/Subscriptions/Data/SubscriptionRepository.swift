@@ -65,6 +65,7 @@ struct RefreshOutcome: Sendable {
     var wasBackfill: Bool
     var newestNewEpisodeGUID: String?
     var newEpisodeIDs: [PersistentIdentifier] = []
+    var inboxReentryEpisodeIDs: [PersistentIdentifier] = []
 
     static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisodeGUID: nil, newEpisodeIDs: [])
 }
@@ -352,6 +353,7 @@ final class SubscriptionRepository {
         // episodes and advanced high-water mark immediately. Only THIS podcast's
         // episodes need re-faulting.
         mergeBackgroundWrites(affectedPodcastIDs: [podcast.persistentModelID])
+        publishInboxReentries(outcome.inboxReentryEpisodeIDs)
         // Refresh-time auto-queue mutates the queue on the background actor, so
         // QueueRepository never gets a chance to publish its normal change
         // notification. Notify after the durable save and main-context merge so
@@ -447,9 +449,12 @@ final class SubscriptionRepository {
             "resultCount=\(results.count)"
         )
         let affectedIDs = results
-            .filter { $0.outcome.added > 0 }
+            .filter {
+                $0.outcome.added > 0 || !$0.outcome.inboxReentryEpisodeIDs.isEmpty
+            }
             .compactMap { self.podcast(forFeedURL: $0.feedURL)?.persistentModelID }
         mergeBackgroundWrites(affectedPodcastIDs: affectedIDs)
+        publishInboxReentries(results.flatMap { $0.outcome.inboxReentryEpisodeIDs })
         PerformanceSignposts.signposter.endInterval(
             "MainContextMerge",
             mergeInterval,
@@ -761,6 +766,18 @@ final class SubscriptionRepository {
         var descriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.persistentModelID == id })
         descriptor.fetchLimit = 1
         return (try? context.fetch(descriptor))?.first
+    }
+
+    /// A republished episode deliberately re-enters Inbox. Project that false
+    /// dismissal with a fresh clock so it wins over an older explicit removal
+    /// on another device; ordinary new/backlog rows never enter this path.
+    private func publishInboxReentries(_ episodeIDs: [PersistentIdentifier]) {
+        let episodes = episodeIDs.compactMap(episode(forPersistentID:))
+        guard !episodes.isEmpty else { return }
+        postEpisodeUserStateChanges(
+            episodes,
+            inboxDismissedChangedExplicitly: true
+        )
     }
 
     /// Current podcast count for the free-tier cap check (#635). Unlike the

@@ -34,7 +34,8 @@ func availableEpisodeActions(
     supportsExport: Bool = false,
     supportsTranscriptExport: Bool = false,
     supportsAddToFolder: Bool = false,
-    supportsMoveToFolder: Bool = false
+    supportsMoveToFolder: Bool = false,
+    supportsRemoveFromInbox: Bool = false
 ) -> [EpisodeAction] {
     order.filter { action in
         switch action {
@@ -46,6 +47,8 @@ func availableEpisodeActions(
             return supportsAddToFolder
         case .moveToFolder:
             return supportsMoveToFolder
+        case .removeFromInbox:
+            return supportsRemoveFromInbox
         case .unfollow:
             return supportsUnfollow && episode.podcast != nil
         default:
@@ -91,7 +94,8 @@ func buildEpisodeActions(
     onExport: (() -> Void)? = nil,
     onExportTranscript: (() -> Void)? = nil,
     onAddToFolder: ((Episode) -> Void)? = nil,
-    onMoveToFolder: ((Episode) -> Void)? = nil
+    onMoveToFolder: ((Episode) -> Void)? = nil,
+    onRemoveFromInbox: (() -> Void)? = nil
 ) -> [QuickActionItem] {
     let episodeID = episode.persistentModelID
     return order.compactMap { action -> QuickActionItem? in
@@ -141,6 +145,7 @@ func buildEpisodeActions(
                 // marking unplayed leaves any dismissal sticky so a triaged
                 // episode never jumps back into the inbox (#546).
                 let nowPlayed = !played
+                let wasDismissed = episode.inboxDismissed
                 // Invoked before the flip so the surface can still find this
                 // row's neighbor in its visible list (#579).
                 onMarkPlayed?(nowPlayed)
@@ -156,7 +161,8 @@ func buildEpisodeActions(
                 if saveQuickAction(context, "played state") {
                     postEpisodeUserStateChanges(
                         [episode],
-                        playedChangedExplicitly: true
+                        playedChangedExplicitly: true,
+                        inboxDismissedChangedExplicitly: episode.inboxDismissed != wasDismissed
                     )
                 }
                 // The rotor path's only announcement (#579). The sighted swipe
@@ -165,6 +171,13 @@ func buildEpisodeActions(
                 // activation. Wording matches that swipe path.
                 Announcer.announce(nowPlayed ? "Marked as played" : "Marked as unplayed")
             }
+        case .removeFromInbox:
+            guard let onRemoveFromInbox else { return nil }
+            return QuickActionItem(
+                label: "Remove from Inbox",
+                isDestructive: false,
+                run: onRemoveFromInbox
+            )
         case .viewBookmarks:
             return QuickActionItem(label: "Bookmarks", isDestructive: false) {
                 onBookmarks()

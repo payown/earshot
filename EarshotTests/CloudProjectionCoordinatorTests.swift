@@ -1111,6 +1111,75 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(episode.isPlayed)
     }
 
+    func testInboxDismissalSyncsIndependentlyFromPlayedState() throws {
+        let app = try makeApplicationContainerWithEpisode(position: 0)
+        let projection = try makeProjectionContainer()
+        let dismissed = episodeStateRow(device: "phone", position: 0, updatedAt: 100)
+        dismissed.inboxDismissed = true
+        dismissed.inboxDismissedUpdatedAt = Date(timeIntervalSince1970: 100)
+        projection.mainContext.insert(dismissed)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+
+        try coordinator.reconcile()
+
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        XCTAssertTrue(episode.inboxDismissed)
+        XCTAssertFalse(episode.isPlayed)
+    }
+
+    func testNewerInboxReentryWinsOverOlderDismissal() throws {
+        let app = try makeApplicationContainerWithEpisode(position: 0)
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        episode.inboxDismissed = true
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let dismissed = episodeStateRow(device: "phone", position: 0, updatedAt: 100)
+        dismissed.inboxDismissed = true
+        dismissed.inboxDismissedUpdatedAt = Date(timeIntervalSince1970: 100)
+        projection.mainContext.insert(dismissed)
+        let reentered = episodeStateRow(device: "mac", position: 0, updatedAt: 200)
+        reentered.inboxDismissed = false
+        reentered.inboxDismissedUpdatedAt = Date(timeIntervalSince1970: 200)
+        projection.mainContext.insert(reentered)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "ipad"
+        )
+
+        try coordinator.reconcile()
+
+        XCTAssertFalse(episode.inboxDismissed)
+        XCTAssertFalse(episode.isPlayed)
+    }
+
+    func testLegacyEpisodeProjectionDoesNotChangeInboxDismissal() throws {
+        let app = try makeApplicationContainerWithEpisode(position: 0)
+        let projection = try makeProjectionContainer()
+        let legacy = episodeStateRow(device: "phone", position: 0, updatedAt: 100)
+        legacy.inboxDismissed = true
+        projection.mainContext.insert(legacy)
+        try projection.mainContext.save()
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "mac"
+        )
+
+        try coordinator.reconcile()
+
+        XCTAssertFalse(try XCTUnwrap(applicationEpisode(in: app)).inboxDismissed)
+    }
+
     func testLivePositionSnapshotPublishesWithoutSavingApplicationEpisode() throws {
         let app = try makeApplicationContainerWithEpisode(position: 10)
         let projection = try makeProjectionContainer()

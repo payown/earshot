@@ -406,7 +406,7 @@ final class RSSParserTests: XCTestCase {
         // destructive `.unfollow`.
         XCTAssertEqual(
             defaultEpisodeActions,
-            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .markPlayed, .viewBookmarks, .openShowNotes, .share, .exportTranscript, .exportAudio, .addToFolder, .moveToFolder, .unfollow]
+            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .removeFromInbox, .markPlayed, .viewBookmarks, .openShowNotes, .share, .exportTranscript, .exportAudio, .addToFolder, .moveToFolder, .unfollow]
         )
     }
 }
