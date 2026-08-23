@@ -15,6 +15,34 @@ private struct PlayerCompletionDismissal: ViewModifier {
         }
     }
 }
+
+private struct CleartextPlaybackWarningPresenter: ViewModifier {
+    let player: PlayerService
+
+    private var isPresented: Binding<Bool> {
+        Binding(
+            get: { player.pendingCleartextPlaybackWarning != nil },
+            set: { isPresented in
+                if !isPresented, player.pendingCleartextPlaybackWarning != nil {
+                    player.cancelPendingCleartextPlayback()
+                }
+            }
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            "Unsecured audio connection",
+            isPresented: isPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Play episode") { player.approvePendingCleartextPlayback() }
+            Button("Cancel", role: .cancel) { player.cancelPendingCleartextPlayback() }
+        } message: {
+            Text(CleartextPlaybackWarning.message)
+        }
+    }
+}
 import UIKit
 
 /// Owns the Inbox badge count separately from RootView so changing playback
@@ -305,6 +333,7 @@ struct RootView: View {
             NowPlayingScreen()
         }
         .modifier(PlayerCompletionDismissal(player: player, settings: settings))
+        .modifier(CleartextPlaybackWarningPresenter(player: player))
         .sheet(isPresented: $showOPMLPaywall, onDismiss: {
             guard resumeImportAfterPaywall else { return }
             resumeImportAfterPaywall = false

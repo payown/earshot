@@ -139,6 +139,15 @@ enum SettingsKey {
         podcastInboxCapPrefix + FeedURLIdentity.canonical(feedURL)
     }
 
+    // Device-local acknowledgement for a podcast whose audio was verified to
+    // require cleartext HTTP (#709). Kept out of the mirrored-key allowlist: a
+    // listener approves the network risk independently on each device.
+    static let cleartextMediaApprovalPrefix = "cleartext_media_approved_"
+
+    static func cleartextMediaApproval(identity: String) -> String {
+        cleartextMediaApprovalPrefix + FeedURLIdentity.canonical(identity)
+    }
+
     // Persisted Earshot Plus entitlement state (#634). Recomputed from
     // StoreKit `Transaction.currentEntitlements` at launch, after every
     // `Transaction.updates` event, and after Restore Purchases (#633) — see
