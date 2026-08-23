@@ -5,6 +5,9 @@ extension Notification.Name {
     static let earshotVolumeBoostSettingDidChange = Notification.Name(
         "earshotVolumeBoostSettingDidChange"
     )
+    static let earshotSkipSilenceSettingDidChange = Notification.Name(
+        "earshotSkipSilenceSettingDidChange"
+    )
 }
 
 /// Setting keys, mirroring the Flutter `app_settings` table keys. Kept as
@@ -20,9 +23,8 @@ enum SettingsKey {
     // App Store privacy label ("Data Not Collected") matches reality.
     static let crashReportingEnabled = "crash_reporting_enabled"
     static let analyticsEnabled = "analytics_enabled"
-    // skip_silence_enabled: retained for data compatibility only. The feature
-    // requires MTAudioProcessingTap (Decision F14) and is not implemented. The
-    // SettingsStore property and Settings UI toggle have been removed (#369).
+    /// Device-local default for compacting sustained silence during playback.
+    /// Individual podcasts can inherit, enable, or disable this preference.
     static let skipSilenceEnabled = "skip_silence_enabled"
     static let voiceEnhanceEnabled = "voice_enhance_enabled"
     static let globalSpeed = "global_speed"
@@ -228,7 +230,7 @@ enum SettingsDefault {
     static let historyRetentionDays = 90
     static let crashReportingEnabled = true  // retained; not read by SettingsStore (no telemetry ships)
     static let analyticsEnabled = true  // retained; not read by SettingsStore (no telemetry ships)
-    static let skipSilenceEnabled = false  // retained; not read by SettingsStore (#369)
+    static let skipSilenceEnabled = false
     static let globalSpeed = 1.0
     static let volumeBoost: VolumeBoostLevel = .off
     static let skipForwardSeconds = 30
@@ -328,6 +330,12 @@ final class AppSettingsStore {
             if AppSettingIdentity.canonicalKey(key) == SettingsKey.volumeBoost {
                 NotificationCenter.default.post(
                     name: .earshotVolumeBoostSettingDidChange,
+                    object: nil
+                )
+            }
+            if AppSettingIdentity.canonicalKey(key) == SettingsKey.skipSilenceEnabled {
+                NotificationCenter.default.post(
+                    name: .earshotSkipSilenceSettingDidChange,
                     object: nil
                 )
             }

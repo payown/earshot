@@ -81,6 +81,15 @@ struct PodcastSettingsView: View {
     /// Test-visible accessor for intro-skip options. Only use in tests.
     static var introSkipOptionsForTesting: [(label: String, value: Int?)] { introSkipOptions }
 
+    private var silenceTrimOptions: [AdjustableOptionPicker<Bool?>.Option] {
+        let inherited = settings.skipSilenceEnabled ? "on" : "off"
+        return [
+            .init(value: nil, title: "Use global", spoken: "Use global, currently \(inherited)"),
+            .init(value: false, title: "Off", spoken: "Off"),
+            .init(value: true, title: "On", spoken: "On"),
+        ]
+    }
+
     // MARK: Intro skip options (#456)
 
     private static let introSkipOptions: [(label: String, value: Int?)] = [
@@ -164,6 +173,7 @@ struct PodcastSettingsView: View {
     private var playbackSection: some View {
         Section {
             speedPicker
+            silenceTrimPicker
             introSkipPicker
         } header: {
             Text("Playback")
@@ -439,6 +449,15 @@ struct PodcastSettingsView: View {
         )
     }
 
+    private var silenceTrimPicker: some View {
+        AdjustableOptionPicker(
+            "Trim silence",
+            options: silenceTrimOptions,
+            selection: silenceTrimOverrideBinding,
+            hint: "Controls silence trimming for this podcast. Flick up or down to change."
+        )
+    }
+
     private var queueAgeLimitPicker: some View {
         AdjustableOptionPicker(
             "Remove from queue after",
@@ -500,6 +519,20 @@ struct PodcastSettingsView: View {
             set: {
                 podcast.introSkipSeconds = $0
                 persistPodcastProjectionChange()
+            }
+        )
+    }
+
+    private var silenceTrimOverrideBinding: Binding<Bool?> {
+        Binding(
+            get: { podcast.trimSilenceOverride },
+            set: {
+                podcast.trimSilenceOverride = $0
+                persistPodcastProjectionChange()
+                NotificationCenter.default.post(
+                    name: .earshotSkipSilenceSettingDidChange,
+                    object: podcast.feedURL
+                )
             }
         )
     }

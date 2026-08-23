@@ -65,6 +65,12 @@ final class PlayerService {
         currentVolumeBoostOverride ?? settings?.volumeBoost() ?? SettingsDefault.volumeBoost
     }
 
+    var effectiveSilenceTrimming: Bool {
+        currentEpisode?.podcast?.trimSilenceOverride
+            ?? settings?.bool(SettingsKey.skipSilenceEnabled, default: SettingsDefault.skipSilenceEnabled)
+            ?? SettingsDefault.skipSilenceEnabled
+    }
+
     /// Set true when a user-initiated "Play now" should also open the full player
     /// screen (#562), gated on the `openPlayerOnPlay` setting. RootView — the
     /// single instance above all five inset mini bars — binds a sheet to this and
@@ -145,7 +151,10 @@ final class PlayerService {
     /// CloudKit applies newer projections through another SwiftData context.
     @ObservationIgnored private var cloudProjectionObserver: NSObjectProtocol?
     @ObservationIgnored private var volumeBoostSettingObserver: NSObjectProtocol?
+    @ObservationIgnored private var skipSilenceSettingObserver: NSObjectProtocol?
     @ObservationIgnored private var audioProcessingGeneration = 0
+    @ObservationIgnored private var currentAudioProcessingMetrics: AudioProcessingMetrics?
+    @ObservationIgnored private var silenceTrimmedSecondsThisSession = 0.0
     /// One-shot flag for the deleted-instance guard log (#574) so a tick storm
     /// against a deleted episode doesn't spam the log. Reset on episode load.
     @ObservationIgnored private var didLogDeletedEpisodeGuard = false
@@ -300,6 +309,7 @@ final class PlayerService {
         observeQueueChanges()
         observeStallRecovery()
         observeVolumeBoostSetting()
+        observeSkipSilenceSetting()
         sleepTimer.onExpired = { [weak self] in self?.handleSleepTimerExpired() }
     }
 
@@ -425,7 +435,7 @@ final class PlayerService {
         guard let episode = currentEpisode, let context, !currentEpisodeIsTransient else { return }
         LocalStateStore.setVolumeBoost(level, on: episode, in: context)
         currentVolumeBoostOverride = level
-        if let item = player.currentItem { applyVolumeBoost(to: item) }
+        if let item = player.currentItem { applyAudioProcessing(to: item) }
     }
 
     /// True once a finite, positive duration is known for the loaded item. The
@@ -704,7 +714,7 @@ final class PlayerService {
         player.pause()
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
-        applyVolumeBoost(to: item)
+        applyAudioProcessing(to: item)
 
         // Always honor saved progress, including the final five percent. Ads or
         // credits near the end remain seekable until playback actually finishes.
@@ -824,7 +834,7 @@ final class PlayerService {
         currentMediaResolutionComplete = url.scheme?.lowercased() != "http"
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
-        applyVolumeBoost(to: item)
+        applyAudioProcessing(to: item)
 
         let resume = PlaybackLogic.playbackStartPosition(
             position: resumePosition(for: episode),
@@ -915,7 +925,7 @@ final class PlayerService {
         let item = makePlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
-        applyVolumeBoost(to: item)
+        applyAudioProcessing(to: item)
         if currentPositionSeconds > 0 {
             player.seek(to: CMTime(seconds: currentPositionSeconds, preferredTimescale: 1))
         }
@@ -2509,7 +2519,7 @@ final class PlayerService {
         preloadedEpisode = nil
     }
 
-    // MARK: Private — volume boost
+    // MARK: Private — audio processing
 
     private func observeVolumeBoostSetting() {
         volumeBoostSettingObserver = NotificationCenter.default.addObserver(
@@ -2520,40 +2530,74 @@ final class PlayerService {
             Task { @MainActor [weak self] in
                 guard let self, self.currentVolumeBoostOverride == nil,
                       let item = self.player.currentItem else { return }
-                self.applyVolumeBoost(to: item)
+                self.applyAudioProcessing(to: item)
+            }
+        }
+    }
+
+    private func observeSkipSilenceSetting() {
+        skipSilenceSettingObserver = NotificationCenter.default.addObserver(
+            forName: .earshotSkipSilenceSettingDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let changedFeedURL = notification.object as? String
+            Task { @MainActor [weak self] in
+                guard let self, let item = self.player.currentItem else { return }
+                if let feedURL = changedFeedURL,
+                   feedURL != self.currentEpisode?.podcast?.feedURL { return }
+                if changedFeedURL == nil,
+                   self.currentEpisode?.podcast?.trimSilenceOverride != nil { return }
+                self.applyAudioProcessing(to: item)
             }
         }
     }
 
     /// Replaces the item's immutable tap whenever the resolved level changes.
     /// Unsupported streams keep playing through AVPlayer's untouched baseline.
-    private func applyVolumeBoost(to item: AVPlayerItem) {
+    private func applyAudioProcessing(to item: AVPlayerItem) {
         audioProcessingGeneration &+= 1
         let generation = audioProcessingGeneration
         let level = effectiveVolumeBoost
-        guard level != .off else {
+        let trimsSilence = effectiveSilenceTrimming
+        collectAudioProcessingMetrics()
+        guard level != .off || trimsSilence else {
+            currentAudioProcessingMetrics = nil
             item.audioMix = nil
             return
         }
+        let metrics = trimsSilence ? AudioProcessingMetrics() : nil
+        let configuration = AudioProcessingConfiguration(
+            gainLimiter: level.processingConfiguration,
+            silenceTrimming: trimsSilence ? SilenceDetectionConfiguration() : nil
+        )
         Task { @MainActor [weak self, weak item] in
             guard let self, let item else { return }
             do {
                 let mix = try await AudioProcessingTapFactory.makeFileAudioMix(
                     asset: item.asset,
-                    configuration: level.processingConfiguration
+                    configuration: configuration,
+                    metrics: metrics
                 )
                 guard self.audioProcessingGeneration == generation,
                       self.player.currentItem === item else { return }
+                self.currentAudioProcessingMetrics = metrics
                 item.audioMix = mix
             } catch {
                 guard self.audioProcessingGeneration == generation,
                       self.player.currentItem === item else { return }
+                self.currentAudioProcessingMetrics = nil
                 item.audioMix = nil
                 AppLog.player.notice(
-                    "Volume boost unavailable for this media; using baseline playback: \(error.localizedDescription, privacy: .public)"
+                    "Audio processing unavailable for this media; using baseline playback: \(error.localizedDescription, privacy: .public)"
                 )
             }
         }
+    }
+
+    private func collectAudioProcessingMetrics() {
+        guard let metrics = currentAudioProcessingMetrics else { return }
+        silenceTrimmedSecondsThisSession += metrics.consumeDiscardedSeconds()
     }
 
     // MARK: Private — interruptions & route changes (PRD 5.5)
