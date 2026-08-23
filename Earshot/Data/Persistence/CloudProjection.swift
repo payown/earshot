@@ -214,7 +214,7 @@ final class CloudFolderProjection {
     init() {}
 }
 
-struct CompactProjectionSeedCounts: Equatable {
+struct CompactProjectionSeedCounts: Codable, Equatable {
     let podcasts: Int
     let episodeStates: Int
     let queueItems: Int
@@ -380,7 +380,7 @@ final class CloudProjectionCoordinator {
             CloudKitLaunchPolicy.isMirroringEnabled()
         },
         seedMarkerRecorder: @escaping (CompactProjectionSeedMarker) -> Void = {
-            CloudProjectionCoordinator.logSeedMarker($0)
+            CloudProjectionCoordinator.recordSeedMarker($0)
         },
         remotePodcastDeletionDelayNanoseconds: UInt64 = 0
     ) {
@@ -609,14 +609,21 @@ final class CloudProjectionCoordinator {
         return Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
 
-    private static func logSeedMarker(_ marker: CompactProjectionSeedMarker) {
+    private static func recordSeedMarker(_ marker: CompactProjectionSeedMarker) {
+        do {
+            try CompactProjectionSeedMarkerStore().record(marker)
+        } catch {
+            AppLog.data.error(
+                "compact-projection-seed-marker-persist-failed error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
         switch marker {
         case .start(let runID):
-            AppLog.data.info(
+            AppLog.data.notice(
                 "compact-projection-seed-start runID=\(runID, privacy: .public)"
             )
         case .complete(let runID, let duration, let counts):
-            AppLog.data.info(
+            AppLog.data.notice(
                 "compact-projection-seed-complete runID=\(runID, privacy: .public) durationSeconds=\(duration, privacy: .public) podcasts=\(counts.podcasts, privacy: .public) episodeStates=\(counts.episodeStates, privacy: .public) queueItems=\(counts.queueItems, privacy: .public) settings=\(counts.settings, privacy: .public) bookmarks=\(counts.bookmarks, privacy: .public) listeningSessions=\(counts.listeningSessions, privacy: .public) folders=\(counts.folders, privacy: .public)"
             )
         case .failure(let runID, let duration, let error):
