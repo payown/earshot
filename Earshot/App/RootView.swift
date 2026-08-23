@@ -387,7 +387,13 @@ struct RootView: View {
             let count = (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0
             capSettings.introducePodcastCapGatingIfNeeded(currentPodcastCount: count)
             tips.configure(context: modelContext)
+            #if DEBUG
+            if !ScreenshotHarness.isActive {
+                ExpirationService(context: modelContext).runExpiration()
+            }
+            #else
             ExpirationService(context: modelContext).runExpiration()
+            #endif
             try await runtime.activateCloudProjectionIfNeeded(container: modelContext.container)
             StatsRepository(context: modelContext).applyRetention(days: settings.historyRetentionDays)
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)

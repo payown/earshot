@@ -26,6 +26,18 @@ final class EarshotUITests: XCTestCase {
             "The deterministic screenshot fixture should render a Library podcast."
         )
 
+        let inboxTab = app.tabBars.buttons["Inbox"]
+        XCTAssertTrue(inboxTab.exists)
+        inboxTab.tap()
+
+        let seededInboxEpisode = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "Apple's Price Hikes")
+        ).firstMatch
+        XCTAssertTrue(
+            seededInboxEpisode.waitForExistence(timeout: 5),
+            "Screenshot-mode maintenance must not expire deterministic Inbox fixtures."
+        )
+
         let queueTab = app.tabBars.buttons["Queue"]
         XCTAssertTrue(queueTab.exists)
         queueTab.tap()

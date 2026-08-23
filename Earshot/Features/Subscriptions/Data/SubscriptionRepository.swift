@@ -655,7 +655,7 @@ final class SubscriptionRepository {
         trigger: MediaTransportSnapshot.Trigger
     ) {
         do {
-            try MediaTransportDiagnostics.capture(in: context, trigger: trigger)
+            _ = try MediaTransportDiagnostics.capture(in: context, trigger: trigger)
         } catch {
             AppLog.networking.error(
                 "Media transport sample failed: \(error.localizedDescription, privacy: .public) (#709)"
