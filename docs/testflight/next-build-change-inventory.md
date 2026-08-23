@@ -1,9 +1,10 @@
 # Next TestFlight change inventory
 
-Status: shipped as Chapter 71, build 232, to Internal Testing Group and Public
-Testers on 2026-08-23. The exact shipped copy is in `build-232-notes.txt`.
+Status: collecting changes after Chapter 71, build 232, which shipped to the
+Internal Testing Group and Public Testers on 2026-08-23. The exact build 232
+copy is in `build-232-notes.txt`.
 
-The last shipped story is Chapter 70 for build 213. The next TestFlight upload
+The last shipped story is Chapter 71 for build 232. The next TestFlight upload
 must follow the maintenance contract in `docs/kashe.md`:
 
 - assign the chapter to the build that is actually uploaded;
@@ -12,58 +13,44 @@ must follow the maintenance contract in `docs/kashe.md`:
 - use that exact chapter as the TestFlight `--notes` payload;
 - keep the complete chapter at or below 2,500 characters before upload.
 
-## Significant changes since build 213
+## Significant changes since build 232
 
 The next Kashe chapter’s “What changed” and “What to test” sections must account
 for every applicable item below. They may group related behavior, but must not
 fall back to generic “bug fixes and performance improvements” copy.
 
-- Build 214: repeated and near-end seeks no longer bounce backward when a stale
-  seek completion, playback tick, or private-iCloud handoff arrives late.
-- Builds 215–220: stale played Inbox rows are repaired safely; downloaded audio
-  is excluded from backups; store, projection, and media-transport evidence is
-  bounded and telemetry-free; audio-session behavior has direct coverage; and a
-  seeded UI smoke test now covers accessible Library, Inbox, and Queue launch.
-- Build 221: in-place episode search within a podcast composes with heard state,
-  sorting, selection, and Quick Actions.
-- Build 222: in-progress rows show and, when enabled under Accessibility, speak
-  both time remaining and total duration.
-- Build 223: Downloads settings explains that new-episode auto-download count is
-  per podcast, includes new Inbox and Queue episodes, and is not a storage cap.
-- Build 224: transcripts export as timestamped, speaker-aware Markdown from the
-  viewer or an episode action.
-- Build 225: Inbox and Queue provide filter-scoped Download All with an exact
-  confirmation and one final VoiceOver outcome summary.
-- Build 226: a default-off Playback setting can dismiss the full player only
-  after natural completion when no next episode will play.
-- Build 227: Remove from Inbox dismisses an episode without marking it played and
-  synchronizes that decision independently through private iCloud.
-- Build 228: Quick Actions can be removed, restored, and reordered without drag,
-  with stable VoiceOver focus and at least one action kept enabled.
-- Build 229: a default-off Downloads setting sends an on-device notification
-  after an episode finishes downloading and surfaces notification-permission
-  recovery when needed.
-- Build 230: Siri and Shortcuts provide Skip Forward and Skip Back actions. The
-  built-in phrases use Earshot’s configured intervals; a Shortcut can supply a
-  custom interval from 1 second through 10 minutes.
-- Build 231: Download All is capped at 50 eligible episodes per request, active
-  transfers can be cancelled without removing completed files, and Clear All
-  Downloads announces the approximate storage it will free.
-- Build 232: legacy HTTP media is tried over HTTPS first and, only when HTTPS is
-  unavailable, requires a per-podcast approval on this device before playback.
+- Build 233: Podcast Quick Actions can open the existing download-count,
+  queue-age-limit, and playback-speed editors directly, moving VoiceOver focus
+  to the native adjustable control without adding duplicate settings.
+- Build 234: Queue options can save the current episode order as a reusable
+  lineup and apply it later. Applying a lineup preserves other queued episodes,
+  skips unavailable or already-played entries, and announces exact applied and
+  skipped counts.
+- Build 235: Playback adds a VoiceOver-first Volume Boost control with Off,
+  Low, Medium, and High levels. It is available globally and per podcast, keeps
+  the system volume unchanged, and applies live during playback.
+- Build 236: Silence trimming now performs real-time silence compaction instead
+  of exposing an inactive setting. It can be enabled globally or overridden per
+  podcast and applies live without changing an episode's saved position.
+- Build 237: the misleading Voice Enhance switch has been removed. It selected
+  a spoken-audio session mode and mono output but did not enhance speech. Normal
+  stereo playback and the stable time-stretch algorithm remain in use.
+- Build 238: Playback's Settings-row VoiceOver hint now says Volume Boost
+  instead of advertising the removed Voice Enhance control.
+- Maintenance since build 232 also expands the seeded navigation smoke test to
+  adapt to iPad layouts and adds direct coverage for the audio-processing path.
 
 ## Shipping checklist
 
-- [x] Reconcile this inventory with `CHANGELOG.md` and every merge after build
-  230.
-- [x] Choose the real final build number and the next chapter number.
-- [x] Write one coherent Kashe chapter with plain-language “What changed” and
+- [x] Reconcile this inventory with `CHANGELOG.md` and every change after build
+  232.
+- [ ] Choose the real final build number and the next chapter number.
+- [ ] Write one coherent Kashe chapter with plain-language “What changed” and
   “What to test” sections covering the inventory.
-- [x] Append the chapter to `docs/kashe.md`; it introduces no new durable story
+- [ ] Append the chapter to `docs/kashe.md`; note any new durable story
   facts requiring an established-details update.
-- [x] Save the exact same text as `docs/testflight/build-N-notes.txt`.
-- [x] Verify the payload with `wc -m`; the exact build 232 chapter is 2,487
-  characters.
-- [x] Obtain Michael’s explicit TestFlight-upload approval.
-- [x] Upload using the checked-in notes file and verify App Store Connect shows
+- [ ] Save the exact same text as `docs/testflight/build-N-notes.txt`.
+- [ ] Verify the payload is at most 2,500 characters with `wc -m`.
+- [ ] Obtain Michael’s explicit TestFlight-upload approval.
+- [ ] Upload using the checked-in notes file and verify App Store Connect shows
   the same chapter.

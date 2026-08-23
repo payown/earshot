@@ -53,7 +53,7 @@ struct SettingsScreen: View {
                 } label: {
                     Label("Playback", systemImage: "play.circle")
                 }
-                .accessibilityHint("Speed, skip intervals, voice enhance, chapters, auto-advance, and queue grouping")
+                .accessibilityHint("Speed, skip intervals, volume boost, chapters, auto-advance, and queue grouping")
 
                 NavigationLink {
                     InboxSettingsView()
