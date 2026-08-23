@@ -224,7 +224,16 @@ final class InboxRepository {
                 DownloadCleanup.removeDownloadFileAndState(episode, in: context)
             }
         }
-        save()
+        save(changedEpisodes: episodes, inboxDismissedChangedExplicitly: true)
+    }
+
+    /// Removes one episode from Inbox without changing played state. This is an
+    /// explicit user-authored dismissal, so it receives its own projection clock
+    /// and remains independent from played-state synchronization (#824).
+    func dismiss(_ episode: Episode) {
+        guard !episode.inboxDismissed else { return }
+        episode.inboxDismissed = true
+        save(changedEpisodes: [episode], inboxDismissedChangedExplicitly: true)
     }
 
     /// Marks `episode` played and dismisses it from the inbox durably (#546).
@@ -237,7 +246,11 @@ final class InboxRepository {
         episode.inboxDismissed = true
         // Auto-delete the download once played, when the user opted in (#downloads).
         DownloadCleanup.removeDownloadAfterPlayedIfEnabled(episode, in: context)
-        save(changedEpisodes: [episode])
+        save(
+            changedEpisodes: [episode],
+            playedChangedExplicitly: true,
+            inboxDismissedChangedExplicitly: true
+        )
     }
 
     // MARK: Internals
@@ -272,7 +285,11 @@ final class InboxRepository {
         return InboxLogic.isExcluded(inboxExcluded: podcast.inboxExcluded, inboxIncluded: podcast.inboxIncluded)
     }
 
-    private func save(changedEpisodes: [Episode] = []) {
+    private func save(
+        changedEpisodes: [Episode] = [],
+        playedChangedExplicitly: Bool = false,
+        inboxDismissedChangedExplicitly: Bool = false
+    ) {
         guard context.hasChanges else { return }
         do {
             try context.save()
@@ -281,7 +298,8 @@ final class InboxRepository {
             NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
             postEpisodeUserStateChanges(
                 changedEpisodes,
-                playedChangedExplicitly: true
+                playedChangedExplicitly: playedChangedExplicitly,
+                inboxDismissedChangedExplicitly: inboxDismissedChangedExplicitly
             )
         } catch {
             AppLog.data.error("Inbox save failed: \(error.localizedDescription, privacy: .public)")

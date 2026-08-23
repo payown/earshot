@@ -90,6 +90,45 @@ final class QuickActionBuildersTests: XCTestCase {
         )
     }
 
+    func testRemoveFromInboxIsAvailableOnlyOnInboxSurface() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+
+        XCTAssertEqual(
+            availableEpisodeActions(episode: episode, order: [.removeFromInbox, .share]),
+            [.share]
+        )
+        XCTAssertEqual(
+            availableEpisodeActions(
+                episode: episode,
+                order: [.removeFromInbox, .share],
+                supportsRemoveFromInbox: true
+            ),
+            [.removeFromInbox, .share]
+        )
+    }
+
+    func testRemoveFromInboxActionInvokesCallback() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        var removed = false
+        let items = buildEpisodeActions(
+            episode: episode,
+            order: [.removeFromInbox],
+            player: PlayerService(),
+            downloads: DownloadManager(),
+            context: ctx,
+            onShowNotes: {},
+            onShare: {},
+            onBookmarks: {},
+            onRemoveFromInbox: { removed = true }
+        )
+
+        XCTAssertEqual(items.map(\.label), ["Remove from Inbox"])
+        items.first?.run()
+        XCTAssertTrue(removed)
+    }
+
     func testAvailableEpisodeActionsRequireAudioAndPodcast() {
         let ctx = TestStore.freshContext()
         let episode = Episode(guid: "detached", title: "Detached", audioURL: "")

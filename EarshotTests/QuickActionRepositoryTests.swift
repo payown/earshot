@@ -58,7 +58,7 @@ final class QuickActionRepositoryTests: XCTestCase {
 
         XCTAssertEqual(
             QuickActionRepository(context: ctx).episodeOrder(),
-            moved + [.exportTranscript, .exportAudio, .addToFolder, .moveToFolder]
+            moved + [.removeFromInbox, .exportTranscript, .exportAudio, .addToFolder, .moveToFolder]
         )
     }
 
