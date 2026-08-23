@@ -3,8 +3,22 @@ import SwiftData
 
 private struct QueueDownloadAllRequest: Identifiable {
     let id = UUID()
+    let candidates: [Episode]
     let episodes: [Episode]
+    let eligibleCount: Int
+    let skippedCount: Int
+    let deferredCount: Int
     let scope: String
+
+    init(candidates: [Episode], scope: String) {
+        let plan = ManualDownloadBatchPlan.make(statuses: candidates.map(\.downloadStatus))
+        self.candidates = candidates
+        episodes = plan.selectedIndices.map { candidates[$0] }
+        eligibleCount = plan.eligibleCount
+        skippedCount = plan.skippedCount
+        deferredCount = plan.deferredCount
+        self.scope = scope
+    }
 }
 
 /// The play queue. Flat, grouped by podcast, or grouped by folder, with drag reorder for sighted
@@ -75,7 +89,11 @@ struct QueueScreen: View {
             .onSubmit(of: .search) { announceMatches() }
             .toolbar { toolbar }
             .confirmationDialog(
-                downloadAllRequest.map { "Download \($0.episodes.count) episodes?" }
+                downloadAllRequest.map {
+                    $0.deferredCount > 0
+                        ? "Download the next \($0.episodes.count) episodes?"
+                        : "Download \($0.episodes.count) episodes?"
+                }
                     ?? "Download episodes?",
                 isPresented: Binding(
                     get: { downloadAllRequest != nil },
@@ -87,11 +105,14 @@ struct QueueScreen: View {
                 Button("Download \(request.episodes.count) episodes") {
                     startDownloadAll(request)
                 }
+                .disabled(request.episodes.isEmpty)
                 Button("Cancel", role: .cancel) { downloadAllRequest = nil }
             } message: { request in
-                Text(
-                    "Downloads every episode in the \(request.scope). Downloaded and active downloads will be skipped."
-                )
+                if request.deferredCount > 0 {
+                    Text("\(request.eligibleCount) episodes in the \(request.scope) are eligible. This starts the next \(request.episodes.count) and leaves \(request.deferredCount) for a later batch. \(request.skippedCount) downloaded or active episodes are skipped.")
+                } else {
+                    Text("Downloads all \(request.eligibleCount) eligible episodes in the \(request.scope). \(request.skippedCount) downloaded or active episodes are skipped.")
+                }
             }
             .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
             .onAppear { requestLaunchHeadingFocus() }
@@ -393,7 +414,7 @@ struct QueueScreen: View {
                             episodes, query: searchText
                         )
                         downloadAllRequest = QueueDownloadAllRequest(
-                            episodes: filteredEpisodes,
+                            candidates: filteredEpisodes,
                             scope: searchActive ? "current filtered Queue" : "Queue"
                         )
                     } label: {
@@ -424,7 +445,7 @@ struct QueueScreen: View {
         downloadAllRequest = nil
         isEnrollingDownloads = true
         Task { @MainActor in
-            let report = await downloads.downloadAll(request.episodes)
+            let report = await downloads.downloadAll(request.candidates)
             isEnrollingDownloads = false
             Announcer.announce(report.announcement, assertive: true)
         }

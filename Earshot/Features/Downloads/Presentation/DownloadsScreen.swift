@@ -54,6 +54,7 @@ struct DownloadsScreen: View {
     @State private var searchText = ""
     // Drives the "Clear all downloads" destructive confirmation from the toolbar.
     @State private var showClearAllConfirm = false
+    @State private var storageSummary = DownloadStorageSummary.empty
     // Global played/unheard filter for the Downloads list (#641). Loaded on
     // appear (default ``EpisodeListFilter/all`` — show everything) and persisted
     // globally on change. Applies only to the Downloaded section; Recently
@@ -248,7 +249,10 @@ struct DownloadsScreen: View {
             // destructive confirmation below.
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    showClearAllConfirm = true
+                    Task {
+                        storageSummary = await downloads.storageSummary()
+                        showClearAllConfirm = true
+                    }
                 } label: {
                     Label("Clear all downloads", systemImage: "trash")
                 }
@@ -258,6 +262,9 @@ struct DownloadsScreen: View {
             }
         }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
+        .task(id: downloadCandidates.count) {
+            storageSummary = await downloads.storageSummary()
+        }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
         .folderPicker($folderPickRequest)
@@ -290,7 +297,7 @@ struct DownloadsScreen: View {
             Button("Clear all downloads", role: .destructive) { clearAllDownloads() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes ^[\(downloaded.count) downloaded episode](inflect: true) from this device. This can't be undone.")
+            Text(DownloadStorageText.clearConfirmation(summary: storageSummary))
         }
     }
 
@@ -356,6 +363,7 @@ struct DownloadsScreen: View {
     private func clearAllDownloads() {
         Task {
             let removed = await downloads.clearAllDownloads()
+            storageSummary = await downloads.storageSummary()
             Announcer.announce(removed == 1 ? "Cleared 1 download" : "Cleared \(removed) downloads")
         }
     }

@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 import UIKit
 import UserNotifications
 
@@ -8,15 +7,15 @@ import UserNotifications
 struct DownloadsSettingsView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(DownloadManager.self) private var downloads
-    @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
 
-    // Live count of downloaded episodes, refreshed on appear and after a clear.
-    // A bounded SQL COUNT over `downloadPath != nil` (no object materialization),
-    // so it stays cheap even on a large library (performance.md).
-    @State private var downloadCount = 0
+    // Compact count/size/activity snapshot. File traversal happens off-main in
+    // DownloadManager so opening Settings stays responsive with large libraries.
+    @State private var storageSummary = DownloadStorageSummary.empty
     @State private var showClearAllConfirm = false
+    @State private var showCancelActiveConfirm = false
     @State private var isClearing = false
+    @State private var isCancelling = false
     @State private var authRequestToken = 0
     @State private var authorizationStatus: UNAuthorizationStatus?
 
@@ -102,26 +101,49 @@ struct DownloadsSettingsView: View {
 
             Section {
                 Button(role: .destructive) {
+                    showCancelActiveConfirm = true
+                } label: {
+                    Text("Cancel active downloads")
+                }
+                .disabled(storageSummary.activeCount == 0 || isCancelling || isClearing)
+                .accessibilityHint(
+                    storageSummary.activeCount == 0
+                        ? "No active downloads to cancel"
+                        : "Stops \(storageSummary.activeCount) active downloads and keeps completed downloads"
+                )
+
+                Button(role: .destructive) {
                     showClearAllConfirm = true
                 } label: {
                     Text("Clear all downloads")
                 }
-                .disabled(downloadCount == 0 || isClearing)
+                .disabled(
+                    (storageSummary.downloadedCount == 0 && storageSummary.activeCount == 0)
+                        || isClearing || isCancelling
+                )
                 .accessibilityHint(
-                    downloadCount == 0
+                    storageSummary.downloadedCount == 0 && storageSummary.activeCount == 0
                         ? "No downloads to remove"
-                        : "Removes every downloaded episode from this device"
+                        : "Removes every downloaded episode and cancels every active download"
                 )
             } footer: {
-                Text(
-                    downloadCount == 0
-                        ? "You have no downloaded episodes."
-                        : "Frees storage by removing ^[\(downloadCount) downloaded episode](inflect: true) from this device. This can't be undone."
-                )
+                Text(DownloadStorageText.storageFooter(summary: storageSummary))
             }
         }
         .navigationTitle("Downloads")
-        .task { await refreshDownloadCount() }
+        .task { await refreshStorageSummary() }
+        .confirmationDialog(
+            "Cancel \(storageSummary.activeCount) active downloads?",
+            isPresented: $showCancelActiveConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Cancel \(storageSummary.activeCount) downloads", role: .destructive) {
+                cancelActiveDownloads()
+            }
+            Button("Keep downloading", role: .cancel) {}
+        } message: {
+            Text(DownloadStorageText.cancelConfirmation(activeCount: storageSummary.activeCount))
+        }
         .confirmationDialog(
             "Clear all downloads?",
             isPresented: $showClearAllConfirm,
@@ -130,22 +152,33 @@ struct DownloadsSettingsView: View {
             Button("Clear all downloads", role: .destructive) { clearAllDownloads() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes ^[\(downloadCount) downloaded episode](inflect: true) from this device. This can't be undone.")
+            Text(DownloadStorageText.clearConfirmation(summary: storageSummary))
         }
     }
 
-    /// Recomputes the downloaded-episode count with a bounded SQL COUNT — no
-    /// object materialization, so it's safe on a large library.
-    private func refreshDownloadCount() async {
-        let descriptor = FetchDescriptor<LocalEpisodeState>(predicate: DownloadListQuery.hasPath)
-        downloadCount = (try? context.fetchCount(descriptor)) ?? 0
+    private func refreshStorageSummary() async {
+        storageSummary = await downloads.storageSummary()
+    }
+
+    private func cancelActiveDownloads() {
+        isCancelling = true
+        Task {
+            let cancelled = await downloads.cancelActiveDownloads()
+            await refreshStorageSummary()
+            isCancelling = false
+            Announcer.announce(
+                cancelled == 1
+                    ? "Cancelled 1 active download. Completed downloads were kept."
+                    : "Cancelled \(cancelled) active downloads. Completed downloads were kept."
+            )
+        }
     }
 
     private func clearAllDownloads() {
         isClearing = true
         Task {
             let removed = await downloads.clearAllDownloads()
-            await refreshDownloadCount()
+            await refreshStorageSummary()
             isClearing = false
             Announcer.announce(removed == 1 ? "Cleared 1 download" : "Cleared \(removed) downloads")
         }
