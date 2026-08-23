@@ -53,32 +53,6 @@ final class AirPlayTests: XCTestCase {
         XCTAssertFalse(productionOptions.isEmpty)
     }
 
-    // MARK: – AudioEnhancementLogic regression guard (Acceptance criterion: #370-2)
-    //
-    // The session category call now includes options, but the mode/channel
-    // mappings from AudioEnhancementLogic must be unchanged.
-
-    /// Voice enhance ON still maps to .spokenAudio mode (regression guard).
-    func test_audioEnhancement_voiceEnhanceOn_modeUnchangedAfterAirPlayChange() {
-        // Acceptance criterion: AirPlay options must not alter voice-enhance behaviour.
-        XCTAssertEqual(AudioEnhancementLogic.mode(voiceEnhanceEnabled: true), .spokenAudio)
-    }
-
-    /// Voice enhance OFF still maps to .default mode (regression guard).
-    func test_audioEnhancement_voiceEnhanceOff_modeUnchangedAfterAirPlayChange() {
-        XCTAssertEqual(AudioEnhancementLogic.mode(voiceEnhanceEnabled: false), .default)
-    }
-
-    /// Voice enhance ON still requests mono output (regression guard).
-    func test_audioEnhancement_voiceEnhanceOn_channelsUnchangedAfterAirPlayChange() {
-        XCTAssertEqual(AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: true), 1)
-    }
-
-    /// Voice enhance OFF still requests stereo output (regression guard).
-    func test_audioEnhancement_voiceEnhanceOff_channelsUnchangedAfterAirPlayChange() {
-        XCTAssertEqual(AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: false), 2)
-    }
-
     // MARK: – RoutePickerView type existence (Acceptance criterion: #370-3)
 
     /// `RoutePickerView` is defined and can be referenced at the module level.

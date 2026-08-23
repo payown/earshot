@@ -62,7 +62,6 @@ struct PlaybackSettingsView: View {
                     hint: "Flick up for more boost, down for less or off"
                 )
                 Toggle("Trim silence", isOn: $settings.skipSilenceEnabled)
-                Toggle("Voice enhance", isOn: $settings.voiceEnhanceEnabled)
 
                 // The footer below explains this toggle; a matching hint would make
                 // VoiceOver read the same sentence twice (#515).

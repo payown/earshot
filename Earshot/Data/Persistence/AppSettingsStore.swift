@@ -26,6 +26,9 @@ enum SettingsKey {
     /// Device-local default for compacting sustained silence during playback.
     /// Individual podcasts can inherit, enable, or disable this preference.
     static let skipSilenceEnabled = "skip_silence_enabled"
+    // Retained for persisted-data compatibility. The former "Voice enhance"
+    // control only forced mono and changed prompt interruption behavior; it did
+    // not enhance speech, so no current code reads or writes this key.
     static let voiceEnhanceEnabled = "voice_enhance_enabled"
     static let globalSpeed = "global_speed"
     /// Device-local default gain. Per-episode overrides are also device-local.

@@ -363,12 +363,9 @@ struct RootView: View {
                 .interactiveDismissDisabled(true)
                 .presentationDetents([.medium])
         }
-        // Re-apply audio settings mid-playback when they change (#352).
+        // Re-apply playback speed immediately when its setting changes.
         .onChange(of: settings.globalSpeed) { _, _ in
             player.reapplyRate()
-        }
-        .onChange(of: settings.voiceEnhanceEnabled) { _, _ in
-            player.applyAudioEnhancement()
         }
         // Keep the lock-screen / Control Center skip buttons in sync with the
         // skip-interval settings (#... review P1-5). Set once at launch, then

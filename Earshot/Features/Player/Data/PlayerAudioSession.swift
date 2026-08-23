@@ -1,8 +1,8 @@
 import AVFoundation
 
 /// Injectable boundary around the audio-session calls PlayerService owns.
-/// Keeping the system object behind this narrow protocol makes routing and
-/// voice-enhancement configuration testable without activating simulator audio.
+/// Keeping the system object behind this narrow protocol makes routing
+/// configuration testable without activating simulator audio.
 @MainActor
 protocol PlayerAudioSession: AnyObject {
     var notificationObject: AnyObject { get }
