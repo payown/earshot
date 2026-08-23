@@ -180,6 +180,23 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testSyncDisabledStartCreatesNoSeedMarker() throws {
+        let app = try makeApplicationContainer()
+        let projection = try makeProjectionContainer()
+        var markers: [CompactProjectionSeedMarker] = []
+        let coordinator = CloudProjectionCoordinator(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            seedInstrumentationEnabled: { false },
+            seedMarkerRecorder: { markers.append($0) }
+        )
+
+        try coordinator.start()
+
+        XCTAssertTrue(markers.isEmpty)
+    }
+
     func testStartObservesLocalChangesAndStopFullyDetaches() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
