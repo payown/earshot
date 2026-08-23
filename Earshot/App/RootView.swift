@@ -1,6 +1,20 @@
 import Combine
 import SwiftUI
 import SwiftData
+
+private struct PlayerCompletionDismissal: ViewModifier {
+    let player: PlayerService
+    let settings: SettingsStore
+
+    func body(content: Content) -> some View {
+        content.onChange(of: player.completedPlaybackStopID) { _, completionID in
+            guard completionID != nil,
+                  settings.dismissPlayerWhenPlaybackEnds,
+                  player.pendingFullPlayerPresentation else { return }
+            player.pendingFullPlayerPresentation = false
+        }
+    }
+}
 import UIKit
 
 /// Owns the Inbox badge count separately from RootView so changing playback
@@ -290,6 +304,7 @@ struct RootView: View {
         )) {
             NowPlayingScreen()
         }
+        .modifier(PlayerCompletionDismissal(player: player, settings: settings))
         .sheet(isPresented: $showOPMLPaywall, onDismiss: {
             guard resumeImportAfterPaywall else { return }
             resumeImportAfterPaywall = false

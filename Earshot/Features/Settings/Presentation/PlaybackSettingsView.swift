@@ -83,6 +83,15 @@ struct PlaybackSettingsView: View {
                 Text("When on, playing an episode opens the full player screen. When off, it plays in the background — tap the mini player to open it.")
             }
 
+            Section {
+                Toggle(
+                    "Dismiss the player when playback ends",
+                    isOn: $settings.dismissPlayerWhenPlaybackEnds
+                )
+            } footer: {
+                Text("Closes the full player after an episode finishes and playback stops. The player stays open when the next queued episode starts.")
+            }
+
             Section("Queue") {
                 Picker("Group queue", selection: $settings.queueGrouping) {
                     ForEach(QueueGrouping.allCases) { mode in

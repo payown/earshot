@@ -61,6 +61,9 @@ enum SettingsKey {
     // Whether playing an episode (the "Play now" default row action) also opens
     // the full player screen. Default true (#562).
     static let openPlayerOnPlay = "open_player_on_play"
+    // Whether the full player closes after natural completion when playback has
+    // no next episode to advance to. Default off (#718).
+    static let dismissPlayerWhenPlaybackEnds = "dismiss_player_when_playback_ends"
     // Auto-advance boundary gates (#446). Both default true (existing behavior).
     // continueAfterEpisode off → stop at every episode boundary.
     // continueAfterGroupEnds off → stop when the next queue item is a different
@@ -173,6 +176,7 @@ enum AppSettingScope {
         SettingsKey.skipBackSeconds, SettingsKey.chapterNavButtonsVisible,
         SettingsKey.inboxOptInOnly, SettingsKey.groupQueueEpisodes,
         SettingsKey.showEpisodeNumbers, SettingsKey.openPlayerOnPlay,
+        SettingsKey.dismissPlayerWhenPlaybackEnds,
         SettingsKey.continueAfterEpisode, SettingsKey.continueAfterGroupEnds,
         SettingsKey.defaultLaunchScreen, SettingsKey.librarySortOrder,
         SettingsKey.episodeSortOrder, SettingsKey.statsStreaksEnabled,
@@ -225,6 +229,9 @@ enum SettingsDefault {
     /// Playing an episode opens the full player by default (#562); users who
     /// prefer to keep browsing can turn it off and use the mini player.
     static let openPlayerOnPlay = true
+    /// Keep the full player open unless the listener explicitly opts into
+    /// dismissal after a natural completion that stops playback (#718).
+    static let dismissPlayerWhenPlaybackEnds = false
     // Auto-advance defaults true: preserves today's unconditional auto-advance
     // until the user opts to stop at a boundary (#446).
     static let continueAfterEpisode = true
