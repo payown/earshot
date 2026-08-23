@@ -12,10 +12,8 @@ import AVFoundation
 ///  2. `NowPlayingScreen` embeds `RoutePickerView`, a `UIViewRepresentable` wrapping
 ///     `AVRoutePickerView`, so users can change output from inside the player.
 ///
-/// `AVAudioSession` and `AVRoutePickerView` are live system objects and cannot be
-/// mocked in unit tests. We therefore test the *values* that would be passed to
-/// those APIs rather than calling the APIs themselves. This matches the pattern
-/// used in `AudioEnhancementLogicTests` for the same service.
+/// `PlayerAudioSessionTests` verifies the values sent through the injected
+/// session boundary. These tests retain small pure-value and route-picker guards.
 final class AirPlayTests: XCTestCase {
 
     private let productionOptions: AVAudioSession.CategoryOptions = [
