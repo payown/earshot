@@ -1,13 +1,14 @@
 # Earshot build 215 and backlog audit
 
-> Generated 2026-08-22 after merging builds 215 and 216 and reviewing every open issue against current `main`.
+> Generated 2026-08-22 and finalized after merging builds 215 through 219 and reviewing every open issue against current `main`.
 
 ## Outcome
 
-Build 215 is merged, fully tested, and confirmed on Michael's iPhone. Build 216
-then closed the highest-priority autonomous follow-up and supplied physical
-evidence for another previously implemented bug. Ten stale, completed, or newly
-verified issues are closed in this sweep. Twenty-six applicable issues remain,
+Build 215 is merged, fully tested, and confirmed on Michael's iPhone. Builds 216
+through 219 completed the safe autonomous follow-ups: durable projection
+evidence, cleartext-media diagnostics, an injectable audio-session boundary,
+and the first UI integration smoke test. Eleven stale, completed, or newly
+verified issues are closed in this sweep. Twenty-five applicable issues remain,
 with explicit priorities and autonomy/sign-off dispositions.
 
 ## Build 215 delivery
@@ -33,6 +34,16 @@ integrity; the durable evidence is in
 `docs/device-test-artifacts/2026-08-22-build-216-projection-evidence.md`. This
 closes [#819](https://github.com/payown/earshot/issues/819).
 
+Build 217 added aggregate-only, bounded cleartext-media diagnostics for
+[#709](https://github.com/payown/earshot/issues/709), without recording URLs,
+hosts, or content and without changing ATS or playback behavior. Build 218 added
+an injectable audio-session boundary with exact category, route-option,
+activation, and channel-policy tests. Build 219 added the first real UI test
+target and CI smoke test, launching a fresh isolated seeded store and verifying
+Library content plus Queue tab navigation. This closes
+[#388](https://github.com/payown/earshot/issues/388). All three pull requests
+passed CI.
+
 ## Closed issue inventory
 
 | Issue | Closure basis |
@@ -47,6 +58,7 @@ closes [#819](https://github.com/payown/earshot/issues/819).
 | [#729](https://github.com/payown/earshot/issues/729) | Completed by build 215 / PR #870. |
 | [#823](https://github.com/payown/earshot/issues/823) | Completed by build 216 / PR #871. |
 | [#819](https://github.com/payown/earshot/issues/819) | Implementation plus physical exact semantic-convergence evidence complete. |
+| [#388](https://github.com/payown/earshot/issues/388) | Audio-session boundary and first real UI launch/navigation smoke test completed in builds 218 and 219. |
 
 ## Remaining priorities
 
@@ -54,7 +66,7 @@ closes [#819](https://github.com/payown/earshot/issues/819).
 
 | Issue | Next action and autonomy |
 | --- | --- |
-| [#709](https://github.com/payown/earshot/issues/709) | Implement telemetry-free cleartext-media measurement autonomously. Warning UX and ATS removal require measured compatibility evidence and explicit review. |
+| [#709](https://github.com/payown/earshot/issues/709) | Telemetry-free aggregate measurement shipped in build 217. Warning UX and ATS removal require collected compatibility evidence and explicit review. |
 | [#711](https://github.com/payown/earshot/issues/711) | Collect build-215+ WAL sizes across refresh/background/relaunch and correlate with Michael's VoiceOver latency measurements before any checkpoint code. |
 | [#696](https://github.com/payown/earshot/issues/696) | Main OOM drivers are fixed; remaining acceptance requires a representative 300+ feed physical import/relaunch run. |
 | [#801](https://github.com/payown/earshot/issues/801) | Requires a controlled physical V6 migration fixture and attributed storage evidence; do not run destructively against Michael's live store. |
@@ -78,7 +90,6 @@ closes [#819](https://github.com/payown/earshot/issues/819).
 | [#550](https://github.com/payown/earshot/issues/550) | Needs product choice between saved template and recurring queue builder. |
 | [#465](https://github.com/payown/earshot/issues/465) | Per-podcast editor Quick Actions remain absent; action/rotor semantics require approval. |
 | [#457](https://github.com/payown/earshot/issues/457) | Search Everywhere remains applicable; scope and VoiceOver result navigation need review. |
-| [#388](https://github.com/payown/earshot/issues/388) | Mock URL and much PlayerService coverage now exist; audio-session seam and first UI/integration smoke test remain autonomous test work. |
 
 ### Low or externally blocked
 
@@ -93,11 +104,10 @@ closes [#819](https://github.com/payown/earshot/issues/819).
 
 ## Recommended execution order
 
-1. Implement #709's non-UI measurement layer.
-2. Extend #388's remaining non-UI test seam and integration coverage.
-3. Collect normal-use evidence for #711 while builds are exercised.
-4. Run controlled device fixtures for #696 and #801 when suitable backup test data/device state is available.
-5. Batch product and VoiceOver-semantic decisions for #824, #834, #835, #719, #718, #717, #552, #465, and #457 before changing their UI.
+1. Collect build-217+ aggregate evidence for #709 and normal-use WAL/VoiceOver evidence for #711.
+2. Run controlled device fixtures for #696 and #801 when suitable backup test data/device state is available.
+3. Batch product and VoiceOver-semantic decisions for #824, #834, #835, #719, #718, #717, #552, #465, and #457 before changing their UI.
+4. Schedule the larger audio, iPad, local-library, and system-integration projects only after their architecture, device, and capability prerequisites are approved.
 
 No issue was closed merely because it was old. Open issues remain where acceptance
 evidence, a product decision, protected-scope approval, hardware, an entitlement,
