@@ -11,11 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Earshot now provides Skip Forward and Skip Back actions to Siri and the Shortcuts app. The built-in Siri phrases use your configured intervals; in Shortcuts, either leave Seconds empty to use that setting or enter any custom interval from 1 second to 10 minutes, then invoke the shortcut by voice. Siri reports clearly when no episode is loaded. (closes #551)
 - Downloads can now notify you when an episode finishes downloading. Turn on “Notify when downloads finish” under Settings > Downloads; it is off by default, uses only an on-device notification, and explains how to enable iOS notification permission if it is unavailable. (closes #453)
+- Quick Actions can now be removed and restored, not only reordered. Settings separates Enabled and Available actions for episodes, podcasts, and Queue rows; Add, Remove, and move controls all work without dragging, preserve VoiceOver focus, and keep at least one default action enabled. (closes #834)
+- Episode rows now have a separate Remove from Inbox action in their Actions rotor and swipe actions. It dismisses the episode without marking it played, and that independent dismissal synchronizes through private iCloud without a newer feed refresh being lost. (closes #824)
+- Playback can optionally close the full player after an episode naturally finishes with no next episode to play. The new default-off setting is under Settings > Playback and does not dismiss for pauses, seeks, interruptions, sleep timers, Stop After This Episode, or queue advancement. (closes #718)
+- Inbox and Queue options now include Download All. Earshot confirms the exact count for the current folder and search filter, skips downloads already saved or active, retries failed episodes, and gives one final VoiceOver summary of eligible, started, skipped, and failed items. (closes #835)
+- Transcripts can now be exported as UTF-8 Markdown from the transcript viewer or an episode’s configurable Actions rotor. Export preserves timestamps and speaker names from WebVTT, SRT, and Podcasting 2.0 JSON, uses a safe Podcast - Episode filename, and shares through the system sheet. (closes #717)
+- Every podcast episode list now has in-place search across titles and full feed descriptions. Search composes with the existing heard filter, sort order, selection mode, and Quick Actions, and VoiceOver announces the count when Search is submitted. (closes #457)
+- Earshot’s required test gate now includes a UI integration smoke test that launches an isolated seeded library and verifies accessible Library, Inbox, and Queue navigation in addition to the native unit suite. (closes #388)
 - Listening Places can write this iPhone's episode positions and played state to a folder in iCloud Drive, Dropbox, or another Files provider using the open `listening-places/1` format shared with QUILL Cast. Earshot 1.2.0 writes outward only; importing another device's changes is deferred. Readable podcast and episode names are optional and off by default.
 - Clearing the Inbox now removes those episodes' downloaded audio when “Delete downloads when done” is enabled, without marking the episodes played.
 
+### Changed
+
+- In-progress episode rows now show and speak both time remaining and total duration when the Time remaining VoiceOver detail is enabled. Untouched, completed, and unknown-duration episodes keep their previous wording. (closes #552)
+- Downloads settings now labels the new-episode auto-download count explicitly as per podcast and explains that it applies after following and refreshing, includes new Inbox and Queue episodes, is not a global storage cap, and is separate from auto-downloading manually queued episodes. (closes #719)
+- Earshot now keeps bounded, aggregate-only on-device evidence about media transport after full refreshes and bulk imports. It records only HTTP, HTTPS, other-scheme, and total counts—never a URL, host, show, episode, or account value—so the remaining ATS media exception can be evaluated without telemetry. (#709)
+- Playback’s audio-session boundary is injectable and covered directly for playback category, AirPlay, both Bluetooth profiles, activation, stereo, and Voice Enhance’s spoken-audio/mono configuration. This is test coverage and architecture hardening; playback policy and spoken UI are unchanged. (closes #388)
+
 ### Fixed
 
+- Repeated skip-forward and skip-back actions no longer bounce to an earlier position when an older seek completion, periodic playback tick, or private-iCloud handoff arrives late. Rapid skips accumulate from the newest requested position, and near-end seeks use the loaded media duration instead of a stale feed duration. (build 214)
+- Played episodes left in Inbox by older builds are repaired in restart-safe background batches. Current natural episode completion remains covered end to end so a played episode cannot silently stay in Inbox. (closes #729)
+- Earshot now excludes both current and legacy podcast download directories from device and iCloud backups, and repairs the exclusion on existing download folders. Downloaded audio remains reproducible and does not consume backup storage. (closes #710)
 - Clear Queue now matches removing episodes individually and keeps deliberately removed episodes from returning to the Inbox.
 - The Library's Published order no longer gets rewound by an older iCloud high-water mark.
 - Automatic and manual Library refreshes share one in-progress state. The manual refresh control now says “Refreshing library” and is disabled during a launch or foreground refresh, preventing overlapping feed writers and duplicate candidates.
