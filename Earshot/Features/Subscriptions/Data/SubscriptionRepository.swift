@@ -494,6 +494,7 @@ final class SubscriptionRepository {
                 )
             )
         }
+        recordMediaTransportSnapshot(trigger: .fullRefresh)
         return SubscriptionRefreshReport(
             notifications: notifications,
             attempted: actorReport.attempted,
@@ -641,12 +642,25 @@ final class SubscriptionRepository {
         if !outcomes.isEmpty {
             NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
         }
+        recordMediaTransportSnapshot(trigger: .bulkImport)
         return BulkSubscribeResult(
             outcomes: outcomes,
             skippedForCap: skippedForCap,
             failed: max(0, allowedURLs.count - results.count),
             cancelled: Task.isCancelled
         )
+    }
+
+    private func recordMediaTransportSnapshot(
+        trigger: MediaTransportSnapshot.Trigger
+    ) {
+        do {
+            try MediaTransportDiagnostics.capture(in: context, trigger: trigger)
+        } catch {
+            AppLog.networking.error(
+                "Media transport sample failed: \(error.localizedDescription, privacy: .public) (#709)"
+            )
+        }
     }
 
     /// Auto-downloads the N most recent episodes (global `autoDownloadCount`; 0 =
