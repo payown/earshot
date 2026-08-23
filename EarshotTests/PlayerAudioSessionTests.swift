@@ -25,7 +25,7 @@ final class PlayerAudioSessionTests: XCTestCase {
         XCTAssertEqual(session.preferredChannelCounts, [2])
     }
 
-    func testVoiceEnhancementUsesSpokenAudioAndMonoWithoutReactivating() throws {
+    func testLegacyVoiceEnhanceValueDoesNotChangeBaselineSession() throws {
         let container = try ModelContainerFactory.makeInMemory()
         AppSettingsStore(context: container.mainContext).setBool(
             true,
@@ -35,16 +35,21 @@ final class PlayerAudioSessionTests: XCTestCase {
         let player = PlayerService(audioSession: session)
         player.configure(context: container.mainContext)
 
-        player.applyAudioEnhancement()
+        player.playPreview(
+            guid: "preview",
+            title: "Preview",
+            audioURL: "https://example.com/preview.mp3",
+            showTitle: "Show"
+        )
 
         XCTAssertEqual(session.category, .playback)
-        XCTAssertEqual(session.mode, .spokenAudio)
+        XCTAssertEqual(session.mode, .default)
         XCTAssertEqual(
             session.options,
             [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
         )
-        XCTAssertEqual(session.activationCount, 0)
-        XCTAssertEqual(session.preferredChannelCounts, [1])
+        XCTAssertEqual(session.activationCount, 1)
+        XCTAssertEqual(session.preferredChannelCounts, [2])
     }
 }
 

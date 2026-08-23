@@ -531,7 +531,7 @@ final class PlayerService {
     /// fix is restored here without changing session routing.
     private func makePlayerItem(url: URL) -> AVPlayerItem {
         let item = AVPlayerItem(url: url)
-        item.audioTimePitchAlgorithm = AudioEnhancementLogic.timePitchAlgorithm
+        item.audioTimePitchAlgorithm = PlaybackAudioLogic.timePitchAlgorithm
         return item
     }
 
@@ -1874,44 +1874,17 @@ final class PlayerService {
 
     // MARK: Private — audio session
 
-    private var voiceEnhanceEnabled: Bool {
-        settings?.bool(SettingsKey.voiceEnhanceEnabled, default: false) ?? false
-    }
-
     private func configureSession() {
-        let enhance = voiceEnhanceEnabled
         do {
             try audioSession.setCategory(
                 .playback,
-                mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance),
+                mode: .default,
                 options: [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
             )
             try audioSession.activate()
-            try audioSession.setPreferredOutputNumberOfChannels(
-                AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: enhance)
-            )
+            try audioSession.setPreferredOutputNumberOfChannels(2)
         } catch {
             AppLog.player.error("Failed to configure audio session: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
-    /// Applies the voice-enhance setting (spoken-audio mode + mono) or restores
-    /// the stereo default. Call on episode load and whenever the toggle changes
-    /// mid-playback (a route change can also reset the channel count). Channel
-    /// count is a hint some Bluetooth routes ignore — expected, not a bug.
-    func applyAudioEnhancement() {
-        let enhance = voiceEnhanceEnabled
-        do {
-            try audioSession.setCategory(
-                .playback,
-                mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance),
-                options: [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
-            )
-            try audioSession.setPreferredOutputNumberOfChannels(
-                AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: enhance)
-            )
-        } catch {
-            AppLog.player.error("Failed to apply audio enhancement: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -2803,22 +2776,8 @@ final class PlayerService {
         if reason == .oldDeviceUnavailable, isPlaying {
             pause()
         }
-        // Only reconfigure the live session when voice-enhance is actually on:
-        // its mono / `.spokenAudio` mode is what a route swap can reset (#374).
-        // For the default enhance-off listener the system's stereo `.playback`
-        // default is already correct, so we must NOT churn the AVAudioSession on
-        // every incidental route change — reconfiguring it mid-render is the
-        // suspected iOS 26.5 fault behind the build-150 crash (#695). Also gate
-        // to the reasons that can actually reset mode/channel count, skipping
-        // noise reasons (wake-from-sleep, no-suitable-route, unknown).
-        guard voiceEnhanceEnabled else { return }
-        switch reason {
-        case .newDeviceAvailable, .oldDeviceUnavailable, .override,
-             .categoryChange, .routeConfigurationChange:
-            applyAudioEnhancement()
-        default:
-            break
-        }
+        // The baseline stereo session needs no route-change reconfiguration.
+        // Avoiding live session churn preserves the build-150 crash fix (#695).
     }
 
     // MARK: Private — streaming stall recovery (#522)

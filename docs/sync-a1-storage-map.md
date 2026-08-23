@@ -164,8 +164,8 @@ persistent identifier, migration marker, or unverified entitlement cache.
 | `onboarding_complete` | **Local** | Per-install lifecycle; a new device must run its own setup and sync disclosure. |
 | `crash_reporting_enabled` | **Local** | Unused compatibility residue; no telemetry ships. |
 | `analytics_enabled` | **Local** | Unused compatibility residue; no telemetry ships. |
-| `skip_silence_enabled` | **Local** | Unused compatibility residue for an unimplemented feature. |
-| `voice_enhance_enabled` | Mirrored | User playback preference. |
+| `skip_silence_enabled` | **Local** | Device-local default because real-time audio processing is evaluated per device. |
+| `voice_enhance_enabled` | Mirrored | Unused compatibility residue for the removed misleading control. |
 | `global_speed` | Mirrored | User playback preference. |
 | `skip_forward_seconds` | Mirrored | User playback preference. |
 | `skip_back_seconds` | Mirrored | User playback preference. |
