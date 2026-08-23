@@ -1,8 +1,8 @@
 import XCTest
 @testable import Earshot
 
-/// Unit tests for the pure "time left" / total length logic shown on episode
-/// rows (#493). No SwiftData, no UI.
+/// Unit tests for the pure remaining-plus-total length logic shown on episode
+/// rows (#493/#552). No SwiftData, no UI.
 final class EpisodeTimeLogicTests: XCTestCase {
 
     // MARK: display decision
@@ -10,7 +10,7 @@ final class EpisodeTimeLogicTests: XCTestCase {
     func testInProgressIsRemaining() {
         // 30 min episode, 10 min in -> 20 min remaining.
         let d = EpisodeTimeLogic.display(positionSeconds: 600, durationSeconds: 1800, isPlayed: false)
-        XCTAssertEqual(d, .remaining(1200))
+        XCTAssertEqual(d, .remaining(1200, total: 1800))
     }
 
     func testNotStartedIsTotal() {
@@ -61,7 +61,7 @@ final class EpisodeTimeLogicTests: XCTestCase {
     func testVisibleRemainingMinutes() {
         XCTAssertEqual(
             EpisodeTimeLogic.visibleText(positionSeconds: 600, durationSeconds: 1800, isPlayed: false),
-            "20 min left"
+            "20 min left · 30 min total"
         )
     }
 
@@ -91,7 +91,7 @@ final class EpisodeTimeLogicTests: XCTestCase {
         // 20 seconds left should read as "1 min left", never "0 min left".
         XCTAssertEqual(
             EpisodeTimeLogic.visibleText(positionSeconds: 1780, durationSeconds: 1800, isPlayed: false),
-            "1 min left"
+            "1 min left · 30 min total"
         )
     }
 
@@ -112,7 +112,7 @@ final class EpisodeTimeLogicTests: XCTestCase {
     func testSpokenRemainingReadsNaturally() {
         XCTAssertEqual(
             EpisodeTimeLogic.spokenText(positionSeconds: 600, durationSeconds: 1800, isPlayed: false),
-            "20 minutes left"
+            "20 minutes left, 30 minutes total"
         )
     }
 

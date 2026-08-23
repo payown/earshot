@@ -207,8 +207,9 @@ struct EpisodeRowContent: View {
         if episode.isDeleted {
             EmptyView()
         } else {
-            // Castro-style "X min left" / total length, computed purely from stored
-            // progress (#493). Cheap arithmetic, safe to evaluate per realization.
+            // In-progress rows show both "X min left" and the total duration
+            // (#552); untouched rows keep the existing compact total length.
+            // Cheap arithmetic, safe to evaluate per realization.
             let timeText = EpisodeTimeLogic.visibleText(
                 positionSeconds: episode.positionSeconds,
                 durationSeconds: episode.durationSeconds,
@@ -259,7 +260,7 @@ struct EpisodeRowContent: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                // Time-left / total length. A played episode keeps just its
+                // Time-left plus total length / untouched total length. A played episode keeps just its
                 // Played treatment (timeText is nil); an unknown-duration
                 // episode shows no time artifact (#493).
                 if let timeText {
