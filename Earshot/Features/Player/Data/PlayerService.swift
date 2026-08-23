@@ -91,6 +91,12 @@ final class PlayerService {
     /// episode or start audio after the user has paused again.
     @ObservationIgnored private var playbackHandoffTask: Task<Void, Never>?
     @ObservationIgnored private var playbackHandoffGeneration = 0
+    /// Generation-protected user seek. AVPlayer seeks asynchronously, so the
+    /// periodic clock must not publish the pre-seek time while the request is in
+    /// flight. Repeated skips replace the pending request while continuing to
+    /// accumulate from the optimistic target shown to the listener.
+    @ObservationIgnored private var userSeekGeneration = 0
+    @ObservationIgnored private var pendingUserSeekTarget: Double?
     /// Session-only exact rate received with a handoff. It takes precedence for
     /// the loaded episode without rewriting the user's global/per-show settings;
     /// any deliberate local speed change clears it.
@@ -359,6 +365,9 @@ final class PlayerService {
     /// including the #574 pre-delete release — routes through here; a mirror left
     /// stale would show "Now Playing" on a cleared or deleted episode's row.
     private func setCurrentEpisode(_ episode: Episode?) {
+        if currentEpisode !== episode {
+            invalidatePendingUserSeek()
+        }
         currentEpisode = episode
         nowPlayingEpisodeID = episode?.persistentModelID
     }
@@ -848,12 +857,47 @@ final class PlayerService {
 
     /// Seeks to an absolute position in seconds, clamped to the item duration.
     func seek(to seconds: Double) {
-        let clamped = max(0, min(seconds, durationSeconds > 0 ? durationSeconds : seconds))
-        player.seek(to: CMTime(seconds: clamped, preferredTimescale: 1))
+        // A deliberate local transport action is newer than any resume-time
+        // CloudKit handoff fetch. Without this cancellation, the late fetch can
+        // seek straight back to the position the listener just left.
+        cancelHandoffOperation()
+        let loadedDuration = player.currentItem?.duration.seconds
+        let authoritativeDuration: Double
+        if let loadedDuration, loadedDuration.isFinite, loadedDuration > 0 {
+            authoritativeDuration = loadedDuration
+        } else {
+            authoritativeDuration = durationSeconds
+        }
+        let clamped = max(
+            0,
+            min(seconds, authoritativeDuration > 0 ? authoritativeDuration : seconds)
+        )
+
+        userSeekGeneration &+= 1
+        let generation = userSeekGeneration
+        pendingUserSeekTarget = clamped
+        player.currentItem?.cancelPendingSeeks()
+
+        // Keep repeated button presses cumulative immediately: a second 30s
+        // skip starts from this optimistic target rather than the old AVPlayer
+        // clock. Periodic ticks are held until AVPlayer confirms the request.
         currentPositionSeconds = clamped
         persistCurrentPosition()
         publishCurrentPlaybackHandoff()
         updateNowPlayingInfo()
+
+        player.seek(
+            to: CMTime(seconds: clamped, preferredTimescale: 600),
+            completionHandler: { [weak self] finished in
+                Task { @MainActor [weak self] in
+                    self?.finishUserSeek(
+                        generation: generation,
+                        requestedTarget: clamped,
+                        finished: finished
+                    )
+                }
+            }
+        )
     }
 
     // MARK: Settings-backed values
@@ -873,6 +917,47 @@ final class PlayerService {
     private func seek(by delta: Double) {
         let target = currentPositionSeconds + delta
         seek(to: target)
+    }
+
+    /// Reconciles the optimistic transport position with AVPlayer's confirmed
+    /// landing point. A completion belonging to an older repeated skip is
+    /// ignored, so it cannot pull the newest request backward.
+    private func finishUserSeek(
+        generation: Int,
+        requestedTarget: Double,
+        finished: Bool
+    ) {
+        guard generation == userSeekGeneration else { return }
+        pendingUserSeekTarget = nil
+
+        let playerPosition = player.currentTime().seconds
+        let settledPosition: Double
+        if playerPosition.isFinite, playerPosition >= 0 {
+            settledPosition = playerPosition
+        } else {
+            settledPosition = requestedTarget
+        }
+
+        // AVPlayer promises the completion callback even for an interrupted
+        // request. On success, use its actual landing point (which may differ
+        // slightly for compressed audio). On interruption, restoring the real
+        // clock is more honest than leaving an unreachable optimistic target.
+        if settledPosition != currentPositionSeconds {
+            currentPositionSeconds = settledPosition
+            persistCurrentPosition()
+            publishCurrentPlaybackHandoff()
+            updateNowPlayingInfo()
+        }
+    }
+
+    /// Invalidates an explicit seek when the loaded episode changes. The
+    /// generation check keeps a late completion from mutating the replacement
+    /// episode's position.
+    private func invalidatePendingUserSeek() {
+        guard pendingUserSeekTarget != nil else { return }
+        userSeekGeneration &+= 1
+        pendingUserSeekTarget = nil
+        player.currentItem?.cancelPendingSeeks()
     }
 
     // MARK: Private — rate
@@ -1620,6 +1705,12 @@ final class PlayerService {
 
     private func handleTick(currentSeconds: Double) {
         guard currentSeconds.isFinite else { return }
+        // AVPlayer can deliver a periodic callback carrying the pre-seek time
+        // while its asynchronous seek is still settling. Publishing that sample
+        // makes the scrubber, VoiceOver value, persistence, and CloudKit handoff
+        // all bounce back. The seek completion performs the authoritative
+        // reconciliation instead.
+        guard pendingUserSeekTarget == nil else { return }
         currentPositionSeconds = currentSeconds
 
         // Belt-and-braces (#574): the loaded episode can be deleted out from
@@ -1632,10 +1723,13 @@ final class PlayerService {
         let episodeWasDeleted = currentEpisode?.isDeleted == true
         if episodeWasDeleted { logDeletedEpisodeGuardOnce("periodic tick") }
 
-        // Keep duration fresh once the item reports it.
-        if durationSeconds <= 0,
-           let itemDuration = player.currentItem?.duration.seconds,
-           itemDuration.isFinite, itemDuration > 0 {
+        // Once AVPlayer has loaded the media, its duration is authoritative.
+        // RSS durations are optional metadata and can be rounded or simply
+        // wrong; retaining a stale feed duration can clamp ordinary skips too
+        // early even when playable audio remains.
+        if let itemDuration = player.currentItem?.duration.seconds,
+           itemDuration.isFinite, itemDuration > 0,
+           abs(durationSeconds - itemDuration) >= 0.5 {
             durationSeconds = itemDuration
             if !episodeWasDeleted {
                 currentEpisode?.durationSeconds = Int(itemDuration)
@@ -2259,6 +2353,7 @@ final class PlayerService {
     /// legitimately be ahead of the coarsely persisted SwiftData row (#736).
     func refreshProjectedPlaybackPosition() {
         guard !currentEpisodeIsTransient,
+              pendingUserSeekTarget == nil,
               let episode = currentEpisode,
               !episode.isDeleted,
               let context else { return }
