@@ -66,8 +66,10 @@ final class QuickActionBuildersTests: XCTestCase {
     func testAvailableEpisodeActionsPreserveOrderAndSurfaceCapabilities() {
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)
+        episode.transcriptURL = "https://x/transcript.vtt"
         let order: [EpisodeAction] = [
-            .share, .unfollow, .exportAudio, .addToFolder, .moveToFolder, .playNow,
+            .share, .unfollow, .exportTranscript, .exportAudio,
+            .addToFolder, .moveToFolder, .playNow,
         ]
 
         XCTAssertEqual(
@@ -80,6 +82,7 @@ final class QuickActionBuildersTests: XCTestCase {
                 order: order,
                 supportsUnfollow: true,
                 supportsExport: true,
+                supportsTranscriptExport: true,
                 supportsAddToFolder: true,
                 supportsMoveToFolder: true
             ),
@@ -95,9 +98,10 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(
             availableEpisodeActions(
                 episode: episode,
-                order: [.exportAudio, .unfollow, .share],
+                order: [.exportTranscript, .exportAudio, .unfollow, .share],
                 supportsUnfollow: true,
-                supportsExport: true
+                supportsExport: true,
+                supportsTranscriptExport: true
             ),
             [.share]
         )
@@ -995,6 +999,32 @@ final class QuickActionBuildersTests: XCTestCase {
     }
 
     // MARK: #689 — Export audio action
+
+    func testExportTranscriptRequiresSourceAndRunner() {
+        let ctx = TestStore.freshContext()
+        let episode = makeEpisode(ctx)
+        episode.transcriptURL = "https://x/transcript.vtt"
+
+        var exported = false
+        let items = buildEpisodeActions(
+            episode: episode, order: [.exportTranscript], player: PlayerService(),
+            downloads: DownloadManager(), context: ctx,
+            onShowNotes: {}, onShare: {}, onBookmarks: {},
+            onExportTranscript: { exported = true }
+        )
+        XCTAssertEqual(items.map(\.label), ["Export transcript"])
+        items.first?.run()
+        XCTAssertTrue(exported)
+
+        episode.transcriptURL = "   "
+        let missing = buildEpisodeActions(
+            episode: episode, order: [.exportTranscript], player: PlayerService(),
+            downloads: DownloadManager(), context: ctx,
+            onShowNotes: {}, onShare: {}, onBookmarks: {},
+            onExportTranscript: {}
+        )
+        XCTAssertTrue(missing.isEmpty)
+    }
 
     func testExportAudioIncludedWhenRunnerProvided() {
         let ctx = TestStore.freshContext()

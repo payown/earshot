@@ -22,6 +22,7 @@ final class TranscriptParserTests: XCTestCase {
         """
         let segments = TranscriptParser.parse(raw, as: .webVTT)
         XCTAssertEqual(segments.map(\.text), ["Hello world", "Second cue"])
+        XCTAssertEqual(segments.map(\.startSeconds), [0, 2])
         XCTAssertNil(segments.first?.speaker)
     }
 
@@ -92,6 +93,7 @@ final class TranscriptParserTests: XCTestCase {
         """
         let segments = TranscriptParser.parse(raw, as: .srt)
         XCTAssertEqual(segments.map(\.text), ["Hello", "World"])
+        XCTAssertEqual(segments.map(\.startSeconds), [1, 5])
     }
 
     func test_srt_colonSpeakerPrefix_extracted() {
@@ -137,8 +139,10 @@ final class TranscriptParserTests: XCTestCase {
         XCTAssertEqual(segments.count, 2)
         XCTAssertEqual(segments[0].speaker, "Alice")
         XCTAssertEqual(segments[0].text, "Hello")
+        XCTAssertEqual(segments[0].startSeconds, 0)
         XCTAssertEqual(segments[1].speaker, "Bob")
         XCTAssertEqual(segments[1].text, "Hi back")
+        XCTAssertEqual(segments[1].startSeconds, 1)
     }
 
     func test_json_textKeyFallback_whenNoBody() {

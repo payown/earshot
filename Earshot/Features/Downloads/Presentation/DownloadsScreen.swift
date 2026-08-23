@@ -40,6 +40,7 @@ struct DownloadsScreen: View {
     // The episode a pending "Export audio" Quick Action targets (#689). Setting
     // it drives the shared `.episodeAudioExport` flow (download-then-share).
     @State private var exportEpisode: Episode?
+    @State private var exportTranscriptEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     // The pending "Add to folder" / "Move to folder" Quick Action target (#756).
     @State private var folderPickRequest: FolderPickRequest?
@@ -261,6 +262,7 @@ struct DownloadsScreen: View {
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
         .folderPicker($folderPickRequest)
         .episodeAudioExport($exportEpisode)
+        .episodeTranscriptExport($exportTranscriptEpisode)
         // Podcast-level destructive confirmation for the row's "Unfollow this
         // podcast" Quick Action (#572). Wording copied from InboxScreen so the
         // flow reads identically everywhere it appears.
@@ -432,6 +434,7 @@ struct DownloadsScreen: View {
             order: quickActions.episodeActions,
             supportsUnfollow: true,
             supportsExport: true,
+            supportsTranscriptExport: true,
             supportsAddToFolder: true,
             supportsMoveToFolder: true
         )
@@ -473,6 +476,7 @@ struct DownloadsScreen: View {
             // Rotor "Export audio" (#689): shares the local file (already
             // downloaded on this screen). Handled by `.episodeAudioExport`.
             onExport: { exportEpisode = episode },
+            onExportTranscript: { exportTranscriptEpisode = episode },
             // Rotor "Add to folder" / "Move to folder" (#756): presents the
             // shared `FolderPickerView` for this single episode.
             onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },

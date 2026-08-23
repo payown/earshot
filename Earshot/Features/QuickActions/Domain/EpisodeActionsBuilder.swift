@@ -32,11 +32,14 @@ func availableEpisodeActions(
     order: [EpisodeAction],
     supportsUnfollow: Bool = false,
     supportsExport: Bool = false,
+    supportsTranscriptExport: Bool = false,
     supportsAddToFolder: Bool = false,
     supportsMoveToFolder: Bool = false
 ) -> [EpisodeAction] {
     order.filter { action in
         switch action {
+        case .exportTranscript:
+            return supportsTranscriptExport && episodeHasTranscript(episode)
         case .exportAudio:
             return supportsExport && !episode.audioURL.isEmpty
         case .addToFolder:
@@ -86,6 +89,7 @@ func buildEpisodeActions(
     onMarkPlayed: ((Bool) -> Void)? = nil,
     onWillQueue: (() -> Void)? = nil,
     onExport: (() -> Void)? = nil,
+    onExportTranscript: (() -> Void)? = nil,
     onAddToFolder: ((Episode) -> Void)? = nil,
     onMoveToFolder: ((Episode) -> Void)? = nil
 ) -> [QuickActionItem] {
@@ -173,6 +177,11 @@ func buildEpisodeActions(
             return QuickActionItem(label: "Share", isDestructive: false) {
                 onShare()
             }
+        case .exportTranscript:
+            guard let onExportTranscript, episodeHasTranscript(episode) else { return nil }
+            return QuickActionItem(label: "Export transcript", isDestructive: false) {
+                onExportTranscript()
+            }
         case .exportAudio:
             // Downloads (if needed) then shares the LOCAL audio file (#689).
             // Omitted (nil) when the surface can't export — the search-preview's
@@ -211,6 +220,11 @@ func buildEpisodeActions(
             }
         }
     }
+}
+
+private func episodeHasTranscript(_ episode: Episode) -> Bool {
+    !(episode.transcriptURL?
+        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
 }
 
 /// Saves the context, logging (not throwing) on failure — Quick Action runners
