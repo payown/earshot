@@ -241,6 +241,37 @@ final class QueueRepository {
         compact(items)
     }
 
+    /// Enqueues any missing episodes, then moves the supplied ordered subset to
+    /// the front while every other queued episode keeps its relative order.
+    /// Used by the reusable morning lineup; duplicates in `episodes` are ignored.
+    func bringToFront(_ episodes: [Episode]) {
+        var items = orderedItems()
+        var itemByEpisodeID: [PersistentIdentifier: QueueItem] = [:]
+        for item in items {
+            if let episodeID = item.episode?.persistentModelID {
+                itemByEpisodeID[episodeID] = item
+            }
+        }
+
+        var frontItemIDs: [PersistentIdentifier] = []
+        var seen = Set<PersistentIdentifier>()
+        for episode in episodes where seen.insert(episode.persistentModelID).inserted {
+            let item: QueueItem
+            if let existing = itemByEpisodeID[episode.persistentModelID] {
+                item = existing
+            } else {
+                item = enqueue(episode)
+                items.append(item)
+                itemByEpisodeID[episode.persistentModelID] = item
+            }
+            frontItemIDs.append(item.persistentModelID)
+        }
+
+        let order = QueueLogic.bringToFront(items.map(\.persistentModelID), frontItemIDs)
+        let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.persistentModelID, $0) })
+        compact(order.compactMap { byID[$0] })
+    }
+
     /// Inserts `episode` so it plays immediately after `current`. If `current`
     /// is in the queue, inserts right after it; otherwise inserts at the front,
     /// so auto-advance still picks it next. Moves an already-queued episode.

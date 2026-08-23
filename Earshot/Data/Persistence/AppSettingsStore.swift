@@ -55,6 +55,9 @@ enum SettingsKey {
     // `"true"`/`"false"` strings are migrated on read by
     // ``AppSettingsStore/queueGrouping()``.
     static let groupQueueEpisodes = "group_queue_episodes"
+    /// JSON-encoded stable episode identities for the reusable Queue lineup.
+    /// Mirrored through private iCloud; applying it is always an explicit action.
+    static let morningLineup = "morning_lineup"
     static let showEpisodeNumbers = "show_episode_numbers"
     static let spokenEpisodePodcastName = "spoken_episode_podcast_name"
     static let spokenEpisodePublishedDate = "spoken_episode_published_date"
@@ -188,6 +191,7 @@ enum AppSettingScope {
         SettingsKey.globalSpeed, SettingsKey.skipForwardSeconds,
         SettingsKey.skipBackSeconds, SettingsKey.chapterNavButtonsVisible,
         SettingsKey.inboxOptInOnly, SettingsKey.groupQueueEpisodes,
+        SettingsKey.morningLineup,
         SettingsKey.showEpisodeNumbers, SettingsKey.openPlayerOnPlay,
         SettingsKey.dismissPlayerWhenPlaybackEnds,
         SettingsKey.continueAfterEpisode, SettingsKey.continueAfterGroupEnds,
