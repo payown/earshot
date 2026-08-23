@@ -158,10 +158,14 @@ final class PlayerService {
     @ObservationIgnored private var likelyToKeepUpObservation: NSKeyValueObservation?
     @ObservationIgnored private var stallObserver: NSObjectProtocol?
 
+    @ObservationIgnored private let audioSession: any PlayerAudioSession
+
     init(
-        playbackHandoff: any PlaybackHandoffClient = PlaybackHandoffClientFactory.make()
+        playbackHandoff: any PlaybackHandoffClient = PlaybackHandoffClientFactory.make(),
+        audioSession: any PlayerAudioSession = AVAudioSession.sharedInstance()
     ) {
         self.playbackHandoff = playbackHandoff
+        self.audioSession = audioSession
     }
 
     /// Generation token for the sleep-timer volume fade (review P1-4). Each fade
@@ -1639,16 +1643,15 @@ final class PlayerService {
     }
 
     private func configureSession() {
-        let session = AVAudioSession.sharedInstance()
         let enhance = voiceEnhanceEnabled
         do {
-            try session.setCategory(
+            try audioSession.setCategory(
                 .playback,
                 mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance),
                 options: [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
             )
-            try session.setActive(true)
-            try session.setPreferredOutputNumberOfChannels(
+            try audioSession.activate()
+            try audioSession.setPreferredOutputNumberOfChannels(
                 AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: enhance)
             )
         } catch {
@@ -1661,15 +1664,14 @@ final class PlayerService {
     /// mid-playback (a route change can also reset the channel count). Channel
     /// count is a hint some Bluetooth routes ignore — expected, not a bug.
     func applyAudioEnhancement() {
-        let session = AVAudioSession.sharedInstance()
         let enhance = voiceEnhanceEnabled
         do {
-            try session.setCategory(
+            try audioSession.setCategory(
                 .playback,
                 mode: AudioEnhancementLogic.mode(voiceEnhanceEnabled: enhance),
                 options: [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
             )
-            try session.setPreferredOutputNumberOfChannels(
+            try audioSession.setPreferredOutputNumberOfChannels(
                 AudioEnhancementLogic.outputChannels(voiceEnhanceEnabled: enhance)
             )
         } catch {
@@ -2276,10 +2278,9 @@ final class PlayerService {
     // MARK: Private — interruptions & route changes (PRD 5.5)
 
     private func observeNotifications() {
-        let session = AVAudioSession.sharedInstance()
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
-            object: session,
+            object: audioSession.notificationObject,
             queue: .main
         ) { [weak self] note in
             let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
@@ -2288,7 +2289,7 @@ final class PlayerService {
         }
         routeChangeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
-            object: session,
+            object: audioSession.notificationObject,
             queue: .main
         ) { [weak self] note in
             let reasonValue = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
