@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Podcast Quick Actions can now open the existing download-count, queue-age-limit, and per-podcast speed editors directly. Each action moves VoiceOver focus to its native adjustable control, remains configurable under Settings > Quick Actions, and adds no new data setting. (closes #465)
+- Queue options can now save the current order as a reusable lineup and apply it later. Applying moves available, unplayed saved episodes to the front in order, preserves every other queued episode, and announces exact applied and skipped counts. Lineups sync through private iCloud and are capped at 100 episodes with an explicit omitted count. (closes #550)
 
 ## [1.2.0] - 2026-08-23
 

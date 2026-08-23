@@ -21,6 +21,33 @@ private struct QueueDownloadAllRequest: Identifiable {
     }
 }
 
+private enum QueueLineupRequest: Identifiable {
+    case save(queueCount: Int, replacing: Int)
+    case apply(savedCount: Int)
+    case clear(savedCount: Int)
+
+    var id: String {
+        switch self {
+        case .save: "save"
+        case .apply: "apply"
+        case .clear: "clear"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case let .save(queueCount, replacing):
+            return replacing > 0
+                ? "Replace the saved lineup with \(min(queueCount, QueueLineupStore.maximumEpisodeCount)) episodes?"
+                : "Save \(min(queueCount, QueueLineupStore.maximumEpisodeCount)) episodes as a lineup?"
+        case let .apply(savedCount):
+            return "Apply the saved \(savedCount)-episode lineup?"
+        case let .clear(savedCount):
+            return "Clear the saved \(savedCount)-episode lineup?"
+        }
+    }
+}
+
 /// The play queue. Flat, grouped by podcast, or grouped by folder, with drag reorder for sighted
 /// users and a full set of VoiceOver custom actions so reordering never depends
 /// on a drag gesture. Flat mode offers Move to top / up / down / to bottom over
@@ -43,12 +70,15 @@ struct QueueScreen: View {
     // queue itself is never touched — rows are hidden from display only.
     @State private var searchText = ""
     @State private var downloadAllRequest: QueueDownloadAllRequest?
+    @State private var lineupRequest: QueueLineupRequest?
+    @State private var savedLineupCount = 0
     @State private var isEnrollingDownloads = false
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusedGroup: QueueGroup.Kind?
     @AccessibilityFocusState private var focusLaunchHeading: Bool
 
     private var repo: QueueRepository { QueueRepository(context: context) }
+    private var lineupStore: QueueLineupStore { QueueLineupStore(context: context) }
     private var episodes: [Episode] { items.compactMap(\.episode) }
 
     /// Whether the search field holds a real (non-whitespace) query. Gates the
@@ -114,8 +144,65 @@ struct QueueScreen: View {
                     Text("Downloads all \(request.eligibleCount) eligible episodes in the \(request.scope). \(request.skippedCount) downloaded or active episodes are skipped.")
                 }
             }
+            .confirmationDialog(
+                lineupRequest?.title ?? "Lineup options",
+                isPresented: Binding(
+                    get: { lineupRequest != nil },
+                    set: { if !$0 { lineupRequest = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: lineupRequest
+            ) { request in
+                switch request {
+                case let .save(queueCount, replacing):
+                    Button(replacing > 0 ? "Replace saved lineup" : "Save lineup") {
+                        let report = lineupStore.save(episodes)
+                        savedLineupCount = report.savedCount
+                        lineupRequest = nil
+                        Announcer.announce(report.announcement, assertive: true)
+                    }
+                    .disabled(queueCount == 0)
+                    Button("Cancel", role: .cancel) { lineupRequest = nil }
+                case .apply:
+                    Button("Apply lineup") {
+                        let report = lineupStore.apply(to: repo)
+                        lineupRequest = nil
+                        Announcer.announce(report.announcement, assertive: true)
+                    }
+                    Button("Cancel", role: .cancel) { lineupRequest = nil }
+                case .clear:
+                    Button("Clear saved lineup", role: .destructive) {
+                        lineupStore.clear()
+                        savedLineupCount = 0
+                        lineupRequest = nil
+                        Announcer.announce("Saved lineup cleared", assertive: true)
+                    }
+                    Button("Cancel", role: .cancel) { lineupRequest = nil }
+                }
+            } message: { request in
+                switch request {
+                case let .save(queueCount, _):
+                    if queueCount > QueueLineupStore.maximumEpisodeCount {
+                        Text("The first \(QueueLineupStore.maximumEpisodeCount) episodes will be saved in their current order. \(queueCount - QueueLineupStore.maximumEpisodeCount) later episodes will be omitted.")
+                    } else {
+                        Text("Saves the current Queue order so you can restore it later.")
+                    }
+                case .apply:
+                    Text("Saved episodes move to the front in order. Other queued episodes stay after them. Unavailable or played episodes are skipped.")
+                case .clear:
+                    Text("Removes the reusable lineup only. Your current Queue is unchanged.")
+                }
+            }
             .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
-            .onAppear { requestLaunchHeadingFocus() }
+            .onAppear {
+                savedLineupCount = lineupStore.savedCount
+                requestLaunchHeadingFocus()
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .earshotCloudKitImportDidFinish)
+            ) { _ in
+                savedLineupCount = lineupStore.savedCount
+            }
             .onChange(of: runtime.launchFocusRequest) { _, _ in
                 requestLaunchHeadingFocus()
             }
@@ -410,6 +497,18 @@ struct QueueScreen: View {
                 }
                 if !episodes.isEmpty {
                     Button {
+                        lineupRequest = .save(
+                            queueCount: episodes.count,
+                            replacing: savedLineupCount
+                        )
+                    } label: {
+                        Label(
+                            savedLineupCount > 0 ? "Replace saved lineup" : "Save as lineup",
+                            systemImage: "bookmark"
+                        )
+                    }
+
+                    Button {
                         let filteredEpisodes = EpisodeSearchFilter.filter(
                             episodes, query: searchText
                         )
@@ -429,6 +528,19 @@ struct QueueScreen: View {
                         Announcer.announce("Queue cleared")
                     } label: {
                         Label("Clear queue", systemImage: "trash")
+                    }
+                }
+                if savedLineupCount > 0 {
+                    Button {
+                        lineupRequest = .apply(savedCount: savedLineupCount)
+                    } label: {
+                        Label("Apply saved lineup", systemImage: "text.badge.checkmark")
+                    }
+
+                    Button(role: .destructive) {
+                        lineupRequest = .clear(savedCount: savedLineupCount)
+                    } label: {
+                        Label("Clear saved lineup", systemImage: "bookmark.slash")
                     }
                 }
             } label: {
