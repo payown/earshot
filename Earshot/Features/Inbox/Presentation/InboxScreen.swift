@@ -1,6 +1,12 @@
 import SwiftUI
 import SwiftData
 
+private struct DownloadAllRequest: Identifiable {
+    let id = UUID()
+    let episodes: [Episode]
+    let scope: String
+}
+
 /// The Inbox: new, untriaged episodes. Each row carries the configured episode
 /// Quick Actions (rotor + default tap). "Clear inbox" dismisses everything
 /// currently shown.
@@ -31,6 +37,8 @@ struct InboxScreen: View {
     // Non-nil presents the shared `FolderPickerView` for the single episode.
     @State private var folderPickRequest: FolderPickRequest?
     @State private var confirmingClear = false
+    @State private var downloadAllRequest: DownloadAllRequest?
+    @State private var isEnrollingDownloads = false
     // Inbox episode multi-select (#758). Reuses the shared scaffold: `selection`
     // is the generic ``MultiSelectState`` holder (keyed on persistent identity so
     // it survives the `@Query`-driven row rebuilds as the inbox changes),
@@ -280,13 +288,54 @@ struct InboxScreen: View {
             }
             if !selection.isSelecting && !inbox.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        confirmingClear = true
+                    Menu {
+                        Button {
+                            downloadAllRequest = DownloadAllRequest(
+                                episodes: visible,
+                                scope: EpisodeSearchFilter.isActive(searchText)
+                                    ? "current filtered Inbox" : "Inbox"
+                            )
+                        } label: {
+                            Label(
+                                EpisodeSearchFilter.isActive(searchText)
+                                    ? "Download filtered Inbox" : "Download all",
+                                systemImage: "arrow.down.circle"
+                            )
+                        }
+
+                        Button(role: .destructive) {
+                            confirmingClear = true
+                        } label: {
+                            Label("Clear inbox", systemImage: "tray.and.arrow.down")
+                        }
                     } label: {
-                        Label("Clear inbox", systemImage: "tray.and.arrow.down")
+                        Label(
+                            isEnrollingDownloads ? "Preparing downloads" : "Inbox options",
+                            systemImage: isEnrollingDownloads ? "arrow.down.circle" : "ellipsis.circle"
+                        )
                     }
+                    .disabled(isEnrollingDownloads)
                 }
             }
+        }
+        .confirmationDialog(
+            downloadAllRequest.map { "Download \($0.episodes.count) episodes?" }
+                ?? "Download episodes?",
+            isPresented: Binding(
+                get: { downloadAllRequest != nil },
+                set: { if !$0 { downloadAllRequest = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: downloadAllRequest
+        ) { request in
+            Button("Download \(request.episodes.count) episodes") {
+                startDownloadAll(request)
+            }
+            Button("Cancel", role: .cancel) { downloadAllRequest = nil }
+        } message: { request in
+            Text(
+                "Downloads every episode in the \(request.scope). Downloaded and active downloads will be skipped."
+            )
         }
         .confirmationDialog(
             "Clear inbox?",
@@ -546,6 +595,16 @@ struct InboxScreen: View {
         // Delay so the list has collapsed to the empty state (the focus target)
         // before we request focus on it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { focusEmpty = true }
+    }
+
+    private func startDownloadAll(_ request: DownloadAllRequest) {
+        downloadAllRequest = nil
+        isEnrollingDownloads = true
+        Task { @MainActor in
+            let report = await downloads.downloadAll(request.episodes)
+            isEnrollingDownloads = false
+            Announcer.announce(report.announcement, assertive: true)
+        }
     }
 
     /// Marks `episode` played and dismisses it from the inbox via the shared

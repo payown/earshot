@@ -1,6 +1,12 @@
 import SwiftUI
 import SwiftData
 
+private struct QueueDownloadAllRequest: Identifiable {
+    let id = UUID()
+    let episodes: [Episode]
+    let scope: String
+}
+
 /// The play queue. Flat, grouped by podcast, or grouped by folder, with drag reorder for sighted
 /// users and a full set of VoiceOver custom actions so reordering never depends
 /// on a drag gesture. Flat mode offers Move to top / up / down / to bottom over
@@ -22,6 +28,8 @@ struct QueueScreen: View {
     // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
     // queue itself is never touched — rows are hidden from display only.
     @State private var searchText = ""
+    @State private var downloadAllRequest: QueueDownloadAllRequest?
+    @State private var isEnrollingDownloads = false
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusedGroup: QueueGroup.Kind?
     @AccessibilityFocusState private var focusLaunchHeading: Bool
@@ -66,6 +74,25 @@ struct QueueScreen: View {
             .searchable(text: $searchText, prompt: "Search queue")
             .onSubmit(of: .search) { announceMatches() }
             .toolbar { toolbar }
+            .confirmationDialog(
+                downloadAllRequest.map { "Download \($0.episodes.count) episodes?" }
+                    ?? "Download episodes?",
+                isPresented: Binding(
+                    get: { downloadAllRequest != nil },
+                    set: { if !$0 { downloadAllRequest = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: downloadAllRequest
+            ) { request in
+                Button("Download \(request.episodes.count) episodes") {
+                    startDownloadAll(request)
+                }
+                Button("Cancel", role: .cancel) { downloadAllRequest = nil }
+            } message: { request in
+                Text(
+                    "Downloads every episode in the \(request.scope). Downloaded and active downloads will be skipped."
+                )
+            }
             .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
             .onAppear { requestLaunchHeadingFocus() }
             .onChange(of: runtime.launchFocusRequest) { _, _ in
@@ -361,6 +388,21 @@ struct QueueScreen: View {
                     }
                 }
                 if !episodes.isEmpty {
+                    Button {
+                        let filteredEpisodes = EpisodeSearchFilter.filter(
+                            episodes, query: searchText
+                        )
+                        downloadAllRequest = QueueDownloadAllRequest(
+                            episodes: filteredEpisodes,
+                            scope: searchActive ? "current filtered Queue" : "Queue"
+                        )
+                    } label: {
+                        Label(
+                            searchActive ? "Download filtered Queue" : "Download all",
+                            systemImage: "arrow.down.circle"
+                        )
+                    }
+
                     Button(role: .destructive) {
                         repo.clear()
                         Announcer.announce("Queue cleared")
@@ -369,8 +411,22 @@ struct QueueScreen: View {
                     }
                 }
             } label: {
-                Label("Queue options", systemImage: "ellipsis.circle")
+                Label(
+                    isEnrollingDownloads ? "Preparing downloads" : "Queue options",
+                    systemImage: isEnrollingDownloads ? "arrow.down.circle" : "ellipsis.circle"
+                )
             }
+            .disabled(isEnrollingDownloads)
+        }
+    }
+
+    private func startDownloadAll(_ request: QueueDownloadAllRequest) {
+        downloadAllRequest = nil
+        isEnrollingDownloads = true
+        Task { @MainActor in
+            let report = await downloads.downloadAll(request.episodes)
+            isEnrollingDownloads = false
+            Announcer.announce(report.announcement, assertive: true)
         }
     }
 
