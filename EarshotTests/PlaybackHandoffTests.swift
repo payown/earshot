@@ -198,6 +198,56 @@ final class PlaybackHandoffTests: XCTestCase {
         XCTAssertEqual(published.last?.playbackRate, 1)
     }
 
+    func testSeekCancelsPendingResumeHandoffSoLateFetchCannotBounceBack() async throws {
+        let context = TestStore.freshContext()
+        let remote = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 25,
+            playbackRate: 1,
+            sourceDeviceID: "phone"
+        )
+        let client = FakePlaybackHandoffClient(fetched: remote)
+        await client.setFetchDelay(500_000_000)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 25)
+        episode.durationSeconds = 300
+        player.load(episode)
+
+        player.resume()
+        player.skipForward()
+        XCTAssertEqual(Int(player.currentPositionSeconds), 55)
+
+        try await Task.sleep(nanoseconds: 700_000_000)
+
+        XCTAssertEqual(
+            Int(player.currentPositionSeconds),
+            55,
+            "A delayed handoff fetched before the skip must not restore the old position"
+        )
+    }
+
+    func testRepeatedForwardSkipsAccumulateFromPendingTarget() {
+        let context = TestStore.freshContext()
+        let player = PlayerService(playbackHandoff: DisabledPlaybackHandoffClient())
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 20)
+        episode.durationSeconds = 300
+        player.load(episode)
+
+        player.skipForward()
+        player.skipForward()
+        player.skipForward()
+
+        XCTAssertEqual(
+            Int(player.currentPositionSeconds),
+            110,
+            "Three rapid 30-second skips must accumulate to 90 seconds"
+        )
+    }
+
     func testPauseCancelsLateFetchWithoutSeekingOrRestarting() async throws {
         let context = TestStore.freshContext()
         let remote = PlaybackHandoffSnapshot(
