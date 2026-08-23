@@ -15,6 +15,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
     case viewBookmarks
     case openShowNotes
     case share
+    case exportTranscript
     case exportAudio
     // Folders phase 2 (#756). Non-destructive: `addToFolder` files the episode
     // into a chosen folder while keeping any existing memberships; `moveToFolder`
@@ -39,6 +40,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
         case .viewBookmarks: return "Bookmarks"
         case .openShowNotes: return "Open show notes"
         case .share: return "Share"
+        case .exportTranscript: return "Export transcript"
         // Downloads (if needed) then shares the LOCAL audio file, so it can be
         // saved to Files / AirDropped — distinct from `.share`, which shares the
         // remote link (#689).
@@ -109,6 +111,7 @@ let defaultEpisodeActions: [EpisodeAction] = [
     .viewBookmarks,
     .openShowNotes,
     .share,
+    .exportTranscript,
     .exportAudio,
     // Folders phase 2 (#756): appended for new users; `QuickActionRepository.resolve()`
     // appends them for existing users too. Reorderable/hideable in settings. Kept

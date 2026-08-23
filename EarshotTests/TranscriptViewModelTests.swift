@@ -48,7 +48,9 @@ final class TranscriptViewModelTests: XCTestCase {
 
         let model = makeModel()
         await model.load(urlString: vttURL)
-        XCTAssertEqual(model.state, .loaded([TranscriptSegment(speaker: nil, text: "Hello world")]))
+        XCTAssertEqual(model.state, .loaded([
+            TranscriptSegment(speaker: nil, text: "Hello world", startSeconds: 0)
+        ]))
     }
 
     func test_load_serverError_reachesFailed() async {

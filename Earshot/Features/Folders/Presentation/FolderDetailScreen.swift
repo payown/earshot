@@ -37,6 +37,7 @@ struct FolderDetailScreen: View {
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
     @State private var exportEpisode: Episode?
+    @State private var exportTranscriptEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var folderPickRequest: FolderPickRequest?
     // `episodes(in:)` reads a detached `FetchDescriptor` (EpisodeFolderMembership
@@ -212,6 +213,7 @@ struct FolderDetailScreen: View {
             .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
             .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
             .episodeAudioExport($exportEpisode)
+            .episodeTranscriptExport($exportTranscriptEpisode)
             .folderPicker($folderPickRequest)
     }
 
@@ -440,6 +442,7 @@ struct FolderDetailScreen: View {
                             episode: episode,
                             order: quickActions.episodeActions,
                             supportsExport: true,
+                            supportsTranscriptExport: true,
                             supportsAddToFolder: true,
                             supportsMoveToFolder: true
                         ),
@@ -500,6 +503,7 @@ struct FolderDetailScreen: View {
             },
             onWillQueue: focusAfterRemoval,
             onExport: { exportEpisode = episode },
+            onExportTranscript: { exportTranscriptEpisode = episode },
             onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
             onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
         ).first?.run()
@@ -574,6 +578,7 @@ struct FolderDetailScreen: View {
             episode: episode,
             order: quickActions.episodeActions,
             supportsExport: true,
+            supportsTranscriptExport: true,
             supportsAddToFolder: true,
             supportsMoveToFolder: true
         )
@@ -619,6 +624,7 @@ struct FolderDetailScreen: View {
             onMarkPlayed: onMarkPlayed,
             onWillQueue: onWillQueue,
             onExport: { exportEpisode = episode },
+            onExportTranscript: { exportTranscriptEpisode = episode },
             onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
             onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
         ).first?.run()

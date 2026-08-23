@@ -10,13 +10,15 @@ import SwiftUI
 /// view only observes ``TranscriptViewModel`` and renders its three states —
 /// loading, loaded, and a friendly error with Retry.
 struct TranscriptView: View {
-    /// The transcript source URL, straight from `Episode.transcriptURL`. Optional
-    /// so the view degrades gracefully to its "no transcript" message if it's ever
-    /// presented without one (the entry point only offers the sheet when non-nil).
-    let transcriptURL: String?
+    /// The episode supplies the transcript URL plus export heading and filename
+    /// metadata. Optional so the view still degrades to its friendly empty state.
+    let episode: Episode?
 
     @Environment(\.dismiss) private var dismiss
     @State private var model = TranscriptViewModel()
+    @State private var exportFile: ExportFile?
+
+    private var transcriptURL: String? { episode?.transcriptURL }
 
     var body: some View {
         NavigationStack {
@@ -24,12 +26,24 @@ struct TranscriptView: View {
                 .navigationTitle("Transcript")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    if case .loaded(let segments) = model.state {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                export(segments)
+                            } label: {
+                                Label("Export transcript", systemImage: "square.and.arrow.up")
+                            }
+                        }
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") { dismiss() }
                     }
                 }
         }
         .task { await model.load(urlString: transcriptURL) }
+        .sheet(item: $exportFile) { file in
+            ShareSheet(items: [file.url])
+        }
     }
 
     @ViewBuilder
@@ -168,5 +182,21 @@ struct TranscriptView: View {
     /// headline already says it all) so there's no redundant second line.
     private func detail(for error: TranscriptError) -> String? {
         isEmpty(error) ? nil : error.errorDescription
+    }
+
+    private func export(_ segments: [TranscriptSegment]) {
+        do {
+            exportFile = ExportFile(url: try TranscriptMarkdownExporter.write(
+                podcastTitle: episode?.podcast?.title,
+                episodeTitle: episode?.title ?? "Episode",
+                publicationDate: episode?.pubDate,
+                segments: segments
+            ))
+        } catch {
+            AppLog.data.error(
+                "Transcript export failed: \(error.localizedDescription, privacy: .public)"
+            )
+            Announcer.announce("Could not export transcript")
+        }
     }
 }

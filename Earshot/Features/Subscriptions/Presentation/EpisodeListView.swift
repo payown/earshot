@@ -17,6 +17,7 @@ struct EpisodeListView: View {
     // The episode a pending "Export audio" Quick Action targets (#689). Drives
     // the shared `.episodeAudioExport` download-then-share flow.
     @State private var exportEpisode: Episode?
+    @State private var exportTranscriptEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     // The pending "Add to folder" / "Move to folder" Quick Action target (#756).
     @State private var folderPickRequest: FolderPickRequest?
@@ -289,6 +290,7 @@ struct EpisodeListView: View {
             ShareSheet(items: shareItems(for: episode))
         }
         .episodeAudioExport($exportEpisode)
+        .episodeTranscriptExport($exportTranscriptEpisode)
         .folderPicker($folderPickRequest)
         // The multi-select batch picker (#758): same shared FolderPickerView, but
         // it reports completion so we leave selection mode and re-anchor focus
@@ -352,6 +354,7 @@ struct EpisodeListView: View {
                     order: quickActions.episodeActions,
                     supportsUnfollow: true,
                     supportsExport: true,
+                    supportsTranscriptExport: true,
                     supportsAddToFolder: true,
                     supportsMoveToFolder: true
                 ),
@@ -390,6 +393,7 @@ struct EpisodeListView: View {
                 }
             },
             onExport: { exportEpisode = episode },
+            onExportTranscript: { exportTranscriptEpisode = episode },
             onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
             onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) }
         ).first?.run()

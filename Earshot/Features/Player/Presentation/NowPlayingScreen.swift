@@ -143,7 +143,7 @@ struct NowPlayingScreen: View {
                 }
             }
             .sheet(isPresented: $showingTranscript) {
-                TranscriptView(transcriptURL: player.nowPlayingEpisode?.transcriptURL)
+                TranscriptView(episode: player.nowPlayingEpisode)
             }
             .sheet(item: $exportURL) { file in
                 ShareSheet(items: [file.url])

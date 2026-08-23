@@ -401,12 +401,12 @@ final class RSSParserTests: XCTestCase {
 
     func testDefaultEpisodeActionsOrder() {
         // `.unfollow` is deliberately LAST — destructive actions never default
-        // early (#572). `.exportAudio` (#689) sits just before it, after `.share`.
+        // early (#572). Transcript/audio export sit late, after `.share`.
         // `.addToFolder`/`.moveToFolder` (#756) sit between them, still before the
         // destructive `.unfollow`.
         XCTAssertEqual(
             defaultEpisodeActions,
-            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .markPlayed, .viewBookmarks, .openShowNotes, .share, .exportAudio, .addToFolder, .moveToFolder, .unfollow]
+            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .markPlayed, .viewBookmarks, .openShowNotes, .share, .exportTranscript, .exportAudio, .addToFolder, .moveToFolder, .unfollow]
         )
     }
 }

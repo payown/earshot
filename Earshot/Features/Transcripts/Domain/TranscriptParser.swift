@@ -59,7 +59,10 @@ enum TranscriptParser {
                 index += 1
             }
 
-            if let segment = makeCueSegment(from: cueLines) {
+            if let segment = makeCueSegment(
+                from: cueLines,
+                startSeconds: cueStartSeconds(from: line)
+            ) {
                 segments.append(segment)
             }
         }
@@ -69,7 +72,10 @@ enum TranscriptParser {
 
     /// Builds a segment from one cue's raw text lines, extracting a speaker and
     /// decoding tags/entities. Returns nil when the cue reduces to empty text.
-    private static func makeCueSegment(from cueLines: [String]) -> TranscriptSegment? {
+    private static func makeCueSegment(
+        from cueLines: [String],
+        startSeconds: TimeInterval?
+    ) -> TranscriptSegment? {
         guard !cueLines.isEmpty else { return nil }
         let merged = cueLines.joined(separator: " ")
 
@@ -92,7 +98,11 @@ enum TranscriptParser {
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        return TranscriptSegment(speaker: normalizedSpeaker(speaker), text: trimmed)
+        return TranscriptSegment(
+            speaker: normalizedSpeaker(speaker),
+            text: trimmed,
+            startSeconds: startSeconds
+        )
     }
 
     // MARK: - JSON (Podcasting 2.0 transcript)
@@ -119,9 +129,11 @@ enum TranscriptParser {
             let body = (entry["body"] as? String) ?? (entry["text"] as? String) ?? ""
             let text = EpisodeSummary.plainText(body)
             guard !text.isEmpty else { continue }
-            segments.append(
-                TranscriptSegment(speaker: normalizedSpeaker(entry["speaker"] as? String), text: text)
-            )
+            segments.append(TranscriptSegment(
+                speaker: normalizedSpeaker(entry["speaker"] as? String),
+                text: text,
+                startSeconds: numericTime(entry["startTime"])
+            ))
         }
 
         return coalesceBySpeaker(segments)
@@ -169,6 +181,39 @@ enum TranscriptParser {
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .components(separatedBy: "\n")
+    }
+
+    /// Parses the left side of a WebVTT/SRT timing line. Accepts both decimal
+    /// separators and either HH:MM:SS or MM:SS forms.
+    private static func cueStartSeconds(from timingLine: String) -> TimeInterval? {
+        guard let marker = timingLine.range(of: "-->") else { return nil }
+        let raw = timingLine[..<marker.lowerBound]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+        let parts = raw.split(separator: ":")
+        guard parts.count == 2 || parts.count == 3,
+              let seconds = Double(parts[parts.count - 1]),
+              let minutes = Double(parts[parts.count - 2]) else { return nil }
+        let hours: Double
+        if parts.count == 3 {
+            guard let parsedHours = Double(parts[0]) else { return nil }
+            hours = parsedHours
+        } else {
+            hours = 0
+        }
+        guard hours >= 0, minutes >= 0, seconds >= 0 else { return nil }
+        return hours * 3_600 + minutes * 60 + seconds
+    }
+
+    private static func numericTime(_ value: Any?) -> TimeInterval? {
+        switch value {
+        case let number as NSNumber:
+            return max(0, number.doubleValue)
+        case let string as String:
+            return Double(string).map { max(0, $0) }
+        default:
+            return nil
+        }
     }
 
     /// Extracts the speaker name from a WebVTT voice span (`<v Name>` or a
@@ -237,7 +282,8 @@ enum TranscriptParser {
                last.text.count + segment.text.count + 1 <= maxParagraphLength {
                 result[result.count - 1] = TranscriptSegment(
                     speaker: last.speaker,
-                    text: last.text + " " + segment.text
+                    text: last.text + " " + segment.text,
+                    startSeconds: last.startSeconds
                 )
             } else {
                 result.append(segment)
