@@ -12,6 +12,7 @@ final class SettingsStore {
     // Playback
     var globalSpeed: Double = SettingsDefault.globalSpeed { didSet { persist { $0.setDouble(globalSpeed, for: SettingsKey.globalSpeed) } } }
     var volumeBoost: VolumeBoostLevel = SettingsDefault.volumeBoost { didSet { persist { $0.setVolumeBoost(volumeBoost) } } }
+    var skipSilenceEnabled: Bool = SettingsDefault.skipSilenceEnabled { didSet { persist { $0.setBool(skipSilenceEnabled, for: SettingsKey.skipSilenceEnabled) } } }
     var skipForwardSeconds: Int = SettingsDefault.skipForwardSeconds { didSet { persist { $0.setInt(skipForwardSeconds, for: SettingsKey.skipForwardSeconds) } } }
     var skipBackSeconds: Int = SettingsDefault.skipBackSeconds { didSet { persist { $0.setInt(skipBackSeconds, for: SettingsKey.skipBackSeconds) } } }
     var voiceEnhanceEnabled = false { didSet { persist { $0.setBool(voiceEnhanceEnabled, for: SettingsKey.voiceEnhanceEnabled) } } }
@@ -85,6 +86,7 @@ final class SettingsStore {
         loaded = false
         globalSpeed = store.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
         volumeBoost = store.volumeBoost()
+        skipSilenceEnabled = store.bool(SettingsKey.skipSilenceEnabled, default: SettingsDefault.skipSilenceEnabled)
         skipForwardSeconds = store.int(SettingsKey.skipForwardSeconds, default: SettingsDefault.skipForwardSeconds)
         skipBackSeconds = store.int(SettingsKey.skipBackSeconds, default: SettingsDefault.skipBackSeconds)
         voiceEnhanceEnabled = store.bool(SettingsKey.voiceEnhanceEnabled, default: false)

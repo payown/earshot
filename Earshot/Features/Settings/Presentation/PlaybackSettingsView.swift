@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings → Playback: speed, skip intervals, voice enhance, chapter navigation
+/// Settings → Playback: speed, skip intervals, audio processing, chapter navigation
 /// buttons, auto-advance, and queue grouping. Extracted from the former single
 /// Settings form so each category has its own dedicated screen. Native controls
 /// (`Toggle`, `AdjustableOptionPicker`) stay VoiceOver- and Dynamic-Type-friendly.
@@ -61,6 +61,7 @@ struct PlaybackSettingsView: View {
                     selection: $settings.volumeBoost,
                     hint: "Flick up for more boost, down for less or off"
                 )
+                Toggle("Trim silence", isOn: $settings.skipSilenceEnabled)
                 Toggle("Voice enhance", isOn: $settings.voiceEnhanceEnabled)
 
                 // The footer below explains this toggle; a matching hint would make
