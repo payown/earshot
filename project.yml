@@ -14,7 +14,7 @@ fileGroups:
 settings:
   base:
     MARKETING_VERSION: "1.2.0"
-    CURRENT_PROJECT_VERSION: "218"
+    CURRENT_PROJECT_VERSION: "219"
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
 targets:
@@ -69,15 +69,30 @@ targets:
         DEVELOPMENT_TEAM: "72PH974742"
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
+  EarshotUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: EarshotUITests
+    dependencies:
+      - target: Earshot
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot.uitests
+        DEVELOPMENT_TEAM: "72PH974742"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   Earshot:
     build:
       targets:
         Earshot: all
         EarshotTests: [test]
+        EarshotUITests: [test]
     test:
       targets:
         - EarshotTests
+        - EarshotUITests
       gatherCoverageData: true
       storeKitConfiguration: Earshot/Testing/Configuration.storekit
     run:

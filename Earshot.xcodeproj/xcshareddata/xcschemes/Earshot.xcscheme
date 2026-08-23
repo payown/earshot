@@ -35,6 +35,20 @@
                ReferencedContainer = "container:Earshot.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "3C67225769E82087592680D6"
+               BuildableName = "EarshotUITests.xctest"
+               BlueprintName = "EarshotUITests"
+               ReferencedContainer = "container:Earshot.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -62,6 +76,17 @@
                BlueprintIdentifier = "916802478DDA8A030C689CC9"
                BuildableName = "EarshotTests.xctest"
                BlueprintName = "EarshotTests"
+               ReferencedContainer = "container:Earshot.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "3C67225769E82087592680D6"
+               BuildableName = "EarshotUITests.xctest"
+               BlueprintName = "EarshotUITests"
                ReferencedContainer = "container:Earshot.xcodeproj">
             </BuildableReference>
          </TestableReference>
