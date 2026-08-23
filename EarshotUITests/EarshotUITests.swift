@@ -14,7 +14,9 @@ final class EarshotUITests: XCTestCase {
 
         app.launch()
 
-        let libraryTab = app.tabBars.buttons["Library"]
+        // TabView is exposed as a tab bar on iPhone and as adaptive buttons on
+        // iPad. Query the button directly so this smoke test covers both forms.
+        let libraryTab = app.buttons["Library"].firstMatch
         XCTAssertTrue(libraryTab.waitForExistence(timeout: 10))
         XCTAssertTrue(libraryTab.isSelected)
 
@@ -26,7 +28,7 @@ final class EarshotUITests: XCTestCase {
             "The deterministic screenshot fixture should render a Library podcast."
         )
 
-        let inboxTab = app.tabBars.buttons["Inbox"]
+        let inboxTab = app.buttons["Inbox"].firstMatch
         XCTAssertTrue(inboxTab.exists)
         inboxTab.tap()
 
@@ -38,7 +40,7 @@ final class EarshotUITests: XCTestCase {
             "Screenshot-mode maintenance must not expire deterministic Inbox fixtures."
         )
 
-        let queueTab = app.tabBars.buttons["Queue"]
+        let queueTab = app.buttons["Queue"].firstMatch
         XCTAssertTrue(queueTab.exists)
         queueTab.tap()
 
