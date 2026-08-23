@@ -20,6 +20,7 @@ final class AppSettingsStoreTests: XCTestCase {
             )
         )
         XCTAssertEqual(store.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed), 1.0)
+        XCTAssertEqual(store.volumeBoost(), .off)
         XCTAssertEqual(store.launchScreen(), .inbox)
         XCTAssertFalse(
             store.bool(
@@ -97,6 +98,18 @@ final class AppSettingsStoreTests: XCTestCase {
             XCTAssertTrue(AppSettingScope.isLocal(key), key)
         }
         XCTAssertFalse(AppSettingScope.isLocal(SettingsKey.globalSpeed))
+        XCTAssertTrue(AppSettingScope.isLocal(SettingsKey.volumeBoost))
+    }
+
+    func testVolumeBoostRoundTripsThroughSettingsStore() throws {
+        let context = TestStore.freshContext()
+        let settings = SettingsStore()
+        settings.configure(context: context)
+        settings.volumeBoost = .medium
+
+        let reloaded = SettingsStore()
+        reloaded.configure(context: context)
+        XCTAssertEqual(reloaded.volumeBoost, .medium)
     }
 
     func testAccessibilitySpeechPreferencesAreDeviceLocal() {

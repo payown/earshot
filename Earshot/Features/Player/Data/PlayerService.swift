@@ -57,6 +57,14 @@ final class PlayerService {
     /// controls without reaching into the private `currentChapters`.
     var chapterCount: Int = 0
 
+    /// `nil` means this episode follows the device-wide default. Kept observed
+    /// so the player sheet updates immediately after a VoiceOver adjustment.
+    private(set) var currentVolumeBoostOverride: VolumeBoostLevel?
+
+    var effectiveVolumeBoost: VolumeBoostLevel {
+        currentVolumeBoostOverride ?? settings?.volumeBoost() ?? SettingsDefault.volumeBoost
+    }
+
     /// Set true when a user-initiated "Play now" should also open the full player
     /// screen (#562), gated on the `openPlayerOnPlay` setting. RootView — the
     /// single instance above all five inset mini bars — binds a sheet to this and
@@ -136,6 +144,8 @@ final class PlayerService {
     /// Refreshes the in-memory playback position and per-podcast rate after
     /// CloudKit applies newer projections through another SwiftData context.
     @ObservationIgnored private var cloudProjectionObserver: NSObjectProtocol?
+    @ObservationIgnored private var volumeBoostSettingObserver: NSObjectProtocol?
+    @ObservationIgnored private var audioProcessingGeneration = 0
     /// One-shot flag for the deleted-instance guard log (#574) so a tick storm
     /// against a deleted episode doesn't spam the log. Reset on episode load.
     @ObservationIgnored private var didLogDeletedEpisodeGuard = false
@@ -289,6 +299,7 @@ final class PlayerService {
         observeItemDidPlayToEnd()
         observeQueueChanges()
         observeStallRecovery()
+        observeVolumeBoostSetting()
         sleepTimer.onExpired = { [weak self] in self?.handleSleepTimerExpired() }
     }
 
@@ -403,6 +414,18 @@ final class PlayerService {
         }
         currentEpisode = episode
         nowPlayingEpisodeID = episode?.persistentModelID
+        if let episode, let context, !currentEpisodeIsTransient {
+            currentVolumeBoostOverride = LocalStateStore.volumeBoost(for: episode, in: context)
+        } else {
+            currentVolumeBoostOverride = nil
+        }
+    }
+
+    func setCurrentVolumeBoostOverride(_ level: VolumeBoostLevel?) {
+        guard let episode = currentEpisode, let context, !currentEpisodeIsTransient else { return }
+        LocalStateStore.setVolumeBoost(level, on: episode, in: context)
+        currentVolumeBoostOverride = level
+        if let item = player.currentItem { applyVolumeBoost(to: item) }
     }
 
     /// True once a finite, positive duration is known for the loaded item. The
@@ -664,8 +687,8 @@ final class PlayerService {
             Announcer.announce("Stop after this episode cancelled")
         }
 
-        setCurrentEpisode(episode)
         currentEpisodeIsTransient = transient
+        setCurrentEpisode(episode)
         handoffRateOverride = handoff?.playbackRate
         didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
@@ -681,6 +704,7 @@ final class PlayerService {
         player.pause()
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
+        applyVolumeBoost(to: item)
 
         // Always honor saved progress, including the final five percent. Ads or
         // credits near the end remain seekable until playback actually finishes.
@@ -787,8 +811,8 @@ final class PlayerService {
             current: playbackOrigin
         )
 
-        setCurrentEpisode(episode)
         currentEpisodeIsTransient = false
+        setCurrentEpisode(episode)
         handoffRateOverride = nil
         didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
@@ -800,6 +824,7 @@ final class PlayerService {
         currentMediaResolutionComplete = url.scheme?.lowercased() != "http"
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
+        applyVolumeBoost(to: item)
 
         let resume = PlaybackLogic.playbackStartPosition(
             position: resumePosition(for: episode),
@@ -890,6 +915,7 @@ final class PlayerService {
         let item = makePlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         observeCurrentItem(item)
+        applyVolumeBoost(to: item)
         if currentPositionSeconds > 0 {
             player.seek(to: CMTime(seconds: currentPositionSeconds, preferredTimescale: 1))
         }
@@ -2481,6 +2507,53 @@ final class PlayerService {
     private func clearPreload() {
         preloadedItem = nil
         preloadedEpisode = nil
+    }
+
+    // MARK: Private — volume boost
+
+    private func observeVolumeBoostSetting() {
+        volumeBoostSettingObserver = NotificationCenter.default.addObserver(
+            forName: .earshotVolumeBoostSettingDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.currentVolumeBoostOverride == nil,
+                      let item = self.player.currentItem else { return }
+                self.applyVolumeBoost(to: item)
+            }
+        }
+    }
+
+    /// Replaces the item's immutable tap whenever the resolved level changes.
+    /// Unsupported streams keep playing through AVPlayer's untouched baseline.
+    private func applyVolumeBoost(to item: AVPlayerItem) {
+        audioProcessingGeneration &+= 1
+        let generation = audioProcessingGeneration
+        let level = effectiveVolumeBoost
+        guard level != .off else {
+            item.audioMix = nil
+            return
+        }
+        Task { @MainActor [weak self, weak item] in
+            guard let self, let item else { return }
+            do {
+                let mix = try await AudioProcessingTapFactory.makeFileAudioMix(
+                    asset: item.asset,
+                    configuration: level.processingConfiguration
+                )
+                guard self.audioProcessingGeneration == generation,
+                      self.player.currentItem === item else { return }
+                item.audioMix = mix
+            } catch {
+                guard self.audioProcessingGeneration == generation,
+                      self.player.currentItem === item else { return }
+                item.audioMix = nil
+                AppLog.player.notice(
+                    "Volume boost unavailable for this media; using baseline playback: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
     }
 
     // MARK: Private — interruptions & route changes (PRD 5.5)

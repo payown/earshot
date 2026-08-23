@@ -2,13 +2,13 @@ import XCTest
 import SwiftData
 @testable import Earshot
 
-/// Guards the V10 live graph against an unversioned model edit (#425) and audits
+/// Guards the V11 live graph against an unversioned model edit (#425) and audits
 /// the exact compatibility rules required before the mirrored configuration may
 /// be switched from `.none` to CloudKit in a later phase.
 @MainActor
 final class SchemaDriftTests: XCTestCase {
 
-    /// The live model graph, kept in lockstep with the final V10 model lists.
+    /// The live model graph, kept in lockstep with the current V11 model lists.
     private static let liveModels: [any PersistentModel.Type] = [
         Podcast.self,
         Episode.self,
@@ -47,10 +47,14 @@ final class SchemaDriftTests: XCTestCase {
         return result
     }
 
-    func testLiveAttributesMatchV10() {
-        let frozenV10 = attributeMap(Schema(versionedSchema: EarshotSchemaV10.self))
+    func testLiveAttributesMatchV11() {
+        let frozenV11 = attributeMap(Schema(versionedSchema: EarshotSchemaV11.self))
         let live = attributeMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, frozenV10)
+        XCTAssertEqual(live, frozenV11)
+        XCTAssertNil(attributeMap(Schema(versionedSchema: EarshotSchemaV10.self))[
+            "LocalEpisodeState.volumeBoostRaw"
+        ])
+        XCTAssertEqual(frozenV11["LocalEpisodeState.volumeBoostRaw"], "true|Optional<String>")
     }
 
     /// V10 permanently retains the two V6 download attributes as inert schema
@@ -84,18 +88,18 @@ final class SchemaDriftTests: XCTestCase {
         XCTAssertEqual(liveAttrs["Episode.legacyDownloadPath"], "true|Optional<String>")
     }
 
-    /// The live relationship graph must remain identical to frozen V10.
-    func testLiveRelationshipsMatchV10() {
-        let frozenV10 = relationshipMap(Schema(versionedSchema: EarshotSchemaV10.self))
+    /// The live relationship graph must remain identical to V11.
+    func testLiveRelationshipsMatchV11() {
+        let frozenV11 = relationshipMap(Schema(versionedSchema: EarshotSchemaV11.self))
         let live = relationshipMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, frozenV10)
+        XCTAssertEqual(live, frozenV11)
     }
 
-    /// Guards the lockstep assumption between the live list and frozen V10.
-    func testLiveListMatchesV10ModelsList() {
-        let v10Names = Set(Schema(versionedSchema: EarshotSchemaV10.self).entities.map(\.name))
+    /// Guards the lockstep assumption between the live list and V11.
+    func testLiveListMatchesV11ModelsList() {
+        let v11Names = Set(Schema(versionedSchema: EarshotSchemaV11.self).entities.map(\.name))
         let liveNames = Set(Schema(Self.liveModels).entities.map(\.name))
-        XCTAssertEqual(v10Names, liveNames)
+        XCTAssertEqual(v11Names, liveNames)
     }
 
 }
@@ -139,9 +143,9 @@ final class CloudKitSchemaCompatibilityTests: XCTestCase {
         }
     }
 
-    func testV10ConfigurationMembershipPermanentlySeparatesLocalData() {
+    func testV11ConfigurationMembershipPermanentlySeparatesLocalData() {
         XCTAssertEqual(
-            Set(Schema(EarshotSchemaV10.mirroredModels).entities.map(\.name)),
+            Set(Schema(EarshotSchemaV11.mirroredModels).entities.map(\.name)),
             [
                 "Podcast", "Episode", "QueueItem", "ListeningSession",
                 "Bookmark", "PodcastFolder", "FolderMembership",
@@ -150,13 +154,13 @@ final class CloudKitSchemaCompatibilityTests: XCTestCase {
             ]
         )
         XCTAssertEqual(
-            Set(Schema(EarshotSchemaV10.localModels).entities.map(\.name)),
+            Set(Schema(EarshotSchemaV11.localModels).entities.map(\.name)),
             ["LocalPodcastState", "LocalEpisodeState", "LocalAppSetting"]
         )
     }
 
-    func testV10MirroredSchemaIsCloudKitCompatible() {
-        for entity in Schema(EarshotSchemaV10.mirroredModels).entities {
+    func testV11MirroredSchemaIsCloudKitCompatible() {
+        for entity in Schema(EarshotSchemaV11.mirroredModels).entities {
             for attribute in entity.attributes {
                 XCTAssertFalse(attribute.options.contains(.unique), "Unique: \(entity.name).\(attribute.name)")
                 XCTAssertTrue(attribute.isOptional || attribute.defaultValue != nil,
@@ -170,8 +174,8 @@ final class CloudKitSchemaCompatibilityTests: XCTestCase {
         }
     }
 
-    func testV10LocalSchemaHasNoRelationshipsAndSplitContainerConstructs() throws {
-        let local = Schema(EarshotSchemaV10.localModels)
+    func testV11LocalSchemaHasNoRelationshipsAndSplitContainerConstructs() throws {
+        let local = Schema(EarshotSchemaV11.localModels)
         XCTAssertTrue(local.entities.allSatisfy { $0.relationships.isEmpty })
         let container = try ModelContainerFactory.makeInMemory()
         XCTAssertEqual(container.configurations.count, 2)

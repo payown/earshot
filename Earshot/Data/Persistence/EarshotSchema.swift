@@ -1852,12 +1852,56 @@ enum EarshotSchemaV10: VersionedSchema {
     static let localModels: [any PersistentModel.Type] = [
         LocalPodcastState.self, LocalEpisodeState.self, LocalAppSetting.self,
     ]
+
+    /// Frozen V10 local episode row. V11 adds the optional volume-boost value;
+    /// keeping this nested shape preserves the exact shipped V10 checksum.
+    @Model
+    final class LocalEpisodeState {
+        var podcastFeedURL: String = ""
+        var episodeGUID: String = ""
+        var downloadStatusRaw: String = DownloadStatus.none.rawValue
+        var downloadPath: String?
+        init() {}
+    }
 }
 
 /// The nullable-tombstone V10 shape of the original store during cutover.
 enum EarshotMirroredSchemaV10: VersionedSchema {
     static let versionIdentifier = Schema.Version(10, 0, 0)
     static var models: [any PersistentModel.Type] { EarshotSchemaV10.mirroredModels }
+}
+
+/// Current graph. V11 adds one optional, device-local episode preference; the
+/// mirrored graph is otherwise byte-for-byte V10.
+enum EarshotSchemaV11: VersionedSchema {
+    static let versionIdentifier = Schema.Version(11, 0, 0)
+    static var models: [any PersistentModel.Type] { mirroredModels + localModels }
+
+    static let mirroredModels: [any PersistentModel.Type] = [
+        Podcast.self, Episode.self, QueueItem.self, ListeningSession.self,
+        Bookmark.self, PodcastFolder.self, FolderMembership.self,
+        RecentlyExpired.self, QuickActionConfig.self, AppSetting.self,
+        EpisodeFolderMembership.self,
+    ]
+
+    static let localModels: [any PersistentModel.Type] = [
+        LocalPodcastState.self, LocalEpisodeState.self, LocalAppSetting.self,
+    ]
+}
+
+enum EarshotMirroredSchemaV11: VersionedSchema {
+    static let versionIdentifier = Schema.Version(11, 0, 0)
+    static var models: [any PersistentModel.Type] { EarshotSchemaV11.mirroredModels }
+}
+
+enum EarshotV10ToV11MigrationPlan: SchemaMigrationPlan {
+    static var schemas: [any VersionedSchema.Type] {
+        [EarshotSchemaV10.self, EarshotSchemaV11.self]
+    }
+
+    static var stages: [MigrationStage] {
+        [.lightweight(fromVersion: EarshotSchemaV10.self, toVersion: EarshotSchemaV11.self)]
+    }
 }
 
 /// Production preflight from the shipped V6 store. V7 is additive, and the

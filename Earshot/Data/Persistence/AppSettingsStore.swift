@@ -1,6 +1,12 @@
 import Foundation
 import SwiftData
 
+extension Notification.Name {
+    static let earshotVolumeBoostSettingDidChange = Notification.Name(
+        "earshotVolumeBoostSettingDidChange"
+    )
+}
+
 /// Setting keys, mirroring the Flutter `app_settings` table keys. Kept as
 /// String constants so they match exactly.
 enum SettingsKey {
@@ -20,6 +26,8 @@ enum SettingsKey {
     static let skipSilenceEnabled = "skip_silence_enabled"
     static let voiceEnhanceEnabled = "voice_enhance_enabled"
     static let globalSpeed = "global_speed"
+    /// Device-local default gain. Per-episode overrides are also device-local.
+    static let volumeBoost = "volume_boost"
     static let skipForwardSeconds = "skip_forward_seconds"
     static let skipBackSeconds = "skip_back_seconds"
     // direct_touch_enabled: retained for data compatibility only. Its one
@@ -222,6 +230,7 @@ enum SettingsDefault {
     static let analyticsEnabled = true  // retained; not read by SettingsStore (no telemetry ships)
     static let skipSilenceEnabled = false  // retained; not read by SettingsStore (#369)
     static let globalSpeed = 1.0
+    static let volumeBoost: VolumeBoostLevel = .off
     static let skipForwardSeconds = 30
     static let skipBackSeconds = 15
     static let wifiOnlyDownloads = true
@@ -316,6 +325,12 @@ final class AppSettingsStore {
                     object: AppSettingIdentity.canonicalKey(key)
                 )
             }
+            if AppSettingIdentity.canonicalKey(key) == SettingsKey.volumeBoost {
+                NotificationCenter.default.post(
+                    name: .earshotVolumeBoostSettingDidChange,
+                    object: nil
+                )
+            }
         } catch {
             AppLog.data.error(
                 "Setting write failed for \(key, privacy: .private): \(error.localizedDescription, privacy: .public)"
@@ -350,6 +365,18 @@ final class AppSettingsStore {
 
     func setDouble(_ value: Double, for key: String) {
         setRawValue(String(value), for: key)
+    }
+
+    func volumeBoost() -> VolumeBoostLevel {
+        guard let raw = rawValue(SettingsKey.volumeBoost),
+              let level = VolumeBoostLevel(rawValue: raw) else {
+            return SettingsDefault.volumeBoost
+        }
+        return level
+    }
+
+    func setVolumeBoost(_ level: VolumeBoostLevel) {
+        setRawValue(level.rawValue, for: SettingsKey.volumeBoost)
     }
 
     /// Reads an optional Int where the stored string `"null"` means "no limit".

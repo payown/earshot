@@ -20,6 +20,12 @@ struct PlaybackSettingsView: View {
         Self.skipIntervals.map { .init(value: $0, title: "\($0)s", spoken: "\($0) seconds") }
     }
 
+    private var volumeBoostOptions: [AdjustableOptionPicker<VolumeBoostLevel>.Option] {
+        VolumeBoostLevel.allCases.map {
+            .init(value: $0, title: $0.title, spoken: $0.spokenValue)
+        }
+    }
+
     var body: some View {
         @Bindable var settings = settings
         Form {
@@ -48,6 +54,12 @@ struct PlaybackSettingsView: View {
                     options: skipAdjustableOptions,
                     selection: $settings.skipBackSeconds,
                     hint: "Flick up for a longer skip, down for shorter"
+                )
+                AdjustableOptionPicker(
+                    "Volume boost",
+                    options: volumeBoostOptions,
+                    selection: $settings.volumeBoost,
+                    hint: "Flick up for more boost, down for less or off"
                 )
                 Toggle("Voice enhance", isOn: $settings.voiceEnhanceEnabled)
 

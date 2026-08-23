@@ -134,19 +134,19 @@ final class ListeningPlacesServiceTests: XCTestCase {
     }
 
     private func makeContainer() throws -> ModelContainer {
-        let full = Schema(versionedSchema: EarshotSchemaV10.self)
+        let full = Schema(versionedSchema: EarshotSchemaV11.self)
         return try ModelContainer(
             for: full,
             configurations:
                 ModelConfiguration(
                     "FutureMirrored",
-                    schema: Schema(EarshotSchemaV10.mirroredModels),
+                    schema: Schema(EarshotSchemaV11.mirroredModels),
                     isStoredInMemoryOnly: true,
                     cloudKitDatabase: .none
                 ),
                 ModelConfiguration(
                     "DeviceLocal",
-                    schema: Schema(EarshotSchemaV10.localModels),
+                    schema: Schema(EarshotSchemaV11.localModels),
                     isStoredInMemoryOnly: true,
                     cloudKitDatabase: .none
                 )
