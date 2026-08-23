@@ -106,6 +106,7 @@
 		454FF27B82A5CFB936D89197 /* TranscriptServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D138184012A698EAAAFE39B /* TranscriptServiceTests.swift */; };
 		4618A181C1A3CA3A43DBBA71 /* ITunesSearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D1FF1B05CD9DD1E0A619E9F /* ITunesSearchServiceTests.swift */; };
 		4700F225EAF1F681295FB6CB /* CloudSyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 610DE11AB2FE2EA159285A77 /* CloudSyncSettingsView.swift */; };
+		4733ABD65AB3333A01DC5298 /* EarshotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFB688696CCDAE1D14C0451D /* EarshotUITests.swift */; };
 		49A01198A1D4C6F0A2B7EF79 /* OPMLImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BB5D96E01928B51EDBFF641 /* OPMLImportCoordinator.swift */; };
 		49FA7FA0FD58D24FD216A65B /* CloudKitEventMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA6D87DE65511C67184C9D6 /* CloudKitEventMonitorTests.swift */; };
 		4A65FDDB227C0091BBA4D618 /* PerformanceSignposts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78137CFAA3CAC86BAA5E7979 /* PerformanceSignposts.swift */; };
@@ -384,6 +385,13 @@
 			remoteGlobalIDString = E31CD32546C44FDD4709019C;
 			remoteInfo = Earshot;
 		};
+		61F47B3AE61818BB5D012BE1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9FB774AEE0DC1581E53209CF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E31CD32546C44FDD4709019C;
+			remoteInfo = Earshot;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -637,6 +645,7 @@
 		A8D9845FCC2B2DB0844F43FC /* AccessibilitySpeechSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilitySpeechSettings.swift; sourceTree = "<group>"; };
 		A8FFF92C5834728DB92FBEC9 /* PendingOPMLImportStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOPMLImportStoreTests.swift; sourceTree = "<group>"; };
 		A951F33F168DD2CF36836C6D /* SearchResultPositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultPositionTests.swift; sourceTree = "<group>"; };
+		AA789973BA39F31DCC581287 /* EarshotUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EarshotUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		ABEBC70285DA0D1C6FF8D924 /* TipJarViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipJarViewModelTests.swift; sourceTree = "<group>"; };
 		ABEEC723E5C0BC90DFC057B2 /* AppSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSetting.swift; sourceTree = "<group>"; };
 		ADC1DFD3FFD884A7FE8029F6 /* ActiveDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveDownload.swift; sourceTree = "<group>"; };
@@ -683,6 +692,7 @@
 		CE3D0B29C92483947ADFC8FD /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 		CE96D8D6DD47BE7CDCE6D094 /* MultiSelectState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiSelectState.swift; sourceTree = "<group>"; };
 		CF92E05A0193AF0123DA2A5B /* NowPlayingArtworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingArtworkTests.swift; sourceTree = "<group>"; };
+		CFB688696CCDAE1D14C0451D /* EarshotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotUITests.swift; sourceTree = "<group>"; };
 		CFD6029A247CD01E7E6D06F1 /* QuickActionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionStore.swift; sourceTree = "<group>"; };
 		CFF0732FD4602125E364F899 /* ProductCatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductCatalogService.swift; sourceTree = "<group>"; };
 		D047C968CE1D5423AA6844E6 /* MailComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailComposeView.swift; sourceTree = "<group>"; };
@@ -929,6 +939,7 @@
 			children = (
 				D417CBEB2EF403CE505CD8E9 /* Earshot.app */,
 				1CC39C15B55034A61C9FB060 /* EarshotTests.xctest */,
+				AA789973BA39F31DCC581287 /* EarshotUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -973,6 +984,14 @@
 				FA719A9EE6C298B619478083 /* StatsPeriod.swift */,
 			);
 			path = Domain;
+			sourceTree = "<group>";
+		};
+		39B1FF5F1B737661311A6F30 /* EarshotUITests */ = {
+			isa = PBXGroup;
+			children = (
+				CFB688696CCDAE1D14C0451D /* EarshotUITests.swift */,
+			);
+			path = EarshotUITests;
 			sourceTree = "<group>";
 		};
 		3A0432BD10651043C15E8C9F /* ListeningPlaces */ = {
@@ -1443,6 +1462,7 @@
 			children = (
 				4274C0A85F145B1D7BDC10FD /* Earshot */,
 				4337CABBC3BFF200BD721BC4 /* EarshotTests */,
+				39B1FF5F1B737661311A6F30 /* EarshotUITests */,
 				DC3C47148B045237317A35C2 /* Frameworks */,
 				373449AA16D97653E16A2BF2 /* Products */,
 			);
@@ -1786,6 +1806,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		3C67225769E82087592680D6 /* EarshotUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4BAEA7281355C76EC460ABF8 /* Build configuration list for PBXNativeTarget "EarshotUITests" */;
+			buildPhases = (
+				78FEA2D340A310CB06E147F9 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BDA34550DD315FC6F7870890 /* PBXTargetDependency */,
+			);
+			name = EarshotUITests;
+			packageProductDependencies = (
+			);
+			productName = EarshotUITests;
+			productReference = AA789973BA39F31DCC581287 /* EarshotUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		916802478DDA8A030C689CC9 /* EarshotTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5A6AD01F0F524600229031A7 /* Build configuration list for PBXNativeTarget "EarshotTests" */;
@@ -1833,6 +1871,11 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					3C67225769E82087592680D6 = {
+						DevelopmentTeam = 72PH974742;
+						ProvisioningStyle = Automatic;
+						TestTargetID = E31CD32546C44FDD4709019C;
+					};
 					916802478DDA8A030C689CC9 = {
 						DevelopmentTeam = 72PH974742;
 						ProvisioningStyle = Automatic;
@@ -1859,6 +1902,7 @@
 			targets = (
 				E31CD32546C44FDD4709019C /* Earshot */,
 				916802478DDA8A030C689CC9 /* EarshotTests */,
+				3C67225769E82087592680D6 /* EarshotUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -2118,6 +2162,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		78FEA2D340A310CB06E147F9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4733ABD65AB3333A01DC5298 /* EarshotUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		AADDFF44010EF59732076845 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -2269,6 +2321,11 @@
 			target = E31CD32546C44FDD4709019C /* Earshot */;
 			targetProxy = 1BE932869FD54030A7461C83 /* PBXContainerItemProxy */;
 		};
+		BDA34550DD315FC6F7870890 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E31CD32546C44FDD4709019C /* Earshot */;
+			targetProxy = 61F47B3AE61818BB5D012BE1 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -2306,7 +2363,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 218;
+				CURRENT_PROJECT_VERSION = 219;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -2359,6 +2416,25 @@
 			};
 			name = Release;
 		};
+		1E7E1F5D06B660698231058A /* CloudKitDevelopment */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 72PH974742;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Earshot;
+			};
+			name = CloudKitDevelopment;
+		};
 		442DB5E1579CF9F8F2E674FF /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -2393,7 +2469,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 218;
+				CURRENT_PROJECT_VERSION = 219;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -2438,6 +2514,25 @@
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = CloudKitDevelopment;
+		};
+		5F2BCBA924F34BB66395732B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 72PH974742;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Earshot;
+			};
+			name = Debug;
 		};
 		7DBFAA456FB5ABBE14E23A80 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -2492,7 +2587,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 218;
+				CURRENT_PROJECT_VERSION = 219;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -2558,6 +2653,25 @@
 			};
 			name = CloudKitDevelopment;
 		};
+		C672DD425CBCDEB0B1730EFD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 72PH974742;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = media.payown.earshot.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Earshot;
+			};
+			name = Release;
+		};
 		D6FC61A6881555A02A25BAFD /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -2580,6 +2694,16 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		4BAEA7281355C76EC460ABF8 /* Build configuration list for PBXNativeTarget "EarshotUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1E7E1F5D06B660698231058A /* CloudKitDevelopment */,
+				5F2BCBA924F34BB66395732B /* Debug */,
+				C672DD425CBCDEB0B1730EFD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		5A6AD01F0F524600229031A7 /* Build configuration list for PBXNativeTarget "EarshotTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
