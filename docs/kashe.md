@@ -502,6 +502,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   episodes together, hears where playback came from, and checks its listening
   time afterward. The folder has become the route itself, laid out before she
   leaves home (Chapter 54)
+- Paul is someone in Kashe's listening circle who has mentioned a podcast to her
+  in passing (Chapter 73)
 
 ## What you can generate
 
@@ -2627,5 +2629,49 @@ That evening she exported a transcript with speaker names and no clock beside
 every sentence. Renata asked why that mattered.
 
 “Because I asked for names,” Kashe said. “Not a stopwatch.”
+
+---
+
+### Chapter 73 — Build 240
+
+*The clock moved back to the margin*
+
+**What changed**
+
+Build 240 makes transcript styles work with more podcast providers. When a feed
+offers several transcript versions, Earshot prefers structured JSON, WebVTT, or
+SRT instead of treating an HTML page as plain text. Listeners still see only the
+readable transcript, never the source JSON.
+
+For episodes already pointing to HTML, semantic cue times become structured
+timestamps. Speakers only can hide them, while either timestamp style can show
+them. A clock time spoken in the conversation, such as “meet at 10:30,” stays in
+the text. The live transcript and both Markdown export paths share the same
+choice. VoiceOver keeps one stop per segment and speaks displayed times
+naturally.
+
+**What to test**
+
+Open a followHIM transcript and another podcast transcript if available. Switch
+among Speakers only, Timestamps only, and Speakers and timestamps. Speakers
+only should contain no provider cue times. Timestamp styles should show them,
+and VoiceOver should speak them naturally without splitting a segment into
+extra stops. Speaker names should appear only when the provider supplies them.
+
+Check an older episode and a newly refreshed one. The transcript must remain
+readable, with no JSON syntax on screen. Confirm that a time actually spoken in
+the episode remains part of its sentence. Export from the transcript viewer and
+from episode Actions; each file should match the selected style.
+
+Kashe opened a transcript from a show Paul had mentioned in passing. The words
+were fine, but every paragraph carried a clock at its shoulder.
+
+She chose speakers. The clocks stayed. She chose timestamps. Nothing changed.
+That was not a preference. It was decoration pretending to be one.
+
+The next time she opened it, the clocks moved when she asked and disappeared
+when she did not. Later, a host said to meet again at 10:30. That time remained.
+
+Kashe smiled. “That one belongs to the sentence.”
 
 More chapters added here as Earshot ships.

@@ -27,15 +27,15 @@ fall back to generic “bug fixes and performance improvements” copy.
 
 ## Shipping checklist
 
-- [ ] Reconcile this inventory with `CHANGELOG.md` and every change after build
+- [x] Reconcile this inventory with `CHANGELOG.md` and every change after build
   239.
-- [ ] Choose the real final build number and the next chapter number.
-- [ ] Write one coherent Kashe chapter with plain-language “What changed” and
+- [x] Choose the real final build number and the next chapter number.
+- [x] Write one coherent Kashe chapter with plain-language “What changed” and
   “What to test” sections covering the inventory.
-- [ ] Append the chapter to `docs/kashe.md`; note any new durable story
+- [x] Append the chapter to `docs/kashe.md`; note any new durable story
   facts requiring an established-details update.
-- [ ] Save the exact same text as `docs/testflight/build-N-notes.txt`.
-- [ ] Verify the payload is at most 2,500 characters with `wc -m`.
-- [ ] Obtain Michael’s explicit TestFlight-upload approval.
+- [x] Save the exact same text as `docs/testflight/build-N-notes.txt`.
+- [x] Verify the payload is at most 2,500 characters with `wc -m`.
+- [x] Obtain Michael’s explicit TestFlight-upload approval.
 - [ ] Upload using the checked-in notes file and verify App Store Connect shows
   the same chapter.
