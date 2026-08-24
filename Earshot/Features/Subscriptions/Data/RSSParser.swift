@@ -78,6 +78,11 @@ final class RSSParser: NSObject, XMLParserDelegate {
     private var itemSeason: String = ""
     private var itemChapterURL: String?
     private var itemTranscriptURL: String?
+    /// Higher values represent transcript containers that preserve timing as
+    /// structured metadata instead of visible prose. Podcast feeds may publish
+    /// several representations for one episode; keep the best one regardless
+    /// of element order.
+    private var itemTranscriptPreference = Int.min
     private var itemEpisodeType: String = ""
 
     private var episodes: [ParsedEpisode] = []
@@ -236,6 +241,7 @@ final class RSSParser: NSObject, XMLParserDelegate {
             itemDescription = ""; itemSummary = ""; itemPubDate = ""
             itemDuration = ""; itemImage = nil; itemEpisode = ""
             itemSeason = ""; itemChapterURL = nil; itemTranscriptURL = nil
+            itemTranscriptPreference = Int.min
             itemEpisodeType = ""
         case "image":
             if !inItem { inChannelImage = true }
@@ -265,8 +271,16 @@ final class RSSParser: NSObject, XMLParserDelegate {
         case "podcast:chapters":
             if inItem, let url = attributeDict["url"] { itemChapterURL = url }
         case "podcast:transcript":
-            if inItem, itemTranscriptURL == nil, let url = attributeDict["url"] {
+            if inItem, let url = attributeDict["url"] {
+                let preference = Self.transcriptPreference(
+                    urlString: url,
+                    mimeType: attributeDict["type"]
+                )
+                guard itemTranscriptURL == nil || preference > itemTranscriptPreference else {
+                    break
+                }
                 itemTranscriptURL = url
+                itemTranscriptPreference = preference
             }
         default:
             break
@@ -367,6 +381,21 @@ final class RSSParser: NSObject, XMLParserDelegate {
                 episodeType: validEpisodeType
             )
         )
+    }
+
+    /// Prefers Podcasting 2.0 JSON, then WebVTT/SRT, over HTML or plain text.
+    /// Structured containers keep cue times separate, allowing the user's
+    /// transcript metadata choice to omit timestamps reliably (#900). Equal
+    /// ranks preserve feed order so two equivalent resources remain stable.
+    private static func transcriptPreference(urlString: String, mimeType: String?) -> Int {
+        guard let url = URL(string: urlString) else { return 0 }
+        switch TranscriptFormat.detect(url: url, contentType: mimeType) {
+        case .json: return 5
+        case .webVTT: return 4
+        case .srt: return 3
+        case .html: return 2
+        case .plainText: return 1
+        }
     }
 }
 
