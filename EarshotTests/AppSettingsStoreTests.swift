@@ -120,9 +120,28 @@ final class AppSettingsStoreTests: XCTestCase {
             SettingsKey.spokenEpisodeDuration,
             SettingsKey.spokenEpisodeDescriptionMode,
             SettingsKey.spokenPodcastDescriptionMode,
+            SettingsKey.transcriptExportMetadata,
         ] {
             XCTAssertTrue(AppSettingScope.isLocal(key), key)
         }
+    }
+
+    func testTranscriptExportMetadataTypedAccessAndInvalidValueRepair() throws {
+        let store = try makeStore()
+        for metadata in TranscriptExportMetadata.allCases {
+            store.setTranscriptExportMetadata(metadata)
+            XCTAssertEqual(store.transcriptExportMetadata(default: .speakersOnly), metadata)
+        }
+
+        store.setRawValue("invalid", for: SettingsKey.transcriptExportMetadata)
+        XCTAssertEqual(
+            store.initializeTranscriptExportMetadataIfNeeded(default: .speakersAndTimestamps),
+            .speakersAndTimestamps
+        )
+        XCTAssertEqual(
+            store.rawValue(SettingsKey.transcriptExportMetadata),
+            TranscriptExportMetadata.speakersAndTimestamps.rawValue
+        )
     }
 
     func testPerPodcastWriteMergesLegacyURLKeyVariants() throws {

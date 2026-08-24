@@ -31,6 +31,43 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.globalSpeed, SettingsDefault.globalSpeed)
         XCTAssertTrue(store.wifiOnlyDownloads)
         XCTAssertFalse(store.downloadCompletionNotifications)
+        XCTAssertEqual(store.transcriptExportMetadata, .speakersOnly)
+    }
+
+    func testFreshInstallDefaultsTranscriptExportsToSpeakersOnly() {
+        let context = TestStore.freshContext()
+        let settings = SettingsStore()
+
+        settings.configure(context: context)
+
+        XCTAssertEqual(settings.transcriptExportMetadata, .speakersOnly)
+        XCTAssertEqual(
+            AppSettingsStore(context: context).rawValue(SettingsKey.transcriptExportMetadata),
+            TranscriptExportMetadata.speakersOnly.rawValue
+        )
+    }
+
+    func testExistingInstallRetainsSpeakersAndTimestamps() {
+        let context = TestStore.freshContext()
+        AppSettingsStore(context: context).setBool(true, for: SettingsKey.onboardingComplete)
+        let settings = SettingsStore()
+
+        settings.configure(context: context)
+
+        XCTAssertEqual(settings.transcriptExportMetadata, .speakersAndTimestamps)
+    }
+
+    func testTranscriptExportMetadataPersistsEveryChoiceAcrossRelaunch() {
+        let context = TestStore.freshContext()
+        let settings = SettingsStore()
+        settings.configure(context: context)
+
+        for metadata in TranscriptExportMetadata.allCases {
+            settings.transcriptExportMetadata = metadata
+            let reloaded = SettingsStore()
+            reloaded.configure(context: context)
+            XCTAssertEqual(reloaded.transcriptExportMetadata, metadata)
+        }
     }
 
     func testAccessibilitySpeechDefaultsAndChangesPersist() {

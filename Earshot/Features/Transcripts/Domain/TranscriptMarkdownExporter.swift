@@ -1,5 +1,27 @@
 import Foundation
 
+/// Which source-provided segment metadata is included in a Markdown export
+/// (#900). Raw values are stable device-local persistence; titles are the exact
+/// option names promised to VoiceOver users.
+enum TranscriptExportMetadata: String, CaseIterable, Identifiable, Sendable {
+    case speakersOnly = "speakers_only"
+    case timestampsOnly = "timestamps_only"
+    case speakersAndTimestamps = "speakers_and_timestamps"
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .speakersOnly: return "Speakers only"
+        case .timestampsOnly: return "Timestamps only"
+        case .speakersAndTimestamps: return "Speakers and timestamps"
+        }
+    }
+
+    var includesSpeakers: Bool { self != .timestampsOnly }
+    var includesTimestamps: Bool { self != .speakersOnly }
+}
+
 /// Builds and writes the normalized Markdown transcript shared by the viewer
 /// and episode Quick Actions (#717). The pure formatter is separately testable;
 /// file creation is confined to a unique temporary directory for the system
@@ -9,7 +31,8 @@ enum TranscriptMarkdownExporter {
         podcastTitle: String?,
         episodeTitle: String,
         publicationDate: Date?,
-        segments: [TranscriptSegment]
+        segments: [TranscriptSegment],
+        metadata: TranscriptExportMetadata
     ) -> String {
         var lines = ["# \(singleLine(episodeTitle, fallback: "Episode"))", ""]
         if let podcastTitle, !singleLine(podcastTitle, fallback: "").isEmpty {
@@ -24,10 +47,10 @@ enum TranscriptMarkdownExporter {
 
         for segment in segments {
             var prefix = ""
-            if let start = segment.startSeconds {
+            if metadata.includesTimestamps, let start = segment.startSeconds {
                 prefix += "[\(timestamp(start))] "
             }
-            if let speaker = segment.speaker, !speaker.isEmpty {
+            if metadata.includesSpeakers, let speaker = segment.speaker, !speaker.isEmpty {
                 prefix += "**\(escapeEmphasis(singleLine(speaker, fallback: "Speaker"))):** "
             }
             lines.append(prefix + segment.text)
@@ -57,6 +80,7 @@ enum TranscriptMarkdownExporter {
         episodeTitle: String,
         publicationDate: Date?,
         segments: [TranscriptSegment],
+        metadata: TranscriptExportMetadata,
         fileManager: FileManager = .default
     ) throws -> URL {
         let directory = fileManager.temporaryDirectory
@@ -70,7 +94,8 @@ enum TranscriptMarkdownExporter {
             podcastTitle: podcastTitle,
             episodeTitle: episodeTitle,
             publicationDate: publicationDate,
-            segments: segments
+            segments: segments,
+            metadata: metadata
         ).utf8).write(to: url, options: .atomic)
         return url
     }
@@ -115,5 +140,50 @@ enum TranscriptMarkdownExporter {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "*", with: "\\*")
             .replacingOccurrences(of: "_", with: "\\_")
+    }
+}
+
+/// Testable viewer entry point. Keeping this adapter distinct from the Quick
+/// Action adapter proves both user-facing paths forward the saved preference.
+enum TranscriptViewerExport {
+    static func write(
+        podcastTitle: String?,
+        episodeTitle: String,
+        publicationDate: Date?,
+        segments: [TranscriptSegment],
+        metadata: TranscriptExportMetadata,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        try TranscriptMarkdownExporter.write(
+            podcastTitle: podcastTitle,
+            episodeTitle: episodeTitle,
+            publicationDate: publicationDate,
+            segments: segments,
+            metadata: metadata,
+            fileManager: fileManager
+        )
+    }
+}
+
+/// Testable episode Quick Action entry point. Transcript loading and its existing
+/// announcements remain in the presentation modifier; normalized file creation
+/// is kept pure and shared with the viewer.
+enum EpisodeQuickActionTranscriptExport {
+    static func write(
+        podcastTitle: String?,
+        episodeTitle: String,
+        publicationDate: Date?,
+        segments: [TranscriptSegment],
+        metadata: TranscriptExportMetadata,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        try TranscriptMarkdownExporter.write(
+            podcastTitle: podcastTitle,
+            episodeTitle: episodeTitle,
+            publicationDate: publicationDate,
+            segments: segments,
+            metadata: metadata,
+            fileManager: fileManager
+        )
     }
 }

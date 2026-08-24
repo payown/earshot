@@ -10,6 +10,7 @@ extension View {
 
 private struct EpisodeTranscriptExportModifier: ViewModifier {
     @Binding var trigger: Episode?
+    @Environment(SettingsStore.self) private var settings
     @State private var exportFile: ExportFile?
     @State private var isExporting = false
 
@@ -48,11 +49,12 @@ private struct EpisodeTranscriptExportModifier: ViewModifier {
             switch result {
             case .success(let segments):
                 do {
-                    exportFile = ExportFile(url: try TranscriptMarkdownExporter.write(
+                    exportFile = ExportFile(url: try EpisodeQuickActionTranscriptExport.write(
                         podcastTitle: podcastTitle,
                         episodeTitle: episodeTitle,
                         publicationDate: publicationDate,
-                        segments: segments
+                        segments: segments,
+                        metadata: settings.transcriptExportMetadata
                     ))
                 } catch {
                     AppLog.data.error(
