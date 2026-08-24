@@ -66,6 +66,31 @@ final class TranscriptMarkdownExporterTests: XCTestCase {
         XCTAssertTrue(both.contains("[01:05] **Alice:** Welcome."))
     }
 
+    func testSpeakersOnlyOmnySRTExportDoesNotLeakCueTimestampsIntoText() throws {
+        let sourceURL = try XCTUnwrap(URL(
+            string: "https://api.omny.fm/transcript?format=SubRip&t=1786971983"
+        ))
+        let raw = """
+        1
+        00:00:04,200 --> 00:00:06,760
+        Speaker 1: Hey, welcome to short stuff.
+
+        2
+        00:00:11,200 --> 00:00:13,240
+        Speaker 2: Do you know who else is here?
+        """
+        let format = TranscriptFormat.detect(url: sourceURL, contentType: "text/plain")
+        let segments = TranscriptParser.parse(raw, as: format)
+
+        let output = markdown(segments: segments, metadata: .speakersOnly)
+
+        XCTAssertTrue(output.contains("**Speaker 1:** Hey, welcome to short stuff."))
+        XCTAssertTrue(output.contains("**Speaker 2:** Do you know who else is here?"))
+        XCTAssertFalse(output.contains("00:00:04"))
+        XCTAssertFalse(output.contains("-->"))
+        XCTAssertFalse(output.contains("\n1\n"))
+    }
+
     func testSegmentsRemainReadableWhenSelectedMetadataIsUnavailable() {
         let segments = [
             TranscriptSegment(speaker: "Alice", text: "Speaker only.", startSeconds: nil),

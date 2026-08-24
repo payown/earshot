@@ -72,6 +72,28 @@ final class TranscriptFormatTests: XCTestCase {
         )
     }
 
+    // MARK: Explicit format query
+
+    func test_detect_omnySubRipQueryBeatsPlainTextContentType() {
+        XCTAssertEqual(
+            TranscriptFormat.detect(
+                url: url("https://api.omny.fm/transcript?format=SubRip&t=1786971983"),
+                contentType: "text/plain"
+            ),
+            .srt
+        )
+    }
+
+    func test_detect_webVTTQueryIsCaseInsensitive() {
+        XCTAssertEqual(
+            TranscriptFormat.detect(
+                url: url("https://api.example.com/transcript?FORMAT=WebVTT"),
+                contentType: "text/plain; charset=utf-8"
+            ),
+            .webVTT
+        )
+    }
+
     // MARK: Content-Type MIME mapping (no useful extension)
 
     func test_detect_textVttContentType_returnsWebVTT() {
