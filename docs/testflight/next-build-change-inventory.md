@@ -37,10 +37,10 @@ fall back to generic “bug fixes and performance improvements” copy.
   stereo playback and the stable time-stretch algorithm remain in use.
 - Build 238: Playback's Settings-row VoiceOver hint now says Volume Boost
   instead of advertising the removed Voice Enhance control.
-- Build 239: Transcript exports can include speakers only, timestamps only, or
-  both. The device-local choice applies to the transcript viewer and episode
-  Actions; new installations default to speakers only while existing
-  installations retain speakers and timestamps.
+- Build 239: Transcript metadata can include speakers only, timestamps only, or
+  both. The device-local choice applies live in the transcript viewer and to
+  exports from the viewer and episode Actions; new installations default to
+  speakers only while existing installations retain speakers and timestamps.
 - Maintenance since build 232 also expands the seeded navigation smoke test to
   adapt to iPad layouts and adds direct coverage for the audio-processing path.
 
