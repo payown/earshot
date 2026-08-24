@@ -74,6 +74,29 @@ final class CoreServicesTests: XCTestCase {
         XCTAssertEqual(ep.transcriptURL, "https://example.com/transcript.vtt")
     }
 
+    func testPrefersStructuredTranscriptRegardlessOfFeedOrder() throws {
+        let feedXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+          <channel>
+            <title>Multiple Transcripts</title>
+            <item>
+              <title>Episode</title>
+              <guid>episode</guid>
+              <enclosure url="https://example.com/episode.mp3" type="audio/mpeg"/>
+              <podcast:transcript url="https://example.com/transcript" type="text/html"/>
+              <podcast:transcript url="https://example.com/transcript.vtt" type="text/vtt"/>
+              <podcast:transcript url="https://example.com/transcript.json" type="application/json"/>
+              <podcast:transcript url="https://example.com/transcript.srt" type="application/x-subrip"/>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        let feed = try XCTUnwrap(RSSParser().parse(Data(feedXML.utf8)))
+        XCTAssertEqual(feed.episodes.first?.transcriptURL, "https://example.com/transcript.json")
+    }
+
     // MARK: HTTPClient URL validation
 
     func testHTTPClientRejectsInvalidURL() async {

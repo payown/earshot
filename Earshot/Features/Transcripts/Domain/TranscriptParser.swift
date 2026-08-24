@@ -142,10 +142,20 @@ enum TranscriptParser {
     // MARK: - HTML
 
     /// Splits an HTML transcript into one segment per block-level paragraph via
-    /// the shared ``EpisodeSummary/paragraphs(_:)`` strip. No speaker extraction
-    /// — HTML transcripts rarely carry structured speaker markup.
+    /// the shared ``EpisodeSummary/paragraphs(_:)`` strip. Semantic `<time>`
+    /// elements are removed with their contents first: providers such as
+    /// Buzzsprout publish cue timestamps this way, and treating their visible
+    /// values as prose prevents the metadata preference from omitting them.
+    /// Ordinary spoken text containing a clock value is untouched. No speaker
+    /// extraction — HTML transcripts rarely carry structured speaker markup.
     private static func parseHTML(_ raw: String) -> [TranscriptSegment] {
-        EpisodeSummary.paragraphs(raw).map { TranscriptSegment(speaker: nil, text: $0) }
+        let withoutTimeElements = raw.replacingOccurrences(
+            of: "(?is)<time\\b[^>]*>.*?</time\\s*>",
+            with: "",
+            options: .regularExpression
+        )
+        return EpisodeSummary.paragraphs(withoutTimeElements)
+            .map { TranscriptSegment(speaker: nil, text: $0) }
     }
 
     // MARK: - Plain text

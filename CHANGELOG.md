@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Removed the Voice Enhance setting because it selected a spoken-audio session mode and mono output but did not perform speech-enhancement processing. Playback continues to use stereo output and the stable time-stretch algorithm.
 
+### Fixed
+
+- Transcript feeds offering multiple representations now prefer structured JSON, WebVTT, or SRT over HTML. Semantic HTML cue times are also omitted, so providers such as Buzzsprout cannot leave timestamps in Speakers-only live transcripts or exports while ordinary spoken clock times remain intact. (build 240)
+
 ## [1.2.0] - 2026-08-23
 
 ### Added

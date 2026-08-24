@@ -1,10 +1,10 @@
 # Next TestFlight change inventory
 
-Status: Chapter 72, build 239, shipped to the Internal Testing Group and Public
-Testers on 2026-08-23. The exact build 239 copy is in
-`build-239-notes.txt`.
+Status: collecting changes after Chapter 72, build 239, which shipped to the
+Internal Testing Group and Public Testers on 2026-08-23. The exact build 239
+copy is in `build-239-notes.txt`.
 
-The last shipped story is Chapter 71 for build 232. The next TestFlight upload
+The last shipped story is Chapter 72 for build 239. The next TestFlight upload
 must follow the maintenance contract in `docs/kashe.md`:
 
 - assign the chapter to the build that is actually uploaded;
@@ -13,48 +13,29 @@ must follow the maintenance contract in `docs/kashe.md`:
 - use that exact chapter as the TestFlight `--notes` payload;
 - keep the complete chapter at or below 2,500 characters before upload.
 
-## Significant changes since build 232
+## Significant changes since build 239
 
 The next Kashe chapter’s “What changed” and “What to test” sections must account
 for every applicable item below. They may group related behavior, but must not
 fall back to generic “bug fixes and performance improvements” copy.
 
-- Build 233: Podcast Quick Actions can open the existing download-count,
-  queue-age-limit, and playback-speed editors directly, moving VoiceOver focus
-  to the native adjustable control without adding duplicate settings.
-- Build 234: Queue options can save the current episode order as a reusable
-  lineup and apply it later. Applying a lineup preserves other queued episodes,
-  skips unavailable or already-played entries, and announces exact applied and
-  skipped counts.
-- Build 235: Playback adds a VoiceOver-first Volume Boost control with Off,
-  Low, Medium, and High levels. It is available globally and per podcast, keeps
-  the system volume unchanged, and applies live during playback.
-- Build 236: Silence trimming now performs real-time silence compaction instead
-  of exposing an inactive setting. It can be enabled globally or overridden per
-  podcast and applies live without changing an episode's saved position.
-- Build 237: the misleading Voice Enhance switch has been removed. It selected
-  a spoken-audio session mode and mono output but did not enhance speech. Normal
-  stereo playback and the stable time-stretch algorithm remain in use.
-- Build 238: Playback's Settings-row VoiceOver hint now says Volume Boost
-  instead of advertising the removed Voice Enhance control.
-- Build 239: Transcript metadata can include speakers only, timestamps only, or
-  both. The device-local choice applies live in the transcript viewer and to
-  exports from the viewer and episode Actions; new installations default to
-  speakers only while existing installations retain speakers and timestamps.
-- Maintenance since build 232 also expands the seeded navigation smoke test to
-  adapt to iPad layouts and adds direct coverage for the audio-processing path.
+- Build 240: Podcast feeds offering several transcript representations now
+  prefer structured JSON, WebVTT, or SRT over HTML. Existing HTML transcript
+  URLs also omit semantic cue-time elements, so Speakers only removes provider
+  timestamps from the live view and both export paths without deleting clock
+  times spoken as part of the episode.
 
 ## Shipping checklist
 
-- [x] Reconcile this inventory with `CHANGELOG.md` and every change after build
-  232.
-- [x] Choose the real final build number and the next chapter number.
-- [x] Write one coherent Kashe chapter with plain-language “What changed” and
+- [ ] Reconcile this inventory with `CHANGELOG.md` and every change after build
+  239.
+- [ ] Choose the real final build number and the next chapter number.
+- [ ] Write one coherent Kashe chapter with plain-language “What changed” and
   “What to test” sections covering the inventory.
-- [x] Append the chapter to `docs/kashe.md`; note any new durable story
+- [ ] Append the chapter to `docs/kashe.md`; note any new durable story
   facts requiring an established-details update.
-- [x] Save the exact same text as `docs/testflight/build-N-notes.txt`.
-- [x] Verify the payload is at most 2,500 characters with `wc -m`.
-- [x] Obtain Michael’s explicit TestFlight-upload approval.
-- [x] Upload using the checked-in notes file and verify App Store Connect shows
+- [ ] Save the exact same text as `docs/testflight/build-N-notes.txt`.
+- [ ] Verify the payload is at most 2,500 characters with `wc -m`.
+- [ ] Obtain Michael’s explicit TestFlight-upload approval.
+- [ ] Upload using the checked-in notes file and verify App Store Connect shows
   the same chapter.
