@@ -1,0 +1,52 @@
+### Chapter 72 — Build 239
+
+*The day found its own volume*
+
+**What changed**
+
+Build 239 gives listening routines a little more shape. Episode Quick Actions
+can open the existing download-count, queue-age, and podcast-speed controls
+directly, with VoiceOver focus on the adjustable control. Queue options can
+save the current order as a lineup and apply it later without throwing away
+episodes that are already waiting.
+
+Playback adds Volume Boost levels from Off through High, globally or per
+podcast, without changing the system volume. Silence trimming now shortens
+quiet gaps while audio plays and keeps the saved episode position honest. The
+old Voice Enhance switch is gone because it changed the audio session and made
+playback mono without actually enhancing speech.
+
+Transcript metadata can show speakers, timestamps, or both. The choice updates
+the transcript itself and Markdown exports from the viewer or episode Actions.
+VoiceOver keeps each transcript segment together and speaks times naturally.
+
+**What to test**
+
+Use episode Quick Actions to open each editor. Focus should land on its native
+adjustable control. Save a Queue lineup, change the Queue, then apply it. Saved
+available episodes should move to the front in order, other queued episodes
+should remain, and Earshot should announce applied and skipped counts.
+
+Try every Volume Boost level during playback, then set a different level for
+one podcast. Turn silence trimming on and off during speech with real pauses.
+Audio should respond live, remain stereo, and resume at the expected saved
+position. Also check ordinary playback speed, background audio, and VoiceOver
+responsiveness.
+
+On a podcast with a supplied transcript, try Speakers only, Timestamps only,
+and Speakers and timestamps. Check the live transcript, its VoiceOver speech,
+an export from the viewer, and an export from episode Actions. Each place should
+contain only the metadata you selected.
+
+Kashe saved a lineup before the first drive, news first, the long interview
+after lunch. The order stopped being another thing she had to rebuild between
+doors.
+
+One host spoke softly, so she raised that show without touching the phone's
+volume. Another left pauses long enough to make her check whether playback had
+stopped. Earshot tightened the gaps and kept going.
+
+That evening she exported a transcript with speaker names and no clock beside
+every sentence. Renata asked why that mattered.
+
+“Because I asked for names,” Kashe said. “Not a stopwatch.”
