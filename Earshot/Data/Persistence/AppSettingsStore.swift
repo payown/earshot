@@ -78,6 +78,9 @@ enum SettingsKey {
     static let spokenEpisodeDuration = "spoken_episode_duration"
     static let spokenEpisodeDescriptionMode = "spoken_episode_description_mode"
     static let spokenPodcastDescriptionMode = "spoken_podcast_description_mode"
+    /// Which source metadata appears in transcript Markdown exports. Device-local
+    /// so each device can favor the files it creates without changing another.
+    static let transcriptExportMetadata = "transcript_export_metadata"
     // Whether playing an episode (the "Play now" default row action) also opens
     // the full player screen. Default true (#562).
     static let openPlayerOnPlay = "open_player_on_play"
@@ -286,6 +289,9 @@ enum SettingsDefault {
     static let accentColor: AccentChoice = .systemDefault
     static let layoutDensity: LayoutDensity = .comfortable
     static let statsStreaksEnabled = false
+    /// Fresh-install default. Existing onboarded installations are seeded with
+    /// ``TranscriptExportMetadata/speakersAndTimestamps`` by ``SettingsStore``.
+    static let transcriptExportMetadata: TranscriptExportMetadata = .speakersOnly
     /// Default number of most-recent episodes seeded into the inbox when a new
     /// podcast is added. Matches Flutter's default of 3.
     static let inboxDefaultCount = 3
@@ -388,6 +394,31 @@ final class AppSettingsStore {
 
     func setVolumeBoost(_ level: VolumeBoostLevel) {
         setRawValue(level.rawValue, for: SettingsKey.volumeBoost)
+    }
+
+    func transcriptExportMetadata(default fallback: TranscriptExportMetadata) -> TranscriptExportMetadata {
+        guard let raw = rawValue(SettingsKey.transcriptExportMetadata),
+              let metadata = TranscriptExportMetadata(rawValue: raw) else {
+            return fallback
+        }
+        return metadata
+    }
+
+    func setTranscriptExportMetadata(_ metadata: TranscriptExportMetadata) {
+        setRawValue(metadata.rawValue, for: SettingsKey.transcriptExportMetadata)
+    }
+
+    /// Writes the launch-specific default exactly once. An invalid legacy value
+    /// is repaired to the supplied default instead of remaining ambiguous.
+    func initializeTranscriptExportMetadataIfNeeded(
+        default fallback: TranscriptExportMetadata
+    ) -> TranscriptExportMetadata {
+        if let raw = rawValue(SettingsKey.transcriptExportMetadata),
+           let metadata = TranscriptExportMetadata(rawValue: raw) {
+            return metadata
+        }
+        setTranscriptExportMetadata(fallback)
+        return fallback
     }
 
     /// Reads an optional Int where the stored string `"null"` means "no limit".

@@ -36,6 +36,7 @@ final class SettingsStore {
     var spokenEpisodeDuration = true { didSet { persist { $0.setBool(spokenEpisodeDuration, for: SettingsKey.spokenEpisodeDuration) } } }
     var spokenEpisodeDescriptionMode: SpokenDescriptionMode = .brief { didSet { persist { $0.setRawValue(spokenEpisodeDescriptionMode.rawValue, for: SettingsKey.spokenEpisodeDescriptionMode) } } }
     var spokenPodcastDescriptionMode: SpokenDescriptionMode = .brief { didSet { persist { $0.setRawValue(spokenPodcastDescriptionMode.rawValue, for: SettingsKey.spokenPodcastDescriptionMode) } } }
+    var transcriptExportMetadata: TranscriptExportMetadata = SettingsDefault.transcriptExportMetadata { didSet { persist { $0.setTranscriptExportMetadata(transcriptExportMetadata) } } }
 
     var episodeSpokenDetails: EpisodeSpokenDetails {
         EpisodeSpokenDetails(
@@ -83,6 +84,13 @@ final class SettingsStore {
         let store = AppSettingsStore(context: context)
         self.store = store
         loaded = false
+        // Before #900, every export included both metadata fields. A completed
+        // onboarding is the durable evidence that this is an existing usable
+        // installation; a genuinely new store has not completed it yet.
+        let wasExistingInstallation = store.bool(
+            SettingsKey.onboardingComplete,
+            default: SettingsDefault.onboardingComplete
+        )
         globalSpeed = store.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
         volumeBoost = store.volumeBoost()
         skipSilenceEnabled = store.bool(SettingsKey.skipSilenceEnabled, default: SettingsDefault.skipSilenceEnabled)
@@ -111,6 +119,9 @@ final class SettingsStore {
         spokenPodcastDescriptionMode = SpokenDescriptionMode(
             rawValue: store.rawValue(SettingsKey.spokenPodcastDescriptionMode) ?? ""
         ) ?? .brief
+        transcriptExportMetadata = store.initializeTranscriptExportMetadataIfNeeded(
+            default: wasExistingInstallation ? .speakersAndTimestamps : .speakersOnly
+        )
         themeOverride = store.themeOverride()
         accentColor = store.accentChoice()
         layoutDensity = store.layoutDensity()

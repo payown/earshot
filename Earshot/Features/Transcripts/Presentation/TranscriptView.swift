@@ -15,6 +15,7 @@ struct TranscriptView: View {
     let episode: Episode?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(SettingsStore.self) private var settings
     @State private var model = TranscriptViewModel()
     @State private var exportFile: ExportFile?
 
@@ -186,11 +187,12 @@ struct TranscriptView: View {
 
     private func export(_ segments: [TranscriptSegment]) {
         do {
-            exportFile = ExportFile(url: try TranscriptMarkdownExporter.write(
+            exportFile = ExportFile(url: try TranscriptViewerExport.write(
                 podcastTitle: episode?.podcast?.title,
                 episodeTitle: episode?.title ?? "Episode",
                 publicationDate: episode?.pubDate,
-                segments: segments
+                segments: segments,
+                metadata: settings.transcriptExportMetadata
             ))
         } catch {
             AppLog.data.error(

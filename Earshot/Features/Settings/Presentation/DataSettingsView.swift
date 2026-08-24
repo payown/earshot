@@ -9,6 +9,7 @@ struct DataSettingsView: View {
     @Environment(\.modelContext) private var context
     @Environment(AppRuntime.self) private var runtime
     @Environment(OPMLImportCoordinator.self) private var opmlImportCoordinator
+    @Environment(SettingsStore.self) private var settings
 
     @Query private var podcasts: [Podcast]
 
@@ -22,6 +23,7 @@ struct DataSettingsView: View {
     /// message — never instead of it.
 
     var body: some View {
+        @Bindable var settings = settings
         Form {
             // No section header: the "Data" navigation title already names the
             // screen, so a matching header would be a redundant VoiceOver heading
@@ -74,6 +76,18 @@ struct DataSettingsView: View {
                 } label: {
                     Label("Delete synced library everywhere", systemImage: "trash")
                 }
+            }
+
+            Section {
+                Picker("Segment metadata", selection: $settings.transcriptExportMetadata) {
+                    ForEach(TranscriptExportMetadata.allCases) { metadata in
+                        Text(metadata.title).tag(metadata)
+                    }
+                }
+            } header: {
+                Text("Transcript exports")
+            } footer: {
+                Text("Applies to exports from both the transcript viewer and episode Actions.")
             }
         }
         .navigationTitle("Data")

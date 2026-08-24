@@ -116,7 +116,7 @@ struct SettingsScreen: View {
                 } label: {
                     Label("Data", systemImage: "externaldrive")
                 }
-                .accessibilityHint("Export, import, clear this device, or delete the synced library everywhere")
+                .accessibilityHint("Podcast import and export, transcript export format, clear this device, or delete the synced library everywhere")
 
                 NavigationLink {
                     HelpSettingsView()

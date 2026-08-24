@@ -11,7 +11,8 @@ final class TranscriptMarkdownExporterTests: XCTestCase {
             segments: [
                 TranscriptSegment(speaker: "Alice", text: "Welcome.", startSeconds: 1.9),
                 TranscriptSegment(speaker: nil, text: "Untimed closing."),
-            ]
+            ],
+            metadata: .speakersAndTimestamps
         )
 
         XCTAssertTrue(markdown.contains("# Braille Today"))
@@ -41,9 +42,89 @@ final class TranscriptMarkdownExporterTests: XCTestCase {
             podcastTitle: nil,
             episodeTitle: "Test",
             publicationDate: nil,
-            segments: [TranscriptSegment(speaker: nil, text: "Café")]
+            segments: [TranscriptSegment(speaker: nil, text: "Café")],
+            metadata: .speakersOnly
         )
         let data = try Data(contentsOf: url)
         XCTAssertEqual(String(data: data, encoding: .utf8)?.contains("Café"), true)
+    }
+
+    func testMetadataModesIncludeOnlyTheSelectedPrefixes() {
+        let segment = TranscriptSegment(
+            speaker: "Alice", text: "Welcome.", startSeconds: 65.8
+        )
+
+        let speakersOnly = markdown(segments: [segment], metadata: .speakersOnly)
+        XCTAssertTrue(speakersOnly.contains("**Alice:** Welcome."))
+        XCTAssertFalse(speakersOnly.contains("[01:05]"))
+
+        let timestampsOnly = markdown(segments: [segment], metadata: .timestampsOnly)
+        XCTAssertTrue(timestampsOnly.contains("[01:05] Welcome."))
+        XCTAssertFalse(timestampsOnly.contains("**Alice:**"))
+
+        let both = markdown(segments: [segment], metadata: .speakersAndTimestamps)
+        XCTAssertTrue(both.contains("[01:05] **Alice:** Welcome."))
+    }
+
+    func testSegmentsRemainReadableWhenSelectedMetadataIsUnavailable() {
+        let segments = [
+            TranscriptSegment(speaker: "Alice", text: "Speaker only.", startSeconds: nil),
+            TranscriptSegment(speaker: nil, text: "Timestamp only.", startSeconds: 3),
+            TranscriptSegment(speaker: nil, text: "Plain text.", startSeconds: nil),
+        ]
+
+        for metadata in TranscriptExportMetadata.allCases {
+            let output = markdown(segments: segments, metadata: metadata)
+            XCTAssertTrue(output.contains("Speaker only."), metadata.title)
+            XCTAssertTrue(output.contains("Timestamp only."), metadata.title)
+            XCTAssertTrue(output.contains("Plain text."), metadata.title)
+        }
+    }
+
+    func testViewerAndQuickActionEntryPointsHonorEveryMetadataMode() throws {
+        let segments = [
+            TranscriptSegment(speaker: "Alice", text: "Welcome.", startSeconds: 1),
+        ]
+
+        for metadata in TranscriptExportMetadata.allCases {
+            let expected = markdown(segments: segments, metadata: metadata)
+            let viewerURL = try TranscriptViewerExport.write(
+                podcastTitle: "Show",
+                episodeTitle: "Episode",
+                publicationDate: nil,
+                segments: segments,
+                metadata: metadata
+            )
+            let quickActionURL = try EpisodeQuickActionTranscriptExport.write(
+                podcastTitle: "Show",
+                episodeTitle: "Episode",
+                publicationDate: nil,
+                segments: segments,
+                metadata: metadata
+            )
+
+            XCTAssertEqual(try String(contentsOf: viewerURL, encoding: .utf8), expected)
+            XCTAssertEqual(try String(contentsOf: quickActionURL, encoding: .utf8), expected)
+        }
+    }
+
+    func testMetadataTitlesMatchTheVoiceOverContract() {
+        XCTAssertEqual(
+            TranscriptExportMetadata.allCases.map(\.title),
+            ["Speakers only", "Timestamps only", "Speakers and timestamps"]
+        )
+    }
+
+    private func markdown(
+        segments: [TranscriptSegment],
+        metadata: TranscriptExportMetadata
+    ) -> String {
+        TranscriptMarkdownExporter.markdown(
+            podcastTitle: "Show",
+            episodeTitle: "Episode",
+            publicationDate: nil,
+            segments: segments,
+            metadata: metadata
+        )
     }
 }
