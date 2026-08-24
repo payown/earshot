@@ -22,11 +22,14 @@ enum TranscriptFormat: String, Equatable, Sendable {
     /// 1. **URL path extension** — the most reliable signal for hand-authored
     ///    transcript files: `vtt`→``webVTT``, `srt`→``srt``, `json`→``json``,
     ///    `html`/`htm`→``html``, `txt`→``plainText``.
-    /// 2. **`Content-Type` MIME** (base type, any `; charset=…` parameter is
+    /// 2. **Explicit URL format query** — transcript endpoints sometimes expose
+    ///    the selected representation as `format=SubRip` or `format=WebVTT`
+    ///    while serving every representation as `text/plain` (notably Omny).
+    /// 3. **`Content-Type` MIME** (base type, any `; charset=…` parameter is
     ///    dropped): `text/vtt`→``webVTT``; `application/x-subrip`, `application/srt`,
     ///    `text/srt`→``srt``; `application/json`, `text/json`→``json``;
     ///    `text/html`, `application/xhtml+xml`→``html``; `text/plain``→``plainText``.
-    /// 3. Anything unrecognised defaults to ``plainText`` — the most forgiving
+    /// 4. Anything unrecognised defaults to ``plainText`` — the most forgiving
     ///    parser, so an unknown body still yields best-effort paragraphs rather
     ///    than nothing.
     ///
@@ -39,6 +42,27 @@ enum TranscriptFormat: String, Equatable, Sendable {
         case "html", "htm": return .html
         case "txt": return .plainText
         default: break
+        }
+
+        // An explicit representation in the URL is more trustworthy than a
+        // generic response MIME. Omny, for example, advertises SRT in RSS and
+        // uses `format=SubRip`, but responds with `Content-Type: text/plain`.
+        // Without this check cue indices and timing lines become transcript text
+        // and can no longer be omitted by the export metadata preference (#900).
+        if let queryFormat = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name.caseInsensitiveCompare("format") == .orderedSame })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+            switch queryFormat {
+            case "webvtt", "vtt": return .webVTT
+            case "subrip", "srt": return .srt
+            case "json": return .json
+            case "html": return .html
+            case "text", "plain", "plaintext", "textwithtimestamps": return .plainText
+            default: break
+            }
         }
 
         if let contentType {
