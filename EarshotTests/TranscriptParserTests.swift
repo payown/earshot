@@ -219,18 +219,21 @@ final class TranscriptParserTests: XCTestCase {
         XCTAssertEqual(segments.first?.text, "Tom & Jerry")
     }
 
-    func test_html_semanticCueTimesRemovedWithoutDeletingSpokenClockText() {
+    func test_html_semanticCueTimesStructuredWithoutDeletingSpokenClockText() {
         let raw = """
         <time>0:01</time>
         <p>Meet me at 10:30 tomorrow.</p>
         <time datetime="PT34S">0:34</time>
         <p>Second paragraph.</p>
+        <p>Published <time datetime="2026-08-23">August 23</time>.</p>
         """
         let segments = TranscriptParser.parse(raw, as: .html)
         XCTAssertEqual(segments.map(\.text), [
             "Meet me at 10:30 tomorrow.",
-            "Second paragraph."
+            "Second paragraph.",
+            "Published August 23."
         ])
+        XCTAssertEqual(segments.map(\.startSeconds), [1, 34, nil])
     }
 
     func test_html_empty_returnsEmpty() {

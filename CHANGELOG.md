@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Transcript feeds offering multiple representations now prefer structured JSON, WebVTT, or SRT over HTML. Semantic HTML cue times are also omitted, so providers such as Buzzsprout cannot leave timestamps in Speakers-only live transcripts or exports while ordinary spoken clock times remain intact. (build 240)
+- Transcript feeds offering multiple representations now prefer structured JSON, WebVTT, or SRT over HTML. Semantic HTML cue times also become structured metadata, so all three transcript styles work for providers such as Buzzsprout while ordinary spoken clock times remain intact. (build 240)
 
 ## [1.2.0] - 2026-08-23
 

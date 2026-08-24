@@ -143,19 +143,69 @@ enum TranscriptParser {
 
     /// Splits an HTML transcript into one segment per block-level paragraph via
     /// the shared ``EpisodeSummary/paragraphs(_:)`` strip. Semantic `<time>`
-    /// elements are removed with their contents first: providers such as
-    /// Buzzsprout publish cue timestamps this way, and treating their visible
-    /// values as prose prevents the metadata preference from omitting them.
-    /// Ordinary spoken text containing a clock value is untouched. No speaker
-    /// extraction — HTML transcripts rarely carry structured speaker markup.
+    /// elements are converted into ``TranscriptSegment/startSeconds`` first:
+    /// providers such as Buzzsprout publish cue timestamps this way, and
+    /// treating their visible values as prose prevents the metadata preference
+    /// from controlling them. Ordinary spoken text containing a clock value is
+    /// untouched. No speaker extraction — HTML transcripts rarely carry
+    /// structured speaker markup.
     private static func parseHTML(_ raw: String) -> [TranscriptSegment] {
-        let withoutTimeElements = raw.replacingOccurrences(
-            of: "(?is)<time\\b[^>]*>.*?</time\\s*>",
-            with: "",
-            options: .regularExpression
+        let structured = structuringHTMLCueTimes(raw)
+        var pendingStartSeconds: TimeInterval?
+        var segments: [TranscriptSegment] = []
+
+        for paragraph in EpisodeSummary.paragraphs(structured.html) {
+            if let startSeconds = structured.startSecondsByMarker[paragraph] {
+                pendingStartSeconds = startSeconds
+                continue
+            }
+            segments.append(TranscriptSegment(
+                speaker: nil,
+                text: paragraph,
+                startSeconds: pendingStartSeconds
+            ))
+            pendingStartSeconds = nil
+        }
+        return segments
+    }
+
+    /// Replaces clock-shaped semantic `<time>` elements with isolated internal
+    /// paragraph markers. ``EpisodeSummary/paragraphs(_:)`` then retains the
+    /// provider's existing block segmentation, while the marker transfers its
+    /// parsed cue time to the next readable block. Non-clock `<time>` content
+    /// (for example a spoken calendar date) remains visible text.
+    private static func structuringHTMLCueTimes(
+        _ raw: String
+    ) -> (html: String, startSecondsByMarker: [String: TimeInterval]) {
+        let pattern = "(?is)<time\\b[^>]*>(.*?)</time\\s*>"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return (raw, [:])
+        }
+
+        let original = raw as NSString
+        let matches = regex.matches(
+            in: raw,
+            range: NSRange(location: 0, length: original.length)
         )
-        return EpisodeSummary.paragraphs(withoutTimeElements)
-            .map { TranscriptSegment(speaker: nil, text: $0) }
+        let transformed = NSMutableString(string: raw)
+        var startSecondsByMarker: [String: TimeInterval] = [:]
+
+        for (index, match) in matches.enumerated().reversed() {
+            guard match.numberOfRanges > 1,
+                  match.range(at: 1).location != NSNotFound else { continue }
+            let visibleTime = EpisodeSummary.plainText(
+                original.substring(with: match.range(at: 1))
+            )
+            guard let startSeconds = clockSeconds(from: visibleTime) else { continue }
+
+            let marker = "__EARSHOT_TRANSCRIPT_CUE_TIME_\(index)__"
+            startSecondsByMarker[marker] = startSeconds
+            transformed.replaceCharacters(
+                in: match.range,
+                with: "\n<p>\(marker)</p>\n"
+            )
+        }
+        return (String(transformed), startSecondsByMarker)
     }
 
     // MARK: - Plain text
@@ -199,8 +249,17 @@ enum TranscriptParser {
         guard let marker = timingLine.range(of: "-->") else { return nil }
         let raw = timingLine[..<marker.lowerBound]
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        return clockSeconds(from: raw)
+    }
+
+    /// Parses `H:MM:SS`, `MM:SS`, or their fractional variants. Shared by
+    /// cue-based formats and semantic HTML time elements so every container
+    /// produces identical structured seconds.
+    private static func clockSeconds<S: StringProtocol>(from raw: S) -> TimeInterval? {
+        let normalized = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: ",", with: ".")
-        let parts = raw.split(separator: ":")
+        let parts = normalized.split(separator: ":")
         guard parts.count == 2 || parts.count == 3,
               let seconds = Double(parts[parts.count - 1]),
               let minutes = Double(parts[parts.count - 2]) else { return nil }

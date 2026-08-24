@@ -187,6 +187,30 @@ final class TranscriptMarkdownExporterTests: XCTestCase {
         }
     }
 
+    func testHTMLCueTimeFollowsLiveTranscriptMetadataMode() throws {
+        let segment = try XCTUnwrap(TranscriptParser.parse(
+            "<time>0:01</time><p>Welcome.</p>",
+            as: .html
+        ).first)
+
+        XCTAssertNil(TranscriptSegmentPresentation.metadataText(
+            for: segment,
+            mode: .speakersOnly
+        ))
+        XCTAssertEqual(TranscriptSegmentPresentation.spokenText(
+            for: segment,
+            mode: .speakersOnly
+        ), "Welcome.")
+        XCTAssertEqual(TranscriptSegmentPresentation.metadataText(
+            for: segment,
+            mode: .timestampsOnly
+        ), "[00:01]")
+        XCTAssertEqual(TranscriptSegmentPresentation.spokenText(
+            for: segment,
+            mode: .timestampsOnly
+        ), "1 second: Welcome.")
+    }
+
     private func markdown(
         segments: [TranscriptSegment],
         metadata: TranscriptExportMetadata

@@ -21,9 +21,9 @@ fall back to generic “bug fixes and performance improvements” copy.
 
 - Build 240: Podcast feeds offering several transcript representations now
   prefer structured JSON, WebVTT, or SRT over HTML. Existing HTML transcript
-  URLs also omit semantic cue-time elements, so Speakers only removes provider
-  timestamps from the live view and both export paths without deleting clock
-  times spoken as part of the episode.
+  URLs also convert semantic cue-time elements into structured metadata, so all
+  three styles work in the live view and both export paths without deleting
+  clock times spoken as part of the episode.
 
 ## Shipping checklist
 
