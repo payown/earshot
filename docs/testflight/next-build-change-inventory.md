@@ -1,8 +1,8 @@
 # Next TestFlight change inventory
 
-Status: collecting changes after Chapter 71, build 232, which shipped to the
-Internal Testing Group and Public Testers on 2026-08-23. The exact build 232
-copy is in `build-232-notes.txt`.
+Status: Chapter 72, build 239, shipped to the Internal Testing Group and Public
+Testers on 2026-08-23. The exact build 239 copy is in
+`build-239-notes.txt`.
 
 The last shipped story is Chapter 71 for build 232. The next TestFlight upload
 must follow the maintenance contract in `docs/kashe.md`:
@@ -56,5 +56,5 @@ fall back to generic “bug fixes and performance improvements” copy.
 - [x] Save the exact same text as `docs/testflight/build-N-notes.txt`.
 - [x] Verify the payload is at most 2,500 characters with `wc -m`.
 - [x] Obtain Michael’s explicit TestFlight-upload approval.
-- [ ] Upload using the checked-in notes file and verify App Store Connect shows
+- [x] Upload using the checked-in notes file and verify App Store Connect shows
   the same chapter.
