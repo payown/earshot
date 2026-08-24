@@ -85,9 +85,9 @@ struct DataSettingsView: View {
                     }
                 }
             } header: {
-                Text("Transcript exports")
+                Text("Transcript metadata")
             } footer: {
-                Text("Applies to exports from both the transcript viewer and episode Actions.")
+                Text("Applies to the transcript viewer and exports from both the viewer and episode Actions.")
             }
         }
         .navigationTitle("Data")

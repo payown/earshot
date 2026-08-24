@@ -140,6 +140,53 @@ final class TranscriptMarkdownExporterTests: XCTestCase {
         )
     }
 
+    func testLiveTranscriptPresentationMatchesEveryMetadataMode() {
+        let segment = TranscriptSegment(
+            speaker: "Alice", text: "Welcome.", startSeconds: 65
+        )
+
+        XCTAssertEqual(
+            TranscriptSegmentPresentation.metadataText(for: segment, mode: .speakersOnly),
+            "Alice"
+        )
+        XCTAssertEqual(
+            TranscriptSegmentPresentation.spokenText(for: segment, mode: .speakersOnly),
+            "Alice: Welcome."
+        )
+        XCTAssertEqual(
+            TranscriptSegmentPresentation.metadataText(for: segment, mode: .timestampsOnly),
+            "[01:05]"
+        )
+        XCTAssertEqual(
+            TranscriptSegmentPresentation.spokenText(for: segment, mode: .timestampsOnly),
+            "1 minute, 5 seconds: Welcome."
+        )
+        XCTAssertEqual(
+            TranscriptSegmentPresentation.metadataText(
+                for: segment, mode: .speakersAndTimestamps
+            ),
+            "[01:05] · Alice"
+        )
+        XCTAssertEqual(
+            TranscriptSegmentPresentation.spokenText(
+                for: segment, mode: .speakersAndTimestamps
+            ),
+            "1 minute, 5 seconds, Alice: Welcome."
+        )
+    }
+
+    func testLiveTranscriptPresentationFallsBackToTextWhenMetadataIsMissing() {
+        let segment = TranscriptSegment(speaker: nil, text: "Plain text.")
+
+        for mode in TranscriptExportMetadata.allCases {
+            XCTAssertNil(TranscriptSegmentPresentation.metadataText(for: segment, mode: mode))
+            XCTAssertEqual(
+                TranscriptSegmentPresentation.spokenText(for: segment, mode: mode),
+                "Plain text."
+            )
+        }
+    }
+
     private func markdown(
         segments: [TranscriptSegment],
         metadata: TranscriptExportMetadata

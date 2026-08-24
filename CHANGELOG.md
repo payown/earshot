@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Transcript exports now offer Speakers only, Timestamps only, or Speakers and timestamps under Settings > Data. The device-local choice applies to exports from both the transcript viewer and episode Actions; new installations default to Speakers only while existing installations retain the previous combined format. (closes #900)
+- Transcript metadata now offers Speakers only, Timestamps only, or Speakers and timestamps under Settings > Data. The device-local choice applies live in the transcript viewer and to exports from both the viewer and episode Actions; new installations default to Speakers only while existing installations retain the previous combined format. (closes #900)
 - Podcast Quick Actions can now open the existing download-count, queue-age-limit, and per-podcast speed editors directly. Each action moves VoiceOver focus to its native adjustable control, remains configurable under Settings > Quick Actions, and adds no new data setting. (closes #465)
 - Queue options can now save the current order as a reusable lineup and apply it later. Applying moves available, unplayed saved episodes to the front in order, preserves every other queued episode, and announces exact applied and skipped counts. Lineups sync through private iCloud and are capped at 100 episodes with an explicit omitted count. (closes #550)
 - Playback now offers VoiceOver-first Volume Boost levels of Off, Low, Medium, and High, globally and per podcast. Boost applies live without changing the system volume. (closes #571)

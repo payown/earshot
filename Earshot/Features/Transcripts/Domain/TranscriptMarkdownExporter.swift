@@ -1,8 +1,8 @@
 import Foundation
 
-/// Which source-provided segment metadata is included in a Markdown export
-/// (#900). Raw values are stable device-local persistence; titles are the exact
-/// option names promised to VoiceOver users.
+/// Which source-provided segment metadata is shown in the transcript viewer and
+/// included in Markdown exports (#900). Raw values are stable device-local
+/// persistence; titles are the exact option names promised to VoiceOver users.
 enum TranscriptExportMetadata: String, CaseIterable, Identifiable, Sendable {
     case speakersOnly = "speakers_only"
     case timestampsOnly = "timestamps_only"

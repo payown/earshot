@@ -94,14 +94,16 @@ struct TranscriptView: View {
         }
     }
 
-    /// One transcript segment: an optional speaker label (distinct, secondary,
-    /// caption-weight) above the spoken text. Rendered as a single VoiceOver element
-    /// whose spoken label is "Speaker: text" so the reader hears who is speaking
-    /// before the line, while the visible text stays selectable.
+    /// One transcript segment: the selected source metadata (distinct, secondary,
+    /// caption-weight) above the spoken text. The segment remains one VoiceOver
+    /// element while its label follows the same setting as the visible metadata.
     private func segmentView(_ segment: TranscriptSegment) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            if let speaker = segment.speaker, !speaker.isEmpty {
-                Text(speaker)
+            if let metadata = TranscriptSegmentPresentation.metadataText(
+                for: segment,
+                mode: settings.transcriptExportMetadata
+            ) {
+                Text(metadata)
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundStyle(AppColor.secondaryText)
@@ -114,19 +116,13 @@ struct TranscriptView: View {
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // One element per segment; author the spoken form so the speaker is named
-        // before the line ("Speaker: text") rather than read as two stray stops.
+        // One element per segment; author the spoken form so metadata and text
+        // are read together rather than becoming separate navigation stops.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenSegment(segment))
-    }
-
-    /// The spoken form of a segment: "Speaker: text" when a speaker is credited,
-    /// otherwise just the text.
-    private func spokenSegment(_ segment: TranscriptSegment) -> String {
-        if let speaker = segment.speaker, !speaker.isEmpty {
-            return "\(speaker): \(segment.text)"
-        }
-        return segment.text
+        .accessibilityLabel(TranscriptSegmentPresentation.spokenText(
+            for: segment,
+            mode: settings.transcriptExportMetadata
+        ))
     }
 
     // MARK: Error
@@ -201,4 +197,66 @@ struct TranscriptView: View {
             Announcer.announce("Could not export transcript")
         }
     }
+}
+
+/// Pure presentation rules shared by visible transcript metadata and the
+/// segment's single VoiceOver label. Keeping this separate makes all three
+/// live-view modes testable without changing focus structure.
+enum TranscriptSegmentPresentation {
+    static func metadataText(
+        for segment: TranscriptSegment,
+        mode: TranscriptExportMetadata
+    ) -> String? {
+        let speaker = segment.speaker?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let usefulSpeaker = speaker.flatMap { $0.isEmpty ? nil : $0 }
+        let timestamp = segment.startSeconds.map {
+            "[\(TranscriptMarkdownExporter.timestamp($0))]"
+        }
+
+        return switch mode {
+        case .speakersOnly:
+            usefulSpeaker
+        case .timestampsOnly:
+            timestamp
+        case .speakersAndTimestamps:
+            [timestamp, usefulSpeaker].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
+        }
+    }
+
+    static func spokenText(
+        for segment: TranscriptSegment,
+        mode: TranscriptExportMetadata
+    ) -> String {
+        let speaker = segment.speaker?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let usefulSpeaker = speaker.flatMap { $0.isEmpty ? nil : $0 }
+        let timestamp = segment.startSeconds.map(spokenTimestamp)
+
+        let prefix: String? = switch mode {
+        case .speakersOnly:
+            usefulSpeaker
+        case .timestampsOnly:
+            timestamp
+        case .speakersAndTimestamps:
+            [timestamp, usefulSpeaker].compactMap { $0 }.joined(separator: ", ").nilIfEmpty
+        }
+        return prefix.map { "\($0): \(segment.text)" } ?? segment.text
+    }
+
+    private static func spokenTimestamp(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded(.down)))
+        let hours = total / 3_600
+        let minutes = (total % 3_600) / 60
+        let remaining = total % 60
+        var parts: [String] = []
+        if hours > 0 { parts.append("\(hours) \(hours == 1 ? "hour" : "hours")") }
+        if minutes > 0 { parts.append("\(minutes) \(minutes == 1 ? "minute" : "minutes")") }
+        if remaining > 0 || parts.isEmpty {
+            parts.append("\(remaining) \(remaining == 1 ? "second" : "seconds")")
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
