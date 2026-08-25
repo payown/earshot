@@ -504,6 +504,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   leaves home (Chapter 54)
 - Paul is someone in Kashe's listening circle who has mentioned a podcast to her
   in passing (Chapter 73)
+- Kashe asks Siri for practical things while driving between clients. She
+  expects the podcast to yield while Siri answers, not compete with it
+  (Chapter 74)
 
 ## What you can generate
 
@@ -2673,5 +2676,53 @@ The next time she opened it, the clocks moved when she asked and disappeared
 when she did not. Later, a host said to meet again at 10:30. That time remained.
 
 Kashe smiled. “That one belongs to the sentence.”
+
+---
+
+### Chapter 74 — Build 241
+
+*The list kept its word*
+
+**What changed**
+
+Build 241 fixes two places where Earshot could say one thing and do another.
+After an episode is marked played, including with Mark All as Played, it no
+longer remains under New episodes when you return to an Inbox or folder. Earshot
+checks the episode's current saved state before showing the row and refreshes
+the list when navigation brings it back on screen.
+
+Podcast playback now uses iOS's spoken-audio mode. Earshot pauses when Siri or
+another short spoken prompt takes over and resumes only when iOS permits it. If
+you explicitly pause during the interruption, Earshot respects that choice and
+stays paused.
+
+**What to test**
+
+Open an Inbox or folder, enter a podcast, and mark one new episode played. Go
+back and confirm it is gone from New episodes. Repeat with Mark All as Played,
+including a podcast with several new episodes. No played row should linger even
+if VoiceOver already announces it as Played. Check the global Inbox and a
+folder-filtered Inbox.
+
+While a podcast is playing, ask Siri a question that produces a spoken answer.
+The podcast should pause instead of speaking underneath Siri, then resume after
+Siri finishes when appropriate. Repeat and tell Siri to pause, or pause Earshot
+during the interruption. Playback should remain paused. Also check Bluetooth,
+AirPlay, background playback, and ordinary play and pause.
+
+Kashe cleared the morning news before pulling away from the curb. One episode
+stayed under New, calmly calling itself played. She went back, tried again, and
+found the same contradiction waiting.
+
+On the drive to her next client, she asked Siri when the pharmacy closed. The
+answer arrived on top of two hosts finishing a sentence.
+
+That evening she sent Renata both problems in one message.
+
+The next morning, New meant new. On the road, the hosts stopped while Siri
+answered, then continued when the car was quiet again.
+
+Kashe listened for a moment. “Taking turns,” she said. “We learned this in
+kindergarten.”
 
 More chapters added here as Earshot ships.
