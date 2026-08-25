@@ -935,6 +935,9 @@ final class PlayerService {
 
     func pause() {
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
+        // An explicit pause while Siri owns the route (including a Siri-issued
+        // remote pause command) cancels automatic post-interruption resume.
+        pausedByInterruption = false
         cancelHandoffOperation()
         player.pause()
         isPlaying = false
@@ -1878,7 +1881,10 @@ final class PlayerService {
         do {
             try audioSession.setCategory(
                 .playback,
-                mode: .default,
+                // Podcasts are continuous spoken audio. Declaring that intent
+                // tells iOS to pause Earshot, rather than mix it underneath,
+                // when Siri or another short spoken prompt takes the route.
+                mode: .spokenAudio,
                 options: [.allowAirPlay, .allowBluetoothHFP, .allowBluetoothA2DP]
             )
             try audioSession.activate()
@@ -2751,17 +2757,23 @@ final class PlayerService {
 
         switch type {
         case .began:
-            if isPlaying {
+            // AVPlayer may already have stopped its transport before this
+            // callback arrives, so preserve the user's pre-interruption intent
+            // instead of consulting only the presentation flag.
+            if isPlaying || intendsToPlay {
                 pause()
                 pausedByInterruption = true
             }
         case .ended:
+            // Missing options means the system did not authorize resumption.
+            // Always consume the one-shot flag so a later unrelated end event
+            // cannot revive stale playback intent.
+            defer { pausedByInterruption = false }
             guard let optionsValue else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
             if options.contains(.shouldResume), pausedByInterruption {
                 resume()
             }
-            pausedByInterruption = false
         @unknown default:
             break
         }
