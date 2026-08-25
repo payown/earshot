@@ -101,6 +101,21 @@ final class InboxRepository {
         candidates.filter { !$0.isDeleted && $0.modelContext == context }
     }
 
+    /// Revalidates an event-driven Inbox snapshot against mutable episode state.
+    ///
+    /// A snapshot can remain alive while a navigation destination covers its
+    /// view. If an episode is marked played from that destination, the cached
+    /// array can miss the notification even though its `Episode` reference now
+    /// exposes the saved played state. Filtering immediately before rendering
+    /// prevents that stale reference from lingering under "New episodes."
+    /// Podcast inclusion/exclusion remains store-filtered when the snapshot is
+    /// loaded; this cheap pass owns only the episode-local membership fields.
+    static func currentEpisodes(_ candidates: [Episode], in context: ModelContext) -> [Episode] {
+        liveEpisodes(candidates, in: context).filter {
+            $0.status == .newEpisode && !$0.inboxDismissed
+        }
+    }
+
     /// Inbox episodes, newest first.
     ///
     /// Relationship-based membership rules are translated to SQL. In

@@ -21,6 +21,46 @@ final class InboxBadgeCountTests: XCTestCase {
         return p
     }
 
+    func testCurrentEpisodesDropsPlayedItemFromCachedGlobalSnapshot() throws {
+        let ctx = TestStore.freshContext()
+        let show = podcast(ctx, "Cached")
+        let item = episode(ctx, "cached-new", podcast: show)
+        try ctx.save()
+
+        let cached = InboxRepository(context: ctx).inboxEpisodes()
+        XCTAssertEqual(cached.map(\.guid), ["cached-new"])
+
+        InboxRepository(context: ctx).markPlayed(item)
+
+        XCTAssertTrue(item.isPlayed, "precondition: the durable action succeeded")
+        XCTAssertEqual(cached.map(\.guid), ["cached-new"], "the retained array itself is stale")
+        XCTAssertTrue(
+            InboxRepository.currentEpisodes(cached, in: ctx).isEmpty,
+            "render-time revalidation must not show a played item from a stale snapshot"
+        )
+    }
+
+    func testCurrentEpisodesDropsBulkPlayedItemFromCachedFolderSnapshot() throws {
+        let ctx = TestStore.freshContext()
+        let show = podcast(ctx, "Folder Cached")
+        let item = episode(ctx, "folder-cached-new", podcast: show)
+        let folder = FolderRepository(context: ctx).createFolder(name: "News")
+        FolderRepository(context: ctx).add(show, to: folder)
+        try ctx.save()
+
+        let cached = InboxRepository(context: ctx).inboxEpisodes(in: folder)
+        XCTAssertEqual(cached.map(\.guid), ["folder-cached-new"])
+
+        XCTAssertEqual(EpisodeRepository(context: ctx).markAllPlayed(in: show), 1)
+
+        XCTAssertTrue(item.isPlayed, "precondition: bulk mark played succeeded")
+        XCTAssertEqual(cached.map(\.guid), ["folder-cached-new"], "the retained folder array is stale")
+        XCTAssertTrue(
+            InboxRepository.currentEpisodes(cached, in: ctx).isEmpty,
+            "a bulk-played item must not linger under the folder's New episodes heading"
+        )
+    }
+
     @discardableResult
     private func episode(_ ctx: ModelContext, _ guid: String, podcast: Podcast,
                          status: EpisodeStatus = .newEpisode, dismissed: Bool = false,
