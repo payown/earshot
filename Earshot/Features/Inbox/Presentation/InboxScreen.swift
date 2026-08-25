@@ -794,13 +794,20 @@ private struct AllInboxCandidates<Content: View>: View {
     var body: some View {
         Group {
             if let candidates {
-                content(candidates)
+                content(InboxRepository.currentEpisodes(candidates, in: context))
             } else {
                 ProgressView("Loading inbox")
                     .accessibilityLabel("Loading inbox")
             }
         }
         .task(id: optInOnly) { reload() }
+        // A pushed destination can mutate Inbox membership while this snapshot
+        // is covered and not receiving notifications. Refresh when navigation
+        // reveals it again so newly added candidates and policy changes also
+        // catch up, while `currentEpisodes` removes stale rows immediately.
+        .onAppear {
+            if candidates != nil { reload() }
+        }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotInboxDidChange)
                 .receive(on: DispatchQueue.main)
@@ -851,13 +858,18 @@ struct FolderScopedInboxCandidates<Content: View>: View {
     var body: some View {
         Group {
             if loaded {
-                content(candidates)
+                content(InboxRepository.currentEpisodes(candidates, in: context))
             } else {
                 ProgressView("Loading folder inbox")
                     .accessibilityLabel("Loading folder inbox")
             }
         }
         .task(id: scopeSignature) { reload() }
+        // Returning from a podcast detail doesn't change `scopeSignature`, so
+        // `.task(id:)` alone may retain the pre-navigation candidate snapshot.
+        .onAppear {
+            if loaded { reload() }
+        }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotInboxDidChange)
                 .receive(on: DispatchQueue.main)
