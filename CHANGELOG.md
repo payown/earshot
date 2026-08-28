@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Player actions now verify that a retained episode still exists before using it, and identity repair unloads duplicate episodes before deleting their SwiftData rows.
+- Compact Cloud projection reconciliation now runs on a background SwiftData actor so large libraries and incoming iCloud changes do not block playback controls, navigation, or VoiceOver.
 - Transcript feeds offering multiple representations now prefer structured JSON, WebVTT, or SRT over HTML. Semantic HTML cue times also become structured metadata, so all three transcript styles work for providers such as Buzzsprout while ordinary spoken clock times remain intact. (build 240)
 
 ## [1.2.0] - 2026-08-23

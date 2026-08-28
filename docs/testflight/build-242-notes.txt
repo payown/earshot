@@ -1,0 +1,41 @@
+### Chapter 75 — Build 242
+
+*The shelf stayed still*
+
+**What changed**
+
+Build 242 hardens two data paths that could make Earshot stall or crash. If
+cleanup merges or deletes a duplicate episode while the player still holds it,
+Earshot now unloads that episode before SwiftData invalidates the row. Play,
+pause, resume, position, and speed updates also confirm that the saved episode
+still exists before using it.
+
+Cloud sync reconciliation now runs in its own background SwiftData actor instead
+of on the main actor. Large libraries and incoming iCloud changes should no
+longer compete with navigation, playback controls, or VoiceOver. The same data
+still syncs. This build does not add analytics, change Earshot's data model, or
+change its privacy behavior.
+
+**What to test**
+
+Start an episode, move around the app, refresh its podcast, and use play, pause,
+and resume from Earshot, the Lock Screen, and Bluetooth controls. Unfollow a
+show while one of its episodes is loaded. Earshot should stop cleanly, with no
+crash or delayed crash.
+
+If you use Earshot on more than one device, change an episode's played state,
+position, queue status, or podcast settings on one device and confirm the other
+catches up. During launch and sync, move through a large Library or Inbox with
+VoiceOver. Focus and speech should remain responsive.
+
+Kashe was halfway through a show when the app went quiet. Not paused. Gone. By
+the time she reopened it, everything looked ordinary enough to make the crash
+feel imaginary.
+
+Later, her phone caught up with changes from the Mac while she moved through the
+Inbox. VoiceOver kept speaking. The player kept its place. Nothing asked her to
+wait while a shelf rearranged itself.
+
+She tapped Pause, then Play.
+
+“Still there,” Kashe said. “Good.”
