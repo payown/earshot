@@ -397,6 +397,18 @@ struct IdentityRepairService {
     ) throws {
         let ordered = group.sorted(by: episodeOrder)
         guard let survivor = ordered.first else { return }
+        let duplicateIDs = Set(ordered.dropFirst().map(\.persistentModelID))
+        if !duplicateIDs.isEmpty {
+            // Identity repair can run on a background ModelActor while the
+            // player retains one of these rows on the main actor. Release that
+            // model before SwiftData invalidates it; the main-queue observer is
+            // delivered synchronously before this post returns.
+            NotificationCenter.default.post(
+                name: .earshotWillDeleteEpisodes,
+                object: nil,
+                userInfo: [PlayerService.willDeleteEpisodeIDsKey: duplicateIDs]
+            )
+        }
         let freshest = group.max(by: episodeFreshnessOrder) ?? survivor
         mergeEpisodeValues(from: group, freshest: freshest, into: survivor)
         survivor.podcast = survivorPodcast

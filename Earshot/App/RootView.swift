@@ -378,11 +378,13 @@ struct RootView: View {
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply)
+                .receive(on: DispatchQueue.main)
         ) { _ in
             settings.configure(context: modelContext)
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotFolderSyncConflictRepaired)
+                .receive(on: DispatchQueue.main)
         ) { _ in
             Announcer.announce("A folder sync conflict was repaired.")
         }

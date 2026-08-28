@@ -10,7 +10,6 @@ extension Notification.Name {
 /// Aggregates ``ListeningSession`` rows into ``ListeningStats``, applies the
 /// history retention policy, deletes all history, and exports sessions as CSV.
 /// Mirrors the Flutter `StatsRepositoryImpl`. Pure math lives in ``StatsLogic``.
-@MainActor
 final class StatsRepository {
     private let context: ModelContext
 

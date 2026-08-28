@@ -664,7 +664,7 @@ final class AppRuntime {
         _ = try? await cloudActivation?.value
         cloudProjectionActivationTask = nil
         do {
-            try cloudProjectionCoordinator?.markAllSubscriptionsDeleted()
+            try await cloudProjectionCoordinator?.markAllSubscriptionsDeleted()
         } catch {
             AppLog.data.error(
                 "Refused local reset because sync tombstones could not be saved: \(error.localizedDescription, privacy: .public)"
@@ -855,11 +855,11 @@ final class AppRuntime {
             guard let self, await prepareCloudAccount() else { return }
             try Task.checkCancellation()
             guard !resetInFlight, cloudProjectionCoordinator == nil else { return }
-            let coordinator = try CloudProjectionCoordinator.make(
+            let coordinator = try await CloudProjectionCoordinator.make(
                 applicationContainer: container
             )
             try Task.checkCancellation()
-            try coordinator.start()
+            try await coordinator.start()
             if Task.isCancelled || resetInFlight {
                 await coordinator.stop()
                 return

@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import SwiftData
 
@@ -283,12 +284,12 @@ struct SubscriptionsView: View {
         // appear without polling or restoring that unbounded hot path.
         .onReceive(NotificationCenter.default.publisher(
             for: .earshotCloudKitImportDidFinish
-        )) { _ in
+        ).receive(on: DispatchQueue.main)) { _ in
             loadPodcasts()
         }
         .onReceive(NotificationCenter.default.publisher(
             for: .earshotCloudProjectionDidApply
-        )) { _ in
+        ).receive(on: DispatchQueue.main)) { _ in
             loadPodcasts()
         }
         // Confirm the reorder for VoiceOver: the menu dismisses and the list

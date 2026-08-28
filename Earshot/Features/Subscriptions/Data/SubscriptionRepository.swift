@@ -277,14 +277,27 @@ final class SubscriptionRepository {
     /// announcing is the presentation layer's job.
     @discardableResult
     func unsubscribe(_ podcast: Podcast) -> Bool {
+        SubscriptionDeletionRepository(context: context).unsubscribe(podcast)
+    }
+}
+
+/// Context-local destructive subscription operation. Keeping this small type
+/// free of global-actor isolation lets compact Cloud reconciliation run the
+/// cascade on its background ModelActor while UI callers continue to invoke it
+/// from ``SubscriptionRepository`` on the main actor.
+struct SubscriptionDeletionRepository {
+    let context: ModelContext
+
+    @discardableResult
+    func unsubscribe(_ podcast: Podcast) -> Bool {
         let title = podcast.title
         // If the player currently holds an episode of this podcast (loaded or
         // gapless-preloaded), it must let go BEFORE the cascade delete below —
         // otherwise the periodic position persist / listening-session flush
         // writes to a deleted instance within seconds and SwiftData traps
-        // (#574). Posted synchronously (both sides are @MainActor, and
-        // PlayerService observes with `queue: nil`), so the unload completes
-        // before `context.delete` runs. A notification keeps this repository
+        // (#574). PlayerService observes synchronously on the main queue, so the
+        // unload completes before `context.delete` runs even when this context
+        // belongs to a background ModelActor. A notification keeps this repository
         // free of a player dependency and covers every unsubscribe surface
         // through this single choke point.
         NotificationCenter.default.post(
@@ -318,6 +331,11 @@ final class SubscriptionRepository {
             return false
         }
     }
+
+}
+
+@MainActor
+extension SubscriptionRepository {
 
     /// Re-fetches a feed and inserts only episodes not already present (by guid).
     /// Episodes newer than the high-water mark surface in the inbox; older ones

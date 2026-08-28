@@ -316,6 +316,41 @@ final class IdentityRepairServiceTests: XCTestCase {
         XCTAssertEqual(otherPodcast.episodes?.count, 2)
     }
 
+    func testTargetedEpisodeRepairUnloadsPlayerBeforeDeletingLoadedDuplicate() throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        context.insert(podcast)
+        let survivor = Episode(
+            guid: "duplicate",
+            title: "Older survivor",
+            audioURL: "https://example.com/old.mp3",
+            createdAt: oldDate
+        )
+        survivor.podcast = podcast
+        context.insert(survivor)
+        let doomed = Episode(
+            guid: "duplicate",
+            title: "Loaded duplicate",
+            audioURL: "https://example.com/new.mp3",
+            createdAt: newDate
+        )
+        doomed.podcast = podcast
+        context.insert(doomed)
+        try context.save()
+
+        let player = PlayerService()
+        player.configure(context: context)
+        player.load(doomed)
+        XCTAssertEqual(player.nowPlayingEpisodeID, doomed.persistentModelID)
+
+        _ = try IdentityRepairService(context: context).repairEpisodes(in: podcast)
+
+        XCTAssertNil(player.nowPlayingEpisode)
+        XCTAssertNil(player.nowPlayingEpisodeID)
+        try context.save()
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 1)
+    }
+
     func testTargetedEpisodeRepairCanLimitWorkToIncomingGUIDs() throws {
         let context = TestStore.freshContext()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
