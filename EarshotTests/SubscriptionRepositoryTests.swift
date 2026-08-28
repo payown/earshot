@@ -36,10 +36,15 @@ private final class PerURLFeedFetcher: FeedFetching, @unchecked Sendable {
 /// the network or filesystem.
 private final class FakeDownloader: EpisodeDownloading {
     private(set) var downloaded: [Episode] = []
+    private(set) var queuedDownloadSweeps = 0
     func download(_ episode: Episode) async { downloaded.append(episode) }
+    func downloadQueuedIfEnabled() async { queuedDownloadSweeps += 1 }
     /// Clears recorded calls so a test can isolate the auto-download trigger it's
     /// asserting (e.g. refresh) from an earlier one (e.g. the initial subscribe).
-    func reset() { downloaded.removeAll() }
+    func reset() {
+        downloaded.removeAll()
+        queuedDownloadSweeps = 0
+    }
 }
 
 /// Returns the same feed for every URL but counts how many times ``fetch(_:)``
@@ -644,6 +649,65 @@ final class SubscriptionRepositoryTests: XCTestCase {
     }
 
     // MARK: Auto-queue on refresh
+
+    func testManualLibraryRefreshTriggersAutoQueueNewEpisodes() async throws {
+        for trigger in [FeedRefreshTrigger.manualToolbar, .manualPullToRefresh] {
+            let ctx = TestStore.freshContext()
+            let feedURL = "https://x/\(trigger.rawValue).xml"
+            let podcast = Podcast(
+                feedURL: feedURL,
+                title: "Manual refresh",
+                autoQueue: true,
+                lastSeenPubDate: d1
+            )
+            ctx.insert(podcast)
+            try ctx.save()
+            let downloader = FakeDownloader()
+            let repo = makeManualLibraryRefreshRepository(
+                context: ctx,
+                feed: FakeFeedFetcher(feed([episode("new", d2)])),
+                downloader: downloader
+            )
+
+            _ = await repo.refreshAllReport(trigger: trigger)
+
+            let refreshed = try XCTUnwrap(
+                ctx.fetch(FetchDescriptor<Episode>()).first
+            )
+            XCTAssertEqual(refreshed.status, .inQueue, "\(trigger.rawValue) must auto-queue")
+            XCTAssertTrue(refreshed.inboxDismissed)
+            XCTAssertNotNil(refreshed.queueItem)
+            XCTAssertEqual(downloader.queuedDownloadSweeps, 1)
+        }
+    }
+
+    func testManualLibraryRefreshKeepsNonAutoQueueEpisodesInInbox() async throws {
+        for trigger in [FeedRefreshTrigger.manualToolbar, .manualPullToRefresh] {
+            let ctx = TestStore.freshContext()
+            let feedURL = "https://x/inbox-\(trigger.rawValue).xml"
+            let podcast = Podcast(
+                feedURL: feedURL,
+                title: "Manual refresh",
+                autoQueue: false,
+                lastSeenPubDate: d1
+            )
+            ctx.insert(podcast)
+            try ctx.save()
+            let repo = makeManualLibraryRefreshRepository(
+                context: ctx,
+                feed: FakeFeedFetcher(feed([episode("new", d2)]))
+            )
+
+            _ = await repo.refreshAllReport(trigger: trigger)
+
+            let refreshed = try XCTUnwrap(
+                ctx.fetch(FetchDescriptor<Episode>()).first
+            )
+            XCTAssertEqual(refreshed.status, .newEpisode)
+            XCTAssertFalse(refreshed.inboxDismissed)
+            XCTAssertNil(refreshed.queueItem)
+        }
+    }
 
     func testRefreshWithAutoQueueEnabledNewEpisodesGoToQueue() async throws {
         let ctx = TestStore.freshContext()

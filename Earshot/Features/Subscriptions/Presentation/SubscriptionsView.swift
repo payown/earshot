@@ -661,7 +661,7 @@ struct SubscriptionsView: View {
             trigger: trigger,
             operation: {
                 Announcer.announce("Refreshing library")
-                let report = await SubscriptionRepository(
+                let report = await makeManualLibraryRefreshRepository(
                     context: context,
                     downloader: downloads,
                     isEntitled: entitlements.isEntitled
@@ -712,4 +712,23 @@ struct SubscriptionsView: View {
         guard runtime.consumeLaunchFocus(.library) else { return }
         DispatchQueue.main.async { focusLaunchHeading = true }
     }
+}
+
+/// Constructs the repository used by both manual whole-library refresh triggers.
+/// Keeping the queue capability here makes pull-to-refresh and the toolbar path
+/// match background and single-podcast refresh routing for auto-queue shows.
+@MainActor
+func makeManualLibraryRefreshRepository(
+    context: ModelContext,
+    feed: FeedFetching = FeedService(),
+    downloader: EpisodeDownloading? = nil,
+    isEntitled: Bool? = nil
+) -> SubscriptionRepository {
+    SubscriptionRepository(
+        context: context,
+        feed: feed,
+        downloader: downloader,
+        queue: QueueRepository(context: context),
+        isEntitled: isEntitled
+    )
 }
