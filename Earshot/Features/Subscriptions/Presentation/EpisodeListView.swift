@@ -596,13 +596,19 @@ struct EpisodeListView: View {
 
     private func refresh() async {
         do {
-            try await SubscriptionRepository(
+            let outcome = try await SubscriptionRepository(
                 context: context,
                 downloader: downloads,
                 queue: QueueRepository(context: context),
                 isEntitled: entitlements.isEntitled
             ).refresh(podcast)
-            Announcer.announce("\(podcast.title) refreshed")
+            if outcome.rejectedAllNewCandidates {
+                Announcer.announce(
+                    "\(podcast.title) refreshed. Episode filters excluded all new episodes. Review this podcast's filters."
+                )
+            } else {
+                Announcer.announce("\(podcast.title) refreshed")
+            }
         } catch {
             AppLog.subscriptions.error("Refresh failed: \(error.localizedDescription, privacy: .public)")
             Announcer.announce("Couldn't refresh \(podcast.title)")

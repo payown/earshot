@@ -147,6 +147,7 @@ struct PodcastSettingsView: View {
                 playbackSection
                 queueSection
                 inboxSection
+                episodeFiltersSection
                 foldersSection
                 notificationsSection
             }
@@ -171,7 +172,7 @@ struct PodcastSettingsView: View {
     // MARK: Sections
 
     private var playbackSection: some View {
-        Section {
+        return Section {
             speedPicker
             silenceTrimPicker
             introSkipPicker
@@ -221,6 +222,33 @@ struct PodcastSettingsView: View {
             } else {
                 Text("New episodes from this podcast appear in the inbox unless you exclude it here.")
             }
+        }
+    }
+
+    private var episodeFiltersSection: some View {
+        let warning = AppSettingsStore(context: modelContext)
+            .episodeFilterSafetyWarning(forFeedURL: podcast.feedURL)
+        let needsReview = warning?.isEmpty == false
+        return Section {
+            NavigationLink {
+                EpisodeFiltersView(podcast: podcast)
+            } label: {
+                HStack {
+                    Label("Episode Filters", systemImage: "line.3.horizontal.decrease.circle")
+                    if needsReview {
+                        Spacer()
+                        Text("Needs review")
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(needsReview ? "Episode Filters, needs review" : "Episode Filters")
+            .accessibilityHint("Configures which future episodes enter the inbox or queue")
+        } header: {
+            Text("Episodes").accessibilityAddTraits(.isHeader)
+        } footer: {
+            Text("Test filters against recent episodes before saving. Filtered episodes remain in the library.")
         }
     }
 

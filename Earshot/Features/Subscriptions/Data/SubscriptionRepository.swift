@@ -45,7 +45,9 @@ extension EpisodeDownloading {
 extension DownloadManager: EpisodeDownloading {}
 
 /// The result of refreshing a single podcast. `added` is the count of genuinely
-/// new (non-future, newer-than-the-mark) episodes inserted; `wasBackfill` is
+/// new (non-future, newer-than-the-mark) episodes kept for Inbox/queue routing;
+/// `filteredCount` is the separately-budgeted count retained only in Library.
+/// `wasBackfill` is
 /// true when the refresh took a backfill path (first-subscribe / migrated-shell
 /// catalog seed) where the inserted episodes are pre-existing catalog and must
 /// NOT trigger a new-episode notification (#72). `newestNewEpisodeGUID` is the
@@ -66,6 +68,10 @@ struct RefreshOutcome: Sendable {
     var newestNewEpisodeGUID: String?
     var newEpisodeIDs: [PersistentIdentifier] = []
     var inboxReentryEpisodeIDs: [PersistentIdentifier] = []
+    var filteredCount = 0
+    var rejectedAllNewCandidates = false
+    var keptOverflowCount = 0
+    var filteredOverflowCount = 0
 
     static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisodeGUID: nil, newEpisodeIDs: [])
 }
@@ -92,6 +98,7 @@ struct SubscriptionRefreshReport: Sendable {
     let cancelled: Bool
     let intendedInsertions: Int
     let durableInsertions: Int
+    var filterSafetyWarningPodcasts: [String] = []
 
     var completion: Completion {
         if !cancelled, failed == 0, succeeded == total { return .full }
@@ -100,7 +107,7 @@ struct SubscriptionRefreshReport: Sendable {
     }
 
     var announcement: String {
-        switch completion {
+        let completionText = switch completion {
         case .full:
             "Library refreshed"
         case let .partial(succeeded, total):
@@ -108,6 +115,9 @@ struct SubscriptionRefreshReport: Sendable {
         case .failure:
             "Library refresh failed"
         }
+        guard !filterSafetyWarningPodcasts.isEmpty else { return completionText }
+        let podcasts = filterSafetyWarningPodcasts.joined(separator: ", ")
+        return "\(completionText). Episode filters excluded all new episodes for \(podcasts). Review those filters."
     }
 }
 
@@ -468,7 +478,8 @@ extension SubscriptionRepository {
         )
         let affectedIDs = results
             .filter {
-                $0.outcome.added > 0 || !$0.outcome.inboxReentryEpisodeIDs.isEmpty
+                $0.outcome.added > 0 || $0.outcome.filteredCount > 0
+                    || !$0.outcome.inboxReentryEpisodeIDs.isEmpty
             }
             .compactMap { self.podcast(forFeedURL: $0.feedURL)?.persistentModelID }
         mergeBackgroundWrites(affectedPodcastIDs: affectedIDs)
@@ -526,7 +537,10 @@ extension SubscriptionRepository {
             failed: actorReport.failed,
             cancelled: actorReport.cancelled,
             intendedInsertions: actorReport.intendedInsertions,
-            durableInsertions: actorReport.durableInsertions
+            durableInsertions: actorReport.durableInsertions,
+            filterSafetyWarningPodcasts: results.compactMap {
+                $0.outcome.rejectedAllNewCandidates ? $0.podcastTitle : nil
+            }
         )
     }
 
