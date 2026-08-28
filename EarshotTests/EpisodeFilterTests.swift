@@ -138,6 +138,17 @@ final class EpisodeFilterTests: XCTestCase {
         XCTAssertTrue(configuration.shouldKeep(title: "Still safe", durationSeconds: nil))
     }
 
+    func testTurningFilteringOffResolvesZeroRuleError() {
+        var configuration = EpisodeFilterConfiguration(
+            isEnabled: true, mode: .keepMatching, rules: []
+        )
+        XCTAssertNotNil(configuration.validationMessage())
+
+        configuration.isEnabled = false
+        XCTAssertNil(configuration.validationMessage())
+        XCTAssertTrue(configuration.shouldKeep(title: "Still safe", durationSeconds: nil))
+    }
+
     func testConfigurationRoundTripsAsMirroredVersionedJSON() throws {
         let context = TestStore.freshContext()
         let store = AppSettingsStore(context: context)
@@ -184,11 +195,21 @@ final class EpisodeFilterTests: XCTestCase {
         )
     }
 
-    func testDurationSaveGateRefusesWhenNoPreviewEpisodeHasDuration() {
+    func testDurationSaveGateRefusesWhenNoneOfFiftyPreviewEpisodesHasDuration() {
         XCTAssertEqual(
             EpisodeFilterSaveAssessment.assess(
                 configuration: durationConfiguration,
-                previewDurations: [nil, nil]
+                previewDurations: Array(repeating: nil, count: 50)
+            ),
+            .refuseNoDuration
+        )
+    }
+
+    func testDurationSaveGateRefusesWhenPreviewHasNoEpisodes() {
+        XCTAssertEqual(
+            EpisodeFilterSaveAssessment.assess(
+                configuration: durationConfiguration,
+                previewDurations: []
             ),
             .refuseNoDuration
         )
