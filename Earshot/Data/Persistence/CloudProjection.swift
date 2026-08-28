@@ -384,7 +384,7 @@ actor CloudProjectionCoordinator: ModelActor {
     private let remotePodcastDeletionDelayNanoseconds: UInt64
     private var isApplyingRemote = false
 
-    init(
+    private init(
         applicationContainer: ModelContainer,
         projectionContainer: ModelContainer,
         center: NotificationCenter = .default,
@@ -453,15 +453,23 @@ actor CloudProjectionCoordinator: ModelActor {
 #if DEBUG
     nonisolated static func makeForTesting(
         applicationContainer: ModelContainer,
-        projectionContainer: ModelContainer
+        projectionContainer: ModelContainer,
+        center: NotificationCenter = .default,
+        deviceID: String = CloudProjectionDeviceIdentity.value(),
+        seedInstrumentationEnabled: @escaping @Sendable () -> Bool = { false },
+        seedMarkerRecorder: @escaping @Sendable (CompactProjectionSeedMarker) -> Void = { _ in },
+        remotePodcastDeletionDelayNanoseconds: UInt64 = 0
     ) async -> CloudProjectionCoordinator {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 continuation.resume(returning: CloudProjectionCoordinator(
                     applicationContainer: applicationContainer,
                     projectionContainer: projectionContainer,
-                    center: NotificationCenter(),
-                    deviceID: "background-test"
+                    center: center,
+                    deviceID: deviceID,
+                    seedInstrumentationEnabled: seedInstrumentationEnabled,
+                    seedMarkerRecorder: seedMarkerRecorder,
+                    remotePodcastDeletionDelayNanoseconds: remotePodcastDeletionDelayNanoseconds
                 ))
             }
         }

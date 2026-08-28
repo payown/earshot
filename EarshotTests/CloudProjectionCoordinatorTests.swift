@@ -124,7 +124,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
         try projection.mainContext.save()
 
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -179,7 +179,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try app.mainContext.save()
         let projection = try makeProjectionContainer()
         let markers = Mutex<[CompactProjectionSeedMarker]>([])
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -221,7 +221,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
         let markers = Mutex<[CompactProjectionSeedMarker]>([])
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -238,7 +238,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
         let center = NotificationCenter()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: center,
@@ -276,7 +276,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
         let center = NotificationCenter()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: center,
@@ -310,7 +310,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
         let center = NotificationCenter()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: center,
@@ -368,7 +368,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
         try app.mainContext.save()
         let projection = try makeProjectionContainer()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection
         )
@@ -420,7 +420,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             }
             try app.mainContext.save()
             let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-            let coordinator = CloudProjectionCoordinator(
+            let coordinator = await CloudProjectionCoordinator.makeForTesting(
                 applicationContainer: app,
                 projectionContainer: projection,
                 center: NotificationCenter(),
@@ -441,7 +441,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 localURL: localURL
             )
             let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-            let restarted = CloudProjectionCoordinator(
+            let restarted = await CloudProjectionCoordinator.makeForTesting(
                 applicationContainer: app,
                 projectionContainer: projection,
                 center: NotificationCenter(),
@@ -501,7 +501,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 localURL: localURL
             )
             let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-            try await CloudProjectionCoordinator(
+            try await CloudProjectionCoordinator.makeForTesting(
                 applicationContainer: app,
                 projectionContainer: projection,
                 center: NotificationCenter(),
@@ -526,7 +526,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         remote.autoQueue = true
         projection.mainContext.insert(remote)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection
         )
@@ -546,7 +546,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         source.mainContext.insert(podcast)
         try source.mainContext.save()
         let projection = try makeProjectionContainer()
-        let first = CloudProjectionCoordinator(
+        let first = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: source,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -570,7 +570,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             Podcast(feedURL: "https://example.com/feed.xml", title: "Stale copy")
         )
         try secondDevice.mainContext.save()
-        let restarted = CloudProjectionCoordinator(
+        let restarted = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: secondDevice,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -603,7 +603,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         projection.mainContext.insert(tombstone)
         try projection.mainContext.save()
 
-        try await CloudProjectionCoordinator(
+        try await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -642,7 +642,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let token = center.addObserver(
             forName: .earshotWillDeleteEpisodes,
             object: nil,
-            queue: nil
+            queue: .main
         ) { note in
             let podcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey]
                 as? PersistentIdentifier
@@ -651,7 +651,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             }
         }
         defer { center.removeObserver(token) }
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: center,
@@ -684,7 +684,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         app.mainContext.insert(session)
         try app.mainContext.save()
 
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: try makeProjectionContainer(),
             center: NotificationCenter(),
@@ -715,7 +715,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         player.load(orphan)
         XCTAssertEqual(player.nowPlayingEpisodeID, orphan.persistentModelID)
 
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: try makeProjectionContainer(),
             center: .default,
@@ -740,7 +740,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         tombstone.sourceDeviceID = "mac"
         projection.mainContext.insert(tombstone)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -775,12 +775,12 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let token = center.addObserver(
             forName: .earshotWillDeleteEpisodes,
             object: nil,
-            queue: nil
+            queue: .main
         ) { _ in
             MainActor.assumeIsolated { notificationCount += 1 }
         }
         defer { center.removeObserver(token) }
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: center,
@@ -814,7 +814,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         projection.mainContext.insert(older)
         projection.mainContext.insert(newer)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -855,7 +855,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         projection.mainContext.insert(cloud)
         try projection.mainContext.save()
 
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -894,7 +894,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         projection.mainContext.insert(cloud)
         try projection.mainContext.save()
 
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -924,7 +924,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         ))
         try app.mainContext.save()
         let projection = try makeProjectionContainer()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -948,7 +948,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         ))
         try app.mainContext.save()
         let projection = try makeProjectionContainer()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -977,7 +977,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
 
         let freshApplicationStore = try makeApplicationContainer()
-        let restarted = CloudProjectionCoordinator(
+        let restarted = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: freshApplicationStore,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -993,7 +993,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
     func testEverywhereDeleteIsIdempotentAndTombstonesEveryLibraryProjection() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1074,7 +1074,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         meaningful[1].isPlayed = true
         try app.mainContext.save()
         let projection = try makeProjectionContainer()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1098,7 +1098,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         projection.mainContext.insert(phone)
         projection.mainContext.insert(staleMac)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1119,7 +1119,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         projection.mainContext.insert(stale)
         projection.mainContext.insert(rewind)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1144,7 +1144,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         played.isPlayed = true
         projection.mainContext.insert(played)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1163,7 +1163,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         played.isPlayed = true
         projection.mainContext.insert(played)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1195,7 +1195,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         dismissed.inboxDismissedUpdatedAt = Date(timeIntervalSince1970: 100)
         projection.mainContext.insert(dismissed)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1224,7 +1224,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         reentered.inboxDismissedUpdatedAt = Date(timeIntervalSince1970: 200)
         projection.mainContext.insert(reentered)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1247,7 +1247,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         legacy.inboxDismissed = true
         projection.mainContext.insert(legacy)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1262,7 +1262,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
     func testLivePositionSnapshotPublishesWithoutSavingApplicationEpisode() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 10)
         let projection = try makeProjectionContainer()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1302,7 +1302,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         phone.mainContext.insert(QueueItem(episode: phoneA, position: 1))
         try phone.mainContext.save()
         let projection = try makeProjectionContainer()
-        let phoneCoordinator = CloudProjectionCoordinator(
+        let phoneCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: phone,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1320,7 +1320,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         mac.mainContext.insert(macA)
         mac.mainContext.insert(macB)
         try mac.mainContext.save()
-        let macCoordinator = CloudProjectionCoordinator(
+        let macCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: mac,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1371,7 +1371,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         app.mainContext.insert(queueItem)
         try app.mainContext.save()
         let projection = try makeProjectionContainer()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1412,7 +1412,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         row.modifiedAt = Date(timeIntervalSince1970: 300)
         projection.mainContext.insert(row)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1475,7 +1475,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 projection.mainContext.insert(row)
             }
             try projection.mainContext.save()
-            let coordinator = CloudProjectionCoordinator(
+            let coordinator = await CloudProjectionCoordinator.makeForTesting(
                 applicationContainer: app,
                 projectionContainer: projection,
                 center: NotificationCenter(),
@@ -1510,7 +1510,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         phoneSettings.setDouble(1.5, for: SettingsKey.globalSpeed)
         phoneSettings.setRawValue("phone-only", for: SettingsKey.lastPlayingEpisodeID)
         let projection = try makeProjectionContainer()
-        let phoneCoordinator = CloudProjectionCoordinator(
+        let phoneCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: phone,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1519,7 +1519,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try await phoneCoordinator.reconcile()
 
         let mac = try makeApplicationContainer()
-        let macCoordinator = CloudProjectionCoordinator(
+        let macCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: mac,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1548,7 +1548,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let phoneSettings = AppSettingsStore(context: phone.mainContext)
         phoneSettings.setDouble(1.5, for: SettingsKey.globalSpeed)
         try phone.mainContext.save()
-        let phoneCoordinator = CloudProjectionCoordinator(
+        let phoneCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: phone,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1557,7 +1557,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try await phoneCoordinator.reconcile()
 
         let mac = try makeApplicationContainerWithEpisode(position: 0)
-        let macCoordinator = CloudProjectionCoordinator(
+        let macCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: mac,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1633,7 +1633,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         newerMac.modifiedAt = Date(timeIntervalSince1970: 200)
         projection.mainContext.insert(newerMac)
         try projection.mainContext.save()
-        let coordinator = CloudProjectionCoordinator(
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1664,7 +1664,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         phone.mainContext.insert(bookmark)
         try phone.mainContext.save()
         let projection = try makeProjectionContainer()
-        let phoneCoordinator = CloudProjectionCoordinator(
+        let phoneCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: phone,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1673,7 +1673,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try await phoneCoordinator.reconcile()
 
         let mac = try makeApplicationContainer()
-        let macCoordinator = CloudProjectionCoordinator(
+        let macCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: mac,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1711,7 +1711,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         phone.mainContext.insert(session)
         try phone.mainContext.save()
         let projection = try makeProjectionContainer()
-        let phoneCoordinator = CloudProjectionCoordinator(
+        let phoneCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: phone,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1720,7 +1720,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try await phoneCoordinator.reconcile()
 
         let mac = try makeApplicationContainer()
-        let macCoordinator = CloudProjectionCoordinator(
+        let macCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: mac,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -1777,7 +1777,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             do {
                 let app = try StoreMigration.openOrMigrate(at: applicationURL)
                 let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-                try await CloudProjectionCoordinator(
+                try await CloudProjectionCoordinator.makeForTesting(
                     applicationContainer: app,
                     projectionContainer: projection,
                     center: NotificationCenter(),
@@ -1838,7 +1838,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             do {
                 let app = try StoreMigration.openOrMigrate(at: applicationURL)
                 let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-                try await CloudProjectionCoordinator(
+                try await CloudProjectionCoordinator.makeForTesting(
                     applicationContainer: app,
                     projectionContainer: projection,
                     center: NotificationCenter(),
@@ -1912,7 +1912,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                     localURL: localURL
                 )
                 let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-                try await CloudProjectionCoordinator(
+                try await CloudProjectionCoordinator.makeForTesting(
                     applicationContainer: app,
                     projectionContainer: projection,
                     center: NotificationCenter(),
@@ -1964,7 +1964,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try projection.mainContext.save()
 
         for _ in 0..<2 {
-            try await CloudProjectionCoordinator(
+            try await CloudProjectionCoordinator.makeForTesting(
                 applicationContainer: app,
                 projectionContainer: projection,
                 center: NotificationCenter(),
@@ -1999,7 +1999,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         phone.mainContext.insert(EpisodeFolderMembership(folder: child, episode: episode, sortOrder: 3))
         try phone.mainContext.save()
         let projection = try makeProjectionContainer()
-        let phoneCoordinator = CloudProjectionCoordinator(
+        let phoneCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: phone,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -2014,7 +2014,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         mac.mainContext.insert(macPodcast)
         mac.mainContext.insert(macEpisode)
         try mac.mainContext.save()
-        let macCoordinator = CloudProjectionCoordinator(
+        let macCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: mac,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -2068,13 +2068,13 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let token = center.addObserver(
             forName: .earshotFolderSyncConflictRepaired,
             object: nil,
-            queue: nil
+            queue: .main
         ) { _ in
             MainActor.assumeIsolated { repairNotices += 1 }
         }
         defer { center.removeObserver(token) }
 
-        try await CloudProjectionCoordinator(
+        try await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection,
             center: center,

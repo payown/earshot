@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import SwiftData
 
@@ -186,13 +187,15 @@ struct EpisodeListView: View {
             Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: visibleEpisodes.count))
         }
         .refreshable { await refresh() }
-        .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)) { note in
+        .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
+            .receive(on: DispatchQueue.main)) { note in
             guard let deletedPodcastID = note.userInfo?[PlayerService.willDeletePodcastIDKey]
                     as? PersistentIdentifier,
                   deletedPodcastID == podcast.persistentModelID else { return }
             dismiss()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply)
+            .receive(on: DispatchQueue.main)) { _ in
             if podcast.isDeleted { dismiss() }
         }
         // Persistent episode multi-select bar (#758): Add to folder is primary and
