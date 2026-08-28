@@ -6,14 +6,14 @@ import SwiftData
 import UIKit
 
 extension Notification.Name {
-    /// Posted on the main actor immediately BEFORE persisted episodes are
-    /// deleted out from under the player (#574). Two posters:
+    /// Posted immediately BEFORE persisted episodes are deleted out from under
+    /// the player (#574). Posters include:
     /// `SubscriptionRepository.unsubscribe` includes the doomed podcast's
     /// `PersistentIdentifier` under ``PlayerService/willDeletePodcastIDKey``;
-    /// the Settings factory reset posts with no userInfo, meaning "everything".
-    /// ``PlayerService`` observes with `queue: nil`, so the handler runs
-    /// SYNCHRONOUSLY on the posting (main) thread and the player has fully
-    /// let go of its episode before the caller's `context.delete` executes.
+    /// the Settings factory reset posts with no userInfo, meaning "everything";
+    /// identity repair includes the exact duplicate episode identifiers. The
+    /// player observes on the main queue, and NotificationCenter waits for that
+    /// handler before the caller's `context.delete` executes.
     static let earshotWillDeleteEpisodes = Notification.Name("earshotWillDeleteEpisodes")
 }
 
@@ -853,6 +853,7 @@ final class PlayerService {
     }
 
     func togglePlayPause() {
+        guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         // Decide from playback intent + the live transport, never the `isPlaying`
         // display flag alone: single-button Bluetooth earbuds send this command,
         // and a stale-`false` flag made the first press resume (a no-op) instead
@@ -869,6 +870,7 @@ final class PlayerService {
     }
 
     func resume() {
+        guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         guard let episode = currentEpisode else { return }
         if !currentMediaResolutionComplete,
            let cleartextURL = currentPlaybackURL,
@@ -894,14 +896,15 @@ final class PlayerService {
         }
         beginHandoffOperation()
         let generation = playbackHandoffGeneration
-        playbackHandoffTask = Task { @MainActor [weak self, weak episode] in
+        let episodeID = episode.persistentModelID
+        playbackHandoffTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let fetched = await fetchPlaybackHandoff(identity: identity)
             guard !Task.isCancelled,
                   playbackHandoffGeneration == generation,
-                  let episode,
-                  !episode.isDeleted,
-                  currentEpisode === episode else { return }
+                  !releaseInvalidCurrentEpisodeIfNeeded(),
+                  nowPlayingEpisodeID == episodeID,
+                  let episode = currentEpisode else { return }
             if let fetched { applyFetchedHandoff(fetched, to: episode) }
             playbackHandoffTask = nil
             resumeImmediately()
@@ -2599,15 +2602,14 @@ final class PlayerService {
             let reasonValue = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
             Task { @MainActor in self?.handleRouteChange(reasonValue: reasonValue) }
         }
-        // Pre-delete hook (#574). `queue: nil` runs the block SYNCHRONOUSLY on
-        // the posting thread; both posters (SubscriptionRepository.unsubscribe,
-        // SettingsReset.deleteAllLocalData) are @MainActor-isolated, so this is
-        // always the main thread and the player is fully unloaded before the
-        // poster's `context.delete` runs.
+        // Pre-delete hook (#574). Identity repair also posts from its background
+        // ModelActor, so force delivery onto the main queue. NotificationCenter
+        // waits for the queued observer before `post` returns, preserving the
+        // contract that the player fully unloads before `context.delete` runs.
         deletionObserver = NotificationCenter.default.addObserver(
             forName: .earshotWillDeleteEpisodes,
             object: nil,
-            queue: nil
+            queue: .main
         ) { [weak self] note in
             let podcastID = note.userInfo?[Self.willDeletePodcastIDKey] as? PersistentIdentifier
             let episodeIDs = note.userInfo?[Self.willDeleteEpisodeIDsKey]
@@ -2622,7 +2624,7 @@ final class PlayerService {
         folderDeletionObserver = NotificationCenter.default.addObserver(
             forName: .earshotFoldersDidDelete,
             object: nil,
-            queue: nil
+            queue: .main
         ) { [weak self] note in
             guard let ids = note.userInfo?[FolderRepository.deletedFolderIDsKey]
                     as? Set<PersistentIdentifier> else { return }
@@ -2657,10 +2659,10 @@ final class PlayerService {
     /// the live local clock: its per-tick position lives in UserDefaults and can
     /// legitimately be ahead of the coarsely persisted SwiftData row (#736).
     func refreshProjectedPlaybackPosition() {
-        guard !currentEpisodeIsTransient,
+        guard !releaseInvalidCurrentEpisodeIfNeeded(),
+              !currentEpisodeIsTransient,
               pendingUserSeekTarget == nil,
               let episode = currentEpisode,
-              !episode.isDeleted,
               let context else { return }
         // A CloudKit import may be saved through a different ModelContext. The
         // player deliberately retains its loaded Episode for the lifetime of the
@@ -2669,9 +2671,15 @@ final class PlayerService {
         // by its stable identifier in a fresh context before refreshing the
         // observable player cache (#825, physical iPhone-to-Mac verification).
         let persistedContext = ModelContext(context.container)
-        guard let persistedEpisode = persistedContext.model(
-            for: episode.persistentModelID
-        ) as? Episode else { return }
+        let episodeID = episode.persistentModelID
+        var descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.persistentModelID == episodeID }
+        )
+        descriptor.fetchLimit = 1
+        guard let persistedEpisode = try? persistedContext.fetch(descriptor).first else {
+            unloadWithoutPersisting()
+            return
+        }
         let target = PlaybackLogic.projectedPlaybackPosition(
             current: currentPositionSeconds,
             projected: persistedEpisode.positionSeconds,
@@ -2693,15 +2701,18 @@ final class PlayerService {
     /// Reapplying while paused updates `AVPlayer.defaultRate`; reapplying while
     /// playing also changes the live rate without restarting the episode.
     func refreshProjectedPlaybackRate() {
-        guard !currentEpisodeIsTransient,
+        guard !releaseInvalidCurrentEpisodeIfNeeded(),
+              !currentEpisodeIsTransient,
               let episode = currentEpisode,
-              !episode.isDeleted,
               let loadedPodcast = episode.podcast,
               let context else { return }
         let persistedContext = ModelContext(context.container)
-        guard let persistedEpisode = persistedContext.model(
-            for: episode.persistentModelID
-        ) as? Episode,
+        let episodeID = episode.persistentModelID
+        var descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.persistentModelID == episodeID }
+        )
+        descriptor.fetchLimit = 1
+        guard let persistedEpisode = try? persistedContext.fetch(descriptor).first,
               let persistedPodcast = persistedEpisode.podcast else { return }
         let projectedOverride = persistedPodcast.speedOverride
         guard loadedPodcast.speedOverride != projectedOverride else { return }

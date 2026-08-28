@@ -370,4 +370,43 @@ final class PlayerDeletionTests: XCTestCase {
         XCTAssertNil(player.currentTitle)
         XCTAssertFalse(player.isPlaying)
     }
+
+    /// VoiceOver's two-finger double tap reaches `togglePlayPause()`. A retained
+    /// model whose saved row disappeared must be released before the toggle
+    /// decides to resume and reads any SwiftData-backed property.
+    func test_togglePlayPause_savedDeletedEpisodeWithoutNotification_unloadsPlayer() throws {
+        let ctx = TestStore.freshContext()
+        let (_, episode) = makePodcastWithEpisode(ctx)
+        let player = makePlayer(ctx)
+        player.load(episode)
+
+        ctx.delete(episode)
+        try ctx.save()
+
+        player.togglePlayPause()
+
+        XCTAssertNil(player.nowPlayingEpisode)
+        XCTAssertNil(player.nowPlayingEpisodeID)
+        XCTAssertNil(player.currentTitle)
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    /// Lock-screen and remote play commands call `resume()` directly rather
+    /// than passing through the toggle path, so it needs the same validation.
+    func test_resume_savedDeletedEpisodeWithoutNotification_unloadsPlayer() throws {
+        let ctx = TestStore.freshContext()
+        let (_, episode) = makePodcastWithEpisode(ctx)
+        let player = makePlayer(ctx)
+        player.load(episode)
+
+        ctx.delete(episode)
+        try ctx.save()
+
+        player.resume()
+
+        XCTAssertNil(player.nowPlayingEpisode)
+        XCTAssertNil(player.nowPlayingEpisodeID)
+        XCTAssertNil(player.currentTitle)
+        XCTAssertFalse(player.isPlaying)
+    }
 }
