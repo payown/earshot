@@ -226,9 +226,8 @@ struct PodcastSettingsView: View {
     }
 
     private var episodeFiltersSection: some View {
-        let warning = AppSettingsStore(context: modelContext)
-            .episodeFilterSafetyWarning(forFeedURL: podcast.feedURL)
-        let needsReview = warning?.isEmpty == false
+        let needsReview = AppSettingsStore(context: modelContext)
+            .episodeFilterNeedsReview(forFeedURL: podcast.feedURL)
         return Section {
             NavigationLink {
                 EpisodeFiltersView(podcast: podcast)

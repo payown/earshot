@@ -643,6 +643,10 @@ final class AppSettingsStore {
         rawValue(SettingsKey.episodeFilterSafetyWarning(feedURL: feedURL))
     }
 
+    func episodeFilterNeedsReview(forFeedURL feedURL: String) -> Bool {
+        episodeFilterSafetyWarning(forFeedURL: feedURL)?.isEmpty == false
+    }
+
     func clearEpisodeFilterSafetyWarning(forFeedURL feedURL: String) {
         setRawValue("", for: SettingsKey.episodeFilterSafetyWarning(feedURL: feedURL))
     }

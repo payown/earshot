@@ -378,6 +378,57 @@ final class FeedRefreshActorTests: XCTestCase {
         )
     }
 
+    func testTwentyFiveMixedCandidatesSelectsKeptBeforeApplyingBudgets() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/twenty-five-filtered.xml"
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(feedURL: feedURL, title: "Twenty five", lastSeenPubDate: d1)
+            let old = Episode(
+                guid: "old", title: "Old", audioURL: "https://x/old.mp3", pubDate: d1
+            )
+            old.podcast = podcast
+            context.insert(podcast)
+            context.insert(old)
+            let configuration = EpisodeFilterConfiguration(
+                isEnabled: true,
+                mode: .filterMatching,
+                rules: [EpisodeFilterRule(name: "Segments", titlePattern: "Segment*")]
+            )
+            try AppSettingIdentity.setValue(
+                EpisodeFilterCodec.encode(configuration),
+                for: SettingsKey.episodeFilterConfiguration(feedURL: feedURL),
+                in: context
+            )
+            try context.save()
+        }
+        let catalog = (1...25).map { index -> ParsedEpisode in
+            var item = parsedEpisode("candidate-\(index)", d1.addingTimeInterval(Double(index)))
+            // The five wanted episodes are oldest and would all fall outside the
+            // old newest-ten window if matching happened after prefixing.
+            item.title = index <= 5 ? "Full show \(index)" : "Segment \(index)"
+            return item
+        }
+
+        let optionalOutcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed(catalog)),
+            autoQueueEnabled: false
+        )
+        let outcome = try XCTUnwrap(optionalOutcome)
+        let stored = try episodes(container)
+
+        XCTAssertEqual(outcome.added, 5)
+        XCTAssertEqual(outcome.filteredCount, 10)
+        XCTAssertEqual(outcome.keptOverflowCount, 0)
+        XCTAssertEqual(outcome.filteredOverflowCount, 10)
+        XCTAssertEqual(
+            Set(stored.filter { !$0.inboxDismissed && $0.guid.hasPrefix("candidate-") }.map(\.guid)),
+            Set((1...5).map { "candidate-\($0)" })
+        )
+        XCTAssertEqual(stored.filter { $0.guid.hasPrefix("candidate-") }.count, 15)
+    }
+
     func testKeepMatchingAllFilteredRecordsRuntimeSafetyWarning() async throws {
         let container = cleanContainer()
         let feedURL = "https://x/runtime-guard.xml"
@@ -420,6 +471,47 @@ final class FeedRefreshActorTests: XCTestCase {
                 in: context
             )
         )
+    }
+
+    func testBackgroundRefreshPersistsSafetyWarningReachableFromPodcastSettings() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/background-runtime-guard.xml"
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(feedURL: feedURL, title: "Background show", lastSeenPubDate: d1)
+            let old = Episode(
+                guid: "old", title: "Old", audioURL: "https://x/old.mp3", pubDate: d1
+            )
+            old.podcast = podcast
+            context.insert(podcast)
+            context.insert(old)
+            let configuration = EpisodeFilterConfiguration(
+                isEnabled: true,
+                mode: .keepMatching,
+                rules: [EpisodeFilterRule(name: "Full", titlePattern: "Full*")]
+            )
+            try AppSettingIdentity.setValue(
+                EpisodeFilterCodec.encode(configuration),
+                for: SettingsKey.episodeFilterConfiguration(feedURL: feedURL),
+                in: context
+            )
+            try context.save()
+        }
+        var segment = parsedEpisode("segment", d2)
+        segment.title = "Segment"
+
+        let report = await FeedRefreshActor(modelContainer: container).refreshAllReport(
+            feed: FakeFeed(parsedFeed([segment])),
+            autoQueueEnabled: false,
+            trigger: .backgroundTask,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+        let settings = AppSettingsStore(context: ModelContext(container))
+
+        XCTAssertTrue(report.results.first?.outcome.rejectedAllNewCandidates == true)
+        XCTAssertTrue(settings.episodeFilterNeedsReview(forFeedURL: feedURL))
+        XCTAssertNotNil(settings.episodeFilterSafetyWarning(forFeedURL: feedURL))
     }
 
     func testSyncedShellAlsoProtectsTenKeptSlotsFromFilteredSegments() async throws {
@@ -1143,7 +1235,7 @@ final class FeedRefreshActorTests: XCTestCase {
     /// publications in one response. Persist the newest ten only, but advance the
     /// durable high-water mark to the newest publication so the same backlog is
     /// not reconsidered on every subsequent automatic refresh.
-    func testActorRefreshLimitsGenuinelyNewEpisodesToNewestTen() async throws {
+    func testNoFilterGoldenStoresNewestTenOfTwentyFiveAndAdvancesMark() async throws {
         let container = cleanContainer()
         let feedURL = "https://x/established-large.xml"
         let seedContext = ModelContext(container)
@@ -1172,6 +1264,9 @@ final class FeedRefreshActorTests: XCTestCase {
 
         let stored = try episodes(container)
         XCTAssertEqual(outcome.added, 10)
+        XCTAssertEqual(outcome.filteredCount, 0)
+        XCTAssertEqual(outcome.keptOverflowCount, 15)
+        XCTAssertFalse(outcome.rejectedAllNewCandidates)
         XCTAssertEqual(stored.count, 11)
         XCTAssertEqual(
             Set(stored.map(\.guid)),
@@ -1181,6 +1276,7 @@ final class FeedRefreshActorTests: XCTestCase {
             ModelContext(container).fetch(FetchDescriptor<Podcast>()).first
         )
         XCTAssertEqual(refreshedPodcast.lastSeenPubDate, d1.addingTimeInterval(25))
+        XCTAssertTrue(stored.filter { $0.guid.hasPrefix("new-") }.allSatisfy { !$0.inboxDismissed })
     }
 
     func testLoadOlderEpisodesPagesTenThenTenThenEndAndDismissesHistory() async throws {
