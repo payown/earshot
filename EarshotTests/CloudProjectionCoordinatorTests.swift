@@ -1,16 +1,52 @@
 import SQLite3
 import SwiftData
+import Synchronization
 import XCTest
 @testable import Earshot
 
 @MainActor
 final class CloudProjectionCoordinatorTests: XCTestCase {
+    func testBackgroundConstructionKeepsProjectionWorkFromBlockingMainActor() async throws {
+        let app = try makeApplicationContainer()
+        for index in 0..<2_000 {
+            app.mainContext.insert(Podcast(
+                feedURL: "https://background.example/\(index)",
+                title: "Podcast \(index)"
+            ))
+        }
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection
+        )
+
+        let heartbeatState = Mutex((isFinished: false, count: 0))
+        let heartbeat = Task { @MainActor in
+            while heartbeatState.withLock({ state in
+                guard !state.isFinished else { return false }
+                state.count += 1
+                return true
+            }) {
+                await Task.yield()
+            }
+        }
+        await Task.yield()
+        let countBeforeReconciliation = heartbeatState.withLock { $0.count }
+        try await coordinator.reconcile()
+        let countAfterReconciliation = heartbeatState.withLock { $0.count }
+        heartbeatState.withLock { $0.isFinished = true }
+        await heartbeat.value
+
+        XCTAssertGreaterThan(countAfterReconciliation, countBeforeReconciliation)
+    }
+
     /// Reproduces the build-204 failure shape: a cold catalog with 99 current
     /// subscriptions, 948 remote deletion tombstones left by Delete Everywhere,
     /// and one unusually large Podcast-to-Episodes relationship.
     /// This is opt-in because constructing 54,000 persisted Episodes is too
     /// expensive for every unit-test run; it is mandatory for release candidates.
-    func testLargeMigratedLibraryFirstProjectionAndFolderReadStayBelowWatchdog() throws {
+    func testLargeMigratedLibraryFirstProjectionAndFolderReadStayBelowWatchdog() async throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["RUN_CLOUD_PROJECTION_SCALE"] != nil,
             "Set TEST_RUNNER_RUN_CLOUD_PROJECTION_SCALE=1 for the build-202 watchdog regression."
@@ -27,7 +63,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let largeFeedEpisodeCount = 12_000
         let ordinaryFeedEpisodeCount = 428
 
-        try autoreleasepool {
+        do {
             let app = try makeOnDiskApplicationContainer(
                 applicationURL: applicationURL,
                 localURL: localURL
@@ -95,10 +131,10 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "scale-phone"
         )
         let firstStarted = ContinuousClock.now
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
         let firstSeconds = secondsSince(firstStarted)
         let secondStarted = ContinuousClock.now
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
         let secondSeconds = secondsSince(secondStarted)
         let folders = try app.mainContext.fetch(FetchDescriptor<PodcastFolder>())
         let parent = try XCTUnwrap(folders.first { $0.name == "Imported" })
@@ -137,26 +173,27 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         return Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
 
-    func testDevelopmentSeedMarkersBracketDurableProjectionWithAllEntityCounts() throws {
+    func testDevelopmentSeedMarkersBracketDurableProjectionWithAllEntityCounts() async throws {
         let app = try makeApplicationContainer()
         app.mainContext.insert(Podcast(feedURL: "https://example.com/feed", title: "Show"))
         try app.mainContext.save()
         let projection = try makeProjectionContainer()
-        var markers: [CompactProjectionSeedMarker] = []
+        let markers = Mutex<[CompactProjectionSeedMarker]>([])
         let coordinator = CloudProjectionCoordinator(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
             deviceID: "phone",
             seedInstrumentationEnabled: { true },
-            seedMarkerRecorder: { markers.append($0) }
+            seedMarkerRecorder: { marker in markers.withLock { $0.append(marker) } }
         )
 
-        try coordinator.start()
+        try await coordinator.start()
 
-        XCTAssertEqual(markers.count, 2)
-        guard case .start(let startRunID) = markers[0],
-              case .complete(let completeRunID, let duration, let counts) = markers[1]
+        let recordedMarkers = markers.withLock { $0 }
+        XCTAssertEqual(recordedMarkers.count, 2)
+        guard case .start(let startRunID) = recordedMarkers[0],
+              case .complete(let completeRunID, let duration, let counts) = recordedMarkers[1]
         else {
             return XCTFail("Expected one start marker followed by one completion marker")
         }
@@ -180,21 +217,21 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testSyncDisabledStartCreatesNoSeedMarker() throws {
+    func testSyncDisabledStartCreatesNoSeedMarker() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
-        var markers: [CompactProjectionSeedMarker] = []
+        let markers = Mutex<[CompactProjectionSeedMarker]>([])
         let coordinator = CloudProjectionCoordinator(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
             seedInstrumentationEnabled: { false },
-            seedMarkerRecorder: { markers.append($0) }
+            seedMarkerRecorder: { marker in markers.withLock { $0.append(marker) } }
         )
 
-        try coordinator.start()
+        try await coordinator.start()
 
-        XCTAssertTrue(markers.isEmpty)
+        XCTAssertTrue(markers.withLock { $0.isEmpty })
     }
 
     func testStartObservesLocalChangesAndStopFullyDetaches() async throws {
@@ -207,13 +244,15 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: center,
             deviceID: "phone"
         )
-        try coordinator.start()
+        try await coordinator.start()
         app.mainContext.insert(Podcast(
             feedURL: "https://example.com/first",
             title: "First"
         ))
         try app.mainContext.save()
         center.post(name: .earshotSubscriptionsDidChange, object: nil)
+        try await waitForProjectionPodcastCount(1, in: projection)
+        projection.mainContext.rollback()
         XCTAssertEqual(
             try projection.mainContext.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
             1
@@ -233,7 +272,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testTargetedSubscriptionNotificationUpdatesOnlyNamedPodcast() throws {
+    func testTargetedSubscriptionNotificationUpdatesOnlyNamedPodcast() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
         let center = NotificationCenter()
@@ -243,18 +282,21 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: center,
             deviceID: "phone"
         )
-        try coordinator.start()
+        try await coordinator.start()
         let first = Podcast(feedURL: "https://example.com/first", title: "First")
         let second = Podcast(feedURL: "https://example.com/second", title: "Second")
         app.mainContext.insert(first)
         app.mainContext.insert(second)
         try app.mainContext.save()
         center.post(name: .earshotSubscriptionsDidChange, object: nil)
+        try await waitForProjectionPodcastCount(2, in: projection)
 
         first.speedOverride = 1.5
         second.speedOverride = 1.75
         try app.mainContext.save()
         center.post(name: .earshotSubscriptionsDidChange, object: first.feedURL)
+        try await waitForProjectedSpeed(1.5, feedURL: first.feedURL, in: projection)
+        projection.mainContext.rollback()
 
         let rows = try projection.mainContext.fetch(
             FetchDescriptor<CloudPodcastProjection>()
@@ -274,7 +316,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: center,
             deviceID: "phone"
         )
-        try coordinator.start()
+        try await coordinator.start()
         let remote = CloudPodcastProjection()
         remote.feedURL = "https://example.com/remote"
         remote.title = "Remote"
@@ -316,7 +358,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(applyCount, 1)
     }
 
-    func testExistingSubscriptionsSeedOnlyCompactProjectionRows() throws {
+    func testExistingSubscriptionsSeedOnlyCompactProjectionRows() async throws {
         let app = try makeApplicationContainer()
         for index in 0..<662 {
             app.mainContext.insert(Podcast(
@@ -331,7 +373,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             projectionContainer: projection
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertEqual(
             try projection.mainContext.fetchCount(
@@ -353,7 +395,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testCompletedSubscriptionBackfillIsRestartableOnDiskWithoutDuplicates() throws {
+    func testCompletedSubscriptionBackfillIsRestartableOnDiskWithoutDuplicates() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(
@@ -365,7 +407,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let localURL = directory.appending(path: "local.store")
         let projectionURL = directory.appending(path: "projection.store")
 
-        try autoreleasepool {
+        do {
             let app = try makeOnDiskApplicationContainer(
                 applicationURL: applicationURL,
                 localURL: localURL
@@ -384,7 +426,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 center: NotificationCenter(),
                 deviceID: "phone"
             )
-            try coordinator.reconcile()
+            try await coordinator.reconcile()
             XCTAssertEqual(
                 try projection.mainContext.fetchCount(
                     FetchDescriptor<CloudPodcastProjection>()
@@ -393,7 +435,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             )
         }
 
-        try autoreleasepool {
+        do {
             let app = try makeOnDiskApplicationContainer(
                 applicationURL: applicationURL,
                 localURL: localURL
@@ -405,7 +447,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 center: NotificationCenter(),
                 deviceID: "phone"
             )
-            try restarted.reconcile()
+            try await restarted.reconcile()
             XCTAssertEqual(
                 try projection.mainContext.fetchCount(
                     FetchDescriptor<CloudPodcastProjection>()
@@ -419,7 +461,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testPartialSubscriptionBackfillResumesOnDiskWithoutDuplicates() throws {
+    func testPartialSubscriptionBackfillResumesOnDiskWithoutDuplicates() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -453,13 +495,13 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             try projection.mainContext.save()
         }
 
-        try autoreleasepool {
+        do {
             let app = try makeOnDiskApplicationContainer(
                 applicationURL: applicationURL,
                 localURL: localURL
             )
             let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-            try CloudProjectionCoordinator(
+            try await CloudProjectionCoordinator(
                 applicationContainer: app,
                 projectionContainer: projection,
                 center: NotificationCenter(),
@@ -475,7 +517,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testImportedProjectionCreatesApplicationSubscription() throws {
+    func testImportedProjectionCreatesApplicationSubscription() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
         let remote = CloudPodcastProjection()
@@ -489,7 +531,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             projectionContainer: projection
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         let podcasts = try app.mainContext.fetch(FetchDescriptor<Podcast>())
         XCTAssertEqual(podcasts.count, 1)
@@ -498,7 +540,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(podcasts[0].autoQueue)
     }
 
-    func testLocalDeletionPersistsTombstoneAndSurvivesCoordinatorRestart() throws {
+    func testLocalDeletionPersistsTombstoneAndSurvivesCoordinatorRestart() async throws {
         let source = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed.xml", title: "Podcast")
         source.mainContext.insert(podcast)
@@ -510,12 +552,12 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "phone"
         )
-        try first.reconcile()
+        try await first.reconcile()
         source.mainContext.delete(podcast)
         try source.mainContext.save()
         let deletedAt = Date(timeIntervalSince1970: 1_800_000_000)
 
-        try first.publishLocalSubscriptionChanges(now: deletedAt)
+        try await first.publishLocalSubscriptionChanges(now: deletedAt)
 
         let rows = try projection.mainContext.fetch(
             FetchDescriptor<CloudPodcastProjection>()
@@ -534,7 +576,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "mac"
         )
-        try restarted.reconcile()
+        try await restarted.reconcile()
 
         XCTAssertEqual(
             try secondDevice.mainContext.fetchCount(FetchDescriptor<Podcast>()),
@@ -543,7 +585,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(rows[0].deletedAt, deletedAt)
     }
 
-    func testRemoteUnfollowReleasesActivePlayerBeforeCascadeDelete() throws {
+    func testRemoteUnfollowReleasesActivePlayerBeforeCascadeDelete() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 30)
         let episode = try XCTUnwrap(applicationEpisode(in: app))
         let player = PlayerService()
@@ -561,7 +603,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         projection.mainContext.insert(tombstone)
         try projection.mainContext.save()
 
-        try CloudProjectionCoordinator(
+        try await CloudProjectionCoordinator(
             applicationContainer: app,
             projectionContainer: projection,
             center: NotificationCenter(),
@@ -617,7 +659,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             remotePodcastDeletionDelayNanoseconds: 1_000_000
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertEqual(notifiedPodcastID, podcastID)
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 1)
@@ -629,7 +671,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 0)
     }
 
-    func testReconcileRemovesOrphansLeftByRemoteUnfollowRefreshRace() throws {
+    func testReconcileRemovesOrphansLeftByRemoteUnfollowRefreshRace() async throws {
         let app = try makeApplicationContainer()
         let orphan = Episode(
             guid: "orphan",
@@ -649,7 +691,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "phone"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 0)
         XCTAssertEqual(
@@ -658,7 +700,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testReconcileUnloadsPlayerBeforeRemovingLoadedOrphan() throws {
+    func testReconcileUnloadsPlayerBeforeRemovingLoadedOrphan() async throws {
         let app = try makeApplicationContainer()
         let orphan = Episode(
             guid: "playing-orphan",
@@ -680,7 +722,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "phone"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertNil(player.nowPlayingEpisode)
         XCTAssertNil(player.nowPlayingEpisodeID)
@@ -706,7 +748,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             remotePodcastDeletionDelayNanoseconds: 20_000_000
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
         tombstone.deletedAt = nil
         tombstone.modifiedAt = .now
         try projection.mainContext.save()
@@ -746,8 +788,8 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             remotePodcastDeletionDelayNanoseconds: 20_000_000
         )
 
-        try coordinator.reconcile()
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertEqual(notificationCount, 1)
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 1)
@@ -758,7 +800,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 0)
     }
 
-    func testDuplicateCloudRowsConvergeToNewestRecord() throws {
+    func testDuplicateCloudRowsConvergeToNewestRecord() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
         let older = CloudPodcastProjection()
@@ -779,7 +821,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "mac"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertEqual(
             try projection.mainContext.fetchCount(
@@ -793,7 +835,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testReconciliationNeverRewindsFeedHighWaterMark() throws {
+    func testReconciliationNeverRewindsFeedHighWaterMark() async throws {
         let app = try makeApplicationContainer()
         let localMark = Date(timeIntervalSince1970: 300)
         let local = Podcast(
@@ -820,13 +862,19 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "phone"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
+        let refreshedLocal = try XCTUnwrap(
+            ModelContext(app).fetch(FetchDescriptor<Podcast>()).first
+        )
+        let refreshedCloud = try XCTUnwrap(
+            ModelContext(projection).fetch(FetchDescriptor<CloudPodcastProjection>()).first
+        )
 
-        XCTAssertEqual(local.lastSeenPubDate, localMark)
-        XCTAssertEqual(cloud.lastSeenPubDate, localMark)
+        XCTAssertEqual(refreshedLocal.lastSeenPubDate, localMark)
+        XCTAssertEqual(refreshedCloud.lastSeenPubDate, localMark)
     }
 
-    func testReconciliationAdvancesLocalFeedHighWaterMarkFromCloud() throws {
+    func testReconciliationAdvancesLocalFeedHighWaterMarkFromCloud() async throws {
         let app = try makeApplicationContainer()
         let localMark = Date(timeIntervalSince1970: 100)
         let local = Podcast(
@@ -853,13 +901,16 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "phone"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
+        let refreshedLocal = try XCTUnwrap(
+            ModelContext(app).fetch(FetchDescriptor<Podcast>()).first
+        )
 
-        XCTAssertEqual(local.lastSeenPubDate, cloudMark)
+        XCTAssertEqual(refreshedLocal.lastSeenPubDate, cloudMark)
         XCTAssertEqual(cloud.lastSeenPubDate, cloudMark)
     }
 
-    func testPublishingLegacyDuplicateLocalFeedURLsDoesNotTrap() throws {
+    func testPublishingLegacyDuplicateLocalFeedURLsDoesNotTrap() async throws {
         let app = try makeApplicationContainer()
         app.mainContext.insert(Podcast(
             feedURL: "https://example.com/feed.xml",
@@ -880,7 +931,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "phone"
         )
 
-        try coordinator.publishLocalSubscriptionChanges()
+        try await coordinator.publishLocalSubscriptionChanges()
 
         let rows = try projection.mainContext.fetch(
             FetchDescriptor<CloudPodcastProjection>()
@@ -889,7 +940,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(rows[0].title, "First")
     }
 
-    func testEverywhereDeleteIntentPrecedesApplicationStoreDeletion() throws {
+    func testEverywhereDeleteIntentPrecedesApplicationStoreDeletion() async throws {
         let app = try makeApplicationContainer()
         app.mainContext.insert(Podcast(
             feedURL: "https://example.com/feed.xml",
@@ -903,21 +954,27 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "phone"
         )
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
         let deletionDate = Date(timeIntervalSince1970: 1_800_000_001)
         let episodeRow = episodeStateRow(device: "phone", position: 90, updatedAt: 100)
         projection.mainContext.insert(episodeRow)
         try projection.mainContext.save()
 
-        try coordinator.markAllSubscriptionsDeleted(now: deletionDate)
+        try await coordinator.markAllSubscriptionsDeleted(now: deletionDate)
+        let refreshedProjectionContext = ModelContext(projection)
 
         let row = try XCTUnwrap(
-            projection.mainContext.fetch(
+            refreshedProjectionContext.fetch(
                 FetchDescriptor<CloudPodcastProjection>()
             ).first
         )
         XCTAssertEqual(row.deletedAt, deletionDate)
-        XCTAssertEqual(episodeRow.deletedAt, deletionDate)
+        XCTAssertEqual(
+            try refreshedProjectionContext.fetch(
+                FetchDescriptor<CloudEpisodeStateProjection>()
+            ).first?.deletedAt,
+            deletionDate
+        )
 
         let freshApplicationStore = try makeApplicationContainer()
         let restarted = CloudProjectionCoordinator(
@@ -926,14 +983,14 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "phone"
         )
-        try restarted.reconcile()
+        try await restarted.reconcile()
         XCTAssertEqual(
             try freshApplicationStore.mainContext.fetchCount(FetchDescriptor<Podcast>()),
             0
         )
     }
 
-    func testEverywhereDeleteIsIdempotentAndTombstonesEveryLibraryProjection() throws {
+    func testEverywhereDeleteIsIdempotentAndTombstonesEveryLibraryProjection() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
         let coordinator = CloudProjectionCoordinator(
@@ -968,19 +1025,38 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try projection.mainContext.save()
         let deletionDate = Date(timeIntervalSince1970: 500)
 
-        try coordinator.markAllSubscriptionsDeleted(now: deletionDate)
-        try coordinator.markAllSubscriptionsDeleted(now: Date(timeIntervalSince1970: 600))
+        try await coordinator.markAllSubscriptionsDeleted(now: deletionDate)
+        try await coordinator.markAllSubscriptionsDeleted(now: Date(timeIntervalSince1970: 600))
+        let refreshed = ModelContext(projection)
 
-        XCTAssertEqual(podcast.deletedAt, deletionDate)
-        XCTAssertEqual(episode.deletedAt, deletionDate)
-        XCTAssertEqual(queue.deletedAt, deletionDate)
-        XCTAssertFalse(queue.isQueued)
-        XCTAssertEqual(bookmark.deletedAt, deletionDate)
-        XCTAssertEqual(session.deletedAt, deletionDate)
-        XCTAssertEqual(folder.deletedAt, deletionDate)
+        XCTAssertEqual(
+            try refreshed.fetch(FetchDescriptor<CloudPodcastProjection>()).first?.deletedAt,
+            deletionDate
+        )
+        XCTAssertEqual(
+            try refreshed.fetch(FetchDescriptor<CloudEpisodeStateProjection>()).first?.deletedAt,
+            deletionDate
+        )
+        let refreshedQueue = try XCTUnwrap(
+            refreshed.fetch(FetchDescriptor<CloudQueueItemProjection>()).first
+        )
+        XCTAssertEqual(refreshedQueue.deletedAt, deletionDate)
+        XCTAssertFalse(refreshedQueue.isQueued)
+        XCTAssertEqual(
+            try refreshed.fetch(FetchDescriptor<CloudBookmarkProjection>()).first?.deletedAt,
+            deletionDate
+        )
+        XCTAssertEqual(
+            try refreshed.fetch(FetchDescriptor<CloudListeningSessionProjection>()).first?.deletedAt,
+            deletionDate
+        )
+        XCTAssertEqual(
+            try refreshed.fetch(FetchDescriptor<CloudFolderProjection>()).first?.deletedAt,
+            deletionDate
+        )
     }
 
-    func testEpisodeProjectionContainsOnlyMeaningfulUserState() throws {
+    func testEpisodeProjectionContainsOnlyMeaningfulUserState() async throws {
         let app = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
         app.mainContext.insert(podcast)
@@ -1005,7 +1081,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "phone"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         let rows = try projection.mainContext.fetch(
             FetchDescriptor<CloudEpisodeStateProjection>()
@@ -1014,7 +1090,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(Set(rows.map(\.episodeGUID)), ["episode-42", "episode-73"])
     }
 
-    func testStaleProgressCannotMovePlaybackBackward() throws {
+    func testStaleProgressCannotMovePlaybackBackward() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 200)
         let projection = try makeProjectionContainer()
         let phone = episodeStateRow(device: "phone", position: 200, updatedAt: 200)
@@ -1029,12 +1105,12 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "phone"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertEqual(try XCTUnwrap(applicationEpisode(in: app)).positionSeconds, 200)
     }
 
-    func testExplicitRewindOverridesOlderProgressThenLaterProgressAdvances() throws {
+    func testExplicitRewindOverridesOlderProgressThenLaterProgressAdvances() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 200)
         let projection = try makeProjectionContainer()
         let stale = episodeStateRow(device: "phone", position: 200, updatedAt: 100)
@@ -1050,18 +1126,18 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "phone"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
         XCTAssertEqual(try XCTUnwrap(applicationEpisode(in: app)).positionSeconds, 50)
 
         rewind.positionSeconds = 80
         rewind.positionUpdatedAt = Date(timeIntervalSince1970: 300)
         rewind.modifiedAt = Date(timeIntervalSince1970: 300)
         try projection.mainContext.save()
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
         XCTAssertEqual(try XCTUnwrap(applicationEpisode(in: app)).positionSeconds, 80)
     }
 
-    func testStaleUnplayedDeviceCannotUndoNewerPlayedStateWithoutExplicitAction() throws {
+    func testStaleUnplayedDeviceCannotUndoNewerPlayedStateWithoutExplicitAction() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 100)
         let projection = try makeProjectionContainer()
         let played = episodeStateRow(device: "phone", position: 0, updatedAt: 200)
@@ -1075,12 +1151,12 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "mac"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertTrue(try XCTUnwrap(applicationEpisode(in: app)).isPlayed)
     }
 
-    func testExplicitMarkUnplayedCanOverrideNewerPlayedState() throws {
+    func testExplicitMarkUnplayedCanOverrideNewerPlayedState() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 100)
         let projection = try makeProjectionContainer()
         let played = episodeStateRow(device: "phone", position: 0, updatedAt: 200)
@@ -1093,7 +1169,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "mac"
         )
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
         let episode = try XCTUnwrap(applicationEpisode(in: app))
         episode.isPlayed = false
         try app.mainContext.save()
@@ -1102,16 +1178,16 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             playedChangedExplicitly: true
         ))
 
-        try coordinator.publishLocalEpisodeStateChanges(
+        try await coordinator.publishLocalEpisodeStateChanges(
             snapshots: [snapshot],
             now: Date(timeIntervalSince1970: 300)
         )
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertFalse(episode.isPlayed)
     }
 
-    func testInboxDismissalSyncsIndependentlyFromPlayedState() throws {
+    func testInboxDismissalSyncsIndependentlyFromPlayedState() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 0)
         let projection = try makeProjectionContainer()
         let dismissed = episodeStateRow(device: "phone", position: 0, updatedAt: 100)
@@ -1126,14 +1202,14 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "mac"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         let episode = try XCTUnwrap(applicationEpisode(in: app))
         XCTAssertTrue(episode.inboxDismissed)
         XCTAssertFalse(episode.isPlayed)
     }
 
-    func testNewerInboxReentryWinsOverOlderDismissal() throws {
+    func testNewerInboxReentryWinsOverOlderDismissal() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 0)
         let episode = try XCTUnwrap(applicationEpisode(in: app))
         episode.inboxDismissed = true
@@ -1155,13 +1231,16 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "ipad"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
+        let refreshedEpisode = try XCTUnwrap(
+            ModelContext(app).fetch(FetchDescriptor<Episode>()).first
+        )
 
-        XCTAssertFalse(episode.inboxDismissed)
-        XCTAssertFalse(episode.isPlayed)
+        XCTAssertFalse(refreshedEpisode.inboxDismissed)
+        XCTAssertFalse(refreshedEpisode.isPlayed)
     }
 
-    func testLegacyEpisodeProjectionDoesNotChangeInboxDismissal() throws {
+    func testLegacyEpisodeProjectionDoesNotChangeInboxDismissal() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 0)
         let projection = try makeProjectionContainer()
         let legacy = episodeStateRow(device: "phone", position: 0, updatedAt: 100)
@@ -1175,12 +1254,12 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "mac"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertFalse(try XCTUnwrap(applicationEpisode(in: app)).inboxDismissed)
     }
 
-    func testLivePositionSnapshotPublishesWithoutSavingApplicationEpisode() throws {
+    func testLivePositionSnapshotPublishesWithoutSavingApplicationEpisode() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 10)
         let projection = try makeProjectionContainer()
         let coordinator = CloudProjectionCoordinator(
@@ -1195,7 +1274,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             positionSeconds: 180
         ))
 
-        try coordinator.publishLocalEpisodeStateChanges(
+        try await coordinator.publishLocalEpisodeStateChanges(
             snapshots: [snapshot],
             now: Date(timeIntervalSince1970: 200)
         )
@@ -1209,7 +1288,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(row.positionUpdatedAt, Date(timeIntervalSince1970: 200))
     }
 
-    func testQueueProjectionConvergesOrderAndRemovalAcrossDevices() throws {
+    func testQueueProjectionConvergesOrderAndRemovalAcrossDevices() async throws {
         let phone = try makeApplicationContainer()
         let phonePodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
         let phoneA = Episode(guid: "a", title: "A", audioURL: "https://example.com/a")
@@ -1229,7 +1308,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "phone"
         )
-        try phoneCoordinator.reconcile()
+        try await phoneCoordinator.reconcile()
 
         let mac = try makeApplicationContainer()
         let macPodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
@@ -1248,7 +1327,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "mac"
         )
 
-        try macCoordinator.reconcile()
+        try await macCoordinator.reconcile()
 
         XCTAssertEqual(
             try mac.mainContext.fetch(FetchDescriptor<QueueItem>(
@@ -1272,7 +1351,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         removal.modifiedAt = Date(timeIntervalSinceNow: 100)
         projection.mainContext.insert(removal)
         try projection.mainContext.save()
-        try macCoordinator.reconcile()
+        try await macCoordinator.reconcile()
 
         XCTAssertEqual(
             try mac.mainContext.fetch(FetchDescriptor<QueueItem>())
@@ -1281,7 +1360,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testUnprojectableQueueItemIsPreserved() throws {
+    func testUnprojectableQueueItemIsPreserved() async throws {
         let app = try makeApplicationContainer()
         let orphan = Episode(
             guid: "unrelated", title: "Unrelated", audioURL: "https://example.com/audio",
@@ -1299,7 +1378,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "mac"
         )
 
-        try coordinator.publishLocalQueueChanges()
+        try await coordinator.publishLocalQueueChanges()
 
         XCTAssertEqual(
             try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 1
@@ -1313,7 +1392,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testRemoteQueueMaterializesEpisodeMissingFromLocalCatalog() throws {
+    func testRemoteQueueMaterializesEpisodeMissingFromLocalCatalog() async throws {
         let app = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
         app.mainContext.insert(podcast)
@@ -1340,7 +1419,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "mac"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         let episode = try XCTUnwrap(
             app.mainContext.fetch(FetchDescriptor<Episode>()).first {
@@ -1359,7 +1438,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testSimultaneousQueueAddReorderAndRemoveConvergesInEitherArrivalOrder() throws {
+    func testSimultaneousQueueAddReorderAndRemoveConvergesInEitherArrivalOrder() async throws {
         for reverseArrival in [false, true] {
             let app = try makeApplicationContainer()
             let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
@@ -1403,7 +1482,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 deviceID: "receiver"
             )
 
-            try coordinator.reconcile()
+            try await coordinator.reconcile()
 
             let queue = try app.mainContext.fetch(FetchDescriptor<QueueItem>(
                 sortBy: [SortDescriptor(\.position)]
@@ -1425,7 +1504,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testNewestMirroredSettingWinsWithoutCopyingLocalSettings() throws {
+    func testNewestMirroredSettingWinsWithoutCopyingLocalSettings() async throws {
         let phone = try makeApplicationContainer()
         let phoneSettings = AppSettingsStore(context: phone.mainContext)
         phoneSettings.setDouble(1.5, for: SettingsKey.globalSpeed)
@@ -1437,7 +1516,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "phone"
         )
-        try phoneCoordinator.reconcile()
+        try await phoneCoordinator.reconcile()
 
         let mac = try makeApplicationContainer()
         let macCoordinator = CloudProjectionCoordinator(
@@ -1446,22 +1525,22 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "mac"
         )
-        try macCoordinator.reconcile()
+        try await macCoordinator.reconcile()
         let macSettings = AppSettingsStore(context: mac.mainContext)
         XCTAssertEqual(macSettings.double(SettingsKey.globalSpeed, default: 1), 1.5)
         XCTAssertNil(macSettings.rawValue(SettingsKey.lastPlayingEpisodeID))
 
         macSettings.setDouble(2, for: SettingsKey.globalSpeed)
-        try macCoordinator.publishLocalSettingChange(
+        try await macCoordinator.publishLocalSettingChange(
             key: SettingsKey.globalSpeed,
             now: .distantFuture
         )
-        try phoneCoordinator.reconcile()
+        try await phoneCoordinator.reconcile()
 
         XCTAssertEqual(phoneSettings.double(SettingsKey.globalSpeed, default: 1), 2)
     }
 
-    func testCoreLibraryRoundTripFromPhoneToMacAndBack() throws {
+    func testCoreLibraryRoundTripFromPhoneToMacAndBack() async throws {
         let projection = try makeProjectionContainer()
         let phone = try makeApplicationContainerWithEpisode(position: 120)
         let phoneEpisode = try XCTUnwrap(applicationEpisode(in: phone))
@@ -1475,7 +1554,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "phone"
         )
-        try phoneCoordinator.reconcile()
+        try await phoneCoordinator.reconcile()
 
         let mac = try makeApplicationContainerWithEpisode(position: 0)
         let macCoordinator = CloudProjectionCoordinator(
@@ -1484,7 +1563,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "mac"
         )
-        try macCoordinator.reconcile()
+        try await macCoordinator.reconcile()
         let macEpisode = try XCTUnwrap(applicationEpisode(in: mac))
         XCTAssertEqual(macEpisode.positionSeconds, 120)
         XCTAssertEqual(
@@ -1509,28 +1588,36 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         macSettings.setDouble(2, for: SettingsKey.globalSpeed)
         try mac.mainContext.save()
         let later = Date.distantFuture
-        try macCoordinator.publishLocalSubscriptionChanges(now: later)
-        try macCoordinator.publishLocalEpisodeStateChanges(
+        try await macCoordinator.publishLocalSubscriptionChanges(now: later)
+        try await macCoordinator.publishLocalEpisodeStateChanges(
             snapshots: [try XCTUnwrap(EpisodeUserStateSnapshot(episode: macEpisode))],
             now: later
         )
-        try macCoordinator.publishLocalQueueChanges(now: later)
-        try macCoordinator.publishLocalSettingChange(
+        try await macCoordinator.publishLocalQueueChanges(now: later)
+        try await macCoordinator.publishLocalSettingChange(
             key: SettingsKey.globalSpeed,
             now: later
         )
 
-        try phoneCoordinator.reconcile()
+        try await phoneCoordinator.reconcile()
+        let refreshedPhoneContext = ModelContext(phone)
         XCTAssertEqual(
-            try phone.mainContext.fetch(FetchDescriptor<Podcast>()).first?.title,
+            try refreshedPhoneContext.fetch(FetchDescriptor<Podcast>()).first?.title,
             "Renamed on Mac"
         )
-        XCTAssertEqual(phoneEpisode.positionSeconds, 240)
-        XCTAssertTrue(try phone.mainContext.fetch(FetchDescriptor<QueueItem>()).isEmpty)
-        XCTAssertEqual(phoneSettings.double(SettingsKey.globalSpeed, default: 1), 2)
+        XCTAssertEqual(
+            try refreshedPhoneContext.fetch(FetchDescriptor<Episode>()).first?.positionSeconds,
+            240
+        )
+        XCTAssertTrue(try refreshedPhoneContext.fetch(FetchDescriptor<QueueItem>()).isEmpty)
+        XCTAssertEqual(
+            AppSettingsStore(context: refreshedPhoneContext)
+                .double(SettingsKey.globalSpeed, default: 1),
+            2
+        )
     }
 
-    func testFreshDeviceCannotReduceGrandfatheredPodcastAllowance() throws {
+    func testFreshDeviceCannotReduceGrandfatheredPodcastAllowance() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
         let olderPhone = CloudSettingProjection()
@@ -1553,7 +1640,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             deviceID: "test"
         )
 
-        try coordinator.reconcile()
+        try await coordinator.reconcile()
 
         XCTAssertEqual(
             AppSettingsStore(context: app.mainContext).grandfatheredPodcastCount(),
@@ -1561,7 +1648,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testBookmarksArriveAfterCatalogAndDeletionPropagates() throws {
+    func testBookmarksArriveAfterCatalogAndDeletionPropagates() async throws {
         let phone = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
         let episode = Episode(guid: "episode", title: "Episode", audioURL: "https://example.com/audio")
@@ -1583,7 +1670,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "phone"
         )
-        try phoneCoordinator.reconcile()
+        try await phoneCoordinator.reconcile()
 
         let mac = try makeApplicationContainer()
         let macCoordinator = CloudProjectionCoordinator(
@@ -1592,7 +1679,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "mac"
         )
-        try macCoordinator.reconcile()
+        try await macCoordinator.reconcile()
         XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<Bookmark>()).isEmpty)
 
         let macPodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
@@ -1601,17 +1688,17 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         mac.mainContext.insert(macPodcast)
         mac.mainContext.insert(macEpisode)
         try mac.mainContext.save()
-        try macCoordinator.reconcile()
+        try await macCoordinator.reconcile()
         XCTAssertEqual(try mac.mainContext.fetch(FetchDescriptor<Bookmark>()).first?.note, "Remember")
 
         phone.mainContext.delete(bookmark)
         try phone.mainContext.save()
-        try phoneCoordinator.publishLocalBookmarkChanges(now: Date(timeIntervalSince1970: 200))
-        try macCoordinator.reconcile()
+        try await phoneCoordinator.publishLocalBookmarkChanges(now: Date(timeIntervalSince1970: 200))
+        try await macCoordinator.reconcile()
         XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<Bookmark>()).isEmpty)
     }
 
-    func testListeningHistorySyncsWithoutRequiringEpisodeCatalog() throws {
+    func testListeningHistorySyncsWithoutRequiringEpisodeCatalog() async throws {
         let phone = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
         phone.mainContext.insert(podcast)
@@ -1630,7 +1717,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "phone"
         )
-        try phoneCoordinator.reconcile()
+        try await phoneCoordinator.reconcile()
 
         let mac = try makeApplicationContainer()
         let macCoordinator = CloudProjectionCoordinator(
@@ -1639,7 +1726,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "mac"
         )
-        try macCoordinator.reconcile()
+        try await macCoordinator.reconcile()
         let imported = try XCTUnwrap(
             mac.mainContext.fetch(FetchDescriptor<ListeningSession>()).first
         )
@@ -1649,10 +1736,10 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
 
         phone.mainContext.delete(session)
         try phone.mainContext.save()
-        try phoneCoordinator.publishLocalListeningHistoryChanges(
+        try await phoneCoordinator.publishLocalListeningHistoryChanges(
             now: Date(timeIntervalSince1970: 200)
         )
-        try macCoordinator.reconcile()
+        try await macCoordinator.reconcile()
         XCTAssertTrue(try mac.mainContext.fetch(FetchDescriptor<ListeningSession>()).isEmpty)
     }
 
@@ -1661,7 +1748,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
     /// SwiftData then supplies a future fault whose first stored-property read
     /// traps instead of throwing. Reconciliation must discard only that
     /// irrecoverable history row and remain idempotent across later launches.
-    func testDanglingListeningSessionPodcastIsRepairedWithoutFaulting() throws {
+    func testDanglingListeningSessionPodcastIsRepairedWithoutFaulting() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1687,10 +1774,10 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
 
         for _ in 0..<2 {
-            try autoreleasepool {
+            do {
                 let app = try StoreMigration.openOrMigrate(at: applicationURL)
                 let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-                try CloudProjectionCoordinator(
+                try await CloudProjectionCoordinator(
                     applicationContainer: app,
                     projectionContainer: projection,
                     center: NotificationCenter(),
@@ -1714,7 +1801,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
 
     /// A missing Episode must not cost the user an otherwise valid podcast-level
     /// history record. This is the complementary dangling-reference shape.
-    func testDanglingListeningSessionEpisodePreservesPodcastHistory() throws {
+    func testDanglingListeningSessionEpisodePreservesPodcastHistory() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1748,10 +1835,10 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
 
         for _ in 0..<2 {
-            try autoreleasepool {
+            do {
                 let app = try StoreMigration.openOrMigrate(at: applicationURL)
                 let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-                try CloudProjectionCoordinator(
+                try await CloudProjectionCoordinator(
                     applicationContainer: app,
                     projectionContainer: projection,
                     center: NotificationCenter(),
@@ -1775,7 +1862,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testPartialListeningHistoryBackfillResumesOnDiskWithoutDuplicates() throws {
+    func testPartialListeningHistoryBackfillResumesOnDiskWithoutDuplicates() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1819,13 +1906,13 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
 
         for _ in 0..<2 {
-            try autoreleasepool {
+            do {
                 let app = try makeOnDiskApplicationContainer(
                     applicationURL: applicationURL,
                     localURL: localURL
                 )
                 let projection = try makeOnDiskProjectionContainer(at: projectionURL)
-                try CloudProjectionCoordinator(
+                try await CloudProjectionCoordinator(
                     applicationContainer: app,
                     projectionContainer: projection,
                     center: NotificationCenter(),
@@ -1851,7 +1938,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testListeningHistoryBackfillPreservesTombstoneAcrossRestart() throws {
+    func testListeningHistoryBackfillPreservesTombstoneAcrossRestart() async throws {
         let app = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
         app.mainContext.insert(podcast)
@@ -1877,7 +1964,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         try projection.mainContext.save()
 
         for _ in 0..<2 {
-            try CloudProjectionCoordinator(
+            try await CloudProjectionCoordinator(
                 applicationContainer: app,
                 projectionContainer: projection,
                 center: NotificationCenter(),
@@ -1896,7 +1983,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testNestedFoldersAndMembershipsConvergeWithoutCycles() throws {
+    func testNestedFoldersAndMembershipsConvergeWithoutCycles() async throws {
         let phone = try makeApplicationContainer()
         let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
         let episode = Episode(guid: "episode", title: "Episode", audioURL: "https://example.com/audio")
@@ -1918,7 +2005,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "phone"
         )
-        try phoneCoordinator.reconcile()
+        try await phoneCoordinator.reconcile()
 
         let mac = try makeApplicationContainer()
         let macPodcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
@@ -1933,7 +2020,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             center: NotificationCenter(),
             deviceID: "mac"
         )
-        try macCoordinator.reconcile()
+        try await macCoordinator.reconcile()
 
         let macFolders = try mac.mainContext.fetch(FetchDescriptor<PodcastFolder>())
         let macChild = try XCTUnwrap(macFolders.first { $0.name == "Child" })
@@ -1947,8 +2034,8 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
 
         phone.mainContext.delete(child)
         try phone.mainContext.save()
-        try phoneCoordinator.publishLocalFolderChanges(now: Date(timeIntervalSince1970: 100))
-        try macCoordinator.reconcile()
+        try await phoneCoordinator.publishLocalFolderChanges(now: Date(timeIntervalSince1970: 100))
+        try await macCoordinator.reconcile()
 
         let remainingFolders = try mac.mainContext.fetch(FetchDescriptor<PodcastFolder>())
         XCTAssertEqual(remainingFolders.map(\.name), ["Parent"])
@@ -1958,7 +2045,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testRemoteFolderCycleRepairsPersistAndNotifyOnce() throws {
+    func testRemoteFolderCycleRepairsPersistAndNotifyOnce() async throws {
         let app = try makeApplicationContainer()
         let projection = try makeProjectionContainer()
         for (index, id, parentID) in [
@@ -1987,7 +2074,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
         defer { center.removeObserver(token) }
 
-        try CloudProjectionCoordinator(
+        try await CloudProjectionCoordinator(
             applicationContainer: app,
             projectionContainer: projection,
             center: center,
@@ -2108,6 +2195,36 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         container.mainContext.insert(episode)
         try container.mainContext.save()
         return container
+    }
+
+    private func waitForProjectionPodcastCount(
+        _ expectedCount: Int,
+        in container: ModelContainer
+    ) async throws {
+        for _ in 0..<100 {
+            let context = ModelContext(container)
+            if try context.fetchCount(FetchDescriptor<CloudPodcastProjection>()) == expectedCount {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Timed out waiting for \(expectedCount) projected podcasts")
+    }
+
+    private func waitForProjectedSpeed(
+        _ expectedSpeed: Double,
+        feedURL: String,
+        in container: ModelContainer
+    ) async throws {
+        for _ in 0..<100 {
+            let context = ModelContext(container)
+            let rows = try context.fetch(FetchDescriptor<CloudPodcastProjection>())
+            if rows.first(where: { $0.feedURL == feedURL })?.speedOverride == expectedSpeed {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Timed out waiting for projected subscription update")
     }
 
     private func executeSQLite(at url: URL, sql: String) throws {

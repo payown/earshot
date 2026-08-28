@@ -1863,7 +1863,7 @@ final class StoreMigrationV6toV8Tests: XCTestCase {
             )
         )
         let reconcileStart = DispatchTime.now().uptimeNanoseconds
-        try CloudProjectionCoordinator(
+        try await CloudProjectionCoordinator(
             applicationContainer: migrated,
             projectionContainer: projection,
             center: NotificationCenter(),

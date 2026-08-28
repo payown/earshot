@@ -36,7 +36,6 @@ enum FolderMoveResult: Equatable {
 /// queue a folder's latest unplayed episodes. Mirrors the Flutter
 /// `FolderRepositoryImpl`. Membership uniqueness of (folder, podcast) is enforced
 /// here rather than by a DB constraint.
-@MainActor
 final class FolderRepository {
     nonisolated static let deletedFolderIDsKey = "deletedFolderIDs"
 
@@ -514,6 +513,7 @@ final class FolderRepository {
     /// repository call performs one queue fetch + compaction regardless of the
     /// number added. Returns the number queued.
     @discardableResult
+    @MainActor
     func addFolderToQueue(_ folder: PodcastFolder, now: Date = .now) -> Int {
         let episodes = unplayedEpisodesToQueue(in: folder, now: now)
         QueueRepository(context: context).add(episodes)

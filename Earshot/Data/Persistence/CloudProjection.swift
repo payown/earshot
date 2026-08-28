@@ -226,7 +226,7 @@ final class CloudFolderProjection {
     init() {}
 }
 
-struct CompactProjectionSeedCounts: Codable, Equatable {
+struct CompactProjectionSeedCounts: Codable, Equatable, Sendable {
     let podcasts: Int
     let episodeStates: Int
     let queueItems: Int
@@ -236,14 +236,15 @@ struct CompactProjectionSeedCounts: Codable, Equatable {
     let folders: Int
 }
 
-enum CompactProjectionSeedMarker: Equatable {
+enum CompactProjectionSeedMarker: Equatable, Sendable {
     case start(runID: String)
     case complete(runID: String, durationSeconds: Double, counts: CompactProjectionSeedCounts)
     case failure(runID: String, durationSeconds: Double, error: String)
 }
 
-@MainActor
-final class CloudProjectionCoordinator {
+actor CloudProjectionCoordinator: ModelActor {
+    nonisolated let modelExecutor: any ModelExecutor
+    nonisolated let modelContainer: ModelContainer
     /// Initial subscription projection is restartable at natural-key boundaries.
     /// Checkpoint frequently enough that a force quit replays at most this many
     /// small, relationship-free rows rather than one all-or-nothing library seed.
@@ -359,8 +360,8 @@ final class CloudProjectionCoordinator {
         }
     }
 
-    private let applicationContainer: ModelContainer
     private let projectionContainer: ModelContainer
+    private let projectionContext: ModelContext
     private let center: NotificationCenter
     private var importObserver: NSObjectProtocol?
     private var subscriptionObserver: NSObjectProtocol?
@@ -378,8 +379,8 @@ final class CloudProjectionCoordinator {
     private var knownLocalSessionIDs: Set<String> = []
     private var knownLocalFolderIDs: Set<String> = []
     private let deviceID: String
-    private let seedInstrumentationEnabled: () -> Bool
-    private let seedMarkerRecorder: (CompactProjectionSeedMarker) -> Void
+    private let seedInstrumentationEnabled: @Sendable () -> Bool
+    private let seedMarkerRecorder: @Sendable (CompactProjectionSeedMarker) -> Void
     private let remotePodcastDeletionDelayNanoseconds: UInt64
     private var isApplyingRemote = false
 
@@ -388,16 +389,19 @@ final class CloudProjectionCoordinator {
         projectionContainer: ModelContainer,
         center: NotificationCenter = .default,
         deviceID: String = CloudProjectionDeviceIdentity.value(),
-        seedInstrumentationEnabled: @escaping () -> Bool = {
+        seedInstrumentationEnabled: @escaping @Sendable () -> Bool = {
             CloudKitLaunchPolicy.isMirroringEnabled()
         },
-        seedMarkerRecorder: @escaping (CompactProjectionSeedMarker) -> Void = {
+        seedMarkerRecorder: @escaping @Sendable (CompactProjectionSeedMarker) -> Void = {
             CloudProjectionCoordinator.recordSeedMarker($0)
         },
         remotePodcastDeletionDelayNanoseconds: UInt64 = 0
     ) {
-        self.applicationContainer = applicationContainer
+        let applicationContext = ModelContext(applicationContainer)
+        modelExecutor = DefaultSerialModelExecutor(modelContext: applicationContext)
+        modelContainer = applicationContainer
         self.projectionContainer = projectionContainer
+        projectionContext = ModelContext(projectionContainer)
         self.center = center
         self.deviceID = deviceID
         self.seedInstrumentationEnabled = seedInstrumentationEnabled
@@ -405,42 +409,74 @@ final class CloudProjectionCoordinator {
         self.remotePodcastDeletionDelayNanoseconds = remotePodcastDeletionDelayNanoseconds
     }
 
-    static func make(applicationContainer: ModelContainer) throws -> CloudProjectionCoordinator {
-        let schema = Schema([
-            CloudPodcastProjection.self,
-            CloudEpisodeStateProjection.self,
-            CloudQueueItemProjection.self,
-            CloudSettingProjection.self,
-            CloudBookmarkProjection.self,
-            CloudListeningSessionProjection.self,
-            CloudFolderProjection.self,
-        ])
-        let configuration = ModelConfiguration(
-            "CloudProjection",
-            schema: schema,
-            url: storeURL,
-            cloudKitDatabase: CloudKitLaunchPolicy.projectionDatabase()
-        )
-        let projectionContainer = try ModelContainer(for: schema, configurations: configuration)
-        return CloudProjectionCoordinator(
-            applicationContainer: applicationContainer,
-            projectionContainer: projectionContainer,
-            // SwiftUI can keep an outgoing VoiceOver row alive for part of the
-            // navigation-pop transition. Stop playback and dismiss first, then
-            // let that transition finish before the cascade invalidates the
-            // row's SwiftData models.
-            remotePodcastDeletionDelayNanoseconds: 750_000_000
-        )
+    nonisolated static func make(
+        applicationContainer: ModelContainer
+    ) async throws -> CloudProjectionCoordinator {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let schema = Schema([
+                        CloudPodcastProjection.self,
+                        CloudEpisodeStateProjection.self,
+                        CloudQueueItemProjection.self,
+                        CloudSettingProjection.self,
+                        CloudBookmarkProjection.self,
+                        CloudListeningSessionProjection.self,
+                        CloudFolderProjection.self,
+                    ])
+                    let configuration = ModelConfiguration(
+                        "CloudProjection",
+                        schema: schema,
+                        url: storeURL,
+                        cloudKitDatabase: CloudKitLaunchPolicy.projectionDatabase()
+                    )
+                    let projectionContainer = try ModelContainer(
+                        for: schema,
+                        configurations: configuration
+                    )
+                    continuation.resume(returning: CloudProjectionCoordinator(
+                        applicationContainer: applicationContainer,
+                        projectionContainer: projectionContainer,
+                        // SwiftUI can keep an outgoing VoiceOver row alive for part of the
+                        // navigation-pop transition. Stop playback and dismiss first, then
+                        // let that transition finish before the cascade invalidates the
+                        // row's SwiftData models.
+                        remotePodcastDeletionDelayNanoseconds: 750_000_000
+                    ))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 
+#if DEBUG
+    nonisolated static func makeForTesting(
+        applicationContainer: ModelContainer,
+        projectionContainer: ModelContainer
+    ) async -> CloudProjectionCoordinator {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(returning: CloudProjectionCoordinator(
+                    applicationContainer: applicationContainer,
+                    projectionContainer: projectionContainer,
+                    center: NotificationCenter(),
+                    deviceID: "background-test"
+                ))
+            }
+        }
+    }
+#endif
+
     func start() throws {
+        refreshContextsFromStore()
         guard importObserver == nil else { return }
         importObserver = center.addObserver(
             forName: .earshotCloudKitImportDidFinish,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.scheduleReconciliation() }
+            Task { await self?.scheduleReconciliation() }
         }
         subscriptionObserver = center.addObserver(
             forName: .earshotSubscriptionsDidChange,
@@ -448,20 +484,7 @@ final class CloudProjectionCoordinator {
             queue: .main
         ) { [weak self] notification in
             let changedFeedURL = notification.object as? String
-            MainActor.assumeIsolated {
-                guard self?.isApplyingRemote == false else { return }
-                do {
-                    if let feedURL = changedFeedURL {
-                        try self?.publishLocalSubscriptionChange(feedURL: feedURL)
-                    } else {
-                        try self?.publishLocalSubscriptionChanges()
-                    }
-                } catch {
-                    AppLog.data.error(
-                        "Cloud subscription projection failed: \(error.localizedDescription, privacy: .public)"
-                    )
-                }
-            }
+            Task { await self?.handleLocalSubscriptionChange(feedURL: changedFeedURL) }
         }
         episodeObserver = center.addObserver(
             forName: .earshotEpisodeUserStateDidChange,
@@ -470,16 +493,7 @@ final class CloudProjectionCoordinator {
         ) { [weak self] notification in
             guard let snapshots = notification.object as? [EpisodeUserStateSnapshot],
                   !snapshots.isEmpty else { return }
-            MainActor.assumeIsolated {
-                guard self?.isApplyingRemote == false else { return }
-                do {
-                    try self?.publishLocalEpisodeStateChanges(snapshots: snapshots)
-                } catch {
-                    AppLog.data.error(
-                        "Cloud episode-state projection failed: \(error.localizedDescription, privacy: .public)"
-                    )
-                }
-            }
+            Task { await self?.handleLocalEpisodeStateChanges(snapshots) }
         }
         // Feed refresh uses this existing event after its store save. Running
         // reconciliation on the next main-actor turn lets a newly refetched
@@ -489,29 +503,14 @@ final class CloudProjectionCoordinator {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                // Reconciliation itself posts this notification after applying
-                // remote episode or queue state. That work is already current;
-                // only an external catalog refresh needs another pass.
-                guard self?.isApplyingRemote == false else { return }
-                self?.scheduleReconciliation()
-            }
+            Task { await self?.scheduleReconciliationUnlessApplyingRemote() }
         }
         queueObserver = center.addObserver(
             forName: .earshotQueueDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard self?.isApplyingRemote == false else { return }
-                do {
-                    try self?.publishLocalQueueChanges()
-                } catch {
-                    AppLog.data.error(
-                        "Cloud queue projection failed: \(error.localizedDescription, privacy: .public)"
-                    )
-                }
-            }
+            Task { await self?.handleLocalQueueChange() }
         }
         settingObserver = center.addObserver(
             forName: .earshotMirroredSettingDidChange,
@@ -519,64 +518,28 @@ final class CloudProjectionCoordinator {
             queue: .main
         ) { [weak self] notification in
             guard let key = notification.object as? String else { return }
-            MainActor.assumeIsolated {
-                guard self?.isApplyingRemote == false else { return }
-                do {
-                    try self?.publishLocalSettingChange(key: key)
-                } catch {
-                    AppLog.data.error(
-                        "Cloud setting projection failed: \(error.localizedDescription, privacy: .public)"
-                    )
-                }
-            }
+            Task { await self?.handleLocalSettingChange(key) }
         }
         bookmarkObserver = center.addObserver(
             forName: .earshotBookmarksDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard self?.isApplyingRemote == false else { return }
-                do {
-                    try self?.publishLocalBookmarkChanges()
-                } catch {
-                    AppLog.data.error(
-                        "Cloud bookmark projection failed: \(error.localizedDescription, privacy: .public)"
-                    )
-                }
-            }
+            Task { await self?.handleLocalBookmarkChange() }
         }
         historyObserver = center.addObserver(
             forName: .earshotListeningHistoryDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard self?.isApplyingRemote == false else { return }
-                do {
-                    try self?.publishLocalListeningHistoryChanges()
-                } catch {
-                    AppLog.data.error(
-                        "Cloud listening-history projection failed: \(error.localizedDescription, privacy: .public)"
-                    )
-                }
-            }
+            Task { await self?.handleLocalListeningHistoryChange() }
         }
         folderObserver = center.addObserver(
             forName: .earshotFoldersDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard self?.isApplyingRemote == false else { return }
-                do {
-                    try self?.publishLocalFolderChanges()
-                } catch {
-                    AppLog.data.error(
-                        "Cloud folder projection failed: \(error.localizedDescription, privacy: .public)"
-                    )
-                }
-            }
+            Task { await self?.handleLocalFolderChange() }
         }
         guard seedInstrumentationEnabled() else {
             try reconcile()
@@ -603,8 +566,91 @@ final class CloudProjectionCoordinator {
         }
     }
 
+    private func handleLocalSubscriptionChange(feedURL: String?) {
+        guard !isApplyingRemote else { return }
+        do {
+            if let feedURL {
+                try publishLocalSubscriptionChange(feedURL: feedURL)
+            } else {
+                try publishLocalSubscriptionChanges()
+            }
+        } catch {
+            AppLog.data.error(
+                "Cloud subscription projection failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func handleLocalEpisodeStateChanges(_ snapshots: [EpisodeUserStateSnapshot]) {
+        guard !isApplyingRemote else { return }
+        do {
+            try publishLocalEpisodeStateChanges(snapshots: snapshots)
+        } catch {
+            AppLog.data.error(
+                "Cloud episode-state projection failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func scheduleReconciliationUnlessApplyingRemote() {
+        // Reconciliation itself posts the Inbox notification after applying
+        // remote state. Only an external catalog refresh needs another pass.
+        guard !isApplyingRemote else { return }
+        scheduleReconciliation()
+    }
+
+    private func handleLocalQueueChange() {
+        guard !isApplyingRemote else { return }
+        do { try publishLocalQueueChanges() }
+        catch {
+            AppLog.data.error(
+                "Cloud queue projection failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func handleLocalSettingChange(_ key: String) {
+        guard !isApplyingRemote else { return }
+        do { try publishLocalSettingChange(key: key) }
+        catch {
+            AppLog.data.error(
+                "Cloud setting projection failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func handleLocalBookmarkChange() {
+        guard !isApplyingRemote else { return }
+        do { try publishLocalBookmarkChanges() }
+        catch {
+            AppLog.data.error(
+                "Cloud bookmark projection failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func handleLocalListeningHistoryChange() {
+        guard !isApplyingRemote else { return }
+        do { try publishLocalListeningHistoryChanges() }
+        catch {
+            AppLog.data.error(
+                "Cloud listening-history projection failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func handleLocalFolderChange() {
+        guard !isApplyingRemote else { return }
+        do { try publishLocalFolderChanges() }
+        catch {
+            AppLog.data.error(
+                "Cloud folder projection failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
     private func compactProjectionCounts() throws -> CompactProjectionSeedCounts {
-        let context = projectionContainer.mainContext
+        let context = projectionContext
         return try CompactProjectionSeedCounts(
             podcasts: context.fetchCount(FetchDescriptor<CloudPodcastProjection>()),
             episodeStates: context.fetchCount(FetchDescriptor<CloudEpisodeStateProjection>()),
@@ -689,27 +735,39 @@ final class CloudProjectionCoordinator {
 
     private func scheduleReconciliation() {
         guard reconcileTask == nil else { return }
-        reconcileTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { reconcileTask = nil }
-            do {
-                try reconcile()
-            } catch {
-                AppLog.data.error(
-                    "Cloud projection reconciliation failed: \(error.localizedDescription, privacy: .public)"
-                )
-            }
+        reconcileTask = Task { [weak self] in
+            await self?.runScheduledReconciliation()
         }
+    }
+
+    private func runScheduledReconciliation() {
+        defer { reconcileTask = nil }
+        do {
+            try reconcile()
+        } catch {
+            AppLog.data.error(
+                "Cloud projection reconciliation failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    /// External application and CloudKit contexts can save while this actor is
+    /// idle. Drop only clean registered-object caches before each entry point so
+    /// retained SwiftData faults cannot hide a newer cross-context save.
+    private func refreshContextsFromStore() {
+        if !modelContext.hasChanges { modelContext.rollback() }
+        if !projectionContext.hasChanges { projectionContext.rollback() }
     }
 
     /// Applies remote subscriptions before projecting local subscriptions. An
     /// empty new device therefore cannot overwrite a populated account.
     func reconcile() throws {
+        refreshContextsFromStore()
         guard !isApplyingRemote else { return }
         isApplyingRemote = true
         defer { isApplyingRemote = false }
-        let appContext = applicationContainer.mainContext
-        let cloudContext = projectionContainer.mainContext
+        let appContext = modelContext
+        let cloudContext = projectionContext
         let cloudRows = try cloudContext.fetch(FetchDescriptor<CloudPodcastProjection>())
         var cloudByFeed: [String: CloudPodcastProjection] = [:]
         for row in cloudRows.sorted(by: Self.projectionOrder) {
@@ -733,7 +791,7 @@ final class CloudProjectionCoordinator {
                     if remotePodcastDeletionDelayNanoseconds == 0 {
                         // Tests and non-UI coordinators retain deterministic,
                         // synchronous reconciliation.
-                        applicationChanged = SubscriptionRepository(context: appContext)
+                        applicationChanged = SubscriptionDeletionRepository(context: appContext)
                             .unsubscribe(podcast) || applicationChanged
                     } else {
                         scheduleRemotePodcastDeletion(podcast, feedURL: row.feedURL)
@@ -855,42 +913,39 @@ final class CloudProjectionCoordinator {
             userInfo: [PlayerService.willDeletePodcastIDKey: podcast.persistentModelID]
         )
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(nanoseconds: remotePodcastDeletionDelayNanoseconds)
-            defer { pendingRemotePodcastDeletionFeedURLs.remove(key) }
+        let deletionDelay = remotePodcastDeletionDelayNanoseconds
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: deletionDelay)
+            await self?.finishRemotePodcastDeletion(key: key)
+        }
+    }
 
-            // Cold-launch feed refresh and CloudKit import can begin together.
-            // Let any refresh unwind before deleting its Podcast, or that refresh
-            // can save newly fetched Episodes after the cascade and leave them
-            // detached from every subscription.
-            await BackgroundFeedRefresher.cancelAndWait()
+    private func finishRemotePodcastDeletion(key: String) async {
+        defer { pendingRemotePodcastDeletionFeedURLs.remove(key) }
 
-            // A rapid refollow may clear the tombstone while the dismissal is in
-            // flight. Re-check the winning cloud row before deleting local data.
-            let rows = (try? projectionContainer.mainContext.fetch(
-                FetchDescriptor<CloudPodcastProjection>()
-            )) ?? []
-            guard rows.contains(where: {
-                FeedURLIdentity.canonical($0.feedURL) == key && $0.deletedAt != nil
-            }) else { return }
-            guard let current = try? PodcastIdentityService(
-                context: applicationContainer.mainContext
-            ).existing(feedURL: key) else { return }
+        // Cold-launch feed refresh and CloudKit import can begin together. Let
+        // any refresh unwind before deleting its Podcast, or that refresh can
+        // save newly fetched Episodes after the cascade and leave them detached.
+        await BackgroundFeedRefresher.cancelAndWait()
 
-            isApplyingRemote = true
-            let changed = SubscriptionRepository(context: applicationContainer.mainContext)
-                .unsubscribe(current)
-            let removedOrphans = (try? removeOrphanedLibraryRows(
-                in: applicationContainer.mainContext
-            )) ?? false
-            if applicationContainer.mainContext.hasChanges {
-                try? applicationContainer.mainContext.save()
-            }
-            isApplyingRemote = false
-            if changed || removedOrphans {
-                center.post(name: .earshotCloudProjectionDidApply, object: nil)
-            }
+        // A rapid refollow may clear the tombstone while dismissal is in flight.
+        let rows = (try? projectionContext.fetch(
+            FetchDescriptor<CloudPodcastProjection>()
+        )) ?? []
+        guard rows.contains(where: {
+            FeedURLIdentity.canonical($0.feedURL) == key && $0.deletedAt != nil
+        }) else { return }
+        guard let current = try? PodcastIdentityService(context: modelContext)
+            .existing(feedURL: key) else { return }
+
+        isApplyingRemote = true
+        let changed = SubscriptionDeletionRepository(context: modelContext)
+            .unsubscribe(current)
+        let removedOrphans = (try? removeOrphanedLibraryRows(in: modelContext)) ?? false
+        if modelContext.hasChanges { try? modelContext.save() }
+        isApplyingRemote = false
+        if changed || removedOrphans {
+            center.post(name: .earshotCloudProjectionDidApply, object: nil)
         }
     }
 
@@ -930,7 +985,7 @@ final class CloudProjectionCoordinator {
     private func resolvedLocalListeningSessions(
         in context: ModelContext
     ) throws -> (sessions: [ResolvedListeningSession], repaired: Bool) {
-        let resolver = try ListeningHistoryIdentityResolver(container: applicationContainer)
+        let resolver = try ListeningHistoryIdentityResolver(container: modelContainer)
         var descriptor = FetchDescriptor<ListeningSession>()
         descriptor.propertiesToFetch = [
             \ListeningSession.episode,
@@ -996,8 +1051,9 @@ final class CloudProjectionCoordinator {
         now: Date = .now,
         onlyMissingOwnRows: Bool = false
     ) throws {
-        let appContext = applicationContainer.mainContext
-        let cloudContext = projectionContainer.mainContext
+        refreshContextsFromStore()
+        let appContext = modelContext
+        let cloudContext = projectionContext
         let meaningful = try appContext.fetch(FetchDescriptor<Episode>(
             predicate: #Predicate {
                 $0.positionSeconds > 0 || $0.playedAt != nil
@@ -1032,7 +1088,10 @@ final class CloudProjectionCoordinator {
             guard let episode = localByKey[key] ?? existingForOwnKeys[key] else {
                 continue
             }
-            let row = ownByKey[key] ?? {
+            let row: CloudEpisodeStateProjection
+            if let existing = ownByKey[key] {
+                row = existing
+            } else {
                 let inserted = CloudEpisodeStateProjection()
                 inserted.feedURL = key.feedURL
                 inserted.episodeGUID = key.guid
@@ -1041,8 +1100,8 @@ final class CloudProjectionCoordinator {
                 inserted.playedUpdatedAt = episode.isPlayed ? now : .distantPast
                 cloudContext.insert(inserted)
                 ownByKey[key] = inserted
-                return inserted
-            }()
+                row = inserted
+            }
             let position = max(0, episode.positionSeconds)
             if row.positionSeconds != position {
                 if position < row.positionSeconds { row.positionResetAt = now }
@@ -1064,8 +1123,9 @@ final class CloudProjectionCoordinator {
         now: Date = .now,
         onlyIfCloudEmpty: Bool = false
     ) throws {
-        let appContext = applicationContainer.mainContext
-        let cloudContext = projectionContainer.mainContext
+        refreshContextsFromStore()
+        let appContext = modelContext
+        let cloudContext = projectionContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
 
         let items = try appContext.fetch(FetchDescriptor<QueueItem>(
@@ -1107,15 +1167,18 @@ final class CloudProjectionCoordinator {
             ? Set(current.keys)
             : Set(rows.filter { $0.deletedAt == nil }.map(Self.episodeKey)).union(current.keys)
         for key in keys.sorted() {
-            let row = ownByKey[key] ?? {
+            let row: CloudQueueItemProjection
+            if let existing = ownByKey[key] {
+                row = existing
+            } else {
                 let inserted = CloudQueueItemProjection()
                 inserted.feedURL = key.feedURL
                 inserted.episodeGUID = key.guid
                 inserted.sourceDeviceID = deviceID
                 cloudContext.insert(inserted)
                 ownByKey[key] = inserted
-                return inserted
-            }()
+                row = inserted
+            }
             let item = current[key]
             let queued = item != nil
             let position = item?.position ?? 0
@@ -1138,8 +1201,9 @@ final class CloudProjectionCoordinator {
         now: Date = .now,
         onlyIfCloudEmpty: Bool = false
     ) throws {
-        let appContext = applicationContainer.mainContext
-        let cloudContext = projectionContainer.mainContext
+        refreshContextsFromStore()
+        let appContext = modelContext
+        let cloudContext = projectionContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudSettingProjection>())
         if onlyIfCloudEmpty, !rows.isEmpty { return }
         let settings = try appContext.fetch(FetchDescriptor<AppSetting>())
@@ -1156,11 +1220,12 @@ final class CloudProjectionCoordinator {
     }
 
     func publishLocalSettingChange(key: String, now: Date = .now) throws {
+        refreshContextsFromStore()
         guard AppSettingScope.isMirrored(key) else { return }
         let canonical = AppSettingIdentity.canonicalKey(key)
-        let appContext = applicationContainer.mainContext
+        let appContext = modelContext
         guard let value = AppSettingIdentity.value(for: canonical, in: appContext) else { return }
-        let cloudContext = projectionContainer.mainContext
+        let cloudContext = projectionContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudSettingProjection>())
         try publishLocalSettingChange(
             key: canonical,
@@ -1176,8 +1241,9 @@ final class CloudProjectionCoordinator {
         now: Date = .now,
         onlyIfCloudEmpty: Bool = false
     ) throws {
-        let appContext = applicationContainer.mainContext
-        let cloudContext = projectionContainer.mainContext
+        refreshContextsFromStore()
+        let appContext = modelContext
+        let cloudContext = projectionContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudBookmarkProjection>())
         if onlyIfCloudEmpty, !rows.isEmpty { return }
         let bookmarks = try appContext.fetch(FetchDescriptor<Bookmark>())
@@ -1197,7 +1263,10 @@ final class CloudProjectionCoordinator {
                 position: bookmark.positionSeconds,
                 createdAt: bookmark.createdAt
             )
-            let row = activeBySemanticKey[key] ?? {
+            let row: CloudBookmarkProjection
+            if let existing = activeBySemanticKey[key] {
+                row = existing
+            } else {
                 let inserted = CloudBookmarkProjection()
                 inserted.bookmarkID = UUID().uuidString.lowercased()
                 inserted.feedURL = FeedURLIdentity.canonical(feedURL)
@@ -1207,8 +1276,8 @@ final class CloudProjectionCoordinator {
                 inserted.sourceDeviceID = deviceID
                 cloudContext.insert(inserted)
                 activeBySemanticKey[key] = inserted
-                return inserted
-            }()
+                row = inserted
+            }
             currentIDs.insert(row.bookmarkID)
             if row.note != bookmark.note || row.modifiedAt == .distantPast {
                 row.note = bookmark.note
@@ -1227,8 +1296,9 @@ final class CloudProjectionCoordinator {
     }
 
     func publishLocalListeningHistoryChanges(now: Date = .now) throws {
-        let appContext = applicationContainer.mainContext
-        let cloudContext = projectionContainer.mainContext
+        refreshContextsFromStore()
+        let appContext = modelContext
+        let cloudContext = projectionContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudListeningSessionProjection>())
         let local = try resolvedLocalListeningSessions(in: appContext)
         if local.repaired, appContext.hasChanges { try appContext.save() }
@@ -1247,7 +1317,10 @@ final class CloudProjectionCoordinator {
                 speed: session.speed,
                 date: session.date
             )
-            let row = activeByKey[key] ?? {
+            let row: CloudListeningSessionProjection
+            if let existing = activeByKey[key] {
+                row = existing
+            } else {
                 let inserted = CloudListeningSessionProjection()
                 inserted.sessionID = UUID().uuidString.lowercased()
                 inserted.feedURL = FeedURLIdentity.canonical(session.feedURL)
@@ -1260,8 +1333,8 @@ final class CloudProjectionCoordinator {
                 cloudContext.insert(inserted)
                 activeByKey[key] = inserted
                 insertedRowsSinceSave += 1
-                return inserted
-            }()
+                row = inserted
+            }
             currentIDs.insert(row.sessionID)
             if insertedRowsSinceSave >= Self.listeningHistoryBackfillSaveBatchSize {
                 try cloudContext.save()
@@ -1283,8 +1356,9 @@ final class CloudProjectionCoordinator {
         now: Date = .now,
         onlyIfCloudEmpty: Bool = false
     ) throws {
-        let appContext = applicationContainer.mainContext
-        let cloudContext = projectionContainer.mainContext
+        refreshContextsFromStore()
+        let appContext = modelContext
+        let cloudContext = projectionContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudFolderProjection>())
         if onlyIfCloudEmpty, !rows.isEmpty { return }
         let folders = try appContext.fetch(FetchDescriptor<PodcastFolder>())
@@ -1301,15 +1375,18 @@ final class CloudProjectionCoordinator {
         var rowByFolderID: [PersistentIdentifier: CloudFolderProjection] = [:]
         for folder in folders.sorted(by: Self.folderOrder) {
             let key = folder.createdAt.timeIntervalSinceReferenceDate.bitPattern
-            let row = activeByCreatedAt[key] ?? {
+            let row: CloudFolderProjection
+            if let existing = activeByCreatedAt[key] {
+                row = existing
+            } else {
                 let inserted = CloudFolderProjection()
                 inserted.folderID = UUID().uuidString.lowercased()
                 inserted.createdAt = folder.createdAt
                 inserted.sourceDeviceID = deviceID
                 cloudContext.insert(inserted)
                 activeByCreatedAt[key] = inserted
-                return inserted
-            }()
+                row = inserted
+            }
             rowByFolderID[folder.persistentModelID] = row
         }
         var currentIDs: Set<String> = []
@@ -1413,8 +1490,9 @@ final class CloudProjectionCoordinator {
         snapshots: [EpisodeUserStateSnapshot],
         now: Date = .now
     ) throws {
+        refreshContextsFromStore()
         guard !snapshots.isEmpty else { return }
-        let cloudContext = projectionContainer.mainContext
+        let cloudContext = projectionContext
         let changedGUIDs = Array(Set(snapshots.map(\.guid)))
         let sourceDeviceID = deviceID
         let rows = try cloudContext.fetch(FetchDescriptor<CloudEpisodeStateProjection>(
@@ -1444,7 +1522,10 @@ final class CloudProjectionCoordinator {
         }
         for key in latestByKey.keys.sorted() {
             guard let snapshot = latestByKey[key] else { continue }
-            let row = ownByKey[key] ?? {
+            let row: CloudEpisodeStateProjection
+            if let existing = ownByKey[key] {
+                row = existing
+            } else {
                 let inserted = CloudEpisodeStateProjection()
                 inserted.feedURL = key.feedURL
                 inserted.episodeGUID = key.guid
@@ -1458,8 +1539,8 @@ final class CloudProjectionCoordinator {
                     ? now : .distantPast
                 cloudContext.insert(inserted)
                 ownByKey[key] = inserted
-                return inserted
-            }()
+                row = inserted
+            }
             if row.positionSeconds != snapshot.positionSeconds {
                 if snapshot.positionSeconds < row.positionSeconds {
                     row.positionResetAt = now
@@ -1487,8 +1568,9 @@ final class CloudProjectionCoordinator {
     /// boundary. The CloudKit upload may be delayed, but a force quit cannot lose
     /// the local projection operation because its SQLite save has completed.
     func publishLocalSubscriptionChanges(now: Date = .now) throws {
-        let appContext = applicationContainer.mainContext
-        let cloudContext = projectionContainer.mainContext
+        refreshContextsFromStore()
+        let appContext = modelContext
+        let cloudContext = projectionContext
         let podcasts = try PodcastIdentityService(context: appContext).scalarPodcasts()
         // Legacy stores can contain duplicate spellings of the same feed URL.
         // Launch repair normally coalesces them, but projection must remain
@@ -1510,14 +1592,25 @@ final class CloudProjectionCoordinator {
         }
 
         for (key, podcast) in localByFeed {
-            let row = cloudByFeed[key] ?? {
+            let row: CloudPodcastProjection
+            if let existing = cloudByFeed[key] {
+                row = existing
+            } else {
                 let inserted = CloudPodcastProjection()
                 inserted.feedURL = key
                 cloudContext.insert(inserted)
                 cloudByFeed[key] = inserted
-                return inserted
-            }()
-            if row.deletedAt != nil || value(podcast) != value(row) {
+                row = inserted
+            }
+            let needsCopy: Bool
+            if row.deletedAt != nil {
+                needsCopy = true
+            } else {
+                let localValue = value(podcast)
+                let projectedValue = value(row)
+                needsCopy = localValue != projectedValue
+            }
+            if needsCopy {
                 copy(podcast, to: row)
                 row.deletedAt = nil
                 row.modifiedAt = now
@@ -1540,8 +1633,9 @@ final class CloudProjectionCoordinator {
     /// repeatedly while a slider is adjusted. Both lookups use stable feed URL
     /// keys, keeping the work independent of library size.
     func publishLocalSubscriptionChange(feedURL: String, now: Date = .now) throws {
-        let appContext = applicationContainer.mainContext
-        let cloudContext = projectionContainer.mainContext
+        refreshContextsFromStore()
+        let appContext = modelContext
+        let cloudContext = projectionContext
         let storedFeedURL = feedURL
         var podcastDescriptor = FetchDescriptor<Podcast>(
             predicate: #Predicate { $0.feedURL == storedFeedURL }
@@ -1574,7 +1668,8 @@ final class CloudProjectionCoordinator {
     /// The projection store remains in place, so a force quit after this save
     /// restarts from tombstones rather than re-importing the deleted library.
     func markAllSubscriptionsDeleted(now: Date = .now) throws {
-        let context = projectionContainer.mainContext
+        refreshContextsFromStore()
+        let context = projectionContext
         let podcastRows = try context.fetch(FetchDescriptor<CloudPodcastProjection>())
         for row in podcastRows where row.deletedAt == nil {
             row.deletedAt = now
@@ -1796,7 +1891,7 @@ final class CloudProjectionCoordinator {
     private func applicationEpisodes(matching keys: Set<EpisodeKey>) -> [EpisodeKey: Episode] {
         guard !keys.isEmpty else { return [:] }
         let keysByFeed = Dictionary(grouping: keys, by: \.feedURL)
-        let context = applicationContainer.mainContext
+        let context = modelContext
         let podcasts = (try? PodcastIdentityService(context: context).scalarPodcasts()) ?? []
         var result: [EpisodeKey: Episode] = [:]
         for podcast in podcasts {
