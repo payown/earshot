@@ -92,6 +92,22 @@ final class EpisodeFilterTests: XCTestCase {
         XCTAssertTrue(filter.shouldKeep(title: "Short news", durationSeconds: 10 * 60))
     }
 
+    func testPreviewEvaluatesDraftWhileTopLevelFilteringIsOff() {
+        let configuration = EpisodeFilterConfiguration(
+            isEnabled: false,
+            mode: .filterMatching,
+            rules: [EpisodeFilterRule(name: "Long", minimumDurationMinutes: 20)]
+        )
+
+        XCTAssertTrue(configuration.shouldKeep(title: "Short segment", durationSeconds: 10 * 60))
+        XCTAssertFalse(configuration.shouldKeepForPreview(
+            title: "Long show", durationSeconds: 30 * 60
+        ))
+        XCTAssertTrue(configuration.shouldKeepForPreview(
+            title: "Short segment", durationSeconds: 10 * 60
+        ))
+    }
+
     func testDisabledRulesDoNotParticipateInMatching() {
         let configuration = EpisodeFilterConfiguration(
             isEnabled: true,
@@ -272,5 +288,138 @@ final class EpisodeFilterTests: XCTestCase {
             ),
             "Filtered, Short segment, duration unavailable."
         )
+    }
+
+    func testExistingApplicationSpeechReportsInboxQueueAndPlayingException() {
+        XCTAssertEqual(
+            EpisodeFilterSpeech.existingApplicationAnnouncement(
+                ExistingEpisodeFilterReport(
+                    evaluated: 5,
+                    filtered: 3,
+                    dismissedFromInbox: 2,
+                    removedFromQueue: 1,
+                    retainedCurrentlyPlaying: 1
+                )
+            ),
+            "Episode filters saved and applied to existing episodes. 2 removed from the inbox. 1 removed from the queue. The currently playing episode stayed in the queue."
+        )
+    }
+
+    func testApplyToExistingDismissesInboxAndDequeuesWithoutChangingPlayedState() async throws {
+        let context = TestStore.freshContext()
+        let feedURL = "https://example.com/existing-filter.xml"
+        let podcast = Podcast(feedURL: feedURL, title: "Existing filter")
+        context.insert(podcast)
+
+        let filteredInbox = Episode(
+            guid: "filtered-inbox", title: "Segment one", audioURL: "https://x/1.mp3"
+        )
+        filteredInbox.podcast = podcast
+        let keptInbox = Episode(
+            guid: "kept-inbox", title: "Full show", audioURL: "https://x/2.mp3"
+        )
+        keptInbox.podcast = podcast
+        let filteredQueued = Episode(
+            guid: "filtered-queued", title: "Segment two", audioURL: "https://x/3.mp3",
+            status: .inQueue, inboxDismissed: true
+        )
+        filteredQueued.podcast = podcast
+        let filteredQueueItem = QueueItem(episode: filteredQueued, position: 0)
+        context.insert(filteredQueueItem)
+        let keptQueued = Episode(
+            guid: "kept-queued", title: "Full show two", audioURL: "https://x/4.mp3",
+            status: .inQueue, inboxDismissed: true
+        )
+        keptQueued.podcast = podcast
+        let keptQueueItem = QueueItem(episode: keptQueued, position: 1)
+        context.insert(keptQueueItem)
+        let filteredPlayed = Episode(
+            guid: "filtered-played", title: "Segment three", audioURL: "https://x/5.mp3",
+            status: .played, positionSeconds: 123, playedAt: .now
+        )
+        filteredPlayed.podcast = podcast
+        for episode in [filteredInbox, keptInbox, filteredQueued, keptQueued, filteredPlayed] {
+            context.insert(episode)
+        }
+        try context.save()
+
+        let configuration = EpisodeFilterConfiguration(
+            isEnabled: true,
+            mode: .filterMatching,
+            rules: [EpisodeFilterRule(name: "Segments", titlePattern: "Segment*")]
+        )
+        let maintenance = await EpisodeFilterMaintenance.makeBackground(
+            modelContainer: TestStore.container
+        )
+        let report = try await maintenance.applyToExistingEpisodes(
+            feedURL: feedURL,
+            configuration: configuration
+        )
+
+        XCTAssertEqual(
+            report,
+            ExistingEpisodeFilterReport(
+                evaluated: 5,
+                filtered: 3,
+                dismissedFromInbox: 2,
+                removedFromQueue: 1,
+                retainedCurrentlyPlaying: 0
+            )
+        )
+        let verification = ModelContext(TestStore.container)
+        let episodes = try verification.fetch(FetchDescriptor<Episode>())
+        let byGUID = Dictionary(uniqueKeysWithValues: episodes.map { ($0.guid, $0) })
+        XCTAssertTrue(try XCTUnwrap(byGUID["filtered-inbox"]).inboxDismissed)
+        XCTAssertFalse(try XCTUnwrap(byGUID["kept-inbox"]).inboxDismissed)
+        XCTAssertNil(try XCTUnwrap(byGUID["filtered-queued"]).queueItem)
+        XCTAssertEqual(try XCTUnwrap(byGUID["filtered-queued"]).status, .newEpisode)
+        XCTAssertNotNil(try XCTUnwrap(byGUID["kept-queued"]).queueItem)
+        XCTAssertEqual(try XCTUnwrap(byGUID["filtered-played"]).status, .played)
+        XCTAssertEqual(try XCTUnwrap(byGUID["filtered-played"]).positionSeconds, 123)
+        let remainingQueue = try verification.fetch(
+            FetchDescriptor<QueueItem>(sortBy: [SortDescriptor(\.position)])
+        )
+        XCTAssertEqual(remainingQueue.map(\.position), [0])
+    }
+
+    func testApplyToExistingRetainsCurrentlyPlayingQueueEpisode() async throws {
+        let context = TestStore.freshContext()
+        let feedURL = "https://example.com/playing-filter.xml"
+        let podcast = Podcast(feedURL: feedURL, title: "Playing filter")
+        let episode = Episode(
+            guid: "playing", title: "Segment playing", audioURL: "https://x/playing.mp3",
+            status: .inQueue, positionSeconds: 42, inboxDismissed: true
+        )
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        context.insert(QueueItem(episode: episode, position: 0))
+        try LocalAppSettingIdentity.setValue(
+            "\(feedURL)|playing",
+            for: SettingsKey.lastPlayingEpisodeID,
+            in: context
+        )
+        try context.save()
+
+        let configuration = EpisodeFilterConfiguration(
+            isEnabled: true,
+            mode: .filterMatching,
+            rules: [EpisodeFilterRule(name: "Segments", titlePattern: "Segment*")]
+        )
+        let maintenance = await EpisodeFilterMaintenance.makeBackground(
+            modelContainer: TestStore.container
+        )
+        let report = try await maintenance.applyToExistingEpisodes(
+            feedURL: feedURL,
+            configuration: configuration
+        )
+
+        XCTAssertEqual(report.retainedCurrentlyPlaying, 1)
+        XCTAssertEqual(report.removedFromQueue, 0)
+        let verification = ModelContext(TestStore.container)
+        let stored = try XCTUnwrap(verification.fetch(FetchDescriptor<Episode>()).first)
+        XCTAssertNotNil(stored.queueItem)
+        XCTAssertEqual(stored.status, .inQueue)
+        XCTAssertEqual(stored.positionSeconds, 42)
     }
 }

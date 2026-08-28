@@ -15,7 +15,10 @@ struct EpisodeFiltersView: View {
     @State private var previewItems: [EpisodeFilterPreviewItem] = []
     @State private var loaded = false
     @State private var showingPartialDurationWarning = false
-    @State private var saveFailure = false
+    @State private var showingExistingEpisodeChoice = false
+    @State private var showingSaveFailure = false
+    @State private var saveFailureMessage = ""
+    @State private var isSaving = false
     @State private var runtimeWarning: String?
 
     private var validationMessage: String? { draft.validationMessage() }
@@ -47,7 +50,14 @@ struct EpisodeFiltersView: View {
             } header: {
                 Text("Behavior").accessibilityAddTraits(.isHeader)
             } footer: {
-                Text("Filtered episodes stay in the podcast library, but do not enter the inbox or queue. Existing episodes do not change.")
+                Text("Filtered episodes stay in the podcast library, but do not enter the inbox or queue. Preview works while filtering is off. Save can also apply the rules to existing episodes.")
+            }
+
+            if isSaving {
+                Section {
+                    ProgressView("Applying filters to existing episodes")
+                        .accessibilityLabel("Applying filters to existing episodes")
+                }
             }
 
             if runtimeWarning != nil {
@@ -125,7 +135,7 @@ struct EpisodeFiltersView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(previewItems) { item in
-                        let kept = draft.shouldKeep(
+                        let kept = draft.shouldKeepForPreview(
                             title: item.title,
                             durationSeconds: item.durationSeconds
                         )
@@ -157,22 +167,42 @@ struct EpisodeFiltersView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { requestSave() }
-                    .disabled(!canSave)
-                    .accessibilityHint(canSave ? "Saves these filters" : "Fix the filter error before saving")
+                    .disabled(!canSave || isSaving)
+                    .accessibilityHint(saveAccessibilityHint)
             }
         }
         .task { loadOnce() }
         .alert("Some episodes have no duration", isPresented: $showingPartialDurationWarning) {
             Button("Cancel", role: .cancel) {}
-            Button("Save Anyway") { persist() }
+            Button("Save Anyway") { chooseSaveScope() }
         } message: {
             Text("Only \(durationReportingCount) of \(previewItems.count) preview episodes report a duration. Episodes without one will not match a duration rule.")
         }
-        .alert("Filters weren't saved", isPresented: $saveFailure) {
+        .confirmationDialog(
+            "Apply filters to existing episodes?",
+            isPresented: $showingExistingEpisodeChoice,
+            titleVisibility: .visible
+        ) {
+            Button("Save and apply to existing episodes") {
+                persist(applyToExisting: true)
+            }
+            Button("Save for new episodes only") {
+                persist(applyToExisting: false)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Applying removes filtered episodes from the inbox and queue while keeping them in the library. The currently playing episode, downloads, playback position, and played state do not change.")
+        }
+        .alert("Filters weren't fully applied", isPresented: $showingSaveFailure) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Try again. Your previous filter settings are unchanged.")
+            Text(saveFailureMessage)
         }
+    }
+
+    private var saveAccessibilityHint: String {
+        if isSaving { return "Applying filters to existing episodes" }
+        return canSave ? "Saves these filters and asks whether to apply them to existing episodes" : "Fix the filter error before saving"
     }
 
     private func ruleSummary(_ rule: EpisodeFilterRule) -> String {
@@ -203,18 +233,27 @@ struct EpisodeFiltersView: View {
     }
 
     private func requestSave() {
-        guard canSave else { return }
+        guard canSave, !isSaving else { return }
         if case .confirmPartialDuration = EpisodeFilterSaveAssessment.assess(
             configuration: draft,
             previewDurations: previewItems.map(\.durationSeconds)
         ) {
             showingPartialDurationWarning = true
         } else {
-            persist()
+            chooseSaveScope()
         }
     }
 
-    private func persist() {
+    private func chooseSaveScope() {
+        if draft.isActiveAtIngest {
+            showingExistingEpisodeChoice = true
+        } else {
+            persist(applyToExisting: false)
+        }
+    }
+
+    private func persist(applyToExisting: Bool) {
+        guard !isSaving else { return }
         let store = AppSettingsStore(context: modelContext)
         do {
             try store.setEpisodeFilterConfiguration(draft, forFeedURL: podcast.feedURL)
@@ -222,12 +261,52 @@ struct EpisodeFiltersView: View {
             AppLog.data.error(
                 "Episode filter save failed: \(error.localizedDescription, privacy: .public)"
             )
-            saveFailure = true
+            saveFailureMessage = "Try again. Your previous filter settings are unchanged."
+            showingSaveFailure = true
             return
         }
         store.clearEpisodeFilterSafetyWarning(forFeedURL: podcast.feedURL)
-        Announcer.announce("Episode filters saved")
-        dismiss()
+        guard applyToExisting else {
+            Announcer.announce("Episode filters saved for new episodes")
+            dismiss()
+            return
+        }
+
+        isSaving = true
+        let configuration = draft
+        let feedURL = podcast.feedURL
+        let podcastID = podcast.persistentModelID
+        let container = modelContext.container
+        Task {
+            do {
+                let maintenance = await EpisodeFilterMaintenance.makeBackground(
+                    modelContainer: container
+                )
+                let report = try await maintenance.applyToExistingEpisodes(
+                    feedURL: feedURL,
+                    configuration: configuration
+                )
+                let descriptor = FetchDescriptor<Episode>(
+                    predicate: #Predicate {
+                        $0.podcast?.persistentModelID == podcastID
+                    }
+                )
+                _ = try? modelContext.fetch(descriptor)
+                NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+                if report.removedFromQueue > 0 {
+                    NotificationCenter.default.post(name: .earshotQueueDidChange, object: nil)
+                }
+                Announcer.announce(EpisodeFilterSpeech.existingApplicationAnnouncement(report))
+                dismiss()
+            } catch {
+                AppLog.data.error(
+                    "Existing episode filter application failed: \(error.localizedDescription, privacy: .public)"
+                )
+                isSaving = false
+                saveFailureMessage = "The filters were saved for new episodes, but existing episodes were not updated. Save again to retry."
+                showingSaveFailure = true
+            }
+        }
     }
 }
 

@@ -113,7 +113,24 @@ struct EpisodeFilterConfiguration: Codable, Equatable, Sendable {
 
     func shouldKeep(title: String, durationSeconds: Int?) -> Bool {
         guard isActiveAtIngest else { return true }
-        let matched = enabledRules.contains { $0.matches(title: title, durationSeconds: durationSeconds) }
+        return shouldKeepUsingRules(title: title, durationSeconds: durationSeconds)
+    }
+
+    /// Preview evaluates a draft before the top-level switch takes effect. This
+    /// is intentionally different from ingest, which must fail open while the
+    /// configuration is disabled. Invalid or empty drafts still fail open.
+    func shouldKeepForPreview(title: String, durationSeconds: Int?) -> Bool {
+        guard version == Self.currentVersion,
+              enabledRules.contains(where: { $0.validationMessage() == nil })
+        else { return true }
+        return shouldKeepUsingRules(title: title, durationSeconds: durationSeconds)
+    }
+
+    private func shouldKeepUsingRules(title: String, durationSeconds: Int?) -> Bool {
+        let matched = enabledRules.contains {
+            $0.validationMessage() == nil
+                && $0.matches(title: title, durationSeconds: durationSeconds)
+        }
         return switch mode {
         case .keepMatching: matched
         case .filterMatching: !matched
@@ -183,6 +200,18 @@ enum EpisodeFilterSpeech {
             parts.append("duration unavailable")
         }
         return parts.joined(separator: ", ") + "."
+    }
+
+    static func existingApplicationAnnouncement(
+        _ report: ExistingEpisodeFilterReport
+    ) -> String {
+        var text = "Episode filters saved and applied to existing episodes. "
+        text += "\(report.dismissedFromInbox) removed from the inbox. "
+        text += "\(report.removedFromQueue) removed from the queue."
+        if report.retainedCurrentlyPlaying > 0 {
+            text += " The currently playing episode stayed in the queue."
+        }
+        return text
     }
 }
 
