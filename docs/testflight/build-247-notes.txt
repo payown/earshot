@@ -1,0 +1,25 @@
+The check-in you can hear and feel
+
+What changed
+
+This refresh work is experimental, and I definitely want your feedback. Earshot now checks podcasts in a rolling order that favors the shows waiting longest, while reusing feed responses when a publisher says nothing has changed. The Inbox and Library show live refresh progress without becoming buttons. VoiceOver can move to that status when you enter either tab, and the status remains available if you flick away.
+
+When a feed fails, Feed Refresh shows which podcast failed and offers the same podcast actions available from the Library, including Unfollow. Earshot also recovers from stale or interrupted refresh state instead of continuing to report work that already ended.
+
+Refresh completion now feels like a quick paired tap. Starting or resuming playback feels more like pressing a physical control, with a firm beginning and a short soft tail. You can turn these cues off with Haptic feedback in Accessibility settings.
+
+What to test
+
+Leave Earshot in the background, return later, and open the Inbox or Library. Listen for useful refresh status, confirm that focus does not trap you there, and check whether newly published episodes arrive sooner and more consistently. Try a manual refresh too, including when feeds have not changed.
+
+If a feed fails, open Feed Refresh and make sure you can identify the podcast, use its actions, and Unfollow it if you choose. The completed or interrupted summary should agree with what actually happened.
+
+Play, pause, and resume from Earshot, the Lock Screen, and your usual headphones. Try the refresh completion cue and the playback press, then turn Haptic feedback off and confirm both become quiet. Please send feedback about refresh speed, misleading status, missing episodes, VoiceOver focus, failed-feed actions, and how either haptic feels.
+
+Kashe used to open the Inbox and wonder whether the morning had been quiet or the app had simply missed it. Waiting without an answer was worse than waiting.
+
+This time the Inbox told her it was checking. She flicked past the message and kept moving. A quick pair of taps met her hand when the work finished. Later, Play landed with a firmer touch and softened away.
+
+She sent Renata a message before she could decide it was too small to mention.
+
+“I can tell what it is doing now,” she wrote. “I am still watching whether it does enough.”
