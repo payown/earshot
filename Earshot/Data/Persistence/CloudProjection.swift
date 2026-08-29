@@ -151,6 +151,11 @@ final class CloudQueueItemProjection {
     var sourceDeviceID: String = ""
     var isQueued: Bool = false
     var position: Int = 0
+    /// Clock for the listener's add/remove decision. Kept separate from
+    /// ``modifiedAt`` so a stale device merely reordering its queue cannot turn
+    /// an older `isQueued = true` contribution into a newer membership decision
+    /// and resurrect an episode another device explicitly removed.
+    var membershipUpdatedAt: Date = Date.distantPast
     var modifiedAt: Date = Date.distantPast
     var deletedAt: Date?
 
@@ -1193,13 +1198,23 @@ actor CloudProjectionCoordinator: ModelActor {
             if let episode = item?.episode {
                 Self.copyEpisodeMetadata(episode, to: row)
             }
-            if row.isQueued != queued || row.position != position || row.deletedAt != nil {
+            let membershipChanged = row.isQueued != queued || row.deletedAt != nil
+            if membershipChanged || row.position != position {
                 row.isQueued = queued
                 row.position = position
                 row.modifiedAt = now
                 row.deletedAt = nil
+                if membershipChanged {
+                    row.membershipUpdatedAt = now
+                }
             } else if row.modifiedAt == .distantPast {
                 row.modifiedAt = now
+            }
+            // Legacy rows predate the independent membership clock. Preserve
+            // their last-writer-wins meaning once, then future order-only edits
+            // leave this clock untouched.
+            if row.membershipUpdatedAt == .distantPast {
+                row.membershipUpdatedAt = row.modifiedAt
             }
         }
         if cloudContext.hasChanges { try cloudContext.save() }
@@ -1786,6 +1801,20 @@ actor CloudProjectionCoordinator: ModelActor {
         return episodeKey(for: lhs) < episodeKey(for: rhs)
     }
 
+    private static func queueMembershipOrder(
+        _ lhs: CloudQueueItemProjection,
+        _ rhs: CloudQueueItemProjection
+    ) -> Bool {
+        let lhsMembershipDate = lhs.membershipUpdatedAt == .distantPast
+            ? lhs.modifiedAt : lhs.membershipUpdatedAt
+        let rhsMembershipDate = rhs.membershipUpdatedAt == .distantPast
+            ? rhs.modifiedAt : rhs.membershipUpdatedAt
+        if lhsMembershipDate != rhsMembershipDate {
+            return lhsMembershipDate > rhsMembershipDate
+        }
+        return queueProjectionOrder(lhs, rhs)
+    }
+
     private static func copyEpisodeMetadata(
         _ episode: Episode,
         to row: CloudQueueItemProjection
@@ -2014,8 +2043,18 @@ actor CloudProjectionCoordinator: ModelActor {
             by: Self.episodeKey
         )
         var winners: [EpisodeKey: CloudQueueItemProjection] = [:]
+        var positionWinners: [EpisodeKey: CloudQueueItemProjection] = [:]
         for (key, contributions) in grouped {
-            winners[key] = contributions.sorted(by: Self.queueProjectionOrder).first
+            // Membership has its own clock. A later position-only edit from a
+            // stale device must not override a newer explicit removal.
+            winners[key] = contributions.sorted(by: Self.queueMembershipOrder).first
+            // Once membership says the episode is queued, ordering remains a
+            // normal last-writer-wins value. Keeping this separate prevents the
+            // independent membership clock from freezing an older position.
+            positionWinners[key] = contributions
+                .filter(\.isQueued)
+                .sorted(by: Self.queueProjectionOrder)
+                .first
         }
         var episodes = applicationEpisodes(matching: Set(winners.keys))
         for key in winners.keys.sorted() where episodes[key] == nil {
@@ -2066,7 +2105,8 @@ actor CloudProjectionCoordinator: ModelActor {
             guard let winner = winners[key], let episode = episodes[key] else { continue }
             if winner.isQueued {
                 if existingByKey[key] == nil {
-                    let item = QueueItem(episode: episode, position: winner.position)
+                    let position = positionWinners[key]?.position ?? winner.position
+                    let item = QueueItem(episode: episode, position: position)
                     appContext.insert(item)
                     existingByKey[key] = item
                     changed = true
@@ -2084,7 +2124,7 @@ actor CloudProjectionCoordinator: ModelActor {
 
         let projected = existingByKey.compactMap { key, item -> (QueueItem, Int, EpisodeKey)? in
             guard let winner = winners[key], winner.isQueued else { return nil }
-            return (item, winner.position, key)
+            return (item, positionWinners[key]?.position ?? winner.position, key)
         }.sorted {
             if $0.1 != $1.1 { return $0.1 < $1.1 }
             return $0.2 < $1.2

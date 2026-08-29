@@ -1362,6 +1362,161 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testQueueReorderOnStaleDeviceCannotResurrectExplicitRemoval() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 0)
+        let episode = try XCTUnwrap(applicationEpisode(in: app))
+        app.mainContext.insert(QueueItem(episode: episode, position: 0))
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+
+        let removal = queueRow(
+            device: "phone", guid: "episode", queued: false, position: 0,
+            membershipUpdatedAt: 200, modifiedAt: 200
+        )
+        let staleReorder = queueRow(
+            device: "mac", guid: "episode", queued: true, position: 7,
+            membershipUpdatedAt: 100, modifiedAt: 300
+        )
+        projection.mainContext.insert(removal)
+        projection.mainContext.insert(staleReorder)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "ipad"
+        )
+
+        try await coordinator.reconcile()
+
+        XCTAssertTrue(
+            try app.mainContext.fetch(FetchDescriptor<QueueItem>()).isEmpty,
+            "a newer order-only edit must not override an explicit remove decision"
+        )
+    }
+
+    func testExplicitQueueReaddWinsAfterRemovalAndStaleReorder() async throws {
+        let app = try makeApplicationContainerWithEpisode(position: 0)
+        let projection = try makeProjectionContainer()
+        projection.mainContext.insert(queueRow(
+            device: "phone", guid: "episode", queued: false, position: 0,
+            membershipUpdatedAt: 200, modifiedAt: 200
+        ))
+        projection.mainContext.insert(queueRow(
+            device: "mac", guid: "episode", queued: true, position: 7,
+            membershipUpdatedAt: 100, modifiedAt: 400
+        ))
+        projection.mainContext.insert(queueRow(
+            device: "ipad", guid: "episode", queued: true, position: 1,
+            membershipUpdatedAt: 300, modifiedAt: 300
+        ))
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "receiver"
+        )
+
+        try await coordinator.reconcile()
+
+        XCTAssertEqual(
+            try app.mainContext.fetch(FetchDescriptor<QueueItem>())
+                .compactMap { $0.episode?.guid },
+            ["episode"]
+        )
+    }
+
+    func testQueuePositionStillUsesNewestOrderEditWhenMembershipClockIsOlder() async throws {
+        let app = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let a = Episode(guid: "a", title: "A", audioURL: "https://example.com/a")
+        let b = Episode(guid: "b", title: "B", audioURL: "https://example.com/b")
+        a.podcast = podcast
+        b.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(a)
+        app.mainContext.insert(b)
+        app.mainContext.insert(QueueItem(episode: b, position: 0))
+        app.mainContext.insert(QueueItem(episode: a, position: 1))
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+
+        projection.mainContext.insert(queueRow(
+            device: "phone", guid: "a", queued: true, position: 2,
+            membershipUpdatedAt: 200, modifiedAt: 200
+        ))
+        projection.mainContext.insert(queueRow(
+            device: "mac", guid: "a", queued: true, position: 0,
+            membershipUpdatedAt: 100, modifiedAt: 300
+        ))
+        projection.mainContext.insert(queueRow(
+            device: "phone", guid: "b", queued: true, position: 1,
+            membershipUpdatedAt: 200, modifiedAt: 200
+        ))
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "ipad"
+        )
+
+        try await coordinator.reconcile()
+
+        XCTAssertEqual(
+            try app.mainContext.fetch(FetchDescriptor<QueueItem>(
+                sortBy: [SortDescriptor(\.position)]
+            )).compactMap { $0.episode?.guid },
+            ["a", "b"]
+        )
+    }
+
+    func testPublishingQueueReorderDoesNotAdvanceMembershipClock() async throws {
+        let app = try makeApplicationContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let a = Episode(guid: "a", title: "A", audioURL: "https://example.com/a")
+        let b = Episode(guid: "b", title: "B", audioURL: "https://example.com/b")
+        a.podcast = podcast
+        b.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(a)
+        app.mainContext.insert(b)
+        let aItem = QueueItem(episode: a, position: 0)
+        let bItem = QueueItem(episode: b, position: 1)
+        app.mainContext.insert(aItem)
+        app.mainContext.insert(bItem)
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        )
+
+        try await coordinator.publishLocalQueueChanges(now: Date(timeIntervalSince1970: 100))
+        aItem.position = 1
+        bItem.position = 0
+        try app.mainContext.save()
+        try await coordinator.publishLocalQueueChanges(now: Date(timeIntervalSince1970: 200))
+
+        var rows = try projection.mainContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
+        let reorderedA = try XCTUnwrap(rows.first { $0.episodeGUID == "a" })
+        XCTAssertEqual(reorderedA.modifiedAt, Date(timeIntervalSince1970: 200))
+        XCTAssertEqual(reorderedA.membershipUpdatedAt, Date(timeIntervalSince1970: 100))
+
+        app.mainContext.delete(aItem)
+        a.status = .newEpisode
+        try app.mainContext.save()
+        try await coordinator.publishLocalQueueChanges(now: Date(timeIntervalSince1970: 300))
+
+        rows = try projection.mainContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
+        let removedA = try XCTUnwrap(rows.first { $0.episodeGUID == "a" })
+        XCTAssertFalse(removedA.isQueued)
+        XCTAssertEqual(removedA.membershipUpdatedAt, Date(timeIntervalSince1970: 300))
+    }
+
     func testUnprojectableQueueItemIsPreserved() async throws {
         let app = try makeApplicationContainer()
         let orphan = Episode(
@@ -2267,6 +2422,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         guid: String,
         queued: Bool,
         position: Int,
+        membershipUpdatedAt: TimeInterval? = nil,
         modifiedAt: TimeInterval
     ) -> CloudQueueItemProjection {
         let row = CloudQueueItemProjection()
@@ -2275,6 +2431,8 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         row.sourceDeviceID = device
         row.isQueued = queued
         row.position = position
+        row.membershipUpdatedAt = membershipUpdatedAt.map(Date.init(timeIntervalSince1970:))
+            ?? .distantPast
         row.modifiedAt = Date(timeIntervalSince1970: modifiedAt)
         return row
     }

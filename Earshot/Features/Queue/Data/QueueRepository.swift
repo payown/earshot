@@ -307,7 +307,8 @@ final class QueueRepository {
     /// "Episodes completed" listening stat) stay untouched, since the user may
     /// not have listened to any of it. Use ``markPlayedAndRemove(_:)`` instead
     /// when the episode genuinely finished playing.
-    func cancelFromQueue(_ episode: Episode) {
+    @discardableResult
+    func cancelFromQueue(_ episode: Episode) -> Bool {
         remove(episode) {
             $0.status = .newEpisode
             $0.inboxDismissed = true
@@ -315,25 +316,42 @@ final class QueueRepository {
             // queue removal means the listener is done with this episode just
             // as surely as marking it played, but it still must not count as a
             // completed listen.
-            DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: context)
+            DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: self.context)
         }
     }
 
     /// Completion-driven removal: marks the episode played atomically.
     /// Intentionally does NOT reset `positionSeconds` — position-zeroing is owned
     /// elsewhere, so a spurious completion can't destroy a saved place.
-    func markPlayedAndRemove(_ episode: Episode) {
+    @discardableResult
+    func markPlayedAndRemove(_ episode: Episode) -> Bool {
         // Also dismiss from the inbox: an episode played to completion should
         // leave the inbox durably, matching the mark-played Quick Action and
         // swipe (#546). `inboxDismissed` stays set even if later marked unplayed.
-        remove(episode) {
+        let queuedEpisode = orderedItems().compactMap(\.episode).first {
+            $0.persistentModelID == episode.persistentModelID
+        }
+        let episodeToMark = queuedEpisode ?? episode
+        let mutate: (Episode) -> Void = {
             $0.isPlayed = true
             $0.inboxDismissed = true
             // Auto-delete the download once played, when the user opted in. In
             // the same save as the played flip so the file and state clear atomically.
-            DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: context)
+            DownloadCleanup.removeDownloadAfterPlayedIfEnabled($0, in: self.context)
         }
-        postEpisodeUserStateChanges([episode], playedChangedExplicitly: true)
+        let saved: Bool
+        if queuedEpisode != nil {
+            saved = remove(episodeToMark, mutate)
+        } else {
+            // Restored playback and jump-to-bookmark intentionally do not queue
+            // the episode. Marking played is still a valid episode mutation; only
+            // queue removal is conditional.
+            mutate(episodeToMark)
+            saved = save(notifyQueueChange: false)
+        }
+        guard saved else { return false }
+        postEpisodeUserStateChanges([episodeToMark], playedChangedExplicitly: true)
+        return true
     }
 
     /// Empties the queue, reverting every episode to `newEpisode` while keeping
@@ -693,13 +711,16 @@ final class QueueRepository {
         return item
     }
 
-    private func remove(_ episode: Episode, _ mutate: (Episode) -> Void) {
-        guard let item = episode.queueItem else { return }
+    @discardableResult
+    private func remove(_ episode: Episode, _ mutate: (Episode) -> Void) -> Bool {
         var items = orderedItems()
+        guard let item = items.first(where: {
+            $0.episode?.persistentModelID == episode.persistentModelID
+        }), let canonicalEpisode = item.episode else { return false }
         items.removeAll { $0.persistentModelID == item.persistentModelID }
         context.delete(item)
-        mutate(episode)
-        compact(items)
+        mutate(canonicalEpisode)
+        return compact(items)
     }
 
     /// Applies a ``QueueLogic`` ordering op (keyed on queue-item ids) and
@@ -754,19 +775,25 @@ final class QueueRepository {
     }
 
     /// Assigns dense positions `0..<N` over `ordered` and saves.
-    private func compact(_ ordered: [QueueItem]) {
+    @discardableResult
+    private func compact(_ ordered: [QueueItem]) -> Bool {
         for (index, item) in ordered.enumerated() where item.position != index {
             item.position = index
         }
-        save()
+        return save()
     }
 
-    private func save() {
+    @discardableResult
+    private func save(notifyQueueChange: Bool = true) -> Bool {
         do {
             try context.save()
-            NotificationCenter.default.post(name: .earshotQueueDidChange, object: nil)
+            if notifyQueueChange {
+                NotificationCenter.default.post(name: .earshotQueueDidChange, object: nil)
+            }
+            return true
         } catch {
             AppLog.player.error("Queue save failed: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 }
