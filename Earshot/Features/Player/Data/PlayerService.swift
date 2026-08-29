@@ -1579,7 +1579,7 @@ final class PlayerService {
     /// current one to the end. Distinct from natural end-of-item completion.
     /// No-op when nothing is loaded. Announces the result.
     func markCurrentPlayedAndAdvance() {
-        guard let finished = currentEpisode, let context else { return }
+        guard let finished = currentEpisode, let context, !currentEpisodeIsTransient else { return }
 
         flushListeningSession()
         let repo = QueueRepository(context: context)
@@ -1588,7 +1588,10 @@ final class PlayerService {
         let nextID = nextAdvanceID(after: finished, in: queued)
         let nextEpisode = queued.first { $0.persistentModelID == nextID }
 
-        repo.markPlayedAndRemove(finished)
+        guard repo.markPlayedAndRemove(finished) else {
+            Announcer.announce("Could not mark as played")
+            return
+        }
         finished.positionSeconds = 0
         saveContext()
         Announcer.announce("Marked as played")
@@ -1641,16 +1644,11 @@ final class PlayerService {
         let nextID = nextAdvanceID(after: episode, in: queued)
         let nextEpisode = queued.first { $0.persistentModelID == nextID }
 
-        // Remove the canonical instance from `queued` (already fetched above),
-        // not the caller's `episode` reference directly: QueueRepository.remove
-        // silently no-ops if `.queueItem` isn't resolved on the instance it's
-        // given, which would leave the episode stuck in the queue while playback
-        // still advances/clears below. `queued` is free here regardless (needed
-        // for nextID above), so this costs nothing extra.
-        let episodeToRemove = queued.first { $0.persistentModelID == episode.persistentModelID } ?? episode
-
         flushListeningSession()
-        repo.cancelFromQueue(episodeToRemove)
+        // The repository resolves the canonical queue item by episode identity.
+        // If persistence fails or the membership disappeared concurrently, keep
+        // playback intact instead of advancing while the row remains queued.
+        guard repo.cancelFromQueue(episode) else { return }
 
         guard let nextEpisode else {
             // Nothing queued after this one: stop cleanly and hide the bar (#730).

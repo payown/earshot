@@ -443,6 +443,53 @@ final class AdvancedPlaybackTests: XCTestCase {
                      "advancing with an empty queue clears the now-playing mirror")
     }
 
+    func test_markCurrentPlayedAndAdvance_restoredNonQueuedEpisodeUpdatesEveryPresentation() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episode = makeEpisode(ctx)
+        player.load(episode)
+        XCTAssertNil(episode.queueItem, "restored playback is deliberately not queued")
+
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertTrue(episode.isPlayed)
+        XCTAssertTrue(episode.inboxDismissed)
+        XCTAssertTrue(EpisodeListFilter.unheard.apply(to: [episode]).isEmpty)
+        XCTAssertEqual(EpisodeAction.markPlayed.label(for: episode), "Mark as unplayed")
+    }
+
+    func test_markCurrentPlayedAndAdvance_queuedEpisodeMarksAndRemovesAtomically() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let episode = makeEpisode(ctx)
+        let queue = QueueRepository(context: ctx)
+        queue.add(episode)
+        player.load(episode)
+
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertTrue(episode.isPlayed)
+        XCTAssertTrue(episode.inboxDismissed)
+        XCTAssertTrue(queue.queue().isEmpty)
+        XCTAssertEqual(EpisodeAction.markPlayed.label(for: episode), "Mark as unplayed")
+    }
+
+    func test_markCurrentPlayedAndAdvance_transientPreviewDoesNotPersistEpisode() throws {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        player.playPreview(
+            guid: "preview", title: "Preview", audioURL: "https://x/preview.mp3", showTitle: "Show"
+        )
+
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Episode>()), 0)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QueueItem>()), 0)
+    }
+
     // MARK: Open full player on play (#562)
 
     /// Acceptance criterion: with the openPlayerOnPlay setting ON (the default),

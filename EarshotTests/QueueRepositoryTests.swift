@@ -329,6 +329,27 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(a.positionSeconds, 42, "position must not be reset here")
     }
 
+    func testMarkPlayedAndRemoveWithoutQueueMembershipStillMarksAndSaves() throws {
+        let ctx = TestStore.freshContext()
+        let p = makePodcast(ctx, "Restored")
+        let episode = makeEpisode(ctx, "restored", podcast: p)
+        try ctx.save()
+        let queueChange = expectation(description: "non-queue played mutation stays off queue channel")
+        queueChange.isInverted = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .earshotQueueDidChange, object: nil, queue: nil
+        ) { _ in queueChange.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        XCTAssertTrue(QueueRepository(context: ctx).markPlayedAndRemove(episode))
+
+        XCTAssertTrue(episode.isPlayed)
+        XCTAssertTrue(episode.inboxDismissed)
+        XCTAssertFalse(ctx.hasChanges)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QueueItem>()), 0)
+        wait(for: [queueChange], timeout: 0.02)
+    }
+
     // MARK: moves
 
     func testMoveToTopAndBottomPersist() {

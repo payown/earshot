@@ -39,7 +39,8 @@ final class MiniPlayerVisibilityTests: XCTestCase {
         let player = PlayerService()
         player.configure(context: ctx)
 
-        player.play(makeEpisode(ctx))
+        let episode = makeEpisode(ctx)
+        player.play(episode)
         XCTAssertNotNil(player.currentTitle, "precondition: bar visible while playing")
         XCTAssertFalse(storedLastPlaying(ctx).isEmpty, "precondition: last-playing episode persisted")
 
@@ -48,6 +49,11 @@ final class MiniPlayerVisibilityTests: XCTestCase {
         XCTAssertNil(player.currentTitle, "mark-played with empty queue hides the mini player")
         XCTAssertNil(player.currentArtist)
         XCTAssertNil(player.nowPlayingEpisodeID)
+        XCTAssertTrue(
+            episode.isPlayed,
+            "manual completion must mark a directly played, non-queued episode"
+        )
+        XCTAssertTrue(episode.inboxDismissed)
         XCTAssertTrue(storedLastPlaying(ctx).isEmpty,
                       "restore key cleared so launch doesn't repopulate the bar")
     }
@@ -79,7 +85,8 @@ final class MiniPlayerVisibilityTests: XCTestCase {
         let player = PlayerService()
         player.configure(context: ctx)
 
-        player.play(makeEpisode(ctx))
+        let episode = makeEpisode(ctx)
+        player.play(episode)
         XCTAssertNotNil(player.currentTitle, "precondition: bar visible while playing")
 
         // Drive natural end-of-track; the completion handler hops onto the main
@@ -99,6 +106,11 @@ final class MiniPlayerVisibilityTests: XCTestCase {
             "natural completion with no next episode emits the full-player dismissal event"
         )
         XCTAssertNil(player.nowPlayingEpisodeID)
+        XCTAssertTrue(
+            episode.isPlayed,
+            "natural completion must mark a directly played, non-queued episode"
+        )
+        XCTAssertTrue(episode.inboxDismissed)
         XCTAssertTrue(storedLastPlaying(ctx).isEmpty,
                       "restore key cleared so launch doesn't repopulate the bar")
     }
