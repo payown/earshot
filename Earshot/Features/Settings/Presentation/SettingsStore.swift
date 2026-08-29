@@ -36,6 +36,7 @@ final class SettingsStore {
     var spokenEpisodeDuration = true { didSet { persist { $0.setBool(spokenEpisodeDuration, for: SettingsKey.spokenEpisodeDuration) } } }
     var spokenEpisodeDescriptionMode: SpokenDescriptionMode = .brief { didSet { persist { $0.setRawValue(spokenEpisodeDescriptionMode.rawValue, for: SettingsKey.spokenEpisodeDescriptionMode) } } }
     var spokenPodcastDescriptionMode: SpokenDescriptionMode = .brief { didSet { persist { $0.setRawValue(spokenPodcastDescriptionMode.rawValue, for: SettingsKey.spokenPodcastDescriptionMode) } } }
+    var hapticFeedbackEnabled: Bool = SettingsDefault.hapticFeedbackEnabled { didSet { persist { $0.setBool(hapticFeedbackEnabled, for: SettingsKey.hapticFeedbackEnabled) } } }
     var transcriptExportMetadata: TranscriptExportMetadata = SettingsDefault.transcriptExportMetadata { didSet { persist { $0.setTranscriptExportMetadata(transcriptExportMetadata) } } }
 
     var episodeSpokenDetails: EpisodeSpokenDetails {
@@ -119,6 +120,10 @@ final class SettingsStore {
         spokenPodcastDescriptionMode = SpokenDescriptionMode(
             rawValue: store.rawValue(SettingsKey.spokenPodcastDescriptionMode) ?? ""
         ) ?? .brief
+        hapticFeedbackEnabled = store.bool(
+            SettingsKey.hapticFeedbackEnabled,
+            default: SettingsDefault.hapticFeedbackEnabled
+        )
         transcriptExportMetadata = store.initializeTranscriptExportMetadataIfNeeded(
             default: wasExistingInstallation ? .speakersAndTimestamps : .speakersOnly
         )

@@ -128,6 +128,7 @@ final class AppRuntime {
     let entitlements = EntitlementStore()
     let importProgress = OPMLImportProgress()
     let opmlImportCoordinator = OPMLImportCoordinator(store: .live())
+    let feedRefreshStatus = FeedRefreshStatusMonitor.shared
     let notificationRouter: NotificationRouter
     let notificationDelegate: NotificationDelegate
 
@@ -136,6 +137,8 @@ final class AppRuntime {
     private(set) var launchProgress: StoreMigrationProgress?
     private(set) var showsLaunchPreparation: Bool
     private(set) var launchFocusRequest: LaunchFocusDestination?
+    private(set) var tabFocusRequest: LaunchFocusDestination?
+    private(set) var tabFocusRevision = 0
     private(set) var launchAttemptCount = 0
     private(set) var recoveryBackup: MigrationBackupDescriptor?
     private(set) var backupRestorePhase: BackupRestorePhase = .idle
@@ -420,6 +423,17 @@ final class AppRuntime {
         return true
     }
 
+    func requestTabFocus(_ destination: LaunchFocusDestination) {
+        tabFocusRequest = destination
+        tabFocusRevision += 1
+    }
+
+    func consumeTabFocus(_ destination: LaunchFocusDestination) -> Bool {
+        guard tabFocusRequest == destination else { return false }
+        tabFocusRequest = nil
+        return true
+    }
+
     var preparationStatusValue: String {
         launchProgress?.statusValue ?? Self.initialPreparationValue
     }
@@ -684,6 +698,7 @@ final class AppRuntime {
         listeningPlaces.releasePersistence()
         tips.releasePersistence()
         entitlements.releasePersistence()
+        feedRefreshStatus.releasePersistence()
         await ArtworkCache.shared.tearDown()
         ArtworkCache.resetShared()
         entitlementContainer = nil

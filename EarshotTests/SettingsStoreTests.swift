@@ -32,6 +32,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(store.wifiOnlyDownloads)
         XCTAssertFalse(store.downloadCompletionNotifications)
         XCTAssertEqual(store.transcriptExportMetadata, .speakersOnly)
+        XCTAssertTrue(store.hapticFeedbackEnabled)
     }
 
     func testFreshInstallDefaultsTranscriptExportsToSpeakersOnly() {
@@ -88,6 +89,20 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertFalse(reloaded.spokenEpisodeDuration)
         XCTAssertEqual(reloaded.spokenEpisodeDescriptionMode, .full)
         XCTAssertEqual(reloaded.spokenPodcastDescriptionMode, .off)
+    }
+
+    func testHapticFeedbackDefaultsOnAndPersistsOff() {
+        let context = TestStore.freshContext()
+        let settings = SettingsStore()
+        settings.configure(context: context)
+        XCTAssertTrue(settings.hapticFeedbackEnabled)
+
+        settings.hapticFeedbackEnabled = false
+
+        let reloaded = SettingsStore()
+        reloaded.configure(context: context)
+        XCTAssertFalse(reloaded.hapticFeedbackEnabled)
+        XCTAssertTrue(AppSettingScope.isLocal(SettingsKey.hapticFeedbackEnabled))
     }
 
     /// Season/episode numbering is OFF by default and round-trips like any other

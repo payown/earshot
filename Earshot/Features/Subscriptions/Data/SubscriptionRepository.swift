@@ -10,9 +10,22 @@ import SwiftData
 /// doubles adopt `@unchecked Sendable`.
 protocol FeedFetching: Sendable {
     func fetch(_ urlString: String) async throws -> ParsedFeed
+    func refresh(_ request: FeedRefreshRequest) async throws -> FeedRefreshFetchResult
 }
 
-enum FeedRefreshTrigger: String, Sendable {
+extension FeedFetching {
+    /// Source-compatible fallback for test doubles and alternate fetchers. A
+    /// fetcher that does not understand HTTP validators still participates in
+    /// refresh correctly; it simply reports a modified representation.
+    func refresh(_ request: FeedRefreshRequest) async throws -> FeedRefreshFetchResult {
+        .modified(
+            try await fetch(request.urlString),
+            validators: nil
+        )
+    }
+}
+
+enum FeedRefreshTrigger: String, Codable, Sendable {
     case manualToolbar
     case manualPullToRefresh
     case coldLaunch
@@ -83,9 +96,18 @@ struct OlderEpisodePageOutcome: Sendable, Equatable {
     let hasMore: Bool
 }
 
+struct FeedRefreshFailure: Codable, Identifiable, Sendable, Equatable {
+    let feedURL: String
+    let podcastTitle: String
+    let reason: String
+
+    var id: String { FeedURLIdentity.canonical(feedURL) }
+}
+
 struct SubscriptionRefreshReport: Sendable {
     enum Completion: Sendable, Equatable {
         case full
+        case completedWithErrors(succeeded: Int, total: Int, failed: Int)
         case partial(succeeded: Int, total: Int)
         case failure
     }
@@ -99,9 +121,15 @@ struct SubscriptionRefreshReport: Sendable {
     let intendedInsertions: Int
     let durableInsertions: Int
     var filterSafetyWarningPodcasts: [String] = []
+    var newEpisodes = 0
+    var unchangedFeeds = 0
+    var failures: [FeedRefreshFailure] = []
 
     var completion: Completion {
         if !cancelled, failed == 0, succeeded == total { return .full }
+        if !cancelled, attempted == total, failed > 0, succeeded > 0 {
+            return .completedWithErrors(succeeded: succeeded, total: total, failed: failed)
+        }
         if succeeded > 0 { return .partial(succeeded: succeeded, total: total) }
         return .failure
     }
@@ -110,6 +138,8 @@ struct SubscriptionRefreshReport: Sendable {
         let completionText = switch completion {
         case .full:
             "Library refreshed"
+        case let .completedWithErrors(_, _, failed):
+            "Library refreshed, \(failed) \(failed == 1 ? "feed" : "feeds") failed"
         case let .partial(succeeded, total):
             "Library partially refreshed, \(succeeded) of \(total) feeds"
         case .failure:
@@ -440,6 +470,12 @@ extension SubscriptionRepository {
     func refreshAllReport(
         trigger: FeedRefreshTrigger = .unspecified,
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
+        onDurableNotifications: @escaping @MainActor @Sendable (
+            [NewEpisodeNotification]
+        ) async -> Void = { _ in },
+        onDurableCheckpoint: @escaping @MainActor @Sendable (
+            FeedRefreshStatusCheckpoint
+        ) -> Void = { _ in },
         onProgress: ((_ completed: Int, _ total: Int) -> Void)? = nil
     ) async -> SubscriptionRefreshReport {
         let walStarted = ContinuousClock.now
@@ -464,54 +500,72 @@ extension SubscriptionRepository {
             isCancelled: isCancelled,
             onProgress: { completed, total in
                 progress?(completed, total)
+            },
+            onCheckpoint: { checkpoint in
+                // Every value in this callback belongs to a successful actor
+                // save. Re-fault only affected podcasts, then start queue and
+                // download side effects while the remaining feeds continue.
+                let affectedIDs = checkpoint
+                    .filter {
+                        $0.outcome.added > 0 || $0.outcome.filteredCount > 0
+                            || !$0.outcome.inboxReentryEpisodeIDs.isEmpty
+                    }
+                    .compactMap {
+                        self.podcast(forFeedURL: $0.feedURL)?.persistentModelID
+                    }
+                self.mergeBackgroundWrites(affectedPodcastIDs: affectedIDs)
+                self.publishInboxReentries(
+                    checkpoint.flatMap { $0.outcome.inboxReentryEpisodeIDs }
+                )
+                if self.autoQueueEnabled,
+                   checkpoint.contains(where: { !$0.outcome.newEpisodeIDs.isEmpty }) {
+                    NotificationCenter.default.post(
+                        name: .earshotQueueDidChange,
+                        object: nil
+                    )
+                }
+                await self.autoDownloadRecent(
+                    episodeIDsPerPodcast: checkpoint.map { $0.outcome.newEpisodeIDs }
+                )
+                await self.downloader?.downloadQueuedIfEnabled()
+                await onDurableNotifications(self.notifications(from: checkpoint))
+                onDurableCheckpoint(
+                    FeedRefreshStatusCheckpoint(
+                        checked: checkpoint.count,
+                        newEpisodes: checkpoint.reduce(0) { $0 + $1.outcome.added },
+                        unchangedFeeds: checkpoint.filter(\.wasNotModified).count
+                    )
+                )
             }
         )
         let results = actorReport.results
 
-        // Pull the background context's writes into the main context so the UI
-        // (and any held `Podcast`/`Episode` objects) reflect the refresh. Only the
-        // podcasts that actually gained episodes need their `.episodes` re-faulted,
-        // and one at a time — never the whole Episode table (#696).
-        let mergeInterval = PerformanceSignposts.signposter.beginInterval(
-            "MainContextMerge",
-            "resultCount=\(results.count)"
-        )
-        let affectedIDs = results
-            .filter {
-                $0.outcome.added > 0 || $0.outcome.filteredCount > 0
-                    || !$0.outcome.inboxReentryEpisodeIDs.isEmpty
-            }
-            .compactMap { self.podcast(forFeedURL: $0.feedURL)?.persistentModelID }
-        mergeBackgroundWrites(affectedPodcastIDs: affectedIDs)
-        publishInboxReentries(results.flatMap { $0.outcome.inboxReentryEpisodeIDs })
-        PerformanceSignposts.signposter.endInterval(
-            "MainContextMerge",
-            mergeInterval,
-            "affectedCount=\(affectedIDs.count)"
-        )
-
-        // See refresh(_:): the background auto-queue path bypasses
-        // QueueRepository, so publish one coalesced notification for the whole
-        // refresh pass. A harmless extra scan is preferable to leaving a new
-        // local queue item outside the CloudKit projection.
-        if autoQueueEnabled, results.contains(where: { !$0.outcome.newEpisodeIDs.isEmpty }) {
-            NotificationCenter.default.post(name: .earshotQueueDidChange, object: nil)
-        }
-
-        // Auto-download the newest `autoDownloadCount` genuinely-new episodes per
-        // podcast (never a backfill pass — `newEpisodeIDs` is empty there). This is
-        // what makes auto-download fire on the whole-library refresh path (pull-to-
-        // refresh, cold-launch throttled refresh, foreground-resume, and the
-        // BGTaskScheduler background refresh), not just on first subscribe (#639).
-        await autoDownloadRecent(episodeIDsPerPodcast: results.map { $0.outcome.newEpisodeIDs })
-        // Auto-download queued episodes surfaced by refresh-time auto-queue (which
-        // enqueues on a background context and posts no .earshotQueueDidChange).
-        // No-op unless the setting is on. One sweep covers the whole queue.
-        await downloader?.downloadQueuedIfEnabled()
-
         // Build notifications from value-type results only — no `@Model` crossed
         // the actor boundary. Only notification-enabled podcasts with genuinely-new
         // episodes (never a backfill pass) earn a notification (#72).
+        let notifications = notifications(from: results)
+        recordMediaTransportSnapshot(trigger: .fullRefresh)
+        return SubscriptionRefreshReport(
+            notifications: notifications,
+            attempted: actorReport.attempted,
+            total: actorReport.total,
+            succeeded: results.count,
+            failed: actorReport.failed,
+            cancelled: actorReport.cancelled,
+            intendedInsertions: actorReport.intendedInsertions,
+            durableInsertions: actorReport.durableInsertions,
+            filterSafetyWarningPodcasts: results.compactMap {
+                $0.outcome.rejectedAllNewCandidates ? $0.podcastTitle : nil
+            },
+            newEpisodes: results.reduce(0) { $0 + $1.outcome.added },
+            unchangedFeeds: results.filter(\.wasNotModified).count,
+            failures: actorReport.failures
+        )
+    }
+
+    private func notifications(
+        from results: [FeedRefreshActor.RefreshProgress]
+    ) -> [NewEpisodeNotification] {
         var notifications: [NewEpisodeNotification] = []
         for result in results {
             guard NewEpisodeNotificationDecision.shouldNotify(
@@ -528,20 +582,7 @@ extension SubscriptionRepository {
                 )
             )
         }
-        recordMediaTransportSnapshot(trigger: .fullRefresh)
-        return SubscriptionRefreshReport(
-            notifications: notifications,
-            attempted: actorReport.attempted,
-            total: actorReport.total,
-            succeeded: results.count,
-            failed: actorReport.failed,
-            cancelled: actorReport.cancelled,
-            intendedInsertions: actorReport.intendedInsertions,
-            durableInsertions: actorReport.durableInsertions,
-            filterSafetyWarningPodcasts: results.compactMap {
-                $0.outcome.rejectedAllNewCandidates ? $0.podcastTitle : nil
-            }
-        )
+        return notifications
     }
 
     /// One feed's outcome from a bulk ``subscribeAll(feedURLs:onProgress:)``, resolved

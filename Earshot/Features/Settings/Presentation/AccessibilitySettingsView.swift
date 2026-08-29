@@ -7,6 +7,15 @@ struct AccessibilitySettingsView: View {
         @Bindable var settings = settings
         Form {
             Section {
+                Toggle("Haptic feedback", isOn: $settings.hapticFeedbackEnabled)
+                    .accessibilityHint(
+                        "Provides tactile feedback when playback starts and a refresh completes"
+                    )
+            } footer: {
+                Text("Provides tactile feedback when playback starts and a refresh completes.")
+            }
+
+            Section {
                 Toggle("Podcast name", isOn: $settings.spokenEpisodePodcastName)
                 Toggle("Published date", isOn: $settings.spokenEpisodePublishedDate)
                 Toggle("Download or streaming status", isOn: $settings.spokenEpisodeDownloadStatus)

@@ -76,11 +76,15 @@ enum BackgroundFeedRefresher {
     /// Submits a `BGAppRefreshTaskRequest` so the OS can wake the app to refresh.
     /// Call when the app moves to the background and after every run so the chain
     /// continues. `earliestBeginDate` is advisory — the OS decides actual timing.
+    @MainActor
     static func scheduleNext(after interval: TimeInterval = FeedRefreshPolicy.defaultWindow) {
         let request = BGAppRefreshTaskRequest(identifier: taskIdentifier)
         request.earliestBeginDate = Date(timeIntervalSinceNow: interval)
         do {
             try BGTaskScheduler.shared.submit(request)
+            if let earliestBeginDate = request.earliestBeginDate {
+                FeedRefreshStatusMonitor.shared.recordScheduled(at: earliestBeginDate)
+            }
             AppLog.networking.info("Scheduled background feed refresh")
         } catch {
             // Submission fails on simulator and when the user has disabled
@@ -138,6 +142,8 @@ enum BackgroundFeedRefresher {
     @MainActor
     static func runUserInitiatedRefresh(
         trigger: FeedRefreshTrigger,
+        total: Int,
+        hapticFeedbackEnabled: Bool = SettingsDefault.hapticFeedbackEnabled,
         operation: @escaping @MainActor () async -> SubscriptionRefreshReport
     ) async -> SubscriptionRefreshReport? {
         guard activeRefreshTask == nil else {
@@ -146,6 +152,7 @@ enum BackgroundFeedRefresher {
         }
 
         let refreshID = UUID()
+        FeedRefreshStatusMonitor.shared.start(trigger: trigger, total: total)
         let task = Task { @MainActor in
             ActiveRefreshResult.userInitiated(await operation())
         }
@@ -153,6 +160,12 @@ enum BackgroundFeedRefresher {
         let result = await task.value
         finish(id: refreshID)
         guard case .userInitiated(let report) = result else { return nil }
+        FeedRefreshStatusMonitor.shared.finish(report)
+        RefreshCompletionHaptics.playIfNeeded(
+            trigger: trigger,
+            succeeded: report.completion == .full,
+            enabled: hapticFeedbackEnabled
+        )
         return report
     }
 
@@ -201,6 +214,7 @@ enum BackgroundFeedRefresher {
             force: force
         ) else {
             AppLog.networking.info("Background feed refresh skipped (within window)")
+            FeedRefreshStatusMonitor.shared.recordSkipped(trigger: trigger)
             return false
         }
 
@@ -208,6 +222,9 @@ enum BackgroundFeedRefresher {
             AppLog.networking.info("Background feed refresh cancelled before start")
             return false
         }
+
+        let podcastCount = (try? context.fetchCount(FetchDescriptor<Podcast>())) ?? 0
+        FeedRefreshStatusMonitor.shared.start(trigger: trigger, total: podcastCount)
 
         let queue = QueueRepository(context: context)
         let downloads = DownloadManager()
@@ -228,27 +245,43 @@ enum BackgroundFeedRefresher {
         // genuinely-new episodes (#72).
         let report = await repo.refreshAllReport(
             trigger: trigger,
-            isCancelled: isCancelled
-        ) { _, _ in }
+            isCancelled: isCancelled,
+            onDurableNotifications: { notifications in
+                guard !notifications.isEmpty else { return }
+                await notifier.deliver(notifications)
+            },
+            onDurableCheckpoint: { checkpoint in
+                FeedRefreshStatusMonitor.shared.checkpoint(checkpoint)
+            }
+        ) { completed, total in
+            FeedRefreshStatusMonitor.shared.progress(checked: completed, total: total)
+        }
+
+        FeedRefreshStatusMonitor.shared.finish(report)
 
         guard !Task.isCancelled, !isCancelled() else {
             AppLog.networking.info("Background feed refresh cancelled after feed work")
             return false
         }
 
-        guard report.completion == .full else {
+        switch report.completion {
+        case .full:
+            settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
+            RefreshCompletionHaptics.playIfNeeded(
+                trigger: trigger,
+                succeeded: true,
+                enabled: settings.bool(
+                    SettingsKey.hapticFeedbackEnabled,
+                    default: SettingsDefault.hapticFeedbackEnabled
+                )
+            )
+        case .completedWithErrors:
+            settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
+        case .partial, .failure:
             AppLog.networking.error(
                 "Background feed refresh incomplete: succeeded=\(report.succeeded) total=\(report.total)"
             )
             return false
-        }
-
-        settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
-
-        // Deliver per-podcast "new episodes" notifications. NotificationService
-        // never throws (logs + swallows), so this can't break task completion.
-        if !report.notifications.isEmpty {
-            await notifier.deliver(report.notifications)
         }
 
         AppLog.networking.info("Background feed refresh complete")

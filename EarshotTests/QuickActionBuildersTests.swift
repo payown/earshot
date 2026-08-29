@@ -853,6 +853,22 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Turn off auto-queue", "Turn on notifications"])
     }
 
+    func testFailedFeedAndLibraryRowsResolveTheSamePodcastActions() {
+        let configured: [PodcastAction] = [
+            .share, .openDetail, .toggleInboxInclude, .toggleInboxExclude,
+            .unsubscribe, .changeDownloadCount,
+        ]
+
+        XCTAssertEqual(
+            visiblePodcastRowActions(configured, inboxOptInOnly: false),
+            [.share, .toggleInboxExclude, .unsubscribe, .changeDownloadCount]
+        )
+        XCTAssertEqual(
+            visiblePodcastRowActions(configured, inboxOptInOnly: true),
+            [.share, .toggleInboxInclude, .unsubscribe, .changeDownloadCount]
+        )
+    }
+
     func testPodcastSettingsEditorActionsPreserveOrderAndInvokeCallbacks() {
         let ctx = TestStore.freshContext()
         let podcast = Podcast(feedURL: "https://x/a.xml", title: "Show")

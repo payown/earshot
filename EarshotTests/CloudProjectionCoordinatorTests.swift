@@ -656,7 +656,9 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             projectionContainer: projection,
             center: center,
             deviceID: "phone",
-            remotePodcastDeletionDelayNanoseconds: 1_000_000
+            // Leave enough separation for reconcile() and its assertions even
+            // on a loaded simulator; one millisecond raced the test process.
+            remotePodcastDeletionDelayNanoseconds: 100_000_000
         )
 
         try await coordinator.reconcile()
@@ -665,7 +667,7 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 1)
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 1)
 
-        try await Task.sleep(nanoseconds: 20_000_000)
+        try await Task.sleep(nanoseconds: 200_000_000)
 
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Podcast>()), 0)
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 0)

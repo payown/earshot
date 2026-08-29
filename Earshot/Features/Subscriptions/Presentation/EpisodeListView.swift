@@ -602,6 +602,11 @@ struct EpisodeListView: View {
                 queue: QueueRepository(context: context),
                 isEntitled: entitlements.isEntitled
             ).refresh(podcast)
+            RefreshCompletionHaptics.playIfNeeded(
+                trigger: .manualPullToRefresh,
+                succeeded: true,
+                enabled: settings.hapticFeedbackEnabled
+            )
             if outcome.rejectedAllNewCandidates {
                 Announcer.announce(
                     "\(podcast.title) refreshed. Episode filters excluded all new episodes. Review this podcast's filters."

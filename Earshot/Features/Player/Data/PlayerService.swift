@@ -372,7 +372,11 @@ final class PlayerService {
     /// Notification actions use this path; automatic queue advance uses `play(_:)`
     /// so consecutive playback never waits on the network.
     func playWithHandoff(_ episode: Episode) {
-        playAfterFetchingHandoff(episode, originEvent: .started(nil))
+        playAfterFetchingHandoff(
+            episode,
+            originEvent: .started(nil),
+            providesStartHaptic: true
+        )
     }
 
     /// Plays `episode` from a user tap on an episode row (the "Play now" default
@@ -396,7 +400,8 @@ final class PlayerService {
         playAfterFetchingHandoff(
             episode,
             originEvent: .started(origin),
-            presentsFullPlayerWhenStarted: delaysPresentationForHTTP
+            presentsFullPlayerWhenStarted: delaysPresentationForHTTP,
+            providesStartHaptic: true
         )
         if !delaysPresentationForHTTP,
            settings?.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
@@ -451,7 +456,8 @@ final class PlayerService {
             episode,
             preparedItem: nil,
             originEvent: .started(nil),
-            startSecondsOverride: startSeconds
+            startSecondsOverride: startSeconds,
+            providesStartHaptic: true
         )
     }
 
@@ -608,7 +614,8 @@ final class PlayerService {
         handoff: PlaybackHandoffSnapshot? = nil,
         resolvedURL: URL? = nil,
         startSecondsOverride: Double? = nil,
-        presentsFullPlayerWhenStarted: Bool = false
+        presentsFullPlayerWhenStarted: Bool = false,
+        providesStartHaptic: Bool = false
     ) {
         if resolvedURL == nil {
             beginMediaResolution()
@@ -642,7 +649,8 @@ final class PlayerService {
                         handoff: handoff,
                         resolvedURL: resolved,
                         startSecondsOverride: startSecondsOverride,
-                        presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted
+                        presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted,
+                        providesStartHaptic: providesStartHaptic
                     )
                 }
                 return
@@ -741,6 +749,14 @@ final class PlayerService {
         isPlaying = true
         intendsToPlay = true
         pausedByInterruption = false
+        if providesStartHaptic {
+            PlaybackStartHaptics.playIfNeeded(
+                enabled: settings?.bool(
+                    SettingsKey.hapticFeedbackEnabled,
+                    default: SettingsDefault.hapticFeedbackEnabled
+                ) ?? SettingsDefault.hapticFeedbackEnabled
+            )
+        }
 
         persistLastPlayingEpisode(episode)
         updateNowPlayingInfo()
@@ -760,7 +776,8 @@ final class PlayerService {
     private func playAfterFetchingHandoff(
         _ episode: Episode,
         originEvent: PlaybackOriginEvent,
-        presentsFullPlayerWhenStarted: Bool = false
+        presentsFullPlayerWhenStarted: Bool = false,
+        providesStartHaptic: Bool = false
     ) {
         guard playbackHandoff.isEnabled,
               let identity = playbackHandoffIdentity(for: episode) else {
@@ -768,7 +785,8 @@ final class PlayerService {
                 episode,
                 preparedItem: nil,
                 originEvent: originEvent,
-                presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted
+                presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted,
+                providesStartHaptic: providesStartHaptic
             )
             return
         }
@@ -788,7 +806,8 @@ final class PlayerService {
                 preparedItem: nil,
                 originEvent: originEvent,
                 handoff: fetched,
-                presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted
+                presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted,
+                providesStartHaptic: providesStartHaptic
             )
         }
     }
@@ -870,6 +889,10 @@ final class PlayerService {
     }
 
     func resume() {
+        resume(providesStartHaptic: true)
+    }
+
+    private func resume(providesStartHaptic: Bool) {
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         guard let episode = currentEpisode else { return }
         if !currentMediaResolutionComplete,
@@ -884,14 +907,14 @@ final class PlayerService {
             ) { [weak self, weak episode] resolvedURL in
                 guard let self, let episode, self.currentEpisode === episode else { return }
                 self.installResolvedURLForLoadedEpisode(resolvedURL)
-                self.resume()
+                self.resume(providesStartHaptic: providesStartHaptic)
             }
             return
         }
         guard playbackHandoff.isEnabled,
               !currentEpisodeIsTransient,
               let identity = playbackHandoffIdentity(for: episode) else {
-            resumeImmediately()
+            resumeImmediately(providesStartHaptic: providesStartHaptic)
             return
         }
         beginHandoffOperation()
@@ -907,11 +930,11 @@ final class PlayerService {
                   let episode = currentEpisode else { return }
             if let fetched { applyFetchedHandoff(fetched, to: episode) }
             playbackHandoffTask = nil
-            resumeImmediately()
+            resumeImmediately(providesStartHaptic: providesStartHaptic)
         }
     }
 
-    private func resumeImmediately() {
+    private func resumeImmediately(providesStartHaptic: Bool) {
         guard currentEpisode != nil else { return }
         // Resuming during a sleep-timer fade supersedes it (P1-4).
         cancelFadeIfNeeded()
@@ -921,6 +944,14 @@ final class PlayerService {
         isPlaying = true
         intendsToPlay = true
         pausedByInterruption = false
+        if providesStartHaptic {
+            PlaybackStartHaptics.playIfNeeded(
+                enabled: settings?.bool(
+                    SettingsKey.hapticFeedbackEnabled,
+                    default: SettingsDefault.hapticFeedbackEnabled
+                ) ?? SettingsDefault.hapticFeedbackEnabled
+            )
+        }
         updateNowPlayingInfo()
     }
 
@@ -2783,7 +2814,7 @@ final class PlayerService {
             guard let optionsValue else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
             if options.contains(.shouldResume), pausedByInterruption {
-                resume()
+                resume(providesStartHaptic: false)
             }
         @unknown default:
             break

@@ -22,6 +22,12 @@ struct RetryPolicy: Sendable {
     /// The shipping policy: 3 attempts with 1s then 2s backoff.
     static let standard = RetryPolicy(maxAttempts: 3, backoff: [1, 2])
 
+    /// One attempt with no backoff. `BGAppRefreshTask` has a short,
+    /// system-controlled execution window, so whole-library background refresh
+    /// uses that window to check more distinct feeds instead of sleeping and
+    /// retrying one publisher. Foreground and manual refresh retain `standard`.
+    static let singleAttempt = RetryPolicy(maxAttempts: 1, backoff: [])
+
     /// A policy that retries the same number of times but never sleeps. Used by
     /// tests so retry behaviour is exercised without real delays.
     static let immediate = RetryPolicy(maxAttempts: 3, backoff: [0, 0])

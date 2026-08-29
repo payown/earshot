@@ -1,9 +1,195 @@
+import CoreHaptics
 import UIKit
 
 enum AnnouncementCompletionResult: Equatable {
     case completed
     case interrupted
     case timedOut
+}
+
+enum RefreshCompletionHapticStyle: Equatable {
+    case light
+}
+
+struct RefreshCompletionHapticPlan: Equatable {
+    let style: RefreshCompletionHapticStyle
+    let impactCount: Int
+    let spacingMilliseconds: Int64
+}
+
+/// A brief, nonverbal completion cue that never changes VoiceOver focus.
+/// Background wakes are deliberately silent: a vibration without an active app
+/// has no useful context and iOS may suppress it anyway.
+@MainActor
+enum RefreshCompletionHaptics {
+    static func plan(
+        trigger: FeedRefreshTrigger,
+        succeeded: Bool,
+        applicationIsActive: Bool,
+        enabled: Bool
+    ) -> RefreshCompletionHapticPlan? {
+        guard enabled, succeeded, applicationIsActive else { return nil }
+        switch trigger {
+        case .manualToolbar, .manualPullToRefresh, .coldLaunch, .foreground:
+            return RefreshCompletionHapticPlan(
+                style: .light,
+                impactCount: 2,
+                spacingMilliseconds: 120
+            )
+        case .backgroundTask, .unspecified:
+            return nil
+        }
+    }
+
+    static func playIfNeeded(
+        trigger: FeedRefreshTrigger,
+        succeeded: Bool,
+        enabled: Bool
+    ) {
+        guard let plan = plan(
+            trigger: trigger,
+            succeeded: succeeded,
+            applicationIsActive: UIApplication.shared.applicationState == .active,
+            enabled: enabled
+        ) else { return }
+
+        let feedbackStyle: UIImpactFeedbackGenerator.FeedbackStyle = switch plan.style {
+        case .light: .light
+        }
+        let generator = UIImpactFeedbackGenerator(style: feedbackStyle)
+        generator.prepare()
+        generator.impactOccurred()
+        guard plan.impactCount > 1 else { return }
+
+        Task { @MainActor in
+            for _ in 1..<plan.impactCount {
+                do {
+                    try await Task.sleep(for: .milliseconds(plan.spacingMilliseconds))
+                } catch {
+                    return
+                }
+                guard UIApplication.shared.applicationState == .active else { return }
+                generator.prepare()
+                generator.impactOccurred()
+            }
+        }
+    }
+}
+
+enum PlaybackStartHapticMode: Equatable {
+    case customMechanicalPress
+    case softImpactFallback
+}
+
+struct PlaybackStartHapticPlan: Equatable {
+    let mode: PlaybackStartHapticMode
+    let totalDurationMilliseconds: Int
+    let pressIntensity: Float
+    let pressSharpness: Float
+    let tailStartMilliseconds: Int
+    let tailDurationMilliseconds: Int
+    let tailIntensity: Float
+    let tailSharpness: Float
+    let tailDecay: Float
+}
+
+/// A single rounded pulse for deliberate Play and Resume actions. Automatic
+/// queue advance and recovery paths never call this type, preserving the cue's
+/// meaning as confirmation of the listener's action.
+@MainActor
+enum PlaybackStartHaptics {
+    private static var engine: CHHapticEngine?
+
+    static func plan(
+        enabled: Bool,
+        applicationIsActive: Bool,
+        supportsCustomHaptics: Bool
+    ) -> PlaybackStartHapticPlan? {
+        guard enabled, applicationIsActive else { return nil }
+        return PlaybackStartHapticPlan(
+            mode: supportsCustomHaptics ? .customMechanicalPress : .softImpactFallback,
+            totalDurationMilliseconds: 185,
+            pressIntensity: 0.85,
+            pressSharpness: 0.6,
+            tailStartMilliseconds: 12,
+            tailDurationMilliseconds: 173,
+            tailIntensity: 0.34,
+            tailSharpness: 0.06,
+            tailDecay: 0.6
+        )
+    }
+
+    static func playIfNeeded(enabled: Bool) {
+        let supportsCustomHaptics = CHHapticEngine.capabilitiesForHardware().supportsHaptics
+        guard let plan = plan(
+            enabled: enabled,
+            applicationIsActive: UIApplication.shared.applicationState == .active,
+            supportsCustomHaptics: supportsCustomHaptics
+        ) else { return }
+
+        guard plan.mode == .customMechanicalPress else {
+            playFallback()
+            return
+        }
+
+        do {
+            let hapticEngine: CHHapticEngine
+            if let engine {
+                hapticEngine = engine
+            } else {
+                let created = try CHHapticEngine()
+                created.playsHapticsOnly = true
+                engine = created
+                hapticEngine = created
+            }
+            try hapticEngine.start()
+            let pressParameters = [
+                CHHapticEventParameter(
+                    parameterID: .hapticIntensity,
+                    value: plan.pressIntensity
+                ),
+                CHHapticEventParameter(
+                    parameterID: .hapticSharpness,
+                    value: plan.pressSharpness
+                ),
+            ]
+            let press = CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: pressParameters,
+                relativeTime: 0
+            )
+            let tailParameters = [
+                CHHapticEventParameter(
+                    parameterID: .hapticIntensity,
+                    value: plan.tailIntensity
+                ),
+                CHHapticEventParameter(
+                    parameterID: .hapticSharpness,
+                    value: plan.tailSharpness
+                ),
+                CHHapticEventParameter(parameterID: .decayTime, value: plan.tailDecay),
+                CHHapticEventParameter(parameterID: .sustained, value: 0),
+            ]
+            let tail = CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: tailParameters,
+                relativeTime: Double(plan.tailStartMilliseconds) / 1_000,
+                duration: Double(plan.tailDurationMilliseconds) / 1_000
+            )
+            let pattern = try CHHapticPattern(events: [press, tail], parameters: [])
+            let player = try hapticEngine.makePlayer(with: pattern)
+            try player.start(atTime: CHHapticTimeImmediate)
+        } catch {
+            engine = nil
+            playFallback()
+        }
+    }
+
+    private static func playFallback() {
+        let generator = UIImpactFeedbackGenerator(style: .soft)
+        generator.prepare()
+        generator.impactOccurred(intensity: 0.7)
+    }
 }
 
 /// Posts VoiceOver announcements for important state changes the user must know

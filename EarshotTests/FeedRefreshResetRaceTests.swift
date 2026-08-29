@@ -53,8 +53,52 @@ private actor LaunchStartSignal {
     }
 }
 
+private actor OneFailedRefreshFeed: FeedFetching {
+    let feed: ParsedFeed
+
+    init(feed: ParsedFeed) { self.feed = feed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        if urlString.contains("failed") { throw URLError(.cannotConnectToHost) }
+        return feed
+    }
+}
+
 @MainActor
 final class FeedRefreshResetRaceTests: XCTestCase {
+    func testCompletedPassWithOneFeedErrorStillStampsThrottle() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        container.mainContext.insert(Podcast(
+            feedURL: "https://example.com/good.xml", title: "Good"
+        ))
+        container.mainContext.insert(Podcast(
+            feedURL: "https://example.com/failed.xml", title: "Failed"
+        ))
+        try container.mainContext.save()
+        let parsed = ParsedFeed(
+            title: "Example", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: []
+        )
+
+        let didComplete = await BackgroundFeedRefresher.runRefresh(
+            container: container,
+            trigger: .backgroundTask,
+            force: true,
+            notifier: NotificationService(),
+            feed: OneFailedRefreshFeed(feed: parsed)
+        )
+
+        XCTAssertTrue(didComplete)
+        XCTAssertNotNil(AppSettingsStore(context: container.mainContext).date(
+            SettingsKey.lastFeedRefresh
+        ))
+        XCTAssertEqual(FeedRefreshStatusMonitor.shared.snapshot.state, .completedWithErrors)
+        XCTAssertEqual(
+            FeedRefreshStatusMonitor.shared.snapshot.failureDetails.map(\.podcastTitle),
+            ["Failed"]
+        )
+    }
+
     func testManualRefreshCannotOverlapAutomaticRefresh() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         container.mainContext.insert(
@@ -77,7 +121,8 @@ final class FeedRefreshResetRaceTests: XCTestCase {
 
         var manualOperationRan = false
         let manualReport = await BackgroundFeedRefresher.runUserInitiatedRefresh(
-            trigger: .manualToolbar
+            trigger: .manualToolbar,
+            total: 1
         ) {
             manualOperationRan = true
             return SubscriptionRefreshReport(
@@ -92,6 +137,92 @@ final class FeedRefreshResetRaceTests: XCTestCase {
         await BackgroundFeedRefresher.cancelAndWait()
         _ = await automatic.value
         XCTAssertFalse(BackgroundFeedRefresher.isRefreshInProgress)
+    }
+
+    func testThrottledForegroundWakePreservesCompletedStatus() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        container.mainContext.insert(
+            Podcast(feedURL: "https://example.com/feed.xml", title: "Example")
+        )
+        let settings = AppSettingsStore(context: container.mainContext)
+        settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
+        try container.mainContext.save()
+        let monitor = FeedRefreshStatusMonitor.shared
+        monitor.configure(context: TestStore.freshContext())
+        defer { monitor.releasePersistence() }
+        monitor.start(trigger: .backgroundTask, total: 1)
+        monitor.finish(SubscriptionRefreshReport(
+            notifications: [], attempted: 1, total: 1, succeeded: 1,
+            failed: 0, cancelled: false, intendedInsertions: 0,
+            durableInsertions: 0
+        ))
+
+        let didRun = await BackgroundFeedRefresher.runRefresh(
+            container: container,
+            trigger: .foreground
+        )
+
+        XCTAssertFalse(didRun)
+        XCTAssertEqual(monitor.snapshot.state, .completed)
+        XCTAssertEqual(monitor.snapshot.checked, 1)
+        XCTAssertEqual(monitor.snapshot.total, 1)
+        XCTAssertEqual(monitor.snapshot.lastSkippedTrigger, .foreground)
+    }
+
+    func testCancellationBeforeRefreshStartPreservesCompletedStatus() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        container.mainContext.insert(
+            Podcast(feedURL: "https://example.com/feed.xml", title: "Example")
+        )
+        try container.mainContext.save()
+        let monitor = FeedRefreshStatusMonitor.shared
+        monitor.configure(context: TestStore.freshContext())
+        defer { monitor.releasePersistence() }
+        monitor.start(trigger: .backgroundTask, total: 1)
+        monitor.finish(SubscriptionRefreshReport(
+            notifications: [], attempted: 1, total: 1, succeeded: 1,
+            failed: 0, cancelled: false, intendedInsertions: 0,
+            durableInsertions: 0
+        ))
+
+        let didRun = await BackgroundFeedRefresher.runRefresh(
+            container: container,
+            trigger: .foreground,
+            force: true,
+            isCancelled: { true }
+        )
+
+        XCTAssertFalse(didRun)
+        XCTAssertEqual(monitor.snapshot.state, .completed)
+        XCTAssertEqual(monitor.snapshot.checked, 1)
+        XCTAssertEqual(monitor.snapshot.total, 1)
+    }
+
+    func testManualRefreshPublishesKnownTotalBeforeOperationAndFinishes() async {
+        let monitor = FeedRefreshStatusMonitor.shared
+        monitor.configure(context: TestStore.freshContext())
+        defer { monitor.releasePersistence() }
+        var observedRunningSnapshot: FeedRefreshStatusSnapshot?
+
+        let report = await BackgroundFeedRefresher.runUserInitiatedRefresh(
+            trigger: .manualPullToRefresh,
+            total: 64
+        ) {
+            observedRunningSnapshot = monitor.snapshot
+            return SubscriptionRefreshReport(
+                notifications: [], attempted: 64, total: 64, succeeded: 64,
+                failed: 0, cancelled: false, intendedInsertions: 0,
+                durableInsertions: 0
+            )
+        }
+
+        XCTAssertNotNil(report)
+        XCTAssertEqual(observedRunningSnapshot?.state, .running)
+        XCTAssertEqual(observedRunningSnapshot?.checked, 0)
+        XCTAssertEqual(observedRunningSnapshot?.total, 64)
+        XCTAssertEqual(monitor.snapshot.state, .completed)
+        XCTAssertEqual(monitor.snapshot.checked, 64)
+        XCTAssertEqual(monitor.snapshot.total, 64)
     }
 
     func testSceneBackgroundCancellationStopsInFlightForegroundRefresh() async throws {

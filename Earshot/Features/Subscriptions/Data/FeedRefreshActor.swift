@@ -63,44 +63,143 @@ actor FeedRefreshActor {
     private struct FetchCandidate: Sendable {
         let index: Int
         let url: String
+        let validators: FeedHTTPValidators?
     }
 
     private struct FetchedFeed: Sendable {
         let index: Int
         let url: String
-        let parsed: ParsedFeed?
+        let result: FeedRefreshFetchResult?
         let errorDescription: String?
+    }
+
+    /// A single-consumer, back-pressured bridge between cooperative network
+    /// children and this actor's serial SwiftData apply loop. `AsyncStream`
+    /// buffering can drop values or retain many large parsed feeds; this channel
+    /// holds at most one completed result and suspends the producer until the
+    /// actor consumes it.
+    private actor FetchResultChannel {
+        private var waitingReceiver: CheckedContinuation<FetchedFeed?, Never>?
+        private var waitingSender: (FetchedFeed, CheckedContinuation<Void, Never>)?
+        private var deliveredSender: CheckedContinuation<Void, Never>?
+        private var isFinished = false
+
+        func send(_ value: FetchedFeed) async {
+            guard !isFinished else { return }
+            await withCheckedContinuation { continuation in
+                if let receiver = waitingReceiver {
+                    waitingReceiver = nil
+                    deliveredSender = continuation
+                    receiver.resume(returning: value)
+                } else {
+                    waitingSender = (value, continuation)
+                }
+            }
+        }
+
+        func next() async -> FetchedFeed? {
+            // Calling next means the consumer has completely applied the prior
+            // value. Only now may the producer replenish that network slot.
+            deliveredSender?.resume()
+            deliveredSender = nil
+            if let sender = waitingSender {
+                waitingSender = nil
+                deliveredSender = sender.1
+                return sender.0
+            }
+            guard !isFinished else { return nil }
+            return await withCheckedContinuation { continuation in
+                waitingReceiver = continuation
+            }
+        }
+
+        func finish() {
+            guard !isFinished else { return }
+            isFinished = true
+            waitingReceiver?.resume(returning: nil)
+            waitingReceiver = nil
+            deliveredSender?.resume()
+            deliveredSender = nil
+            waitingSender?.1.resume()
+            waitingSender = nil
+        }
+    }
+
+    private struct FetchPipeline: Sendable {
+        let channel: FetchResultChannel
+        let producer: Task<Void, Never>
     }
 
     /// Run only the network fan-out on the cooperative executor. Keeping the task
     /// group out of the custom SwiftData model executor avoids Release builds
     /// discarding completed child results while all model mutation stays isolated.
-    private nonisolated static func fetchBatch(
-        _ candidates: [FetchCandidate], feed: FeedFetching
-    ) async -> [FetchedFeed] {
-        await withTaskGroup(of: FetchedFeed.self, returning: [FetchedFeed].self) { group in
-            for candidate in candidates {
-                group.addTask {
-                    do {
-                        return FetchedFeed(
-                            index: candidate.index,
-                            url: candidate.url,
-                            parsed: try await feed.fetch(candidate.url),
-                            errorDescription: nil
-                        )
-                    } catch {
-                        return FetchedFeed(
-                            index: candidate.index,
-                            url: candidate.url,
-                            parsed: nil,
-                            errorDescription: error.localizedDescription
-                        )
+    private nonisolated static func fetchPipeline(
+        _ candidates: [FetchCandidate],
+        trigger: FeedRefreshTrigger,
+        feed: FeedFetching,
+        isCancelled: @escaping @Sendable () -> Bool
+    ) -> FetchPipeline {
+        let channel = FetchResultChannel()
+        let producer = Task { @concurrent in
+                await withTaskGroup(of: FetchedFeed.self) { group in
+                    var nextIndex = 0
+
+                    func addNext() {
+                        guard nextIndex < candidates.count,
+                              !Task.isCancelled,
+                              !isCancelled() else { return }
+                        let candidate = candidates[nextIndex]
+                        nextIndex += 1
+                        group.addTask {
+                            do {
+                                return FetchedFeed(
+                                    index: candidate.index,
+                                    url: candidate.url,
+                                    result: try await feed.refresh(FeedRefreshRequest(
+                                        urlString: candidate.url,
+                                        validators: candidate.validators,
+                                        trigger: trigger
+                                    )),
+                                    errorDescription: nil
+                                )
+                            } catch {
+                                return FetchedFeed(
+                                    index: candidate.index,
+                                    url: candidate.url,
+                                    result: nil,
+                                    errorDescription: error.localizedDescription
+                                )
+                            }
+                        }
+                    }
+
+                    // Fill the bounded window immediately. Every schedule attempt
+                    // still checks both cancellation sources, and cancellation of
+                    // the retained producer cancels every task-group child. Waiting
+                    // for one feed to finish before opening the window made a slow
+                    // first feed stall the entire library for no safety benefit.
+                    for _ in 0..<refreshFetchConcurrency { addNext() }
+                    while let result = await group.next() {
+                        await channel.send(result)
+                        addNext()
                     }
                 }
-            }
-            var results: [FetchedFeed] = []
-            for await result in group { results.append(result) }
-            return results
+                await channel.finish()
+        }
+        return FetchPipeline(channel: channel, producer: producer)
+    }
+
+    /// `Task` cancellation does not automatically propagate into the detached
+    /// network producer retained by `FetchPipeline`. Wake the channel consumer
+    /// and cancel every task-group child when the refresh owner is cancelled.
+    private nonisolated static func nextResult(
+        from pipeline: FetchPipeline
+    ) async -> FetchedFeed? {
+        await withTaskCancellationHandler {
+            await pipeline.channel.next()
+        } onCancel: {
+            pipeline.producer.cancel()
+            Task { await pipeline.channel.finish() }
         }
     }
     /// Bulk subscription outcomes retain their newly inserted Episode objects
@@ -141,10 +240,12 @@ actor FeedRefreshActor {
         let podcastTitle: String
         let notificationEnabled: Bool
         var outcome: RefreshOutcome
+        var wasNotModified = false
     }
 
     struct RefreshRun: Sendable {
         let results: [RefreshProgress]
+        let failures: [FeedRefreshFailure]
         let attempted: Int
         let total: Int
         let failed: Int
@@ -194,7 +295,7 @@ actor FeedRefreshActor {
         autoQueueEnabled: Bool,
         trigger: FeedRefreshTrigger = .unspecified,
         isEntitled: Bool? = nil,
-        isCancelled: @Sendable () -> Bool,
+        isCancelled: @escaping @Sendable () -> Bool,
         onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async -> [RefreshProgress] {
         await refreshAllReport(
@@ -212,8 +313,9 @@ actor FeedRefreshActor {
         autoQueueEnabled: Bool,
         trigger: FeedRefreshTrigger = .unspecified,
         isEntitled: Bool? = nil,
-        isCancelled: @Sendable () -> Bool,
+        isCancelled: @escaping @Sendable () -> Bool,
         onProgress: @MainActor @Sendable (_ completed: Int, _ total: Int) -> Void,
+        onCheckpoint: @MainActor @Sendable ([RefreshProgress]) async -> Void = { _ in },
         onInboxChange: @MainActor @Sendable () -> Void = {
             NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
         }
@@ -254,17 +356,32 @@ actor FeedRefreshActor {
         )
         var resultByInputIndex: [Int: RefreshProgress] = [:]
         var pendingByInputIndex: [Int: ApplyOutcome] = [:]
+        var pendingUnchangedByInputIndex: [Int: RefreshProgress] = [:]
         var completed = 0
         var failed = 0
         var intendedInsertions = 0
         var durableInsertions = 0
         var batchIndex = 0
         var sinceLastSave = 0
-        var nextIndex = 0
         var postedIncrementalInboxChange = false
+        var failuresByInputIndex: [Int: FeedRefreshFailure] = [:]
 
-        func flushPending() -> Bool {
-            guard !pendingByInputIndex.isEmpty else { return false }
+        func recordFailure(index: Int, feedURL: String, title: String, reason: String) {
+            failuresByInputIndex[index] = FeedRefreshFailure(
+                feedURL: feedURL,
+                podcastTitle: title,
+                reason: reason
+            )
+        }
+
+        func flushPending() -> (madeNewContentDurable: Bool, results: [RefreshProgress]) {
+            guard !pendingByInputIndex.isEmpty || !pendingUnchangedByInputIndex.isEmpty else {
+                return (false, [])
+            }
+            let pendingIndexes = Set(
+                pendingByInputIndex.keys.map { $0 }
+                    + pendingUnchangedByInputIndex.keys.map { $0 }
+            )
             batchIndex += 1
             let batchIntended = pendingByInputIndex.values.reduce(0) {
                 $0 + $1.insertedCount
@@ -274,7 +391,7 @@ actor FeedRefreshActor {
             if saveIfNeededOrLog(
                 correlationID: correlationID,
                 batchIndex: batchIndex,
-                feedCount: pendingByInputIndex.count,
+                feedCount: pendingByInputIndex.count + pendingUnchangedByInputIndex.count,
                 intendedInsertions: batchIntended
             ) {
                 durableInsertions += batchIntended
@@ -284,15 +401,41 @@ actor FeedRefreshActor {
                     progress.outcome = applyOutcome.result()
                     resultByInputIndex[index] = progress
                 }
+                for (index, progress) in pendingUnchangedByInputIndex {
+                    resultByInputIndex[index] = progress
+                }
             } else {
-                failed += pendingByInputIndex.count
+                failed += pendingByInputIndex.count + pendingUnchangedByInputIndex.count
                 for index in pendingByInputIndex.keys {
+                    if let progress = resultByInputIndex[index] {
+                        recordFailure(
+                            index: index,
+                            feedURL: progress.feedURL,
+                            title: progress.podcastTitle,
+                            reason: "Could not save refresh changes."
+                        )
+                    }
+                    resultByInputIndex.removeValue(forKey: index)
+                }
+                for index in pendingUnchangedByInputIndex.keys {
+                    if let progress = resultByInputIndex[index] {
+                        recordFailure(
+                            index: index,
+                            feedURL: progress.feedURL,
+                            title: progress.podcastTitle,
+                            reason: "Could not save refresh changes."
+                        )
+                    }
                     resultByInputIndex.removeValue(forKey: index)
                 }
             }
             pendingByInputIndex.removeAll()
+            pendingUnchangedByInputIndex.removeAll()
             sinceLastSave = 0
-            return madeNewContentDurable
+            let checkpointResults = pendingIndexes.sorted().compactMap {
+                resultByInputIndex[$0]
+            }
+            return (madeNewContentDurable, checkpointResults)
         }
 
         let cancelledAtFirstSchedule = isCancelled()
@@ -303,17 +446,24 @@ actor FeedRefreshActor {
             "refresh=\(correlationID, privacy: .public) firstFetch=\(firstScheduleReason, privacy: .public) taskCancelled=\(cancelledAtFirstSchedule, privacy: .public) eligibleFeeds=\(eligibleFeedCount) total=\(total) isEntitled=\(entitlementValue, privacy: .public)"
         )
 
-        refreshLoop: while !cancelledAtFirstSchedule, nextIndex < eligibleFeedCount {
-            // Preserve the prompt-cancellation contract: start one request, then
-            // use the steady-state three-wide network window for later batches.
-            let fetchCount = nextIndex == 0 ? 1 : Self.refreshFetchConcurrency
-            let endIndex = min(nextIndex + fetchCount, eligibleFeedCount)
-            let candidates = (nextIndex..<endIndex).map {
-                FetchCandidate(index: $0, url: podcasts[$0].feedURL)
-            }
-            nextIndex = endIndex
-            let fetchedFeeds = await Self.fetchBatch(candidates, feed: feed)
-            for fetched in fetchedFeeds {
+        let candidates = podcasts.enumerated().map { index, podcast in
+            FetchCandidate(
+                index: index,
+                url: podcast.feedURL,
+                validators: FeedRefreshValidatorStore.validators(
+                    feedURL: podcast.feedURL,
+                    in: modelContext
+                )
+            )
+        }
+        let pipeline = Self.fetchPipeline(
+            candidates,
+            trigger: trigger,
+            feed: feed,
+            isCancelled: isCancelled
+        )
+        refreshLoop: while let fetched = await Self.nextResult(from: pipeline) {
+            guard !cancelledAtFirstSchedule else { break }
                 let inputIndex = fetched.index
                 let requestedURL = fetched.url
                 // Resolve the destination again by the URL captured inside the
@@ -323,6 +473,12 @@ actor FeedRefreshActor {
                 guard let podcast = try? PodcastIdentityService(context: modelContext)
                     .existing(feedURL: requestedURL) else {
                     failed += 1
+                    recordFailure(
+                        index: inputIndex,
+                        feedURL: requestedURL,
+                        title: podcasts[inputIndex].title,
+                        reason: "Could not match this feed to its podcast."
+                    )
                     let feedID = Self.opaqueFeedID(requestedURL, salt: correlationID)
                     AppLog.subscriptions.error(
                         "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=identity-failure"
@@ -334,8 +490,42 @@ actor FeedRefreshActor {
                 let title = podcast.title
                 let url = requestedURL
                 let feedID = Self.opaqueFeedID(url, salt: correlationID)
-                if let parsed = fetched.parsed {
+                if let fetchResult = fetched.result {
                     do {
+                        if case let .notModified(validators) = fetchResult {
+                            LocalStateStore.setRefreshedAt(.now, on: podcast, in: modelContext)
+                            try FeedRefreshValidatorStore.set(
+                                validators,
+                                feedURL: url,
+                                in: modelContext
+                            )
+                            let progress = RefreshProgress(
+                                feedURL: url,
+                                podcastTitle: title,
+                                notificationEnabled: podcast.notificationEnabled ?? false,
+                                outcome: RefreshOutcome(
+                                    added: 0,
+                                    wasBackfill: false,
+                                    newestNewEpisodeGUID: nil
+                                ),
+                                wasNotModified: true
+                            )
+                            pendingUnchangedByInputIndex[inputIndex] = progress
+                            sinceLastSave += 1
+                            if sinceLastSave >= Self.saveBatchSize {
+                                let checkpoint = flushPending()
+                                if !checkpoint.results.isEmpty {
+                                    await onCheckpoint(checkpoint.results)
+                                }
+                            }
+                            completed += 1
+                            await onProgress(completed, total)
+                            if isCancelled() { break refreshLoop }
+                            continue
+                        }
+                        guard case let .modified(parsed, validators) = fetchResult else {
+                            continue
+                        }
                         let markBefore = podcast.lastSeenPubDate
                         let repairGUIDs = ordinaryRefreshCandidates(
                             from: Self.deduplicatedEpisodes(parsed.episodes),
@@ -351,6 +541,11 @@ actor FeedRefreshActor {
                         )
                         let applyOutcome = apply(
                             parsed, to: podcast, autoQueueEnabled: autoQueueEnabled
+                        )
+                        try FeedRefreshValidatorStore.set(
+                            validators,
+                            feedURL: url,
+                            in: modelContext
                         )
                         PerformanceSignposts.signposter.endInterval(
                             "ActorApply",
@@ -368,24 +563,44 @@ actor FeedRefreshActor {
                         )
                         pendingByInputIndex[inputIndex] = applyOutcome
                         sinceLastSave += 1
-                        if sinceLastSave >= Self.saveBatchSize,
-                           flushPending(), !postedIncrementalInboxChange {
+                        let shouldFlushFirstContent = !postedIncrementalInboxChange
+                            && applyOutcome.insertedCount > 0
+                        if shouldFlushFirstContent || sinceLastSave >= Self.saveBatchSize {
+                            let checkpoint = flushPending()
+                            if !checkpoint.results.isEmpty {
+                                await onCheckpoint(checkpoint.results)
+                            }
+                            if checkpoint.madeNewContentDurable,
+                               !postedIncrementalInboxChange {
                             // Surface the first durable new-content batch while a
                             // large library continues refreshing. Limit the whole
                             // run to this early signal plus the final signal below
                             // so Inbox reloads cannot become a per-batch hot path.
                             postedIncrementalInboxChange = true
                             await onInboxChange()
+                            }
                         }
                     } catch {
                         modelContext.rollback()
                         failed += 1
+                        recordFailure(
+                            index: inputIndex,
+                            feedURL: url,
+                            title: title,
+                            reason: "Could not process or save this feed."
+                        )
                         AppLog.subscriptions.error(
                             "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=feed-failure error=\(Self.errorDetail(error), privacy: .public)"
                         )
                     }
                 } else {
                     failed += 1
+                    recordFailure(
+                        index: inputIndex,
+                        feedURL: url,
+                        title: title,
+                        reason: "Could not download or read this feed."
+                    )
                     AppLog.subscriptions.error(
                         "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=fetch-failure error=\(Self.sanitized(fetched.errorDescription ?? "Unknown error"), privacy: .public)"
                     )
@@ -399,11 +614,17 @@ actor FeedRefreshActor {
                     )
                     break refreshLoop
                 }
-            }
         }
-        _ = flushPending()
+        await pipeline.channel.finish()
+        pipeline.producer.cancel()
+        _ = await pipeline.producer.value
+        let finalCheckpoint = flushPending()
+        if !finalCheckpoint.results.isEmpty {
+            await onCheckpoint(finalCheckpoint.results)
+        }
         let report = RefreshRun(
             results: resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] },
+            failures: failuresByInputIndex.keys.sorted().compactMap { failuresByInputIndex[$0] },
             attempted: completed,
             total: total,
             failed: failed,

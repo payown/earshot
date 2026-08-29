@@ -176,13 +176,24 @@ struct RootView: View {
 
         let tabSelection = Binding<RootTab>(
             get: { selectedTab ?? resolvedLaunchTab },
-            set: { selectedTab = $0 }
+            set: { newTab in
+                let oldTab = selectedTab ?? resolvedLaunchTab
+                selectedTab = newTab
+                guard oldTab != newTab else { return }
+                switch newTab {
+                case .inbox:
+                    runtime.requestTabFocus(.inbox)
+                case .library:
+                    runtime.requestTabFocus(.library)
+                case .queue, .downloads, .settings:
+                    break
+                }
+            }
         )
 
         TabView(selection: tabSelection) {
             NavigationStack {
                 InboxScreen()
-                    .contextualTip(.inbox)
             }
             .modifier(TabChrome())
             .tabItem { Label("Inbox", systemImage: "tray") }
@@ -190,7 +201,6 @@ struct RootView: View {
 
             NavigationStack {
                 QueueScreen()
-                    .contextualTip(.queue)
             }
             .modifier(TabChrome())
             .tabItem { Label("Queue", systemImage: "list.bullet") }
@@ -208,7 +218,6 @@ struct RootView: View {
 
             NavigationStack {
                 DownloadsScreen()
-                    .contextualTip(.downloads)
             }
             .modifier(TabChrome())
             .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
@@ -418,6 +427,7 @@ struct RootView: View {
                 player.configure(context: modelContext)
                 quickActions.configure(context: modelContext)
                 downloads.configure(context: modelContext)
+                runtime.feedRefreshStatus.configure(context: modelContext)
             }
             try Task.checkCancellation()
             await downloads.reconcileStuckDownloads()

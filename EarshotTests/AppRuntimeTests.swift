@@ -829,6 +829,23 @@ final class AppRuntimeTests: XCTestCase {
         }
     }
 
+    func testTabFocusRequestIsRevisionedAndConsumedOnce() {
+        let runtime = AppRuntime(mode: .testHost)
+
+        runtime.requestTabFocus(.inbox)
+
+        XCTAssertEqual(runtime.tabFocusRequest, .inbox)
+        XCTAssertEqual(runtime.tabFocusRevision, 1)
+        XCTAssertFalse(runtime.consumeTabFocus(.library))
+        XCTAssertTrue(runtime.consumeTabFocus(.inbox))
+        XCTAssertNil(runtime.tabFocusRequest)
+        XCTAssertFalse(runtime.consumeTabFocus(.inbox))
+
+        runtime.requestTabFocus(.library)
+        XCTAssertEqual(runtime.tabFocusRevision, 2)
+        XCTAssertTrue(runtime.consumeTabFocus(.library))
+    }
+
     func testFreshInstallSkipsPreparationAnnouncementsAndFocusesOnboarding() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         let announcer = RecordingLaunchAnnouncer()
