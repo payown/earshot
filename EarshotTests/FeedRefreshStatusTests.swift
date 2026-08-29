@@ -21,7 +21,8 @@ final class FeedRefreshStatusTests: XCTestCase {
                 RefreshCompletionHaptics.plan(
                     trigger: trigger,
                     succeeded: true,
-                    applicationIsActive: true
+                    applicationIsActive: true,
+                    enabled: true
                 ),
                 expected
             )
@@ -32,22 +33,68 @@ final class FeedRefreshStatusTests: XCTestCase {
         XCTAssertNil(RefreshCompletionHaptics.plan(
             trigger: .manualToolbar,
             succeeded: false,
-            applicationIsActive: true
+            applicationIsActive: true,
+            enabled: true
         ))
         XCTAssertNil(RefreshCompletionHaptics.plan(
             trigger: .backgroundTask,
             succeeded: true,
-            applicationIsActive: true
+            applicationIsActive: true,
+            enabled: true
         ))
         XCTAssertNil(RefreshCompletionHaptics.plan(
             trigger: .unspecified,
             succeeded: true,
-            applicationIsActive: true
+            applicationIsActive: true,
+            enabled: true
         ))
         XCTAssertNil(RefreshCompletionHaptics.plan(
             trigger: .foreground,
             succeeded: true,
-            applicationIsActive: false
+            applicationIsActive: false,
+            enabled: true
+        ))
+        XCTAssertNil(RefreshCompletionHaptics.plan(
+            trigger: .manualPullToRefresh,
+            succeeded: true,
+            applicationIsActive: true,
+            enabled: false
+        ))
+    }
+
+    func testPlaybackStartHapticIsOneRoundedPulseWithFallback() {
+        let custom = PlaybackStartHaptics.plan(
+            enabled: true,
+            applicationIsActive: true,
+            supportsCustomHaptics: true
+        )
+        XCTAssertEqual(custom?.mode, .customSoftLanding)
+        XCTAssertEqual(custom?.durationMilliseconds, 150)
+        XCTAssertEqual(custom?.intensity, 0.55)
+        XCTAssertEqual(custom?.sharpness, 0.08)
+        XCTAssertEqual(custom?.attack, 0.12)
+        XCTAssertEqual(custom?.release, 0.4)
+
+        XCTAssertEqual(
+            PlaybackStartHaptics.plan(
+                enabled: true,
+                applicationIsActive: true,
+                supportsCustomHaptics: false
+            )?.mode,
+            .softImpactFallback
+        )
+    }
+
+    func testPlaybackStartHapticIsSilentWhenDisabledOrInactive() {
+        XCTAssertNil(PlaybackStartHaptics.plan(
+            enabled: false,
+            applicationIsActive: true,
+            supportsCustomHaptics: true
+        ))
+        XCTAssertNil(PlaybackStartHaptics.plan(
+            enabled: true,
+            applicationIsActive: false,
+            supportsCustomHaptics: true
         ))
     }
 

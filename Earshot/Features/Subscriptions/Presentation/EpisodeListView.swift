@@ -604,7 +604,8 @@ struct EpisodeListView: View {
             ).refresh(podcast)
             RefreshCompletionHaptics.playIfNeeded(
                 trigger: .manualPullToRefresh,
-                succeeded: true
+                succeeded: true,
+                enabled: settings.hapticFeedbackEnabled
             )
             if outcome.rejectedAllNewCandidates {
                 Announcer.announce(

@@ -78,6 +78,10 @@ enum SettingsKey {
     static let spokenEpisodeDuration = "spoken_episode_duration"
     static let spokenEpisodeDescriptionMode = "spoken_episode_description_mode"
     static let spokenPodcastDescriptionMode = "spoken_podcast_description_mode"
+    /// Whether Earshot provides its own tactile cues for playback starts and
+    /// completed refreshes. Device-local because haptic preference and hardware
+    /// availability belong to this device, not the listener's synced library.
+    static let hapticFeedbackEnabled = "haptic_feedback_enabled"
     /// Which source metadata appears in transcript Markdown exports. Device-local
     /// so each device can favor the files it creates without changing another.
     static let transcriptExportMetadata = "transcript_export_metadata"
@@ -270,6 +274,7 @@ enum SettingsDefault {
     /// Chapter navigation buttons shown by default; users who prefer the artwork
     /// VoiceOver rotor can turn them off (#515).
     static let chapterNavButtonsVisible = true
+    static let hapticFeedbackEnabled = true
     static let inboxOptInOnly = false
     /// The Queue starts ungrouped (a flat play-order list) until the user picks a
     /// grouping mode (#762). Replaces the old `groupQueueEpisodes = false` bool;

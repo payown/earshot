@@ -121,6 +121,7 @@ final class AppSettingsStoreTests: XCTestCase {
             SettingsKey.spokenEpisodeDescriptionMode,
             SettingsKey.spokenPodcastDescriptionMode,
             SettingsKey.transcriptExportMetadata,
+            SettingsKey.hapticFeedbackEnabled,
         ] {
             XCTAssertTrue(AppSettingScope.isLocal(key), key)
         }

@@ -673,6 +673,7 @@ struct SubscriptionsView: View {
         guard let report = await BackgroundFeedRefresher.runUserInitiatedRefresh(
             trigger: trigger,
             total: podcastCount,
+            hapticFeedbackEnabled: settings.hapticFeedbackEnabled,
             operation: {
                 Announcer.announce("Refreshing library")
                 let report = await makeManualLibraryRefreshRepository(

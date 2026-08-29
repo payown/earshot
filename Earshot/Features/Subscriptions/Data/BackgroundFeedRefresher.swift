@@ -143,6 +143,7 @@ enum BackgroundFeedRefresher {
     static func runUserInitiatedRefresh(
         trigger: FeedRefreshTrigger,
         total: Int,
+        hapticFeedbackEnabled: Bool = SettingsDefault.hapticFeedbackEnabled,
         operation: @escaping @MainActor () async -> SubscriptionRefreshReport
     ) async -> SubscriptionRefreshReport? {
         guard activeRefreshTask == nil else {
@@ -162,7 +163,8 @@ enum BackgroundFeedRefresher {
         FeedRefreshStatusMonitor.shared.finish(report)
         RefreshCompletionHaptics.playIfNeeded(
             trigger: trigger,
-            succeeded: report.completion == .full
+            succeeded: report.completion == .full,
+            enabled: hapticFeedbackEnabled
         )
         return report
     }
@@ -265,7 +267,14 @@ enum BackgroundFeedRefresher {
         switch report.completion {
         case .full:
             settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
-            RefreshCompletionHaptics.playIfNeeded(trigger: trigger, succeeded: true)
+            RefreshCompletionHaptics.playIfNeeded(
+                trigger: trigger,
+                succeeded: true,
+                enabled: settings.bool(
+                    SettingsKey.hapticFeedbackEnabled,
+                    default: SettingsDefault.hapticFeedbackEnabled
+                )
+            )
         case .completedWithErrors:
             settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
         case .partial, .failure:
