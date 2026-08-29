@@ -160,6 +160,10 @@ enum BackgroundFeedRefresher {
         finish(id: refreshID)
         guard case .userInitiated(let report) = result else { return nil }
         FeedRefreshStatusMonitor.shared.finish(report)
+        RefreshCompletionHaptics.playIfNeeded(
+            trigger: trigger,
+            succeeded: report.completion == .full
+        )
         return report
     }
 
@@ -259,7 +263,10 @@ enum BackgroundFeedRefresher {
         }
 
         switch report.completion {
-        case .full, .completedWithErrors:
+        case .full:
+            settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
+            RefreshCompletionHaptics.playIfNeeded(trigger: trigger, succeeded: true)
+        case .completedWithErrors:
             settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
         case .partial, .failure:
             AppLog.networking.error(

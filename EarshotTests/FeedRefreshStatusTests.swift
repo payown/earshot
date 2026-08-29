@@ -4,6 +4,53 @@ import XCTest
 
 @MainActor
 final class FeedRefreshStatusTests: XCTestCase {
+    func testRefreshCompletionHapticPlanIsExactlyTwoShortLightTaps() {
+        let expected = RefreshCompletionHapticPlan(
+            style: .light,
+            impactCount: 2,
+            spacingMilliseconds: 120
+        )
+
+        for trigger in [
+            FeedRefreshTrigger.manualToolbar,
+            .manualPullToRefresh,
+            .coldLaunch,
+            .foreground,
+        ] {
+            XCTAssertEqual(
+                RefreshCompletionHaptics.plan(
+                    trigger: trigger,
+                    succeeded: true,
+                    applicationIsActive: true
+                ),
+                expected
+            )
+        }
+    }
+
+    func testRefreshCompletionHapticIsSilentForFailureBackgroundAndInactiveApp() {
+        XCTAssertNil(RefreshCompletionHaptics.plan(
+            trigger: .manualToolbar,
+            succeeded: false,
+            applicationIsActive: true
+        ))
+        XCTAssertNil(RefreshCompletionHaptics.plan(
+            trigger: .backgroundTask,
+            succeeded: true,
+            applicationIsActive: true
+        ))
+        XCTAssertNil(RefreshCompletionHaptics.plan(
+            trigger: .unspecified,
+            succeeded: true,
+            applicationIsActive: true
+        ))
+        XCTAssertNil(RefreshCompletionHaptics.plan(
+            trigger: .foreground,
+            succeeded: true,
+            applicationIsActive: false
+        ))
+    }
+
     func testSnapshotDecodesStoredVersionWithoutFailureDetails() throws {
         let data = Data(#"{"state":"completed","trigger":"backgroundTask","checked":64,"total":64,"newEpisodes":3,"unchangedFeeds":61,"failedFeeds":0}"#.utf8)
 

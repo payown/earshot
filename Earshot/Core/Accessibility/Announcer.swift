@@ -6,6 +6,69 @@ enum AnnouncementCompletionResult: Equatable {
     case timedOut
 }
 
+enum RefreshCompletionHapticStyle: Equatable {
+    case light
+}
+
+struct RefreshCompletionHapticPlan: Equatable {
+    let style: RefreshCompletionHapticStyle
+    let impactCount: Int
+    let spacingMilliseconds: Int64
+}
+
+/// A brief, nonverbal completion cue that never changes VoiceOver focus.
+/// Background wakes are deliberately silent: a vibration without an active app
+/// has no useful context and iOS may suppress it anyway.
+@MainActor
+enum RefreshCompletionHaptics {
+    static func plan(
+        trigger: FeedRefreshTrigger,
+        succeeded: Bool,
+        applicationIsActive: Bool
+    ) -> RefreshCompletionHapticPlan? {
+        guard succeeded, applicationIsActive else { return nil }
+        switch trigger {
+        case .manualToolbar, .manualPullToRefresh, .coldLaunch, .foreground:
+            return RefreshCompletionHapticPlan(
+                style: .light,
+                impactCount: 2,
+                spacingMilliseconds: 120
+            )
+        case .backgroundTask, .unspecified:
+            return nil
+        }
+    }
+
+    static func playIfNeeded(trigger: FeedRefreshTrigger, succeeded: Bool) {
+        guard let plan = plan(
+            trigger: trigger,
+            succeeded: succeeded,
+            applicationIsActive: UIApplication.shared.applicationState == .active
+        ) else { return }
+
+        let feedbackStyle: UIImpactFeedbackGenerator.FeedbackStyle = switch plan.style {
+        case .light: .light
+        }
+        let generator = UIImpactFeedbackGenerator(style: feedbackStyle)
+        generator.prepare()
+        generator.impactOccurred()
+        guard plan.impactCount > 1 else { return }
+
+        Task { @MainActor in
+            for _ in 1..<plan.impactCount {
+                do {
+                    try await Task.sleep(for: .milliseconds(plan.spacingMilliseconds))
+                } catch {
+                    return
+                }
+                guard UIApplication.shared.applicationState == .active else { return }
+                generator.prepare()
+                generator.impactOccurred()
+            }
+        }
+    }
+}
+
 /// Posts VoiceOver announcements for important state changes the user must know
 /// about (e.g. "Playing", "Episode added to queue"). Reserve announcements for
 /// meaningful changes — don't announce noise.
