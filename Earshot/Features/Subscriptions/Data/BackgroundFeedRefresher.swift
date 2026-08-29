@@ -117,7 +117,6 @@ enum BackgroundFeedRefresher {
         }
 
         let refreshID = UUID()
-        FeedRefreshStatusMonitor.shared.start(trigger: trigger)
         let task = Task { @MainActor in
             ActiveRefreshResult.automatic(await performRefresh(
                 container: container,
@@ -143,6 +142,7 @@ enum BackgroundFeedRefresher {
     @MainActor
     static func runUserInitiatedRefresh(
         trigger: FeedRefreshTrigger,
+        total: Int,
         operation: @escaping @MainActor () async -> SubscriptionRefreshReport
     ) async -> SubscriptionRefreshReport? {
         guard activeRefreshTask == nil else {
@@ -151,6 +151,7 @@ enum BackgroundFeedRefresher {
         }
 
         let refreshID = UUID()
+        FeedRefreshStatusMonitor.shared.start(trigger: trigger, total: total)
         let task = Task { @MainActor in
             ActiveRefreshResult.userInitiated(await operation())
         }

@@ -668,8 +668,11 @@ struct SubscriptionsView: View {
         // path actually finds new episodes must be the path that notifies, or the
         // notification is lost (#421). deliver() coalesces per podcast by a stable
         // identifier, so the same show notifying from both paths can never stack.
+        let podcastCount = (try? context.fetchCount(FetchDescriptor<Podcast>()))
+            ?? podcasts.count
         guard let report = await BackgroundFeedRefresher.runUserInitiatedRefresh(
             trigger: trigger,
+            total: podcastCount,
             operation: {
                 Announcer.announce("Refreshing library")
                 let report = await makeManualLibraryRefreshRepository(
