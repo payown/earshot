@@ -68,12 +68,19 @@ final class FeedRefreshStatusTests: XCTestCase {
             applicationIsActive: true,
             supportsCustomHaptics: true
         )
-        XCTAssertEqual(custom?.mode, .customSoftLanding)
-        XCTAssertEqual(custom?.durationMilliseconds, 150)
-        XCTAssertEqual(custom?.intensity, 0.55)
-        XCTAssertEqual(custom?.sharpness, 0.08)
-        XCTAssertEqual(custom?.attack, 0.12)
-        XCTAssertEqual(custom?.release, 0.4)
+        XCTAssertEqual(custom?.mode, .customMechanicalPress)
+        XCTAssertEqual(custom?.totalDurationMilliseconds, 150)
+        XCTAssertEqual(custom?.pressIntensity, 0.85)
+        XCTAssertEqual(custom?.pressSharpness, 0.6)
+        XCTAssertEqual(custom?.tailStartMilliseconds, 12)
+        XCTAssertEqual(custom?.tailDurationMilliseconds, 138)
+        XCTAssertEqual(custom?.tailIntensity, 0.3)
+        XCTAssertEqual(custom?.tailSharpness, 0.06)
+        XCTAssertEqual(custom?.tailDecay, 0.45)
+        XCTAssertEqual(
+            (custom?.tailStartMilliseconds ?? 0) + (custom?.tailDurationMilliseconds ?? 0),
+            custom?.totalDurationMilliseconds
+        )
 
         XCTAssertEqual(
             PlaybackStartHaptics.plan(

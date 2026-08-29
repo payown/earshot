@@ -77,17 +77,20 @@ enum RefreshCompletionHaptics {
 }
 
 enum PlaybackStartHapticMode: Equatable {
-    case customSoftLanding
+    case customMechanicalPress
     case softImpactFallback
 }
 
 struct PlaybackStartHapticPlan: Equatable {
     let mode: PlaybackStartHapticMode
-    let durationMilliseconds: Int
-    let intensity: Float
-    let sharpness: Float
-    let attack: Float
-    let release: Float
+    let totalDurationMilliseconds: Int
+    let pressIntensity: Float
+    let pressSharpness: Float
+    let tailStartMilliseconds: Int
+    let tailDurationMilliseconds: Int
+    let tailIntensity: Float
+    let tailSharpness: Float
+    let tailDecay: Float
 }
 
 /// A single rounded pulse for deliberate Play and Resume actions. Automatic
@@ -104,12 +107,15 @@ enum PlaybackStartHaptics {
     ) -> PlaybackStartHapticPlan? {
         guard enabled, applicationIsActive else { return nil }
         return PlaybackStartHapticPlan(
-            mode: supportsCustomHaptics ? .customSoftLanding : .softImpactFallback,
-            durationMilliseconds: 150,
-            intensity: 0.55,
-            sharpness: 0.08,
-            attack: 0.12,
-            release: 0.4
+            mode: supportsCustomHaptics ? .customMechanicalPress : .softImpactFallback,
+            totalDurationMilliseconds: 150,
+            pressIntensity: 0.85,
+            pressSharpness: 0.6,
+            tailStartMilliseconds: 12,
+            tailDurationMilliseconds: 138,
+            tailIntensity: 0.3,
+            tailSharpness: 0.06,
+            tailDecay: 0.45
         )
     }
 
@@ -121,7 +127,7 @@ enum PlaybackStartHaptics {
             supportsCustomHaptics: supportsCustomHaptics
         ) else { return }
 
-        guard plan.mode == .customSoftLanding else {
+        guard plan.mode == .customMechanicalPress else {
             playFallback()
             return
         }
@@ -137,20 +143,40 @@ enum PlaybackStartHaptics {
                 hapticEngine = created
             }
             try hapticEngine.start()
-            let parameters = [
-                CHHapticEventParameter(parameterID: .hapticIntensity, value: plan.intensity),
-                CHHapticEventParameter(parameterID: .hapticSharpness, value: plan.sharpness),
-                CHHapticEventParameter(parameterID: .attackTime, value: plan.attack),
-                CHHapticEventParameter(parameterID: .releaseTime, value: plan.release),
-                CHHapticEventParameter(parameterID: .sustained, value: 1),
+            let pressParameters = [
+                CHHapticEventParameter(
+                    parameterID: .hapticIntensity,
+                    value: plan.pressIntensity
+                ),
+                CHHapticEventParameter(
+                    parameterID: .hapticSharpness,
+                    value: plan.pressSharpness
+                ),
             ]
-            let event = CHHapticEvent(
-                eventType: .hapticContinuous,
-                parameters: parameters,
-                relativeTime: 0,
-                duration: Double(plan.durationMilliseconds) / 1_000
+            let press = CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: pressParameters,
+                relativeTime: 0
             )
-            let pattern = try CHHapticPattern(events: [event], parameters: [])
+            let tailParameters = [
+                CHHapticEventParameter(
+                    parameterID: .hapticIntensity,
+                    value: plan.tailIntensity
+                ),
+                CHHapticEventParameter(
+                    parameterID: .hapticSharpness,
+                    value: plan.tailSharpness
+                ),
+                CHHapticEventParameter(parameterID: .decayTime, value: plan.tailDecay),
+                CHHapticEventParameter(parameterID: .sustained, value: 0),
+            ]
+            let tail = CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: tailParameters,
+                relativeTime: Double(plan.tailStartMilliseconds) / 1_000,
+                duration: Double(plan.tailDurationMilliseconds) / 1_000
+            )
+            let pattern = try CHHapticPattern(events: [press, tail], parameters: [])
             let player = try hapticEngine.makePlayer(with: pattern)
             try player.start(atTime: CHHapticTimeImmediate)
         } catch {
