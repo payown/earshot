@@ -6,6 +6,7 @@ enum FeedRefreshStatusState: String, Codable, Equatable, Sendable {
     case never
     case running
     case completed
+    case completedWithErrors
     case interrupted
     case failed
 }
@@ -24,6 +25,51 @@ struct FeedRefreshStatusSnapshot: Codable, Equatable, Sendable {
     var newEpisodes = 0
     var unchangedFeeds = 0
     var failedFeeds = 0
+    var failureDetails: [FeedRefreshFailure] = []
+
+    private enum CodingKeys: String, CodingKey {
+        case state, trigger, scheduledAt, startedAt, endedAt, lastCompletedAt
+        case lastSkippedAt, lastSkippedTrigger, checked, total, newEpisodes
+        case unchangedFeeds, failedFeeds, failureDetails
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decodeIfPresent(FeedRefreshStatusState.self, forKey: .state) ?? .never
+        trigger = try values.decodeIfPresent(FeedRefreshTrigger.self, forKey: .trigger) ?? .unspecified
+        scheduledAt = try values.decodeIfPresent(Date.self, forKey: .scheduledAt)
+        startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
+        endedAt = try values.decodeIfPresent(Date.self, forKey: .endedAt)
+        lastCompletedAt = try values.decodeIfPresent(Date.self, forKey: .lastCompletedAt)
+        lastSkippedAt = try values.decodeIfPresent(Date.self, forKey: .lastSkippedAt)
+        lastSkippedTrigger = try values.decodeIfPresent(FeedRefreshTrigger.self, forKey: .lastSkippedTrigger)
+        checked = try values.decodeIfPresent(Int.self, forKey: .checked) ?? 0
+        total = try values.decodeIfPresent(Int.self, forKey: .total) ?? 0
+        newEpisodes = try values.decodeIfPresent(Int.self, forKey: .newEpisodes) ?? 0
+        unchangedFeeds = try values.decodeIfPresent(Int.self, forKey: .unchangedFeeds) ?? 0
+        failedFeeds = try values.decodeIfPresent(Int.self, forKey: .failedFeeds) ?? 0
+        failureDetails = try values.decodeIfPresent([FeedRefreshFailure].self, forKey: .failureDetails) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(state, forKey: .state)
+        try values.encode(trigger, forKey: .trigger)
+        try values.encodeIfPresent(scheduledAt, forKey: .scheduledAt)
+        try values.encodeIfPresent(startedAt, forKey: .startedAt)
+        try values.encodeIfPresent(endedAt, forKey: .endedAt)
+        try values.encodeIfPresent(lastCompletedAt, forKey: .lastCompletedAt)
+        try values.encodeIfPresent(lastSkippedAt, forKey: .lastSkippedAt)
+        try values.encodeIfPresent(lastSkippedTrigger, forKey: .lastSkippedTrigger)
+        try values.encode(checked, forKey: .checked)
+        try values.encode(total, forKey: .total)
+        try values.encode(newEpisodes, forKey: .newEpisodes)
+        try values.encode(unchangedFeeds, forKey: .unchangedFeeds)
+        try values.encode(failedFeeds, forKey: .failedFeeds)
+        try values.encode(failureDetails, forKey: .failureDetails)
+    }
 }
 
 struct FeedRefreshStatusCheckpoint: Sendable, Equatable {
@@ -104,6 +150,9 @@ final class FeedRefreshStatusMonitor {
         snapshot.newEpisodes = 0
         snapshot.unchangedFeeds = 0
         snapshot.failedFeeds = 0
+        // Keep the last actionable failures available until this run finishes.
+        // If iOS terminates a background refresh, users can still identify the
+        // feeds that needed attention before the interrupted run began.
         durableChecked = 0
         persist()
     }
@@ -124,16 +173,31 @@ final class FeedRefreshStatusMonitor {
     func finish(_ report: SubscriptionRefreshReport, now: Date = Date()) {
         snapshot.state = switch report.completion {
         case .full: .completed
+        case .completedWithErrors: .completedWithErrors
         case .partial: .interrupted
         case .failure: .failed
         }
         snapshot.endedAt = now
-        if report.completion == .full { snapshot.lastCompletedAt = now }
+        switch report.completion {
+        case .full, .completedWithErrors:
+            snapshot.lastCompletedAt = now
+        case .partial, .failure:
+            break
+        }
         snapshot.checked = report.attempted
         snapshot.total = report.total
         snapshot.newEpisodes = report.newEpisodes
         snapshot.unchangedFeeds = report.unchangedFeeds
         snapshot.failedFeeds = report.failed
+        snapshot.failureDetails = report.failures
+        persist()
+    }
+
+    func removeFailure(feedURL: String) {
+        let canonical = FeedURLIdentity.canonical(feedURL)
+        snapshot.failureDetails.removeAll {
+            FeedURLIdentity.canonical($0.feedURL) == canonical
+        }
         persist()
     }
 
@@ -150,11 +214,21 @@ final class FeedRefreshStatusMonitor {
 }
 
 enum FeedRefreshStatusPresentation {
+    enum EntryFocus: Equatable {
+        case heading
+        case refreshStatus
+    }
+
+    static func entryFocus(_ snapshot: FeedRefreshStatusSnapshot) -> EntryFocus {
+        snapshot.state == .running ? .refreshStatus : .heading
+    }
+
     static func status(_ state: FeedRefreshStatusState) -> String {
         switch state {
         case .never: "Not refreshed yet"
         case .running: "Refreshing"
         case .completed: "Completed"
+        case .completedWithErrors: "Completed with errors"
         case .interrupted: "Interrupted"
         case .failed: "Failed"
         }
@@ -186,6 +260,10 @@ enum FeedRefreshStatusPresentation {
         case .completed:
             let when = snapshot.endedAt.map(dateText) ?? "at an unknown time"
             return "Last \(automatic) refresh completed \(when). Checked \(snapshot.checked) of \(snapshot.total) podcasts. Found \(snapshot.newEpisodes) new episodes. \(snapshot.unchangedFeeds) feeds were unchanged."
+        case .completedWithErrors:
+            let when = snapshot.endedAt.map(dateText) ?? "at an unknown time"
+            let feedNoun = snapshot.failedFeeds == 1 ? "feed" : "feeds"
+            return "Last \(automatic) refresh completed with errors \(when). Checked \(snapshot.checked) of \(snapshot.total) podcasts. Found \(snapshot.newEpisodes) new episodes. \(snapshot.failedFeeds) \(feedNoun) failed."
         case .interrupted:
             let when = snapshot.endedAt.map(dateText) ?? "at an unknown time"
             return "Last \(automatic) refresh was interrupted \(when). Checked \(snapshot.checked) of \(snapshot.total) podcasts. Found \(snapshot.newEpisodes) new episodes. Earshot will resume with the least recently checked podcasts."

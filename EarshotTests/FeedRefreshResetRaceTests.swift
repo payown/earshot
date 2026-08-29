@@ -53,8 +53,52 @@ private actor LaunchStartSignal {
     }
 }
 
+private actor OneFailedRefreshFeed: FeedFetching {
+    let feed: ParsedFeed
+
+    init(feed: ParsedFeed) { self.feed = feed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        if urlString.contains("failed") { throw URLError(.cannotConnectToHost) }
+        return feed
+    }
+}
+
 @MainActor
 final class FeedRefreshResetRaceTests: XCTestCase {
+    func testCompletedPassWithOneFeedErrorStillStampsThrottle() async throws {
+        let container = try ModelContainerFactory.makeInMemory()
+        container.mainContext.insert(Podcast(
+            feedURL: "https://example.com/good.xml", title: "Good"
+        ))
+        container.mainContext.insert(Podcast(
+            feedURL: "https://example.com/failed.xml", title: "Failed"
+        ))
+        try container.mainContext.save()
+        let parsed = ParsedFeed(
+            title: "Example", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: []
+        )
+
+        let didComplete = await BackgroundFeedRefresher.runRefresh(
+            container: container,
+            trigger: .backgroundTask,
+            force: true,
+            notifier: NotificationService(),
+            feed: OneFailedRefreshFeed(feed: parsed)
+        )
+
+        XCTAssertTrue(didComplete)
+        XCTAssertNotNil(AppSettingsStore(context: container.mainContext).date(
+            SettingsKey.lastFeedRefresh
+        ))
+        XCTAssertEqual(FeedRefreshStatusMonitor.shared.snapshot.state, .completedWithErrors)
+        XCTAssertEqual(
+            FeedRefreshStatusMonitor.shared.snapshot.failureDetails.map(\.podcastTitle),
+            ["Failed"]
+        )
+    }
+
     func testManualRefreshCannotOverlapAutomaticRefresh() async throws {
         let container = try ModelContainerFactory.makeInMemory()
         container.mainContext.insert(

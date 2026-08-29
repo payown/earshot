@@ -137,6 +137,8 @@ final class AppRuntime {
     private(set) var launchProgress: StoreMigrationProgress?
     private(set) var showsLaunchPreparation: Bool
     private(set) var launchFocusRequest: LaunchFocusDestination?
+    private(set) var tabFocusRequest: LaunchFocusDestination?
+    private(set) var tabFocusRevision = 0
     private(set) var launchAttemptCount = 0
     private(set) var recoveryBackup: MigrationBackupDescriptor?
     private(set) var backupRestorePhase: BackupRestorePhase = .idle
@@ -418,6 +420,17 @@ final class AppRuntime {
     func consumeLaunchFocus(_ destination: LaunchFocusDestination) -> Bool {
         guard launchFocusRequest == destination else { return false }
         launchFocusRequest = nil
+        return true
+    }
+
+    func requestTabFocus(_ destination: LaunchFocusDestination) {
+        tabFocusRequest = destination
+        tabFocusRevision += 1
+    }
+
+    func consumeTabFocus(_ destination: LaunchFocusDestination) -> Bool {
+        guard tabFocusRequest == destination else { return false }
+        tabFocusRequest = nil
         return true
     }
 

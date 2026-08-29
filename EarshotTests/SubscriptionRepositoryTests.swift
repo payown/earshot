@@ -143,6 +143,10 @@ final class SubscriptionRepositoryTests: XCTestCase {
         )
         XCTAssertEqual(
             report(succeeded: 2, total: 3, failed: 1).announcement,
+            "Library refreshed, 1 feed failed"
+        )
+        XCTAssertEqual(
+            report(succeeded: 2, total: 3, failed: 0, cancelled: true).announcement,
             "Library partially refreshed, 2 of 3 feeds"
         )
         XCTAssertEqual(
@@ -826,16 +830,15 @@ final class SubscriptionRepositoryTests: XCTestCase {
         try await seedSubscriptions(3, fetcher: fetcher, repo: repo)
 
         let before = fetcher.fetchCount
-        // Cancel as soon as the first feed has been fetched. The guard runs before
-        // each iteration, so iteration 0 fetches once, then iteration 1's guard
-        // fires and the loop returns -- the remaining two feeds are never fetched.
+        // Cancel as soon as the first feed has been fetched. The scheduler opens
+        // its three-request window together, but stops processing after the first
+        // completed result observes cancellation.
         var progressCalls = 0
         await repo.refreshAll(isCancelled: { fetcher.fetchCount - before >= 1 }) { _, _ in
             progressCalls += 1
         }
 
-        // Only the first podcast was fetched; the loop stopped before the rest.
-        XCTAssertEqual(fetcher.fetchCount - before, 1)
+        XCTAssertEqual(fetcher.fetchCount - before, 3)
         // Progress fired only for the one feed processed before cancellation.
         XCTAssertEqual(progressCalls, 1)
     }

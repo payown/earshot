@@ -257,14 +257,15 @@ enum BackgroundFeedRefresher {
             return false
         }
 
-        guard report.completion == .full else {
+        switch report.completion {
+        case .full, .completedWithErrors:
+            settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
+        case .partial, .failure:
             AppLog.networking.error(
                 "Background feed refresh incomplete: succeeded=\(report.succeeded) total=\(report.total)"
             )
             return false
         }
-
-        settings.setDate(Date(), for: SettingsKey.lastFeedRefresh)
 
         AppLog.networking.info("Background feed refresh complete")
         return true

@@ -95,3 +95,15 @@ let defaultPodcastActions: [PodcastAction] = [
     .addToFolder,
     .moveToFolder,
 ]
+
+func visiblePodcastRowActions(
+    _ configuredActions: [PodcastAction],
+    inboxOptInOnly: Bool
+) -> [PodcastAction] {
+    configuredActions.filter {
+        guard $0 != .openDetail else { return false }
+        if $0 == .toggleInboxInclude { return inboxOptInOnly }
+        if $0 == .toggleInboxExclude { return !inboxOptInOnly }
+        return true
+    }
+}

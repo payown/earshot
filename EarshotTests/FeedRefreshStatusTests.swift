@@ -4,6 +4,16 @@ import XCTest
 
 @MainActor
 final class FeedRefreshStatusTests: XCTestCase {
+    func testSnapshotDecodesStoredVersionWithoutFailureDetails() throws {
+        let data = Data(#"{"state":"completed","trigger":"backgroundTask","checked":64,"total":64,"newEpisodes":3,"unchangedFeeds":61,"failedFeeds":0}"#.utf8)
+
+        let snapshot = try JSONDecoder().decode(FeedRefreshStatusSnapshot.self, from: data)
+
+        XCTAssertEqual(snapshot.state, .completed)
+        XCTAssertEqual(snapshot.checked, 64)
+        XCTAssertEqual(snapshot.failureDetails, [])
+    }
+
     func testNeverRunAndRunningStatusExactSpeech() {
         XCTAssertEqual(
             FeedRefreshStatusPresentation.summary(FeedRefreshStatusSnapshot()) { _ in "today" },
@@ -42,6 +52,98 @@ final class FeedRefreshStatusTests: XCTestCase {
             FeedRefreshStatusPresentation.summary(interrupted) { _ in "today at 9:42 AM" },
             "Last automatic refresh was interrupted today at 9:42 AM. Checked 18 of 64 podcasts. Found 2 new episodes. Earshot will resume with the least recently checked podcasts."
         )
+    }
+
+    func testCompletedWithErrorsIsNotInterruptedAndPersistsFeedIdentity() {
+        let context = TestStore.freshContext()
+        let monitor = FeedRefreshStatusMonitor()
+        monitor.configure(context: context)
+        let failure = FeedRefreshFailure(
+            feedURL: "https://example.com/feed.xml",
+            podcastTitle: "Example Show",
+            reason: "Could not download or read this feed."
+        )
+        let finishedAt = Date(timeIntervalSince1970: 400)
+
+        monitor.start(trigger: .backgroundTask, total: 3)
+        monitor.finish(SubscriptionRefreshReport(
+            notifications: [], attempted: 3, total: 3, succeeded: 2,
+            failed: 1, cancelled: false, intendedInsertions: 0,
+            durableInsertions: 0, failures: [failure]
+        ), now: finishedAt)
+
+        XCTAssertEqual(monitor.snapshot.state, .completedWithErrors)
+        XCTAssertEqual(monitor.snapshot.lastCompletedAt, finishedAt)
+        XCTAssertEqual(monitor.snapshot.failureDetails, [failure])
+        XCTAssertEqual(FeedRefreshStatusStore.load(from: context), monitor.snapshot)
+        XCTAssertEqual(
+            FeedRefreshStatusPresentation.summary(monitor.snapshot) { _ in "today at 9:42 AM" },
+            "Last automatic refresh completed with errors today at 9:42 AM. Checked 3 of 3 podcasts. Found 0 new episodes. 1 feed failed."
+        )
+    }
+
+    func testCancelledPartialPassRemainsInterrupted() {
+        let monitor = FeedRefreshStatusMonitor()
+        monitor.finish(SubscriptionRefreshReport(
+            notifications: [], attempted: 2, total: 3, succeeded: 2,
+            failed: 0, cancelled: true, intendedInsertions: 0,
+            durableInsertions: 0
+        ))
+
+        XCTAssertEqual(monitor.snapshot.state, .interrupted)
+    }
+
+    func testInlineStatusSpeechVisibilityAndEntryFocus() {
+        var snapshot = FeedRefreshStatusSnapshot()
+        XCTAssertFalse(FeedRefreshInlineStatus.shouldShow(snapshot))
+        XCTAssertEqual(FeedRefreshStatusPresentation.entryFocus(snapshot), .heading)
+
+        snapshot.state = .running
+        snapshot.checked = 18
+        snapshot.total = 64
+        snapshot.newEpisodes = 2
+        XCTAssertTrue(FeedRefreshInlineStatus.shouldShow(snapshot))
+        XCTAssertEqual(FeedRefreshStatusPresentation.entryFocus(snapshot), .refreshStatus)
+        XCTAssertEqual(
+            FeedRefreshInlineStatus(snapshot: snapshot).spokenText,
+            "Refreshing podcasts. 18 of 64 checked. 2 new episodes found."
+        )
+
+        snapshot.state = .completedWithErrors
+        snapshot.failedFeeds = 2
+        XCTAssertTrue(FeedRefreshInlineStatus.shouldShow(snapshot))
+        XCTAssertEqual(FeedRefreshStatusPresentation.entryFocus(snapshot), .heading)
+        XCTAssertEqual(
+            FeedRefreshInlineStatus(snapshot: snapshot).spokenText,
+            "Refresh completed with 2 feed errors."
+        )
+    }
+
+    func testRemovingFailedFeedUpdatesPersistedStatus() {
+        let context = TestStore.freshContext()
+        let monitor = FeedRefreshStatusMonitor()
+        monitor.configure(context: context)
+        let first = FeedRefreshFailure(
+            feedURL: "HTTPS://EXAMPLE.COM/one.xml",
+            podcastTitle: "One",
+            reason: "Failed."
+        )
+        let second = FeedRefreshFailure(
+            feedURL: "https://example.com/two.xml",
+            podcastTitle: "Two",
+            reason: "Failed."
+        )
+        monitor.finish(SubscriptionRefreshReport(
+            notifications: [], attempted: 3, total: 3, succeeded: 1,
+            failed: 2, cancelled: false, intendedInsertions: 0,
+            durableInsertions: 0, failures: [first, second]
+        ))
+
+        monitor.removeFailure(feedURL: "https://example.com/one.xml")
+
+        XCTAssertEqual(monitor.snapshot.failedFeeds, 2)
+        XCTAssertEqual(monitor.snapshot.failureDetails, [second])
+        XCTAssertEqual(FeedRefreshStatusStore.load(from: context), monitor.snapshot)
     }
 
     func testScheduledStatusExplainsIOSControlsTiming() {

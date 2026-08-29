@@ -173,17 +173,11 @@ actor FeedRefreshActor {
                         }
                     }
 
-                    // Preserve the existing first-request cancellation probe.
-                    addNext()
-                    guard let first = await group.next() else {
-                        return
-                    }
-                    await channel.send(first)
-
-                    // Fill the steady-state window only after the first request
-                    // has completed. Thereafter every completion immediately
-                    // replenishes one slot; a slow sibling cannot stall the next
-                    // feed as it did in fixed batches.
+                    // Fill the bounded window immediately. Every schedule attempt
+                    // still checks both cancellation sources, and cancellation of
+                    // the retained producer cancels every task-group child. Waiting
+                    // for one feed to finish before opening the window made a slow
+                    // first feed stall the entire library for no safety benefit.
                     for _ in 0..<refreshFetchConcurrency { addNext() }
                     while let result = await group.next() {
                         await channel.send(result)
@@ -251,6 +245,7 @@ actor FeedRefreshActor {
 
     struct RefreshRun: Sendable {
         let results: [RefreshProgress]
+        let failures: [FeedRefreshFailure]
         let attempted: Int
         let total: Int
         let failed: Int
@@ -369,6 +364,15 @@ actor FeedRefreshActor {
         var batchIndex = 0
         var sinceLastSave = 0
         var postedIncrementalInboxChange = false
+        var failuresByInputIndex: [Int: FeedRefreshFailure] = [:]
+
+        func recordFailure(index: Int, feedURL: String, title: String, reason: String) {
+            failuresByInputIndex[index] = FeedRefreshFailure(
+                feedURL: feedURL,
+                podcastTitle: title,
+                reason: reason
+            )
+        }
 
         func flushPending() -> (madeNewContentDurable: Bool, results: [RefreshProgress]) {
             guard !pendingByInputIndex.isEmpty || !pendingUnchangedByInputIndex.isEmpty else {
@@ -403,9 +407,25 @@ actor FeedRefreshActor {
             } else {
                 failed += pendingByInputIndex.count + pendingUnchangedByInputIndex.count
                 for index in pendingByInputIndex.keys {
+                    if let progress = resultByInputIndex[index] {
+                        recordFailure(
+                            index: index,
+                            feedURL: progress.feedURL,
+                            title: progress.podcastTitle,
+                            reason: "Could not save refresh changes."
+                        )
+                    }
                     resultByInputIndex.removeValue(forKey: index)
                 }
                 for index in pendingUnchangedByInputIndex.keys {
+                    if let progress = resultByInputIndex[index] {
+                        recordFailure(
+                            index: index,
+                            feedURL: progress.feedURL,
+                            title: progress.podcastTitle,
+                            reason: "Could not save refresh changes."
+                        )
+                    }
                     resultByInputIndex.removeValue(forKey: index)
                 }
             }
@@ -453,6 +473,12 @@ actor FeedRefreshActor {
                 guard let podcast = try? PodcastIdentityService(context: modelContext)
                     .existing(feedURL: requestedURL) else {
                     failed += 1
+                    recordFailure(
+                        index: inputIndex,
+                        feedURL: requestedURL,
+                        title: podcasts[inputIndex].title,
+                        reason: "Could not match this feed to its podcast."
+                    )
                     let feedID = Self.opaqueFeedID(requestedURL, salt: correlationID)
                     AppLog.subscriptions.error(
                         "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=identity-failure"
@@ -557,12 +583,24 @@ actor FeedRefreshActor {
                     } catch {
                         modelContext.rollback()
                         failed += 1
+                        recordFailure(
+                            index: inputIndex,
+                            feedURL: url,
+                            title: title,
+                            reason: "Could not process or save this feed."
+                        )
                         AppLog.subscriptions.error(
                             "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=feed-failure error=\(Self.errorDetail(error), privacy: .public)"
                         )
                     }
                 } else {
                     failed += 1
+                    recordFailure(
+                        index: inputIndex,
+                        feedURL: url,
+                        title: title,
+                        reason: "Could not download or read this feed."
+                    )
                     AppLog.subscriptions.error(
                         "refresh=\(correlationID, privacy: .public) feed=\(feedID, privacy: .public) outcome=fetch-failure error=\(Self.sanitized(fetched.errorDescription ?? "Unknown error"), privacy: .public)"
                     )
@@ -586,6 +624,7 @@ actor FeedRefreshActor {
         }
         let report = RefreshRun(
             results: resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] },
+            failures: failuresByInputIndex.keys.sorted().compactMap { failuresByInputIndex[$0] },
             attempted: completed,
             total: total,
             failed: failed,

@@ -48,6 +48,7 @@ struct SubscriptionsView: View {
     // rides the row across the select-mode toggle.
     @AccessibilityFocusState private var focusedRowID: PersistentIdentifier?
     @AccessibilityFocusState private var focusLaunchHeading: Bool
+    @AccessibilityFocusState private var focusRefreshStatus: Bool
     // Gates the sighted-only swipe action below, mirroring Inbox's identical
     // gate: VoiceOver users already reach unfollow through the row's
     // "Unfollow" Quick Action in the rotor (`rotorActions(for:)` below), so
@@ -145,9 +146,21 @@ struct SubscriptionsView: View {
         // the heading trait. The plain `navigationTitle` keeps back-button identity.
         .navigationTitle("Library")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { requestLaunchHeadingFocus() }
+        .safeAreaInset(edge: .top) {
+            if FeedRefreshInlineStatus.shouldShow(runtime.feedRefreshStatus.snapshot) {
+                FeedRefreshInlineStatus(snapshot: runtime.feedRefreshStatus.snapshot)
+                    .accessibilityFocused($focusRefreshStatus)
+            }
+        }
+        .onAppear {
+            requestLaunchHeadingFocus()
+            requestTabEntryFocus()
+        }
         .onChange(of: runtime.launchFocusRequest) { _, _ in
             requestLaunchHeadingFocus()
+        }
+        .onChange(of: runtime.tabFocusRevision) { _, _ in
+            requestTabEntryFocus()
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -557,12 +570,10 @@ struct SubscriptionsView: View {
     /// double-navigates. See SWIFTUI_PLAN.md. Unsubscribe is destructive and
     /// routes through a confirmation dialog rather than firing immediately.
     private func rotorActions(for podcast: Podcast) -> [PodcastAction] {
-        quickActions.podcastActions.filter {
-            guard $0 != .openDetail else { return false }
-            if $0 == .toggleInboxInclude { return settings.inboxOptInOnly }
-            if $0 == .toggleInboxExclude { return !settings.inboxOptInOnly }
-            return true
-        }
+        visiblePodcastRowActions(
+            quickActions.podcastActions,
+            inboxOptInOnly: settings.inboxOptInOnly
+        )
     }
 
     private func perform(_ action: PodcastAction, for podcast: Podcast) {
@@ -677,10 +688,13 @@ struct SubscriptionsView: View {
                         )
                     }
                 )
-                if report.completion == .full {
+                switch report.completion {
+                case .full, .completedWithErrors:
                     AppSettingsStore(context: context).setDate(
                         Date(), for: SettingsKey.lastFeedRefresh
                     )
+                case .partial, .failure:
+                    break
                 }
                 if !report.notifications.isEmpty {
                     await NotificationService().deliver(report.notifications)
@@ -721,7 +735,24 @@ struct SubscriptionsView: View {
 
     private func requestLaunchHeadingFocus() {
         guard runtime.consumeLaunchFocus(.library) else { return }
-        DispatchQueue.main.async { focusLaunchHeading = true }
+        focusHeadingOrRefreshStatus()
+    }
+
+    private func requestTabEntryFocus() {
+        guard runtime.consumeTabFocus(.library) else { return }
+        focusHeadingOrRefreshStatus()
+    }
+
+    private func focusHeadingOrRefreshStatus() {
+        DispatchQueue.main.async {
+            if FeedRefreshStatusPresentation.entryFocus(
+                runtime.feedRefreshStatus.snapshot
+            ) == .refreshStatus {
+                focusRefreshStatus = true
+            } else {
+                focusLaunchHeading = true
+            }
+        }
     }
 }
 

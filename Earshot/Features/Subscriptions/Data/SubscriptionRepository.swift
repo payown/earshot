@@ -96,9 +96,18 @@ struct OlderEpisodePageOutcome: Sendable, Equatable {
     let hasMore: Bool
 }
 
+struct FeedRefreshFailure: Codable, Identifiable, Sendable, Equatable {
+    let feedURL: String
+    let podcastTitle: String
+    let reason: String
+
+    var id: String { FeedURLIdentity.canonical(feedURL) }
+}
+
 struct SubscriptionRefreshReport: Sendable {
     enum Completion: Sendable, Equatable {
         case full
+        case completedWithErrors(succeeded: Int, total: Int, failed: Int)
         case partial(succeeded: Int, total: Int)
         case failure
     }
@@ -114,9 +123,13 @@ struct SubscriptionRefreshReport: Sendable {
     var filterSafetyWarningPodcasts: [String] = []
     var newEpisodes = 0
     var unchangedFeeds = 0
+    var failures: [FeedRefreshFailure] = []
 
     var completion: Completion {
         if !cancelled, failed == 0, succeeded == total { return .full }
+        if !cancelled, attempted == total, failed > 0, succeeded > 0 {
+            return .completedWithErrors(succeeded: succeeded, total: total, failed: failed)
+        }
         if succeeded > 0 { return .partial(succeeded: succeeded, total: total) }
         return .failure
     }
@@ -125,6 +138,8 @@ struct SubscriptionRefreshReport: Sendable {
         let completionText = switch completion {
         case .full:
             "Library refreshed"
+        case let .completedWithErrors(_, _, failed):
+            "Library refreshed, \(failed) \(failed == 1 ? "feed" : "feeds") failed"
         case let .partial(succeeded, total):
             "Library partially refreshed, \(succeeded) of \(total) feeds"
         case .failure:
@@ -543,7 +558,8 @@ extension SubscriptionRepository {
                 $0.outcome.rejectedAllNewCandidates ? $0.podcastTitle : nil
             },
             newEpisodes: results.reduce(0) { $0 + $1.outcome.added },
-            unchangedFeeds: results.filter(\.wasNotModified).count
+            unchangedFeeds: results.filter(\.wasNotModified).count,
+            failures: actorReport.failures
         )
     }
 

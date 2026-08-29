@@ -90,6 +90,7 @@ struct InboxScreen: View {
     // the Queue's neighbor-focus wiring.
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusLaunchHeading: Bool
+    @AccessibilityFocusState private var focusRefreshStatus: Bool
     // Tracked by SwiftUI, so toggling VoiceOver while the Inbox is on screen
     // re-renders the rows and attaches/removes the swipe actions immediately —
     // no relaunch. (Reading UIAccessibility.isVoiceOverRunning in body would
@@ -213,6 +214,12 @@ struct InboxScreen: View {
         // (e.g. for back-button context) without duplicating the principal.
         .navigationTitle("Inbox")
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top) {
+            if FeedRefreshInlineStatus.shouldShow(runtime.feedRefreshStatus.snapshot) {
+                FeedRefreshInlineStatus(snapshot: runtime.feedRefreshStatus.snapshot)
+                    .accessibilityFocused($focusRefreshStatus)
+            }
+        }
         // Persistent episode multi-select bar (#758): Add to folder is primary
         // and its label carries the live count ("Add 3 episodes to folder") — the
         // accessibility source of truth for the count. Move to folder follows, and
@@ -261,9 +268,15 @@ struct InboxScreen: View {
         // the user asks for the tally when they want it (the list itself
         // updates live as they type).
         .searchable(text: $searchText, prompt: "Search inbox")
-        .onAppear { requestLaunchHeadingFocus() }
+        .onAppear {
+            requestLaunchHeadingFocus()
+            requestTabEntryFocus()
+        }
         .onChange(of: runtime.launchFocusRequest) { _, _ in
             requestLaunchHeadingFocus()
+        }
+        .onChange(of: runtime.tabFocusRevision) { _, _ in
+            requestTabEntryFocus()
         }
         .onChange(of: searchText) { _, _ in displayedEpisodeLimit = InboxLogic.displayBatchSize }
         .onSubmit(of: .search) { announceMatches(count: visible.count) }
@@ -762,7 +775,24 @@ struct InboxScreen: View {
 
     private func requestLaunchHeadingFocus() {
         guard runtime.consumeLaunchFocus(.inbox) else { return }
-        DispatchQueue.main.async { focusLaunchHeading = true }
+        focusHeadingOrRefreshStatus()
+    }
+
+    private func requestTabEntryFocus() {
+        guard runtime.consumeTabFocus(.inbox) else { return }
+        focusHeadingOrRefreshStatus()
+    }
+
+    private func focusHeadingOrRefreshStatus() {
+        DispatchQueue.main.async {
+            if FeedRefreshStatusPresentation.entryFocus(
+                runtime.feedRefreshStatus.snapshot
+            ) == .refreshStatus {
+                focusRefreshStatus = true
+            } else {
+                focusLaunchHeading = true
+            }
+        }
     }
 
     private func shareItems(for episode: Episode) -> [Any] {

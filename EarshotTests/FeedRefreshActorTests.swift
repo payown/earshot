@@ -1059,14 +1059,14 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertFalse(hasPendingChanges)
         XCTAssertEqual(report.results.count, 14, "Unsaved feeds must not be reported as successful")
         XCTAssertEqual(report.failed, 1)
+        XCTAssertEqual(report.failures.count, 1)
+        XCTAssertEqual(report.failures.first?.reason, "Could not save refresh changes.")
         XCTAssertEqual(report.intendedInsertions, 15)
         XCTAssertEqual(report.durableInsertions, 14)
     }
 
-    /// Whole-library refresh overlaps at most three network requests. The first
-    /// request completes alone to preserve prompt background-task cancellation;
-    /// the next three rendezvous here, proving the steady-state window reaches
-    /// three without creating an unbounded request burst.
+    /// Whole-library refresh opens its three-request window immediately and never
+    /// exceeds it.
     func testActorRefreshAllBoundsNetworkConcurrencyAtThree() async throws {
         let container = cleanContainer()
         do {
@@ -1092,6 +1092,36 @@ final class FeedRefreshActorTests: XCTestCase {
         let maximumActiveFetches = await fetcher.maximumActiveFetches()
         XCTAssertEqual(results.count, 7)
         XCTAssertEqual(maximumActiveFetches, 3)
+    }
+
+    func testActorRefreshFailureReportsPodcastTitleAndReason() async throws {
+        final class FailingFeed: FeedFetching, @unchecked Sendable {
+            func fetch(_ urlString: String) async throws -> ParsedFeed {
+                throw URLError(.timedOut)
+            }
+        }
+        let container = cleanContainer()
+        let context = ModelContext(container)
+        context.insert(Podcast(
+            feedURL: "https://example.com/failing.xml",
+            title: "The Failing Show",
+            lastSeenPubDate: d1
+        ))
+        try context.save()
+
+        let report = await FeedRefreshActor(modelContainer: container).refreshAllReport(
+            feed: FailingFeed(),
+            autoQueueEnabled: false,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+
+        XCTAssertEqual(report.failed, 1)
+        XCTAssertEqual(report.failures, [FeedRefreshFailure(
+            feedURL: "https://example.com/failing.xml",
+            podcastTitle: "The Failing Show",
+            reason: "Could not download or read this feed."
+        )])
     }
 
     func testRollingWindowStartsNextFetchWithoutWaitingForSlowSiblings() async throws {
@@ -1607,36 +1637,39 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).count, urls.count, "Retry creates no duplicate episodes")
     }
 
-    /// Cancellation before the first feed processes nothing.
+    /// A cancelled rolling refresh opens with the three least recently checked
+    /// feeds, so its next run resumes fairly without a serial warm-up request.
     func testActorRefreshAllResumesWithLeastRecentlyRefreshedFeed() async throws {
         let container = cleanContainer()
         let neverURL = "https://x/never.xml"
         let oldestURL = "https://x/oldest.xml"
+        let middleURL = "https://x/middle.xml"
         let newestURL = "https://x/newest.xml"
         do {
             let context = ModelContext(container)
-            for url in [newestURL, neverURL, oldestURL] {
+            for url in [newestURL, neverURL, oldestURL, middleURL] {
                 context.insert(Podcast(feedURL: url, title: url, lastSeenPubDate: d1))
             }
             context.insert(LocalPodcastState(feedURL: oldestURL, refreshedAt: d2))
-            context.insert(LocalPodcastState(feedURL: newestURL, refreshedAt: d3))
+            context.insert(LocalPodcastState(feedURL: middleURL, refreshedAt: d3))
+            context.insert(LocalPodcastState(feedURL: newestURL, refreshedAt: d3.addingTimeInterval(60)))
             try context.save()
         }
         let fetcher = RecordingFeed(parsedFeed([parsedEpisode("a", d1)]))
         let actor = FeedRefreshActor(modelContainer: container)
 
-        for expected in [neverURL, oldestURL] {
-            let cancelled = OSAllocatedUnfairLock(initialState: false)
-            let report = await actor.refreshAllReport(
-                feed: fetcher,
-                autoQueueEnabled: false,
-                isCancelled: { cancelled.withLock { $0 } },
-                onProgress: { _, _ in cancelled.withLock { $0 = true } }
-            )
-            let fetchedURL = await fetcher.lastURL()
-            XCTAssertEqual(report.attempted, 1)
-            XCTAssertEqual(fetchedURL, expected)
-        }
+        let cancelled = OSAllocatedUnfairLock(initialState: false)
+        let report = await actor.refreshAllReport(
+            feed: fetcher,
+            autoQueueEnabled: false,
+            isCancelled: { cancelled.withLock { $0 } },
+            onProgress: { _, _ in cancelled.withLock { $0 = true } }
+        )
+        let fetchedURLs = await fetcher.allURLs()
+
+        XCTAssertEqual(report.attempted, 1, "Cancellation stops processing after the first completed fetch")
+        XCTAssertEqual(Set(fetchedURLs), Set([neverURL, oldestURL, middleURL]))
+        XCTAssertFalse(fetchedURLs.contains(newestURL))
     }
 
     func testActorRefreshAllCancelledImmediatelyDoesNothing() async throws {
@@ -1681,11 +1714,12 @@ private actor RecordingFeed: FeedFetching {
     }
 
     func lastURL() -> String? { urls.last }
+    func allURLs() -> [String] { urls }
 }
 
-/// Lets the first request finish immediately, then holds the next requests
-/// until three are active. Later requests finish immediately; the recorded high
-/// water mark proves the production scheduler never exceeded its bound.
+/// Holds the first three requests until all are active. Later requests finish
+/// immediately; the high-water mark proves the scheduler opens its window at
+/// launch and never exceeds the bound.
 private actor RefreshConcurrencyFeed: FeedFetching {
     private let feed: ParsedFeed
     private var callCount = 0
@@ -1700,7 +1734,7 @@ private actor RefreshConcurrencyFeed: FeedFetching {
         active += 1
         maximumActive = max(maximumActive, active)
 
-        if callCount > 1, callCount <= 4 {
+        if callCount <= 3 {
             await withCheckedContinuation { continuation in
                 rendezvous.append(continuation)
                 if rendezvous.count == 3 {
