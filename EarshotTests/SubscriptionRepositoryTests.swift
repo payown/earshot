@@ -473,6 +473,37 @@ final class SubscriptionRepositoryTests: XCTestCase {
         await fulfillment(of: [queueChange], timeout: 1)
     }
 
+    /// Removing an auto-queued episode is a durable user decision. Seeing the
+    /// same GUID in a later copy of the feed must neither queue nor download it
+    /// again; only a genuinely new feed item may enter those paths.
+    func testRefreshDoesNotRequeueOrRedownloadRemovedAutoQueuedEpisode() async throws {
+        let ctx = TestStore.freshContext()
+        AppSettingsStore(context: ctx).setInt(3, for: SettingsKey.autoDownloadCount)
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let downloader = FakeDownloader()
+        let queue = QueueRepository(context: ctx)
+        let repo = SubscriptionRepository(
+            context: ctx, feed: fetcher, downloader: downloader, queue: queue
+        )
+        let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        podcast.autoQueue = true
+        try ctx.save()
+
+        fetcher.feed = feed([episode("a", d1), episode("b", d2)])
+        _ = try await repo.refresh(podcast)
+        let b = try XCTUnwrap(podcast.episodes?.first { $0.guid == "b" })
+        XCTAssertEqual(queue.queue().map(\.guid), ["b"])
+        XCTAssertEqual(downloader.downloaded.map(\.guid).last, "b")
+
+        XCTAssertTrue(queue.cancelFromQueue(b))
+        downloader.reset()
+        _ = try await repo.refresh(podcast)
+
+        XCTAssertTrue(queue.queue().isEmpty)
+        XCTAssertTrue(b.inboxDismissed)
+        XCTAssertTrue(downloader.downloaded.isEmpty)
+    }
+
     /// A backfill refresh (migrated shell) must NOT auto-download -- its inserted
     /// episodes are pre-existing catalog, matching the existing `wasBackfill`
     /// notification gate (#72 / #639).
