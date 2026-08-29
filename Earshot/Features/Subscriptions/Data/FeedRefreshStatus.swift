@@ -119,8 +119,12 @@ final class FeedRefreshStatusMonitor {
         snapshot = FeedRefreshStatusStore.load(from: context) ?? FeedRefreshStatusSnapshot()
         durableChecked = snapshot.checked
         if snapshot.state == .running {
-            snapshot.state = .interrupted
-            snapshot.endedAt = now
+            if wasRunningAttemptSkipped {
+                restoreStateBeforeSkippedAttempt()
+            } else {
+                snapshot.state = .interrupted
+                snapshot.endedAt = now
+            }
             persist()
         }
     }
@@ -137,6 +141,12 @@ final class FeedRefreshStatusMonitor {
     func recordSkipped(trigger: FeedRefreshTrigger, now: Date = Date()) {
         snapshot.lastSkippedAt = now
         snapshot.lastSkippedTrigger = trigger
+        // Compatibility for builds that marked a wake as running before the
+        // throttle check. A skipped wake did no feed work and must not remain
+        // visible as either running or interrupted.
+        if snapshot.state == .running, wasRunningAttemptSkipped {
+            restoreStateBeforeSkippedAttempt()
+        }
         persist()
     }
 
@@ -210,6 +220,18 @@ final class FeedRefreshStatusMonitor {
                 "Could not save feed refresh status: \(error.localizedDescription, privacy: .public)"
             )
         }
+    }
+
+    private var wasRunningAttemptSkipped: Bool {
+        guard let startedAt = snapshot.startedAt,
+              let skippedAt = snapshot.lastSkippedAt else { return false }
+        return skippedAt >= startedAt
+    }
+
+    private func restoreStateBeforeSkippedAttempt() {
+        snapshot.state = snapshot.lastCompletedAt == nil ? .never : .completed
+        snapshot.startedAt = nil
+        snapshot.endedAt = snapshot.lastCompletedAt
     }
 }
 

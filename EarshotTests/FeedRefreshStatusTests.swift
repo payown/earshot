@@ -184,6 +184,27 @@ final class FeedRefreshStatusTests: XCTestCase {
         XCTAssertEqual(FeedRefreshStatusStore.load(from: context), monitor.snapshot)
     }
 
+    func testStoredThrottleSkippedRunningAttemptRestoresCompletedState() throws {
+        let context = TestStore.freshContext()
+        var stale = FeedRefreshStatusSnapshot()
+        stale.state = .running
+        stale.trigger = .foreground
+        stale.startedAt = Date(timeIntervalSince1970: 200)
+        stale.lastSkippedAt = Date(timeIntervalSince1970: 201)
+        stale.lastSkippedTrigger = .foreground
+        stale.lastCompletedAt = Date(timeIntervalSince1970: 100)
+        try FeedRefreshStatusStore.save(stale, in: context)
+
+        let monitor = FeedRefreshStatusMonitor()
+        monitor.configure(context: context, now: Date(timeIntervalSince1970: 300))
+
+        XCTAssertEqual(monitor.snapshot.state, .completed)
+        XCTAssertNil(monitor.snapshot.startedAt)
+        XCTAssertEqual(monitor.snapshot.endedAt, stale.lastCompletedAt)
+        XCTAssertFalse(FeedRefreshInlineStatus.shouldShow(monitor.snapshot))
+        XCTAssertEqual(FeedRefreshStatusStore.load(from: context), monitor.snapshot)
+    }
+
     func testSkippedOpportunityPersistsWithoutReplacingLastRefresh() {
         let context = TestStore.freshContext()
         let monitor = FeedRefreshStatusMonitor()
