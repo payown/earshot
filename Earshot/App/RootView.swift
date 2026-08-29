@@ -418,6 +418,7 @@ struct RootView: View {
                 player.configure(context: modelContext)
                 quickActions.configure(context: modelContext)
                 downloads.configure(context: modelContext)
+                runtime.feedRefreshStatus.configure(context: modelContext)
             }
             try Task.checkCancellation()
             await downloads.reconcileStuckDownloads()

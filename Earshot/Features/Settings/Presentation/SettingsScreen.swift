@@ -98,6 +98,13 @@ struct SettingsScreen: View {
                 .accessibilityHint("Sync status and what stays on this device")
 
                 NavigationLink {
+                    FeedRefreshSettingsView()
+                } label: {
+                    Label("Feed Refresh", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .accessibilityHint("See when feeds were checked and the result of the latest refresh")
+
+                NavigationLink {
                     ListeningPlacesSettingsView()
                 } label: {
                     Label("Listening Places", systemImage: "folder.badge.gearshape")

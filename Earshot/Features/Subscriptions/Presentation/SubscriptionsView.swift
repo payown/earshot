@@ -665,7 +665,18 @@ struct SubscriptionsView: View {
                     context: context,
                     downloader: downloads,
                     isEntitled: entitlements.isEntitled
-                ).refreshAllReport(trigger: trigger)
+                ).refreshAllReport(
+                    trigger: trigger,
+                    onDurableCheckpoint: { checkpoint in
+                        runtime.feedRefreshStatus.checkpoint(checkpoint)
+                    },
+                    onProgress: { completed, total in
+                        runtime.feedRefreshStatus.progress(
+                            checked: completed,
+                            total: total
+                        )
+                    }
+                )
                 if report.completion == .full {
                     AppSettingsStore(context: context).setDate(
                         Date(), for: SettingsKey.lastFeedRefresh

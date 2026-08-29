@@ -128,6 +128,7 @@ final class AppRuntime {
     let entitlements = EntitlementStore()
     let importProgress = OPMLImportProgress()
     let opmlImportCoordinator = OPMLImportCoordinator(store: .live())
+    let feedRefreshStatus = FeedRefreshStatusMonitor.shared
     let notificationRouter: NotificationRouter
     let notificationDelegate: NotificationDelegate
 
@@ -684,6 +685,7 @@ final class AppRuntime {
         listeningPlaces.releasePersistence()
         tips.releasePersistence()
         entitlements.releasePersistence()
+        feedRefreshStatus.releasePersistence()
         await ArtworkCache.shared.tearDown()
         ArtworkCache.resetShared()
         entitlementContainer = nil

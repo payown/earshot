@@ -18,6 +18,7 @@ final class MockURLProtocol: URLProtocol {
     /// with a body, or a transport-level `URLError`.
     enum Outcome {
         case response(statusCode: Int, data: Data)
+        case responseWithHeaders(statusCode: Int, data: Data, headers: [String: String])
         case failure(URLError)
     }
 
@@ -35,6 +36,12 @@ final class MockURLProtocol: URLProtocol {
         lock.lock()
         defer { lock.unlock() }
         return capturedRequests.compactMap(\.url)
+    }
+
+    static var requests: [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedRequests
     }
 
     /// Replaces the queued outcomes. Call before issuing requests.
@@ -96,6 +103,17 @@ final class MockURLProtocol: URLProtocol {
                 statusCode: statusCode,
                 httpVersion: "HTTP/1.1",
                 headerFields: nil
+            )!
+            client.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client.urlProtocol(self, didLoad: data)
+            client.urlProtocolDidFinishLoading(self)
+        case let .responseWithHeaders(statusCode, data, headers):
+            let url = request.url ?? URL(string: "https://example.invalid")!
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: headers
             )!
             client.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client.urlProtocol(self, didLoad: data)

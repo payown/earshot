@@ -1021,8 +1021,9 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).filter { $0.guid == "b" }.count, 3)
     }
 
-    /// A failed batch must be discarded before later feeds are applied. SwiftData
-    /// otherwise leaves the failed graph dirty and every later save retries it.
+    /// A failed first-content checkpoint must be discarded before later feeds
+    /// are applied. SwiftData otherwise leaves the failed graph dirty and every
+    /// later save retries it.
     func testActorRefreshAllRollsBackFailedBatchAndLaterBatchPersists() async throws {
         let container = cleanContainer()
         do {
@@ -1054,12 +1055,12 @@ final class FeedRefreshActorTests: XCTestCase {
 
         let durableNewEpisodes = try episodes(container).filter { $0.guid == "new" }
         let hasPendingChanges = await actor.hasPendingChangesForTesting()
-        XCTAssertEqual(durableNewEpisodes.count, 5, "Only the later successful batch persists")
+        XCTAssertEqual(durableNewEpisodes.count, 14, "Only later successful checkpoints persist")
         XCTAssertFalse(hasPendingChanges)
-        XCTAssertEqual(report.results.count, 5, "Unsaved feeds must not be reported as successful")
-        XCTAssertEqual(report.failed, 10)
+        XCTAssertEqual(report.results.count, 14, "Unsaved feeds must not be reported as successful")
+        XCTAssertEqual(report.failed, 1)
         XCTAssertEqual(report.intendedInsertions, 15)
-        XCTAssertEqual(report.durableInsertions, 5)
+        XCTAssertEqual(report.durableInsertions, 14)
     }
 
     /// Whole-library refresh overlaps at most three network requests. The first
@@ -1091,6 +1092,99 @@ final class FeedRefreshActorTests: XCTestCase {
         let maximumActiveFetches = await fetcher.maximumActiveFetches()
         XCTAssertEqual(results.count, 7)
         XCTAssertEqual(maximumActiveFetches, 3)
+    }
+
+    func testRollingWindowStartsNextFetchWithoutWaitingForSlowSiblings() async throws {
+        let container = cleanContainer()
+        do {
+            let context = ModelContext(container)
+            for index in 0..<6 {
+                context.insert(Podcast(
+                    feedURL: "https://x/rolling-\(index).xml",
+                    title: "Rolling \(index)",
+                    lastSeenPubDate: d1
+                ))
+            }
+            try context.save()
+        }
+        let fetcher = RollingWindowProbeFeed(parsedFeed([parsedEpisode("existing", d1)]))
+        let refresh = Task { @concurrent in
+            await FeedRefreshActor(modelContainer: container).refreshAll(
+                feed: fetcher,
+                autoQueueEnabled: false,
+                isCancelled: { false },
+                onProgress: { _, _ in }
+            )
+        }
+
+        var startedFifth = false
+        for _ in 0..<100 {
+            if await fetcher.fetchCount() >= 5 {
+                startedFifth = true
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await fetcher.releaseBlockedFetches()
+        let results = await refresh.value
+
+        XCTAssertTrue(
+            startedFifth,
+            "A completed slot should start feed five while feeds two and three remain slow"
+        )
+        XCTAssertEqual(results.count, 6)
+    }
+
+    func testNotModifiedMarksRefreshedWithoutEpisodeMutation() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/not-modified.xml"
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(
+                feedURL: feedURL,
+                title: "Unchanged",
+                lastSeenPubDate: d1
+            )
+            let episode = Episode(
+                guid: "existing",
+                title: "Existing",
+                audioURL: "https://x/existing.mp3",
+                pubDate: d1
+            )
+            episode.podcast = podcast
+            context.insert(podcast)
+            context.insert(episode)
+            try FeedRefreshValidatorStore.set(
+                FeedHTTPValidators(etag: "\"old\"", lastModified: nil, representationURL: nil),
+                feedURL: feedURL,
+                in: context
+            )
+            try context.save()
+        }
+        let replacement = FeedHTTPValidators(
+            etag: "\"confirmed\"",
+            lastModified: "today",
+            representationURL: feedURL
+        )
+
+        let report = await FeedRefreshActor(modelContainer: container).refreshAllReport(
+            feed: NotModifiedFeed(validators: replacement),
+            autoQueueEnabled: false,
+            trigger: .backgroundTask,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+        let context = ModelContext(container)
+        let localState = try context.fetch(FetchDescriptor<LocalPodcastState>())
+
+        XCTAssertEqual(report.results.count, 1)
+        XCTAssertTrue(report.results[0].wasNotModified)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 1)
+        XCTAssertNotNil(localState.first?.refreshedAt)
+        XCTAssertEqual(
+            FeedRefreshValidatorStore.validators(feedURL: feedURL, in: context),
+            replacement
+        )
     }
 
     func testActorRefreshAllSurfacesFirstDurableBatchBeforeCompletion() async throws {
@@ -1622,6 +1716,49 @@ private actor RefreshConcurrencyFeed: FeedFetching {
     }
 
     func maximumActiveFetches() -> Int { maximumActive }
+}
+
+private actor RollingWindowProbeFeed: FeedFetching {
+    private let feed: ParsedFeed
+    private var calls = 0
+    private var blocked: [CheckedContinuation<Void, Never>] = []
+
+    init(_ feed: ParsedFeed) { self.feed = feed }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        calls += 1
+        let call = calls
+        if call == 2 || call == 3 {
+            await withCheckedContinuation { continuation in
+                blocked.append(continuation)
+            }
+        }
+        return feed
+    }
+
+    func fetchCount() -> Int { calls }
+
+    func releaseBlockedFetches() {
+        let continuations = blocked
+        blocked.removeAll()
+        continuations.forEach { $0.resume() }
+    }
+}
+
+private struct NotModifiedFeed: FeedFetching {
+    let validators: FeedHTTPValidators
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        XCTFail("A conditional refresh should use refresh(_:)")
+        return ParsedFeed(
+            title: "Unexpected", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: []
+        )
+    }
+
+    func refresh(_ request: FeedRefreshRequest) async throws -> FeedRefreshFetchResult {
+        .notModified(validators: validators)
+    }
 }
 
 private actor OutOfOrderDistinctFeed: FeedFetching {
