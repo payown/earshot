@@ -108,14 +108,14 @@ enum PlaybackStartHaptics {
         guard enabled, applicationIsActive else { return nil }
         return PlaybackStartHapticPlan(
             mode: supportsCustomHaptics ? .customMechanicalPress : .softImpactFallback,
-            totalDurationMilliseconds: 150,
+            totalDurationMilliseconds: 185,
             pressIntensity: 0.85,
             pressSharpness: 0.6,
             tailStartMilliseconds: 12,
-            tailDurationMilliseconds: 138,
-            tailIntensity: 0.3,
+            tailDurationMilliseconds: 173,
+            tailIntensity: 0.34,
             tailSharpness: 0.06,
-            tailDecay: 0.45
+            tailDecay: 0.6
         )
     }
 
