@@ -326,6 +326,288 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).count, 2, "No duplicate rows")
     }
 
+    func testFilterUsesSeparateTenKeptAndTenFilteredInsertionBudgets() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/split-budget.xml"
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(feedURL: feedURL, title: "Segments", lastSeenPubDate: d1)
+            let old = Episode(guid: "old", title: "Old", audioURL: "https://x/old.mp3", pubDate: d1)
+            old.podcast = podcast
+            context.insert(podcast)
+            context.insert(old)
+            let configuration = EpisodeFilterConfiguration(
+                isEnabled: true,
+                mode: .filterMatching,
+                rules: [EpisodeFilterRule(name: "Segments", titlePattern: "Segment*")]
+            )
+            try AppSettingIdentity.setValue(
+                EpisodeFilterCodec.encode(configuration),
+                for: SettingsKey.episodeFilterConfiguration(feedURL: feedURL),
+                in: context
+            )
+            try context.save()
+        }
+        let items = (1...15).flatMap { index -> [ParsedEpisode] in
+            let date = d1.addingTimeInterval(Double(index * 100))
+            var kept = parsedEpisode("kept-\(index)", date)
+            kept.title = "Full show \(index)"
+            var filtered = parsedEpisode("filtered-\(index)", date.addingTimeInterval(1))
+            filtered.title = "Segment \(index)"
+            return [kept, filtered]
+        }
+
+        let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed(items)),
+            autoQueueEnabled: false
+        )
+        let stored = try episodes(container)
+
+        XCTAssertEqual(outcome?.added, 10)
+        XCTAssertEqual(outcome?.filteredCount, 10)
+        XCTAssertEqual(outcome?.keptOverflowCount, 5)
+        XCTAssertEqual(outcome?.filteredOverflowCount, 5)
+        XCTAssertEqual(stored.filter { $0.guid.hasPrefix("kept-") }.count, 10)
+        XCTAssertEqual(stored.filter { $0.guid.hasPrefix("filtered-") }.count, 10)
+        XCTAssertTrue(
+            stored.filter { $0.guid.hasPrefix("filtered-") }.allSatisfy(\.inboxDismissed)
+        )
+        XCTAssertTrue(
+            stored.filter { $0.guid.hasPrefix("kept-") }.allSatisfy { !$0.inboxDismissed }
+        )
+    }
+
+    func testTwentyFiveMixedCandidatesSelectsKeptBeforeApplyingBudgets() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/twenty-five-filtered.xml"
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(feedURL: feedURL, title: "Twenty five", lastSeenPubDate: d1)
+            let old = Episode(
+                guid: "old", title: "Old", audioURL: "https://x/old.mp3", pubDate: d1
+            )
+            old.podcast = podcast
+            context.insert(podcast)
+            context.insert(old)
+            let configuration = EpisodeFilterConfiguration(
+                isEnabled: true,
+                mode: .filterMatching,
+                rules: [EpisodeFilterRule(name: "Segments", titlePattern: "Segment*")]
+            )
+            try AppSettingIdentity.setValue(
+                EpisodeFilterCodec.encode(configuration),
+                for: SettingsKey.episodeFilterConfiguration(feedURL: feedURL),
+                in: context
+            )
+            try context.save()
+        }
+        let catalog = (1...25).map { index -> ParsedEpisode in
+            var item = parsedEpisode("candidate-\(index)", d1.addingTimeInterval(Double(index)))
+            // The five wanted episodes are oldest and would all fall outside the
+            // old newest-ten window if matching happened after prefixing.
+            item.title = index <= 5 ? "Full show \(index)" : "Segment \(index)"
+            return item
+        }
+
+        let optionalOutcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed(catalog)),
+            autoQueueEnabled: false
+        )
+        let outcome = try XCTUnwrap(optionalOutcome)
+        let stored = try episodes(container)
+
+        XCTAssertEqual(outcome.added, 5)
+        XCTAssertEqual(outcome.filteredCount, 10)
+        XCTAssertEqual(outcome.keptOverflowCount, 0)
+        XCTAssertEqual(outcome.filteredOverflowCount, 10)
+        XCTAssertEqual(
+            Set(stored.filter { !$0.inboxDismissed && $0.guid.hasPrefix("candidate-") }.map(\.guid)),
+            Set((1...5).map { "candidate-\($0)" })
+        )
+        XCTAssertEqual(stored.filter { $0.guid.hasPrefix("candidate-") }.count, 15)
+    }
+
+    func testKeepMatchingAllFilteredRecordsRuntimeSafetyWarning() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/runtime-guard.xml"
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(feedURL: feedURL, title: "Host migrated", lastSeenPubDate: d1)
+            let old = Episode(guid: "old", title: "Old", audioURL: "https://x/old.mp3", pubDate: d1)
+            old.podcast = podcast
+            context.insert(podcast)
+            context.insert(old)
+            let configuration = EpisodeFilterConfiguration(
+                isEnabled: true,
+                mode: .keepMatching,
+                rules: [EpisodeFilterRule(name: "Long shows", minimumDurationMinutes: 45)]
+            )
+            try AppSettingIdentity.setValue(
+                EpisodeFilterCodec.encode(configuration),
+                for: SettingsKey.episodeFilterConfiguration(feedURL: feedURL),
+                in: context
+            )
+            try context.save()
+        }
+        let candidates = (1...3).map { parsedEpisode("missing-duration-\($0)", d1.addingTimeInterval(Double($0))) }
+
+        let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed(candidates)),
+            autoQueueEnabled: false
+        )
+        let context = ModelContext(container)
+        let stored = try context.fetch(FetchDescriptor<Episode>())
+
+        XCTAssertEqual(outcome?.added, 0)
+        XCTAssertEqual(outcome?.filteredCount, 3)
+        XCTAssertTrue(outcome?.rejectedAllNewCandidates == true)
+        XCTAssertTrue(stored.filter { $0.guid.hasPrefix("missing-duration-") }.allSatisfy(\.inboxDismissed))
+        XCTAssertNotNil(
+            LocalAppSettingIdentity.value(
+                for: SettingsKey.episodeFilterSafetyWarning(feedURL: feedURL),
+                in: context
+            )
+        )
+    }
+
+    func testBackgroundRefreshPersistsSafetyWarningReachableFromPodcastSettings() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/background-runtime-guard.xml"
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(feedURL: feedURL, title: "Background show", lastSeenPubDate: d1)
+            let old = Episode(
+                guid: "old", title: "Old", audioURL: "https://x/old.mp3", pubDate: d1
+            )
+            old.podcast = podcast
+            context.insert(podcast)
+            context.insert(old)
+            let configuration = EpisodeFilterConfiguration(
+                isEnabled: true,
+                mode: .keepMatching,
+                rules: [EpisodeFilterRule(name: "Full", titlePattern: "Full*")]
+            )
+            try AppSettingIdentity.setValue(
+                EpisodeFilterCodec.encode(configuration),
+                for: SettingsKey.episodeFilterConfiguration(feedURL: feedURL),
+                in: context
+            )
+            try context.save()
+        }
+        var segment = parsedEpisode("segment", d2)
+        segment.title = "Segment"
+
+        let report = await FeedRefreshActor(modelContainer: container).refreshAllReport(
+            feed: FakeFeed(parsedFeed([segment])),
+            autoQueueEnabled: false,
+            trigger: .backgroundTask,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+        let settings = AppSettingsStore(context: ModelContext(container))
+
+        XCTAssertTrue(report.results.first?.outcome.rejectedAllNewCandidates == true)
+        XCTAssertTrue(settings.episodeFilterNeedsReview(forFeedURL: feedURL))
+        XCTAssertNotNil(settings.episodeFilterSafetyWarning(forFeedURL: feedURL))
+    }
+
+    func testSyncedShellAlsoProtectsTenKeptSlotsFromFilteredSegments() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/synced-shell-filter.xml"
+        do {
+            let context = ModelContext(container)
+            context.insert(Podcast(
+                feedURL: feedURL,
+                title: "Synced segments",
+                lastSeenPubDate: d1
+            ))
+            let configuration = EpisodeFilterConfiguration(
+                isEnabled: true,
+                mode: .filterMatching,
+                rules: [EpisodeFilterRule(name: "Segments", titlePattern: "Segment*")]
+            )
+            try AppSettingIdentity.setValue(
+                EpisodeFilterCodec.encode(configuration),
+                for: SettingsKey.episodeFilterConfiguration(feedURL: feedURL),
+                in: context
+            )
+            try context.save()
+        }
+        let items = (1...12).flatMap { index -> [ParsedEpisode] in
+            let date = d1.addingTimeInterval(Double(index * 100))
+            var kept = parsedEpisode("shell-kept-\(index)", date)
+            kept.title = "Full show \(index)"
+            var filtered = parsedEpisode("shell-filtered-\(index)", date.addingTimeInterval(1))
+            filtered.title = "Segment \(index)"
+            return [kept, filtered]
+        }
+
+        let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed(items)),
+            autoQueueEnabled: false
+        )
+        let stored = try episodes(container)
+
+        XCTAssertEqual(outcome?.added, 10)
+        XCTAssertEqual(outcome?.filteredCount, 10)
+        XCTAssertEqual(stored.filter { $0.guid.hasPrefix("shell-kept-") }.count, 10)
+        XCTAssertEqual(stored.filter { $0.guid.hasPrefix("shell-filtered-") }.count, 10)
+    }
+
+    func testFilteredEpisodeNeverAutoQueuesWhileKeptEpisodeStillDoes() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/filtered-auto-queue.xml"
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(
+                feedURL: feedURL,
+                title: "Auto queue segments",
+                autoQueue: true,
+                lastSeenPubDate: d1
+            )
+            let old = Episode(guid: "old", title: "Old", audioURL: "https://x/old.mp3", pubDate: d1)
+            old.podcast = podcast
+            context.insert(podcast)
+            context.insert(old)
+            let configuration = EpisodeFilterConfiguration(
+                isEnabled: true,
+                mode: .filterMatching,
+                rules: [EpisodeFilterRule(name: "Segments", titlePattern: "Segment*")]
+            )
+            try AppSettingIdentity.setValue(
+                EpisodeFilterCodec.encode(configuration),
+                for: SettingsKey.episodeFilterConfiguration(feedURL: feedURL),
+                in: context
+            )
+            try context.save()
+        }
+        var kept = parsedEpisode("kept", d2)
+        kept.title = "Full show"
+        var filtered = parsedEpisode("filtered", d3)
+        filtered.title = "Segment one"
+
+        let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed([kept, filtered])),
+            autoQueueEnabled: true
+        )
+        let stored = try episodes(container)
+        let keptEpisode = try XCTUnwrap(stored.first { $0.guid == "kept" })
+        let filteredEpisode = try XCTUnwrap(stored.first { $0.guid == "filtered" })
+
+        XCTAssertEqual(outcome?.newEpisodeIDs.count, 1)
+        XCTAssertEqual(keptEpisode.status, .inQueue)
+        XCTAssertNotNil(keptEpisode.queueItem)
+        XCTAssertTrue(keptEpisode.inboxDismissed)
+        XCTAssertEqual(filteredEpisode.status, .newEpisode)
+        XCTAssertNil(filteredEpisode.queueItem)
+        XCTAssertTrue(filteredEpisode.inboxDismissed)
+    }
+
     /// Regression for #778: two entries with the same GUID in one response must
     /// be collapsed before either unsaved row is inserted. Reversing their feed
     /// order selects the same canonical payload.
@@ -953,7 +1235,7 @@ final class FeedRefreshActorTests: XCTestCase {
     /// publications in one response. Persist the newest ten only, but advance the
     /// durable high-water mark to the newest publication so the same backlog is
     /// not reconsidered on every subsequent automatic refresh.
-    func testActorRefreshLimitsGenuinelyNewEpisodesToNewestTen() async throws {
+    func testNoFilterGoldenStoresNewestTenOfTwentyFiveAndAdvancesMark() async throws {
         let container = cleanContainer()
         let feedURL = "https://x/established-large.xml"
         let seedContext = ModelContext(container)
@@ -982,6 +1264,9 @@ final class FeedRefreshActorTests: XCTestCase {
 
         let stored = try episodes(container)
         XCTAssertEqual(outcome.added, 10)
+        XCTAssertEqual(outcome.filteredCount, 0)
+        XCTAssertEqual(outcome.keptOverflowCount, 15)
+        XCTAssertFalse(outcome.rejectedAllNewCandidates)
         XCTAssertEqual(stored.count, 11)
         XCTAssertEqual(
             Set(stored.map(\.guid)),
@@ -991,6 +1276,7 @@ final class FeedRefreshActorTests: XCTestCase {
             ModelContext(container).fetch(FetchDescriptor<Podcast>()).first
         )
         XCTAssertEqual(refreshedPodcast.lastSeenPubDate, d1.addingTimeInterval(25))
+        XCTAssertTrue(stored.filter { $0.guid.hasPrefix("new-") }.allSatisfy { !$0.inboxDismissed })
     }
 
     func testLoadOlderEpisodesPagesTenThenTenThenEndAndDismissesHistory() async throws {

@@ -2769,4 +2769,55 @@ She tapped Pause, then Play.
 
 “Still there,” Kashe said. “Good.”
 
+---
+
+Chapter 76 — Build 243
+
+The shelf learned what to leave alone
+
+What changed
+
+Episode filtering is experimental in this build, and I definitely want your
+feedback. Each podcast now has filtering options in Podcast Settings. Rules can
+match an episode title with plain text or a wildcard pattern and can use a
+minimum or maximum duration. Matching is case-insensitive unless you turn that
+off.
+
+Preview checks the newest 50 episodes even while Filter new episodes is off. If
+you turn the switch on, future refreshes apply the rules automatically. When you
+save an active filter, you can also apply it once to episodes already in your
+Inbox or Queue. Filtered episodes stay in the podcast's library. Downloads,
+played state, and listening position are preserved.
+
+If keep-matching rules reject every new candidate in one refresh, Earshot saves
+a warning in Podcast Settings. This is a safety check for feeds that change
+their titles or stop supplying durations.
+
+What to test
+
+Open a podcast, choose Podcast Settings, then Episode Filters. Add title and
+duration rules and compare Preview with the episode list. Try both filter
+matching and keep matching. Preview should update before the main switch is on.
+
+Turn Filter new episodes on, save, and choose whether to apply the rules to
+existing episodes. Matching existing episodes should leave the Inbox or Queue
+but remain in the podcast's episode list. Refresh afterward and confirm new
+episodes follow the same rules. Also try a feed with short segments, where more
+than ten items may arrive together.
+
+Please send feedback from Settings. I especially want to know about a preview
+that disagrees with the saved result, an episode that disappears from the
+podcast library, an unexpected Queue change, a warning that is missing or
+wrong, or any VoiceOver wording or delay that gets in your way.
+
+Kashe opened the morning show and found six clips around the interview she
+wanted. The clips were useful to somebody. They just were not useful to her.
+
+She made one rule, listened through the preview, and saved it. The Inbox grew
+quiet without pretending the other episodes had never existed.
+
+Renata asked if she trusted it.
+
+“It says experimental,” Kashe said. “So I am experimenting.”
+
 More chapters added here as Earshot ships.

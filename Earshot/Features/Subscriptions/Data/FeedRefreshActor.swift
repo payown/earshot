@@ -119,10 +119,13 @@ actor FeedRefreshActor {
     /// not CloudKit state.
     private static let syncedShellInitialEpisodeLimit = 10
     /// An established subscription refreshes frequently, so it should ingest
-    /// only the newest genuinely-new rows. Rebuilding historical gaps made a
+    /// only a bounded set of genuinely-new rows. Rebuilding historical gaps made a
     /// single 45,436-episode inverse relationship monopolize SwiftData and block
     /// the UI even from a background context. Older local rows are preserved.
     private static let ordinaryRefreshNewEpisodeLimit = 10
+    /// Filtered rows are retained for Library recovery, but never consume the
+    /// ten insertion slots reserved for episodes the listener wants to keep.
+    private static let ordinaryRefreshFilteredEpisodeLimit = 10
     /// Store lookups used by explicit historical paging stay bounded even when
     /// the remote feed contains tens of thousands of items.
     private static let olderEpisodeIdentityChunkSize = 50
@@ -925,6 +928,28 @@ actor FeedRefreshActor {
         }
     }
 
+    private struct OrdinaryCandidateSelection {
+        let candidates: [ParsedEpisode]
+        let filteredGUIDs: Set<String>
+        let totalNewCount: Int
+        let keptCountBeforeLimit: Int
+        let filteredCountBeforeLimit: Int
+        let warnsWhenAllFiltered: Bool
+
+        var rejectedAllNewCandidates: Bool {
+            warnsWhenAllFiltered && totalNewCount > 0
+                && keptCountBeforeLimit == 0 && filteredCountBeforeLimit > 0
+        }
+
+        var keptOverflowCount: Int {
+            max(0, keptCountBeforeLimit - FeedRefreshActor.ordinaryRefreshNewEpisodeLimit)
+        }
+
+        var filteredOverflowCount: Int {
+            max(0, filteredCountBeforeLimit - FeedRefreshActor.ordinaryRefreshFilteredEpisodeLimit)
+        }
+    }
+
     /// Diffs `parsed` against `podcast` and inserts new episodes, preserving the
     /// exact behavior of the former main-actor `refresh`: migrated-shell backfill,
     /// dedup-by-guid, future-date clamp on the high-water mark, inbox pre-dismiss
@@ -990,11 +1015,12 @@ actor FeedRefreshActor {
         // newest ten genuinely-new, non-future publications. This preserves all
         // existing history while bounding relationship maintenance for feeds
         // whose GUID format or retained catalog has changed.
-        let candidateEpisodes = ordinaryRefreshCandidates(
+        let selection = ordinaryRefreshSelection(
             from: parsedEpisodes,
             podcast: podcast,
             now: now
         )
+        let candidateEpisodes = selection.candidates
         let existingEpisodes = episodes(
             in: podcast,
             matchingGUIDs: candidateEpisodes.map(\.guid)
@@ -1008,6 +1034,7 @@ actor FeedRefreshActor {
         var newestNewGUID: String?
         var newestNewPub = Date.distantPast
         var newEpisodes: [Episode] = []
+        var filtered = 0
 
         // Lookup by guid for the republish pass below (#397), built once instead
         // of a per-item linear scan.
@@ -1015,7 +1042,7 @@ actor FeedRefreshActor {
             existingEpisodes.map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
         )
         let inboxReentries = resurfaceRepublished(
-            candidateEpisodes,
+            candidateEpisodes.filter { !selection.filteredGUIDs.contains($0.guid) },
             existingByGUID: existingByGUID,
             now: now
         )
@@ -1023,6 +1050,15 @@ actor FeedRefreshActor {
         for item in candidateEpisodes where !existingGUIDs.contains(item.guid) {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
+            if selection.filteredGUIDs.contains(item.guid) {
+                // Version 1's filtered outcome is deliberately reversible using
+                // the existing Library row action: retain a normal new episode,
+                // but keep it out of both Inbox and auto-queue.
+                episode.inboxDismissed = true
+                modelContext.insert(episode)
+                filtered += 1
+                continue
+            }
             let pub = item.pubDate ?? .distantPast
             // New = newer than the mark AND not future-dated (#296).
             let isNewEpisode = pub > mark && pub <= now
@@ -1050,6 +1086,24 @@ actor FeedRefreshActor {
             added += 1
         }
 
+        if selection.keptCountBeforeLimit > Self.ordinaryRefreshNewEpisodeLimit
+            || selection.filteredCountBeforeLimit > Self.ordinaryRefreshFilteredEpisodeLimit {
+            AppLog.subscriptions.info(
+                "Refresh insertion budget for \(podcast.title, privacy: .public): kept=\(selection.keptCountBeforeLimit) filtered=\(selection.filteredCountBeforeLimit)"
+            )
+        }
+        if selection.rejectedAllNewCandidates {
+            let key = SettingsKey.episodeFilterSafetyWarning(feedURL: podcast.feedURL)
+            try? LocalAppSettingIdentity.setValue(
+                "\(now.timeIntervalSince1970)|\(selection.totalNewCount)",
+                for: key,
+                in: modelContext
+            )
+            AppLog.subscriptions.error(
+                "Episode filters excluded all \(selection.totalNewCount) new candidate(s) for \(podcast.title, privacy: .public)"
+            )
+        }
+
         // Advance the mark to the newest non-future pub date; never retreat, never
         // to a future date (#296).
         podcast.lastSeenPubDate = max(mark, Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? mark)
@@ -1073,10 +1127,18 @@ actor FeedRefreshActor {
         }
 
         return ApplyOutcome(
-            refreshOutcome: RefreshOutcome(added: added, wasBackfill: false, newestNewEpisodeGUID: newestNewGUID),
+            refreshOutcome: RefreshOutcome(
+                added: added,
+                wasBackfill: false,
+                newestNewEpisodeGUID: newestNewGUID,
+                filteredCount: filtered,
+                rejectedAllNewCandidates: selection.rejectedAllNewCandidates,
+                keptOverflowCount: selection.keptOverflowCount,
+                filteredOverflowCount: selection.filteredOverflowCount
+            ),
             newEpisodes: newEpisodes,
             inboxReentryEpisodes: inboxReentries,
-            insertedCount: added
+            insertedCount: added + filtered
         )
     }
 
@@ -1093,14 +1155,55 @@ actor FeedRefreshActor {
         podcast: Podcast,
         now: Date
     ) -> [ParsedEpisode] {
+        ordinaryRefreshSelection(from: parsedEpisodes, podcast: podcast, now: now).candidates
+    }
+
+    private func ordinaryRefreshSelection(
+        from parsedEpisodes: [ParsedEpisode],
+        podcast: Podcast,
+        now: Date
+    ) -> OrdinaryCandidateSelection {
         let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
-        return Array(parsedEpisodes
+        let allNew = parsedEpisodes
             .filter {
                 let pub = $0.pubDate ?? .distantPast
                 return pub > mark && pub <= now
             }
             .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
-            .prefix(Self.ordinaryRefreshNewEpisodeLimit))
+        let raw = AppSettingIdentity.value(
+            for: SettingsKey.episodeFilterConfiguration(feedURL: podcast.feedURL),
+            in: modelContext
+        )
+        let configuration = EpisodeFilterCodec.decode(raw)
+        guard configuration.isActiveAtIngest else {
+            return OrdinaryCandidateSelection(
+                candidates: Array(allNew.prefix(Self.ordinaryRefreshNewEpisodeLimit)),
+                filteredGUIDs: [],
+                totalNewCount: allNew.count,
+                keptCountBeforeLimit: allNew.count,
+                filteredCountBeforeLimit: 0,
+                warnsWhenAllFiltered: false
+            )
+        }
+        let kept = allNew.filter {
+            configuration.shouldKeep(title: $0.title, durationSeconds: $0.durationSeconds)
+        }
+        let filtered = allNew.filter {
+            !configuration.shouldKeep(title: $0.title, durationSeconds: $0.durationSeconds)
+        }
+        let selectedKept = kept.prefix(Self.ordinaryRefreshNewEpisodeLimit)
+        let selectedFiltered = filtered.prefix(Self.ordinaryRefreshFilteredEpisodeLimit)
+        let selected = (Array(selectedKept) + Array(selectedFiltered)).sorted {
+            ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast)
+        }
+        return OrdinaryCandidateSelection(
+            candidates: selected,
+            filteredGUIDs: Set(selectedFiltered.map(\.guid)),
+            totalNewCount: allNew.count,
+            keptCountBeforeLimit: kept.count,
+            filteredCountBeforeLimit: filtered.count,
+            warnsWhenAllFiltered: configuration.mode == .keepMatching
+        )
     }
 
     /// Fetch only rows that can participate in this refresh. In particular, do
@@ -1124,20 +1227,40 @@ actor FeedRefreshActor {
         now: Date
     ) -> ApplyOutcome {
         let mark = min(podcast.lastSeenPubDate ?? .distantPast, now)
-        let seed = parsedEpisodes
+        let selection = ordinaryRefreshSelection(
+            from: parsedEpisodes,
+            podcast: podcast,
+            now: now
+        )
+        let selectedNewGUIDs = Set(selection.candidates.map(\.guid))
+        let backlogFillCount = max(
+            0, Self.syncedShellInitialEpisodeLimit - selection.candidates.count
+        )
+        let backlog = parsedEpisodes
+            .filter { !selectedNewGUIDs.contains($0.guid) }
             .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
-            .prefix(Self.syncedShellInitialEpisodeLimit)
+            .prefix(backlogFillCount)
+        let seed = (selection.candidates + Array(backlog)).sorted {
+            ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast)
+        }
         let autoQueueOn = podcast.autoQueue && autoQueueEnabled
         var genuinelyNew: [Episode] = []
         var autoQueued: [Episode] = []
         var newestNewGUID: String?
         var newestNewPub = Date.distantPast
+        var filtered = 0
 
         for item in seed {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
             let pub = item.pubDate ?? .distantPast
             let isNewEpisode = pub > mark && pub <= now
+            if isNewEpisode, selection.filteredGUIDs.contains(item.guid) {
+                episode.inboxDismissed = true
+                modelContext.insert(episode)
+                filtered += 1
+                continue
+            }
             episode.inboxDismissed = !isNewEpisode || autoQueueOn
             modelContext.insert(episode)
             if isNewEpisode {
@@ -1159,6 +1282,17 @@ actor FeedRefreshActor {
             enqueueAtEnd(autoQueued)
             enforceQueueCap(for: podcast)
         }
+        if selection.rejectedAllNewCandidates {
+            let key = SettingsKey.episodeFilterSafetyWarning(feedURL: podcast.feedURL)
+            try? LocalAppSettingIdentity.setValue(
+                "\(now.timeIntervalSince1970)|\(selection.totalNewCount)",
+                for: key,
+                in: modelContext
+            )
+            AppLog.subscriptions.error(
+                "Episode filters excluded all \(selection.totalNewCount) new candidate(s) while seeding \(podcast.title, privacy: .public)"
+            )
+        }
         AppLog.subscriptions.info(
             "Seeded synced subscription \(podcast.title, privacy: .public) with \(seed.count) recent episode(s); \(genuinelyNew.count) genuinely new"
         )
@@ -1166,7 +1300,11 @@ actor FeedRefreshActor {
             refreshOutcome: RefreshOutcome(
                 added: genuinelyNew.count,
                 wasBackfill: false,
-                newestNewEpisodeGUID: newestNewGUID
+                newestNewEpisodeGUID: newestNewGUID,
+                filteredCount: filtered,
+                rejectedAllNewCandidates: selection.rejectedAllNewCandidates,
+                keptOverflowCount: selection.keptOverflowCount,
+                filteredOverflowCount: selection.filteredOverflowCount
             ),
             newEpisodes: genuinelyNew,
             inboxReentryEpisodes: [],

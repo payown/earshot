@@ -160,7 +160,11 @@ struct PodcastIdentityService {
 /// collapsed in the same save.
 enum AppSettingIdentity {
     static func canonicalKey(_ rawKey: String) -> String {
-        for prefix in [SettingsKey.podcastFilterPrefix, SettingsKey.podcastInboxCapPrefix]
+        for prefix in [
+            SettingsKey.podcastFilterPrefix,
+            SettingsKey.podcastInboxCapPrefix,
+            SettingsKey.episodeFilterConfigurationPrefix,
+        ]
         where rawKey.hasPrefix(prefix) {
             return prefix + FeedURLIdentity.canonical(String(rawKey.dropFirst(prefix.count)))
         }
@@ -173,7 +177,8 @@ enum AppSettingIdentity {
             FetchDescriptor<AppSetting>(predicate: #Predicate { $0.key == key })
         )
         if key.hasPrefix(SettingsKey.podcastFilterPrefix)
-            || key.hasPrefix(SettingsKey.podcastInboxCapPrefix) {
+            || key.hasPrefix(SettingsKey.podcastInboxCapPrefix)
+            || key.hasPrefix(SettingsKey.episodeFilterConfigurationPrefix) {
             let existingIDs = Set(matches.map(\.persistentModelID))
             matches.append(
                 contentsOf: try context.fetch(FetchDescriptor<AppSetting>()).filter {

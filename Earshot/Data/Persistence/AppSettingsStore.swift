@@ -158,6 +158,22 @@ enum SettingsKey {
         podcastInboxCapPrefix + FeedURLIdentity.canonical(feedURL)
     }
 
+    /// Versioned per-podcast ingest-filter JSON. Mirrored through the existing
+    /// AppSetting projection; no SwiftData schema change is involved.
+    static let episodeFilterConfigurationPrefix = "episode_filter_configuration_"
+
+    static func episodeFilterConfiguration(feedURL: String) -> String {
+        episodeFilterConfigurationPrefix + FeedURLIdentity.canonical(feedURL)
+    }
+
+    /// Device-local unresolved runtime guard. It remains visible until the user
+    /// reviews and saves that podcast's filters.
+    static let episodeFilterSafetyWarningPrefix = "episode_filter_safety_warning_"
+
+    static func episodeFilterSafetyWarning(feedURL: String) -> String {
+        episodeFilterSafetyWarningPrefix + FeedURLIdentity.canonical(feedURL)
+    }
+
     // Device-local acknowledgement for a podcast whose audio was verified to
     // require cleartext HTTP (#709). Kept out of the mirrored-key allowlist: a
     // listener approves the network risk independently on each device.
@@ -221,7 +237,8 @@ enum AppSettingScope {
     static func isLocal(_ key: String) -> Bool {
         let canonical = AppSettingIdentity.canonicalKey(key)
         if canonical.hasPrefix(SettingsKey.podcastFilterPrefix)
-            || canonical.hasPrefix(SettingsKey.podcastInboxCapPrefix) {
+            || canonical.hasPrefix(SettingsKey.podcastInboxCapPrefix)
+            || canonical.hasPrefix(SettingsKey.episodeFilterConfigurationPrefix) {
             return false
         }
         return !mirroredKeys.contains(canonical)
@@ -595,6 +612,43 @@ final class AppSettingsStore {
     /// shadowed by an older saved cap on a future re-subscribe.
     func setPodcastInboxCap(_ cap: Int?, forFeedURL feedURL: String) {
         setOptionalInt(cap, for: SettingsKey.podcastInboxCap(feedURL: feedURL))
+    }
+
+    func episodeFilterConfiguration(forFeedURL feedURL: String) -> EpisodeFilterConfiguration {
+        EpisodeFilterCodec.decode(
+            rawValue(SettingsKey.episodeFilterConfiguration(feedURL: feedURL))
+        )
+    }
+
+    func setEpisodeFilterConfiguration(
+        _ configuration: EpisodeFilterConfiguration,
+        forFeedURL feedURL: String
+    ) throws {
+        let key = SettingsKey.episodeFilterConfiguration(feedURL: feedURL)
+        let value = try EpisodeFilterCodec.encode(configuration)
+        do {
+            try AppSettingIdentity.setValue(value, for: key, in: context)
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+        NotificationCenter.default.post(
+            name: .earshotMirroredSettingDidChange,
+            object: AppSettingIdentity.canonicalKey(key)
+        )
+    }
+
+    func episodeFilterSafetyWarning(forFeedURL feedURL: String) -> String? {
+        rawValue(SettingsKey.episodeFilterSafetyWarning(feedURL: feedURL))
+    }
+
+    func episodeFilterNeedsReview(forFeedURL feedURL: String) -> Bool {
+        episodeFilterSafetyWarning(forFeedURL: feedURL)?.isEmpty == false
+    }
+
+    func clearEpisodeFilterSafetyWarning(forFeedURL feedURL: String) {
+        setRawValue("", for: SettingsKey.episodeFilterSafetyWarning(feedURL: feedURL))
     }
 
     // MARK: Podcast cap grandfathering (#635)
