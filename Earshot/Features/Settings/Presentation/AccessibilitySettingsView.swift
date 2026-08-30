@@ -38,9 +38,9 @@ struct AccessibilitySettingsView: View {
                     }
                 }
             } header: {
-                Text("Library podcasts")
+                Text("Podcast list details")
             } footer: {
-                Text("Brief speaks a short description. Full can make each Library item lengthy.")
+                Text("Brief speaks a short description. Full can make podcast items in Library, search, and category browsing lengthy.")
             }
         }
         .navigationTitle("Accessibility")

@@ -101,6 +101,8 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   (Chapter 12)
 - Kashe keeps a mental "look that up later" list from things hosts mention
   mid-episode -- usually never gets to it (Chapter 13)
+- Kashe discovers an Actual Play show by browsing categories instead of using
+  the mental lookup list she has carried since Chapter 13.
 - Her work means moving mobility equipment: wrestling a wheelchair into her
   trunk, blood pressure cuffs, seatbelts; she pauses constantly, both hands
   busy (Chapter 14)
@@ -2847,5 +2849,31 @@ This time the Inbox told her it was checking. She flicked past the message and k
 She sent Renata a message before she could decide it was too small to mention.
 
 “I can tell what it is doing now,” she wrote. “I am still watching whether it does enough.”
+
+---
+
+The aisle beside the search box
+
+What changed
+
+Add Podcast now lets you browse Apple Podcasts categories and their subcategories. Open a category to see podcasts, then open a show, follow or unfollow it, and use the same details and actions you get from search.
+
+The screen is cleaner too. Search sits directly below the heading, before the RSS feed option. VoiceOver no longer calls every expandable category a heading or repeats “result one of” on each podcast. It announces the result count once instead.
+
+Podcast descriptions in search and category results now follow your Podcast list details choice under Settings, Accessibility. Choose Off, Brief, or Full just as you do for the Library. Descriptions load from each podcast feed, so some may arrive a moment after the first results appear.
+
+What to test
+
+Open Add Podcast and browse several categories and subcategories. Make sure expanding and collapsing categories is clear without extra heading speech. Open a podcast, follow or unfollow it, and confirm the detail screen and actions match a podcast found through search.
+
+Search for a podcast and listen through several results. You should hear the total once, not a position on every row. Under Settings, Accessibility, switch Podcast list details among Off, Brief, and Full. Check the Library, search results, and category results after each choice. Tell me about missing or stale descriptions, slow VoiceOver navigation, confusing category names, or any result that behaves differently depending on how you found it.
+
+Kashe had a list of shows she meant to look up. The list lived in her head, which meant it was excellent at collecting names and poor at returning them.
+
+She opened Add Podcast to search for one and found categories beside it. Fiction led to Actual Play, then to a show she had never heard Renata mention. She listened to the description, opened the details, and followed it.
+
+Later, Renata asked what she had searched for.
+
+“I didn’t,” Kashe said. “I took the aisle beside the search box.”
 
 More chapters added here as Earshot ships.

@@ -94,9 +94,9 @@ struct ITunesSearchService: Sendable {
     /// `feedUrl` under different collection entries). Because a result's `id` IS
     /// its feed URL, those duplicates produced colliding `id`s, which desynced
     /// SwiftUI's `ForEach` index→row binding and mis-numbered the "result N of M"
-    /// VoiceOver position (#501). Deduping here fixes that at the source AND makes
-    /// the count honest — the user never sees, or hears a total inflated by, the
-    /// same show twice.
+    /// row identity. Deduping here fixes that at the source and keeps the one-time
+    /// result-count announcement honest — the user never sees or hears a total
+    /// inflated by the same show twice.
     ///
     /// Pure and `static` so the order-preserving, first-wins behaviour is
     /// unit-testable without a network round-trip.

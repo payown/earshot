@@ -68,6 +68,12 @@ struct SearchView<HeaderContent: View>: View {
     /// content.
     let scope: SearchScope
 
+    /// The Library's full Add Podcast sheet supplies its own compact landing rows
+    /// (categories, RSS, OPML), so it suppresses the large empty-state illustration
+    /// and pins search beneath the title. Onboarding's standalone search keeps the
+    /// established explanatory empty state.
+    let usesCompactLanding: Bool
+
     /// Overrides the navigation title. The Library toolbar search keeps the default
     /// "Search"; the search-first Add Podcast screen passes "Add podcast" so the bar
     /// reads as the add flow it now is.
@@ -85,8 +91,10 @@ struct SearchView<HeaderContent: View>: View {
     /// via `.searchFocused` so we focus the field itself, never a container.
     @FocusState private var searchFieldFocused: Bool
 
-    /// Caller-supplied content rendered as the FIRST section of the results `List`,
-    /// above any local or directory results. This is the reliable home for screen
+    /// Caller-supplied secondary content rendered after search results. When the
+    /// query is empty it is the screen's landing content; while searching it follows
+    /// the results so the result set stays close to the search field. This is the
+    /// reliable home for screen
     /// affordances that must stay reachable while the search field is focused and the
     /// keyboard is up: because it's ordinary `List` content (not nav-bar or keyboard
     /// chrome), VoiceOver always has it in the swipe path and scrolls it into view —
@@ -99,9 +107,11 @@ struct SearchView<HeaderContent: View>: View {
         scope: SearchScope = .addPodcast,
         title: String? = nil,
         autoFocusSearch: Bool = false,
+        usesCompactLanding: Bool = false,
         @ViewBuilder headerContent: () -> HeaderContent = { EmptyView() }
     ) {
         self.scope = scope
+        self.usesCompactLanding = usesCompactLanding
         self.titleOverride = title
         self.autoFocusSearch = autoFocusSearch
         self.headerContent = headerContent()
@@ -120,15 +130,12 @@ struct SearchView<HeaderContent: View>: View {
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
-    @Environment(EntitlementStore.self) private var entitlements
+    @Environment(SettingsStore.self) private var settings
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
     @Query private var podcasts: [Podcast]
     @Query private var episodes: [Episode]
     @Query private var bookmarks: [Bookmark]
-    /// Drives the subscribe-to-folder offer (#764): the picker is only offered when
-    /// this is non-empty (decision F8), so a user with no folders is never
-    /// interrupted by a picker they'd have to populate first.
-    @Query private var folders: [PodcastFolder]
 
     @State private var query = ""
     @State private var directoryState: DirectoryState = .idle
@@ -141,21 +148,6 @@ struct SearchView<HeaderContent: View>: View {
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
-    /// Programmatic navigation target for a directory row (#499). Set by the row's
-    /// primary tap and its VoiceOver Activate action alike, so both paths land on
-    /// the same destination.
-    @State private var directoryNavigation: DirectoryNavigation?
-    /// Presents the Earshot Plus paywall (#632) when a subscribe attempt hits
-    /// the free-tier podcast cap. Set from `subscribe(_:)`'s / `toggleFollow(_:)`'s
-    /// catch block, in ADDITION to the existing VoiceOver announcement — never
-    /// instead of it, since a user who dismisses the paywall without acting
-    /// still needs the spoken/visible reason the follow didn't happen.
-    @State private var showPaywall = false
-    /// A pending subscribe-to-folder offer (#764). Set to the just-followed podcast
-    /// when the user already has folders; presents the shared ``FolderPickerView``
-    /// in `.add` mode so they can file the new show, or Cancel to skip.
-    @State private var subscribeFolderPick: FolderPickRequest?
-
     private let itunes = ITunesSearchService()
 
     /// How long the query must be quiet before a directory request fires. Computed
@@ -185,17 +177,23 @@ struct SearchView<HeaderContent: View>: View {
 
     var body: some View {
         List {
-            // Caller-supplied rows (e.g. the Add Podcast screen's secondary add
-            // paths) live at the top of the List as real content, so they stay in
-            // VoiceOver's swipe path with the keyboard up.
-            headerContent
-
             if scope.showsPodcasts && !matchedPodcasts.isEmpty {
                 Section(header: Text("Podcasts").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedPodcasts) { podcast in
                         NavigationLink(value: podcast) {
                             Text(podcast.title)
                         }
+                        .accessibilityLabel(PodcastRowSpeech.label(
+                            title: podcast.title,
+                            author: podcast.author,
+                            isReadOnly: false
+                        ))
+                        .modifier(OptionalSpokenValue(value: voiceOverEnabled
+                            ? PodcastRowSpeech.value(
+                                for: podcast,
+                                mode: settings.spokenPodcastDescriptionMode
+                            )
+                            : nil))
                     }
                 }
             }
@@ -224,9 +222,15 @@ struct SearchView<HeaderContent: View>: View {
             if scope.showsDirectory {
                 directorySection
             }
+
+            // Secondary add paths remain real List content and therefore stay in
+            // VoiceOver's swipe path with the keyboard up. Placing them after active
+            // results keeps the search field and its results together; with an empty
+            // query these rows naturally become the landing content.
+            headerContent
         }
         .navigationTitle(titleOverride ?? "Search")
-        .searchable(text: $query, prompt: searchPrompt)
+        .searchable(text: $query, placement: searchPlacement, prompt: searchPrompt)
         .modifier(SearchFieldFocus(focused: $searchFieldFocused, autoFocus: autoFocusSearch))
         // The directory search only ever fires in a directory-backed scope (Add
         // Podcast); in `.library` scope `scheduleDirectorySearch` is never wired
@@ -237,27 +241,19 @@ struct SearchView<HeaderContent: View>: View {
         }
         .onDisappear { directoryTask?.cancel() }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
-        // Programmatic destination for a directory row's primary Activate / tap.
-        // An un-subscribed hit opens the lightweight preview; an already-subscribed
-        // one routes to the existing EpisodeListView (acceptance #4, #499).
-        .navigationDestination(item: $directoryNavigation) { destination in
-            switch destination {
-            case let .preview(result): PodcastPreviewView(result: result)
-            case let .subscribed(podcast): EpisodeListView(podcast: podcast)
-            }
-        }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
-        // Earshot Plus paywall (#632), presented on top of the free-tier
-        // podcast cap. Dismissible via its own explicit Close button, never
-        // drag-only.
-        .sheet(isPresented: $showPaywall) { PaywallView() }
-        // Subscribe-to-folder offer (#764): only presented when the user already
-        // has folders (decision F8, gated in `subscribe`). The shared picker files
-        // the new show and announces the result, or Cancel skips.
-        .folderPicker($subscribeFolderPick)
         .overlay { emptyOverlay }
+    }
+
+    private var searchPlacement: SearchFieldPlacement {
+        switch (scope, usesCompactLanding) {
+        case (.addPodcast, true):
+            return .navigationBarDrawer(displayMode: .always)
+        default:
+            return .automatic
+        }
     }
 
     /// The prompt shown in the search field, tailored to the scope so VoiceOver and
@@ -283,8 +279,15 @@ struct SearchView<HeaderContent: View>: View {
                 ContentUnavailableView("Search your library", systemImage: "magnifyingglass",
                                        description: Text("Find podcasts you follow, episodes, and bookmarks."))
             case .addPodcast:
-                ContentUnavailableView("Find a podcast to follow", systemImage: "magnifyingglass",
-                                       description: Text("Search by show or author. The directory is searched automatically as you type."))
+                if usesCompactLanding {
+                    EmptyView()
+                } else {
+                    ContentUnavailableView(
+                        "Find a podcast to follow",
+                        systemImage: "magnifyingglass",
+                        description: Text("Search by show or author. The directory is searched automatically as you type.")
+                    )
+                }
             }
         } else if scope == .library && !hasLocalResults {
             ContentUnavailableView("No results in your library", systemImage: "magnifyingglass",
@@ -326,116 +329,9 @@ struct SearchView<HeaderContent: View>: View {
                         .accessibilityHint("Retry searching the iTunes podcast directory")
                     }
                 case .results(let results):
-                    // Enumerate so each row knows its one-based position and the
-                    // total, for the "result N of M" VoiceOver value (#501). The
-                    // index/count follow the displayed relevance order. `results`
-                    // is a plain in-memory array (max ~50 iTunes hits), not a
-                    // SwiftData `@Query`, so `enumerated()` here doesn't defeat
-                    // lazy `@Query` rendering.
-                    //
-                    // Identify rows by the enumerated `offset` (always unique
-                    // 0..<count), NOT by `element.id`. A result's `id` is its feed
-                    // URL, and iTunes can return the same feed twice; the upstream
-                    // dedupe collapses those, but keying on `offset` guarantees
-                    // index↔row can never desync even if any other field ever
-                    // collides, so the "result N of M" position stays in step (#501).
-                    ForEach(Array(results.enumerated()), id: \.offset) { offset, result in
-                        directoryRow(result, index: offset, total: results.count)
-                    }
+                    DirectoryPodcastResults(results: results)
                 }
             }
-        }
-    }
-
-    /// A directory result row with TWO distinct VoiceOver actions (#499):
-    ///
-    /// - Primary Activate (double-tap) opens the podcast: an un-subscribed hit goes
-    ///   to ``PodcastPreviewView`` to read about the show first; an already-followed
-    ///   one to the existing `EpisodeListView`. It does NOT follow.
-    /// - A single Follow / Unfollow rotor action toggles subscription, with the
-    ///   label reflecting current state and an announcement on completion.
-    ///
-    /// The whole row is collapsed into ONE accessibility element with
-    /// `children: .ignore`, so the inner navigate Button and Follow Button don't
-    /// each create their own VoiceOver stop. The element is marked a button, its
-    /// `.default` action navigates, and the toggle is exposed as a named action —
-    /// keeping Activate and Follow genuinely separate. Sighted users still get two
-    /// real tap targets: the row body navigates, the trailing button toggles.
-    ///
-    /// `index` (zero-based) and `total` drive the "result N of M" position context
-    /// in the row's accessibility value (#501), composed after the "Following"
-    /// state so a subscribed row reads "Following, result 4 of 50" and an
-    /// un-subscribed one "result 4 of 50".
-    private func directoryRow(_ result: PodcastSearchResult, index: Int, total: Int) -> some View {
-        let subscribed = isSubscribed(result)
-        let toggleLabel = FollowToggle.actionLabel(subscribed: subscribed)
-        return HStack(spacing: Spacing.md) {
-            Button {
-                openDetail(result)
-            } label: {
-                HStack(spacing: Spacing.md) {
-                    PodcastArtwork(urlString: result.artworkURL)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(result.title).font(.headline).lineLimit(2)
-                        if let author = result.author {
-                            Text(author).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Button(toggleLabel) { toggleFollow(result) }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel([result.title, result.author].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Opens this podcast")
-        // Value carries "result N of M" position-in-set context (#501), prefixed
-        // with "Following, " when subscribed. The phrase is always present, so the
-        // value is never empty in either state — no VoiceOver dead-air pause — and
-        // the title stays in the label above, never buried in the value.
-        .accessibilityValue(
-            SearchResultPosition.rowValue(subscribed: subscribed, index: index, total: total)
-        )
-        // Default action = Activate (double-tap): navigate, never follow.
-        .accessibilityAction { openDetail(result) }
-        // Single follow control, a toggle that reads "Follow" / "Unfollow".
-        .accessibilityAction(named: Text(toggleLabel)) { toggleFollow(result) }
-    }
-
-    private func isSubscribed(_ result: PodcastSearchResult) -> Bool {
-        podcasts.contains { FeedURLIdentity.matches($0.feedURL, result.feedURL) }
-    }
-
-    /// Routes a directory row's primary tap / Activate: an already-followed show to
-    /// the existing episode list, an un-subscribed one to the read-first preview.
-    private func openDetail(_ result: PodcastSearchResult) {
-        if let existing = podcasts.first(where: {
-            FeedURLIdentity.matches($0.feedURL, result.feedURL)
-        }) {
-            directoryNavigation = .subscribed(existing)
-        } else {
-            directoryNavigation = .preview(result)
-        }
-    }
-
-    /// Follow / Unfollow toggle for a directory row. The `@Query` updates
-    /// reactively, so the row's label, value, and rotor action flip on completion
-    /// without the user re-entering the row.
-    private func toggleFollow(_ result: PodcastSearchResult) {
-        if let existing = podcasts.first(where: {
-            FeedURLIdentity.matches($0.feedURL, result.feedURL)
-        }) {
-            if SubscriptionRepository(context: context).unsubscribe(existing) {
-                Announcer.announce(FollowToggle.announcement(nowFollowing: false, title: result.title))
-            }
-        } else {
-            subscribe(result)
         }
     }
 
@@ -533,48 +429,10 @@ struct SearchView<HeaderContent: View>: View {
         Announcer.announce(summary)
     }
 
-    private func subscribe(_ result: PodcastSearchResult) {
-        Task {
-            do {
-                let podcast = try await SubscriptionRepository(context: context, downloader: downloads, isEntitled: entitlements.isEntitled).subscribe(feedURL: result.feedURL)
-                Announcer.announce(FollowToggle.announcement(nowFollowing: true, title: result.title))
-                // Offer to file the new show only when folders already exist
-                // (decision F8, #764). The presentation is deferred ~0.6s so the
-                // "Now following" announcement lands before the sheet's
-                // .screenChanged utterance would otherwise preempt it — the
-                // presentation-side mirror of the picker's own 0.5s post-dismiss
-                // deferral. The picker announces its own outcome.
-                if FolderLogic.shouldOfferSubscribeToFolder(existingFolderCount: folders.count) {
-                    try? await Task.sleep(for: .milliseconds(600))
-                    subscribeFolderPick = .podcast(podcast, mode: .add)
-                }
-            } catch {
-                AppLog.networking.error("Subscribe from search failed for \(result.feedURL, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                // Curated, VoiceOver-safe message — never the raw transport
-                // string (#688). The title is safe via the Announcer language-pin.
-                Announcer.announce("Couldn't follow \(result.title). \(SubscribeErrorMessage.userFacing(error))")
-                // In addition to the announcement above: an 11th-podcast attempt
-                // is exactly the moment a paywall should offer the upgrade (#632).
-                if case SubscriptionError.podcastCapReached = error {
-                    showPaywall = true
-                }
-            }
-        }
-    }
-
     private func shareItems(for episode: Episode) -> [Any] {
         if let url = URL(string: episode.audioURL) { return [episode.title, url] }
         return [episode.title]
     }
-}
-
-/// The destination a directory search row navigates to on its primary Activate /
-/// tap (#499). `Hashable` so it drives `navigationDestination(item:)`. An
-/// un-subscribed result opens the read-first ``PodcastPreviewView``; an
-/// already-followed one routes to the existing `EpisodeListView`.
-private enum DirectoryNavigation: Hashable {
-    case preview(PodcastSearchResult)
-    case subscribed(Podcast)
 }
 
 /// Optionally moves keyboard focus onto the `.searchable` field as the screen

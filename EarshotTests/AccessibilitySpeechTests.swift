@@ -68,4 +68,33 @@ final class AccessibilitySpeechTests: XCTestCase {
         podcast.podcastDescription = "Updated description"
         XCTAssertEqual(PodcastRowSpeech.value(for: podcast, mode: .brief), "Updated description")
     }
+
+    func testDirectoryPodcastSpeechRespectsDescriptionModeWithoutRepeatingPosition() {
+        XCTAssertNil(
+            DirectoryPodcastRowSpeech.value(
+                subscribed: false,
+                feedURL: "https://example.com/feed",
+                description: "<p>A thoughtful show about accessibility.</p>",
+                mode: .off
+            )
+        )
+        XCTAssertEqual(
+            DirectoryPodcastRowSpeech.value(
+                subscribed: true,
+                feedURL: "https://example.com/feed",
+                description: "<p>A thoughtful show about accessibility.</p>",
+                mode: .brief
+            ),
+            "Following, A thoughtful show about accessibility."
+        )
+        XCTAssertEqual(
+            DirectoryPodcastRowSpeech.value(
+                subscribed: false,
+                feedURL: "https://example.com/feed",
+                description: "<p>A thoughtful show about accessibility.</p>",
+                mode: .full
+            ),
+            "A thoughtful show about accessibility."
+        )
+    }
 }

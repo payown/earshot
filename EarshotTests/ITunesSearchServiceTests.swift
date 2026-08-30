@@ -80,7 +80,7 @@ final class ITunesSearchServiceTests: XCTestCase {
     /// iTunes can return the same show more than once under different collection
     /// entries that share a `feedUrl`. Later duplicates are dropped and the first
     /// occurrence (highest relevance) is kept, so the result `id`s stay unique and
-    /// the "result N of M" count is honest (#501).
+    /// the once-per-search result count is honest (#501).
     func test_dedupe_collapsesDuplicateFeedURLs_keepingFirstOccurrence() {
         let input = [
             PodcastSearchResult(id: "https://a.com/feed", title: "A (primary)", author: "x",
