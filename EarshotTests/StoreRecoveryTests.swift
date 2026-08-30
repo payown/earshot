@@ -25,6 +25,9 @@ final class StoreRecoveryTests: XCTestCase {
         MigrationBackupManager.injectedQuarantineCleanupFailure = false
         MigrationBackupManager.injectedEraseFailureAfterMoveCount = nil
         MigrationBackupManager.injectedEraseRollbackFailure = false
+        MigrationBackupManager.injectedRestoreFailureAfterPrimaryInstall = false
+        MigrationBackupManager.injectedRestoreInterruptionAfterValidationJournal = false
+        MigrationBackupManager.injectedAvailableBytes = nil
         if let dir { try? FileManager.default.removeItem(at: dir) }
     }
 
@@ -80,6 +83,65 @@ final class StoreRecoveryTests: XCTestCase {
             ))
             try container.mainContext.save()
         }
+    }
+
+    func testInterruptedSnapshotStagingIsRemovedBeforeSpaceGateAndRetry() throws {
+        try seedV6RecoveryStore()
+        let root = MigrationBackupManager.backupRoot(for: storeURL)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let interrupted = root.appending(
+            path: ".incomplete-\(UUID().uuidString)", directoryHint: .isDirectory
+        )
+        let similarlyNamedUserDirectory = root.appending(
+            path: ".incomplete-not-a-uuid", directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: interrupted, withIntermediateDirectories: false
+        )
+        try FileManager.default.createDirectory(
+            at: similarlyNamedUserDirectory, withIntermediateDirectories: false
+        )
+        try Data(repeating: 0xA5, count: 1_048_576).write(
+            to: interrupted.appending(path: "partial-snapshot")
+        )
+
+        MigrationBackupManager.injectedAvailableBytes = 0
+        XCTAssertThrowsError(try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)) {
+            guard case MigrationBackupError.insufficientStorage = $0 else {
+                return XCTFail("expected the storage gate after cleanup, got \($0)")
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: interrupted.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: similarlyNamedUserDirectory.path))
+
+        MigrationBackupManager.injectedAvailableBytes = .max
+        let backup = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
+        XCTAssertEqual(backup.sourceSchemaMajor, 6)
+        XCTAssertEqual(backup.targetSchemaMajor, 12)
+        XCTAssertNotNil(MigrationBackupManager.latestRestorableBackup(at: storeURL))
+    }
+
+    func testUnchangedSourceRetryRemovesStaleSnapshotBeforeSpaceGate() throws {
+        try seedV6RecoveryStore()
+        let stale = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
+        try addCurrentPodcast()
+        XCTAssertEqual(try podcastCount(), 2)
+
+        MigrationBackupManager.injectedAvailableBytes = 0
+        XCTAssertThrowsError(try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)) {
+            guard case MigrationBackupError.insufficientStorage = $0 else {
+                return XCTFail("expected the post-cleanup storage gate, got \($0)")
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.directoryURL.path))
+        XCTAssertEqual(try podcastCount(), 2, "cleanup must not mutate the live source")
+
+        MigrationBackupManager.injectedAvailableBytes = .max
+        let fresh = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
+        XCTAssertNotEqual(fresh.id, stale.id)
+        XCTAssertEqual(fresh.sourceSchemaMajor, 6)
+        XCTAssertEqual(try podcastCount(), 2)
+        XCTAssertEqual(MigrationBackupManager.latestRestorableBackup(at: storeURL)?.id, fresh.id)
     }
 
     /// Writes a store at a schema NEWER than the app's current V4 (an extra
@@ -258,7 +320,7 @@ final class StoreRecoveryTests: XCTestCase {
         try seedV6RecoveryStore()
         let backup = try MigrationBackupManager.prepareVerifiedBackup(at: storeURL)
         XCTAssertEqual(backup.sourceSchemaMajor, 6)
-        XCTAssertEqual(backup.targetSchemaMajor, 11)
+        XCTAssertEqual(backup.targetSchemaMajor, 12)
         XCTAssertEqual(backup.format, .verifiedSnapshot)
         XCTAssertTrue(
             FileManager.default.fileExists(
@@ -369,10 +431,10 @@ final class StoreRecoveryTests: XCTestCase {
             at: MigrationBackupManager.backupRoot(for: storeURL),
             includingPropertiesForKeys: nil).count, 2)
 
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 12)
         XCTAssertNotNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))
 
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 12)
         XCTAssertNil(MigrationBackupManager.latestRecordedBackup(at: storeURL))
     }
 
@@ -380,13 +442,13 @@ final class StoreRecoveryTests: XCTestCase {
         try seedV6RecoveryStore()
         let legacyDirectory = try XCTUnwrap(ModelContainerFactory.backupStoreFiles(at: storeURL))
 
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 12)
         XCTAssertTrue(FileManager.default.fileExists(atPath: legacyDirectory.path))
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: legacyDirectory.appending(path: "migration-retention.json").path
         ))
 
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 12)
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacyDirectory.path))
     }
 
@@ -394,8 +456,8 @@ final class StoreRecoveryTests: XCTestCase {
         try Data([0x00, 0x01, 0x02, 0x03, 0xFF]).write(to: storeURL)
         let resetBackup = try XCTUnwrap(ModelContainerFactory.backupStoreFiles(at: storeURL))
 
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
-        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 11)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 12)
+        MigrationBackupManager.noteSuccessfulTargetOpen(at: storeURL, targetSchemaMajor: 12)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: resetBackup.path))
     }

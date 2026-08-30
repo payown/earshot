@@ -13,6 +13,12 @@ final class Podcast {
     var language: String?
     var category: String?
 
+    /// Subscription ownership marker introduced by schema V12. A missing or
+    /// unrecognized value remains a followed podcast for forward-safe legacy
+    /// behavior. Application semantics are added behind a central policy in the
+    /// next phase; schema migration intentionally performs no backfill.
+    var subscriptionStateRaw: String?
+
     // Content-flow settings
     var autoQueue: Bool = false
     /// nil = off. Optional so V2→V3 is a SwiftData-native lightweight migration
@@ -64,6 +70,7 @@ final class Podcast {
         websiteURL: String? = nil,
         language: String? = nil,
         category: String? = nil,
+        subscriptionStateRaw: String? = nil,
         autoQueue: Bool = false,
         // Default nil (off) so a fresh insert and a row migrated from V2 read
         // identically — both nil, both treated as off (#425).
@@ -88,6 +95,7 @@ final class Podcast {
         self.websiteURL = websiteURL
         self.language = language
         self.category = category
+        self.subscriptionStateRaw = subscriptionStateRaw
         self.autoQueue = autoQueue
         self.notificationEnabled = notificationEnabled
         self.speedOverride = speedOverride

@@ -2256,19 +2256,19 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
     }
 
     private func makeApplicationContainer() throws -> ModelContainer {
-        let full = Schema(versionedSchema: EarshotSchemaV11.self)
+        let full = Schema(versionedSchema: EarshotSchemaV12.self)
         return try ModelContainer(
             for: full,
             configurations:
                 ModelConfiguration(
                     "FutureMirrored",
-                    schema: Schema(EarshotSchemaV11.mirroredModels),
+                    schema: Schema(EarshotSchemaV12.mirroredModels),
                     isStoredInMemoryOnly: true,
                     cloudKitDatabase: .none
                 ),
                 ModelConfiguration(
                     "DeviceLocal",
-                    schema: Schema(EarshotSchemaV11.localModels),
+                    schema: Schema(EarshotSchemaV12.localModels),
                     isStoredInMemoryOnly: true,
                     cloudKitDatabase: .none
                 )
@@ -2300,19 +2300,19 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         applicationURL: URL,
         localURL: URL
     ) throws -> ModelContainer {
-        let full = Schema(versionedSchema: EarshotSchemaV11.self)
+        let full = Schema(versionedSchema: EarshotSchemaV12.self)
         return try ModelContainer(
             for: full,
             configurations:
                 ModelConfiguration(
                     "FutureMirrored",
-                    schema: Schema(EarshotSchemaV11.mirroredModels),
+                    schema: Schema(EarshotSchemaV12.mirroredModels),
                     url: applicationURL,
                     cloudKitDatabase: .none
                 ),
                 ModelConfiguration(
                     "DeviceLocal",
-                    schema: Schema(EarshotSchemaV11.localModels),
+                    schema: Schema(EarshotSchemaV12.localModels),
                     url: localURL,
                     cloudKitDatabase: .none
                 )
