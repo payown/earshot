@@ -78,7 +78,7 @@ enum RefreshCompletionHaptics {
 
 enum PlaybackStartHapticMode: Equatable {
     case customMechanicalPress
-    case softImpactFallback
+    case heavyImpactFallback
 }
 
 struct PlaybackStartHapticPlan: Equatable {
@@ -107,15 +107,15 @@ enum PlaybackStartHaptics {
     ) -> PlaybackStartHapticPlan? {
         guard enabled, applicationIsActive else { return nil }
         return PlaybackStartHapticPlan(
-            mode: supportsCustomHaptics ? .customMechanicalPress : .softImpactFallback,
-            totalDurationMilliseconds: 185,
-            pressIntensity: 0.85,
-            pressSharpness: 0.6,
-            tailStartMilliseconds: 12,
-            tailDurationMilliseconds: 173,
-            tailIntensity: 0.34,
-            tailSharpness: 0.06,
-            tailDecay: 0.6
+            mode: supportsCustomHaptics ? .customMechanicalPress : .heavyImpactFallback,
+            totalDurationMilliseconds: 210,
+            pressIntensity: 0.95,
+            pressSharpness: 0.38,
+            tailStartMilliseconds: 10,
+            tailDurationMilliseconds: 200,
+            tailIntensity: 0.46,
+            tailSharpness: 0.02,
+            tailDecay: 0.52
         )
     }
 
@@ -186,9 +186,9 @@ enum PlaybackStartHaptics {
     }
 
     private static func playFallback() {
-        let generator = UIImpactFeedbackGenerator(style: .soft)
+        let generator = UIImpactFeedbackGenerator(style: .heavy)
         generator.prepare()
-        generator.impactOccurred(intensity: 0.7)
+        generator.impactOccurred(intensity: 0.8)
     }
 }
 
