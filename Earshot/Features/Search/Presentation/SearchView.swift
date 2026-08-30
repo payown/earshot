@@ -148,6 +148,7 @@ struct SearchView<HeaderContent: View>: View {
     @State private var showNotesEpisode: Episode?
     @State private var sharingEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
+    @State private var fullPodcastDescription: PodcastDescriptionPresentation?
     private let itunes = ITunesSearchService()
 
     /// How long the query must be quiet before a directory request fires. Computed
@@ -194,6 +195,7 @@ struct SearchView<HeaderContent: View>: View {
                                 mode: settings.spokenPodcastDescriptionMode
                             )
                             : nil))
+                        .rotorActions(fullDescriptionActions(for: podcast))
                     }
                 }
             }
@@ -244,7 +246,20 @@ struct SearchView<HeaderContent: View>: View {
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
+        .sheet(item: $fullPodcastDescription) { PodcastDescriptionView(presentation: $0) }
         .overlay { emptyOverlay }
+    }
+
+    private func fullDescriptionActions(for podcast: Podcast) -> [QuickActionItem] {
+        guard let presentation = PodcastDescriptionPresentation(
+            title: podcast.title,
+            descriptionHTML: podcast.podcastDescription
+        ) else {
+            return []
+        }
+        return [QuickActionItem(label: "Read full description", isDestructive: false) {
+            fullPodcastDescription = presentation
+        }]
     }
 
     private var searchPlacement: SearchFieldPlacement {

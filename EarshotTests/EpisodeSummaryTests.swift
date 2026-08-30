@@ -109,10 +109,56 @@ final class EpisodeSummaryTests: XCTestCase {
         XCTAssertEqual(EpisodeSummary.shortSummary(html), "A short note.")
     }
 
-    func testShortSummaryPrefersSentenceBoundary() {
+    func testShortSummaryDefaultStillPrefersOneSentence() {
         let html = "This is the first sentence. " + String(repeating: "tail ", count: 60)
-        let summary = EpisodeSummary.shortSummary(html, maxLength: 140)
-        XCTAssertEqual(summary, "This is the first sentence.")
+        XCTAssertEqual(
+            EpisodeSummary.shortSummary(html, maxLength: 140),
+            "This is the first sentence."
+        )
+    }
+
+    func testTwoSentenceSummaryUsesRemainingCapAfterShortFirstSentence() {
+        let html = "This is the first sentence. " + String(repeating: "tail ", count: 60)
+        let summary = EpisodeSummary.shortSummary(
+            html,
+            maxLength: 140,
+            preferredSentenceCount: 2
+        )
+        XCTAssertNotNil(summary)
+        XCTAssertTrue(summary!.hasPrefix("This is the first sentence. tail"))
+        XCTAssertTrue(summary!.hasSuffix("…"))
+        XCTAssertGreaterThan(summary!.count, "This is the first sentence.".count)
+        XCTAssertLessThanOrEqual(summary!.count, 141)
+    }
+
+    func testShortSummaryPrefersTwoCompleteSentences() {
+        let html = "First sentence contains useful context. Second sentence adds more detail. "
+            + String(repeating: "tail ", count: 60)
+        XCTAssertEqual(
+            EpisodeSummary.shortSummary(html, maxLength: 140),
+            "First sentence contains useful context."
+        )
+        XCTAssertEqual(
+            EpisodeSummary.shortSummary(
+                html,
+                maxLength: 140,
+                preferredSentenceCount: 2
+            ),
+            "First sentence contains useful context. Second sentence adds more detail."
+        )
+    }
+
+    func testShortSummaryKeepsOneSentenceWhenItUsesMostOfCap() {
+        let html = "This first sentence is intentionally long enough to provide a useful and complete spoken summary for the listener. "
+            + String(repeating: "tail ", count: 60)
+        XCTAssertEqual(
+            EpisodeSummary.shortSummary(
+                html,
+                maxLength: 140,
+                preferredSentenceCount: 2
+            ),
+            "This first sentence is intentionally long enough to provide a useful and complete spoken summary for the listener."
+        )
     }
 
     func testShortSummaryTruncatesOnWordBoundaryWithEllipsis() {

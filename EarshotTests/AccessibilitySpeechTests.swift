@@ -49,6 +49,20 @@ final class AccessibilitySpeechTests: XCTestCase {
         )
     }
 
+    func testPodcastBriefDescriptionUsesTwoUsefulSentences() {
+        let podcast = Podcast(
+            feedURL: "https://example.com/two-sentences",
+            title: "Example",
+            podcastDescription: "A short introduction. A second sentence explains what listeners can expect. "
+                + String(repeating: "Additional detail ", count: 30)
+        )
+
+        XCTAssertEqual(
+            PodcastRowSpeech.value(for: podcast, mode: .brief),
+            "A short introduction. A second sentence explains what listeners can expect."
+        )
+    }
+
     func testMarkupOnlyDescriptionsProduceNoValue() {
         let podcast = Podcast(
             feedURL: "https://example.com/feed",

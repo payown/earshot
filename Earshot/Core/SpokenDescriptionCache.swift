@@ -20,11 +20,12 @@ final class SpokenDescriptionCache {
         identity: String,
         html: String?,
         mode: SpokenDescriptionMode,
-        briefLimit: Int
+        briefLimit: Int,
+        preferredBriefSentenceCount: Int = 1
     ) -> String? {
         guard mode != .off else { return nil }
         let source = html ?? ""
-        let key = "\(identity)\u{1}\(source.hashValue)\u{1}\(mode.rawValue)\u{1}\(briefLimit)" as NSString
+        let key = "\(identity)\u{1}\(source.hashValue)\u{1}\(mode.rawValue)\u{1}\(briefLimit)\u{1}\(preferredBriefSentenceCount)" as NSString
         if let value = cache.object(forKey: key) as String? {
             return value == Self.noValue ? nil : value
         }
@@ -33,7 +34,11 @@ final class SpokenDescriptionCache {
         case .off:
             value = nil
         case .brief:
-            value = EpisodeSummary.shortSummary(source, maxLength: briefLimit)
+            value = EpisodeSummary.shortSummary(
+                source,
+                maxLength: briefLimit,
+                preferredSentenceCount: preferredBriefSentenceCount
+            )
         case .full:
             let plain = EpisodeSummary.plainText(source)
             value = plain.isEmpty ? nil : plain
@@ -82,7 +87,8 @@ enum PodcastRowSpeech {
             identity: "podcast:\(FeedURLIdentity.canonical(podcast.feedURL))",
             html: podcast.podcastDescription,
             mode: mode,
-            briefLimit: 240
+            briefLimit: 240,
+            preferredBriefSentenceCount: 2
         )
     }
 }

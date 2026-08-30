@@ -850,7 +850,10 @@ final class QuickActionBuildersTests: XCTestCase {
             context: ctx,
             onOpenDetail: {}, onShare: {}, onUnsubscribe: {}
         )
-        XCTAssertEqual(items.map(\.label), ["Turn off auto-queue", "Turn on notifications"])
+        XCTAssertEqual(
+            items.map(\.label),
+            ["Turn off auto-queue", "Turn on new episode notifications"]
+        )
     }
 
     func testFailedFeedAndLibraryRowsResolveTheSamePodcastActions() {
@@ -1341,7 +1344,10 @@ final class QuickActionBuildersTests: XCTestCase {
         let podcast = Podcast(feedURL: "https://x/a.xml", title: "Show")
         ctx.insert(podcast)
 
-        XCTAssertEqual(PodcastAction.toggleNotifications.label(for: podcast), "Turn on notifications")
+        XCTAssertEqual(
+            PodcastAction.toggleNotifications.label(for: podcast),
+            "Turn on new episode notifications"
+        )
         XCTAssertEqual(PodcastAction.toggleAutoQueue.label(for: podcast), "Turn on auto-queue")
         XCTAssertEqual(PodcastAction.toggleInboxInclude.label(for: podcast), "Add to Inbox")
         XCTAssertEqual(PodcastAction.toggleInboxExclude.label(for: podcast), "Exclude from Inbox")
@@ -1352,7 +1358,10 @@ final class QuickActionBuildersTests: XCTestCase {
         podcast.autoQueue = true
         podcast.inboxIncluded = true
         podcast.inboxExcluded = true
-        XCTAssertEqual(PodcastAction.toggleNotifications.label(for: podcast), "Turn off notifications")
+        XCTAssertEqual(
+            PodcastAction.toggleNotifications.label(for: podcast),
+            "Turn off new episode notifications"
+        )
         XCTAssertEqual(PodcastAction.toggleAutoQueue.label(for: podcast), "Turn off auto-queue")
         XCTAssertEqual(PodcastAction.toggleInboxInclude.label(for: podcast), "Remove from Inbox")
         XCTAssertEqual(PodcastAction.toggleInboxExclude.label(for: podcast), "Include in Inbox")

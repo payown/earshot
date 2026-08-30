@@ -3,7 +3,8 @@ import SwiftData
 
 /// A read-only preview of an UN-subscribed directory search result (#499). Reached
 /// by the primary Activate / tap on a directory row so a user can read about a show
-/// — artwork, title, author, description, and a few recent episodes — and decide
+/// — artwork, title, author, description, and the episodes exposed by its feed —
+/// and decide
 /// before following. The Follow / Unfollow control here mirrors the row's toggle, so
 /// the user can act either from the list or from the detail.
 ///
@@ -39,6 +40,12 @@ struct PodcastPreviewView: View {
 
     @State private var model = PodcastPreviewModel()
 
+    /// Preview-only presentation choices. They deliberately do not write the
+    /// saved-podcast sort preference because auditing a feed is a separate
+    /// workflow from browsing the Library.
+    @State private var searchText = ""
+    @State private var sortOrder: PreviewEpisodeSortOrder = .newestFirst
+
     /// A pending subscribe-to-folder offer (#764). Set to the just-followed podcast
     /// when folders already exist; presents the shared ``FolderPickerView`` in
     /// `.add` mode, or Cancel to skip.
@@ -71,9 +78,21 @@ struct PodcastPreviewView: View {
                     }
                 }
                 if !episodes.isEmpty {
-                    Section("Recent episodes") {
-                        ForEach(episodes) { episode in
-                            episodeRow(episode)
+                    Section {
+                        chronologicalSortButton
+                    }
+                    let visibleEpisodes = visibleEpisodes(from: episodes)
+                    if visibleEpisodes.isEmpty {
+                        Section {
+                            NoSearchMatchesView(query: searchText)
+                        }
+                    } else {
+                        Section {
+                            ForEach(visibleEpisodes) { episode in
+                                episodeRow(episode)
+                            }
+                        } header: {
+                            Text("^[\(visibleEpisodes.count) available episode](inflect: true)")
                         }
                     }
                 }
@@ -81,6 +100,14 @@ struct PodcastPreviewView: View {
         }
         .navigationTitle(result.title)
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchText, prompt: "Search available episodes")
+        .onSubmit(of: .search) {
+            guard PreviewEpisodeSearchFilter.isActive(searchText),
+                  case let .loaded(_, episodes) = model.state else { return }
+            Announcer.announce(
+                EpisodeSearchFilter.resultAnnouncement(count: visibleEpisodes(from: episodes).count)
+            )
+        }
         // Earshot Plus paywall (#632), dismissible via its own explicit Close
         // button, never drag-only.
         .sheet(isPresented: $showPaywall) { PaywallView() }
@@ -136,6 +163,24 @@ struct PodcastPreviewView: View {
     }
 
     // MARK: Loaded content rows
+
+    private func visibleEpisodes(from episodes: [PreviewEpisode]) -> [PreviewEpisode] {
+        PreviewEpisodeSearchFilter.filter(sortOrder.sorted(episodes), query: searchText)
+    }
+
+    /// Matches the chronological toggle on a followed podcast while keeping
+    /// the choice local to this preview and making its effect explicit to
+    /// VoiceOver users.
+    private var chronologicalSortButton: some View {
+        let target = sortOrder.toggleTarget
+        return Button {
+            sortOrder = target
+            Announcer.announce(target.announcement)
+        } label: {
+            Label(sortOrder.toggleTitle, systemImage: "arrow.up.arrow.down")
+        }
+        .accessibilityHint("Changes the available episode order without starting playback")
+    }
 
     @ViewBuilder
     private func episodeRow(_ episode: PreviewEpisode) -> some View {
