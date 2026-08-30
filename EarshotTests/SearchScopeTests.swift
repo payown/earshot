@@ -29,30 +29,41 @@ final class SearchScopeTests: XCTestCase {
     /// so episodes/bookmarks stay hidden and the directory stays searched. This pins
     /// the new configurable init the Library "+" entry depends on.
     func testSearchViewAddPodcastConfigKeepsScope() {
-        let view = SearchView(scope: .addPodcast, title: "Add podcast", autoFocusSearch: true)
+        let view = SearchView(
+            scope: .addPodcast,
+            title: "Add podcast",
+            autoFocusSearch: true,
+            usesCompactLanding: true
+        )
         XCTAssertEqual(view.scope, .addPodcast)
+        XCTAssertTrue(view.usesCompactLanding)
     }
 
     func testAddPodcastScopeIsStored() {
         let view = SearchView(scope: .addPodcast)
         XCTAssertEqual(view.scope, .addPodcast)
+        XCTAssertFalse(view.usesCompactLanding, "Onboarding keeps the explanatory landing state")
     }
 
     func testScopeCasesAreDistinct() {
         XCTAssertNotEqual(SearchScope.library, SearchScope.addPodcast)
     }
 
-    /// The Add Podcast screen supplies its secondary add paths ("Add by RSS URL",
-    /// "Import OPML file") via `SearchView`'s `headerContent` slot so they render as
-    /// real `List` rows — the only placement VoiceOver reliably reaches while the
-    /// `.searchable` field is focused and the keyboard is up. Passing header content
-    /// must not change the stored scope (episodes/bookmarks stay hidden, directory
-    /// stays searched). This pins the generic header-content init the fix depends on.
+    /// The Add Podcast screen supplies category and secondary add paths through
+    /// `SearchView`'s auxiliary List content, which remains reachable while the
+    /// searchable field and keyboard are active. Passing that content must not change
+    /// the stored scope (episodes/bookmarks stay hidden, directory stays searched).
     func testSearchViewKeepsScopeWithHeaderContent() {
-        let view = SearchView(scope: .addPodcast, title: "Add podcast", autoFocusSearch: true) {
+        let view = SearchView(
+            scope: .addPodcast,
+            title: "Add podcast",
+            autoFocusSearch: true,
+            usesCompactLanding: true
+        ) {
             Text("Other ways to add")
         }
         XCTAssertEqual(view.scope, .addPodcast)
+        XCTAssertTrue(view.usesCompactLanding)
     }
 
     /// Callers that pass no header content (Library toolbar search, onboarding) infer

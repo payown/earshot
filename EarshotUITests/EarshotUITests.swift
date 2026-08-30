@@ -1,5 +1,6 @@
 import XCTest
 
+@MainActor
 final class EarshotUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -46,5 +47,39 @@ final class EarshotUITests: XCTestCase {
 
         XCTAssertTrue(queueTab.isSelected)
         XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 5))
+    }
+
+    func testAddPodcastSearchAndCategoryLandingOrder() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uiTestScreenshotSeed",
+            "-screenshotScreen", "library",
+        ]
+        app.launch()
+
+        let addPodcast = app.buttons["Add podcast"].firstMatch
+        XCTAssertTrue(addPodcast.waitForExistence(timeout: 10))
+        addPodcast.tap()
+
+        XCTAssertTrue(app.navigationBars["Add podcast"].waitForExistence(timeout: 5))
+        let search = app.searchFields.firstMatch
+        let browse = app.buttons["Browse categories"].firstMatch
+        let rss = app.buttons["Add by RSS URL"].firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        XCTAssertTrue(browse.waitForExistence(timeout: 5))
+        XCTAssertTrue(rss.waitForExistence(timeout: 5))
+        XCTAssertLessThan(search.frame.minY, browse.frame.minY)
+        XCTAssertLessThan(browse.frame.minY, rss.frame.minY)
+
+        browse.tap()
+        XCTAssertTrue(app.navigationBars["Browse categories"].waitForExistence(timeout: 5))
+
+        let fiction = app.buttons["Fiction"].firstMatch
+        XCTAssertTrue(fiction.waitForExistence(timeout: 5))
+        fiction.tap()
+        XCTAssertTrue(app.buttons["Top Fiction shows"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Comedy Fiction"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["Drama"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["Science Fiction"].firstMatch.exists)
     }
 }

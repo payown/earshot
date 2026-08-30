@@ -7,10 +7,9 @@ import UniformTypeIdentifiers
 /// directory search (``SearchView`` in the `.addPodcast` scope) — type a show and
 /// tap Follow, no intermediate menu.
 ///
-/// The two less-common ways to add a podcast — paste an RSS URL, import an OPML
-/// file — stay reachable but secondary. They live as **two real rows in the search
-/// results `List`** (an "Other ways to add" section at the top of the screen body),
-/// supplied to ``SearchView`` via its `headerContent` slot. This placement is
+/// Category browsing plus the two less-common ways to add a podcast — paste an RSS
+/// URL and import an OPML file — stay reachable as real rows in the search results
+/// `List`, supplied to ``SearchView`` via its auxiliary-content slot. This placement is
 /// deliberate and is what makes them reliably reachable by VoiceOver:
 ///
 /// - The nav bar fails: once the auto-focused `.searchable` field is active, iOS
@@ -44,12 +43,16 @@ struct AddPodcastView: View {
 
     var body: some View {
         NavigationStack {
-            // The search-first screen IS the directory search. The two secondary add
-            // paths are passed as in-content rows (headerContent) so they sit in the
-            // results List and stay in VoiceOver's swipe path while the keyboard is
-            // up — unlike nav-bar or keyboard-accessory chrome, which iOS hides or
-            // skips once .searchable is active.
-            SearchView(scope: .addPodcast, title: "Add podcast", autoFocusSearch: true) {
+            // The search-first screen IS the directory search. Category browsing and
+            // secondary add paths are passed as in-content rows so they stay in
+            // VoiceOver's swipe path while the keyboard is up.
+            SearchView(
+                scope: .addPodcast,
+                title: "Add podcast",
+                autoFocusSearch: true,
+                usesCompactLanding: true
+            ) {
+                discoverySection
                 otherWaysToAddSection
             }
             .toolbar {
@@ -68,8 +71,20 @@ struct AddPodcastView: View {
         }
     }
 
+    private var discoverySection: some View {
+        Section(header: Text("Discover").accessibilityAddTraits(.isHeader)) {
+            NavigationLink {
+                PodcastCategoriesView()
+            } label: {
+                Label("Browse categories", systemImage: "square.grid.2x2")
+            }
+            .accessibilityHint("Browse Apple Podcasts charts by category")
+        }
+    }
+
     /// The two secondary add paths, rendered as a titled section of real `List` rows
-    /// at the top of the search results. Each row is a single, clearly-labelled
+    /// after active search results (or beneath Discover on the empty landing screen).
+    /// Each row is a single, clearly-labelled
     /// VoiceOver node — a `Label` (leading SF Symbol + text, so the signal is icon +
     /// text, never colour) inside a system `Button`, which already carries the button
     /// trait and a 44pt-tall List-row hit target. The header trait is on the section
