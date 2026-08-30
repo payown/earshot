@@ -192,6 +192,117 @@ enum PlaybackStartHaptics {
     }
 }
 
+enum PlaybackPauseHapticMode: Equatable {
+    case customMechanicalRelease
+    case rigidImpactFallback
+}
+
+struct PlaybackPauseHapticPlan: Equatable {
+    let mode: PlaybackPauseHapticMode
+    let totalDurationMilliseconds: Int
+    let leadDurationMilliseconds: Int
+    let leadIntensity: Float
+    let leadSharpness: Float
+    let releaseStartMilliseconds: Int
+    let releaseIntensity: Float
+    let releaseSharpness: Float
+}
+
+/// A short mechanical-release cue for deliberate Pause actions. The custom
+/// pattern reverses the start cue's transient-then-tail shape: a quiet lead-in
+/// ends in one crisp tap. Automatic stops and interruptions never call this
+/// type, preserving the cue's meaning as confirmation of the listener's action.
+@MainActor
+enum PlaybackPauseHaptics {
+    private static var engine: CHHapticEngine?
+
+    static func plan(
+        enabled: Bool,
+        applicationIsActive: Bool,
+        supportsCustomHaptics: Bool
+    ) -> PlaybackPauseHapticPlan? {
+        guard enabled, applicationIsActive else { return nil }
+        return PlaybackPauseHapticPlan(
+            mode: supportsCustomHaptics ? .customMechanicalRelease : .rigidImpactFallback,
+            totalDurationMilliseconds: 80,
+            leadDurationMilliseconds: 72,
+            leadIntensity: 0.18,
+            leadSharpness: 0.05,
+            releaseStartMilliseconds: 72,
+            releaseIntensity: 0.62,
+            releaseSharpness: 0.9
+        )
+    }
+
+    static func playIfNeeded(enabled: Bool) {
+        let supportsCustomHaptics = CHHapticEngine.capabilitiesForHardware().supportsHaptics
+        guard let plan = plan(
+            enabled: enabled,
+            applicationIsActive: UIApplication.shared.applicationState == .active,
+            supportsCustomHaptics: supportsCustomHaptics
+        ) else { return }
+
+        guard plan.mode == .customMechanicalRelease else {
+            playFallback()
+            return
+        }
+
+        do {
+            let hapticEngine: CHHapticEngine
+            if let engine {
+                hapticEngine = engine
+            } else {
+                let created = try CHHapticEngine()
+                created.playsHapticsOnly = true
+                engine = created
+                hapticEngine = created
+            }
+            try hapticEngine.start()
+            let lead = CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: [
+                    CHHapticEventParameter(
+                        parameterID: .hapticIntensity,
+                        value: plan.leadIntensity
+                    ),
+                    CHHapticEventParameter(
+                        parameterID: .hapticSharpness,
+                        value: plan.leadSharpness
+                    ),
+                ],
+                relativeTime: 0,
+                duration: Double(plan.leadDurationMilliseconds) / 1_000
+            )
+            let release = CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    CHHapticEventParameter(
+                        parameterID: .hapticIntensity,
+                        value: plan.releaseIntensity
+                    ),
+                    CHHapticEventParameter(
+                        parameterID: .hapticSharpness,
+                        value: plan.releaseSharpness
+                    ),
+                ],
+                relativeTime: Double(plan.releaseStartMilliseconds) / 1_000
+            )
+            let pattern = try CHHapticPattern(events: [lead, release], parameters: [])
+            let player = try hapticEngine.makePlayer(with: pattern)
+            try player.start(atTime: CHHapticTimeImmediate)
+        } catch {
+            engine = nil
+            playFallback()
+        }
+    }
+
+    private static func playFallback() {
+        let generator = UIImpactFeedbackGenerator(style: .rigid)
+        generator.prepare()
+        generator.impactOccurred(intensity: 0.55)
+    }
+}
+
 /// Posts VoiceOver announcements for important state changes the user must know
 /// about (e.g. "Playing", "Episode added to queue"). Reserve announcements for
 /// meaningful changes — don't announce noise.

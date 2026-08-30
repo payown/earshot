@@ -345,7 +345,7 @@ final class PlayerService {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(steps) * 0.08) { [weak self] in
             guard let self, self.fadeGeneration == generation else { return }
-            self.pause()
+            self.pause(providesPauseHaptic: false)
             self.player.volume = startVolume
         }
     }
@@ -586,7 +586,7 @@ final class PlayerService {
 
             // Do not let the outgoing episode continue speaking beneath a
             // security decision for the newly selected episode.
-            if isPlaying { pause() }
+            if isPlaying { pause(providesPauseHaptic: false) }
             pendingCleartextApprovalKey = approvalKey
             pendingCleartextPlaybackAction = { [weak self, weak episode] in
                 guard let self, let episode, !episode.isDeleted,
@@ -790,7 +790,7 @@ final class PlayerService {
             )
             return
         }
-        if isPlaying { pause() }
+        if isPlaying { pause(providesPauseHaptic: false) }
         beginHandoffOperation()
         let generation = playbackHandoffGeneration
         playbackHandoffTask = Task { @MainActor [weak self, weak episode] in
@@ -968,7 +968,14 @@ final class PlayerService {
     }
 
     func pause() {
+        pause(providesPauseHaptic: true)
+    }
+
+    private func pause(providesPauseHaptic: Bool) {
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
+        let wasPlaying = isPlaying
+            || intendsToPlay
+            || player.timeControlStatus == .playing
         // An explicit pause while Siri owns the route (including a Siri-issued
         // remote pause command) cancels automatic post-interruption resume.
         pausedByInterruption = false
@@ -976,6 +983,14 @@ final class PlayerService {
         player.pause()
         isPlaying = false
         intendsToPlay = false
+        if providesPauseHaptic, wasPlaying {
+            PlaybackPauseHaptics.playIfNeeded(
+                enabled: settings?.bool(
+                    SettingsKey.hapticFeedbackEnabled,
+                    default: SettingsDefault.hapticFeedbackEnabled
+                ) ?? SettingsDefault.hapticFeedbackEnabled
+            )
+        }
         persistCurrentPosition()
         publishCurrentPlaybackHandoff()
         flushListeningSession()
@@ -1598,7 +1613,7 @@ final class PlayerService {
 
         guard let nextEpisode else {
             // Nothing queued after this one: stop cleanly and hide the bar (#730).
-            pause()
+            pause(providesPauseHaptic: false)
             isPlaying = false
             clearNowPlayingPresentation()
             return
@@ -1652,7 +1667,7 @@ final class PlayerService {
 
         guard let nextEpisode else {
             // Nothing queued after this one: stop cleanly and hide the bar (#730).
-            pause()
+            pause(providesPauseHaptic: false)
             isPlaying = false
             clearNowPlayingPresentation()
             return
@@ -2801,7 +2816,7 @@ final class PlayerService {
             // callback arrives, so preserve the user's pre-interruption intent
             // instead of consulting only the presentation flag.
             if isPlaying || intendsToPlay {
-                pause()
+                pause(providesPauseHaptic: false)
                 pausedByInterruption = true
             }
         case .ended:
@@ -2826,7 +2841,7 @@ final class PlayerService {
         // aloud on the speaker. This must not be delayed by the AVAudioSession
         // work below.
         if reason == .oldDeviceUnavailable, isPlaying {
-            pause()
+            pause(providesPauseHaptic: false)
         }
         // The baseline stereo session needs no route-change reconfiguration.
         // Avoiding live session churn preserves the build-150 crash fix (#695).

@@ -105,6 +105,52 @@ final class FeedRefreshStatusTests: XCTestCase {
         ))
     }
 
+    func testPlaybackPauseHapticIsOneShortMechanicalReleaseWithFallback() {
+        let custom = PlaybackPauseHaptics.plan(
+            enabled: true,
+            applicationIsActive: true,
+            supportsCustomHaptics: true
+        )
+        XCTAssertEqual(custom?.mode, .customMechanicalRelease)
+        XCTAssertEqual(custom?.totalDurationMilliseconds, 80)
+        XCTAssertEqual(custom?.leadDurationMilliseconds, 72)
+        XCTAssertEqual(custom?.leadIntensity, 0.18)
+        XCTAssertEqual(custom?.leadSharpness, 0.05)
+        XCTAssertEqual(custom?.releaseStartMilliseconds, 72)
+        XCTAssertEqual(custom?.releaseIntensity, 0.62)
+        XCTAssertEqual(custom?.releaseSharpness, 0.9)
+        XCTAssertLessThan(
+            custom?.totalDurationMilliseconds ?? .max,
+            PlaybackStartHaptics.plan(
+                enabled: true,
+                applicationIsActive: true,
+                supportsCustomHaptics: true
+            )?.totalDurationMilliseconds ?? 0
+        )
+
+        XCTAssertEqual(
+            PlaybackPauseHaptics.plan(
+                enabled: true,
+                applicationIsActive: true,
+                supportsCustomHaptics: false
+            )?.mode,
+            .rigidImpactFallback
+        )
+    }
+
+    func testPlaybackPauseHapticIsSilentWhenDisabledOrInactive() {
+        XCTAssertNil(PlaybackPauseHaptics.plan(
+            enabled: false,
+            applicationIsActive: true,
+            supportsCustomHaptics: true
+        ))
+        XCTAssertNil(PlaybackPauseHaptics.plan(
+            enabled: true,
+            applicationIsActive: false,
+            supportsCustomHaptics: true
+        ))
+    }
+
     func testSnapshotDecodesStoredVersionWithoutFailureDetails() throws {
         let data = Data(#"{"state":"completed","trigger":"backgroundTask","checked":64,"total":64,"newEpisodes":3,"unchangedFeeds":61,"failedFeeds":0}"#.utf8)
 
