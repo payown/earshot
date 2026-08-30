@@ -23,6 +23,14 @@ enum FollowToggle {
 /// stored `Episode` — so the preview can show "what's recent" without subscribing,
 /// inserting anything into the store, or fetching audio.
 struct PreviewEpisode: Identifiable, Equatable, Sendable {
+    /// Canonicalizable show identity carried with the value so a later queue
+    /// action never has to recover persistence identity from visible text.
+    let podcastFeedURL: String
+    /// Directory metadata wins over the feed title/artwork. These values keep a
+    /// materialized catalog episode grouped and presented under the show the
+    /// listener selected in Discovery.
+    let podcastTitle: String
+    let podcastArtworkURL: String?
     let id: String
     let title: String
     let pubDate: Date?
@@ -42,9 +50,12 @@ struct PreviewEpisode: Identifiable, Equatable, Sendable {
     /// Per-episode artwork when the feed provides it; the Now Playing surfaces
     /// fall back to the show artwork when this is nil.
     let artworkURL: String?
+    let episodeNumber: Int?
+    let seasonNumber: Int?
     /// Podcasting 2.0 chapter feed URL, passed through so a streamed preview still
     /// gets chapter navigation.
     let chapterURL: String?
+    let transcriptURL: String?
 }
 
 /// Chronological presentation order for an unsubscribed podcast preview.
@@ -157,7 +168,11 @@ final class PodcastPreviewModel {
     /// episode the publisher exposes in that feed. Never throws — a failure is
     /// folded into `.failed`
     /// (logged) so the view can offer a retry. Safe to call again (retry).
-    func load(feedURL: String) async {
+    func load(
+        feedURL: String,
+        podcastTitle: String? = nil,
+        podcastArtworkURL: String? = nil
+    ) async {
         state = .loading
         do {
             let parsed = try await feed.fetch(feedURL)
@@ -167,7 +182,12 @@ final class PodcastPreviewModel {
             let prepared = await Task.detached(priority: .userInitiated) {
                 (
                     description: Self.cleanedDescription(parsed.description),
-                    episodes: Self.availableEpisodes(from: parsed)
+                    episodes: Self.availableEpisodes(
+                        from: parsed,
+                        feedURL: feedURL,
+                        podcastTitle: podcastTitle,
+                        podcastArtworkURL: podcastArtworkURL
+                    )
                 )
             }.value
             state = .loaded(
@@ -185,10 +205,21 @@ final class PodcastPreviewModel {
     /// Pure: every episode exposed by a parsed feed, newest-first, mapped to
     /// read-only ``PreviewEpisode`` values. This is feed-bounded: a publisher
     /// may omit older archive entries from its RSS document.
-    nonisolated static func availableEpisodes(from feed: ParsedFeed) -> [PreviewEpisode] {
+    nonisolated static func availableEpisodes(
+        from feed: ParsedFeed,
+        feedURL: String = "",
+        podcastTitle: String? = nil,
+        podcastArtworkURL: String? = nil
+    ) -> [PreviewEpisode] {
+        let directoryTitle = podcastTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = directoryTitle.flatMap { $0.isEmpty ? nil : $0 } ?? feed.title
+        let resolvedArtworkURL = podcastArtworkURL ?? feed.artworkURL
         let uniqueEpisodes = deduplicatedEpisodes(feed.episodes)
         let previews = uniqueEpisodes.map {
                 PreviewEpisode(
+                    podcastFeedURL: feedURL,
+                    podcastTitle: resolvedTitle,
+                    podcastArtworkURL: resolvedArtworkURL,
                     id: $0.guid,
                     title: $0.title,
                     pubDate: $0.pubDate,
@@ -197,7 +228,10 @@ final class PodcastPreviewModel {
                     episodeDescription: $0.description,
                     searchableDescription: EpisodeSummary.plainText($0.description),
                     artworkURL: $0.artworkURL,
-                    chapterURL: $0.chapterURL
+                    episodeNumber: $0.episodeNumber,
+                    seasonNumber: $0.seasonNumber,
+                    chapterURL: $0.chapterURL,
+                    transcriptURL: $0.transcriptURL
                 )
             }
         return PreviewEpisodeSortOrder.newestFirst.sorted(previews)

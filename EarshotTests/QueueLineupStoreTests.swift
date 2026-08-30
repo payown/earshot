@@ -104,4 +104,57 @@ final class QueueLineupStoreTests: XCTestCase {
         XCTAssertEqual(settings.rawValue(SettingsKey.morningLineup), "")
         XCTAssertFalse(store.hasSavedLineup)
     }
+
+    func testIdentityPolicyCanonicalizesDeduplicatesAndPreservesUnsyncedLocalSlots() {
+        let duplicateJSON = QueueLineupIdentityPolicy.encoded([
+            QueueLineupIdentity(feedURL: "HTTPS://Example.com:443/feed#one", episodeGUID: "g"),
+            QueueLineupIdentity(feedURL: "https://example.com/feed", episodeGUID: "g"),
+        ])
+        XCTAssertEqual(QueueLineupIdentityPolicy.identities(from: duplicateJSON)?.count, 1)
+
+        let local = QueueLineupIdentityPolicy.encoded([
+            QueueLineupIdentity(feedURL: "https://unknown.example/feed", episodeGUID: "unknown"),
+            QueueLineupIdentity(feedURL: "https://catalog.example/feed", episodeGUID: "catalog"),
+            QueueLineupIdentity(feedURL: "https://followed.example/old", episodeGUID: "old"),
+        ])
+        let remote = QueueLineupIdentityPolicy.encoded([
+            QueueLineupIdentity(feedURL: "https://followed.example/new", episodeGUID: "new"),
+        ])
+        let merged = QueueLineupIdentityPolicy.mergingRemoteValue(
+            remote,
+            into: local,
+            followedFeeds: ["https://followed.example/old", "https://followed.example/new"]
+        )
+        XCTAssertEqual(
+            QueueLineupIdentityPolicy.identities(from: merged),
+            [
+                QueueLineupIdentity(feedURL: "https://unknown.example/feed", episodeGUID: "unknown"),
+                QueueLineupIdentity(feedURL: "https://catalog.example/feed", episodeGUID: "catalog"),
+                QueueLineupIdentity(feedURL: "https://followed.example/new", episodeGUID: "new"),
+            ]
+        )
+        XCTAssertEqual(
+            QueueLineupIdentityPolicy.mergingRemoteValue(
+                "invalid", into: local, followedFeeds: []
+            ),
+            local,
+            "invalid remote input cannot overwrite richer local state"
+        )
+        XCTAssertEqual(
+            QueueLineupIdentityPolicy.outboundValue("", followedFeeds: []),
+            "[]",
+            "the existing empty-string clear remains an explicit synced clear"
+        )
+        XCTAssertNil(QueueLineupIdentityPolicy.outboundValue("invalid", followedFeeds: []))
+    }
+
+    func testSaveReportCountsCanonicalIdentitiesAfterDeduplication() {
+        let context = TestStore.freshContext()
+        let podcast = makePodcast(context, name: "show")
+        let episode = makeEpisode(context, guid: "same", podcast: podcast)
+
+        let report = QueueLineupStore(context: context).save([episode, episode])
+
+        XCTAssertEqual(report, QueueLineupSaveReport(savedCount: 1, omittedCount: 1))
+    }
 }

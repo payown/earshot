@@ -115,7 +115,13 @@ struct PodcastPreviewView: View {
         // exist (decision F8, gated in `toggleFollow`). The shared picker files the
         // new show and announces the result, or Cancel skips.
         .folderPicker($subscribeFolderPick)
-        .task { await model.load(feedURL: result.feedURL) }
+        .task {
+            await model.load(
+                feedURL: result.feedURL,
+                podcastTitle: result.title,
+                podcastArtworkURL: result.artworkURL
+            )
+        }
     }
 
     // MARK: Header
@@ -255,7 +261,13 @@ struct PodcastPreviewView: View {
                 }
                 .accessibilityElement(children: .combine)
                 Button {
-                    Task { await model.load(feedURL: result.feedURL) }
+                    Task {
+                        await model.load(
+                            feedURL: result.feedURL,
+                            podcastTitle: result.title,
+                            podcastArtworkURL: result.artworkURL
+                        )
+                    }
                 } label: {
                     Label("Try Again", systemImage: "arrow.clockwise")
                         .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
