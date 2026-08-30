@@ -84,8 +84,134 @@ final class QueueRepository {
 
     private let context: ModelContext
 
+    /// A no-save result used only by ``CatalogEpisodeQueueRepository``. Keeping
+    /// this staging surface inside the existing queue owner prevents catalog
+    /// materialization from committing a shell/episode before queue ordering.
+    struct CatalogStage {
+        let intentChanged: Bool
+        let queueChanged: Bool
+    }
+
+    struct CatalogRemovalStage {
+        let mutation: CatalogStage
+        let downloadCleanupAfterCommit: CatalogDownloadCleanup?
+    }
+
+    struct CatalogDownloadCleanup {
+        let key: EpisodeLocalKey
+        let episodeID: PersistentIdentifier
+        let fileURL: URL?
+    }
+
     init(context: ModelContext) {
         self.context = context
+    }
+
+    // MARK: Catalog transaction staging
+
+    /// Stages an idempotent append without saving or notifying. The caller owns
+    /// the single transaction that also creates/updates the catalog graph.
+    func stageCatalogAdd(_ episode: Episode) throws -> CatalogStage {
+        let fetched = try catalogOrderedItems()
+        var items = fetched.items
+        let alreadyQueued = items.contains {
+            $0.episode?.persistentModelID == episode.persistentModelID
+        }
+        if !alreadyQueued { items.append(enqueue(episode)) }
+        let compacted = stageDensePositions(items)
+        return CatalogStage(
+            intentChanged: !alreadyQueued,
+            queueChanged: fetched.removedOrphans || !alreadyQueued || compacted
+        )
+    }
+
+    /// Stages Play Next relative to an episode resolved in this same context.
+    /// A nil/nonqueued anchor means front. Returns a truthful no-op when the
+    /// target is already in the requested position.
+    func stageCatalogPlayNext(_ episode: Episode, after current: Episode?) throws -> CatalogStage {
+        let fetched = try catalogOrderedItems()
+        var items = fetched.items
+        let originalOrder = items.map(\.persistentModelID)
+        let existing = items.first {
+            $0.episode?.persistentModelID == episode.persistentModelID
+        }
+        let item = existing ?? enqueue(episode)
+        if let existing {
+            items.removeAll { $0.persistentModelID == existing.persistentModelID }
+        }
+
+        let currentID = current?.persistentModelID
+        let insertIndex: Int
+        if currentID != episode.persistentModelID,
+           let index = items.firstIndex(where: {
+               $0.episode?.persistentModelID == currentID
+           }) {
+            insertIndex = index + 1
+        } else {
+            insertIndex = 0
+        }
+        items.insert(item, at: min(insertIndex, items.count))
+
+        let reordered = items.map(\.persistentModelID) != originalOrder
+        let compacted = stageDensePositions(items)
+        let intentChanged = existing == nil || reordered
+        return CatalogStage(
+            intentChanged: intentChanged,
+            queueChanged: fetched.removedOrphans || intentChanged || compacted
+        )
+    }
+
+    /// Stages catalog removal without materializing a missing episode. The
+    /// episode and podcast remain in the store; only queue membership and the
+    /// existing cancel-state transition change.
+    func stageCatalogCancelFromQueue(
+        feedURL: String,
+        guid: String
+    ) throws -> CatalogRemovalStage {
+        let fetched = try catalogOrderedItems()
+        var items = fetched.items
+        guard let item = items.first(where: {
+            $0.episode?.guid == guid
+                && $0.episode?.podcast.map {
+                    FeedURLIdentity.matches($0.feedURL, feedURL)
+                } == true
+        }), let canonicalEpisode = item.episode else {
+            let compacted = stageDensePositions(items)
+            return CatalogRemovalStage(
+                mutation: CatalogStage(
+                    intentChanged: false,
+                    queueChanged: fetched.removedOrphans || compacted
+                ),
+                downloadCleanupAfterCommit: nil
+            )
+        }
+
+        items.removeAll { $0.persistentModelID == item.persistentModelID }
+        context.delete(item)
+        canonicalEpisode.status = .newEpisode
+        canonicalEpisode.inboxDismissed = true
+
+        let downloadCleanup = DownloadCleanup.deleteAfterPlayedEnabled(context)
+            && canonicalEpisode.downloadStatus == .downloaded
+            ? LocalStateStore.key(for: canonicalEpisode).map {
+                CatalogDownloadCleanup(
+                    key: $0,
+                    episodeID: canonicalEpisode.persistentModelID,
+                    fileURL: canonicalEpisode.localAudioURL
+                )
+            }
+            : nil
+        _ = stageDensePositions(items)
+        return CatalogRemovalStage(
+            mutation: CatalogStage(intentChanged: true, queueChanged: true),
+            downloadCleanupAfterCommit: downloadCleanup
+        )
+    }
+
+    /// Publishes the one queue invalidation owned by a successfully committed
+    /// catalog transaction. Never call before the enclosing context save.
+    func postCommittedCatalogQueueChange(to center: NotificationCenter = .default) {
+        center.post(name: .earshotQueueDidChange, object: nil)
     }
 
     // MARK: Reads
@@ -689,6 +815,32 @@ final class QueueRepository {
     }
 
     // MARK: Internals
+
+    /// Throwing counterpart to ``orderedItems()`` for atomic catalog writes.
+    /// A fetch failure must abort the whole transaction rather than silently
+    /// treating the queue as empty and overwriting its order.
+    private func catalogOrderedItems() throws -> (items: [QueueItem], removedOrphans: Bool) {
+        let descriptor = FetchDescriptor<QueueItem>(sortBy: [SortDescriptor(\.position)])
+        let all = try context.fetch(descriptor)
+        let orphans = all.filter { $0.episode == nil }
+        orphans.forEach(context.delete)
+        if !orphans.isEmpty {
+            AppLog.player.error("Removed \(orphans.count) orphan queue item(s)")
+        }
+        return (all.filter { $0.episode != nil }, !orphans.isEmpty)
+    }
+
+    /// Assigns dense positions without persistence. Only the catalog transaction
+    /// uses this; all public queue APIs retain their existing save/notify shape.
+    @discardableResult
+    private func stageDensePositions(_ ordered: [QueueItem]) -> Bool {
+        var changed = false
+        for (index, item) in ordered.enumerated() where item.position != index {
+            item.position = index
+            changed = true
+        }
+        return changed
+    }
 
     /// Queue items in position order, with orphans (no episode — only possible
     /// via corrupt/aged data, since the relationship cascades) deleted so the

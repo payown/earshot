@@ -83,16 +83,27 @@ final class PodcastPreviewModelTests: XCTestCase {
         let parsed = ParsedEpisode(
             guid: "g", title: "Ep g", audioURL: "https://x/g.mp3",
             description: "Show notes", pubDate: d1, durationSeconds: 1200,
-            artworkURL: "https://x/art.jpg", episodeNumber: nil, seasonNumber: nil,
-            chapterURL: "https://x/chapters.json", transcriptURL: nil
+            artworkURL: "https://x/art.jpg", episodeNumber: 7, seasonNumber: 3,
+            chapterURL: "https://x/chapters.json", transcriptURL: "https://x/transcript.vtt"
         )
-        let available = PodcastPreviewModel.availableEpisodes(from: parsedFeed([parsed]))
+        let available = PodcastPreviewModel.availableEpisodes(
+            from: parsedFeed([parsed]),
+            feedURL: "https://x/feed.xml",
+            podcastTitle: "Directory Show",
+            podcastArtworkURL: "https://x/show.jpg"
+        )
 
         let first = available.first
         XCTAssertEqual(first?.audioURL, "https://x/g.mp3")
+        XCTAssertEqual(first?.podcastFeedURL, "https://x/feed.xml")
+        XCTAssertEqual(first?.podcastTitle, "Directory Show")
+        XCTAssertEqual(first?.podcastArtworkURL, "https://x/show.jpg")
         XCTAssertEqual(first?.episodeDescription, "Show notes")
         XCTAssertEqual(first?.artworkURL, "https://x/art.jpg")
+        XCTAssertEqual(first?.episodeNumber, 7)
+        XCTAssertEqual(first?.seasonNumber, 3)
         XCTAssertEqual(first?.chapterURL, "https://x/chapters.json")
+        XCTAssertEqual(first?.transcriptURL, "https://x/transcript.vtt")
         XCTAssertEqual(first?.searchableDescription, "Show notes")
     }
 
