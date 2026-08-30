@@ -35,6 +35,10 @@ struct PreviewEpisode: Identifiable, Equatable, Sendable {
     /// Show-notes HTML, passed through so a streamed preview can surface chapters
     /// embedded in the description and a sensible Now Playing description.
     let episodeDescription: String?
+    /// Plain-text show notes prepared once while mapping the feed. Preview
+    /// search reads this value rather than stripping HTML again for every
+    /// keystroke across a potentially large publisher archive.
+    let searchableDescription: String
     /// Per-episode artwork when the feed provides it; the Now Playing surfaces
     /// fall back to the show artwork when this is nil.
     let artworkURL: String?
@@ -43,10 +47,88 @@ struct PreviewEpisode: Identifiable, Equatable, Sendable {
     let chapterURL: String?
 }
 
+/// Chronological presentation order for an unsubscribed podcast preview.
+/// Kept independent from the saved-podcast setting: auditing a feed must not
+/// silently change how followed podcasts are ordered elsewhere in the app.
+enum PreviewEpisodeSortOrder: String, CaseIterable, Identifiable, Equatable {
+    case newestFirst
+    case oldestFirst
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .newestFirst: return "Newest to oldest"
+        case .oldestFirst: return "Oldest to newest"
+        }
+    }
+
+    var toggleTarget: PreviewEpisodeSortOrder {
+        self == .newestFirst ? .oldestFirst : .newestFirst
+    }
+
+    var toggleTitle: String {
+        switch toggleTarget {
+        case .newestFirst: return "Sort newest to oldest"
+        case .oldestFirst: return "Sort oldest to newest"
+        }
+    }
+
+    var announcement: String { "Sorted by \(title)" }
+
+    /// Missing dates always trail dated episodes. Date and title ties fall
+    /// back to the feed GUID so changing sort order never destabilizes SwiftUI
+    /// row identity or VoiceOver focus.
+    func sorted(_ episodes: [PreviewEpisode]) -> [PreviewEpisode] {
+        episodes.sorted { lhs, rhs in
+            switch (lhs.pubDate, rhs.pubDate) {
+            case let (left?, right?):
+                if left != right {
+                    return self == .oldestFirst ? left < right : left > right
+                }
+            case (nil, nil):
+                break
+            case (nil, _?):
+                return false
+            case (_?, nil):
+                return true
+            }
+
+            let titleOrder = lhs.title.localizedStandardCompare(rhs.title)
+            if titleOrder != .orderedSame { return titleOrder == .orderedAscending }
+            return lhs.id < rhs.id
+        }
+    }
+}
+
+/// Pure local matching for publisher-feed episodes. An empty query preserves
+/// the exact input array and an active query preserves the selected sort order.
+enum PreviewEpisodeSearchFilter {
+    static func normalized(_ query: String) -> String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func isActive(_ query: String) -> Bool {
+        !normalized(query).isEmpty
+    }
+
+    static func matches(_ episode: PreviewEpisode, query: String) -> Bool {
+        let query = normalized(query)
+        guard !query.isEmpty else { return true }
+        return episode.title.localizedStandardContains(query)
+            || episode.searchableDescription.localizedStandardContains(query)
+    }
+
+    static func filter(_ episodes: [PreviewEpisode], query: String) -> [PreviewEpisode] {
+        guard isActive(query) else { return episodes }
+        return episodes.filter { matches($0, query: query) }
+    }
+}
+
 /// Drives the podcast preview: fetches an UN-subscribed feed once via
 /// ``FeedFetching`` (the same abstraction the subscribe flow uses) and exposes the
-/// show description plus a few recent episodes so a user — VoiceOver or sighted —
-/// can read about a show before deciding to follow it (#499).
+/// show description plus every episode exposed by the publisher's current feed
+/// so a user — VoiceOver or sighted — can audit a show without following it.
 ///
 /// `@MainActor` because it owns view-facing state; the network fetch itself runs
 /// inside `FeedService`/`HTTPClient` off the main thread and only the parsed,
@@ -71,16 +153,26 @@ final class PodcastPreviewModel {
         self.feed = feed
     }
 
-    /// Fetches and parses the feed, then publishes the description and the newest
-    /// `recentLimit` episodes. Never throws — a failure is folded into `.failed`
+    /// Fetches and parses the feed, then publishes the description and every
+    /// episode the publisher exposes in that feed. Never throws — a failure is
+    /// folded into `.failed`
     /// (logged) so the view can offer a retry. Safe to call again (retry).
-    func load(feedURL: String, recentLimit: Int = 5) async {
+    func load(feedURL: String) async {
         state = .loading
         do {
             let parsed = try await feed.fetch(feedURL)
+            // Large publisher feeds can contain thousands of descriptions. HTML
+            // sanitizing and deterministic deduplication are pure work, so keep
+            // them off the main actor and publish only the finished value graph.
+            let prepared = await Task.detached(priority: .userInitiated) {
+                (
+                    description: Self.cleanedDescription(parsed.description),
+                    episodes: Self.availableEpisodes(from: parsed)
+                )
+            }.value
             state = .loaded(
-                description: Self.cleanedDescription(parsed.description),
-                episodes: Self.recentEpisodes(from: parsed, limit: recentLimit)
+                description: prepared.description,
+                episodes: prepared.episodes
             )
         } catch {
             AppLog.networking.error(
@@ -90,13 +182,12 @@ final class PodcastPreviewModel {
         }
     }
 
-    /// Pure: the newest `limit` episodes of a parsed feed, newest-first, mapped to
-    /// read-only ``PreviewEpisode`` values. Tested without any network.
-    static func recentEpisodes(from feed: ParsedFeed, limit: Int) -> [PreviewEpisode] {
-        feed.episodes
-            .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
-            .prefix(max(0, limit))
-            .map {
+    /// Pure: every episode exposed by a parsed feed, newest-first, mapped to
+    /// read-only ``PreviewEpisode`` values. This is feed-bounded: a publisher
+    /// may omit older archive entries from its RSS document.
+    nonisolated static func availableEpisodes(from feed: ParsedFeed) -> [PreviewEpisode] {
+        let uniqueEpisodes = deduplicatedEpisodes(feed.episodes)
+        let previews = uniqueEpisodes.map {
                 PreviewEpisode(
                     id: $0.guid,
                     title: $0.title,
@@ -104,16 +195,56 @@ final class PodcastPreviewModel {
                     durationSeconds: $0.durationSeconds,
                     audioURL: $0.audioURL,
                     episodeDescription: $0.description,
+                    searchableDescription: EpisodeSummary.plainText($0.description),
                     artworkURL: $0.artworkURL,
                     chapterURL: $0.chapterURL
                 )
             }
+        return PreviewEpisodeSortOrder.newestFirst.sorted(previews)
+    }
+
+    /// Feed GUID is the stable SwiftUI row identity and the playback identity,
+    /// so collapse malformed duplicate items before rendering. Match the saved
+    /// feed refresh policy: newest publication wins, then a stable payload key.
+    nonisolated private static func deduplicatedEpisodes(_ episodes: [ParsedEpisode]) -> [ParsedEpisode] {
+        var order: [String] = []
+        var winnerByGUID: [String: ParsedEpisode] = [:]
+        for episode in episodes {
+            guard let current = winnerByGUID[episode.guid] else {
+                order.append(episode.guid)
+                winnerByGUID[episode.guid] = episode
+                continue
+            }
+            let candidateDate = episode.pubDate ?? .distantPast
+            let currentDate = current.pubDate ?? .distantPast
+            if candidateDate > currentDate
+                || (candidateDate == currentDate
+                    && stableSignature(for: episode) < stableSignature(for: current)) {
+                winnerByGUID[episode.guid] = episode
+            }
+        }
+        return order.compactMap { winnerByGUID[$0] }
+    }
+
+    nonisolated private static func stableSignature(for episode: ParsedEpisode) -> String {
+        [
+            episode.audioURL,
+            episode.title,
+            episode.description ?? "",
+            episode.artworkURL ?? "",
+            episode.durationSeconds.map(String.init) ?? "",
+            episode.episodeNumber.map(String.init) ?? "",
+            episode.seasonNumber.map(String.init) ?? "",
+            episode.chapterURL ?? "",
+            episode.transcriptURL ?? "",
+            episode.episodeType ?? "",
+        ].joined(separator: "\u{1F}")
     }
 
     /// Pure: trims a feed description and collapses an empty/whitespace-only value
     /// to `nil` so the view can decide cleanly whether to render a description
     /// section at all (no empty box, no dead VoiceOver stop).
-    static func cleanedDescription(_ raw: String?) -> String? {
+    nonisolated static func cleanedDescription(_ raw: String?) -> String? {
         // Strip HTML tags and decode entities first (some feeds emit raw markup
         // and numeric entities in the show description, #518), then collapse an
         // empty/whitespace-only result to nil so the "About" section hides.

@@ -28,10 +28,10 @@ struct SubscriptionsView: View {
     // blocks VoiceOver even though this screen never needs those episodes.
     @State private var podcasts: [Podcast] = []
     @State private var hasLoadedPodcasts = false
-    @State private var showingAdd = false
     @State private var isRefreshing = false
     @State private var sharedRefreshInProgress = false
     @State private var sharingPodcast: Podcast?
+    @State private var fullDescription: PodcastDescriptionPresentation?
     @State private var pendingUnsubscribe: Podcast?
     @State private var quickActionEditor: PodcastQuickActionEditor?
     // The pending "Add to folder" / "Move to folder" podcast Quick Action target
@@ -97,7 +97,9 @@ struct SubscriptionsView: View {
                 } description: {
                     Text("Add a podcast feed to get started.")
                 } actions: {
-                    Button("Add podcast") { showingAdd = true }
+                    NavigationLink("Discover podcasts") {
+                        AddPodcastView()
+                    }
                 }
             } else {
                 List {
@@ -153,6 +155,12 @@ struct SubscriptionsView: View {
             }
         }
         .onAppear {
+            // This screen remains alive while Discovery is pushed onto the
+            // Library NavigationStack. Reload when it becomes visible again so
+            // podcasts followed from Discovery appear immediately without
+            // restoring the expensive live @Query this screen intentionally
+            // avoids for large libraries.
+            loadPodcasts()
             requestLaunchHeadingFocus()
             requestTabEntryFocus()
         }
@@ -234,16 +242,18 @@ struct SubscriptionsView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showingAdd = true
+                NavigationLink {
+                    AddPodcastView()
                 } label: {
-                    Label("Add podcast", systemImage: "plus")
+                    Label("Discover podcasts", systemImage: "plus")
                 }
             }
         }
-        .sheet(isPresented: $showingAdd, onDismiss: loadPodcasts) { AddPodcastView() }
         .sheet(item: $sharingPodcast) { podcast in
             ShareSheet(items: shareItems(for: podcast))
+        }
+        .sheet(item: $fullDescription) { presentation in
+            PodcastDescriptionView(presentation: presentation)
         }
         .sheet(item: $quickActionEditor) { editor in
             switch editor {
@@ -282,7 +292,6 @@ struct SubscriptionsView: View {
             Text("This removes \(podcast.title) and its episodes. This can't be undone.")
         }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
-        .task { loadPodcasts() }
         .task {
             sharedRefreshInProgress = BackgroundFeedRefresher.isRefreshInProgress
         }
@@ -387,6 +396,16 @@ struct SubscriptionsView: View {
         // objects are constructed for the single action activated by the user.
         let actions = rotorActions(for: podcast)
         let presentations = PodcastAction.presentations(actions, for: podcast)
+        let descriptionPresentation = PodcastDescriptionPresentation(
+            title: podcast.title,
+            descriptionHTML: podcast.podcastDescription
+        )
+        let supplementalActions = descriptionPresentation.map { _ in
+            [PodcastRowSupplementalAction(
+                id: "readFullDescription",
+                label: "Read full description"
+            )]
+        } ?? []
         let podcastID = podcast.persistentModelID
         let performAction = { (action: PodcastAction) in
             guard PersistentModelLifetime.podcastExists(podcastID, in: context) else { return }
@@ -397,6 +416,8 @@ struct SubscriptionsView: View {
                 for: podcast,
                 readOnlyIDs: readOnlyIDs,
                 actions: presentations,
+                supplementalActions: supplementalActions,
+                descriptionPresentation: descriptionPresentation,
                 performAction: performAction
             )
         }
@@ -489,6 +510,8 @@ struct SubscriptionsView: View {
         for podcast: Podcast,
         readOnlyIDs: Set<PersistentIdentifier>,
         actions: [DeferredActionPresentation<PodcastAction>],
+        supplementalActions: [PodcastRowSupplementalAction],
+        descriptionPresentation: PodcastDescriptionPresentation?,
         performAction: @escaping (PodcastAction) -> Void
     ) -> some View {
         let isReadOnly = readOnlyIDs.contains(podcast.persistentModelID)
@@ -505,7 +528,15 @@ struct SubscriptionsView: View {
             ) : nil))
             // Rotor order goes through the shared helper, which compensates for
             // the OS emitting `.accessibilityActions` children in reverse (#572).
-            .podcastActionsRotor(actions, perform: performAction)
+            .podcastActionsRotor(
+                actions,
+                supplementalActions: supplementalActions,
+                perform: performAction,
+                performSupplemental: { _ in
+                    guard let descriptionPresentation else { return }
+                    fullDescription = descriptionPresentation
+                }
+            )
     }
 
     // MARK: Multi-select (#757)

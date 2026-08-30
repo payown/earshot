@@ -29,7 +29,9 @@ func buildPodcastActions(
             // and write a concrete Bool back.
             let on = podcast.notificationEnabled ?? false
             return QuickActionItem(
-                label: on ? "Turn off notifications" : "Turn on notifications",
+                label: on
+                    ? "Turn off new episode notifications"
+                    : "Turn on new episode notifications",
                 isDestructive: false
             ) {
                 let newValue = !(podcast.notificationEnabled ?? false)

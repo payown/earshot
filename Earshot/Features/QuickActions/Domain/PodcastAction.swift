@@ -29,7 +29,7 @@ enum PodcastAction: String, CaseIterable, Identifiable, Codable {
     var label: String {
         switch self {
         case .openDetail: return "Open podcast detail"
-        case .toggleNotifications: return "Toggle notifications"
+        case .toggleNotifications: return "Toggle new episode notifications"
         case .toggleAutoQueue: return "Toggle auto-queue"
         case .toggleInboxInclude: return "Toggle inbox inclusion"
         case .toggleInboxExclude: return "Toggle inbox exclusion"
@@ -49,7 +49,7 @@ enum PodcastAction: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .toggleNotifications:
             return (podcast.notificationEnabled ?? false)
-                ? "Turn off notifications" : "Turn on notifications"
+                ? "Turn off new episode notifications" : "Turn on new episode notifications"
         case .toggleAutoQueue:
             return podcast.autoQueue ? "Turn off auto-queue" : "Turn on auto-queue"
         case .toggleInboxInclude:

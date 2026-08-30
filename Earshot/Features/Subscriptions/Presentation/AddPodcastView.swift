@@ -2,8 +2,9 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
-/// The "add a NEW podcast" screen, presented as a sheet from the Library tab's +
-/// button. Following a show is the primary action, so this lands the user in the
+/// The Library tab's Discovery screen, pushed within Library's existing
+/// `NavigationStack` so the app-level mini player remains reachable throughout
+/// browsing. Following a show is the primary action, so this lands the user in
 /// directory search (``SearchView`` in the `.addPodcast` scope) — type a show and
 /// tap Follow, no intermediate menu.
 ///
@@ -30,10 +31,10 @@ import UniformTypeIdentifiers
 /// into active-search state; sighted users still land in the search field and type
 /// immediately.
 ///
-/// Dismissal is explicit (a Done button plus `.accessibilityAction(.escape)`), never
-/// drag-only, so it's reachable without a downward swipe gesture. A successful
-/// subscribe or import updates the Library `@Query` automatically; the user can keep
-/// adding more, or close when finished.
+/// Native back navigation is always available, and the explicit VoiceOver escape
+/// action pops back to Library. When Library becomes visible again it reloads its
+/// scalar podcast projection, so newly followed shows appear without a live
+/// `@Query` over the full episode graph.
 struct AddPodcastView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(OPMLImportCoordinator.self) private var opmlImportCoordinator
@@ -42,26 +43,19 @@ struct AddPodcastView: View {
     @State private var importingOPML = false
 
     var body: some View {
-        NavigationStack {
-            // The search-first screen IS the directory search. Category browsing and
-            // secondary add paths are passed as in-content rows so they stay in
-            // VoiceOver's swipe path while the keyboard is up.
-            SearchView(
-                scope: .addPodcast,
-                title: "Add podcast",
-                autoFocusSearch: true,
-                usesCompactLanding: true
-            ) {
-                discoverySection
-                otherWaysToAddSection
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .accessibilityAction(.escape) { dismiss() }
+        // The search-first screen IS the directory search. Category browsing and
+        // secondary add paths are passed as in-content rows so they stay in
+        // VoiceOver's swipe path while the keyboard is up.
+        SearchView(
+            scope: .addPodcast,
+            title: "Discover podcasts",
+            autoFocusSearch: true,
+            usesCompactLanding: true
+        ) {
+            discoverySection
+            otherWaysToAddSection
         }
+        .accessibilityAction(.escape) { dismiss() }
         .sheet(isPresented: $showingAddByURL) { AddFeedView() }
         .fileImporter(
             isPresented: $importingOPML,

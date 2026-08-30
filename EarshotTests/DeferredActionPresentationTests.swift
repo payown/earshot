@@ -76,7 +76,7 @@ final class DeferredActionPresentationTests: XCTestCase {
 
         XCTAssertEqual(
             presentations.map(\.label),
-            ["Turn off notifications", "Turn off auto-queue", "Unfollow"]
+            ["Turn off new episode notifications", "Turn off auto-queue", "Unfollow"]
         )
         XCTAssertEqual(presentations.map(\.isDestructive), [false, false, true])
     }

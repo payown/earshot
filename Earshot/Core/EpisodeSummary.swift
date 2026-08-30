@@ -290,31 +290,51 @@ enum EpisodeSummary {
     }
 
     /// A brief, length-capped plain-text summary for a row's VoiceOver value
-    /// (#495). Prefers ending at the first sentence boundary within `maxLength`;
-    /// otherwise truncates on a word boundary and appends an ellipsis. Returns
-    /// `nil` when there is no description, so a row with no notes announces
-    /// nothing extra.
-    static func shortSummary(_ html: String?, maxLength: Int = 140) -> String? {
+    /// (#495). By default it keeps the original single-sentence episode-row
+    /// behavior. Callers may request more sentences; podcast rows request two so
+    /// a short first line does not consume the whole "Brief" description. It
+    /// otherwise ends at a useful sentence boundary or truncates on a word
+    /// boundary with an ellipsis. Returns `nil` when there is no description, so
+    /// a row with no notes announces nothing extra.
+    static func shortSummary(
+        _ html: String?,
+        maxLength: Int = 140,
+        preferredSentenceCount: Int = 1
+    ) -> String? {
         let text = plainText(html)
         guard !text.isEmpty else { return nil }
+        guard maxLength > 0 else { return nil }
         guard text.count > maxLength else { return text }
 
         let chars = Array(text)
 
-        // Prefer ending at the first *substantial* sentence boundary within the
-        // cap. The minimum length skips stray early periods (e.g. "Dr." or "1.")
-        // so the summary isn't cut to an abbreviation.
+        // Collect the requested substantial sentence boundaries within the cap. The
+        // minimum length skips stray early periods (e.g. "Dr." or "1.") so the
+        // summary isn't cut to an abbreviation.
         let minSentenceLength = 20
+        var sentenceEnds: [Int] = []
         var index = 0
         while index < chars.count && index < maxLength {
             let c = chars[index]
             if c == "." || c == "!" || c == "?" {
                 let endsHere = index + 1 >= chars.count || chars[index + 1] == " "
                 if endsHere && (index + 1) >= minSentenceLength {
-                    return String(chars[0...index]).trimmingCharacters(in: .whitespaces)
+                    sentenceEnds.append(index)
+                    if sentenceEnds.count == max(1, preferredSentenceCount) {
+                        return String(chars[0...index]).trimmingCharacters(in: .whitespaces)
+                    }
                 }
             }
             index += 1
+        }
+
+        // One reasonably full sentence is still a clean stopping point. A short
+        // one is not: keep going toward the cap so "Brief" conveys more than a
+        // feed's headline-like opening line.
+        if preferredSentenceCount > 1,
+           let sentenceEnd = sentenceEnds.last,
+           sentenceEnd + 1 >= max(40, maxLength / 2) {
+            return String(chars[0...sentenceEnd]).trimmingCharacters(in: .whitespaces)
         }
 
         // No clean sentence break: truncate on the last word boundary and mark

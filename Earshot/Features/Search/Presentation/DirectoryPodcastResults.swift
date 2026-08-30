@@ -20,6 +20,7 @@ struct DirectoryPodcastResults: View {
     @State private var subscribeFolderPick: FolderPickRequest?
     @State private var showPaywall = false
     @State private var remoteDescriptions: [String: String] = [:]
+    @State private var fullDescription: PodcastDescriptionPresentation?
 
     private var spokenDescriptionMode: SpokenDescriptionMode {
         settings.spokenPodcastDescriptionMode
@@ -38,7 +39,13 @@ struct DirectoryPodcastResults: View {
                 description: spokenDescription(for: result),
                 descriptionMode: spokenDescriptionMode,
                 open: { openDetail(result) },
-                toggleFollow: { toggleFollow(result) }
+                toggleFollow: { toggleFollow(result) },
+                readFullDescription: {
+                    fullDescription = PodcastDescriptionPresentation(
+                        title: result.title,
+                        descriptionHTML: spokenDescription(for: result)
+                    )
+                }
             )
         }
         .navigationDestination(item: $navigation) { destination in
@@ -50,6 +57,7 @@ struct DirectoryPodcastResults: View {
             }
         }
         .sheet(isPresented: $showPaywall) { PaywallView() }
+        .sheet(item: $fullDescription) { PodcastDescriptionView(presentation: $0) }
         .folderPicker($subscribeFolderPick)
         .task(id: descriptionLoadKey) {
             guard DirectoryPodcastDescriptionPolicy.shouldLoad(
@@ -146,9 +154,23 @@ private struct DirectoryPodcastRow: View {
     let descriptionMode: SpokenDescriptionMode
     let open: () -> Void
     let toggleFollow: () -> Void
+    let readFullDescription: () -> Void
 
     private var toggleLabel: String {
         FollowToggle.actionLabel(subscribed: subscribed)
+    }
+
+    private var rotorActions: [QuickActionItem] {
+        var actions = [QuickActionItem(label: toggleLabel, isDestructive: false) {
+            toggleFollow()
+        }]
+        if let description,
+           !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            actions.append(QuickActionItem(label: "Read full description", isDestructive: false) {
+                readFullDescription()
+            })
+        }
+        return actions
     }
 
     var body: some View {
@@ -185,7 +207,10 @@ private struct DirectoryPodcastRow: View {
             )
         ))
         .accessibilityAction { open() }
-        .accessibilityAction(named: Text(toggleLabel)) { toggleFollow() }
+        // Fixed actions still use Earshot's shared rotor-order compensation;
+        // declaring raw accessibility actions here would speak them backwards
+        // on the iOS releases covered by QuickActionsRotor.
+        .rotorActions(rotorActions)
     }
 }
 
