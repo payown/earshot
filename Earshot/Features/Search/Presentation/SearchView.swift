@@ -130,6 +130,8 @@ struct SearchView<HeaderContent: View>: View {
     @Environment(PlayerService.self) private var player
     @Environment(DownloadManager.self) private var downloads
     @Environment(QuickActionStore.self) private var quickActions
+    @Environment(SettingsStore.self) private var settings
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
     @Query private var podcasts: [Podcast]
     @Query private var episodes: [Episode]
@@ -181,6 +183,17 @@ struct SearchView<HeaderContent: View>: View {
                         NavigationLink(value: podcast) {
                             Text(podcast.title)
                         }
+                        .accessibilityLabel(PodcastRowSpeech.label(
+                            title: podcast.title,
+                            author: podcast.author,
+                            isReadOnly: false
+                        ))
+                        .modifier(OptionalSpokenValue(value: voiceOverEnabled
+                            ? PodcastRowSpeech.value(
+                                for: podcast,
+                                mode: settings.spokenPodcastDescriptionMode
+                            )
+                            : nil))
                     }
                 }
             }
@@ -316,19 +329,6 @@ struct SearchView<HeaderContent: View>: View {
                         .accessibilityHint("Retry searching the iTunes podcast directory")
                     }
                 case .results(let results):
-                    // Enumerate so each row knows its one-based position and the
-                    // total, for the "result N of M" VoiceOver value (#501). The
-                    // index/count follow the displayed relevance order. `results`
-                    // is a small plain in-memory iTunes result array, not a
-                    // SwiftData `@Query`, so `enumerated()` here doesn't defeat
-                    // lazy `@Query` rendering.
-                    //
-                    // Identify rows by the enumerated `offset` (always unique
-                    // 0..<count), NOT by `element.id`. A result's `id` is its feed
-                    // URL, and iTunes can return the same feed twice; the upstream
-                    // dedupe collapses those, but keying on `offset` guarantees
-                    // index↔row can never desync even if any other field ever
-                    // collides, so the "result N of M" position stays in step (#501).
                     DirectoryPodcastResults(results: results)
                 }
             }

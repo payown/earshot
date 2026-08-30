@@ -19,6 +19,10 @@ struct PodcastCategoriesView: View {
                             Text(category.name)
                                 .font(.headline)
                         }
+                        // DisclosureGroup supplies the button and expanded-state
+                        // semantics. A heading trait makes VoiceOver announce a
+                        // redundant role for every expandable category.
+                        .accessibilityRemoveTraits(.isHeader)
                     }
                 }
             } footer: {

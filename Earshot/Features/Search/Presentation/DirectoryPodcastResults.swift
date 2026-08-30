@@ -10,6 +10,8 @@ struct DirectoryPodcastResults: View {
     @Environment(\.modelContext) private var context
     @Environment(DownloadManager.self) private var downloads
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(SettingsStore.self) private var settings
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
     @Query private var podcasts: [Podcast]
     @Query private var folders: [PodcastFolder]
@@ -17,14 +19,24 @@ struct DirectoryPodcastResults: View {
     @State private var navigation: DirectoryPodcastNavigation?
     @State private var subscribeFolderPick: FolderPickRequest?
     @State private var showPaywall = false
+    @State private var remoteDescriptions: [String: String] = [:]
+
+    private var spokenDescriptionMode: SpokenDescriptionMode {
+        settings.spokenPodcastDescriptionMode
+    }
+
+    private var descriptionLoadKey: String {
+        let feeds = results.map { FeedURLIdentity.canonical($0.feedURL) }.joined(separator: "\u{1}")
+        return "\(voiceOverEnabled)|\(spokenDescriptionMode.rawValue)|\(feeds)"
+    }
 
     var body: some View {
-        ForEach(Array(results.enumerated()), id: \.offset) { offset, result in
+        ForEach(Array(results.enumerated()), id: \.offset) { _, result in
             DirectoryPodcastRow(
                 result: result,
-                index: offset,
-                total: results.count,
                 subscribed: isSubscribed(result),
+                description: spokenDescription(for: result),
+                descriptionMode: spokenDescriptionMode,
                 open: { openDetail(result) },
                 toggleFollow: { toggleFollow(result) }
             )
@@ -39,10 +51,40 @@ struct DirectoryPodcastResults: View {
         }
         .sheet(isPresented: $showPaywall) { PaywallView() }
         .folderPicker($subscribeFolderPick)
+        .task(id: descriptionLoadKey) {
+            guard DirectoryPodcastDescriptionPolicy.shouldLoad(
+                voiceOverEnabled: voiceOverEnabled,
+                mode: spokenDescriptionMode
+            ) else {
+                remoteDescriptions = [:]
+                return
+            }
+            let feedURLs = results.map(\.feedURL)
+            let prioritized = await DirectoryPodcastDescriptionService.shared.descriptions(
+                for: Array(feedURLs.prefix(4))
+            )
+            guard !Task.isCancelled else { return }
+            remoteDescriptions = prioritized
+
+            let loaded = await DirectoryPodcastDescriptionService.shared.descriptions(
+                for: feedURLs
+            )
+            guard !Task.isCancelled else { return }
+            remoteDescriptions = loaded
+        }
     }
 
     private func isSubscribed(_ result: PodcastSearchResult) -> Bool {
         podcasts.contains { FeedURLIdentity.matches($0.feedURL, result.feedURL) }
+    }
+
+    private func spokenDescription(for result: PodcastSearchResult) -> String? {
+        if let podcast = podcasts.first(where: {
+            FeedURLIdentity.matches($0.feedURL, result.feedURL)
+        }) {
+            return podcast.podcastDescription
+        }
+        return remoteDescriptions[FeedURLIdentity.canonical(result.feedURL)]
     }
 
     private func openDetail(_ result: PodcastSearchResult) {
@@ -99,9 +141,9 @@ struct DirectoryPodcastResults: View {
 /// Activate opens the show; the named action follows or unfollows it.
 private struct DirectoryPodcastRow: View {
     let result: PodcastSearchResult
-    let index: Int
-    let total: Int
     let subscribed: Bool
+    let description: String?
+    let descriptionMode: SpokenDescriptionMode
     let open: () -> Void
     let toggleFollow: () -> Void
 
@@ -134,9 +176,14 @@ private struct DirectoryPodcastRow: View {
         .accessibilityLabel([result.title, result.author].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Opens this podcast")
-        .accessibilityValue(
-            SearchResultPosition.rowValue(subscribed: subscribed, index: index, total: total)
-        )
+        .modifier(OptionalSpokenValue(value:
+            DirectoryPodcastRowSpeech.value(
+                subscribed: subscribed,
+                feedURL: result.feedURL,
+                description: description,
+                mode: descriptionMode
+            )
+        ))
         .accessibilityAction { open() }
         .accessibilityAction(named: Text(toggleLabel)) { toggleFollow() }
     }
