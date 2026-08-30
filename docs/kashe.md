@@ -2862,11 +2862,15 @@ The screen is cleaner too. Search sits directly below the heading, before the RS
 
 Podcast descriptions in search and category results now follow your Podcast list details choice under Settings, Accessibility. Choose Off, Brief, or Full just as you do for the Library. Descriptions load from each podcast feed, so some may arrive a moment after the first results appear.
 
+Marking the episode currently playing as played now removes it from Unheard and offers Mark as unplayed. Removing an automatically queued episode now keeps it from returning and downloading again after refresh.
+
 What to test
 
 Open Add Podcast and browse several categories and subcategories. Make sure expanding and collapsing categories is clear without extra heading speech. Open a podcast, follow or unfollow it, and confirm the detail screen and actions match a podcast found through search.
 
 Search for a podcast and listen through several results. You should hear the total once, not a position on every row. Under Settings, Accessibility, switch Podcast list details among Off, Brief, and Full. Check the Library, search results, and category results after each choice. Tell me about missing or stale descriptions, slow VoiceOver navigation, confusing category names, or any result that behaves differently depending on how you found it.
+
+Mark the playing episode as played and check Unheard and its action. Remove an auto-queued episode, refresh, and confirm it stays out and does not download again.
 
 Kashe had a list of shows she meant to look up. The list lived in her head, which meant it was excellent at collecting names and poor at returning them.
 
