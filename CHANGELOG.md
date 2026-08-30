@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add Podcast now includes expandable Apple Podcasts categories and subcategories. Category results use the same podcast details and Follow or Unfollow actions as search results.
+- Podcast descriptions in search and category results now follow the Podcast list details preference under Accessibility, including Off, Brief, and Full modes.
 - Transcript metadata now offers Speakers only, Timestamps only, or Speakers and timestamps under Settings > Data. The device-local choice applies live in the transcript viewer and to exports from both the viewer and episode Actions; new installations default to Speakers only while existing installations retain the previous combined format. (closes #900)
 - Podcast Quick Actions can now open the existing download-count, queue-age-limit, and per-podcast speed editors directly. Each action moves VoiceOver focus to its native adjustable control, remains configurable under Settings > Quick Actions, and adds no new data setting. (closes #465)
 - Queue options can now save the current order as a reusable lineup and apply it later. Applying moves available, unplayed saved episodes to the front in order, preserves every other queued episode, and announces exact applied and skipped counts. Lineups sync through private iCloud and are capped at 100 episodes with an explicit omitted count. (closes #550)
@@ -17,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Add Podcast places search directly below its heading before the RSS-feed option. VoiceOver announces the result count once instead of repeating a position on every podcast, and expandable categories no longer carry a redundant heading trait.
 - Removed the Voice Enhance setting because it selected a spoken-audio session mode and mono output but did not perform speech-enhancement processing. Playback continues to use stereo output and the stable time-stretch algorithm.
 
 ### Fixed
