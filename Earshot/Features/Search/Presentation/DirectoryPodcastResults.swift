@@ -13,7 +13,7 @@ struct DirectoryPodcastResults: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
-    @Query private var podcasts: [Podcast]
+    @Query(filter: PodcastQuery.followed) private var podcasts: [Podcast]
     @Query private var folders: [PodcastFolder]
 
     @State private var navigation: DirectoryPodcastNavigation?

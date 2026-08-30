@@ -82,12 +82,13 @@ struct PodcastIdentityService {
     /// Fetches Podcast values without asking Core Data to populate any inverse
     /// relationships. Callers that only need subscription metadata must not make
     /// their cost proportional to the number of Episodes in the library.
-    func scalarPodcasts() throws -> [Podcast] {
+    func allScalarPodcasts() throws -> [Podcast] {
         var descriptor = FetchDescriptor<Podcast>()
         descriptor.propertiesToFetch = [
             \Podcast.feedURL, \Podcast.title, \Podcast.author,
             \Podcast.podcastDescription, \Podcast.artworkURL, \Podcast.websiteURL,
-            \Podcast.language, \Podcast.category, \Podcast.autoQueue,
+            \Podcast.language, \Podcast.category, \Podcast.subscriptionStateRaw,
+            \Podcast.autoQueue,
             \Podcast.notificationEnabled, \Podcast.speedOverride,
             \Podcast.trimSilenceOverride, \Podcast.introSkipSeconds,
             \Podcast.queueAgeLimitDays, \Podcast.inboxMaxEpisodes,
@@ -98,14 +99,16 @@ struct PodcastIdentityService {
     }
 
     /// Resolves a whole import against one deliberately narrow fetch. Import used
-    /// to call ``existing(feedURL:)`` once per URL; Core Data consequently executed
+    /// to call ``existingAnyState(feedURL:)`` once per URL; Core Data consequently executed
     /// and populated relationship faults hundreds of times on the actor executor.
     /// Fetch only scalar identity fields once, then classify in memory.
-    func existingByCanonicalFeedURL(for feedURLs: [String]) throws -> [String: Podcast] {
+    func existingAnyStateByCanonicalFeedURL(
+        for feedURLs: [String]
+    ) throws -> [String: Podcast] {
         let requested = Set(feedURLs.map(FeedURLIdentity.canonical))
         guard !requested.isEmpty else { return [:] }
 
-        let podcasts = try scalarPodcasts()
+        let podcasts = try allScalarPodcasts()
         var matches: [String: Podcast] = [:]
         for podcast in podcasts {
             let canonical = FeedURLIdentity.canonical(podcast.feedURL)
@@ -119,27 +122,34 @@ struct PodcastIdentityService {
         return matches
     }
 
-    func existing(feedURL: String) throws -> Podcast? {
+    func existingAnyState(feedURL: String) throws -> Podcast? {
         let canonical = FeedURLIdentity.canonical(feedURL)
         var exactDescriptor = FetchDescriptor<Podcast>(
             predicate: #Predicate { $0.feedURL == canonical }
         )
         exactDescriptor.propertiesToFetch = [
-            \Podcast.feedURL, \Podcast.title, \Podcast.createdAt,
+            \Podcast.feedURL, \Podcast.title, \Podcast.subscriptionStateRaw,
+            \Podcast.createdAt,
         ]
         let exact = try context.fetch(exactDescriptor)
-        if let winner = Self.deterministicPodcast(in: exact) { return winner }
+        if let winner = Self.deterministicPodcast(in: exact), winner.isFollowed {
+            return winner
+        }
 
-        let legacyMatches = try scalarPodcasts()
+        let legacyMatches = try allScalarPodcasts()
             .filter { FeedURLIdentity.canonical($0.feedURL) == canonical }
         return Self.deterministicPodcast(in: legacyMatches)
+    }
+
+    func existingFollowed(feedURL: String) throws -> Podcast? {
+        try existingAnyState(feedURL: feedURL).flatMap { $0.isFollowed ? $0 : nil }
     }
 
     func fetchOrCreate(
         feedURL: String,
         create: (_ canonicalFeedURL: String) -> Podcast
     ) throws -> (podcast: Podcast, inserted: Bool) {
-        if let existing = try existing(feedURL: feedURL) {
+        if let existing = try existingAnyState(feedURL: feedURL) {
             return (existing, false)
         }
         let podcast = create(FeedURLIdentity.canonical(feedURL))
@@ -149,6 +159,7 @@ struct PodcastIdentityService {
 
     private static func deterministicPodcast(in podcasts: [Podcast]) -> Podcast? {
         podcasts.min {
+            if $0.isFollowed != $1.isFollowed { return $0.isFollowed }
             if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
             return stableID($0) < stableID($1)
         }
@@ -543,6 +554,9 @@ struct IdentityRepairService {
     private func mergePodcastValues(
         from group: [Podcast], newest: Podcast, into survivor: Podcast
     ) {
+        let followed = group.filter(\.isFollowed)
+        let settingsGroup = followed.isEmpty ? group : followed
+        let settingsSource = settingsGroup.max(by: podcastOrder) ?? newest
         survivor.title = newest.title.isEmpty ? survivor.title : newest.title
         survivor.author = newest.author ?? group.compactMap(\.author).last
         survivor.podcastDescription = newest.podcastDescription ?? group.compactMap(\.podcastDescription).last
@@ -550,16 +564,24 @@ struct IdentityRepairService {
         survivor.websiteURL = newest.websiteURL ?? group.compactMap(\.websiteURL).last
         survivor.language = newest.language ?? group.compactMap(\.language).last
         survivor.category = newest.category ?? group.compactMap(\.category).last
-        survivor.autoQueue = newest.autoQueue
-        survivor.notificationEnabled = newest.notificationEnabled ?? group.compactMap(\.notificationEnabled).last
-        survivor.speedOverride = newest.speedOverride ?? group.compactMap(\.speedOverride).last
-        survivor.trimSilenceOverride = newest.trimSilenceOverride ?? group.compactMap(\.trimSilenceOverride).last
-        survivor.introSkipSeconds = newest.introSkipSeconds ?? group.compactMap(\.introSkipSeconds).last
-        survivor.queueAgeLimitDays = newest.queueAgeLimitDays ?? group.compactMap(\.queueAgeLimitDays).last
-        survivor.inboxMaxEpisodes = newest.inboxMaxEpisodes ?? group.compactMap(\.inboxMaxEpisodes).last
-        survivor.inboxAgeLimitHours = newest.inboxAgeLimitHours ?? group.compactMap(\.inboxAgeLimitHours).last
-        survivor.inboxExcluded = newest.inboxExcluded
-        survivor.inboxIncluded = newest.inboxIncluded
+        survivor.subscriptionStateRaw = settingsSource.subscriptionStateRaw
+        survivor.autoQueue = settingsSource.autoQueue
+        survivor.notificationEnabled = settingsSource.notificationEnabled
+            ?? settingsGroup.compactMap(\.notificationEnabled).last
+        survivor.speedOverride = settingsSource.speedOverride
+            ?? settingsGroup.compactMap(\.speedOverride).last
+        survivor.trimSilenceOverride = settingsSource.trimSilenceOverride
+            ?? settingsGroup.compactMap(\.trimSilenceOverride).last
+        survivor.introSkipSeconds = settingsSource.introSkipSeconds
+            ?? settingsGroup.compactMap(\.introSkipSeconds).last
+        survivor.queueAgeLimitDays = settingsSource.queueAgeLimitDays
+            ?? settingsGroup.compactMap(\.queueAgeLimitDays).last
+        survivor.inboxMaxEpisodes = settingsSource.inboxMaxEpisodes
+            ?? settingsGroup.compactMap(\.inboxMaxEpisodes).last
+        survivor.inboxAgeLimitHours = settingsSource.inboxAgeLimitHours
+            ?? settingsGroup.compactMap(\.inboxAgeLimitHours).last
+        survivor.inboxExcluded = settingsSource.inboxExcluded
+        survivor.inboxIncluded = settingsSource.inboxIncluded
         survivor.createdAt = group.map(\.createdAt).min() ?? survivor.createdAt
         survivor.refreshedAt = group.compactMap(\.refreshedAt).max()
         survivor.lastSeenPubDate = group.compactMap(\.lastSeenPubDate).max()
@@ -611,6 +633,7 @@ private func stableID<T: PersistentModel>(_ model: T) -> String {
 }
 
 private func podcastOrder(_ lhs: Podcast, _ rhs: Podcast) -> Bool {
+    if lhs.isFollowed != rhs.isFollowed { return lhs.isFollowed }
     if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
     return stableID(lhs) < stableID(rhs)
 }

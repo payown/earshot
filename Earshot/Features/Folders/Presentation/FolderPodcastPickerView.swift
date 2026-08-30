@@ -8,7 +8,8 @@ struct FolderPodcastPickerView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Bindable var folder: PodcastFolder
-    @Query(sort: \Podcast.title) private var podcasts: [Podcast]
+    @Query(filter: PodcastQuery.followed, sort: \Podcast.title)
+    private var podcasts: [Podcast]
     @Query private var memberships: [FolderMembership]
 
     var body: some View {

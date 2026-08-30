@@ -63,11 +63,12 @@ final class FolderRepository {
                 return (lhs.podcast?.title ?? "") < (rhs.podcast?.title ?? "")
             }
             .compactMap(\.podcast)
+            .filter(\.isFollowed)
     }
 
     /// Podcasts that belong to no folder, by title — the "Unfiled" group.
     func unfiledPodcasts() -> [Podcast] {
-        let all = (try? context.fetch(FetchDescriptor<Podcast>())) ?? []
+        let all = (try? context.fetch(PodcastQuery.followedDescriptor())) ?? []
         // Fetch memberships once (not once per podcast) and build the filed set.
         let memberships = (try? context.fetch(FetchDescriptor<FolderMembership>())) ?? []
         let filedIDs = Set(memberships.compactMap { $0.podcast?.persistentModelID })
@@ -239,6 +240,7 @@ final class FolderRepository {
     /// Adds `podcast` to `folder` at the end. Idempotent: an existing membership
     /// is left untouched.
     func add(_ podcast: Podcast, to folder: PodcastFolder) {
+        guard podcast.isFollowed else { return }
         let existing = membershipsByFolderID()[folder.persistentModelID, default: []]
         guard !existing.contains(where: {
             $0.podcast?.persistentModelID == podcast.persistentModelID
@@ -264,6 +266,10 @@ final class FolderRepository {
         for membership in existing
         where membership.podcast?.persistentModelID == podcast.persistentModelID {
             context.delete(membership)
+        }
+        guard podcast.isFollowed else {
+            save()
+            return
         }
         let byFolderID = Dictionary(grouping: existing) { $0.folder?.persistentModelID }
         for folder in targets {
@@ -301,7 +307,7 @@ final class FolderRepository {
         // Seed with the folder's current members so both existing memberships and
         // repeats inside `podcasts` collapse to a single insert.
         var seen = Set(existing.compactMap { $0.podcast?.persistentModelID })
-        for podcast in podcasts {
+        for podcast in podcasts where podcast.isFollowed {
             guard seen.insert(podcast.persistentModelID).inserted else { continue }
             context.insert(FolderMembership(folder: folder, podcast: podcast, sortOrder: nextOrder))
             nextOrder += 1
@@ -339,7 +345,7 @@ final class FolderRepository {
             }
             .map(\.sortOrder).max() ?? -1) + 1
         var seen = Set<PersistentIdentifier>()
-        for podcast in podcasts {
+        for podcast in podcasts where podcast.isFollowed {
             guard seen.insert(podcast.persistentModelID).inserted else { continue }
             context.insert(FolderMembership(folder: folder, podcast: podcast, sortOrder: nextOrder))
             nextOrder += 1
@@ -540,7 +546,7 @@ final class FolderRepository {
             // `node.memberships`, blocking the main thread until iOS's scene
             // watchdog terminated build 202.
             for membership in memberships[node.persistentModelID, default: []] {
-                guard let podcast = membership.podcast else { continue }
+                guard let podcast = membership.podcast, podcast.isFollowed else { continue }
                 if seen.insert(podcast.persistentModelID).inserted {
                     result.append(podcast)
                 }

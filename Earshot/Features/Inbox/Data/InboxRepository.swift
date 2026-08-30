@@ -113,6 +113,7 @@ final class InboxRepository {
     static func currentEpisodes(_ candidates: [Episode], in context: ModelContext) -> [Episode] {
         liveEpisodes(candidates, in: context).filter {
             $0.status == .newEpisode && !$0.inboxDismissed
+                && $0.podcast?.isCatalogOnly != true
         }
     }
 
@@ -130,7 +131,9 @@ final class InboxRepository {
             predicate: InboxQuery.predicate(optInOnly: optInOnly),
             sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
         )
-        return ((try? context.fetch(descriptor)) ?? []).filter { $0.status == .newEpisode }
+        return ((try? context.fetch(descriptor)) ?? []).filter {
+            $0.status == .newEpisode && $0.podcast?.isCatalogOnly != true
+        }
     }
 
     /// The folder's own Inbox, subtree-aware and newest first (#763). Each
@@ -186,7 +189,9 @@ final class InboxRepository {
     func inboxCount(optInOnly: Bool) -> Int {
         let descriptor = FetchDescriptor<Episode>(predicate: InboxQuery.unplayedPredicate(optInOnly: optInOnly))
         let candidates = (try? context.fetch(descriptor)) ?? []
-        return candidates.filter { $0.status == .newEpisode }.count
+        return candidates.filter {
+            $0.status == .newEpisode && $0.podcast?.isCatalogOnly != true
+        }.count
     }
 
 
@@ -209,6 +214,7 @@ final class InboxRepository {
         return candidates.filter {
             $0.status == .newEpisode &&
             !$0.inboxDismissed &&
+            $0.podcast?.isCatalogOnly != true &&
             !isExcluded($0.podcast, optInOnly: optInOnly)
         }
     }
@@ -217,7 +223,7 @@ final class InboxRepository {
     /// call after a refresh or an include/exclude change.
     func applyLimits(now: Date = .now) {
         let optInOnly = settings.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
-        let podcasts = (try? context.fetch(FetchDescriptor<Podcast>())) ?? []
+        let podcasts = (try? context.fetch(PodcastQuery.followedDescriptor())) ?? []
         for podcast in podcasts where !isExcluded(podcast, optInOnly: optInOnly) {
             applyForPodcast(podcast, now: now)
         }

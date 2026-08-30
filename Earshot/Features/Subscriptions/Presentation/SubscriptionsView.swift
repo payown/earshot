@@ -699,7 +699,7 @@ struct SubscriptionsView: View {
         // path actually finds new episodes must be the path that notifies, or the
         // notification is lost (#421). deliver() coalesces per podcast by a stable
         // identifier, so the same show notifying from both paths can never stack.
-        let podcastCount = (try? context.fetchCount(FetchDescriptor<Podcast>()))
+        let podcastCount = (try? PodcastQuery.followedCount(in: context))
             ?? podcasts.count
         guard let report = await BackgroundFeedRefresher.runUserInitiatedRefresh(
             trigger: trigger,
@@ -751,12 +751,15 @@ struct SubscriptionsView: View {
     private func loadPodcasts() {
         let interval = PerformanceSignposts.signposter.beginInterval("LibraryReload")
         defer { PerformanceSignposts.signposter.endInterval("LibraryReload", interval) }
-        var descriptor = FetchDescriptor<Podcast>(sortBy: [SortDescriptor(\.title)])
+        var descriptor = PodcastQuery.followedDescriptor(
+            sortBy: [SortDescriptor(\.title)]
+        )
         descriptor.propertiesToFetch = [
             \Podcast.feedURL,
             \Podcast.title,
             \Podcast.author,
             \Podcast.artworkURL,
+            \Podcast.subscriptionStateRaw,
             \Podcast.autoQueue,
             \Podcast.notificationEnabled,
             \Podcast.inboxExcluded,

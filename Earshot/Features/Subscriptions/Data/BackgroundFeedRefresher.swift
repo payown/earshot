@@ -223,7 +223,7 @@ enum BackgroundFeedRefresher {
             return false
         }
 
-        let podcastCount = (try? context.fetchCount(FetchDescriptor<Podcast>())) ?? 0
+        let podcastCount = (try? PodcastQuery.followedCount(in: context)) ?? 0
         FeedRefreshStatusMonitor.shared.start(trigger: trigger, total: podcastCount)
 
         let queue = QueueRepository(context: context)

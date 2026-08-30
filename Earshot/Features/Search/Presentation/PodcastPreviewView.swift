@@ -32,7 +32,7 @@ struct PodcastPreviewView: View {
 
     /// Subscriptions, so the Follow / Unfollow control reflects live state and the
     /// label flips the moment the toggle completes — without re-entering the view.
-    @Query private var podcasts: [Podcast]
+    @Query(filter: PodcastQuery.followed) private var podcasts: [Podcast]
 
     /// Drives the subscribe-to-folder offer (#764): the picker is only offered when
     /// the user already has at least one folder (decision F8).

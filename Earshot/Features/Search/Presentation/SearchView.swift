@@ -133,7 +133,7 @@ struct SearchView<HeaderContent: View>: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
-    @Query private var podcasts: [Podcast]
+    @Query(filter: PodcastQuery.followed) private var podcasts: [Podcast]
     @Query private var episodes: [Episode]
     @Query private var bookmarks: [Bookmark]
 
@@ -160,10 +160,16 @@ struct SearchView<HeaderContent: View>: View {
         SearchLogic.filter(podcasts, query: query) { "\($0.title) \($0.author ?? "")" }
     }
     private var matchedEpisodes: [Episode] {
-        SearchLogic.filter(episodes, query: query) { $0.title }
+        SearchLogic.filter(
+            episodes.filter(PodcastQuery.isInFollowedLibrary),
+            query: query
+        ) { $0.title }
     }
     private var matchedBookmarks: [Bookmark] {
-        SearchLogic.filter(bookmarks, query: query) { "\($0.note) \($0.episode?.title ?? "")" }
+        SearchLogic.filter(
+            bookmarks.filter(PodcastQuery.isInFollowedLibrary),
+            query: query
+        ) { "\($0.note) \($0.episode?.title ?? "")" }
     }
 
     /// Whether this scope surfaced any LOCAL results to the user. Only counts the
