@@ -35,7 +35,9 @@ struct EpisodeUserStateSnapshot: Sendable, Equatable {
         playedChangedExplicitly: Bool = false,
         inboxDismissedChangedExplicitly: Bool = false
     ) {
-        guard let feedURL = episode.podcast?.feedURL, !episode.guid.isEmpty else { return nil }
+        guard let podcast = episode.podcast, podcast.isFollowed,
+              !episode.guid.isEmpty else { return nil }
+        let feedURL = podcast.feedURL
         self.feedURL = FeedURLIdentity.canonical(feedURL)
         self.guid = episode.guid
         self.positionSeconds = max(0, positionSeconds ?? episode.positionSeconds)
@@ -793,14 +795,14 @@ actor CloudProjectionCoordinator: ModelActor {
         }
 
         let podcastIdentity = PodcastIdentityService(context: appContext)
-        var localByFeed = try podcastIdentity.existingByCanonicalFeedURL(
+        var localByFeed = try podcastIdentity.existingAnyStateByCanonicalFeedURL(
             for: Array(cloudByFeed.keys)
         )
         var applicationChanged = false
         for row in cloudByFeed.values.sorted(by: Self.projectionOrder) {
             let key = FeedURLIdentity.canonical(row.feedURL)
             if row.deletedAt != nil {
-                if let podcast = localByFeed[key] {
+                if let podcast = localByFeed[key], podcast.isFollowed {
                     if remotePodcastDeletionDelayNanoseconds == 0 {
                         // Tests and non-UI coordinators retain deterministic,
                         // synchronous reconciliation.
@@ -815,6 +817,7 @@ actor CloudProjectionCoordinator: ModelActor {
             }
             let podcast: Podcast
             if let existing = localByFeed[key] {
+                guard existing.isFollowed else { continue }
                 podcast = existing
             } else {
                 podcast = Podcast(feedURL: key, title: row.title, createdAt: row.createdAt)
@@ -833,7 +836,8 @@ actor CloudProjectionCoordinator: ModelActor {
             applicationChanged = true
         }
 
-        let podcasts = try podcastIdentity.scalarPodcasts()
+        let podcasts = try podcastIdentity.allScalarPodcasts()
+            .filter(\.isFollowed)
             .sorted { FeedURLIdentity.canonical($0.feedURL) < FeedURLIdentity.canonical($1.feedURL) }
         var subscriptionRowsSinceSave = 0
         for podcast in podcasts {
@@ -949,7 +953,7 @@ actor CloudProjectionCoordinator: ModelActor {
             FeedURLIdentity.canonical($0.feedURL) == key && $0.deletedAt != nil
         }) else { return }
         guard let current = try? PodcastIdentityService(context: modelContext)
-            .existing(feedURL: key) else { return }
+            .existingFollowed(feedURL: key) else { return }
 
         isApplyingRemote = true
         let changed = SubscriptionDeletionRepository(context: modelContext)
@@ -1074,7 +1078,8 @@ actor CloudProjectionCoordinator: ModelActor {
         ))
         var localByKey: [EpisodeKey: Episode] = [:]
         for episode in meaningful.sorted(by: Self.episodeOrder) {
-            guard let key = Self.episodeKey(for: episode) else { continue }
+            guard episode.podcast?.isFollowed == true,
+                  let key = Self.episodeKey(for: episode) else { continue }
             if localByKey[key] == nil { localByKey[key] = episode }
         }
 
@@ -1146,8 +1151,14 @@ actor CloudProjectionCoordinator: ModelActor {
         ))
         var current: [EpisodeKey: (position: Int, episode: Episode)] = [:]
         for item in items {
-            guard let episode = item.episode,
-                  let key = Self.episodeKey(for: episode) else {
+            guard let episode = item.episode else {
+                AppLog.data.error(
+                    "Queue projection skipped unprojectable item at position \(item.position, privacy: .public); missing usable episode or feed key"
+                )
+                continue
+            }
+            guard episode.podcast?.isFollowed == true else { continue }
+            guard let key = Self.episodeKey(for: episode) else {
                 AppLog.data.error(
                     "Queue projection skipped unprojectable item at position \(item.position, privacy: .public); missing usable episode or feed key"
                 )
@@ -1230,7 +1241,9 @@ actor CloudProjectionCoordinator: ModelActor {
         let rows = try cloudContext.fetch(FetchDescriptor<CloudSettingProjection>())
         if onlyIfCloudEmpty, !rows.isEmpty { return }
         let settings = try appContext.fetch(FetchDescriptor<AppSetting>())
-        for setting in settings where AppSettingScope.isMirrored(setting.key) {
+        let followedFeeds = try followedFeedURLs(in: appContext)
+        for setting in settings where AppSettingScope.isMirrored(setting.key)
+            && Self.settingBelongsToFollowedPodcast(setting.key, followedFeeds: followedFeeds) {
             try publishLocalSettingChange(
                 key: setting.key,
                 value: setting.value,
@@ -1247,6 +1260,11 @@ actor CloudProjectionCoordinator: ModelActor {
         guard AppSettingScope.isMirrored(key) else { return }
         let canonical = AppSettingIdentity.canonicalKey(key)
         let appContext = modelContext
+        let followedFeeds = try followedFeedURLs(in: appContext)
+        guard Self.settingBelongsToFollowedPodcast(
+            canonical,
+            followedFeeds: followedFeeds
+        ) else { return }
         guard let value = AppSettingIdentity.value(for: canonical, in: appContext) else { return }
         let cloudContext = projectionContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudSettingProjection>())
@@ -1278,6 +1296,7 @@ actor CloudProjectionCoordinator: ModelActor {
         var currentIDs: Set<String> = []
         for bookmark in bookmarks.sorted(by: { $0.createdAt < $1.createdAt }) {
             guard let episode = bookmark.episode,
+                  episode.podcast?.isFollowed == true,
                   let feedURL = episode.podcast?.feedURL,
                   !episode.guid.isEmpty else { continue }
             let key = Self.bookmarkSemanticKey(
@@ -1332,7 +1351,10 @@ actor CloudProjectionCoordinator: ModelActor {
         }
         var currentIDs: Set<String> = []
         var insertedRowsSinceSave = 0
-        for session in local.sessions.sorted(by: { $0.date < $1.date }) {
+        let followedFeeds = try followedFeedURLs(in: appContext)
+        for session in local.sessions
+            .filter({ followedFeeds.contains(FeedURLIdentity.canonical($0.feedURL)) })
+            .sorted(by: { $0.date < $1.date }) {
             let key = Self.sessionSemanticKey(
                 feedURL: session.feedURL,
                 guid: session.episodeGUID,
@@ -1423,7 +1445,8 @@ actor CloudProjectionCoordinator: ModelActor {
             // the small membership table rather than the episode catalog.
             let podcastMembers = podcastMembershipsByFolderID[folder.persistentModelID, default: []]
                 .compactMap { membership -> CloudFolderPodcastMember? in
-                guard let feedURL = membership.podcast?.feedURL else { return nil }
+                guard let podcast = membership.podcast, podcast.isFollowed else { return nil }
+                let feedURL = podcast.feedURL
                 return CloudFolderPodcastMember(
                     feedURL: FeedURLIdentity.canonical(feedURL),
                     sortOrder: membership.sortOrder
@@ -1435,6 +1458,7 @@ actor CloudProjectionCoordinator: ModelActor {
             let episodeMembers = episodeMemberships.compactMap { membership -> CloudFolderEpisodeMember? in
                 guard membership.folder?.persistentModelID == folder.persistentModelID,
                       let episode = membership.episode,
+                      episode.podcast?.isFollowed == true,
                       let feedURL = episode.podcast?.feedURL else { return nil }
                 return CloudFolderEpisodeMember(
                     feedURL: FeedURLIdentity.canonical(feedURL),
@@ -1536,11 +1560,13 @@ actor CloudProjectionCoordinator: ModelActor {
             }
         }
         var latestByKey: [EpisodeKey: EpisodeUserStateSnapshot] = [:]
+        let followedFeeds = try followedFeedURLs(in: modelContext)
         for snapshot in snapshots {
             let key = EpisodeKey(
                 feedURL: FeedURLIdentity.canonical(snapshot.feedURL),
                 guid: snapshot.guid
             )
+            guard followedFeeds.contains(key.feedURL) else { continue }
             latestByKey[key] = snapshot
         }
         for key in latestByKey.keys.sorted() {
@@ -1594,7 +1620,9 @@ actor CloudProjectionCoordinator: ModelActor {
         refreshContextsFromStore()
         let appContext = modelContext
         let cloudContext = projectionContext
-        let podcasts = try PodcastIdentityService(context: appContext).scalarPodcasts()
+        let podcasts = try PodcastIdentityService(context: appContext)
+            .allScalarPodcasts()
+            .filter(\.isFollowed)
         // Legacy stores can contain duplicate spellings of the same feed URL.
         // Launch repair normally coalesces them, but projection must remain
         // total even if a save notification arrives before that repair.
@@ -1659,19 +1687,22 @@ actor CloudProjectionCoordinator: ModelActor {
         refreshContextsFromStore()
         let appContext = modelContext
         let cloudContext = projectionContext
-        let storedFeedURL = feedURL
-        var podcastDescriptor = FetchDescriptor<Podcast>(
-            predicate: #Predicate { $0.feedURL == storedFeedURL }
-        )
-        podcastDescriptor.fetchLimit = 1
-        guard let podcast = try appContext.fetch(podcastDescriptor).first else { return }
-
-        let canonicalFeedURL = FeedURLIdentity.canonical(podcast.feedURL)
+        let podcast = try PodcastIdentityService(context: appContext)
+            .existingAnyState(feedURL: feedURL)
+        let canonicalFeedURL = FeedURLIdentity.canonical(podcast?.feedURL ?? feedURL)
         var projectionDescriptor = FetchDescriptor<CloudPodcastProjection>(
             predicate: #Predicate { $0.feedURL == canonicalFeedURL }
         )
         projectionDescriptor.fetchLimit = 1
-        let row = try cloudContext.fetch(projectionDescriptor).first ?? {
+        let existingRow = try cloudContext.fetch(projectionDescriptor).first
+        guard let podcast, podcast.isFollowed else {
+            // Catalog identity is local-only. Preserve any remote subscription
+            // record for a later explicit promotion instead of treating the
+            // hidden application row as an Unfollow.
+            knownLocalFeedURLs.remove(canonicalFeedURL)
+            return
+        }
+        let row = existingRow ?? {
             let inserted = CloudPodcastProjection()
             inserted.feedURL = canonicalFeedURL
             cloudContext.insert(inserted)
@@ -1925,11 +1956,36 @@ actor CloudProjectionCoordinator: ModelActor {
         return try? JSONDecoder().decode(type, from: data)
     }
 
+    private func followedFeedURLs(in context: ModelContext) throws -> Set<String> {
+        Set(try PodcastIdentityService(context: context).allScalarPodcasts()
+            .filter(\.isFollowed)
+            .map { FeedURLIdentity.canonical($0.feedURL) })
+    }
+
+    private static func settingBelongsToFollowedPodcast(
+        _ rawKey: String,
+        followedFeeds: Set<String>
+    ) -> Bool {
+        let key = AppSettingIdentity.canonicalKey(rawKey)
+        for prefix in [
+            SettingsKey.podcastFilterPrefix,
+            SettingsKey.podcastInboxCapPrefix,
+            SettingsKey.episodeFilterConfigurationPrefix,
+        ] where key.hasPrefix(prefix) {
+            return followedFeeds.contains(
+                FeedURLIdentity.canonical(String(key.dropFirst(prefix.count)))
+            )
+        }
+        return true
+    }
+
     private func applicationEpisodes(matching keys: Set<EpisodeKey>) -> [EpisodeKey: Episode] {
         guard !keys.isEmpty else { return [:] }
         let keysByFeed = Dictionary(grouping: keys, by: \.feedURL)
         let context = modelContext
-        let podcasts = (try? PodcastIdentityService(context: context).scalarPodcasts()) ?? []
+        let podcasts = (
+            try? PodcastIdentityService(context: context).allScalarPodcasts()
+        )?.filter(\.isFollowed) ?? []
         var result: [EpisodeKey: Episode] = [:]
         for podcast in podcasts {
             let feed = FeedURLIdentity.canonical(podcast.feedURL)
@@ -2068,7 +2124,7 @@ actor CloudProjectionCoordinator: ModelActor {
                   let audioURL = metadata.episodeAudioURL,
                   !audioURL.isEmpty,
                   let podcast = try PodcastIdentityService(context: appContext)
-                    .existing(feedURL: key.feedURL)
+                    .existingFollowed(feedURL: key.feedURL)
             else { continue }
             let episode = Episode(
                 guid: key.guid,
@@ -2095,6 +2151,7 @@ actor CloudProjectionCoordinator: ModelActor {
         var existingByKey: [EpisodeKey: QueueItem] = [:]
         for item in existing {
             guard let episode = item.episode,
+                  episode.podcast?.isFollowed == true,
                   let key = Self.episodeKey(for: episode),
                   existingByKey[key] == nil else { continue }
             existingByKey[key] = item
@@ -2147,8 +2204,15 @@ actor CloudProjectionCoordinator: ModelActor {
         appContext: ModelContext,
         cloudContext: ModelContext
     ) throws -> Bool {
+        let followedFeeds = try followedFeedURLs(in: appContext)
         let rows = try cloudContext.fetch(FetchDescriptor<CloudSettingProjection>())
-            .filter { $0.deletedAt == nil && AppSettingScope.isMirrored($0.key) }
+            .filter {
+                $0.deletedAt == nil && AppSettingScope.isMirrored($0.key)
+                    && Self.settingBelongsToFollowedPodcast(
+                        $0.key,
+                        followedFeeds: followedFeeds
+                    )
+            }
         var newestByDevice: [String: CloudSettingProjection] = [:]
         for row in rows.sorted(by: Self.settingProjectionOrder) {
             let key = AppSettingIdentity.canonicalKey(row.key)
@@ -2206,6 +2270,7 @@ actor CloudProjectionCoordinator: ModelActor {
         var localBySemanticKey: [String: Bookmark] = [:]
         for bookmark in existing {
             guard let episode = bookmark.episode,
+                  episode.podcast?.isFollowed == true,
                   let feedURL = episode.podcast?.feedURL else { continue }
             let key = Self.bookmarkSemanticKey(
                 feedURL: feedURL,
@@ -2270,7 +2335,9 @@ actor CloudProjectionCoordinator: ModelActor {
         }
         let local = try resolvedLocalListeningSessions(in: appContext)
         var localByKey: [String: ListeningSession] = [:]
-        for session in local.sessions {
+        let followedFeeds = try followedFeedURLs(in: appContext)
+        for session in local.sessions where
+            followedFeeds.contains(FeedURLIdentity.canonical(session.feedURL)) {
             let key = Self.sessionSemanticKey(
                 feedURL: session.feedURL,
                 guid: session.episodeGUID,
@@ -2296,7 +2363,7 @@ actor CloudProjectionCoordinator: ModelActor {
                 continue
             }
             guard let podcast = try PodcastIdentityService(context: appContext)
-                .existing(feedURL: row.feedURL) else { continue }
+                .existingFollowed(feedURL: row.feedURL) else { continue }
             let episode: Episode? = if let guid = row.episodeGUID {
                 applicationEpisodes(matching: [
                     EpisodeKey(
@@ -2397,7 +2464,8 @@ actor CloudProjectionCoordinator: ModelActor {
             ) ?? []
             var existingPodcastMembers: [String: FolderMembership] = [:]
             for member in podcastMembershipsByFolderID[folder.persistentModelID, default: []] {
-                guard let feedURL = member.podcast?.feedURL else { continue }
+                guard let podcast = member.podcast, podcast.isFollowed else { continue }
+                let feedURL = podcast.feedURL
                 let feed = FeedURLIdentity.canonical(feedURL)
                 if existingPodcastMembers[feed] == nil {
                     existingPodcastMembers[feed] = member
@@ -2415,7 +2483,7 @@ actor CloudProjectionCoordinator: ModelActor {
             }
             for member in podcastMembers {
                 guard let podcast = try PodcastIdentityService(context: appContext)
-                    .existing(feedURL: member.feedURL) else { continue }
+                    .existingFollowed(feedURL: member.feedURL) else { continue }
                 if let existing = existingPodcastMembers[member.feedURL] {
                     if existing.sortOrder != member.sortOrder {
                         existing.sortOrder = member.sortOrder
@@ -2439,6 +2507,7 @@ actor CloudProjectionCoordinator: ModelActor {
             var existingEpisodeMembers: [EpisodeKey: EpisodeFolderMembership] = [:]
             for member in allEpisodeMembers {
                 guard let episode = member.episode,
+                      episode.podcast?.isFollowed == true,
                       let key = Self.episodeKey(for: episode),
                       existingEpisodeMembers[key] == nil else { continue }
                 existingEpisodeMembers[key] = member

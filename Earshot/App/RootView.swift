@@ -437,7 +437,7 @@ struct RootView: View {
             settings.configure(context: modelContext)
             runtime.listeningPlaces.configure(context: modelContext)
             let capSettings = AppSettingsStore(context: modelContext)
-            let count = (try? modelContext.fetchCount(FetchDescriptor<Podcast>())) ?? 0
+            let count = (try? PodcastQuery.followedCount(in: modelContext)) ?? 0
             capSettings.introducePodcastCapGatingIfNeeded(currentPodcastCount: count)
             tips.configure(context: modelContext)
             #if DEBUG
@@ -592,7 +592,7 @@ struct RootView: View {
         defer { notificationRouter.clear() }
 
         guard let podcast = try? PodcastIdentityService(context: modelContext)
-            .existing(feedURL: intent.feedURL) else {
+            .existingFollowed(feedURL: intent.feedURL) else {
             AppLog.notifications.error("Notification routing: podcast not found for feed")
             return
         }

@@ -216,6 +216,10 @@ final class SubscriptionRepository {
     @discardableResult
     func subscribe(feedURL: String) async throws -> Podcast {
         let canonical = FeedURLIdentity.canonical(feedURL)
+        // Phase 3 must distinguish a followed match from a catalog-only shell
+        // and promote the latter through the cap/fetch transaction. Phase 1 has
+        // no catalog materialization entry point, so this remains unreachable
+        // for catalog rows until the queue repository lands.
         if podcast(forFeedURL: canonical) != nil {
             let repair = try IdentityRepairService(context: context).repair(feedURLs: [canonical])
             if repair.didChange { try context.save() }
@@ -819,7 +823,7 @@ extension SubscriptionRepository {
     }
 
     private func podcast(forFeedURL url: String) -> Podcast? {
-        try? PodcastIdentityService(context: context).existing(feedURL: url)
+        try? PodcastIdentityService(context: context).existingAnyState(feedURL: url)
     }
 
     /// Resolves a podcast on the MAIN context from an identifier the background
@@ -863,7 +867,7 @@ extension SubscriptionRepository {
     /// the cap being momentarily under-enforced.
     private func currentPodcastCountForCapCheck() -> Int {
         do {
-            return try context.fetchCount(FetchDescriptor<Podcast>())
+            return try PodcastQuery.followedCount(in: context)
         } catch {
             AppLog.subscriptions.error(
                 "Podcast cap check: failed to fetch podcast count, treating as 0: \(error.localizedDescription, privacy: .public)"
@@ -878,7 +882,7 @@ extension SubscriptionRepository {
     /// it's logged rather than swallowed.
     private func allPodcastsForCapCheck() -> [Podcast] {
         do {
-            return try context.fetch(FetchDescriptor<Podcast>())
+            return try context.fetch(PodcastQuery.followedDescriptor())
         } catch {
             AppLog.subscriptions.error(
                 "Podcast cap check: failed to fetch podcasts, treating as empty: \(error.localizedDescription, privacy: .public)"

@@ -2255,6 +2255,121 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         }
     }
 
+    func testCatalogGraphStaysLocalAcrossEveryProjectionEntity() async throws {
+        let app = try makeApplicationContainer()
+        let context = app.mainContext
+        let feedURL = "https://catalog-local.example/feed"
+        let podcast = Podcast(
+            feedURL: feedURL,
+            title: "Catalog local",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue
+        )
+        context.insert(podcast)
+        let episode = Episode(
+            guid: "catalog-episode",
+            title: "Catalog episode",
+            audioURL: "https://catalog-local.example/episode.mp3",
+            positionSeconds: 42,
+            inboxDismissed: true
+        )
+        episode.podcast = podcast
+        context.insert(episode)
+        context.insert(QueueItem(episode: episode, position: 0))
+        context.insert(Bookmark(episode: episode, positionSeconds: 12, note: "Local"))
+        context.insert(ListeningSession(
+            episode: episode,
+            podcast: podcast,
+            durationSeconds: 30
+        ))
+        let folder = PodcastFolder(name: "Corrupt catalog folder")
+        context.insert(folder)
+        context.insert(FolderMembership(folder: folder, podcast: podcast))
+        context.insert(EpisodeFolderMembership(folder: folder, episode: episode))
+        try AppSettingIdentity.setValue(
+            "all",
+            for: SettingsKey.podcastFilter(feedURL: feedURL),
+            in: context
+        )
+        try context.save()
+
+        let projection = try makeProjectionContainer()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection
+        )
+        try await coordinator.reconcile()
+
+        let projected = projection.mainContext
+        XCTAssertEqual(try projected.fetchCount(FetchDescriptor<CloudPodcastProjection>()), 0)
+        XCTAssertEqual(try projected.fetchCount(FetchDescriptor<CloudEpisodeStateProjection>()), 0)
+        XCTAssertEqual(try projected.fetchCount(FetchDescriptor<CloudQueueItemProjection>()), 0)
+        XCTAssertEqual(try projected.fetchCount(FetchDescriptor<CloudSettingProjection>()), 0)
+        XCTAssertEqual(try projected.fetchCount(FetchDescriptor<CloudBookmarkProjection>()), 0)
+        XCTAssertEqual(try projected.fetchCount(FetchDescriptor<CloudListeningSessionProjection>()), 0)
+        let folderRows = try projected.fetch(FetchDescriptor<CloudFolderProjection>())
+        XCTAssertEqual(folderRows.count, 1)
+        XCTAssertFalse(folderRows[0].podcastMembersJSON.contains(feedURL))
+        XCTAssertFalse(folderRows[0].episodeMembersJSON.contains(feedURL))
+
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertNotNil(
+            try PodcastIdentityService(context: context)
+                .existingAnyState(feedURL: feedURL)
+        )
+
+        let remotePodcast = CloudPodcastProjection()
+        remotePodcast.feedURL = feedURL
+        remotePodcast.title = "Remote followed title"
+        remotePodcast.sourceDeviceID = "remote"
+        remotePodcast.modifiedAt = Date(timeIntervalSince1970: 200)
+        let remoteEpisode = CloudEpisodeStateProjection()
+        remoteEpisode.feedURL = feedURL
+        remoteEpisode.episodeGUID = episode.guid
+        remoteEpisode.sourceDeviceID = "remote"
+        remoteEpisode.positionSeconds = 999
+        remoteEpisode.positionUpdatedAt = Date(timeIntervalSince1970: 200)
+        remoteEpisode.isPlayed = true
+        remoteEpisode.playedUpdatedAt = Date(timeIntervalSince1970: 200)
+        remoteEpisode.modifiedAt = Date(timeIntervalSince1970: 200)
+        let remoteQueue = CloudQueueItemProjection()
+        remoteQueue.feedURL = feedURL
+        remoteQueue.episodeGUID = episode.guid
+        remoteQueue.sourceDeviceID = "remote"
+        remoteQueue.isQueued = false
+        remoteQueue.position = 99
+        remoteQueue.membershipUpdatedAt = Date(timeIntervalSince1970: 200)
+        remoteQueue.modifiedAt = Date(timeIntervalSince1970: 200)
+        let remoteSetting = CloudSettingProjection()
+        remoteSetting.key = SettingsKey.podcastFilter(feedURL: feedURL)
+        remoteSetting.value = "unplayed"
+        remoteSetting.sourceDeviceID = "remote"
+        remoteSetting.modifiedAt = Date(timeIntervalSince1970: 200)
+        projected.insert(remotePodcast)
+        projected.insert(remoteEpisode)
+        projected.insert(remoteQueue)
+        projected.insert(remoteSetting)
+        try projected.save()
+
+        try await coordinator.reconcile()
+
+        XCTAssertTrue(podcast.isCatalogOnly)
+        XCTAssertEqual(podcast.title, "Catalog local")
+        XCTAssertEqual(episode.positionSeconds, 42)
+        XCTAssertFalse(episode.isPlayed)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertEqual(
+            AppSettingIdentity.value(
+                for: SettingsKey.podcastFilter(feedURL: feedURL),
+                in: context
+            ),
+            "all"
+        )
+        XCTAssertNil(remotePodcast.deletedAt)
+        XCTAssertNil(remoteEpisode.deletedAt)
+        XCTAssertNil(remoteQueue.deletedAt)
+        XCTAssertEqual(remoteSetting.value, "unplayed")
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV12.self)
         return try ModelContainer(

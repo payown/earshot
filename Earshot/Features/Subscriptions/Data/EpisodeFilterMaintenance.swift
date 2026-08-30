@@ -44,10 +44,8 @@ actor EpisodeFilterMaintenance {
             throw EpisodeFilterMaintenanceError.inactiveConfiguration
         }
 
-        let canonicalFeedURL = FeedURLIdentity.canonical(feedURL)
-        let podcast = try modelContext.fetch(FetchDescriptor<Podcast>()).first {
-            FeedURLIdentity.canonical($0.feedURL) == canonicalFeedURL
-        }
+        let podcast = try PodcastIdentityService(context: modelContext)
+            .existingFollowed(feedURL: feedURL)
         guard let podcast else { throw EpisodeFilterMaintenanceError.podcastNotFound }
 
         let podcastID = podcast.persistentModelID
