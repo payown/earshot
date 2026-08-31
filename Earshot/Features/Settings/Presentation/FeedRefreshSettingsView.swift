@@ -230,7 +230,7 @@ struct FeedRefreshSettingsView: View {
         var loaded: [String: Podcast] = [:]
         for failure in runtime.feedRefreshStatus.snapshot.failureDetails {
             guard let podcast = try? PodcastIdentityService(context: context)
-                .existing(feedURL: failure.feedURL) else { continue }
+                .existingFollowed(feedURL: failure.feedURL) else { continue }
             loaded[failure.id] = podcast
         }
         failedPodcasts = loaded

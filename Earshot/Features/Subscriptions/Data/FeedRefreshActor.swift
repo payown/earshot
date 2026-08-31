@@ -326,7 +326,9 @@ actor FeedRefreshActor {
         }
         let correlationID = UUID().uuidString.lowercased()
         let taskCancelledAtEntry = Task.isCancelled
-        let fetchedPodcasts = (try? modelContext.fetch(FetchDescriptor<Podcast>())) ?? []
+        let fetchedPodcasts = (
+            try? modelContext.fetch(PodcastQuery.followedDescriptor())
+        ) ?? []
         let refreshDatePairs: [(String, Date)] =
             (try? modelContext.fetch(FetchDescriptor<LocalPodcastState>()))?.compactMap {
                 guard let refreshedAt = $0.refreshedAt else { return nil }
@@ -471,7 +473,7 @@ actor FeedRefreshActor {
                 // from ever attaching one feed's episodes to another podcast
                 // while CloudKit subscription inserts and feed requests overlap.
                 guard let podcast = try? PodcastIdentityService(context: modelContext)
-                    .existing(feedURL: requestedURL) else {
+                    .existingFollowed(feedURL: requestedURL) else {
                     failed += 1
                     recordFailure(
                         index: inputIndex,
@@ -650,7 +652,7 @@ actor FeedRefreshActor {
     ) async throws -> RefreshOutcome? {
         let canonical = FeedURLIdentity.canonical(feedURL)
         guard let podcast = try PodcastIdentityService(context: modelContext)
-            .existing(feedURL: canonical)
+            .existingFollowed(feedURL: canonical)
         else { return nil }
         let parsed = try await feed.fetch(canonical)
         let repairGUIDs = ordinaryRefreshCandidates(
@@ -680,7 +682,7 @@ actor FeedRefreshActor {
     ) async throws -> OlderEpisodePageOutcome? {
         let canonical = FeedURLIdentity.canonical(feedURL)
         guard let podcast = try PodcastIdentityService(context: modelContext)
-            .existing(feedURL: canonical)
+            .existingFollowed(feedURL: canonical)
         else { return nil }
 
         guard pageSize > 0 else {
@@ -846,7 +848,9 @@ actor FeedRefreshActor {
                 "inputCount=\(feedURLs.count)"
             )
             let identity = PodcastIdentityService(context: modelContext)
-            let existingByURL = (try? identity.existingByCanonicalFeedURL(for: feedURLs)) ?? [:]
+            let existingByURL = (
+                try? identity.existingAnyStateByCanonicalFeedURL(for: feedURLs)
+            ) ?? [:]
             PerformanceSignposts.signposter.endInterval(
                 "OPMLIdentityScan",
                 identityScan,
@@ -855,7 +859,8 @@ actor FeedRefreshActor {
             var fetchCandidates: [(index: Int, url: String)] = []
             for (index, url) in feedURLs.enumerated() {
                 guard !isCancelled() else { break }
-                if let existing = existingByURL[FeedURLIdentity.canonical(url)] {
+                if let existing = existingByURL[FeedURLIdentity.canonical(url)],
+                   existing.isFollowed {
                     resultByInputIndex[index] = SubscribeOutcome(
                         podcast: existing, episodes: [], alreadySubscribed: true
                     ).result()
@@ -994,7 +999,10 @@ actor FeedRefreshActor {
         // Idempotency: an existing subscription returns it with no fetch or insert —
         // exactly the old early return. Its ID is already permanent (it was saved
         // before), so `result()` is valid immediately.
-        if let existing = try identity.existing(feedURL: canonical) {
+        // Phase 3 must promote a catalog-only match atomically before catalog
+        // queue actions become reachable. Phase 1 has no catalog materialization
+        // entry point, so only followed rows can currently reach this branch.
+        if let existing = try identity.existingAnyState(feedURL: canonical) {
             return SubscribeOutcome(podcast: existing, episodes: [], alreadySubscribed: true)
         }
 

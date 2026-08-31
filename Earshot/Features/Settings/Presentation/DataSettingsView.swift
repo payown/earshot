@@ -11,7 +11,7 @@ struct DataSettingsView: View {
     @Environment(OPMLImportCoordinator.self) private var opmlImportCoordinator
     @Environment(SettingsStore.self) private var settings
 
-    @Query private var podcasts: [Podcast]
+    @Query(filter: PodcastQuery.followed) private var podcasts: [Podcast]
 
     @State private var exportURL: ExportFile?
     @State private var confirmingReset = false

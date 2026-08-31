@@ -15,8 +15,7 @@ final class Podcast {
 
     /// Subscription ownership marker introduced by schema V12. A missing or
     /// unrecognized value remains a followed podcast for forward-safe legacy
-    /// behavior. Application semantics are added behind a central policy in the
-    /// next phase; schema migration intentionally performs no backfill.
+    /// behavior; ``PodcastSubscriptionState`` owns the application semantics.
     var subscriptionStateRaw: String?
 
     // Content-flow settings

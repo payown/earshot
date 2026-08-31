@@ -10,7 +10,7 @@ struct OnboardingView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(OPMLImportCoordinator.self) private var opmlImportCoordinator
     @Environment(\.dismiss) private var dismiss
-    @Query private var podcasts: [Podcast]
+    @Query(filter: PodcastQuery.followed) private var podcasts: [Podcast]
 
     @State private var pageIndex = 0
     @State private var showingAdd = false

@@ -222,6 +222,43 @@ final class FeedRefreshActorTests: XCTestCase {
         return TestStore.container
     }
 
+    func testRefreshAllExcludesCatalogOnlyPodcastFromWorkAndProgressTotal() async throws {
+        let container = cleanContainer()
+        let context = ModelContext(container)
+        context.insert(Podcast(
+            feedURL: "https://refresh-boundary.example/followed",
+            title: "Followed",
+            lastSeenPubDate: d1
+        ))
+        context.insert(Podcast(
+            feedURL: "https://refresh-boundary.example/catalog",
+            title: "Catalog",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue,
+            lastSeenPubDate: d1
+        ))
+        try context.save()
+        let progress = ProgressBox()
+
+        let report = await FeedRefreshActor(modelContainer: container).refreshAllReport(
+            feed: FakeFeed(parsedFeed([parsedEpisode("new", d2)])),
+            autoQueueEnabled: false,
+            trigger: .manualToolbar,
+            isCancelled: { false },
+            onProgress: { completed, total in
+                progress.lastCompleted = completed
+                progress.lastTotal = total
+            }
+        )
+
+        XCTAssertEqual(report.total, 1)
+        XCTAssertEqual(report.attempted, 1)
+        XCTAssertEqual(progress.lastCompleted, 1)
+        XCTAssertEqual(progress.lastTotal, 1)
+        let episodes = try ModelContext(container).fetch(FetchDescriptor<Episode>())
+        XCTAssertEqual(episodes.count, 1)
+        XCTAssertEqual(episodes.first?.podcast?.title, "Followed")
+    }
+
     private let d1 = Date(timeIntervalSince1970: 1_700_000_000)
     private let d2 = Date(timeIntervalSince1970: 1_700_100_000)
     private let d3 = Date(timeIntervalSince1970: 1_700_200_000)
