@@ -216,27 +216,56 @@ final class SubscriptionRepository {
     @discardableResult
     func subscribe(feedURL: String) async throws -> Podcast {
         let canonical = FeedURLIdentity.canonical(feedURL)
-        // Phase 3 must distinguish a followed match from a catalog-only shell
-        // and promote the latter through the cap/fetch transaction. Phase 1 has
-        // no catalog materialization entry point, so this remains unreachable
-        // for catalog rows until the queue repository lands.
-        if podcast(forFeedURL: canonical) != nil {
-            let repair = try IdentityRepairService(context: context).repair(feedURLs: [canonical])
-            if repair.didChange { try context.save() }
-            if let repaired = podcast(forFeedURL: canonical) { return repaired }
+        if (try? PodcastIdentityService(context: context)
+            .existingFollowed(feedURL: canonical)) != nil {
+            await PodcastIdentityWriteGate.shared.acquire(feedURLs: [canonical])
+            var repairStagedChanges = false
+            do {
+                try Task.checkCancellation()
+                let repair = try IdentityRepairService(context: context)
+                    .repair(feedURLs: [canonical])
+                repairStagedChanges = repair.didChange
+                if repair.didChange { try context.save() }
+                guard let repaired = try PodcastIdentityService(context: context)
+                    .existingFollowed(feedURL: canonical) else {
+                    throw SubscriptionError.podcastNotFoundAfterSubscribe
+                }
+                await PodcastIdentityWriteGate.shared.release(feedURLs: [canonical])
+                return repaired
+            } catch {
+                if repairStagedChanges || context.hasChanges { context.rollback() }
+                await PodcastIdentityWriteGate.shared.release(feedURLs: [canonical])
+                throw error
+            }
         }
 
         // Free-tier podcast cap (#635): block an 11th podcast for a non-Plus
         // user BEFORE the network fetch below, so a blocked add never wastes a
         // fetch. `isEntitled == nil` means the cap isn't enforced at this call
         // site (legacy/test behavior).
+        var maximumFollowedCount: Int?
         if let isEntitled {
             let currentCount = currentPodcastCountForCapCheck()
             let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
-            guard PodcastCapPolicy.canAddSubscription(currentCount: currentCount, isEntitled: isEntitled, grandfatheredCount: grandfathered) else {
+            if !PodcastCapPolicy.canAddSubscription(
+                currentCount: currentCount,
+                isEntitled: isEntitled,
+                grandfatheredCount: grandfathered
+            ) {
+                await PodcastIdentityWriteGate.shared.acquire(feedURLs: [canonical])
+                if !context.hasChanges { context.rollback() }
+                let concurrentlyFollowed = try? PodcastIdentityService(context: context)
+                    .existingFollowed(feedURL: canonical)
+                await PodcastIdentityWriteGate.shared.release(feedURLs: [canonical])
+                if let concurrentlyFollowed { return concurrentlyFollowed }
                 throw SubscriptionError.podcastCapReached(
                     currentCount: currentCount,
                     limit: PodcastCapPolicy.effectiveFreeLimit(grandfatheredCount: grandfathered)
+                )
+            }
+            if !isEntitled {
+                maximumFollowedCount = PodcastCapPolicy.effectiveFreeLimit(
+                    grandfatheredCount: grandfathered
                 )
             }
         }
@@ -250,14 +279,14 @@ final class SubscriptionRepository {
         // Hand the fetch/parse/insert/save to the background actor (off the main
         // thread). It returns only Sendable PersistentIdentifiers.
         let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
-        let result = try await actor.subscribe(feedURL: canonical, feed: feed, inboxSeedCount: inboxSeedCount)
+        let result = try await actor.subscribe(
+            feedURL: canonical, feed: feed, inboxSeedCount: inboxSeedCount,
+            maximumFollowedCount: maximumFollowedCount
+        )
 
         // Pull the background context's writes into the main context so the
         // re-fetch below resolves the freshly-inserted podcast and episodes.
         mergeBackgroundWrites()
-        let repair = try IdentityRepairService(context: context).repair(feedURLs: [canonical])
-        if repair.didChange { try context.save() }
-
         // Re-fetch the podcast on the main context by its persistentModelID so the
         // returned object is a valid main-context `Podcast` for callers. If the
         // feed already existed (actor early return) it was caught above, but guard
@@ -299,7 +328,12 @@ final class SubscriptionRepository {
         // unless "Auto-download queued episodes" is on and something is queued.
         await downloader?.downloadQueuedIfEnabled()
 
-        NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
+        if !result.alreadySubscribed {
+            NotificationCenter.default.post(
+                name: .earshotSubscriptionsDidChange, object: canonical
+            )
+            NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
+        }
 
         return podcast
     }
@@ -331,10 +365,28 @@ final class SubscriptionRepository {
 /// from ``SubscriptionRepository`` on the main actor.
 struct SubscriptionDeletionRepository {
     let context: ModelContext
+    private let saveOperation: (ModelContext) throws -> Void
+
+    init(context: ModelContext, saveOperation: @escaping (ModelContext) throws -> Void = {
+        try $0.save()
+    }) {
+        self.context = context
+        self.saveOperation = saveOperation
+    }
 
     @discardableResult
     func unsubscribe(_ podcast: Podcast) -> Bool {
         let title = podcast.title
+        do {
+            try PendingCloudFollowIntent.clear(feedURL: podcast.feedURL, in: context)
+            try PendingCloudUnfollowIntent.set(feedURL: podcast.feedURL, in: context)
+        } catch {
+            context.rollback()
+            AppLog.subscriptions.error(
+                "Failed to prepare unsubscribe from \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
         // If the player currently holds an episode of this podcast (loaded or
         // gapless-preloaded), it must let go BEFORE the cascade delete below —
         // otherwise the periodic position persist / listening-session flush
@@ -349,13 +401,30 @@ struct SubscriptionDeletionRepository {
             object: nil,
             userInfo: [PlayerService.willDeletePodcastIDKey: podcast.persistentModelID]
         )
-        let folders = FolderRepository(context: context)
-        folders.removeFromAllFolders(podcast)
-        // The cascade below deletes this podcast's episodes, but their
-        // EpisodeFolderMembership join rows (one-way to Episode, no inverse) do NOT
-        // cascade — clean them up first or they dangle at deleted episodes (#756).
-        folders.removePodcastEpisodesFromAllFolders(podcast)
-        StatsRepository(context: context).removeSessions(for: podcast)
+        let podcastID = podcast.persistentModelID
+        var folderRowsRemoved = 0
+        var sessionRowsRemoved = 0
+        do {
+            for membership in try context.fetch(FetchDescriptor<FolderMembership>())
+            where membership.podcast?.persistentModelID == podcastID {
+                context.delete(membership); folderRowsRemoved += 1
+            }
+            for membership in try context.fetch(FetchDescriptor<EpisodeFolderMembership>())
+            where membership.episode?.podcast?.persistentModelID == podcastID {
+                context.delete(membership); folderRowsRemoved += 1
+            }
+            for session in try context.fetch(FetchDescriptor<ListeningSession>())
+            where session.podcast?.persistentModelID == podcastID
+                || session.episode?.podcast?.persistentModelID == podcastID {
+                context.delete(session); sessionRowsRemoved += 1
+            }
+        } catch {
+            context.rollback()
+            AppLog.subscriptions.error(
+                "Failed to stage unsubscribe from \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
         // ActiveDownload.episode is a one-way reference (no inverse on Episode, so
         // that Episode's shape stays out of the V4→V5 migration — #701), which
         // means SwiftData will NOT nullify it when the cascade below deletes this
@@ -364,11 +433,18 @@ struct SubscriptionDeletionRepository {
         ActiveDownload.removeRows(forEpisodesOf: podcast, in: context)
         context.delete(podcast)
         do {
-            try context.save()
+            try saveOperation(context)
+            if folderRowsRemoved > 0 {
+                NotificationCenter.default.post(name: .earshotFoldersDidChange, object: nil)
+            }
+            if sessionRowsRemoved > 0 {
+                NotificationCenter.default.post(name: .earshotListeningHistoryDidChange, object: nil)
+            }
             NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
             AppLog.subscriptions.info("Unsubscribed from \(title, privacy: .public)")
             return true
         } catch {
+            context.rollback()
             AppLog.subscriptions.error(
                 "Failed to unsubscribe from \(title, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
@@ -628,13 +704,6 @@ extension SubscriptionRepository {
     /// main actor after each feed with `(completed, total, currentTitle)` and is kept
     /// cheap (two ints + an optional String) so it can't reintroduce a stall.
     ///
-    /// Free-tier cap (#635): when `isEntitled == false`, `feedURLs` is trimmed to
-    /// however many free slots remain (`PodcastCapPolicy.allowedNewSubscriptions`)
-    /// BEFORE the background pass runs, so a capped-out user's request never wastes
-    /// network fetches on feeds that can't be added. The trimmed count is reported
-    /// back as ``BulkSubscribeResult/skippedForCap``. `isEntitled == nil` (the
-    /// default) means the cap isn't enforced at this call site.
-    ///
     /// Auto-download is NOT done here — the caller (`OPMLImportService`) runs it once
     /// at the end against the returned `episodeIDs`, so it too stays off the per-feed
     /// path. Returns one ``BulkSubscribeOutcome`` per feed that resolved, in input
@@ -653,21 +722,14 @@ extension SubscriptionRepository {
             return BulkSubscribeResult(outcomes: [], skippedForCap: 0, failed: 0, cancelled: false)
         }
 
-        var allowedURLs = canonicalFeedURLs
-        var skippedForCap = 0
+        var maximumFollowedCount: Int?
         if let isEntitled {
-            let currentCount = currentPodcastCountForCapCheck()
             let grandfathered = AppSettingsStore(context: context).grandfatheredPodcastCount()
-            let allowedCount = PodcastCapPolicy.allowedNewSubscriptions(
-                currentCount: currentCount, requested: canonicalFeedURLs.count, isEntitled: isEntitled, grandfatheredCount: grandfathered
-            )
-            allowedURLs = Array(canonicalFeedURLs.prefix(allowedCount))
-            skippedForCap = canonicalFeedURLs.count - allowedURLs.count
-        }
-        guard !allowedURLs.isEmpty else {
-            return BulkSubscribeResult(
-                outcomes: [], skippedForCap: skippedForCap, failed: 0, cancelled: false
-            )
+            if !isEntitled {
+                maximumFollowedCount = PodcastCapPolicy.effectiveFreeLimit(
+                    grandfatheredCount: grandfathered
+                )
+            }
         }
 
         // Resolve the inbox seed count on the main actor (AppSettingsStore is
@@ -678,9 +740,11 @@ extension SubscriptionRepository {
         // Hand the whole fetch/parse/insert/save loop to the background actor. It
         // returns only Sendable PersistentIdentifiers, batching its saves.
         let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
-        let results = await actor.subscribeAll(
-            feedURLs: allowedURLs, feed: feed, inboxSeedCount: inboxSeedCount, onProgress: onProgress
+        let actorReport = await actor.subscribeAllReport(
+            feedURLs: canonicalFeedURLs, feed: feed, inboxSeedCount: inboxSeedCount,
+            maximumFollowedCount: maximumFollowedCount, onProgress: onProgress
         )
+        let results = actorReport.results
 
         let reconciliationInterval = PerformanceSignposts.signposter.beginInterval(
             "OPMLReconciliation",
@@ -696,15 +760,6 @@ extension SubscriptionRepository {
         // Reconcile the main context ONCE for the entire batch (the essential fix:
         // this used to run once per feed).
         mergeBackgroundWrites()
-        do {
-            let repair = try IdentityRepairService(context: context).repair(feedURLs: allowedURLs)
-            if repair.didChange { try context.save() }
-        } catch {
-            AppLog.subscriptions.error(
-                "Bulk subscription identity repair failed: \(error.localizedDescription, privacy: .public)"
-            )
-        }
-
         // Resolve each result back to a live main-context podcast. A missing
         // persistentID re-fetch is simply skipped (never force-unwrapped).
         var outcomes: [BulkSubscribeOutcome] = []
@@ -721,14 +776,15 @@ extension SubscriptionRepository {
                 )
             )
         }
-        if !outcomes.isEmpty {
+        if actorReport.mutated {
             NotificationCenter.default.post(name: .earshotSubscriptionsDidChange, object: nil)
+            NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
         }
         recordMediaTransportSnapshot(trigger: .bulkImport)
         return BulkSubscribeResult(
             outcomes: outcomes,
-            skippedForCap: skippedForCap,
-            failed: max(0, allowedURLs.count - results.count),
+            skippedForCap: actorReport.skippedForCap,
+            failed: actorReport.failed,
             cancelled: Task.isCancelled
         )
     }

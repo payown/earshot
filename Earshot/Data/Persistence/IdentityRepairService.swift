@@ -73,6 +73,29 @@ actor PodcastIdentityWriteGate {
     }
 }
 
+actor SubscriptionCapacityWriteGate {
+    static let shared = SubscriptionCapacityWriteGate()
+
+    private var held = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        guard held else {
+            held = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            held = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
 /// Central fetch-or-create behavior for the Podcast natural key. The final
 /// recheck is intentionally cheap (Podcast is a small table) and also finds
 /// pre-canonical rows written by older builds.
@@ -204,6 +227,10 @@ enum AppSettingIdentity {
         try? rows(for: key, in: context).first?.value
     }
 
+    static func valueThrowing(for key: String, in context: ModelContext) throws -> String? {
+        try rows(for: key, in: context).first?.value
+    }
+
     static func setValue(_ value: String, for rawKey: String, in context: ModelContext) throws {
         let key = canonicalKey(rawKey)
         let matches = try rows(for: key, in: context)
@@ -217,6 +244,89 @@ enum AppSettingIdentity {
         survivor.key = key
         survivor.value = value
         for duplicate in matches.dropFirst() { context.delete(duplicate) }
+    }
+
+    static func removeValue(for rawKey: String, in context: ModelContext) throws {
+        for row in try rows(for: rawKey, in: context) { context.delete(row) }
+    }
+}
+
+private enum PendingCloudIntent {
+    static func intents(prefix: String, in context: ModelContext) throws -> [(token: String, feed: String)] {
+        try context.fetch(FetchDescriptor<AppSetting>()).compactMap {
+            guard $0.key.hasPrefix(prefix) else { return nil }
+            let token = String($0.key.dropFirst(prefix.count))
+            guard UUID(uuidString: token) != nil else { return nil }
+            return (token, FeedURLIdentity.canonical($0.value))
+        }.sorted { $0.token < $1.token }
+    }
+
+    static func set(feedURL: String, prefix: String, in context: ModelContext) throws {
+        try clear(feedURL: feedURL, prefix: prefix, in: context)
+        context.insert(AppSetting(key: prefix + UUID().uuidString,
+                                  value: FeedURLIdentity.canonical(feedURL)))
+    }
+
+    static func clear(feedURL: String, prefix: String, in context: ModelContext) throws {
+        let feed = FeedURLIdentity.canonical(feedURL)
+        for row in try context.fetch(FetchDescriptor<AppSetting>())
+        where row.key.hasPrefix(prefix) && FeedURLIdentity.canonical(row.value) == feed {
+            context.delete(row)
+        }
+    }
+
+    static func clear(feedURL: String, token: String, prefix: String,
+                      in context: ModelContext) throws {
+        let key = prefix + token
+        let feed = FeedURLIdentity.canonical(feedURL)
+        for row in try context.fetch(FetchDescriptor<AppSetting>(predicate: #Predicate { $0.key == key }))
+        where FeedURLIdentity.canonical(row.value) == feed { context.delete(row) }
+    }
+}
+
+enum PendingCloudFollowIntent {
+    static func feedURLs(in context: ModelContext) throws -> Set<String> {
+        Set(try PendingCloudIntent.intents(prefix: SettingsKey.pendingCloudFollowPrefix, in: context).map(\.feed))
+    }
+    static func token(feedURL: String, in context: ModelContext) throws -> String? {
+        try tokens(feedURL: feedURL, in: context).first
+    }
+    static func tokens(feedURL: String, in context: ModelContext) throws -> [String] {
+        let feed = FeedURLIdentity.canonical(feedURL)
+        return try PendingCloudIntent.intents(prefix: SettingsKey.pendingCloudFollowPrefix, in: context)
+            .filter { $0.feed == feed }.map(\.token)
+    }
+    static func exists(feedURL: String, in context: ModelContext) throws -> Bool {
+        try !tokens(feedURL: feedURL, in: context).isEmpty
+    }
+    static func set(feedURL: String, in context: ModelContext) throws {
+        try PendingCloudIntent.set(feedURL: feedURL, prefix: SettingsKey.pendingCloudFollowPrefix, in: context)
+    }
+    static func clear(feedURL: String, in context: ModelContext) throws {
+        try PendingCloudIntent.clear(feedURL: feedURL, prefix: SettingsKey.pendingCloudFollowPrefix, in: context)
+    }
+    static func clear(feedURL: String, matching token: String, in context: ModelContext) throws {
+        try PendingCloudIntent.clear(feedURL: feedURL, token: token,
+                                     prefix: SettingsKey.pendingCloudFollowPrefix, in: context)
+    }
+}
+
+enum PendingCloudUnfollowIntent {
+    static func intents(in context: ModelContext) throws -> [(token: String, feed: String)] {
+        try PendingCloudIntent.intents(prefix: SettingsKey.pendingCloudUnfollowPrefix, in: context)
+    }
+    static func feedURLs(in context: ModelContext) throws -> Set<String> {
+        Set(try intents(in: context).map(\.feed))
+    }
+    static func set(feedURL: String, in context: ModelContext) throws {
+        try PendingCloudIntent.set(feedURL: feedURL, prefix: SettingsKey.pendingCloudUnfollowPrefix, in: context)
+    }
+    static func clear(feedURL: String, in context: ModelContext) throws {
+        try PendingCloudIntent.clear(feedURL: feedURL, prefix: SettingsKey.pendingCloudUnfollowPrefix, in: context)
+    }
+    static func clear(feedURL: String, matching token: String, in context: ModelContext) throws {
+        try PendingCloudIntent.clear(feedURL: feedURL, token: token,
+                                     prefix: SettingsKey.pendingCloudUnfollowPrefix, in: context)
     }
 }
 
@@ -316,7 +426,7 @@ struct IdentityRepairService {
     private func repairPodcastGroups(
         matching requestedKeys: Set<String>?
     ) throws -> IdentityRepairReport {
-        let podcasts = try context.fetch(FetchDescriptor<Podcast>())
+        let podcasts = try PodcastIdentityService(context: context).allScalarPodcasts()
         var report = IdentityRepairReport(podcastsInspected: podcasts.count)
         let groups = Dictionary(grouping: podcasts) {
             FeedURLIdentity.canonical($0.feedURL)

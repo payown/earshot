@@ -170,6 +170,17 @@ enum SettingsKey {
         episodeFilterConfigurationPrefix + FeedURLIdentity.canonical(feedURL)
     }
 
+    static let pendingCloudFollowPrefix = "pending_cloud_follow_"
+    static let pendingCloudUnfollowPrefix = "pending_cloud_unfollow_"
+
+    static func pendingCloudFollow(token: String) -> String {
+        pendingCloudFollowPrefix + token
+    }
+
+    static func pendingCloudUnfollow(token: String) -> String {
+        pendingCloudUnfollowPrefix + token
+    }
+
     /// Device-local unresolved runtime guard. It remains visible until the user
     /// reviews and saves that podcast's filters.
     static let episodeFilterSafetyWarningPrefix = "episode_filter_safety_warning_"
