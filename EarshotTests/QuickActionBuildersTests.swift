@@ -31,6 +31,24 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), ["Share", "Play now", "Play next"])
     }
 
+    func testRefreshEpisodeAudioHasApprovedExactLabelAndRequiresPodcast() {
+        let context = TestStore.freshContext()
+        let episode = makeEpisode(context)
+        XCTAssertEqual(EpisodeAction.refreshAudio.label, "Refresh episode audio")
+        XCTAssertEqual(
+            availableEpisodeActions(episode: episode, order: [.refreshAudio]),
+            [.refreshAudio]
+        )
+
+        let detached = Episode(
+            guid: "preview", title: "Preview", audioURL: "https://x/preview.mp3"
+        )
+        XCTAssertEqual(
+            availableEpisodeActions(episode: detached, order: [.refreshAudio]),
+            []
+        )
+    }
+
     func testEpisodeMarkPlayedLabelReflectsState() {
         let ctx = TestStore.freshContext()
         let played = makeEpisode(ctx, played: true)
@@ -276,7 +294,8 @@ final class QuickActionBuildersTests: XCTestCase {
     func testUnfollowOmittedWhenSurfaceCannotUnfollow() {
         // Acceptance criterion: #572 — surfaces that pass no onUnfollow (the
         // detached search preview, #517 zero-store-writes contract) get no
-        // "Unfollow this podcast" item; the other 8 stay intact and in order.
+        // "Unfollow this podcast" item; the other available actions stay intact
+        // and in order, including the always-reachable audio repair escape hatch.
         let ctx = TestStore.freshContext()
         let episode = makeEpisode(ctx)
         let items = buildEpisodeActions(
@@ -287,6 +306,7 @@ final class QuickActionBuildersTests: XCTestCase {
         XCTAssertEqual(items.map(\.label), [
             "Play now", "Add to end of queue", "Play next", "Download",
             "Mark as played", "Bookmarks", "Open show notes", "Share",
+            "Refresh episode audio",
         ])
         XCTAssertFalse(items.map(\.label).contains("Unfollow this podcast"))
     }

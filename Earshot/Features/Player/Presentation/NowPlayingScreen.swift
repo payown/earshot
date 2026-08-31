@@ -91,6 +91,12 @@ struct NowPlayingScreen: View {
                         .padding(.top, Spacing.lg)
 
                     titleBlock
+                    if let failure = player.playbackFailureMessage {
+                        Label(failure, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.secondary)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(failure)
+                    }
                     chapterRow
                     ScrubberView(player: player)
                     transportRow
@@ -247,6 +253,11 @@ struct NowPlayingScreen: View {
         actions.append(QuickActionItem(label: stopAfterActionLabel, isDestructive: false) {
             player.toggleStopAfterEpisode()
         })
+        if let episode = player.nowPlayingEpisode {
+            actions.append(QuickActionItem(label: "Refresh episode audio", isDestructive: false) {
+                Task { await player.refreshEpisodeAudio(episode, using: downloads) }
+            })
+        }
         if player.nowPlayingEpisode != nil {
             actions.append(QuickActionItem(label: "Bookmarks", isDestructive: false) {
                 showingBookmarks = true
@@ -763,12 +774,19 @@ struct NowPlayingScreen: View {
             } label: {
                 Label("Bookmarks", systemImage: "bookmark")
             }
+
+            Button {
+                guard let episode = player.nowPlayingEpisode else { return }
+                Task { await player.refreshEpisodeAudio(episode, using: downloads) }
+            } label: {
+                Label("Refresh episode audio", systemImage: "arrow.clockwise")
+            }
         } label: {
             Image(systemName: "ellipsis.circle")
         }
         .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
         .accessibilityLabel("Episode actions")
-        .accessibilityHint("Mark as played, export audio, stop after this episode, and bookmarks")
+        .accessibilityHint("Mark as played, export audio, stop after this episode, bookmarks, and refresh episode audio")
         .disabled(player.nowPlayingEpisode == nil)
     }
 
