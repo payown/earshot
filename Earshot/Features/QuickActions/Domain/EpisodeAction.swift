@@ -18,6 +18,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
     case share
     case exportTranscript
     case exportAudio
+    case refreshAudio
     // Folders phase 2 (#756). Non-destructive: `addToFolder` files the episode
     // into a chosen folder while keeping any existing memberships; `moveToFolder`
     // relocates it into exactly the chosen folder. Both open the shared
@@ -47,6 +48,7 @@ enum EpisodeAction: String, CaseIterable, Identifiable, Codable {
         // saved to Files / AirDropped — distinct from `.share`, which shares the
         // remote link (#689).
         case .exportAudio: return "Export audio"
+        case .refreshAudio: return "Refresh episode audio"
         // Folders phase 2 (#756). Activation opens the shared nested folder
         // picker; the actual filing happens when the user chooses a folder.
         case .addToFolder: return "Add to another folder"
@@ -116,6 +118,9 @@ let defaultEpisodeActions: [EpisodeAction] = [
     .share,
     .exportTranscript,
     .exportAudio,
+    // Recovery escape hatch for publishers that replace broken media without
+    // changing its GUID, date, URL, or byte length.
+    .refreshAudio,
     // Folders phase 2 (#756): appended for new users; `QuickActionRepository.resolve()`
     // appends them for existing users too. Reorderable/hideable in settings. Kept
     // before `.unfollow` so the destructive action stays last by default.

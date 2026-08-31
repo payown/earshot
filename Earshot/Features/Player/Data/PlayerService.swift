@@ -41,6 +41,10 @@ final class PlayerService {
     var currentPositionSeconds: Double = 0
     /// Loaded episode duration in seconds, if known.
     var durationSeconds: Double = 0
+    /// Persistent, non-modal playback failure surfaced by Now Playing. It stays
+    /// available after the one automatic recovery attempt so VoiceOver users do
+    /// not have to catch a transient announcement.
+    private(set) var playbackFailureMessage: String?
 
     /// Title of the active chapter for the loaded episode (#508). `nil` when the
     /// episode has no chapters or playback is before the first chapter starts.
@@ -181,10 +185,16 @@ final class PlayerService {
     @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
     @ObservationIgnored private var bufferEmptyObservation: NSKeyValueObservation?
     @ObservationIgnored private var likelyToKeepUpObservation: NSKeyValueObservation?
+    @ObservationIgnored private var itemStatusObservation: NSKeyValueObservation?
     @ObservationIgnored private var stallObserver: NSObjectProtocol?
+    @ObservationIgnored private var failedToEndObserver: NSObjectProtocol?
 
     @ObservationIgnored private let audioSession: any PlayerAudioSession
     @ObservationIgnored private let mediaHTTPSProbe: any MediaHTTPSProbing
+    @ObservationIgnored private let mediaRecoveryFeed: any FeedFetching
+    @ObservationIgnored private var mediaRecoveryAttemptedEpisodeID: PersistentIdentifier?
+    @ObservationIgnored private var mediaRecoveryInProgressEpisodeID: PersistentIdentifier?
+    @ObservationIgnored private var mediaRecoveryGeneration = 0
     @ObservationIgnored private var mediaResolutionGeneration = 0
     @ObservationIgnored private var pendingCleartextPlaybackAction: (() -> Void)?
     @ObservationIgnored private var pendingCleartextApprovalKey: String?
@@ -198,11 +208,13 @@ final class PlayerService {
     init(
         playbackHandoff: any PlaybackHandoffClient = PlaybackHandoffClientFactory.make(),
         audioSession: any PlayerAudioSession = AVAudioSession.sharedInstance(),
-        mediaHTTPSProbe: any MediaHTTPSProbing = MediaHTTPSProbe()
+        mediaHTTPSProbe: any MediaHTTPSProbing = MediaHTTPSProbe(),
+        mediaRecoveryFeed: any FeedFetching = FeedService()
     ) {
         self.playbackHandoff = playbackHandoff
         self.audioSession = audioSession
         self.mediaHTTPSProbe = mediaHTTPSProbe
+        self.mediaRecoveryFeed = mediaRecoveryFeed
     }
 
     /// Generation token for the sleep-timer volume fade (review P1-4). Each fade
@@ -364,6 +376,7 @@ final class PlayerService {
     /// Loads and starts playing an episode. Resumes from its saved position;
     /// only actual playback completion or an explicit action marks it played.
     func play(_ episode: Episode) {
+        beginUserMediaAttempt()
         cancelHandoffOperation()
         play(episode, preparedItem: nil, originEvent: .started(nil))
     }
@@ -372,6 +385,7 @@ final class PlayerService {
     /// Notification actions use this path; automatic queue advance uses `play(_:)`
     /// so consecutive playback never waits on the network.
     func playWithHandoff(_ episode: Episode) {
+        beginUserMediaAttempt()
         playAfterFetchingHandoff(
             episode,
             originEvent: .started(nil),
@@ -392,6 +406,7 @@ final class PlayerService {
     /// user-initiated path queues and can present the player — queue auto-advance,
     /// resume, and jump-to-bookmark never do either.
     func playFromEpisodeList(_ episode: Episode, origin: PlaybackOrigin? = nil) {
+        beginUserMediaAttempt()
         if let context {
             QueueRepository(context: context).add(episode)
         }
@@ -451,6 +466,7 @@ final class PlayerService {
     /// Plays `episode` and jumps to an explicit start position. Backs
     /// jump-to-bookmark, where the saved position must be overridden.
     func play(_ episode: Episode, at startSeconds: Double) {
+        beginUserMediaAttempt()
         cancelHandoffOperation()
         play(
             episode,
@@ -495,6 +511,7 @@ final class PlayerService {
         chapterURL: String? = nil,
         durationSeconds: Int? = nil
     ) {
+        beginUserMediaAttempt()
         guard !audioURL.isEmpty else {
             AppLog.player.error("playPreview called with no audio URL for \(title, privacy: .public)")
             return
@@ -546,6 +563,13 @@ final class PlayerService {
         pendingCleartextPlaybackWarning = nil
         pendingCleartextPlaybackAction = nil
         pendingCleartextApprovalKey = nil
+    }
+
+    private func beginUserMediaAttempt() {
+        mediaRecoveryGeneration &+= 1
+        mediaRecoveryAttemptedEpisodeID = nil
+        mediaRecoveryInProgressEpisodeID = nil
+        playbackFailureMessage = nil
     }
 
     private func clearPendingCleartextPlayback(invalidateResolution: Bool = true) {
@@ -1051,6 +1075,12 @@ final class PlayerService {
         bufferEmptyObservation = nil
         likelyToKeepUpObservation?.invalidate()
         likelyToKeepUpObservation = nil
+        itemStatusObservation?.invalidate()
+        itemStatusObservation = nil
+        if let failedToEndObserver {
+            NotificationCenter.default.removeObserver(failedToEndObserver)
+            self.failedToEndObserver = nil
+        }
 
         isPlaying = false
         intendsToPlay = false
@@ -2917,11 +2947,187 @@ final class PlayerService {
     private func observeCurrentItem(_ item: AVPlayerItem) {
         bufferEmptyObservation?.invalidate()
         likelyToKeepUpObservation?.invalidate()
+        itemStatusObservation?.invalidate()
         bufferEmptyObservation = item.observe(\.isPlaybackBufferEmpty, options: [.new]) { [weak self] _, _ in
             Task { @MainActor in self?.handleBufferEmptyChanged() }
         }
         likelyToKeepUpObservation = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] _, _ in
             Task { @MainActor in self?.handleLikelyToKeepUpChanged() }
+        }
+        itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self, weak item] _, _ in
+            Task { @MainActor in
+                guard let self, let item, item === self.player.currentItem,
+                      item.status == .failed else { return }
+                self.handleUnplayableCurrentItem()
+            }
+        }
+        if let failedToEndObserver {
+            NotificationCenter.default.removeObserver(failedToEndObserver)
+        }
+        failedToEndObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.failedToPlayToEndTimeNotification,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleUnplayableCurrentItem()
+            }
+        }
+    }
+
+    /// A downloaded copy gets one automatic escape to the current enclosure.
+    /// Remote failures never recurse: they remain visible and actionable.
+    private func handleUnplayableCurrentItem() {
+        guard let episode = currentEpisode, !currentEpisodeIsTransient else {
+            surfacePlaybackFailure()
+            return
+        }
+        let episodeID = episode.persistentModelID
+        if mediaRecoveryInProgressEpisodeID == episodeID { return }
+        guard currentPlaybackURL?.isFileURL == true else {
+            // A normal remote stream can fail transiently while the player is
+            // still resolving or buffering it. Only surface a remote failure
+            // when it is the retry from a known-bad downloaded copy.
+            if mediaRecoveryAttemptedEpisodeID == episodeID {
+                surfacePlaybackFailure()
+            }
+            return
+        }
+        guard mediaRecoveryAttemptedEpisodeID != episodeID else {
+            surfacePlaybackFailure()
+            return
+        }
+        mediaRecoveryAttemptedEpisodeID = episodeID
+        mediaRecoveryInProgressEpisodeID = episodeID
+        mediaRecoveryGeneration &+= 1
+        let generation = mediaRecoveryGeneration
+        let resumePosition = currentPositionSeconds
+        let shouldResume = intendsToPlay
+        let feedURL = episode.podcast?.feedURL
+        let guid = episode.guid
+        let staleLocalURL = episode.localAudioURL
+
+        player.pause()
+        episode.downloadPath = nil
+        if let context {
+            ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+            guard saveContext() else {
+                surfacePlaybackFailure()
+                return
+            }
+        }
+        if let staleLocalURL { try? FileManager.default.removeItem(at: staleLocalURL) }
+        Announcer.announce("The downloaded copy could not play. Trying the current episode audio.")
+
+        Task { @MainActor [weak self, weak episode] in
+            guard let self, let episode, !episode.isDeleted else { return }
+            var correctedItem: ParsedEpisode?
+            if let feedURL {
+                correctedItem = try? await self.mediaRecoveryFeed.fetch(feedURL)
+                    .episodes.first { $0.guid == guid }
+            }
+            guard self.mediaRecoveryGeneration == generation,
+                  self.currentEpisode === episode else { return }
+            if let item = correctedItem {
+                self.applyRecoveredMetadata(item, to: episode)
+                _ = self.saveContext()
+            }
+            guard !episode.audioURL.isEmpty else {
+                self.mediaRecoveryInProgressEpisodeID = nil
+                self.surfacePlaybackFailure()
+                return
+            }
+            self.play(
+                episode,
+                preparedItem: nil,
+                originEvent: .continuedCurrentEpisode,
+                startSecondsOverride: resumePosition
+            )
+            self.mediaRecoveryInProgressEpisodeID = nil
+            if !shouldResume {
+                self.pause(providesPauseHaptic: false)
+            }
+        }
+    }
+
+    private func applyRecoveredMetadata(_ item: ParsedEpisode, to episode: Episode) {
+        if !item.title.isEmpty { episode.title = item.title }
+        if !item.audioURL.isEmpty { episode.audioURL = item.audioURL }
+        if let value = item.description { episode.episodeDescription = value }
+        if let value = item.durationSeconds { episode.durationSeconds = value }
+        if let value = item.pubDate { episode.pubDate = value }
+        if let value = item.artworkURL { episode.artworkURL = value }
+        if let value = item.episodeNumber { episode.episodeNumber = value }
+        if let value = item.seasonNumber { episode.seasonNumber = value }
+        if let value = item.chapterURL { episode.chapterURL = value }
+        if let value = item.transcriptURL { episode.transcriptURL = value }
+    }
+
+    private func surfacePlaybackFailure() {
+        guard playbackFailureMessage == nil else { return }
+        mediaRecoveryInProgressEpisodeID = nil
+        isPlaying = false
+        intendsToPlay = false
+        let message = "This episode’s audio could not be played. Refresh the episode audio and try again."
+        playbackFailureMessage = message
+        Announcer.announce(message, assertive: true)
+        updateNowPlayingInfo()
+    }
+
+    /// Explicit recovery for valid-but-wrong media that AVFoundation cannot
+    /// distinguish automatically (for example, silence at an unchanged URL).
+    func refreshEpisodeAudio(
+        _ episode: Episode,
+        using downloads: DownloadManager? = nil
+    ) async {
+        guard let feedURL = episode.podcast?.feedURL else {
+            Announcer.announce("Could not refresh this episode’s audio")
+            return
+        }
+        Announcer.announce("Refreshing episode audio")
+        do {
+            let feed = try await mediaRecoveryFeed.fetch(feedURL)
+            guard let item = feed.episodes.first(where: { $0.guid == episode.guid }) else {
+                throw FeedError.parse
+            }
+            let restoreDownloadIntent = episode.downloadStatus == .downloaded
+                || episode.downloadStatus == .downloading
+                || episode.downloadStatus == .pending
+            let staleDownloadPath = episode.downloadPath
+            let staleLocalURL = episode.localAudioURL
+            episode.downloadPath = nil
+            if let context {
+                ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+            }
+            applyRecoveredMetadata(item, to: episode)
+            guard saveContext() else { throw FeedError.parse }
+            if let downloads {
+                await downloads.replaceCorrectedMedia([
+                    CorrectedEpisodeMedia(
+                        episodeID: episode.persistentModelID,
+                        restoreDownloadIntent: restoreDownloadIntent,
+                        staleDownloadPath: staleDownloadPath
+                    )
+                ])
+            } else if let staleLocalURL {
+                try? FileManager.default.removeItem(at: staleLocalURL)
+            }
+            if currentEpisode === episode {
+                let position = currentPositionSeconds
+                let shouldResume = intendsToPlay
+                mediaRecoveryAttemptedEpisodeID = episode.persistentModelID
+                play(
+                    episode,
+                    preparedItem: nil,
+                    originEvent: .continuedCurrentEpisode,
+                    startSecondsOverride: position
+                )
+                if !shouldResume { pause(providesPauseHaptic: false) }
+            }
+            playbackFailureMessage = nil
+            Announcer.announce("Episode audio refreshed")
+        } catch {
+            Announcer.announce("Could not refresh this episode’s audio")
         }
     }
 

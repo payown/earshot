@@ -3,6 +3,11 @@ import SwiftData
 import AVFoundation
 @testable import Earshot
 
+private struct CorrectedMediaFeedStub: FeedFetching {
+    let feed: ParsedFeed
+    func fetch(_ urlString: String) async throws -> ParsedFeed { feed }
+}
+
 /// Tests for the #373 advanced-playback engine state on ``PlayerService``:
 /// hold-to-fast-forward rate swap and chapter auto-skip toggling / guarding.
 ///
@@ -11,6 +16,44 @@ import AVFoundation
 /// pure decision math is covered separately in ``ChapterSkipLogicTests``.
 @MainActor
 final class AdvancedPlaybackTests: XCTestCase {
+
+    func testManualEpisodeAudioRefreshUpdatesSameGUIDAndPreservesUserState() async throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://x/feed", title: "Show")
+        let episode = Episode(
+            guid: "same", title: "Original", audioURL: "https://x/broken.mp3",
+            episodeDescription: "Old", durationSeconds: 10
+        )
+        episode.podcast = podcast
+        episode.isPlayed = true
+        episode.inboxDismissed = true
+        episode.positionSeconds = 99
+        context.insert(podcast)
+        context.insert(episode)
+        try context.save()
+        let corrected = ParsedEpisode(
+            guid: "same", title: "Corrected", audioURL: "https://x/repaired.mp3",
+            description: "New", pubDate: nil, durationSeconds: 600,
+            artworkURL: nil, episodeNumber: nil, seasonNumber: nil,
+            chapterURL: nil, transcriptURL: nil
+        )
+        let feed = ParsedFeed(
+            title: "Show", artworkURL: nil, description: nil, author: nil,
+            websiteURL: nil, language: nil, category: nil, episodes: [corrected]
+        )
+        let player = PlayerService(mediaRecoveryFeed: CorrectedMediaFeedStub(feed: feed))
+        player.configure(context: context)
+
+        await player.refreshEpisodeAudio(episode)
+
+        XCTAssertEqual(episode.audioURL, "https://x/repaired.mp3")
+        XCTAssertEqual(episode.title, "Corrected")
+        XCTAssertEqual(episode.episodeDescription, "New")
+        XCTAssertEqual(episode.durationSeconds, 600)
+        XCTAssertTrue(episode.isPlayed)
+        XCTAssertTrue(episode.inboxDismissed)
+        XCTAssertEqual(episode.positionSeconds, 99)
+    }
 
     private func makeContext() -> ModelContext {
         TestStore.freshContext()

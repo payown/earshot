@@ -43,6 +43,8 @@ func availableEpisodeActions(
             return supportsTranscriptExport && episodeHasTranscript(episode)
         case .exportAudio:
             return supportsExport && !episode.audioURL.isEmpty
+        case .refreshAudio:
+            return episode.podcast != nil
         case .addToFolder:
             return supportsAddToFolder
         case .moveToFolder:
@@ -203,6 +205,14 @@ func buildEpisodeActions(
             guard let onExport, !episode.audioURL.isEmpty else { return nil }
             return QuickActionItem(label: "Export audio", isDestructive: false) {
                 onExport()
+            }
+        case .refreshAudio:
+            guard episode.podcast != nil else { return nil }
+            return QuickActionItem(label: "Refresh episode audio", isDestructive: false) {
+                Task { @MainActor in
+                    guard PersistentModelLifetime.episodeExists(episodeID, in: context) else { return }
+                    await player.refreshEpisodeAudio(episode, using: downloads)
+                }
             }
         case .addToFolder:
             // Folders phase 2 (#756): opens the shared `FolderPickerView` in
