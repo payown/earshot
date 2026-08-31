@@ -761,6 +761,357 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(try app.mainContext.fetchCount(FetchDescriptor<Episode>()), 1)
     }
 
+    func testPromotionActivationRestartsAndPublishesEntireGraphWithoutReorderingQueue() async throws {
+        enum Injected: Error { case afterQueue, markerSave }
+        let app = try makeApplicationContainer()
+        let context = app.mainContext
+        let feedURL = "https://example.com/promoted-graph"
+        let podcast = Podcast(
+            feedURL: feedURL, title: "Promoted graph",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue
+        )
+        let first = Episode(
+            guid: "first", title: "First", audioURL: "https://example.com/first.mp3",
+            status: .inQueue, positionSeconds: 42, inboxDismissed: true
+        )
+        let second = Episode(
+            guid: "second", title: "Second", audioURL: "https://example.com/second.mp3",
+            status: .inQueue
+        )
+        first.podcast = podcast
+        second.podcast = podcast
+        let catalog = Podcast(
+            feedURL: "https://catalog.example/feed", title: "Catalog anchors",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue
+        )
+        let before = Episode(
+            guid: "before", title: "Before", audioURL: "https://example.com/before.mp3",
+            status: .inQueue
+        )
+        let middle = Episode(
+            guid: "middle", title: "Middle", audioURL: "https://example.com/middle.mp3",
+            status: .inQueue
+        )
+        before.podcast = catalog
+        middle.podcast = catalog
+        context.insert(podcast)
+        context.insert(first)
+        context.insert(second)
+        context.insert(catalog)
+        context.insert(before)
+        context.insert(middle)
+        context.insert(QueueItem(episode: before, position: 0))
+        context.insert(QueueItem(episode: first, position: 1))
+        context.insert(QueueItem(episode: middle, position: 2))
+        context.insert(QueueItem(episode: second, position: 3))
+        context.insert(Bookmark(episode: first, positionSeconds: 12, note: "Keep"))
+        context.insert(ListeningSession(
+            episode: first, podcast: podcast, durationSeconds: 30
+        ))
+        let folder = PodcastFolder(name: "Promoted folder")
+        context.insert(folder)
+        context.insert(FolderMembership(folder: folder, podcast: podcast))
+        context.insert(EpisodeFolderMembership(folder: folder, episode: first))
+        try AppSettingIdentity.setValue(
+            "all", for: SettingsKey.podcastFilter(feedURL: feedURL), in: context
+        )
+        try context.save()
+        XCTAssertEqual(QueueLineupStore(context: context).save([second, first]).savedCount, 2)
+        podcast.subscriptionStateRaw = nil
+        try PendingCloudFollowIntent.set(feedURL: feedURL, in: context)
+        context.insert(AppSetting(
+            key: SettingsKey.pendingCloudFollowPrefix + UUID().uuidString, value: feedURL
+        ))
+        try context.save()
+        let originalQueue = try context.fetch(FetchDescriptor<QueueItem>(
+            sortBy: [SortDescriptor(\.position)]
+        )).compactMap { $0.episode?.guid }
+        let projection = try makeProjectionContainer()
+        let tombstone = CloudPodcastProjection()
+        tombstone.feedURL = feedURL
+        tombstone.deletedAt = .distantFuture
+        tombstone.sourceDeviceID = "remote"
+        let unrelatedQueue = CloudQueueItemProjection()
+        unrelatedQueue.feedURL = "https://unrelated.example/feed"
+        unrelatedQueue.episodeGUID = "unrelated"
+        unrelatedQueue.isQueued = true
+        unrelatedQueue.position = 99
+        unrelatedQueue.sourceDeviceID = "remote"
+        let unrelatedSetting = CloudSettingProjection()
+        unrelatedSetting.key = SettingsKey.globalSpeed
+        unrelatedSetting.value = "1.75"
+        unrelatedSetting.sourceDeviceID = "remote"
+        let unrelatedState = CloudEpisodeStateProjection()
+        unrelatedState.feedURL = "https://unrelated.example/feed"
+        unrelatedState.episodeGUID = "state"
+        unrelatedState.positionSeconds = 77
+        unrelatedState.sourceDeviceID = "phone"
+        let remoteOnlyQueue = CloudQueueItemProjection()
+        remoteOnlyQueue.feedURL = feedURL
+        remoteOnlyQueue.episodeGUID = "remote-only"
+        remoteOnlyQueue.isQueued = true
+        remoteOnlyQueue.position = 20
+        remoteOnlyQueue.sourceDeviceID = "remote"
+        projection.mainContext.insert(unrelatedQueue)
+        projection.mainContext.insert(unrelatedSetting)
+        projection.mainContext.insert(unrelatedState)
+        projection.mainContext.insert(remoteOnlyQueue)
+        projection.mainContext.insert(tombstone)
+        try projection.mainContext.save()
+        let interrupted = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            deviceID: "phone",
+            followActivationCheckpoint: { if $0 == "queue" { throw Injected.afterQueue } }
+        )
+        do { try await interrupted.publishLocalSubscriptionChange(feedURL: feedURL) }
+        catch Injected.afterQueue { }
+        XCTAssertTrue(try PendingCloudFollowIntent.exists(feedURL: feedURL, in: ModelContext(app)))
+        let clearFailing = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection, deviceID: "phone",
+            pendingIntentSave: { _ in throw Injected.markerSave }
+        )
+        do { try await clearFailing.publishLocalSubscriptionChange(feedURL: feedURL) }
+        catch Injected.markerSave { }
+        XCTAssertTrue(try PendingCloudFollowIntent.exists(feedURL: feedURL, in: ModelContext(app)))
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection, deviceID: "phone"
+        )
+        try await coordinator.publishLocalSubscriptionChange(feedURL: feedURL)
+        let projected = ModelContext(projection)
+        XCTAssertEqual(try projected.fetchCount(FetchDescriptor<CloudPodcastProjection>()), 1)
+        XCTAssertEqual(try projected.fetchCount(FetchDescriptor<CloudEpisodeStateProjection>()), 2)
+        XCTAssertEqual(try projected.fetchCount(FetchDescriptor<CloudQueueItemProjection>()), 4)
+        XCTAssertGreaterThanOrEqual(
+            try projected.fetchCount(FetchDescriptor<CloudSettingProjection>()), 2
+        )
+        XCTAssertEqual(try projected.fetchCount(FetchDescriptor<CloudBookmarkProjection>()), 1)
+        XCTAssertEqual(
+            try projected.fetchCount(FetchDescriptor<CloudListeningSessionProjection>()), 1
+        )
+        let projectedFolder = try XCTUnwrap(
+            projected.fetch(FetchDescriptor<CloudFolderProjection>()).first
+        )
+        XCTAssertTrue(try folderFeeds(projectedFolder.podcastMembersJSON).contains(feedURL))
+        XCTAssertTrue(try folderFeeds(projectedFolder.episodeMembersJSON).contains(feedURL))
+        try await coordinator.reconcile()
+        XCTAssertEqual(
+            try ModelContext(app).fetch(FetchDescriptor<QueueItem>(
+                sortBy: [SortDescriptor(\.position)]
+            )).compactMap { $0.episode?.guid },
+            originalQueue
+        )
+        let remoteOnlyRows = try projected.fetch(FetchDescriptor<CloudQueueItemProjection>())
+            .filter { $0.feedURL == feedURL && $0.episodeGUID == "remote-only" }
+        XCTAssertEqual(remoteOnlyRows.count, 1)
+        XCTAssertTrue(remoteOnlyRows[0].isQueued)
+        XCTAssertEqual(remoteOnlyRows[0].sourceDeviceID, "remote")
+
+        let targetRows = try projected.fetch(FetchDescriptor<CloudQueueItemProjection>())
+            .filter { $0.feedURL == feedURL && ["first", "second"].contains($0.episodeGUID) }
+        for row in targetRows {
+            row.position = row.episodeGUID == "second" ? 1 : 3
+            row.modifiedAt = .distantFuture
+            row.sourceDeviceID = "remote"
+        }
+        try projected.save()
+        try await coordinator.reconcile()
+        XCTAssertEqual(
+            try ModelContext(app).fetch(FetchDescriptor<QueueItem>(sortBy: [SortDescriptor(\.position)]))
+                .compactMap { $0.episode?.guid },
+            ["before", "second", "middle", "first"]
+        )
+        XCTAssertFalse(try PendingCloudFollowIntent.exists(feedURL: feedURL, in: context))
+        XCTAssertEqual(unrelatedQueue.position, 99)
+        XCTAssertEqual(unrelatedSetting.value, "1.75")
+        XCTAssertEqual(unrelatedState.positionSeconds, 77)
+    }
+
+    func testMidActivationUnfollowNeutralizesTargetGraphAndPreservesUnrelatedRows() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/mid-unfollow"
+        let podcast = Podcast(feedURL: feedURL, title: "Mid Unfollow")
+        let episode = Episode(
+            guid: "episode", title: "Episode", audioURL: "https://example.com/audio",
+            status: .inQueue, positionSeconds: 20
+        )
+        episode.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(episode)
+        app.mainContext.insert(QueueItem(episode: episode, position: 0))
+        app.mainContext.insert(Bookmark(episode: episode, positionSeconds: 4))
+        app.mainContext.insert(ListeningSession(
+            episode: episode, podcast: podcast, durationSeconds: 10
+        ))
+        let folder = PodcastFolder(name: "Target folder")
+        app.mainContext.insert(folder)
+        app.mainContext.insert(FolderMembership(folder: folder, podcast: podcast))
+        try AppSettingIdentity.setValue(
+            "all", for: SettingsKey.podcastFilter(feedURL: feedURL), in: app.mainContext
+        )
+        try PendingCloudFollowIntent.set(feedURL: feedURL, in: app.mainContext)
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let unrelated = CloudQueueItemProjection()
+        unrelated.feedURL = "https://unrelated.example/feed"
+        unrelated.episodeGUID = "keep"
+        unrelated.isQueued = true
+        unrelated.sourceDeviceID = "phone"
+        let unrelatedState = CloudEpisodeStateProjection()
+        unrelatedState.feedURL = unrelated.feedURL
+        unrelatedState.episodeGUID = "state"
+        unrelatedState.positionSeconds = 55
+        unrelatedState.sourceDeviceID = "phone"
+        projection.mainContext.insert(unrelated)
+        projection.mainContext.insert(unrelatedState)
+        try projection.mainContext.save()
+        let didUnfollow = Mutex(false)
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            deviceID: "phone",
+            followActivationCheckpoint: { stage in
+                guard stage == "verified", !didUnfollow.withLock({ value in
+                    defer { value = true }
+                    return value
+                }) else { return }
+                let context = ModelContext(app)
+                if let target = try PodcastIdentityService(context: context)
+                    .existingFollowed(feedURL: feedURL) {
+                    _ = SubscriptionDeletionRepository(context: context).unsubscribe(target)
+                }
+            }
+        )
+        do { try await coordinator.publishLocalSubscriptionChange(feedURL: feedURL) }
+        catch is CancellationError { }
+        try await coordinator.reconcile()
+        let check = ModelContext(projection)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Podcast>()), 0)
+        XCTAssertFalse(try check.fetch(FetchDescriptor<CloudPodcastProjection>()).contains {
+            $0.feedURL == feedURL && $0.deletedAt == nil
+        })
+        XCTAssertFalse(try check.fetch(FetchDescriptor<CloudEpisodeStateProjection>()).contains {
+            $0.feedURL == feedURL && $0.deletedAt == nil
+        })
+        XCTAssertFalse(try check.fetch(FetchDescriptor<CloudQueueItemProjection>()).contains {
+            $0.feedURL == feedURL && $0.isQueued && $0.deletedAt == nil
+        })
+        XCTAssertFalse(try check.fetch(FetchDescriptor<CloudSettingProjection>()).contains {
+            $0.key.contains(feedURL) && $0.deletedAt == nil
+        })
+        XCTAssertFalse(try check.fetch(FetchDescriptor<CloudBookmarkProjection>()).contains {
+            $0.feedURL == feedURL && $0.deletedAt == nil
+        })
+        XCTAssertFalse(try check.fetch(FetchDescriptor<CloudListeningSessionProjection>()).contains {
+            $0.feedURL == feedURL && $0.deletedAt == nil
+        })
+        for row in try check.fetch(FetchDescriptor<CloudFolderProjection>()) {
+            XCTAssertFalse(try folderFeeds(row.podcastMembersJSON).contains(feedURL))
+            XCTAssertFalse(try folderFeeds(row.episodeMembersJSON).contains(feedURL))
+        }
+        XCTAssertTrue(try check.fetch(FetchDescriptor<CloudQueueItemProjection>()).contains {
+            $0.feedURL == unrelated.feedURL && $0.isQueued
+        })
+        XCTAssertTrue(try check.fetch(FetchDescriptor<CloudEpisodeStateProjection>()).contains {
+            $0.feedURL == unrelated.feedURL && $0.positionSeconds == 55 && $0.deletedAt == nil
+        })
+    }
+
+    func testPendingUnfollowSurvivesRestartAndPreventsRemoteRecreation() async throws {
+        enum Injected: Error { case markerSave }
+        let app = try makeApplicationContainerWithEpisode(position: 30)
+        let feedURL = "https://example.com/feed"
+        let projection = try makeProjectionContainer()
+        let active = CloudPodcastProjection()
+        active.feedURL = feedURL
+        active.title = "Remote"
+        active.sourceDeviceID = "remote"
+        projection.mainContext.insert(active)
+        try projection.mainContext.save()
+        let podcast = try XCTUnwrap(
+            PodcastIdentityService(context: app.mainContext).existingFollowed(feedURL: feedURL)
+        )
+        XCTAssertTrue(SubscriptionDeletionRepository(context: app.mainContext).unsubscribe(podcast))
+        XCTAssertTrue(try PendingCloudUnfollowIntent.feedURLs(in: ModelContext(app)).contains(feedURL))
+
+        let failing = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection, deviceID: "phone",
+            pendingIntentSave: { _ in throw Injected.markerSave }
+        )
+        do { try await failing.reconcile(); XCTFail("Expected marker-save failure") }
+        catch Injected.markerSave { }
+        XCTAssertTrue(try PendingCloudUnfollowIntent.feedURLs(in: ModelContext(app)).contains(feedURL))
+        let restarted = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app, projectionContainer: projection, deviceID: "phone"
+        )
+        try await restarted.reconcile()
+
+        XCTAssertNil(try PodcastIdentityService(context: ModelContext(app))
+            .existingFollowed(feedURL: feedURL))
+        XCTAssertFalse(try projection.mainContext.fetch(FetchDescriptor<CloudPodcastProjection>())
+            .contains { $0.feedURL == feedURL && $0.deletedAt == nil })
+        XCTAssertFalse(try PendingCloudUnfollowIntent.feedURLs(in: ModelContext(app)).contains(feedURL))
+    }
+    func testCatalogShellWithoutFollowIntentIgnoresRemoteTombstone() async throws {
+        let app = try makeApplicationContainer()
+        let feedURL = "https://example.com/catalog-feed"
+        app.mainContext.insert(Podcast(
+            feedURL: feedURL, title: "Catalog",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue
+        ))
+        try app.mainContext.save()
+        let projection = try makeProjectionContainer()
+        let tombstone = CloudPodcastProjection()
+        tombstone.feedURL = feedURL
+        tombstone.title = "Old Follow"
+        tombstone.deletedAt = Date.distantFuture
+        projection.mainContext.insert(tombstone)
+        try projection.mainContext.save()
+
+        try await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone"
+        ).reconcile()
+
+        let shell = try XCTUnwrap(
+            PodcastIdentityService(context: ModelContext(app))
+                .existingAnyState(feedURL: feedURL)
+        )
+        XCTAssertFalse(shell.isFollowed)
+        XCTAssertEqual(try ModelContext(app).fetchCount(FetchDescriptor<Podcast>()), 1)
+    }
+
+    func testFollowIntentReadFailureAbortsRemoteDeletionFailClosed() async throws {
+        enum IntentReadFailure: Error { case injected }
+        let app = try makeApplicationContainerWithEpisode(position: 30)
+        let projection = try makeProjectionContainer()
+        let tombstone = CloudPodcastProjection()
+        tombstone.feedURL = "https://example.com/feed"
+        tombstone.title = "Old remote state"
+        tombstone.deletedAt = Date.distantFuture
+        projection.mainContext.insert(tombstone)
+        try projection.mainContext.save()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "phone",
+            pendingFollowFeedURLs: { _ in throw IntentReadFailure.injected }
+        )
+
+        do {
+            try await coordinator.reconcile()
+            XCTFail("A critical intent read failure must abort remote application")
+        } catch IntentReadFailure.injected { }
+
+        let check = ModelContext(app)
+        XCTAssertEqual(try check.fetchCount(FetchDescriptor<Podcast>()), 1)
+        XCTAssertEqual(try check.fetchCount(FetchDescriptor<Episode>()), 1)
+        XCTAssertNotNil(tombstone.deletedAt)
+    }
+
     func testRepeatedReconciliationSchedulesOneDelayedRemoteDelete() async throws {
         let app = try makeApplicationContainerWithEpisode(position: 30)
         let projection = try makeProjectionContainer()
@@ -2636,6 +2987,13 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
 
     private func applicationEpisode(in container: ModelContainer) throws -> Episode? {
         try container.mainContext.fetch(FetchDescriptor<Episode>()).first
+    }
+
+    private func folderFeeds(_ json: String) throws -> Set<String> {
+        let values = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]]
+        )
+        return Set(values.compactMap { $0["feedURL"] as? String }.map(FeedURLIdentity.canonical))
     }
 
     private func episodeStateRow(
