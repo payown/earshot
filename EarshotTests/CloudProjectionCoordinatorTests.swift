@@ -4,6 +4,44 @@ import Synchronization
 import XCTest
 @testable import Earshot
 
+private actor QueueApplicationRaceGate {
+    private var isPaused = false
+    private var isFinished = false
+    private var pauseWaiters: [CheckedContinuation<Bool, Never>] = []
+    private var resumeWaiter: CheckedContinuation<Void, Never>?
+
+    func pause() async {
+        guard !isFinished else { return }
+        isPaused = true
+        let waiters = pauseWaiters
+        pauseWaiters.removeAll()
+        for waiter in waiters { waiter.resume(returning: true) }
+        await withCheckedContinuation { resumeWaiter = $0 }
+    }
+
+    func waitUntilPaused() async -> Bool {
+        if isPaused { return true }
+        if isFinished { return false }
+        return await withCheckedContinuation { pauseWaiters.append($0) }
+    }
+
+    func resume() {
+        isPaused = false
+        resumeWaiter?.resume()
+        resumeWaiter = nil
+    }
+
+    func finish() {
+        isFinished = true
+        isPaused = false
+        let waiters = pauseWaiters
+        pauseWaiters.removeAll()
+        for waiter in waiters { waiter.resume(returning: false) }
+        resumeWaiter?.resume()
+        resumeWaiter = nil
+    }
+}
+
 @MainActor
 final class CloudProjectionCoordinatorTests: XCTestCase {
     func testBackgroundConstructionKeepsProjectionWorkFromBlockingMainActor() async throws {
@@ -2303,6 +2341,324 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(try PendingCloudQueueMutation.orderings(in: app.mainContext).isEmpty)
     }
 
+    func testPlaybackCompletionDuringRemoteQueueApplyDoesNotResurrectFinishedEpisode() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "cloud-queue-race-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try makeOnDiskApplicationContainer(
+            applicationURL: root.appending(path: "application.store"),
+            localURL: root.appending(path: "local.store")
+        )
+        let projection = try makeOnDiskProjectionContainer(
+            at: root.appending(path: "projection.store")
+        )
+
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Show")
+        let finished = Episode(
+            guid: "finished", title: "Finished", audioURL: "https://example.com/finished.mp3",
+            status: .inQueue
+        )
+        let next = Episode(
+            guid: "next", title: "Next", audioURL: "https://example.com/next.mp3",
+            status: .inQueue
+        )
+        finished.podcast = podcast
+        next.podcast = podcast
+        app.mainContext.insert(podcast)
+        app.mainContext.insert(finished)
+        app.mainContext.insert(next)
+        app.mainContext.insert(QueueItem(episode: finished, position: 0))
+        app.mainContext.insert(QueueItem(episode: next, position: 1))
+        try PendingCloudQueueMutation.markBootstrapCompleted(in: app.mainContext)
+        try app.mainContext.save()
+
+        projection.mainContext.insert(queueRow(
+            device: "remote", guid: "finished", queued: true, position: 0,
+            membershipUpdatedAt: 100, modifiedAt: 100
+        ))
+        try projection.mainContext.save()
+
+        let queueApplicationGate = QueueApplicationRaceGate()
+        let shouldPause = Mutex(true)
+        let observedStages = Mutex<[String]>([])
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            center: NotificationCenter(),
+            deviceID: "receiver",
+            queueApplicationCheckpoint: { stage in
+                observedStages.withLock { $0.append(stage) }
+                guard stage.hasPrefix("episodes-resolved:"),
+                      shouldPause.withLock({ pause in
+                          defer { pause = false }
+                          return pause
+                      }) else { return }
+                await queueApplicationGate.pause()
+            }
+        )
+
+        let racedReconciliation = Task {
+            do {
+                try await coordinator.reconcile()
+                await queueApplicationGate.finish()
+            } catch {
+                await queueApplicationGate.finish()
+                throw error
+            }
+        }
+        guard await queueApplicationGate.waitUntilPaused() else {
+            try await racedReconciliation.value
+            return XCTFail("Reconciliation ended before the queue race checkpoint")
+        }
+        XCTAssertTrue(observedStages.withLock { $0.contains("episodes-resolved:1") })
+
+        do {
+            let playbackContext = app.mainContext
+            let playbackEpisode = try XCTUnwrap(
+                playbackContext.fetch(FetchDescriptor<Episode>()).first { $0.guid == "finished" }
+            )
+            XCTAssertNotNil(playbackEpisode.queueItem)
+            XCTAssertTrue(
+                QueueRepository(context: playbackContext).markPlayedAndRemove(playbackEpisode)
+            )
+            XCTAssertTrue(playbackEpisode.isPlayed)
+            XCTAssertTrue(try PendingCloudQueueMutation.memberships(in: playbackContext).contains {
+                $0.guid == "finished" && !$0.isQueued
+            })
+        } catch {
+            await queueApplicationGate.resume()
+            _ = try? await racedReconciliation.value
+            throw error
+        }
+
+        await queueApplicationGate.resume()
+        try await racedReconciliation.value
+
+        let racedStages = observedStages.withLock { $0 }
+        XCTAssertTrue(
+            racedStages.contains("episodes-resolved:1"),
+            "The coordinator must retain the finished Episode's QueueItem inverse"
+        )
+        XCTAssertTrue(
+            racedStages.contains("existing-fetched:0"),
+            "The post-completion fetch must observe no QueueItem before materialization"
+        )
+        var fresh = ModelContext(app)
+        var items = try fresh.fetch(FetchDescriptor<QueueItem>())
+        XCTAssertFalse(items.contains { $0.episode?.guid == "finished" })
+        XCTAssertEqual(items.filter { $0.episode?.guid == "next" }.count, 1)
+
+        // The raced pass must defer the stale affirmative row. A clean pass then
+        // publishes playback's newer durable removal and converges all contexts.
+        try await coordinator.reconcile()
+
+        fresh = ModelContext(app)
+        items = try fresh.fetch(FetchDescriptor<QueueItem>())
+        XCTAssertFalse(items.contains { $0.episode?.guid == "finished" })
+        XCTAssertEqual(items.filter { $0.episode?.guid == "next" }.count, 1)
+        XCTAssertTrue(try PendingCloudQueueMutation.memberships(in: fresh).isEmpty)
+        let contributions = try ModelContext(projection)
+            .fetch(FetchDescriptor<CloudQueueItemProjection>())
+            .filter { $0.episodeGUID == "finished" && $0.deletedAt == nil }
+        let winner = try XCTUnwrap(contributions.sorted {
+            if $0.membershipUpdatedAt != $1.membershipUpdatedAt {
+                return $0.membershipUpdatedAt > $1.membershipUpdatedAt
+            }
+            return $0.sourceDeviceID < $1.sourceDeviceID
+        }.first)
+        XCTAssertFalse(winner.isQueued)
+        XCTAssertEqual(winner.sourceDeviceID, "receiver")
+        let episodeIDs = items.compactMap { $0.episode?.persistentModelID }
+        XCTAssertEqual(Set(episodeIDs).count, episodeIDs.count)
+
+        // Cloud application must refresh the same graph the UI and player use.
+        // A subsequent real repository add/remove on mainContext must neither
+        // see a stale inverse nor trap in SwiftData's relationship setter.
+        let mainRepository = QueueRepository(context: app.mainContext)
+        mainRepository.add(finished)
+        XCTAssertNotNil(finished.queueItem)
+        XCTAssertTrue(mainRepository.markPlayedAndRemove(finished))
+        XCTAssertNil(finished.queueItem)
+    }
+
+    func testEqualClockPendingRemovalWinsByOrderingThenDeviceTie() async throws {
+        struct Scenario: Sendable {
+            let name: String
+            let orderingTime: TimeInterval
+            let remoteModifiedTime: TimeInterval
+            let receiverDevice: String
+            let remoteDevice: String
+        }
+        let membershipTime: TimeInterval = 100
+        let scenarios = [
+            Scenario(
+                name: "newer ordering",
+                orderingTime: 200,
+                remoteModifiedTime: 150,
+                receiverDevice: "z-receiver",
+                remoteDevice: "a-remote"
+            ),
+            Scenario(
+                name: "device tie",
+                orderingTime: 100,
+                remoteModifiedTime: 100,
+                receiverDevice: "a-receiver",
+                remoteDevice: "z-remote"
+            ),
+        ]
+
+        for scenario in scenarios {
+            let app = try makeApplicationContainer()
+            let episode = queueEpisode(in: app, guid: "episode")
+            try PendingCloudQueueMutation.markBootstrapCompleted(in: app.mainContext)
+            try app.mainContext.save()
+            let projection = try makeProjectionContainer()
+            projection.mainContext.insert(queueRow(
+                device: scenario.remoteDevice,
+                guid: episode.guid,
+                queued: true,
+                position: 0,
+                membershipUpdatedAt: membershipTime,
+                modifiedAt: scenario.remoteModifiedTime
+            ))
+            try projection.mainContext.save()
+            let didStage = Mutex(false)
+            let coordinator = await CloudProjectionCoordinator.makeForTesting(
+                applicationContainer: app,
+                projectionContainer: projection,
+                center: NotificationCenter(),
+                deviceID: scenario.receiverDevice,
+                queueApplicationCheckpoint: { stage in
+                    guard stage.hasPrefix("episodes-resolved:"),
+                          didStage.withLock({ staged in
+                              defer { staged = true }
+                              return !staged
+                          }) else { return }
+                    try await MainActor.run {
+                        PendingCloudQueueMutation.stageMembership(
+                            feedURL: "https://example.com/feed",
+                            guid: "episode",
+                            isQueued: false,
+                            eventDate: Date(timeIntervalSince1970: membershipTime),
+                            in: app.mainContext
+                        )
+                        PendingCloudQueueMutation.stageOrdering(
+                            eventDate: Date(timeIntervalSince1970: scenario.orderingTime),
+                            in: app.mainContext
+                        )
+                        try app.mainContext.save()
+                    }
+                }
+            )
+
+            try await coordinator.reconcile()
+
+            XCTAssertTrue(
+                try ModelContext(app).fetch(FetchDescriptor<QueueItem>()).isEmpty,
+                scenario.name
+            )
+            XCTAssertFalse(
+                try PendingCloudQueueMutation.memberships(in: app.mainContext).isEmpty,
+                scenario.name
+            )
+
+            try await coordinator.reconcile()
+
+            XCTAssertTrue(
+                try ModelContext(app).fetch(FetchDescriptor<QueueItem>()).isEmpty,
+                scenario.name
+            )
+            XCTAssertTrue(
+                try PendingCloudQueueMutation.memberships(in: app.mainContext).isEmpty,
+                scenario.name
+            )
+            let own = try XCTUnwrap(
+                try ModelContext(projection).fetch(FetchDescriptor<CloudQueueItemProjection>())
+                    .first { $0.sourceDeviceID == scenario.receiverDevice },
+                scenario.name
+            )
+            XCTAssertFalse(own.isQueued, scenario.name)
+            XCTAssertEqual(
+                own.membershipUpdatedAt,
+                Date(timeIntervalSince1970: membershipTime),
+                scenario.name
+            )
+            XCTAssertEqual(
+                own.modifiedAt,
+                Date(timeIntervalSince1970: scenario.orderingTime),
+                scenario.name
+            )
+        }
+    }
+
+    func testRemoteReorderPreservesCatalogSlotAndSecondReconcileIsIdempotent() async throws {
+        let app = try makeApplicationContainer()
+        let followed = Podcast(feedURL: "https://example.com/feed", title: "Followed")
+        let catalog = Podcast(
+            feedURL: "https://catalog.example/feed",
+            title: "Catalog",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue
+        )
+        let a = Episode(guid: "a", title: "A", audioURL: "https://example.com/a.mp3")
+        let b = Episode(guid: "b", title: "B", audioURL: "https://example.com/b.mp3")
+        let localCatalog = Episode(
+            guid: "catalog",
+            title: "Catalog",
+            audioURL: "https://catalog.example/catalog.mp3"
+        )
+        a.podcast = followed
+        b.podcast = followed
+        localCatalog.podcast = catalog
+        app.mainContext.insert(followed)
+        app.mainContext.insert(catalog)
+        app.mainContext.insert(a)
+        app.mainContext.insert(b)
+        app.mainContext.insert(localCatalog)
+        app.mainContext.insert(QueueItem(episode: a, position: 0))
+        app.mainContext.insert(QueueItem(episode: localCatalog, position: 1))
+        app.mainContext.insert(QueueItem(episode: b, position: 2))
+        try PendingCloudQueueMutation.markBootstrapCompleted(in: app.mainContext)
+        try app.mainContext.save()
+
+        let projection = try makeProjectionContainer()
+        projection.mainContext.insert(queueRow(
+            device: "remote", guid: "a", queued: true, position: 1,
+            membershipUpdatedAt: 100, modifiedAt: 200
+        ))
+        projection.mainContext.insert(queueRow(
+            device: "remote", guid: "b", queued: true, position: 0,
+            membershipUpdatedAt: 100, modifiedAt: 200
+        ))
+        try projection.mainContext.save()
+        let coordinator = await queueCoordinator(app, projection)
+
+        try await coordinator.reconcile()
+
+        var context = ModelContext(app)
+        var items = try context.fetch(FetchDescriptor<QueueItem>(
+            sortBy: [SortDescriptor(\.position)]
+        ))
+        XCTAssertEqual(items.compactMap { $0.episode?.guid }, ["b", "catalog", "a"])
+        XCTAssertEqual(items.map(\.position), [0, 1, 2])
+        let firstIDs = items.map(\.persistentModelID)
+        XCTAssertTrue(catalog.isCatalogOnly)
+
+        try await coordinator.reconcile()
+
+        context = ModelContext(app)
+        items = try context.fetch(FetchDescriptor<QueueItem>(
+            sortBy: [SortDescriptor(\.position)]
+        ))
+        XCTAssertEqual(items.compactMap { $0.episode?.guid }, ["b", "catalog", "a"])
+        XCTAssertEqual(items.map(\.position), [0, 1, 2])
+        XCTAssertEqual(items.map(\.persistentModelID), firstIDs)
+        XCTAssertEqual(
+            try ModelContext(projection).fetchCount(FetchDescriptor<CloudQueueItemProjection>()),
+            2
+        )
+    }
+
     func testSimultaneousQueueAddReorderAndRemoveConvergesInEitherArrivalOrder() async throws {
         for reverseArrival in [false, true] {
             let app = try makeApplicationContainer()
@@ -3022,11 +3378,6 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
                 .existingAnyState(feedURL: feedURL)
         )
 
-        let remotePodcast = CloudPodcastProjection()
-        remotePodcast.feedURL = feedURL
-        remotePodcast.title = "Remote followed title"
-        remotePodcast.sourceDeviceID = "remote"
-        remotePodcast.modifiedAt = Date(timeIntervalSince1970: 200)
         let remoteEpisode = CloudEpisodeStateProjection()
         remoteEpisode.feedURL = feedURL
         remoteEpisode.episodeGUID = episode.guid
@@ -3049,7 +3400,6 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         remoteSetting.value = "unplayed"
         remoteSetting.sourceDeviceID = "remote"
         remoteSetting.modifiedAt = Date(timeIntervalSince1970: 200)
-        projected.insert(remotePodcast)
         projected.insert(remoteEpisode)
         projected.insert(remoteQueue)
         projected.insert(remoteSetting)
@@ -3069,7 +3419,6 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             ),
             "all"
         )
-        XCTAssertNil(remotePodcast.deletedAt)
         XCTAssertNil(remoteEpisode.deletedAt)
         XCTAssertNil(remoteQueue.deletedAt)
         XCTAssertEqual(remoteSetting.value, "unplayed")
