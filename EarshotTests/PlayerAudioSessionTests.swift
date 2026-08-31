@@ -56,11 +56,13 @@ final class PlayerAudioSessionTests: XCTestCase {
         let session = MockPlayerAudioSession()
         let player = PlayerService(audioSession: session)
         let container = try ModelContainerFactory.makeInMemory()
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
         player.configure(context: container.mainContext)
         player.playPreview(
             guid: "preview",
             title: "Preview",
-            audioURL: "https://example.com/preview.mp3",
+            audioURL: audioURL.absoluteString,
             showTitle: "Show"
         )
         XCTAssertTrue(player.isPlaying)
@@ -76,11 +78,13 @@ final class PlayerAudioSessionTests: XCTestCase {
         let session = MockPlayerAudioSession()
         let player = PlayerService(audioSession: session)
         let container = try ModelContainerFactory.makeInMemory()
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
         player.configure(context: container.mainContext)
         player.playPreview(
             guid: "preview",
             title: "Preview",
-            audioURL: "https://example.com/preview.mp3",
+            audioURL: audioURL.absoluteString,
             showTitle: "Show"
         )
 
@@ -100,11 +104,13 @@ final class PlayerAudioSessionTests: XCTestCase {
         let session = MockPlayerAudioSession()
         let player = PlayerService(audioSession: session)
         let container = try ModelContainerFactory.makeInMemory()
+        let audioURL = try makeSilentAudioURL()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
         player.configure(context: container.mainContext)
         player.playPreview(
             guid: "preview",
             title: "Preview",
-            audioURL: "https://example.com/preview.mp3",
+            audioURL: audioURL.absoluteString,
             showTitle: "Show"
         )
 
@@ -147,6 +153,43 @@ final class PlayerAudioSessionTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertTrue(condition(), "Timed out waiting for interruption state")
+    }
+
+    /// A real local asset keeps AVPlayer alive while interruption behavior is
+    /// exercised. A remote example URL can fail before the resume notification
+    /// is handled, which turns this into a network-timing test on CI.
+    private func makeSilentAudioURL() throws -> URL {
+        let sampleRate: UInt32 = 8_000
+        let channelCount: UInt16 = 1
+        let bitsPerSample: UInt16 = 16
+        let durationSeconds: UInt32 = 30
+        let bytesPerSample = UInt32(bitsPerSample / 8)
+        let dataByteCount = sampleRate * durationSeconds * UInt32(channelCount) * bytesPerSample
+
+        var data = Data()
+        func append<T: FixedWidthInteger>(_ value: T) {
+            var littleEndian = value.littleEndian
+            withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+        }
+
+        data.append(contentsOf: "RIFF".utf8)
+        append(UInt32(36) + dataByteCount)
+        data.append(contentsOf: "WAVEfmt ".utf8)
+        append(UInt32(16))
+        append(UInt16(1))
+        append(channelCount)
+        append(sampleRate)
+        append(sampleRate * UInt32(channelCount) * bytesPerSample)
+        append(channelCount * UInt16(bytesPerSample))
+        append(bitsPerSample)
+        data.append(contentsOf: "data".utf8)
+        append(dataByteCount)
+        data.append(Data(count: Int(dataByteCount)))
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("earshot-player-session-\(UUID().uuidString).wav")
+        try data.write(to: url, options: .atomic)
+        return url
     }
 }
 
