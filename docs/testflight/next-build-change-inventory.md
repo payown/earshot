@@ -1,10 +1,10 @@
 # Next TestFlight change inventory
 
-Status: Chapter 75, build 242 shipped to the Internal Testing Group and Public
-Testers on 2026-08-27. Its exact copy is in `build-242-notes.txt`.
+Status: Chapter 79, build 249 shipped to the Internal Testing Group and Public
+Testers on 2026-08-31. Its exact copy is in `build-249-notes.txt`.
 
-The last shipped story is Chapter 74 for build 241. The next TestFlight upload
-must follow the maintenance contract in `docs/kashe.md`:
+The last shipped story is Chapter 78 for build 248. This TestFlight upload
+follows the maintenance contract in `docs/kashe.md`:
 
 - assign the chapter to the build that is actually uploaded;
 - append the full chapter to `docs/kashe.md` in the same shipping change;
@@ -12,18 +12,22 @@ must follow the maintenance contract in `docs/kashe.md`:
 - use that exact chapter as the TestFlight `--notes` payload;
 - keep the complete chapter at or below 2,500 characters before upload.
 
-## Significant changes since build 241
+## Significant changes since build 248
 
 The next Kashe chapter’s “What changed” and “What to test” sections must account
 for every applicable item below. They may group related behavior, but must not
 fall back to generic “bug fixes and performance improvements” copy.
 
-- Build 242: Player entry points now verify that a retained episode still exists
-  before using it, and identity repair unloads duplicate episodes before their
-  SwiftData rows are deleted.
-- Build 242: Compact Cloud projection reconciliation now owns background
-  SwiftData contexts, keeping large sync/import work off the main actor without
-  changing the stored schema, synced fields, analytics, or privacy behavior.
+- Build 249: Discovery previews expose the available feed with episode search,
+  newest/oldest sorting, immediate playback, and queue actions without requiring
+  a follow or download.
+- Build 249: Catalog podcasts promote into followed Library podcasts without
+  losing queue, played, or listening-position state; streaming OPML progress is
+  preserved.
+- Build 249: Remote queue reconciliation no longer carries SwiftData relationship
+  objects across an actor suspension. The application context applies a plain
+  queue plan atomically, preventing the build-248 completion-versus-sync crash
+  and episode resurrection.
 
 ## Shipping checklist
 

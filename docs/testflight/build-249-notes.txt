@@ -1,0 +1,50 @@
+Chapter 79, Build 249
+
+The shelf without a membership card
+
+What changed
+
+Discovery is now a place where you can stay and listen, not just a short stop
+before following a show. Open an unfollowed podcast to browse its available
+episodes, search episode titles and descriptions, and sort newest or oldest
+first. Each episode can play immediately or be added to and removed from the
+queue. None of those actions follows the podcast or downloads its episodes.
+
+If you later follow that podcast, Earshot promotes the same catalog record into
+your Library instead of making a competing copy. Queue membership, played state,
+listening position, and other local state remain attached. Large OPML imports
+also continue reporting progress as they stream into the Library.
+
+Build 249 fixes the crash reported from build 248. If playback finishes or
+removes an episode while iCloud is applying queue changes, reconciliation now
+works from plain snapshots and commits through the app's current data context.
+The completed episode should stay gone instead of returning or leaving a stale
+relationship that SwiftData can crash on.
+
+What to test
+
+Find a podcast you do not follow. Browse far beyond its newest five episodes,
+search for a word from an older title or description, and switch between newest
+and oldest. Play an episode, add it to the end of the queue, remove it, and add
+it again. Confirm the podcast remains unfollowed until you explicitly choose
+Follow. Then follow it and confirm the queued episode and listening position
+survive in the Library.
+
+With iCloud sync active, finish a queued episode while moving or removing other
+queue items. Let sync complete, close Earshot, and reopen it. The finished
+episode should not return, queue order should remain sensible, and Earshot
+should not crash. If you use two devices, repeat while the other device changes
+the queue.
+
+Kashe opened a show a client had mentioned and found three years of episodes.
+She searched for the guest's name, put one interview at the end of her queue,
+and left the Follow button alone.
+
+The interview finished between visits while her other device caught up. That
+evening she opened Earshot again. The episode was still finished. The show was
+still not in her Library. Both were exactly where she had left them.
+
+Renata asked whether she had found a new podcast.
+
+“I found one episode,” Kashe said. “I don't need a membership card for the
+whole shelf.”
