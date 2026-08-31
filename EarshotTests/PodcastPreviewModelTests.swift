@@ -45,6 +45,151 @@ final class PodcastPreviewModelTests: XCTestCase {
 
     // MARK: availableEpisodes (pure)
 
+    func testPreviewEpisodeActionsHaveDesignedQueueStateOrder() {
+        XCTAssertEqual(
+            PreviewEpisodeActions.resolved(audioURL: "https://x/episode.mp3", isQueued: false),
+            [.playNow, .addToQueueEnd, .playNext]
+        )
+        XCTAssertEqual(
+            PreviewEpisodeActions.resolved(audioURL: "https://x/episode.mp3", isQueued: true),
+            [.playNow, .removeFromQueue, .playNext]
+        )
+    }
+
+    func testPreviewEpisodeActionsRequireNonWhitespaceAudio() {
+        XCTAssertEqual(PreviewEpisodeActions.resolved(audioURL: "", isQueued: false), [])
+        XCTAssertEqual(PreviewEpisodeActions.resolved(audioURL: "  \n", isQueued: true), [])
+    }
+
+    func testPreviewEpisodeActionLabelsAndDestructiveRoleAreExact() {
+        XCTAssertEqual(PreviewEpisodeAction.playNow.label, "Play now")
+        XCTAssertEqual(PreviewEpisodeAction.addToQueueEnd.label, "Add to end of queue")
+        XCTAssertEqual(PreviewEpisodeAction.removeFromQueue.label, "Remove from queue")
+        XCTAssertEqual(PreviewEpisodeAction.playNext.label, "Play next")
+        XCTAssertFalse(PreviewEpisodeAction.playNow.isDestructive)
+        XCTAssertFalse(PreviewEpisodeAction.addToQueueEnd.isDestructive)
+        XCTAssertTrue(PreviewEpisodeAction.removeFromQueue.isDestructive)
+        XCTAssertFalse(PreviewEpisodeAction.playNext.isDestructive)
+    }
+
+    func testPreviewEpisodeRotorAndContextOrdersUseCentralPolicies() {
+        let actions = PreviewEpisodeActions.resolved(
+            audioURL: "https://x/episode.mp3",
+            isQueued: false
+        )
+        XCTAssertEqual(
+            QuickActionsRotor.declarationOrder(actions),
+            [.playNext, .addToQueueEnd, .playNow]
+        )
+        XCTAssertEqual(QuickActionsContextMenu.declarationOrder(actions), actions)
+    }
+
+    func testPreviewEpisodeAnnouncementsRequireMatchingDurableMutation() {
+        XCTAssertEqual(
+            PreviewEpisodeActions.announcement(
+                for: .addToQueueEnd, outcome: .added, title: "The Episode"
+            ),
+            "Added The Episode to the end of the queue"
+        )
+        XCTAssertEqual(
+            PreviewEpisodeActions.announcement(
+                for: .playNext, outcome: .movedNext, title: "The Episode"
+            ),
+            "The Episode will play next"
+        )
+        XCTAssertEqual(
+            PreviewEpisodeActions.announcement(
+                for: .removeFromQueue, outcome: .removed, title: "The Episode"
+            ),
+            "Removed The Episode from the queue"
+        )
+        XCTAssertEqual(
+            PreviewEpisodeActions.announcement(
+                for: .addToQueueEnd, outcome: .alreadyQueued, title: "The Episode"
+            ),
+            "The Episode is already in the queue"
+        )
+        XCTAssertEqual(
+            PreviewEpisodeActions.announcement(
+                for: .playNext, outcome: .alreadyNext, title: "The Episode"
+            ),
+            "The Episode is already next"
+        )
+        XCTAssertEqual(
+            PreviewEpisodeActions.announcement(
+                for: .removeFromQueue, outcome: .alreadyRemoved, title: "The Episode"
+            ),
+            "The Episode is not in the queue"
+        )
+    }
+
+    func testPreviewEpisodeNoOpsReconcileMembershipAndIgnoreMismatchedActions() {
+        XCTAssertFalse(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .added))
+        XCTAssertFalse(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .movedNext))
+        XCTAssertFalse(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .removed))
+        XCTAssertTrue(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .alreadyQueued))
+        XCTAssertTrue(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .alreadyNext))
+        XCTAssertTrue(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .alreadyRemoved))
+
+        for (action, outcome) in [
+            (PreviewEpisodeAction.playNext, CatalogEpisodeQueueOutcome.alreadyQueued),
+            (.playNext, .alreadyRemoved),
+            (.addToQueueEnd, .alreadyNext),
+            (.removeFromQueue, .alreadyNext),
+        ] {
+            XCTAssertNil(PreviewEpisodeActions.announcement(
+                for: action,
+                outcome: outcome,
+                title: "The Episode"
+            ))
+        }
+    }
+
+    func testPreviewEpisodeFailureAnnouncementsAreCuratedAndCancellationIsSilent() {
+        XCTAssertEqual(
+            PreviewEpisodeActions.failureAnnouncement(
+                for: .addToQueueEnd, failure: .persistenceFailed, title: "The Episode"
+            ),
+            "Couldn't add The Episode to the queue"
+        )
+        XCTAssertEqual(
+            PreviewEpisodeActions.failureAnnouncement(
+                for: .playNext, failure: .missingGUID, title: "The Episode"
+            ),
+            "Couldn't move The Episode to play next"
+        )
+        XCTAssertEqual(
+            PreviewEpisodeActions.failureAnnouncement(
+                for: .removeFromQueue, failure: .invalidFeedURL, title: "The Episode"
+            ),
+            "Couldn't remove The Episode from the queue"
+        )
+        XCTAssertNil(PreviewEpisodeActions.failureAnnouncement(
+            for: .removeFromQueue, failure: .cancelled, title: "The Episode"
+        ))
+    }
+
+    func testCatalogIdentityUsesCanonicalFeedAndGUIDTogether() {
+        let first = PreviewEpisode(
+            podcastFeedURL: "HTTPS://Example.com/feed/", podcastTitle: "Show",
+            podcastArtworkURL: nil, id: " same-guid ", title: "One", pubDate: nil,
+            durationSeconds: nil, audioURL: "https://x/one.mp3", episodeDescription: nil,
+            searchableDescription: "", artworkURL: nil, episodeNumber: nil,
+            seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+        let second = PreviewEpisode(
+            podcastFeedURL: "https://other.example/feed", podcastTitle: "Other",
+            podcastArtworkURL: nil, id: "same-guid", title: "Two", pubDate: nil,
+            durationSeconds: nil, audioURL: "https://x/two.mp3", episodeDescription: nil,
+            searchableDescription: "", artworkURL: nil, episodeNumber: nil,
+            seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+
+        XCTAssertEqual(first.catalogIdentity?.guid, "same-guid")
+        XCTAssertNotEqual(first.catalogIdentity, second.catalogIdentity)
+        XCTAssertEqual(Set([first.catalogIdentity, second.catalogIdentity]).count, 2)
+    }
+
     func testAvailableEpisodesAreNewestFirstAndNotCapped() {
         // Deliberately out of order. Every publisher-feed episode is retained.
         let feed = parsedFeed([

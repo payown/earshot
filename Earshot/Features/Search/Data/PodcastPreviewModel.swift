@@ -136,6 +136,109 @@ enum PreviewEpisodeSearchFilter {
     }
 }
 
+/// Fixed Discovery actions for a playable preview episode. The enum is stable
+/// across SwiftUI body evaluations; queue state changes only replace the one
+/// state-specific middle action and never replace the episode row itself.
+enum PreviewEpisodeAction: String, Identifiable, Equatable, StableQuickActionPresentation {
+    case playNow
+    case addToQueueEnd
+    case removeFromQueue
+    case playNext
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .playNow: "Play now"
+        case .addToQueueEnd: "Add to end of queue"
+        case .removeFromQueue: "Remove from queue"
+        case .playNext: "Play next"
+        }
+    }
+
+    var isDestructive: Bool { self == .removeFromQueue }
+}
+
+/// Pure presentation policy shared by VoiceOver's Actions rotor and the sighted
+/// long-press menu. Missing/whitespace audio exposes no dead actions.
+enum PreviewEpisodeActions {
+    static func resolved(audioURL: String, isQueued: Bool) -> [PreviewEpisodeAction] {
+        guard !audioURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return []
+        }
+        return isQueued
+            ? [.playNow, .removeFromQueue, .playNext]
+            : [.playNow, .addToQueueEnd, .playNext]
+    }
+
+    static func announcement(
+        for action: PreviewEpisodeAction,
+        outcome: CatalogEpisodeQueueOutcome,
+        title: String
+    ) -> String? {
+        switch (action, outcome) {
+        case (.addToQueueEnd, .added):
+            "Added \(title) to the end of the queue"
+        case (.playNext, .movedNext):
+            "\(title) will play next"
+        case (.removeFromQueue, .removed):
+            "Removed \(title) from the queue"
+        case (.addToQueueEnd, .alreadyQueued):
+            "\(title) is already in the queue"
+        case (.playNext, .alreadyNext):
+            "\(title) is already next"
+        case (.removeFromQueue, .alreadyRemoved):
+            "\(title) is not in the queue"
+        default:
+            nil
+        }
+    }
+
+    /// Queue mutations publish `.earshotQueueDidChange` after their durable save,
+    /// which is the preview's single refresh path for committed changes. No-op
+    /// outcomes intentionally publish nothing, so explicitly reconcile those to
+    /// recover from an earlier failed or stale screen snapshot.
+    static func needsNoOpMembershipRefresh(
+        after outcome: CatalogEpisodeQueueOutcome
+    ) -> Bool {
+        switch outcome {
+        case .alreadyQueued, .alreadyNext, .alreadyRemoved:
+            true
+        case .added, .movedNext, .removed:
+            false
+        }
+    }
+
+    static func failureAnnouncement(
+        for action: PreviewEpisodeAction,
+        failure: CatalogEpisodeQueueFailure,
+        title: String
+    ) -> String? {
+        guard failure != .cancelled else { return nil }
+        switch action {
+        case .playNow:
+            return nil
+        case .addToQueueEnd:
+            return "Couldn't add \(title) to the queue"
+        case .removeFromQueue:
+            return "Couldn't remove \(title) from the queue"
+        case .playNext:
+            return "Couldn't move \(title) to play next"
+        }
+    }
+}
+
+extension PreviewEpisode {
+    /// Canonical natural identity used by both the screen snapshot and queue
+    /// mutations. Visible title is deliberately never part of membership.
+    var catalogIdentity: CatalogEpisodeIdentity? {
+        let feedURL = FeedURLIdentity.canonical(podcastFeedURL)
+        let guid = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !feedURL.isEmpty, !guid.isEmpty else { return nil }
+        return CatalogEpisodeIdentity(feedURL: feedURL, guid: guid)
+    }
+}
+
 /// Drives the podcast preview: fetches an UN-subscribed feed once via
 /// ``FeedFetching`` (the same abstraction the subscribe flow uses) and exposes the
 /// show description plus every episode exposed by the publisher's current feed

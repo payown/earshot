@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct CatalogEpisodeIdentity: Equatable, Sendable {
+struct CatalogEpisodeIdentity: Hashable, Sendable {
     let feedURL: String
     let guid: String
 }
@@ -69,6 +69,23 @@ final class CatalogEpisodeQueueRepository {
         self.saveOperation = saveOperation
         self.cleanupSaveOperation = cleanupSaveOperation
         self.cleanupRowsOperation = cleanupRowsOperation
+    }
+
+    /// A value-only snapshot of durable queue membership for Discovery. The
+    /// preview keeps this single set at screen scope instead of retaining
+    /// SwiftData models or issuing one fetch for every episode row.
+    func queuedEpisodeIdentities() throws -> Set<CatalogEpisodeIdentity> {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let items = try context.fetch(FetchDescriptor<QueueItem>())
+        return Set(items.compactMap { item in
+            guard let episode = item.episode,
+                  let podcast = episode.podcast else { return nil }
+            let feedURL = FeedURLIdentity.canonical(podcast.feedURL)
+            let guid = episode.guid.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !feedURL.isEmpty, !guid.isEmpty else { return nil }
+            return CatalogEpisodeIdentity(feedURL: feedURL, guid: guid)
+        })
     }
 
     func add(
