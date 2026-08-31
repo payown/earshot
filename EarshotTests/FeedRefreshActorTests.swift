@@ -207,7 +207,7 @@ final class FeedRefreshActorTests: XCTestCase {
     private func makeOnDiskEarshotContainer(
         at storeURL: URL, allowsSave: Bool
     ) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: EarshotSchemaV11.self)
+        let schema = Schema(versionedSchema: EarshotSchemaV12.self)
         return try ModelContainer(
             for: schema,
             configurations: ModelConfiguration(

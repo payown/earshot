@@ -1,14 +1,15 @@
 import XCTest
 import SwiftData
+import CryptoKit
 @testable import Earshot
 
-/// Guards the V11 live graph against an unversioned model edit (#425) and audits
+/// Guards the V12 live graph against an unversioned model edit (#425) and audits
 /// the exact compatibility rules required before the mirrored configuration may
 /// be switched from `.none` to CloudKit in a later phase.
 @MainActor
 final class SchemaDriftTests: XCTestCase {
 
-    /// The live model graph, kept in lockstep with the current V11 model lists.
+    /// The live model graph, kept in lockstep with the current V12 model lists.
     private static let liveModels: [any PersistentModel.Type] = [
         Podcast.self,
         Episode.self,
@@ -47,10 +48,52 @@ final class SchemaDriftTests: XCTestCase {
         return result
     }
 
-    func testLiveAttributesMatchV11() {
+    private func fingerprint(_ schema: Schema) -> String {
+        var records: [String] = []
+        for entity in schema.entities {
+            for attribute in entity.attributes {
+                let defaultValue: String
+                if let date = attribute.defaultValue as? Date {
+                    defaultValue = "Date:\(date.timeIntervalSinceReferenceDate)"
+                } else if let value = attribute.defaultValue {
+                    defaultValue = "\(String(reflecting: type(of: value))):\(String(reflecting: value))"
+                } else {
+                    defaultValue = "nil"
+                }
+                records.append([
+                    "A", entity.name, attribute.name, attribute.originalName,
+                    String(describing: attribute.valueType), attribute.isOptional.description,
+                    attribute.isUnique.description, attribute.isTransformable.description,
+                    attribute.options.map { String(reflecting: $0) }.sorted()
+                        .joined(separator: ","),
+                    defaultValue, attribute.hashModifier ?? "nil",
+                ].joined(separator: "|"))
+            }
+            for relationship in entity.relationships {
+                records.append([
+                    "R", entity.name, relationship.name, relationship.originalName,
+                    String(describing: relationship.valueType), relationship.destination,
+                    relationship.deleteRule.rawValue, relationship.inverseName ?? "nil",
+                    relationship.minimumModelCount.map(String.init) ?? "nil",
+                    relationship.maximumModelCount.map(String.init) ?? "nil",
+                    relationship.isToOneRelationship.description,
+                    relationship.options.map(\.debugDescription).sorted()
+                        .joined(separator: ","),
+                    relationship.hashModifier ?? "nil",
+                ].joined(separator: "|"))
+            }
+        }
+        let bytes = Data(records.sorted().joined(separator: "\n").utf8)
+        return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func testLiveAttributesMatchV12AndShippedV11HasNotDrifted() {
+        let currentV12 = attributeMap(Schema(versionedSchema: EarshotSchemaV12.self))
         let frozenV11 = attributeMap(Schema(versionedSchema: EarshotSchemaV11.self))
         let live = attributeMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, frozenV11)
+        XCTAssertEqual(live, currentV12)
+        XCTAssertNil(frozenV11["Podcast.subscriptionStateRaw"])
+        XCTAssertEqual(currentV12["Podcast.subscriptionStateRaw"], "true|Optional<String>")
         XCTAssertNil(attributeMap(Schema(versionedSchema: EarshotSchemaV10.self))[
             "LocalEpisodeState.volumeBoostRaw"
         ])
@@ -88,16 +131,29 @@ final class SchemaDriftTests: XCTestCase {
         XCTAssertEqual(liveAttrs["Episode.legacyDownloadPath"], "true|Optional<String>")
     }
 
-    /// The live relationship graph must remain identical to V11.
-    func testLiveRelationshipsMatchV11() {
-        let frozenV11 = relationshipMap(Schema(versionedSchema: EarshotSchemaV11.self))
-        let live = relationshipMap(Schema(Self.liveModels))
-        XCTAssertEqual(live, frozenV11)
+    func testShippedV10AndV11FullFingerprintsStayFrozen() {
+        XCTAssertEqual(
+            fingerprint(Schema(versionedSchema: EarshotSchemaV10.self)),
+            "4cb2def708e982f2f2292a6671227dfaefe03bdb5c11280ff1bab9c4728e74be"
+        )
+        XCTAssertEqual(
+            fingerprint(Schema(versionedSchema: EarshotSchemaV11.self)),
+            "90e69d4a52d23609a9d07934ff7448e42050426bbeb081c9ac5d7180b988b2fd"
+        )
     }
 
-    /// Guards the lockstep assumption between the live list and V11.
-    func testLiveListMatchesV11ModelsList() {
-        let v11Names = Set(Schema(versionedSchema: EarshotSchemaV11.self).entities.map(\.name))
+    /// The additive V12 field does not change any relationship.
+    func testLiveRelationshipsMatchV12AndV11() {
+        let frozenV11 = relationshipMap(Schema(versionedSchema: EarshotSchemaV11.self))
+        let currentV12 = relationshipMap(Schema(versionedSchema: EarshotSchemaV12.self))
+        let live = relationshipMap(Schema(Self.liveModels))
+        XCTAssertEqual(live, currentV12)
+        XCTAssertEqual(currentV12, frozenV11)
+    }
+
+    /// Guards the lockstep assumption between the live list and V12.
+    func testLiveListMatchesV12ModelsList() {
+        let v11Names = Set(Schema(versionedSchema: EarshotSchemaV12.self).entities.map(\.name))
         let liveNames = Set(Schema(Self.liveModels).entities.map(\.name))
         XCTAssertEqual(v11Names, liveNames)
     }
@@ -174,8 +230,8 @@ final class CloudKitSchemaCompatibilityTests: XCTestCase {
         }
     }
 
-    func testV11LocalSchemaHasNoRelationshipsAndSplitContainerConstructs() throws {
-        let local = Schema(EarshotSchemaV11.localModels)
+    func testV12LocalSchemaHasNoRelationshipsAndSplitContainerConstructs() throws {
+        let local = Schema(EarshotSchemaV12.localModels)
         XCTAssertTrue(local.entities.allSatisfy { $0.relationships.isEmpty })
         let container = try ModelContainerFactory.makeInMemory()
         XCTAssertEqual(container.configurations.count, 2)

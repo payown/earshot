@@ -87,9 +87,9 @@ final class StoreMigrationFloorTests: XCTestCase {
 
         let load = ModelContainerFactory.load(at: storeURL)
         guard case .ready(let migrated) = load else {
-            return XCTFail("the production V5 floor must migrate to V11")
+            return XCTFail("the production V5 floor must migrate to V12")
         }
-        XCTAssertEqual(try storedMajorVersion(), 11)
+        XCTAssertEqual(try storedMajorVersion(), 12)
         var episode = FetchDescriptor<Episode>(
             predicate: #Predicate { $0.guid == "v5-production-episode" }
         )
@@ -141,12 +141,12 @@ final class StoreMigrationFloorTests: XCTestCase {
         }
         XCTAssertEqual(try storedMajorVersion(), 5)
         XCTAssertEqual(
-            try storedMajorVersion(at: StoreMigration.localStoreURL(for: storeURL)), 11
+            try storedMajorVersion(at: StoreMigration.localStoreURL(for: storeURL)), 12
         )
 
         StoreMigration.injectedFailurePoint = nil
         let resumed = try StoreMigration.openOrMigrate(at: storeURL)
-        XCTAssertEqual(try storedMajorVersion(), 11)
+        XCTAssertEqual(try storedMajorVersion(), 12)
         var descriptor = FetchDescriptor<Episode>(
             predicate: #Predicate { $0.guid == "resume-v5" }
         )
