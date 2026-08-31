@@ -183,6 +183,12 @@ enum PreviewEpisodeActions {
             "\(title) will play next"
         case (.removeFromQueue, .removed):
             "Removed \(title) from the queue"
+        case (.addToQueueEnd, .alreadyQueued):
+            "\(title) is already in the queue"
+        case (.playNext, .alreadyNext):
+            "\(title) is already next"
+        case (.removeFromQueue, .alreadyRemoved):
+            "\(title) is not in the queue"
         default:
             nil
         }
@@ -191,7 +197,7 @@ enum PreviewEpisodeActions {
     /// Queue mutations publish `.earshotQueueDidChange` after their durable save,
     /// which is the preview's single refresh path for committed changes. No-op
     /// outcomes intentionally publish nothing, so explicitly reconcile those to
-    /// recover from an earlier failed or stale screen snapshot without speaking.
+    /// recover from an earlier failed or stale screen snapshot.
     static func needsNoOpMembershipRefresh(
         after outcome: CatalogEpisodeQueueOutcome
     ) -> Bool {

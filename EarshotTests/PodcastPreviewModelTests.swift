@@ -103,18 +103,27 @@ final class PodcastPreviewModelTests: XCTestCase {
             ),
             "Removed The Episode from the queue"
         )
-        XCTAssertNil(PreviewEpisodeActions.announcement(
-            for: .addToQueueEnd, outcome: .alreadyQueued, title: "The Episode"
-        ))
-        XCTAssertNil(PreviewEpisodeActions.announcement(
-            for: .playNext, outcome: .alreadyNext, title: "The Episode"
-        ))
-        XCTAssertNil(PreviewEpisodeActions.announcement(
-            for: .removeFromQueue, outcome: .alreadyRemoved, title: "The Episode"
-        ))
+        XCTAssertEqual(
+            PreviewEpisodeActions.announcement(
+                for: .addToQueueEnd, outcome: .alreadyQueued, title: "The Episode"
+            ),
+            "The Episode is already in the queue"
+        )
+        XCTAssertEqual(
+            PreviewEpisodeActions.announcement(
+                for: .playNext, outcome: .alreadyNext, title: "The Episode"
+            ),
+            "The Episode is already next"
+        )
+        XCTAssertEqual(
+            PreviewEpisodeActions.announcement(
+                for: .removeFromQueue, outcome: .alreadyRemoved, title: "The Episode"
+            ),
+            "The Episode is not in the queue"
+        )
     }
 
-    func testPreviewEpisodeNoOpsReconcileMembershipWithoutSpeech() {
+    func testPreviewEpisodeNoOpsReconcileMembershipAndIgnoreMismatchedActions() {
         XCTAssertFalse(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .added))
         XCTAssertFalse(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .movedNext))
         XCTAssertFalse(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .removed))
@@ -122,13 +131,14 @@ final class PodcastPreviewModelTests: XCTestCase {
         XCTAssertTrue(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .alreadyNext))
         XCTAssertTrue(PreviewEpisodeActions.needsNoOpMembershipRefresh(after: .alreadyRemoved))
 
-        for outcome in [
-            CatalogEpisodeQueueOutcome.alreadyQueued,
-            .alreadyNext,
-            .alreadyRemoved,
+        for (action, outcome) in [
+            (PreviewEpisodeAction.playNext, CatalogEpisodeQueueOutcome.alreadyQueued),
+            (.playNext, .alreadyRemoved),
+            (.addToQueueEnd, .alreadyNext),
+            (.removeFromQueue, .alreadyNext),
         ] {
             XCTAssertNil(PreviewEpisodeActions.announcement(
-                for: .playNext,
+                for: action,
                 outcome: outcome,
                 title: "The Episode"
             ))
