@@ -313,7 +313,14 @@ final class DownloadManager {
         // completion delivered after the app was killed still resolves the
         // episode. The composite "feedURL|guid" key (#576) disambiguates guids
         // that repeat across podcasts.
-        task.taskDescription = DownloadTaskKey.key(feedURL: episode.podcast?.feedURL, guid: episode.guid)
+        let identityKey = DownloadTaskKey.key(
+            feedURL: episode.podcast?.feedURL,
+            guid: episode.guid
+        )
+        task.taskDescription = DownloadTransferKey.key(
+            identityKey: identityKey,
+            sourceURL: url
+        )
         task.resume()
         AppLog.networking.info("Download started (background): \(episode.title, privacy: .public)")
     }
@@ -526,6 +533,47 @@ final class DownloadManager {
         save()
     }
 
+    /// Finishes a feed-driven media correction after the background refresh
+    /// save is visible on the main context. Cancellation is identity-scoped: a
+    /// repaired show never disturbs unrelated background downloads. A second
+    /// file/state reset closes the narrow window where a legacy task (which has
+    /// no source fingerprint) completed between the actor save and this call.
+    func replaceCorrectedMedia(_ repairs: [CorrectedEpisodeMedia]) async {
+        guard let context, !repairs.isEmpty else { return }
+        let episodes = repairs.compactMap { repair -> (Episode, CorrectedEpisodeMedia)? in
+            let episodeID = repair.episodeID
+            var descriptor = FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.persistentModelID == episodeID }
+            )
+            descriptor.fetchLimit = 1
+            guard let episode = (try? context.fetch(descriptor))?.first else { return nil }
+            return (episode, repair)
+        }
+        guard !episodes.isEmpty else { return }
+
+        let identityKeys = Set(episodes.map {
+            DownloadTaskKey.key(feedURL: $0.0.podcast?.feedURL, guid: $0.0.guid)
+        })
+        await Self.cancelTasks(matchingIdentityKeys: identityKeys)
+        for (episode, repair) in episodes {
+            if let staleURL = DownloadPaths.resolveLocalURL(storedValue: repair.staleDownloadPath) {
+                try? FileManager.default.removeItem(at: staleURL)
+            }
+            if let url = episode.localAudioURL {
+                try? FileManager.default.removeItem(at: url)
+            }
+            episode.downloadPath = nil
+            ActiveDownload.setDownloadStatus(.none, on: episode, in: context)
+        }
+        save()
+        for (episode, repair) in episodes where repair.restoreDownloadIntent {
+            await download(episode, announceWaiting: false)
+        }
+        AppLog.networking.notice(
+            "Replaced corrected media for \(episodes.count) episode(s)"
+        )
+    }
+
     /// Counts completed and active downloads and measures the allocated bytes in
     /// the Downloads directory. Directory traversal stays off the main actor;
     /// only the compact scalar summary returns to SwiftUI.
@@ -632,6 +680,15 @@ final class DownloadManager {
     /// ``clearAllDownloads()`` so no in-flight transfer completes after a clear.
     static func cancelAllTasks() async {
         for task in await allTasks() { task.cancel() }
+    }
+
+    private static func cancelTasks(matchingIdentityKeys keys: Set<String>) async {
+        guard !keys.isEmpty else { return }
+        for task in await allTasks() {
+            guard let raw = task.taskDescription,
+                  keys.contains(DownloadTransferKey.identityKey(from: raw)) else { continue }
+            task.cancel()
+        }
     }
 
     /// A recovery marker may be removed only after cancellation callbacks have
@@ -761,11 +818,7 @@ final class DownloadManager {
     }
 
     private static func complete(taskKey: String, fileName: String) {
-        // Wake downloadAndWait callers first, unconditionally, so a failed
-        // episode lookup can't leave a continuation parked until its timeout.
-        // Resumption only SCHEDULES the waiter — it runs after this function
-        // returns, so it observes the persisted state below.
-        resolveWaiters(for: taskKey, success: true)
+        let identityKey = DownloadTransferKey.identityKey(from: taskKey)
         guard let context = container?.mainContext,
               let episode = DownloadTaskKey.episode(matching: taskKey, in: context) else {
             // A local or remotely delivered unfollow can delete the episode
@@ -777,6 +830,25 @@ final class DownloadManager {
             if let url = DownloadPaths.resolveLocalURL(storedValue: fileName) {
                 try? FileManager.default.removeItem(at: url)
             }
+            resolveWaiters(for: identityKey, success: false)
+            return
+        }
+        // A feed correction or explicit removal can supersede a background
+        // transfer while URLSession is delivering its terminal callback. Only
+        // the still-current source, in the still-downloading state, may win.
+        // This closes the late-success race that previously resurrected a stale
+        // file after its replacement had already been selected.
+        let currentSource = URL(string: episode.audioURL).map(SecureURL.upgradedForNonMedia)
+        let transferSource = DownloadTransferKey.parse(taskKey).flatMap {
+            URL(string: $0.sourceURL)
+        }
+        guard episode.downloadStatus == .downloading,
+              transferSource == nil || transferSource == currentSource else {
+            if let url = DownloadPaths.resolveLocalURL(storedValue: fileName) {
+                try? FileManager.default.removeItem(at: url)
+            }
+            resolveWaiters(for: identityKey, success: false)
+            AppLog.networking.notice("Ignored a superseded download completion")
             return
         }
         // Store only the file NAME: iOS relocates the app container on every
@@ -787,6 +859,7 @@ final class DownloadManager {
         // (#701).
         ActiveDownload.setDownloadStatus(.downloaded, on: episode, in: context)
         save(context, action: "complete")
+        resolveWaiters(for: identityKey, success: true)
         Announcer.announce("Downloaded \(episode.title)")
         let shouldNotify = AppSettingsStore(context: context).bool(
             SettingsKey.downloadCompletionNotifications,
@@ -819,7 +892,10 @@ final class DownloadManager {
     #endif
 
     private static func fail(taskKey: String) {
-        resolveWaiters(for: taskKey, success: false)
+        resolveWaiters(
+            for: DownloadTransferKey.identityKey(from: taskKey),
+            success: false
+        )
         guard let context = container?.mainContext,
               let episode = DownloadTaskKey.episode(matching: taskKey, in: context) else { return }
         // Don't clobber a state that already moved on (e.g. the user removed it).
@@ -835,7 +911,12 @@ final class DownloadManager {
     private static func liveTaskKeys() async -> Set<String> {
         await withCheckedContinuation { continuation in
             session.getAllTasks { tasks in
-                continuation.resume(returning: Set(tasks.compactMap { $0.taskDescription }))
+                var keys = Set<String>()
+                for value in tasks.compactMap(\.taskDescription) {
+                    keys.insert(value)
+                    keys.insert(DownloadTransferKey.identityKey(from: value))
+                }
+                continuation.resume(returning: keys)
             }
         }
     }

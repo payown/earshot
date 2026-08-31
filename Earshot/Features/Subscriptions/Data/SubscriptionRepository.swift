@@ -49,10 +49,14 @@ protocol EpisodeDownloading: AnyObject {
     /// "Auto-download queued episodes" setting is on. Defaulted to a no-op so
     /// test fakes and non-DownloadManager conformers need not implement it.
     func downloadQueuedIfEnabled() async
+    /// Cancels obsolete transfers and optionally restores the listener's prior
+    /// download intent after a publisher corrects an existing enclosure.
+    func replaceCorrectedMedia(_ repairs: [CorrectedEpisodeMedia]) async
 }
 
 extension EpisodeDownloading {
     func downloadQueuedIfEnabled() async {}
+    func replaceCorrectedMedia(_ repairs: [CorrectedEpisodeMedia]) async {}
 }
 
 extension DownloadManager: EpisodeDownloading {}
@@ -85,8 +89,21 @@ struct RefreshOutcome: Sendable {
     var rejectedAllNewCandidates = false
     var keptOverflowCount = 0
     var filteredOverflowCount = 0
+    var metadataUpdatedCount = 0
+    var correctedMedia: [CorrectedEpisodeMedia] = []
 
     static let backfill = RefreshOutcome(added: 0, wasBackfill: true, newestNewEpisodeGUID: nil, newEpisodeIDs: [])
+}
+
+/// A saved, actor-produced instruction to finish local recovery on the main
+/// actor. The background refresh has committed the corrected metadata and
+/// local-state reset; the downloader then removes the old file, cancels any
+/// surviving URLSession task, and restores the prior download intent through
+/// the normal connectivity gate.
+struct CorrectedEpisodeMedia: Sendable, Equatable {
+    let episodeID: PersistentIdentifier
+    let restoreDownloadIntent: Bool
+    let staleDownloadPath: String?
 }
 
 /// Result of one explicit historical-catalog page. Historical rows are always
@@ -589,6 +606,7 @@ extension SubscriptionRepository {
                 let affectedIDs = checkpoint
                     .filter {
                         $0.outcome.added > 0 || $0.outcome.filteredCount > 0
+                            || $0.outcome.metadataUpdatedCount > 0
                             || !$0.outcome.inboxReentryEpisodeIDs.isEmpty
                     }
                     .compactMap {
@@ -607,6 +625,9 @@ extension SubscriptionRepository {
                 }
                 await self.autoDownloadRecent(
                     episodeIDsPerPodcast: checkpoint.map { $0.outcome.newEpisodeIDs }
+                )
+                await self.downloader?.replaceCorrectedMedia(
+                    checkpoint.flatMap { $0.outcome.correctedMedia }
                 )
                 await self.downloader?.downloadQueuedIfEnabled()
                 await onDurableNotifications(self.notifications(from: checkpoint))

@@ -228,6 +228,10 @@ actor FeedRefreshActor {
     /// Store lookups used by explicit historical paging stay bounded even when
     /// the remote feed contains tens of thousands of items.
     private static let olderEpisodeIdentityChunkSize = 50
+    /// Reconcile a bounded recent window even when no episode is newer than the
+    /// high-water mark. Publishers commonly repair an existing enclosure while
+    /// retaining its GUID and date; the old new-only diff could never see it.
+    private static let correctedMetadataWindow = 50
     /// A single unresponsive feed must not hold an OPML import at the URLSession
     /// resource timeout. The normal feed refresh path keeps its existing policy;
     /// this shorter ceiling applies only to bulk import prefetches.
@@ -1336,17 +1340,50 @@ actor FeedRefreshActor {
         }.prefix(limit))
     }
 
-    private static func mergeFeedMetadata(_ item: ParsedEpisode, into episode: Episode) {
+    @discardableResult
+    private static func mergeFeedMetadata(
+        _ item: ParsedEpisode,
+        into episode: Episode,
+        updatePublicationDate: Bool = true
+    ) -> Bool {
+        let before = EpisodeMetadataSnapshot(episode)
         if !item.title.isEmpty { episode.title = item.title }
         if !item.audioURL.isEmpty { episode.audioURL = item.audioURL }
         if let value = item.description { episode.episodeDescription = value }
         if let value = item.durationSeconds { episode.durationSeconds = value }
-        if let value = item.pubDate { episode.pubDate = value }
+        if updatePublicationDate, let value = item.pubDate { episode.pubDate = value }
         if let value = item.artworkURL { episode.artworkURL = value }
         if let value = item.episodeNumber { episode.episodeNumber = value }
         if let value = item.seasonNumber { episode.seasonNumber = value }
         if let value = item.chapterURL { episode.chapterURL = value }
         if let value = item.transcriptURL { episode.transcriptURL = value }
+        return before != EpisodeMetadataSnapshot(episode)
+    }
+
+    private struct EpisodeMetadataSnapshot: Equatable {
+        let title: String
+        let audioURL: String
+        let episodeDescription: String?
+        let durationSeconds: Int?
+        let pubDate: Date?
+        let artworkURL: String?
+        let episodeNumber: Int?
+        let seasonNumber: Int?
+        let chapterURL: String?
+        let transcriptURL: String?
+
+        init(_ episode: Episode) {
+            title = episode.title
+            audioURL = episode.audioURL
+            episodeDescription = episode.episodeDescription
+            durationSeconds = episode.durationSeconds
+            pubDate = episode.pubDate
+            artworkURL = episode.artworkURL
+            episodeNumber = episode.episodeNumber
+            seasonNumber = episode.seasonNumber
+            chapterURL = episode.chapterURL
+            transcriptURL = episode.transcriptURL
+        }
     }
 
     /// The user's saved per-podcast inbox cap for this feed URL, read from the
@@ -1410,11 +1447,25 @@ actor FeedRefreshActor {
         let newEpisodes: [Episode]
         let inboxReentryEpisodes: [Episode]
         let insertedCount: Int
+        var metadataUpdatedCount = 0
+        var correctedMediaEpisodes: [(
+            episode: Episode,
+            restoreDownloadIntent: Bool,
+            staleDownloadPath: String?
+        )] = []
 
         func result() -> RefreshOutcome {
             var outcome = refreshOutcome
             outcome.newEpisodeIDs = newEpisodes.map(\.persistentModelID)
             outcome.inboxReentryEpisodeIDs = inboxReentryEpisodes.map(\.persistentModelID)
+            outcome.metadataUpdatedCount = metadataUpdatedCount
+            outcome.correctedMedia = correctedMediaEpisodes.map {
+                CorrectedEpisodeMedia(
+                    episodeID: $0.episode.persistentModelID,
+                    restoreDownloadIntent: $0.restoreDownloadIntent,
+                    staleDownloadPath: $0.staleDownloadPath
+                )
+            }
             return outcome
         }
     }
@@ -1512,9 +1563,20 @@ actor FeedRefreshActor {
             now: now
         )
         let candidateEpisodes = selection.candidates
+        let recentCorrectionItems = Array(parsedEpisodes.sorted {
+            ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast)
+        }.prefix(Self.correctedMetadataWindow))
+        let priorityCorrectionGUIDs = correctionPriorityGUIDs(for: podcast)
+        let correctionItems = Self.deduplicatedEpisodes(
+            recentCorrectionItems + parsedEpisodes.filter {
+                priorityCorrectionGUIDs.contains($0.guid)
+            }
+        )
+        let lookupGUIDs = Array(Set(
+            candidateEpisodes.map(\.guid) + correctionItems.map(\.guid)
+        ))
         let existingEpisodes = episodes(
-            in: podcast,
-            matchingGUIDs: candidateEpisodes.map(\.guid)
+            in: podcast, matchingGUIDs: lookupGUIDs
         )
         let existingGUIDs = Set(existingEpisodes.map(\.guid))
         // Gate matches the former `podcast.autoQueue && queue != nil`: with no
@@ -1526,18 +1588,47 @@ actor FeedRefreshActor {
         var newestNewPub = Date.distantPast
         var newEpisodes: [Episode] = []
         var filtered = 0
+        var metadataUpdatedCount = 0
+        var correctedMediaEpisodes: [(Episode, Bool, String?)] = []
 
         // Lookup by guid for the republish pass below (#397), built once instead
         // of a per-item linear scan.
         let existingByGUID = Dictionary(
             existingEpisodes.map { ($0.guid, $0) }, uniquingKeysWith: { first, _ in first }
         )
+        let correctionByGUID = Dictionary(
+            correctionItems.map { ($0.guid, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let inboxReentries = resurfaceRepublished(
             candidateEpisodes.filter { !selection.filteredGUIDs.contains($0.guid) },
             existingByGUID: existingByGUID,
             now: now
         )
-
+        for episode in existingEpisodes {
+            guard let item = correctionByGUID[episode.guid] else { continue }
+            let oldAudioURL = episode.audioURL
+            let localDownloadRows = ActiveDownload.rows(for: episode, in: modelContext)
+            let hadDownloadIntent = localDownloadRows.contains {
+                $0.downloadStatus != .none || $0.downloadPath != nil
+            }
+            let lengthMismatch = Self.downloadedFileLengthMismatch(
+                storedDownloadPath: localDownloadRows.compactMap(\.downloadPath).first,
+                expectedByteLength: item.enclosureByteLength
+            )
+            if Self.mergeFeedMetadata(
+                item, into: episode, updatePublicationDate: false
+            ) {
+                metadataUpdatedCount += 1
+            }
+            if hadDownloadIntent
+                && (oldAudioURL != episode.audioURL || lengthMismatch) {
+                let staleDownloadPath = localDownloadRows.compactMap(\.downloadPath).first
+                episode.downloadPath = nil
+                ActiveDownload.setDownloadStatus(.none, on: episode, in: modelContext)
+                correctedMediaEpisodes.append((episode, true, staleDownloadPath))
+            }
+        }
         for item in candidateEpisodes where !existingGUIDs.contains(item.guid) {
             let episode = Self.makeEpisode(from: item)
             episode.podcast = podcast
@@ -1629,8 +1720,65 @@ actor FeedRefreshActor {
             ),
             newEpisodes: newEpisodes,
             inboxReentryEpisodes: inboxReentries,
-            insertedCount: added + filtered
+            insertedCount: added + filtered,
+            metadataUpdatedCount: metadataUpdatedCount,
+            correctedMediaEpisodes: correctedMediaEpisodes
         )
+    }
+
+    private static func downloadedFileLengthMismatch(
+        storedDownloadPath: String?,
+        expectedByteLength: Int64?
+    ) -> Bool {
+        guard let expectedByteLength,
+              let url = DownloadPaths.resolveLocalURL(storedValue: storedDownloadPath),
+              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        else { return false }
+        return Int64(size) != expectedByteLength
+    }
+
+    /// Older episodes still important on this device must not fall outside the
+    /// recent metadata window. Local-state rows are bounded by actual downloads
+    /// and overrides, queue rows by the user's queue, and Inbox candidates by a
+    /// defensive cap. The last-playing identity is added explicitly.
+    private func correctionPriorityGUIDs(for podcast: Podcast) -> Set<String> {
+        let canonicalFeedURL = FeedURLIdentity.canonical(podcast.feedURL)
+        let podcastID = podcast.persistentModelID
+        var guids = Set<String>()
+
+        let localDescriptor = FetchDescriptor<LocalEpisodeState>(
+            predicate: #Predicate { $0.podcastFeedURL == canonicalFeedURL }
+        )
+        for row in (try? modelContext.fetch(localDescriptor)) ?? [] {
+            guids.insert(row.episodeGUID)
+        }
+        let queueDescriptor = FetchDescriptor<QueueItem>(
+            predicate: #Predicate {
+                $0.episode?.podcast?.persistentModelID == podcastID
+            }
+        )
+        for item in (try? modelContext.fetch(queueDescriptor)) ?? [] {
+            if let guid = item.episode?.guid { guids.insert(guid) }
+        }
+        var inboxDescriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate {
+                $0.podcast?.persistentModelID == podcastID && !$0.inboxDismissed
+            }
+        )
+        inboxDescriptor.fetchLimit = 200
+        for episode in (try? modelContext.fetch(inboxDescriptor)) ?? [] {
+            guids.insert(episode.guid)
+        }
+        if let stored = LocalAppSettingIdentity.value(
+            for: SettingsKey.lastPlayingEpisodeID,
+            in: modelContext
+        ) {
+            let parsed = DownloadTaskKey.parse(stored)
+            if parsed.feedURL.map(FeedURLIdentity.canonical) == canonicalFeedURL {
+                guids.insert(parsed.guid)
+            }
+        }
+        return guids
     }
 
     private func hasEpisodes(for podcast: Podcast) -> Bool {

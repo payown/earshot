@@ -1,5 +1,16 @@
 import Foundation
 
+enum DownloadPayloadValidation {
+    static func accepts(statusCode: Int, contentType: String, byteCount: Int) -> Bool {
+        let normalized = contentType.lowercased()
+        let knownNonMedia = normalized.hasPrefix("text/")
+            || normalized.contains("application/json")
+            || normalized.contains("application/xml")
+            || normalized.contains("html")
+        return (200...299).contains(statusCode) && !knownNonMedia && byteCount > 0
+    }
+}
+
 /// A terminal background-download event that can outlive the process. During a
 /// future asynchronous store open, iOS may reconnect the background session and
 /// deliver these events before Earshot has a ModelContainer. The downloaded file
@@ -239,19 +250,31 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate, @unch
         // server's error page, not audio. Without this check that page would be
         // saved and the episode marked `.downloaded` (#576). Reject non-2xx
         // statuses and HTML bodies outright.
+        let byteCount = (try? location.resourceValues(
+            forKeys: [.fileSizeKey]
+        ).fileSize) ?? 0
         if let http = downloadTask.response as? HTTPURLResponse {
-            let contentType = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
-            guard (200...299).contains(http.statusCode), !contentType.contains("text/html") else {
+            let contentType = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+            guard DownloadPayloadValidation.accepts(
+                statusCode: http.statusCode,
+                contentType: contentType,
+                byteCount: byteCount
+            ) else {
                 AppLog.networking.error("Download rejected for \(sourceURL.absoluteString, privacy: .public): HTTP \(http.statusCode, privacy: .public), Content-Type \(contentType, privacy: .public)")
                 record(taskKey: taskKey, outcome: .failed)
                 return
             }
+        } else if byteCount <= 0 {
+            record(taskKey: taskKey, outcome: .failed)
+            return
         }
         do {
             let directory = try DownloadPaths.downloadsDirectory()
             let destination = DownloadPaths.destination(
                 inDirectory: directory,
-                guid: DownloadTaskKey.parse(taskKey).guid,
+                guid: DownloadTaskKey.parse(
+                    DownloadTransferKey.identityKey(from: taskKey)
+                ).guid,
                 sourceURL: sourceURL
             )
             try? FileManager.default.removeItem(at: destination)

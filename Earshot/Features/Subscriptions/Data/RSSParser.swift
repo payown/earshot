@@ -13,6 +13,10 @@ struct ParsedEpisode: Sendable {
     var seasonNumber: Int?
     var chapterURL: String?
     var transcriptURL: String?
+    /// Declared enclosure size from RSS `length` or an Atom enclosure link.
+    /// Feed-only metadata used to recognize a publisher replacing media at the
+    /// same URL; it is deliberately not persisted on the synced Episode model.
+    var enclosureByteLength: Int64? = nil
     /// `itunes:episodeType` — "full", "trailer", or "bonus" (normalized
     /// lowercase); nil when absent or unrecognized. Parse-level only for now:
     /// persisting it on `Episode` needs a SwiftData schema change, deferred to
@@ -68,6 +72,7 @@ final class RSSParser: NSObject, XMLParserDelegate {
     // Item-level
     private var itemTitle = ""
     private var itemAudio = ""
+    private var itemEnclosureByteLength: Int64?
     private var itemGUID = ""
     private var itemDescription = ""
     private var itemSummary = ""
@@ -238,6 +243,7 @@ final class RSSParser: NSObject, XMLParserDelegate {
         case "item", "entry":
             inItem = true
             itemTitle = ""; itemAudio = ""; itemGUID = ""
+            itemEnclosureByteLength = nil
             itemDescription = ""; itemSummary = ""; itemPubDate = ""
             itemDuration = ""; itemImage = nil; itemEpisode = ""
             itemSeason = ""; itemChapterURL = nil; itemTranscriptURL = nil
@@ -246,7 +252,12 @@ final class RSSParser: NSObject, XMLParserDelegate {
         case "image":
             if !inItem { inChannelImage = true }
         case "enclosure":
-            if let url = attributeDict["url"], inItem { itemAudio = url }
+            if let url = attributeDict["url"], inItem {
+                itemAudio = url
+                itemEnclosureByteLength = Self.parseEnclosureByteLength(
+                    attributeDict["length"]
+                )
+            }
         case "link":
             // Atom links carry their target in attributes (RSS <link> has text
             // content, handled at didEndElement). Inside an entry, the audio is
@@ -255,7 +266,12 @@ final class RSSParser: NSObject, XMLParserDelegate {
             if let href = attributeDict["href"] {
                 let rel = attributeDict["rel"]
                 if inItem {
-                    if rel == "enclosure", itemAudio.isEmpty { itemAudio = href }
+                    if rel == "enclosure", itemAudio.isEmpty {
+                        itemAudio = href
+                        itemEnclosureByteLength = Self.parseEnclosureByteLength(
+                            attributeDict["length"]
+                        )
+                    }
                 } else if feedLink == nil, rel == nil || rel == "alternate" {
                     feedLink = href
                 }
@@ -378,9 +394,20 @@ final class RSSParser: NSObject, XMLParserDelegate {
                 seasonNumber: Int(itemSeason),
                 chapterURL: itemChapterURL,
                 transcriptURL: itemTranscriptURL,
+                enclosureByteLength: itemEnclosureByteLength,
                 episodeType: validEpisodeType
             )
         )
+    }
+
+    /// RSS says enclosure length is a byte count. Treat missing, malformed,
+    /// zero, negative, and overflowing values as unknown rather than allowing a
+    /// hostile or broken feed to invalidate a good local download.
+    static func parseEnclosureByteLength(_ raw: String?) -> Int64? {
+        guard let raw,
+              let value = Int64(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              value > 0 else { return nil }
+        return value
     }
 
     /// Prefers Podcasting 2.0 JSON, then WebVTT/SRT, over HTML or plain text.

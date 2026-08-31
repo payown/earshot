@@ -363,6 +363,92 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try episodes(container).count, 2, "No duplicate rows")
     }
 
+    func testSameGUIDAndDateReconcilesCorrectedMetadataWithoutBecomingNew() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/corrected.xml"
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(feedURL: feedURL, title: "Show", lastSeenPubDate: d2)
+            let episode = Episode(
+                guid: "same", title: "Original", audioURL: "https://x/broken.mp3",
+                episodeDescription: "Old notes", durationSeconds: 10, pubDate: d2
+            )
+            episode.podcast = podcast
+            episode.inboxDismissed = true
+            episode.isPlayed = true
+            episode.positionSeconds = 321
+            context.insert(podcast)
+            context.insert(episode)
+            try context.save()
+        }
+        var repaired = parsedEpisode("same", d2, audioURL: "https://x/repaired.mp3")
+        repaired.title = "Corrected"
+        repaired.description = "New notes"
+        repaired.durationSeconds = 600
+
+        let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed([repaired])),
+            autoQueueEnabled: false
+        )
+        let stored = try XCTUnwrap(try episodes(container).first)
+
+        XCTAssertEqual(outcome?.added, 0)
+        XCTAssertEqual(outcome?.filteredCount, 0)
+        XCTAssertEqual(outcome?.metadataUpdatedCount, 1)
+        XCTAssertEqual(stored.audioURL, "https://x/repaired.mp3")
+        XCTAssertEqual(stored.title, "Corrected")
+        XCTAssertEqual(stored.episodeDescription, "New notes")
+        XCTAssertEqual(stored.durationSeconds, 600)
+        XCTAssertTrue(stored.inboxDismissed)
+        XCTAssertTrue(stored.isPlayed)
+        XCTAssertEqual(stored.positionSeconds, 321)
+    }
+
+    func testCorrectedDownloadedMediaRequestsReplacementWithoutNewEpisodeEffects() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/downloaded-correction.xml"
+        let staleName = "stale-episode-\(UUID().uuidString).mp3"
+        let staleFile = try DownloadPaths.downloadsDirectory()
+            .appending(path: staleName)
+        try Data("broken".utf8).write(to: staleFile)
+        defer { try? FileManager.default.removeItem(at: staleFile) }
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(feedURL: feedURL, title: "Show", lastSeenPubDate: d2)
+            let episode = Episode(
+                guid: "same", title: "Episode", audioURL: "https://x/broken.mp3",
+                pubDate: d2
+            )
+            episode.podcast = podcast
+            context.insert(podcast)
+            context.insert(episode)
+            LocalStateStore.setDownloadStatus(.downloaded, on: episode, in: context)
+            LocalStateStore.setDownloadPath(staleName, on: episode, in: context)
+            try context.save()
+        }
+
+        let outcome = try await FeedRefreshActor(modelContainer: container).refreshOne(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed([
+                parsedEpisode("same", d2, audioURL: "https://x/repaired.mp3")
+            ])),
+            autoQueueEnabled: false
+        )
+
+        XCTAssertEqual(outcome?.added, 0)
+        XCTAssertEqual(outcome?.correctedMedia.count, 1)
+        XCTAssertEqual(outcome?.correctedMedia.first?.restoreDownloadIntent, true)
+        XCTAssertEqual(outcome?.correctedMedia.first?.staleDownloadPath, staleName)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: staleFile.path),
+            "The actor must leave the old file intact until its metadata save commits"
+        )
+        let stored = try XCTUnwrap(try episodes(container).first)
+        XCTAssertEqual(stored.downloadStatus, .none)
+        XCTAssertEqual(stored.audioURL, "https://x/repaired.mp3")
+    }
+
     func testFilterUsesSeparateTenKeptAndTenFilteredInsertionBudgets() async throws {
         let container = cleanContainer()
         let feedURL = "https://x/split-budget.xml"

@@ -48,6 +48,25 @@ final class RSSParserTests: XCTestCase {
         XCTAssertEqual(feed.episodes[1].guid, "https://example.com/ep2.mp3")
     }
 
+    func testParsesRSSEnclosureByteLength() throws {
+        let xml = """
+        <rss><channel><title>Sizes</title><item><guid>one</guid>
+        <enclosure url="https://example.com/one.mp3" length="68722440"/>
+        </item></channel></rss>
+        """
+        let feed = try XCTUnwrap(RSSParser().parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.episodes.first?.enclosureByteLength, 68_722_440)
+    }
+
+    func testEnclosureByteLengthRejectsMissingInvalidAndNonPositiveValues() {
+        XCTAssertNil(RSSParser.parseEnclosureByteLength(nil))
+        XCTAssertNil(RSSParser.parseEnclosureByteLength(""))
+        XCTAssertNil(RSSParser.parseEnclosureByteLength("audio"))
+        XCTAssertNil(RSSParser.parseEnclosureByteLength("0"))
+        XCTAssertNil(RSSParser.parseEnclosureByteLength("-1"))
+        XCTAssertNil(RSSParser.parseEnclosureByteLength("999999999999999999999999"))
+    }
+
     func testRejectsNonXMLData() {
         XCTAssertNil(RSSParser().parse(Data("not xml at all".utf8)))
     }
@@ -98,6 +117,17 @@ final class RSSParserTests: XCTestCase {
         XCTAssertEqual(ep.audioURL, "https://example.com/atom1.mp3")
         XCTAssertEqual(ep.description, "First Atom episode.")
         XCTAssertNotNil(ep.pubDate)
+    }
+
+    func testParsesAtomEnclosureByteLength() throws {
+        let xml = """
+        <feed xmlns="http://www.w3.org/2005/Atom"><title>Atom</title><entry>
+        <id>one</id><title>One</title>
+        <link rel="enclosure" href="https://example.com/one.mp3" length="12345"/>
+        </entry></feed>
+        """
+        let feed = try XCTUnwrap(RSSParser().parse(Data(xml.utf8)))
+        XCTAssertEqual(feed.episodes.first?.enclosureByteLength, 12_345)
     }
 
     func testAtomPrefersPublishedOverUpdated() throws {
@@ -406,7 +436,7 @@ final class RSSParserTests: XCTestCase {
         // destructive `.unfollow`.
         XCTAssertEqual(
             defaultEpisodeActions,
-            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .removeFromInbox, .markPlayed, .viewBookmarks, .openShowNotes, .share, .exportTranscript, .exportAudio, .addToFolder, .moveToFolder, .unfollow]
+            [.playNow, .addToQueueBottom, .addToQueueTop, .download, .removeFromInbox, .markPlayed, .viewBookmarks, .openShowNotes, .share, .exportTranscript, .exportAudio, .refreshAudio, .addToFolder, .moveToFolder, .unfollow]
         )
     }
 }
