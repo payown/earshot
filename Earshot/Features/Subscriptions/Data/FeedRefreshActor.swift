@@ -277,6 +277,13 @@ actor FeedRefreshActor {
         let alreadySubscribed: Bool
     }
 
+    struct BulkSubscribeReport: Sendable {
+        let results: [SubscribeResult]
+        let skippedForCap: Int
+        let failed: Int
+        let mutated: Bool
+    }
+
     /// Refreshes every subscription on the background context, parsing and writing
     /// off the main actor and saving in batches. Mirrors the per-podcast semantics
     /// of `SubscriptionRepository.refresh` exactly (dedup-by-guid, inbox high-water
@@ -758,25 +765,27 @@ actor FeedRefreshActor {
     /// `@Model`. Auto-download is NOT done here: the downloader is `@MainActor`,
     /// so the caller re-fetches the inserted episodes by `episodeIDs` on the main
     /// context and enqueues there.
-    func subscribe(feedURL: String, feed: FeedFetching, inboxSeedCount: Int) async throws -> SubscribeResult {
+    func subscribe(
+        feedURL: String,
+        feed: FeedFetching,
+        inboxSeedCount: Int,
+        maximumFollowedCount: Int? = nil
+    ) async throws -> SubscribeResult {
         let canonical = FeedURLIdentity.canonical(feedURL)
-        await PodcastIdentityWriteGate.shared.acquire(feedURLs: [canonical])
-        do {
-            let repair = try IdentityRepairService(context: modelContext)
-                .repair(feedURLs: [canonical])
-            if repair.didChange { try saveWithSignpost() }
-            // Hold the identity gate through the save: another context must not
-            // perform its final existence check while this insert is uncommitted.
-            let outcome = try await subscribeOne(
-                feedURL: canonical, feed: feed, inboxSeedCount: inboxSeedCount
-            )
-            try saveIfNeeded()
-            await PodcastIdentityWriteGate.shared.release(feedURLs: [canonical])
-            return outcome.result()
-        } catch {
-            await PodcastIdentityWriteGate.shared.release(feedURLs: [canonical])
-            throw error
+        let parsed = try await feed.fetch(canonical)
+        try Task.checkCancellation()
+        let prepared = PreparedSubscription(
+            inputIndex: 0, feedURL: canonical, parsed: parsed, initialEpisodeLimit: nil
+        )
+        let committed = try await commitPreparedBatch(
+            [prepared], inboxSeedCount: inboxSeedCount,
+            maximumFollowedCount: maximumFollowedCount,
+            capBehavior: .throwError
+        )
+        guard let result = committed.results.first else {
+            throw SubscriptionError.podcastNotFoundAfterSubscribe
         }
+        return result.result
     }
 
     /// Subscribes to every feed URL in `feedURLs` in ONE background pass, saving in
@@ -808,132 +817,172 @@ actor FeedRefreshActor {
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
     ) async -> [SubscribeResult] {
-        await PodcastIdentityWriteGate.shared.acquire(feedURLs: feedURLs)
+        await subscribeAllReport(
+            feedURLs: feedURLs, feed: feed, inboxSeedCount: inboxSeedCount,
+            maximumFollowedCount: nil, isCancelled: isCancelled,
+            onProgress: onProgress
+        ).results
+    }
+
+    func subscribeAllReport(
+        feedURLs: [String],
+        feed: FeedFetching,
+        inboxSeedCount: Int,
+        maximumFollowedCount: Int?,
+        isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
+        onProgress: (@MainActor @Sendable (_ completed: Int, _ total: Int, _ currentTitle: String?) -> Void)? = nil
+    ) async -> BulkSubscribeReport {
         let total = feedURLs.count
+        var resultByIndex: [Int: SubscribeResult] = [:]
+        var skippedForCap = 0
+        var failed = 0
+        var mutated = false
+        var completed = 0
 
-        do {
-            let repair = try IdentityRepairService(context: modelContext)
-                .repair(feedURLs: feedURLs)
-            if repair.didChange { try saveWithSignpost() }
-        } catch {
-            AppLog.subscriptions.error(
-                "OPML import: preflight identity repair failed: \(error.localizedDescription, privacy: .public)"
-            )
-        }
-
-        let results = await withTaskGroup(
-            of: (Int, String, ParsedFeed?).self,
-            returning: [SubscribeResult].self
-        ) { group in
-            var resultByInputIndex: [Int: SubscribeResult] = [:]
-            var pendingOutcomeByInputIndex: [Int: SubscribeOutcome] = [:]
-            var sinceLastSave = 0
-            var completed = 0
-
-            func flushPending() {
-                _ = saveIfNeededOrLog()
-                for (index, outcome) in pendingOutcomeByInputIndex {
-                    resultByInputIndex[index] = outcome.result()
-                }
-                pendingOutcomeByInputIndex.removeAll()
-                sinceLastSave = 0
-            }
-
-            // Resolve existing subscriptions without network work. New feeds enter
-            // the bounded pipeline below; each parsed feed is written and released
-            // as soon as it arrives rather than retaining every parsed feed until
-            // the slowest network request finishes.
-            let identityScan = PerformanceSignposts.signposter.beginInterval(
-                "OPMLIdentityScan",
-                "inputCount=\(feedURLs.count)"
-            )
-            let identity = PodcastIdentityService(context: modelContext)
-            let existingByURL = (
-                try? identity.existingAnyStateByCanonicalFeedURL(for: feedURLs)
-            ) ?? [:]
-            PerformanceSignposts.signposter.endInterval(
-                "OPMLIdentityScan",
-                identityScan,
-                "existingCount=\(existingByURL.count) mainThread=\(Thread.isMainThread)"
-            )
-            var fetchCandidates: [(index: Int, url: String)] = []
-            for (index, url) in feedURLs.enumerated() {
-                guard !isCancelled() else { break }
-                if let existing = existingByURL[FeedURLIdentity.canonical(url)],
-                   existing.isFollowed {
-                    resultByInputIndex[index] = SubscribeOutcome(
-                        podcast: existing, episodes: [], alreadySubscribed: true
-                    ).result()
+        let identity = PodcastIdentityService(context: modelContext)
+        let existing = (try? identity.existingAnyStateByCanonicalFeedURL(for: feedURLs)) ?? [:]
+        var candidates: [(Int, String)] = []
+        for (index, rawURL) in feedURLs.enumerated() {
+            guard !isCancelled() else { break }
+            let url = FeedURLIdentity.canonical(rawURL)
+            if let podcast = existing[url], podcast.isFollowed {
+                do {
+                    if let confirmed = try await confirmedExistingSubscription(
+                        feedURL: url
+                    ) {
+                        resultByIndex[index] = confirmed.result
+                        completed += 1
+                        await onProgress?(completed, total, confirmed.title)
+                    } else {
+                        candidates.append((index, url))
+                    }
+                } catch is CancellationError {
+                    break
+                } catch {
+                    failed += 1
                     completed += 1
-                    await onProgress?(completed, total, existing.title)
+                    await onProgress?(completed, total, nil)
+                }
+            } else {
+                candidates.append((index, url))
+            }
+        }
+        let fetchChunkSize = max(Self.subscribeFetchConcurrency, Self.subscribeSaveBatchSize)
+        var nextCandidate = 0
+        while nextCandidate < candidates.count {
+            guard !isCancelled() else { break }
+            let remaining = Array(candidates[nextCandidate...])
+            let capacitySnapshot: BulkCapacitySnapshot
+            do {
+                capacitySnapshot = try await authoritativeBulkCapacitySnapshot(
+                    feedURLs: remaining.map { $0.1 },
+                    maximumFollowedCount: maximumFollowedCount
+                )
+            } catch is CancellationError {
+                break
+            } catch {
+                failed += remaining.count
+                break
+            }
+            var stillNeedsFetch: [(Int, String)] = []
+            for candidate in remaining {
+                if let confirmed = capacitySnapshot.followed[candidate.1] {
+                    resultByIndex[candidate.0] = confirmed.result
+                    completed += 1
+                    await onProgress?(completed, total, confirmed.title)
                 } else {
-                    fetchCandidates.append((index, url))
+                    stillNeedsFetch.append(candidate)
                 }
             }
+            candidates.replaceSubrange(nextCandidate..., with: stillNeedsFetch)
+            guard nextCandidate < candidates.count, !isCancelled() else { break }
 
-            var nextIndex = 0
-            let initial = isCancelled() ? 0 : min(Self.subscribeFetchConcurrency, fetchCandidates.count)
-            for _ in 0..<initial {
-                let candidate = fetchCandidates[nextIndex]
-                nextIndex += 1
-                group.addTask {
-                    (candidate.index, candidate.url, await Self.fetchForImport(candidate.url, feed: feed))
-                }
+            let availableSlots = capacitySnapshot.availableSlots
+            guard availableSlots > 0 else {
+                skippedForCap += candidates.count - nextCandidate
+                break
             }
-            while let (inputIndex, url, parsed) = await group.next() {
-                var title: String?
-                if let parsed {
-                    do {
-                        let outcome = try await subscribeOne(
-                            feedURL: url,
-                            feed: feed,
-                            inboxSeedCount: inboxSeedCount,
-                            parsedFeed: parsed,
+            let end = min(
+                nextCandidate + min(fetchChunkSize, availableSlots), candidates.count
+            )
+            let chunk = Array(candidates[
+                nextCandidate..<end
+            ])
+            nextCandidate = end
+            let fetched = await withTaskGroup(
+                of: PreparedSubscription?.self, returning: [PreparedSubscription].self
+            ) { group in
+                for (index, url) in chunk {
+                    group.addTask {
+                        guard let parsed = await Self.fetchForImport(url, feed: feed) else { return nil }
+                        return PreparedSubscription(
+                            inputIndex: index, feedURL: url, parsed: parsed,
                             initialEpisodeLimit: Self.opmlInitialEpisodeLimit
                         )
-                        title = outcome.title
-                        if outcome.alreadySubscribed {
-                            resultByInputIndex[inputIndex] = outcome.result()
-                        } else {
-                            pendingOutcomeByInputIndex[inputIndex] = outcome
-                            sinceLastSave += 1
-                            if sinceLastSave >= Self.subscribeSaveBatchSize { flushPending() }
+                    }
+                }
+                var values: [PreparedSubscription] = []
+                for await value in group {
+                    if let value { values.append(value) }
+                }
+                return values.sorted { $0.inputIndex < $1.inputIndex }
+            }
+            failed += chunk.count - fetched.count
+            for applyStart in stride(
+                from: 0, to: fetched.count, by: Self.subscribeSaveBatchSize
+            ) {
+                let applyBatch = Array(fetched[
+                    applyStart..<min(applyStart + Self.subscribeSaveBatchSize, fetched.count)
+                ])
+                do {
+                    let commit = try await commitPreparedBatch(
+                        applyBatch, inboxSeedCount: inboxSeedCount,
+                        maximumFollowedCount: maximumFollowedCount,
+                        capBehavior: .skip
+                    )
+                    for indexed in commit.results {
+                        resultByIndex[indexed.inputIndex] = indexed.result
+                    }
+                    skippedForCap += commit.skippedForCap
+                    mutated = mutated || commit.mutated
+                } catch is CancellationError {
+                    break
+                } catch {
+                    var unresolvedFailures = 0
+                    for input in applyBatch {
+                        do {
+                            if let confirmed = try await confirmedExistingSubscription(
+                                feedURL: input.feedURL
+                            ) {
+                                resultByIndex[input.inputIndex] = confirmed.result
+                            } else {
+                                unresolvedFailures += 1
+                            }
+                        } catch {
+                            unresolvedFailures += 1
                         }
-                    } catch {
-                        AppLog.subscriptions.error(
-                            "OPML import: failed \(url, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                        )
                     }
-                } else {
-                    AppLog.subscriptions.error("OPML import: failed \(url, privacy: .public)")
-                }
-                completed += 1
-                await onProgress?(completed, total, title)
-
-                guard !isCancelled() else {
-                    group.cancelAll()
-                    continue
-                }
-
-                if nextIndex < fetchCandidates.count {
-                    let candidate = fetchCandidates[nextIndex]
-                    nextIndex += 1
-                    group.addTask {
-                        (candidate.index, candidate.url, await Self.fetchForImport(candidate.url, feed: feed))
-                    }
+                    failed += unresolvedFailures
+                    AppLog.subscriptions.error(
+                        "OPML import batch failed: \(error.localizedDescription, privacy: .public)"
+                    )
                 }
             }
-
-            flushPending()
-            return resultByInputIndex.keys.sorted().compactMap { resultByInputIndex[$0] }
+            for (index, _) in chunk.sorted(by: { $0.0 < $1.0 }) {
+                completed += 1
+                let title = resultByIndex[index].flatMap { result in
+                    (try? PodcastIdentityService(context: modelContext)
+                        .existingAnyState(feedURL: result.feedURL))?.title
+                }
+                await onProgress?(completed, total, title)
+            }
         }
 
-        // Newly ingested episodes can change the inbox count — signal the tab
-        // badge once, at the end of the whole operation rather than per batch,
-        // so it refreshes without polling on every save (#736).
-        NotificationCenter.default.post(name: .earshotInboxDidChange, object: nil)
-        await PodcastIdentityWriteGate.shared.release(feedURLs: feedURLs)
-        return results
+        return BulkSubscribeReport(
+            results: resultByIndex.keys.sorted().compactMap { resultByIndex[$0] },
+            skippedForCap: skippedForCap, failed: failed,
+            mutated: mutated
+        )
     }
 
     private static func fetchForImport(_ url: String, feed: FeedFetching) async -> ParsedFeed? {
@@ -946,6 +995,96 @@ actor FeedRefreshActor {
             let result = await group.next() ?? nil
             group.cancelAll()
             return result
+        }
+    }
+
+    private struct PreparedSubscription: Sendable {
+        let inputIndex: Int
+        let feedURL: String
+        let parsed: ParsedFeed
+        let initialEpisodeLimit: Int?
+    }
+
+    private struct IndexedSubscribeResult {
+        let inputIndex: Int
+        let result: SubscribeResult
+    }
+
+    private struct CommittedBatch {
+        let results: [IndexedSubscribeResult]
+        let skippedForCap: Int
+        let mutated: Bool
+    }
+
+    private enum CapBehavior { case throwError, skip }
+
+    private struct BulkCapacitySnapshot {
+        let followed: [String: (result: SubscribeResult, title: String)]
+        let availableSlots: Int
+    }
+
+    private func authoritativeBulkCapacitySnapshot(
+        feedURLs: [String],
+        maximumFollowedCount: Int?
+    ) async throws -> BulkCapacitySnapshot {
+        await SubscriptionCapacityWriteGate.shared.acquire()
+        if Task.isCancelled {
+            await SubscriptionCapacityWriteGate.shared.release()
+            throw CancellationError()
+        }
+        await PodcastIdentityWriteGate.shared.acquire(feedURLs: feedURLs)
+        do {
+            try Task.checkCancellation()
+            if !modelContext.hasChanges { modelContext.rollback() }
+            let identity = PodcastIdentityService(context: modelContext)
+            let current = try identity.existingAnyStateByCanonicalFeedURL(for: feedURLs)
+            var followed: [String: (result: SubscribeResult, title: String)] = [:]
+            for feedURL in feedURLs {
+                guard let podcast = current[feedURL], podcast.isFollowed else { continue }
+                let outcome = SubscribeOutcome(
+                    podcast: podcast, episodes: [], alreadySubscribed: true
+                )
+                followed[feedURL] = (outcome.result(), podcast.title)
+            }
+            let availableSlots = if let maximumFollowedCount {
+                max(0, maximumFollowedCount - (try PodcastQuery.followedCount(in: modelContext)))
+            } else {
+                Int.max
+            }
+            await PodcastIdentityWriteGate.shared.release(feedURLs: feedURLs)
+            await SubscriptionCapacityWriteGate.shared.release()
+            return BulkCapacitySnapshot(
+                followed: followed, availableSlots: availableSlots
+            )
+        } catch {
+            await PodcastIdentityWriteGate.shared.release(feedURLs: feedURLs)
+            await SubscriptionCapacityWriteGate.shared.release()
+            throw error
+        }
+    }
+
+    private func confirmedExistingSubscription(
+        feedURL: String
+    ) async throws -> (result: SubscribeResult, title: String)? {
+        await PodcastIdentityWriteGate.shared.acquire(feedURLs: [feedURL])
+        do {
+            try Task.checkCancellation()
+            if !modelContext.hasChanges { modelContext.rollback() }
+            guard let podcast = try PodcastIdentityService(context: modelContext)
+                .existingFollowed(feedURL: feedURL) else {
+                await PodcastIdentityWriteGate.shared.release(feedURLs: [feedURL])
+                return nil
+            }
+            let result = SubscribeOutcome(
+                podcast: podcast, episodes: [], alreadySubscribed: true
+            ).result()
+            let title = podcast.title
+            await PodcastIdentityWriteGate.shared.release(feedURLs: [feedURL])
+            return (result, title)
+        } catch {
+            modelContext.rollback()
+            await PodcastIdentityWriteGate.shared.release(feedURLs: [feedURL])
+            throw error
         }
     }
 
@@ -983,108 +1122,205 @@ actor FeedRefreshActor {
         }
     }
 
-    /// Core subscribe used by both ``subscribe(feedURL:feed:)`` and
-    /// ``subscribeAll(feedURLs:feed:onProgress:)``. Does NOT save — the caller decides
-    /// when to save and then reads permanent IDs via ``SubscribeOutcome/result()``.
-    private func subscribeOne(
-        feedURL: String,
-        feed: FeedFetching,
+    private func commitPreparedBatch(
+        _ prepared: [PreparedSubscription],
         inboxSeedCount: Int,
-        parsedFeed: ParsedFeed? = nil,
-        initialEpisodeLimit: Int? = nil
-    ) async throws -> SubscribeOutcome {
-        let canonical = FeedURLIdentity.canonical(feedURL)
+        maximumFollowedCount: Int?,
+        capBehavior: CapBehavior
+    ) async throws -> CommittedBatch {
+        guard !prepared.isEmpty else {
+            return CommittedBatch(results: [], skippedForCap: 0, mutated: false)
+        }
+        let feedURLs = prepared.map(\.feedURL)
+
+        try await repairSubscriptionIdentities(feedURLs: feedURLs)
+
+        await SubscriptionCapacityWriteGate.shared.acquire()
+        if Task.isCancelled {
+            await SubscriptionCapacityWriteGate.shared.release()
+            throw CancellationError()
+        }
+        await PodcastIdentityWriteGate.shared.acquire(feedURLs: feedURLs)
+        do {
+            try Task.checkCancellation()
+            if !modelContext.hasChanges { modelContext.rollback() }
+            let identity = PodcastIdentityService(context: modelContext)
+            var followedCount = try PodcastQuery.followedCount(in: modelContext)
+            var staged: [(Int, SubscribeOutcome)] = []
+            var skippedForCap = 0
+            var mutated = false
+
+            for input in prepared.sorted(by: { $0.inputIndex < $1.inputIndex }) {
+                if let followed = try identity.existingFollowed(feedURL: input.feedURL) {
+                    staged.append((input.inputIndex, SubscribeOutcome(
+                        podcast: followed, episodes: [], alreadySubscribed: true
+                    )))
+                    continue
+                }
+                if let maximumFollowedCount, followedCount >= maximumFollowedCount {
+                    if capBehavior == .throwError {
+                        throw SubscriptionError.podcastCapReached(
+                            currentCount: followedCount, limit: maximumFollowedCount
+                        )
+                    }
+                    skippedForCap += 1
+                    continue
+                }
+                let outcome = try stageSubscription(
+                    input, inboxSeedCount: inboxSeedCount
+                )
+                staged.append((input.inputIndex, outcome))
+                followedCount += 1
+                mutated = true
+            }
+
+            try saveIfNeeded()
+            let results = staged.map {
+                IndexedSubscribeResult(inputIndex: $0.0, result: $0.1.result())
+            }
+            let refreshedFeedURLs = staged.compactMap {
+                $0.1.alreadySubscribed ? nil : $0.1.podcast.feedURL
+            }
+            await PodcastIdentityWriteGate.shared.release(feedURLs: feedURLs)
+            await SubscriptionCapacityWriteGate.shared.release()
+            stampRefreshedAtBestEffort(feedURLs: refreshedFeedURLs)
+            return CommittedBatch(
+                results: results, skippedForCap: skippedForCap, mutated: mutated
+            )
+        } catch {
+            modelContext.rollback()
+            await PodcastIdentityWriteGate.shared.release(feedURLs: feedURLs)
+            await SubscriptionCapacityWriteGate.shared.release()
+            throw error
+        }
+    }
+
+    private func repairSubscriptionIdentities(feedURLs: [String]) async throws {
+        await PodcastIdentityWriteGate.shared.acquire(feedURLs: feedURLs)
+        do {
+            try Task.checkCancellation()
+            if !modelContext.hasChanges { modelContext.rollback() }
+            let report = try IdentityRepairService(context: modelContext)
+                .repair(feedURLs: feedURLs)
+            if report.didChange { try saveIfNeeded() }
+            await PodcastIdentityWriteGate.shared.release(feedURLs: feedURLs)
+        } catch {
+            modelContext.rollback()
+            await PodcastIdentityWriteGate.shared.release(feedURLs: feedURLs)
+            throw error
+        }
+    }
+
+    private func stageSubscription(
+        _ input: PreparedSubscription,
+        inboxSeedCount: Int
+    ) throws -> SubscribeOutcome {
+        let canonical = FeedURLIdentity.canonical(input.feedURL)
+        let parsed = input.parsed
+        let parsedEpisodes = Self.initialSubscriptionEpisodes(
+            parsed.episodes, limit: input.initialEpisodeLimit
+        )
         let identity = PodcastIdentityService(context: modelContext)
-
-        // Idempotency: an existing subscription returns it with no fetch or insert —
-        // exactly the old early return. Its ID is already permanent (it was saved
-        // before), so `result()` is valid immediately.
-        // Phase 3 must promote a catalog-only match atomically before catalog
-        // queue actions become reachable. Phase 1 has no catalog materialization
-        // entry point, so only followed rows can currently reach this branch.
-        if let existing = try identity.existingAnyState(feedURL: canonical) {
-            return SubscribeOutcome(podcast: existing, episodes: [], alreadySubscribed: true)
-        }
-
-        // The fetch (network I/O) and the synchronous parse inside it both run on
-        // this background actor, never the main thread.
-        let parsed: ParsedFeed
-        if let parsedFeed {
-            parsed = parsedFeed
-        } else {
-            parsed = try await feed.fetch(canonical)
-        }
-        let completeParsedEpisodes = Self.deduplicatedEpisodes(parsed.episodes)
-        let parsedEpisodes: [ParsedEpisode]
-        if let initialEpisodeLimit {
-            parsedEpisodes = Array(
-                completeParsedEpisodes
-                    .sorted { ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast) }
-                    .prefix(initialEpisodeLimit)
-            )
-        } else {
-            parsedEpisodes = completeParsedEpisodes
-        }
-
-        // Recheck after the await: another subscribe context may have committed
-        // the same natural key while this actor was fetching the network feed.
-        let resolved = try identity.fetchOrCreate(feedURL: canonical) { canonicalFeedURL in
-            Podcast(
-                feedURL: canonicalFeedURL,
-                title: parsed.title.isEmpty ? "Untitled podcast" : parsed.title,
-                author: parsed.author,
-                podcastDescription: parsed.description,
-                artworkURL: parsed.artworkURL,
-                websiteURL: parsed.websiteURL,
-                language: parsed.language,
-                category: parsed.category
-            )
-        }
-        guard resolved.inserted else {
-            return SubscribeOutcome(podcast: resolved.podcast, episodes: [], alreadySubscribed: true)
+        let resolved = try identity.fetchOrCreate(feedURL: canonical) { feedURL in
+            Podcast(feedURL: feedURL, title: parsed.title.isEmpty ? "Untitled podcast" : parsed.title)
         }
         let podcast = resolved.podcast
-
-        // Restore the user's saved per-podcast inbox cap (if any) onto the fresh
-        // Podcast BEFORE inbox seeding, so re-adding a previously-removed podcast
-        // seeds min(global seed, saved cap) instead of silently dropping the
-        // limit (#548). The cap is keyed by feed URL in the AppSetting store
-        // (same pattern as the #489 per-podcast filter), which survives the
-        // unsubscribe that deleted the old Podcast row.
-        if let savedCap = storedInboxCap(forFeedURL: canonical) {
+        podcast.feedURL = canonical
+        podcast.subscriptionStateRaw = nil
+        if !parsed.title.isEmpty { podcast.title = parsed.title }
+        if let value = parsed.author { podcast.author = value }
+        if let value = parsed.description { podcast.podcastDescription = value }
+        if let value = parsed.artworkURL { podcast.artworkURL = value }
+        if let value = parsed.websiteURL { podcast.websiteURL = value }
+        if let value = parsed.language { podcast.language = value }
+        if let value = parsed.category { podcast.category = value }
+        if podcast.inboxMaxEpisodes == nil,
+           let savedCap = storedInboxCap(forFeedURL: canonical) {
             podcast.inboxMaxEpisodes = savedCap
         }
 
-        let now = Date.now
-        var insertedEpisodes: [Episode] = []
-        for (index, item) in parsedEpisodes.enumerated() {
-            let episode = Self.makeEpisode(from: item)
-            episode.podcast = podcast
-            // Start every episode dismissed; the seed pass below un-dismisses the
-            // newest N so they surface in the inbox. This replaces the former
-            // blanket pre-dismiss, which left a fresh subscribe with an empty inbox
-            // (Flutter seeded the newest N instead — parity gap).
-            episode.inboxDismissed = true
-            modelContext.insert(episode)
-            insertedEpisodes.append(episode)
-            // A feed can contain thousands of episodes. Cooperatively yield during
-            // that synchronous insertion loop so other executors — especially the
-            // main actor serving SwiftUI and VoiceOver — get regular run time.
-            if index.isMultiple(of: 100) { await Task.yield() }
+        var existingByGUID: [String: Episode] = [:]
+        for start in stride(from: 0, to: parsedEpisodes.count, by: Self.olderEpisodeIdentityChunkSize) {
+            let end = min(start + Self.olderEpisodeIdentityChunkSize, parsedEpisodes.count)
+            for episode in try targetedEpisodes(
+                in: podcast, matchingGUIDs: parsedEpisodes[start..<end].map(\.guid)
+            ) where existingByGUID[episode.guid] == nil {
+                existingByGUID[episode.guid] = episode
+            }
         }
-        // Seed the inbox with the newest N NON-FUTURE episodes (status stays
-        // .newEpisode), keeping the rest dismissed. N is resolved on the main actor
-        // and passed in; a smaller per-podcast cap (never set on a brand-new
-        // podcast, but honored defensively) wins.
-        seedInbox(insertedEpisodes, seedCount: inboxSeedCount, perPodcastCap: podcast.inboxMaxEpisodes, now: now)
+        var inserted: [Episode] = []
+        for item in parsedEpisodes {
+            if let episode = existingByGUID[item.guid] {
+                Self.mergeFeedMetadata(item, into: episode)
+            } else {
+                let episode = Self.makeEpisode(from: item)
+                episode.podcast = podcast
+                episode.inboxDismissed = true
+                modelContext.insert(episode)
+                existingByGUID[item.guid] = episode
+                inserted.append(episode)
+            }
+        }
+        let now = Date.now
+        seedInbox(
+            inserted, seedCount: inboxSeedCount,
+            perPodcastCap: podcast.inboxMaxEpisodes, now: now
+        )
+        if let latest = Self.latestNonFuturePubDate(parsedEpisodes, now: now) {
+            podcast.lastSeenPubDate = [podcast.lastSeenPubDate, latest].compactMap { $0 }.max()
+        } else if podcast.lastSeenPubDate == nil {
+            podcast.lastSeenPubDate = now
+        }
+        try PendingCloudUnfollowIntent.clear(feedURL: canonical, in: modelContext)
+        try PendingCloudFollowIntent.set(feedURL: canonical, in: modelContext)
+        AppLog.subscriptions.info(
+            "Subscribed to \(podcast.title, privacy: .public) with \(parsedEpisodes.count) feed episodes"
+        )
+        return SubscribeOutcome(
+            podcast: podcast, episodes: inserted, alreadySubscribed: false
+        )
+    }
 
-        // Seed the high-water mark to the newest NON-FUTURE pub date so a misdated
-        // future episode can't push the mark ahead of real new episodes (#296).
-        podcast.lastSeenPubDate = Self.latestNonFuturePubDate(parsedEpisodes, now: now) ?? now
-        LocalStateStore.setRefreshedAt(now, on: podcast, in: modelContext)
-        AppLog.subscriptions.info("Subscribed to \(podcast.title, privacy: .public) with \(parsedEpisodes.count) episodes, seeded \(min(inboxSeedCount < 0 ? insertedEpisodes.count : inboxSeedCount, insertedEpisodes.count)) into inbox")
+    private func stampRefreshedAtBestEffort(feedURLs: [String]) {
+        guard !feedURLs.isEmpty else { return }
+        let now = Date.now
+        do {
+            let identity = PodcastIdentityService(context: modelContext)
+            for feedURL in feedURLs {
+                if let podcast = try identity.existingFollowed(feedURL: feedURL) {
+                    LocalStateStore.setRefreshedAt(now, on: podcast, in: modelContext)
+                }
+            }
+            if modelContext.hasChanges { try saveWithSignpost() }
+        } catch {
+            modelContext.rollback()
+            AppLog.subscriptions.error(
+                "Subscription refreshed-state save failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
 
-        return SubscribeOutcome(podcast: podcast, episodes: insertedEpisodes, alreadySubscribed: false)
+    private static func initialSubscriptionEpisodes(
+        _ episodes: [ParsedEpisode], limit: Int?
+    ) -> [ParsedEpisode] {
+        let complete = deduplicatedEpisodes(episodes)
+        guard let limit else { return complete }
+        return Array(complete.sorted {
+            ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast)
+        }.prefix(limit))
+    }
+
+    private static func mergeFeedMetadata(_ item: ParsedEpisode, into episode: Episode) {
+        if !item.title.isEmpty { episode.title = item.title }
+        if !item.audioURL.isEmpty { episode.audioURL = item.audioURL }
+        if let value = item.description { episode.episodeDescription = value }
+        if let value = item.durationSeconds { episode.durationSeconds = value }
+        if let value = item.pubDate { episode.pubDate = value }
+        if let value = item.artworkURL { episode.artworkURL = value }
+        if let value = item.episodeNumber { episode.episodeNumber = value }
+        if let value = item.seasonNumber { episode.seasonNumber = value }
+        if let value = item.chapterURL { episode.chapterURL = value }
+        if let value = item.transcriptURL { episode.transcriptURL = value }
     }
 
     /// The user's saved per-podcast inbox cap for this feed URL, read from the
@@ -1438,7 +1674,9 @@ actor FeedRefreshActor {
     /// Fetch only rows that can participate in this refresh. In particular, do
     /// not fault `podcast.episodes`: the real device has one 45,436-row inverse
     /// relationship, and materializing it caused the build-178 hang samples.
-    private func episodes(in podcast: Podcast, matchingGUIDs guids: [String]) -> [Episode] {
+    private func targetedEpisodes(
+        in podcast: Podcast, matchingGUIDs guids: [String]
+    ) throws -> [Episode] {
         guard !guids.isEmpty else { return [] }
         let podcastID = podcast.persistentModelID
         let descriptor = FetchDescriptor<Episode>(
@@ -1446,7 +1684,11 @@ actor FeedRefreshActor {
                 $0.podcast?.persistentModelID == podcastID && guids.contains($0.guid)
             }
         )
-        return (try? modelContext.fetch(descriptor)) ?? []
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func episodes(in podcast: Podcast, matchingGUIDs guids: [String]) -> [Episode] {
+        (try? targetedEpisodes(in: podcast, matchingGUIDs: guids)) ?? []
     }
 
     private func seedSyncedShell(

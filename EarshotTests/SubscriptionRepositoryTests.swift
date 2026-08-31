@@ -178,6 +178,19 @@ final class SubscriptionRepositoryTests: XCTestCase {
         )
     }
 
+    private func preview(feedURL: String, guid: String) -> PreviewEpisode {
+        PreviewEpisode(
+            podcastFeedURL: feedURL, podcastTitle: "Directory Show",
+            podcastArtworkURL: "https://x/show.jpg", id: guid,
+            title: "Preview \(guid)", pubDate: d1, durationSeconds: 900,
+            audioURL: "https://x/\(guid).mp3",
+            episodeDescription: "Notes", searchableDescription: "Notes",
+            artworkURL: nil, episodeNumber: 1, seasonNumber: 1,
+            chapterURL: "https://x/chapters.json",
+            transcriptURL: "https://x/transcript.vtt"
+        )
+    }
+
     /// Subscribing seeds the newest N episodes (N = global `inboxDefaultCount`,
     /// default 3) into the inbox rather than dismissing the whole backlog, so a
     /// fresh subscribe is not an empty inbox (Flutter parity). With 2 episodes and
@@ -270,10 +283,149 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let resolved = try await [first, second]
         let fetchCount = await fetcher.fetchCount()
 
-        XCTAssertEqual(fetchCount, 1, "The second writer must recheck after the first commits")
+        XCTAssertEqual(fetchCount, 2, "Network parsing is intentionally lock-free; commit still rechecks identity")
         XCTAssertEqual(Set(resolved).count, 1)
         XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Podcast>()), 1)
         XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Episode>()), 1)
+    }
+
+    func testSubscribePromotesCatalogShellAndPreservesEpisodeUserState() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = Podcast(
+            feedURL: "https://x/feed.xml", title: "Catalog title",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue,
+            speedOverride: 1.7, inboxMaxEpisodes: 1
+        )
+        let existing = Episode(
+            guid: "a", title: "Catalog episode", audioURL: "https://old/a.mp3",
+            pubDate: d1, status: .inQueue, positionSeconds: 321,
+            inboxDismissed: true
+        )
+        existing.podcast = podcast
+        let queueItem = QueueItem(episode: existing, position: 4)
+        let bookmark = Bookmark(episode: existing, positionSeconds: 120, note: "Keep")
+        ctx.insert(podcast)
+        ctx.insert(existing)
+        ctx.insert(queueItem)
+        ctx.insert(bookmark)
+        try PendingCloudUnfollowIntent.set(feedURL: podcast.feedURL, in: ctx)
+        try ctx.save()
+        let podcastID = podcast.persistentModelID
+        let episodeID = existing.persistentModelID
+        let fetcher = FakeFeedFetcher(feed([episode("a", d2), episode("b", d3)]))
+
+        let promoted = try await SubscriptionRepository(context: ctx, feed: fetcher)
+            .subscribe(feedURL: "https://x/feed.xml")
+
+        XCTAssertEqual(promoted.persistentModelID, podcastID)
+        XCTAssertTrue(promoted.isFollowed)
+        XCTAssertEqual(promoted.speedOverride, 1.7)
+        XCTAssertEqual(promoted.inboxMaxEpisodes, 1)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Podcast>()), 1)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Episode>()), 2)
+        let retained = try XCTUnwrap(
+            try ctx.fetch(FetchDescriptor<Episode>()).first { $0.persistentModelID == episodeID }
+        )
+        XCTAssertEqual(retained.positionSeconds, 321)
+        XCTAssertEqual(retained.status, .inQueue)
+        XCTAssertTrue(retained.inboxDismissed)
+        XCTAssertEqual(retained.queueItem?.position, 4)
+        XCTAssertEqual(retained.bookmarks?.first?.note, "Keep")
+        XCTAssertEqual(retained.title, "Ep a", "Feed-authored metadata refreshes in place")
+        let newlyInserted = try XCTUnwrap(
+            try ctx.fetch(FetchDescriptor<Episode>()).first { $0.guid == "b" }
+        )
+        XCTAssertFalse(newlyInserted.inboxDismissed, "Only genuinely new feed rows are inbox-seeded")
+        XCTAssertTrue(try PendingCloudFollowIntent.exists(feedURL: podcast.feedURL, in: ctx))
+        XCTAssertFalse(try PendingCloudUnfollowIntent.feedURLs(in: ctx).contains(podcast.feedURL))
+    }
+
+    func testConcurrentCatalogAddAndFollowConvergeWithoutQueueLoss() async throws {
+        let ctx = TestStore.freshContext()
+        let feedURL = "https://x/concurrent-catalog.xml"
+        let queueRepository = CatalogEpisodeQueueRepository(container: ctx.container)
+        let subscriptionRepository = SubscriptionRepository(
+            context: ctx,
+            feed: FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
+        )
+        let episodePreview = preview(feedURL: feedURL, guid: "a")
+
+        async let addResult: Result<CatalogEpisodeQueueOutcome, CatalogEpisodeQueueFailure> = {
+            @MainActor in await queueRepository.add(episodePreview)
+        }()
+        async let followedID: PersistentIdentifier = { @MainActor in
+            try await subscriptionRepository.subscribe(feedURL: feedURL).persistentModelID
+        }()
+        let (add, promotedID) = try await (addResult, followedID)
+
+        XCTAssertEqual(add, .success(.added))
+        let fresh = ModelContext(ctx.container)
+        XCTAssertEqual(
+            try PodcastIdentityService(context: fresh).existingFollowed(feedURL: feedURL)?
+                .persistentModelID,
+            promotedID
+        )
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<Podcast>()), 1)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<Episode>()), 2)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertEqual(
+            try fresh.fetch(FetchDescriptor<QueueItem>()).first?.episode?.guid,
+            "a"
+        )
+    }
+
+    func testSubscribeCatalogAtCapFailsBeforeNetwork() async throws {
+        let ctx = TestStore.freshContext()
+        for index in 0..<10 {
+            ctx.insert(Podcast(feedURL: "https://x/followed\(index).xml", title: "Followed"))
+        }
+        ctx.insert(Podcast(
+            feedURL: "https://x/catalog.xml", title: "Catalog",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue
+        ))
+        try ctx.save()
+        let fetcher = CountingFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, isEntitled: false)
+
+        do {
+            _ = try await repo.subscribe(feedURL: "https://x/catalog.xml")
+            XCTFail("Catalog promotion consumes a followed-library slot")
+        } catch SubscriptionError.podcastCapReached(let count, let limit) {
+            XCTAssertEqual(count, 10)
+            XCTAssertEqual(limit, 10)
+        }
+        XCTAssertEqual(fetcher.fetchCount, 0)
+        XCTAssertFalse(try XCTUnwrap(
+            PodcastIdentityService(context: ctx).existingAnyState(feedURL: "https://x/catalog.xml")
+        ).isFollowed)
+    }
+
+    func testConcurrentLastSlotSubscriptionsCommitOnlyOne() async throws {
+        let ctx = TestStore.freshContext()
+        for index in 0..<9 {
+            ctx.insert(Podcast(feedURL: "https://x/existing\(index).xml", title: "Existing"))
+        }
+        try ctx.save()
+        let fetcher = ConcurrentSubscribeFeedFetcher(feed([episode("a", d1)]))
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, isEntitled: false)
+        let start = ConcurrentTaskBarrier(target: 2)
+
+        async let first: Bool = { @MainActor in
+            await start.arriveAndWait()
+            do { _ = try await repo.subscribe(feedURL: "https://x/first.xml"); return true }
+            catch SubscriptionError.podcastCapReached { return false }
+        }()
+        async let second: Bool = { @MainActor in
+            await start.arriveAndWait()
+            do { _ = try await repo.subscribe(feedURL: "https://x/second.xml"); return true }
+            catch SubscriptionError.podcastCapReached { return false }
+        }()
+        await fetcher.waitUntilFirstFetchStarts()
+        await fetcher.releaseFirstFetch()
+
+        let outcomes = try await [first, second]
+        XCTAssertEqual(outcomes.filter { $0 }.count, 1)
+        XCTAssertEqual(try PodcastQuery.followedCount(in: ctx), 10)
     }
 
     func testRefreshAddsOnlyNewEpisodesAndSurfacesThemInInbox() async throws {
@@ -1041,6 +1193,38 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Episode>()).count, 0, "Episodes cascade with the podcast")
     }
 
+    func testUnsubscribeFinalSaveFailureRollsBackGraphAndIntentSupersession() async throws {
+        enum Injected: Error { case save }
+        let ctx = TestStore.freshContext()
+        let podcast = try await SubscriptionRepository(
+            context: ctx, feed: FakeFeedFetcher(feed([episode("a", d1)]))
+        ).subscribe(feedURL: "https://x/feed.xml")
+        let feedURL = podcast.feedURL
+        let episode = try XCTUnwrap(podcast.episodes?.first)
+        let folder = PodcastFolder(name: "Keep")
+        ctx.insert(folder)
+        ctx.insert(FolderMembership(folder: folder, podcast: podcast))
+        ctx.insert(EpisodeFolderMembership(folder: folder, episode: episode))
+        ctx.insert(ListeningSession(episode: episode, podcast: podcast, durationSeconds: 30))
+        try ctx.save()
+        let followTokens = try PendingCloudFollowIntent.tokens(
+            feedURL: feedURL, in: ctx
+        )
+
+        XCTAssertFalse(SubscriptionDeletionRepository(
+            context: ctx, saveOperation: { _ in throw Injected.save }
+        ).unsubscribe(podcast))
+
+        let fresh = ModelContext(ctx.container)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<Podcast>()), 1)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<Episode>()), 1)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<FolderMembership>()), 1)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<EpisodeFolderMembership>()), 1)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<ListeningSession>()), 1)
+        XCTAssertEqual(try PendingCloudFollowIntent.tokens(feedURL: feedURL, in: fresh), followTokens)
+        XCTAssertFalse(try PendingCloudUnfollowIntent.feedURLs(in: fresh).contains(feedURL))
+    }
+
     /// Unsubscribing first removes folder memberships, so no dangling
     /// `FolderMembership` row survives the podcast delete (the F2 no-cascade case).
     func testUnsubscribeRemovesFolderMemberships() async throws {
@@ -1238,6 +1422,67 @@ final class SubscriptionRepositoryTests: XCTestCase {
 
         XCTAssertEqual(result.outcomes.count, 7, "10 - 3 already subscribed = 7 free slots remaining")
         XCTAssertEqual(result.skippedForCap, 5)
+    }
+
+    func testSubscribeAllRefillsLastSlotAfterEarlierFeedFetchFails() async throws {
+        let ctx = TestStore.freshContext()
+        for index in 0..<9 {
+            ctx.insert(Podcast(
+                feedURL: "https://x/existing\(index).xml", title: "Existing \(index)"
+            ))
+        }
+        try ctx.save()
+        let failedURL = "https://x/fails.xml"
+        let succeedingURL = "https://x/refill.xml"
+        let fetcher = PerURLFeedFetcher()
+        fetcher.setFeed(feed([episode("refilled", d1)]), for: succeedingURL)
+        let repo = SubscriptionRepository(context: ctx, feed: fetcher, isEntitled: false)
+        let result = await repo.subscribeAll(feedURLs: [failedURL, succeedingURL])
+        XCTAssertEqual(result.outcomes.map(\.feedURL), [succeedingURL])
+        XCTAssertEqual(result.failed, 1)
+        XCTAssertEqual(result.skippedForCap, 0)
+        XCTAssertEqual(try PodcastQuery.followedCount(in: ctx), 10)
+    }
+    func testSubscribeAllPromotesCatalogRowsAndKeepsAlreadyFollowedOutcome() async throws {
+        let ctx = TestStore.freshContext()
+        let followed = Podcast(feedURL: "https://x/followed.xml", title: "Followed")
+        let catalog = Podcast(
+            feedURL: "https://x/catalog.xml", title: "Catalog",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue
+        )
+        let queued = Episode(
+            guid: "a", title: "Queued", audioURL: "https://x/a.mp3",
+            status: .inQueue, positionSeconds: 42, inboxDismissed: true
+        )
+        queued.podcast = catalog
+        ctx.insert(followed)
+        ctx.insert(catalog)
+        ctx.insert(queued)
+        ctx.insert(QueueItem(episode: queued, position: 0))
+        try ctx.save()
+        let catalogID = catalog.persistentModelID
+        let repo = SubscriptionRepository(
+            context: ctx,
+            feed: FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)])),
+            isEntitled: false
+        )
+
+        let result = await repo.subscribeAll(
+            feedURLs: [followed.feedURL, catalog.feedURL]
+        )
+
+        XCTAssertEqual(result.outcomes.count, 2)
+        XCTAssertTrue(result.outcomes[0].alreadySubscribed)
+        XCTAssertFalse(result.outcomes[1].alreadySubscribed)
+        XCTAssertEqual(result.outcomes[1].podcast.persistentModelID, catalogID)
+        XCTAssertTrue(result.outcomes[1].podcast.isFollowed)
+        XCTAssertEqual(try PodcastQuery.followedCount(in: ctx), 2)
+        let retained = try XCTUnwrap(
+            try ctx.fetch(FetchDescriptor<Episode>()).first { $0.guid == "a" }
+        )
+        XCTAssertEqual(retained.positionSeconds, 42)
+        XCTAssertEqual(retained.queueItem?.position, 0)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<Episode>()), 2)
     }
 
     func testSubscribeAllEntitledImportsAllRegardlessOfCap() async throws {
