@@ -346,6 +346,27 @@ final class OPMLBulkImportTests: XCTestCase {
         XCTAssertEqual(fetcher.maximumFetchCount, 3, "Import keeps at most three network fetches in flight")
         XCTAssertEqual(recorder.completes, Array(1...8))
     }
+
+    func testBulkImportKeepsDurableProgressInInputOrderWhenLaterFetchFinishesFirst() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = StaggeredFeedFetcher(fastFeedIndex: 1)
+        let service = OPMLImportService(
+            context: ctx, subscriptions: SubscriptionRepository(context: ctx, feed: fetcher)
+        )
+        let feeds = (0..<3).map { "https://feed\($0).com/rss" }
+        let recorder = ProgressRecorder()
+
+        _ = await service.importOPML(opml(feeds: feeds), onProgress: { completed, _, title in
+            recorder.completes.append(completed)
+            if let title { recorder.titles.append(title) }
+        })
+
+        XCTAssertEqual(recorder.completes, [1, 2, 3])
+        XCTAssertEqual(recorder.titles.count, 3)
+        XCTAssertTrue(recorder.titles[0].contains("feed0"))
+        XCTAssertTrue(recorder.titles[1].contains("feed1"))
+        XCTAssertTrue(recorder.titles[2].contains("feed2"))
+    }
 }
 
 /// Captures progress callback values on the main actor.
@@ -366,6 +387,9 @@ private final class StaggeredFeedFetcher: FeedFetching, @unchecked Sendable {
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
+    private let fastFeedIndex: Int
+
+    init(fastFeedIndex: Int = 0) { self.fastFeedIndex = fastFeedIndex }
 
     var activeFetchCount: Int { state.withLock { $0.active } }
     var maximumFetchCount: Int { state.withLock { $0.maximum } }
@@ -377,7 +401,7 @@ private final class StaggeredFeedFetcher: FeedFetching, @unchecked Sendable {
         }
         defer { state.withLock { $0.active -= 1 } }
 
-        if urlString.contains("feed0") {
+        if urlString.contains("feed\(fastFeedIndex)") {
             try await Task.sleep(for: .milliseconds(20))
         } else {
             try await Task.sleep(for: .milliseconds(250))

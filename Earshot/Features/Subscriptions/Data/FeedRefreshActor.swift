@@ -909,72 +909,85 @@ actor FeedRefreshActor {
                 nextCandidate..<end
             ])
             nextCandidate = end
-            let fetched = await withTaskGroup(
-                of: PreparedSubscription?.self, returning: [PreparedSubscription].self
-            ) { group in
+            await withTaskGroup(of: PreparedFetchResult.self) { group in
                 for (index, url) in chunk {
                     group.addTask {
-                        guard let parsed = await Self.fetchForImport(url, feed: feed) else { return nil }
-                        return PreparedSubscription(
+                        guard let parsed = await Self.fetchForImport(url, feed: feed) else {
+                            return .failure(index)
+                        }
+                        return .success(PreparedSubscription(
                             inputIndex: index, feedURL: url, parsed: parsed,
                             initialEpisodeLimit: Self.opmlInitialEpisodeLimit
-                        )
+                        ))
                     }
                 }
-                var values: [PreparedSubscription] = []
-                for await value in group {
-                    if let value { values.append(value) }
-                }
-                return values.sorted { $0.inputIndex < $1.inputIndex }
-            }
-            failed += chunk.count - fetched.count
-            for applyStart in stride(
-                from: 0, to: fetched.count, by: Self.subscribeSaveBatchSize
-            ) {
-                let applyBatch = Array(fetched[
-                    applyStart..<min(applyStart + Self.subscribeSaveBatchSize, fetched.count)
-                ])
-                do {
-                    let commit = try await commitPreparedBatch(
-                        applyBatch, inboxSeedCount: inboxSeedCount,
-                        maximumFollowedCount: maximumFollowedCount,
-                        capBehavior: .skip
-                    )
-                    for indexed in commit.results {
-                        resultByIndex[indexed.inputIndex] = indexed.result
-                    }
-                    skippedForCap += commit.skippedForCap
-                    mutated = mutated || commit.mutated
-                } catch is CancellationError {
-                    break
-                } catch {
-                    var unresolvedFailures = 0
-                    for input in applyBatch {
+                // Fetches finish out of order, but only a contiguous input-order
+                // prefix may consume cap slots or publish durable progress.
+                var resolved: [Int: PreparedFetchResult] = [:]
+                var applyOffset = 0
+                for await fetched in group {
+                    resolved[fetched.inputIndex] = fetched
+                    while applyOffset < chunk.count,
+                          let first = resolved[chunk[applyOffset].0] {
+                        if case let .failure(index) = first {
+                            resolved.removeValue(forKey: index)
+                            applyOffset += 1
+                            failed += 1
+                            completed += 1
+                            await onProgress?(completed, total, nil)
+                            continue
+                        }
+                        var applyBatch: [PreparedSubscription] = []
+                        while applyOffset < chunk.count,
+                              applyBatch.count < Self.subscribeSaveBatchSize,
+                              let ready = resolved[chunk[applyOffset].0],
+                              case let .success(input) = ready {
+                            resolved.removeValue(forKey: input.inputIndex)
+                            applyBatch.append(input)
+                            applyOffset += 1
+                        }
                         do {
-                            if let confirmed = try await confirmedExistingSubscription(
-                                feedURL: input.feedURL
-                            ) {
-                                resultByIndex[input.inputIndex] = confirmed.result
-                            } else {
-                                unresolvedFailures += 1
+                            let commit = try await commitPreparedBatch(
+                                applyBatch, inboxSeedCount: inboxSeedCount,
+                                maximumFollowedCount: maximumFollowedCount,
+                                capBehavior: .skip
+                            )
+                            for indexed in commit.results {
+                                resultByIndex[indexed.inputIndex] = indexed.result
                             }
+                            skippedForCap += commit.skippedForCap
+                            mutated = mutated || commit.mutated
+                        } catch is CancellationError {
+                            group.cancelAll()
+                            return
                         } catch {
-                            unresolvedFailures += 1
+                            var unresolvedFailures = 0
+                            for input in applyBatch {
+                                do {
+                                    if let confirmed = try await confirmedExistingSubscription(
+                                        feedURL: input.feedURL
+                                    ) {
+                                        resultByIndex[input.inputIndex] = confirmed.result
+                                    } else {
+                                        unresolvedFailures += 1
+                                    }
+                                } catch { unresolvedFailures += 1 }
+                            }
+                            failed += unresolvedFailures
+                            AppLog.subscriptions.error(
+                                "OPML import batch failed: \(error.localizedDescription, privacy: .public)"
+                            )
+                        }
+                        for input in applyBatch {
+                            completed += 1
+                            let title = resultByIndex[input.inputIndex].flatMap { result in
+                                (try? PodcastIdentityService(context: modelContext)
+                                    .existingAnyState(feedURL: result.feedURL))?.title
+                            }
+                            await onProgress?(completed, total, title)
                         }
                     }
-                    failed += unresolvedFailures
-                    AppLog.subscriptions.error(
-                        "OPML import batch failed: \(error.localizedDescription, privacy: .public)"
-                    )
                 }
-            }
-            for (index, _) in chunk.sorted(by: { $0.0 < $1.0 }) {
-                completed += 1
-                let title = resultByIndex[index].flatMap { result in
-                    (try? PodcastIdentityService(context: modelContext)
-                        .existingAnyState(feedURL: result.feedURL))?.title
-                }
-                await onProgress?(completed, total, title)
             }
         }
 
@@ -1003,6 +1016,18 @@ actor FeedRefreshActor {
         let feedURL: String
         let parsed: ParsedFeed
         let initialEpisodeLimit: Int?
+    }
+
+    private enum PreparedFetchResult: Sendable {
+        case success(PreparedSubscription)
+        case failure(Int)
+
+        var inputIndex: Int {
+            switch self {
+            case let .success(input): input.inputIndex
+            case let .failure(index): index
+            }
+        }
     }
 
     private struct IndexedSubscribeResult {
