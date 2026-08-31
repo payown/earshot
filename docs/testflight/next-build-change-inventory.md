@@ -1,8 +1,7 @@
 # Next TestFlight change inventory
 
-Status: Chapter 79 is prepared for build 249 and Michael approved uploading it
-to the Internal Testing Group and Public Testers on 2026-08-31. Its exact copy
-is in `build-249-notes.txt`.
+Status: Chapter 79, build 249 shipped to the Internal Testing Group and Public
+Testers on 2026-08-31. Its exact copy is in `build-249-notes.txt`.
 
 The last shipped story is Chapter 78 for build 248. This TestFlight upload
 follows the maintenance contract in `docs/kashe.md`:
