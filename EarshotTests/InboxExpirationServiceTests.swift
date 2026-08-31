@@ -154,20 +154,64 @@ final class InboxExpirationServiceTests: XCTestCase {
 
     // MARK: Expiration
 
-    func testExpiresStaleQueuedEpisode() {
+    func testExpiresStaleQueuedEpisodesAndPersistsOneOrderingIntent() throws {
         let ctx = TestStore.freshContext()
         let p = podcast(ctx, "A")
         p.queueAgeLimitDays = 7
-        let e = episode(ctx, "old", podcast: p, status: .inQueue)
-        let item = QueueItem(episode: e, position: 0, addedAt: daysAgo(10))
-        ctx.insert(item)
-        try? ctx.save()
+        let episodes = ["old-a", "old-b"].enumerated().map { position, guid in
+            let episode = episode(ctx, guid, podcast: p, status: .inQueue)
+            ctx.insert(QueueItem(episode: episode, position: position, addedAt: daysAgo(10)))
+            return episode
+        }
+        try ctx.save()
 
         ExpirationService(context: ctx).runExpiration(now: now)
 
         XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QueueItem>()), 0)
-        XCTAssertEqual(ExpirationService(context: ctx).recentlyExpired().count, 1)
-        XCTAssertEqual(e.status, .expired)
+        XCTAssertEqual(ExpirationService(context: ctx).recentlyExpired().count, 2)
+        XCTAssertTrue(episodes.allSatisfy { $0.status == .expired })
+        let removals = try PendingCloudQueueMutation.memberships(in: ctx)
+        XCTAssertEqual(Set(removals.map(\.guid)), ["old-a", "old-b"])
+        XCTAssertTrue(removals.allSatisfy { !$0.isQueued && $0.eventDate == now })
+        XCTAssertEqual(try PendingCloudQueueMutation.orderings(in: ctx).count, 1)
+    }
+
+    func testCatalogExpirationDoesNotCreateCloudQueueIntent() throws {
+        let ctx = TestStore.freshContext()
+        let p = podcast(ctx, "Catalog")
+        p.subscriptionStateRaw = PodcastSubscriptionState.catalogOnly.rawValue
+        p.queueAgeLimitDays = 7
+        let e = episode(ctx, "old", podcast: p, status: .inQueue)
+        ctx.insert(QueueItem(episode: e, position: 0, addedAt: daysAgo(10)))
+        try ctx.save()
+
+        ExpirationService(context: ctx).runExpiration(now: now)
+
+        XCTAssertTrue(try PendingCloudQueueMutation.memberships(in: ctx).isEmpty)
+        XCTAssertTrue(try PendingCloudQueueMutation.orderings(in: ctx).isEmpty)
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<QueueItem>()), 0)
+    }
+
+    func testExpirationSaveFailureRollsBackQueueAndCloudIntent() throws {
+        enum Injected: Error { case save }
+        let ctx = TestStore.freshContext()
+        let p = podcast(ctx, "A")
+        p.queueAgeLimitDays = 7
+        let e = episode(ctx, "old", podcast: p, status: .inQueue)
+        ctx.insert(QueueItem(episode: e, position: 0, addedAt: daysAgo(10)))
+        try ctx.save()
+
+        ExpirationService(
+            context: ctx,
+            saveOperation: { _ in throw Injected.save }
+        ).runExpiration(now: now)
+
+        let fresh = ModelContext(ctx.container)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<QueueItem>()), 1)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<RecentlyExpired>()), 0)
+        XCTAssertTrue(try PendingCloudQueueMutation.memberships(in: fresh).isEmpty)
+        XCTAssertTrue(try PendingCloudQueueMutation.orderings(in: fresh).isEmpty)
+        XCTAssertEqual(try XCTUnwrap(fresh.fetch(FetchDescriptor<Episode>()).first).status, .inQueue)
     }
 
     func testExpirationReusesExistingRelationshipWhenQueuedAndExpiredConflict() throws {

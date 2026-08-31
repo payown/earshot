@@ -309,6 +309,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
         ctx.insert(queueItem)
         ctx.insert(bookmark)
         try PendingCloudUnfollowIntent.set(feedURL: podcast.feedURL, in: ctx)
+        try PendingCloudRemoteActivationIntent.set(feedURL: podcast.feedURL, in: ctx)
         try ctx.save()
         let podcastID = podcast.persistentModelID
         let episodeID = existing.persistentModelID
@@ -338,6 +339,9 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertFalse(newlyInserted.inboxDismissed, "Only genuinely new feed rows are inbox-seeded")
         XCTAssertTrue(try PendingCloudFollowIntent.exists(feedURL: podcast.feedURL, in: ctx))
         XCTAssertFalse(try PendingCloudUnfollowIntent.feedURLs(in: ctx).contains(podcast.feedURL))
+        XCTAssertFalse(
+            try PendingCloudRemoteActivationIntent.exists(feedURL: podcast.feedURL, in: ctx)
+        )
     }
 
     func testConcurrentCatalogAddAndFollowConvergeWithoutQueueLoss() async throws {
@@ -1183,6 +1187,9 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let fetcher = FakeFeedFetcher(feed([episode("a", d1), episode("b", d2)]))
         let repo = SubscriptionRepository(context: ctx, feed: fetcher)
         let podcast = try await repo.subscribe(feedURL: "https://x/feed.xml")
+        let feedURL = podcast.feedURL
+        try PendingCloudRemoteActivationIntent.set(feedURL: feedURL, in: ctx)
+        try ctx.save()
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 1)
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Episode>()).count, 2)
 
@@ -1191,6 +1198,10 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertTrue(ok, "A clean delete saves and reports success")
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Podcast>()).count, 0)
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<Episode>()).count, 0, "Episodes cascade with the podcast")
+        XCTAssertFalse(
+            try PendingCloudRemoteActivationIntent.exists(feedURL: feedURL, in: ctx)
+        )
+        XCTAssertTrue(try PendingCloudUnfollowIntent.feedURLs(in: ctx).contains(feedURL))
     }
 
     func testUnsubscribeFinalSaveFailureRollsBackGraphAndIntentSupersession() async throws {
@@ -1207,6 +1218,8 @@ final class SubscriptionRepositoryTests: XCTestCase {
         ctx.insert(EpisodeFolderMembership(folder: folder, episode: episode))
         ctx.insert(ListeningSession(episode: episode, podcast: podcast, durationSeconds: 30))
         try ctx.save()
+        try PendingCloudRemoteActivationIntent.set(feedURL: feedURL, in: ctx)
+        try ctx.save()
         let followTokens = try PendingCloudFollowIntent.tokens(
             feedURL: feedURL, in: ctx
         )
@@ -1222,6 +1235,7 @@ final class SubscriptionRepositoryTests: XCTestCase {
         XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<EpisodeFolderMembership>()), 1)
         XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<ListeningSession>()), 1)
         XCTAssertEqual(try PendingCloudFollowIntent.tokens(feedURL: feedURL, in: fresh), followTokens)
+        XCTAssertTrue(try PendingCloudRemoteActivationIntent.exists(feedURL: feedURL, in: fresh))
         XCTAssertFalse(try PendingCloudUnfollowIntent.feedURLs(in: fresh).contains(feedURL))
     }
 

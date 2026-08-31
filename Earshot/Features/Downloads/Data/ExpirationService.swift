@@ -7,9 +7,14 @@ import SwiftData
 @MainActor
 final class ExpirationService {
     private let context: ModelContext
+    private let saveOperation: (ModelContext) throws -> Void
 
-    init(context: ModelContext) {
+    init(
+        context: ModelContext,
+        saveOperation: @escaping (ModelContext) throws -> Void = { try $0.save() }
+    ) {
         self.context = context
+        self.saveOperation = saveOperation
     }
 
     func runExpiration(now: Date = .now) {
@@ -40,6 +45,7 @@ final class ExpirationService {
 
     private func expireStale(now: Date) {
         let items = (try? context.fetch(FetchDescriptor<QueueItem>())) ?? []
+        var stagedFollowedRemoval = false
         for item in items {
             // A projection/repair save can invalidate a fetched relationship.
             // Never ask SwiftData for persisted values after its backing model
@@ -73,8 +79,17 @@ final class ExpirationService {
             } else {
                 context.insert(RecentlyExpired(episode: episode, expiredAt: now))
             }
+            stagedFollowedRemoval = PendingCloudQueueMutation.stageMembership(
+                episode: episode,
+                isQueued: false,
+                eventDate: now,
+                in: context
+            ) || stagedFollowedRemoval
             episode.status = .expired
             context.delete(item)
+        }
+        if stagedFollowedRemoval {
+            PendingCloudQueueMutation.stageOrdering(eventDate: now, in: context)
         }
     }
 
@@ -102,8 +117,9 @@ final class ExpirationService {
     private func save() {
         guard context.hasChanges else { return }
         do {
-            try context.save()
+            try saveOperation(context)
         } catch {
+            context.rollback()
             AppLog.data.error("Expiration save failed: \(error.localizedDescription, privacy: .public)")
         }
     }

@@ -780,7 +780,7 @@ final class PlayerService {
         providesStartHaptic: Bool = false
     ) {
         guard playbackHandoff.isEnabled,
-              let identity = playbackHandoffIdentity(for: episode) else {
+              let identity = followedPlaybackHandoffIdentity(for: episode) else {
             play(
                 episode,
                 preparedItem: nil,
@@ -801,11 +801,16 @@ final class PlayerService {
                   let episode,
                   !episode.isDeleted else { return }
             playbackHandoffTask = nil
+            // A Follow can be superseded while the direct CloudKit request is
+            // in flight. Catalog-only playback is device-local, so a response
+            // fetched before that transition must not cross the new boundary.
+            let eligibleHandoff = followedPlaybackHandoffIdentity(for: episode) == identity
+                ? fetched : nil
             play(
                 episode,
                 preparedItem: nil,
                 originEvent: originEvent,
-                handoff: fetched,
+                handoff: eligibleHandoff,
                 presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted,
                 providesStartHaptic: providesStartHaptic
             )
@@ -913,7 +918,7 @@ final class PlayerService {
         }
         guard playbackHandoff.isEnabled,
               !currentEpisodeIsTransient,
-              let identity = playbackHandoffIdentity(for: episode) else {
+              let identity = followedPlaybackHandoffIdentity(for: episode) else {
             resumeImmediately(providesStartHaptic: providesStartHaptic)
             return
         }
@@ -928,7 +933,10 @@ final class PlayerService {
                   !releaseInvalidCurrentEpisodeIfNeeded(),
                   nowPlayingEpisodeID == episodeID,
                   let episode = currentEpisode else { return }
-            if let fetched { applyFetchedHandoff(fetched, to: episode) }
+            if followedPlaybackHandoffIdentity(for: episode) == identity,
+               let fetched {
+                applyFetchedHandoff(fetched, to: episode)
+            }
             playbackHandoffTask = nil
             resumeImmediately(providesStartHaptic: providesStartHaptic)
         }
@@ -2089,13 +2097,26 @@ final class PlayerService {
         PlaybackHandoffIdentity(feedURL: episode.podcast?.feedURL, guid: episode.guid)
     }
 
+    /// Direct handoff is subscription state, not catalog state. Catalog-only
+    /// episodes remain fully playable and durable on this device, but they must
+    /// never fetch or publish the account-wide direct CloudKit record. Keeping
+    /// raw identity construction separate lets callers still reason about the
+    /// episode without treating this device's catalog status as permission to
+    /// delete legitimate followed state written by another device.
+    private func followedPlaybackHandoffIdentity(
+        for episode: Episode
+    ) -> PlaybackHandoffIdentity? {
+        guard !episode.isDeleted, episode.podcast?.isFollowed == true else { return nil }
+        return playbackHandoffIdentity(for: episode)
+    }
+
     private func currentPlaybackHandoffSnapshot() -> PlaybackHandoffSnapshot? {
         guard playbackHandoff.isEnabled,
               !currentEpisodeIsTransient,
               let episode = currentEpisode,
               !episode.isDeleted,
               currentPositionSeconds.isFinite,
-              let identity = playbackHandoffIdentity(for: episode) else { return nil }
+              let identity = followedPlaybackHandoffIdentity(for: episode) else { return nil }
         return PlaybackHandoffSnapshot(
             identity: identity,
             positionSeconds: Int(max(0, currentPositionSeconds)),
@@ -2107,9 +2128,20 @@ final class PlayerService {
     /// from the periodic tick so direct handoff cannot create sustained radio,
     /// battery, or main-thread pressure on long listening sessions.
     private func publishCurrentPlaybackHandoff() {
-        guard let snapshot = currentPlaybackHandoffSnapshot() else { return }
+        guard let episode = currentEpisode,
+              let snapshot = currentPlaybackHandoffSnapshot() else { return }
         let client = playbackHandoff
-        Task {
+        Task { @MainActor [weak self, weak episode] in
+            // Task scheduling is itself a suspension boundary: Unfollow may
+            // commit after the snapshot was formed but before this body starts.
+            // Revalidate the captured episode immediately before the transport
+            // call. It need not still be current (episode switches deliberately
+            // publish the outgoing boundary), but it must still be a live,
+            // followed episode with the exact same natural identity.
+            guard let self, let episode,
+                  self.followedPlaybackHandoffIdentity(for: episode) == snapshot.identity else {
+                return
+            }
             do {
                 try await client.publish(snapshot)
                 AppLog.data.debug(
@@ -2157,7 +2189,10 @@ final class PlayerService {
         _ snapshot: PlaybackHandoffSnapshot,
         to episode: Episode
     ) {
-        guard playbackHandoffIdentity(for: episode) == snapshot.identity else { return }
+        // Recheck after the network suspension as a final defense even though
+        // both fetch callers also revalidate. A catalog transition must never
+        // apply a response that was authorized by an earlier followed state.
+        guard followedPlaybackHandoffIdentity(for: episode) == snapshot.identity else { return }
         let position = snapshot.positionSeconds
         episode.positionSeconds = position
         handoffRateOverride = snapshot.playbackRate

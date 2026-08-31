@@ -7,6 +7,7 @@ actor FakePlaybackHandoffClient: PlaybackHandoffClient {
     nonisolated let isEnabled = true
     var fetched: PlaybackHandoffSnapshot?
     var fetchDelayNanoseconds: UInt64 = 0
+    private(set) var fetchedIdentities: [PlaybackHandoffIdentity] = []
     private(set) var published: [PlaybackHandoffSnapshot] = []
 
     init(fetched: PlaybackHandoffSnapshot? = nil) {
@@ -20,6 +21,7 @@ actor FakePlaybackHandoffClient: PlaybackHandoffClient {
     func fetchLatest(
         for identity: PlaybackHandoffIdentity
     ) async throws -> PlaybackHandoffSnapshot? {
+        fetchedIdentities.append(identity)
         if fetchDelayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: fetchDelayNanoseconds)
         }
@@ -36,9 +38,15 @@ actor FakePlaybackHandoffClient: PlaybackHandoffClient {
 final class PlaybackHandoffTests: XCTestCase {
     private func makeEpisode(
         _ context: ModelContext,
-        position: Int = 0
+        position: Int = 0,
+        followed: Bool = true
     ) -> Episode {
-        let podcast = Podcast(feedURL: "HTTPS://Example.com/feed/", title: "Show")
+        let podcast = Podcast(
+            feedURL: "HTTPS://Example.com/feed/",
+            title: "Show",
+            subscriptionStateRaw: followed
+                ? nil : PodcastSubscriptionState.catalogOnly.rawValue
+        )
         context.insert(podcast)
         let episode = Episode(
             guid: "episode-1",
@@ -196,6 +204,167 @@ final class PlaybackHandoffTests: XCTestCase {
         XCTAssertEqual(published.last?.identity, try identity())
         XCTAssertEqual(published.last?.positionSeconds, 73)
         XCTAssertEqual(published.last?.playbackRate, 1)
+    }
+
+    func testCatalogTransitionBeforeScheduledPublishPreventsUpload() async throws {
+        let context = TestStore.freshContext()
+        let client = FakePlaybackHandoffClient()
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context)
+        player.load(episode)
+
+        // `seek` forms the value snapshot and schedules its MainActor publish
+        // task. This test remains on MainActor long enough to supersede Follow
+        // before that task can begin, deterministically exercising the narrow
+        // scheduling window rather than relying on a transport delay.
+        player.seek(to: 73)
+        episode.podcast?.subscriptionStateRaw = PodcastSubscriptionState.catalogOnly.rawValue
+        try context.save()
+        await Task.yield()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let published = await client.published
+        XCTAssertTrue(published.isEmpty)
+        XCTAssertEqual(Int(player.currentPositionSeconds), 73)
+    }
+
+    func testCatalogPlaybackNeverFetchesOrPublishesDirectHandoff() async throws {
+        let context = TestStore.freshContext()
+        let remote = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 180,
+            playbackRate: 1.5,
+            sourceDeviceID: "phone"
+        )
+        let client = FakePlaybackHandoffClient(fetched: remote)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 20, followed: false)
+
+        player.playWithHandoff(episode)
+        player.seek(to: 73)
+        player.pause()
+        player.setGlobalSpeed(1.25, announce: false)
+        player.persistForBackground()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let fetched = await client.fetchedIdentities
+        let published = await client.published
+        XCTAssertTrue(fetched.isEmpty)
+        XCTAssertTrue(published.isEmpty)
+        XCTAssertEqual(Int(player.currentPositionSeconds), 73)
+    }
+
+    func testCatalogLoadedResumeNeverFetchesDirectHandoff() async throws {
+        let context = TestStore.freshContext()
+        let remote = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 180,
+            playbackRate: 1.5,
+            sourceDeviceID: "phone"
+        )
+        let client = FakePlaybackHandoffClient(fetched: remote)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 20, followed: false)
+        player.load(episode)
+
+        player.resume()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let fetched = await client.fetchedIdentities
+        XCTAssertTrue(fetched.isEmpty)
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(Int(player.currentPositionSeconds), 20)
+    }
+
+    func testCatalogPromotionEnablesOrdinaryDirectHandoff() async throws {
+        let context = TestStore.freshContext()
+        let remote = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 180,
+            playbackRate: 1.5,
+            sourceDeviceID: "phone"
+        )
+        let client = FakePlaybackHandoffClient(fetched: remote)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 20, followed: false)
+
+        player.playWithHandoff(episode)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let catalogFetches = await client.fetchedIdentities
+        XCTAssertTrue(catalogFetches.isEmpty)
+
+        episode.podcast?.subscriptionStateRaw = nil
+        try context.save()
+        player.playWithHandoff(episode)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let promotedFetches = await client.fetchedIdentities
+        XCTAssertEqual(promotedFetches, [try identity()])
+        XCTAssertEqual(Int(player.currentPositionSeconds), 180)
+        XCTAssertEqual(player.effectiveRate, 1.5)
+    }
+
+    func testCatalogTransitionDuringStartFetchDoesNotApplyRemoteHandoff() async throws {
+        let context = TestStore.freshContext()
+        let remote = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 180,
+            playbackRate: 1.5,
+            sourceDeviceID: "phone"
+        )
+        let client = FakePlaybackHandoffClient(fetched: remote)
+        await client.setFetchDelay(250_000_000)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 20)
+
+        player.playWithHandoff(episode)
+        episode.podcast?.subscriptionStateRaw = PodcastSubscriptionState.catalogOnly.rawValue
+        try context.save()
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        let fetched = await client.fetchedIdentities
+        XCTAssertEqual(fetched, [try identity()])
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(Int(player.currentPositionSeconds), 20)
+        XCTAssertEqual(player.effectiveRate, 1)
+    }
+
+    func testCatalogTransitionDuringResumeFetchDoesNotApplyRemoteHandoff() async throws {
+        let context = TestStore.freshContext()
+        let remote = PlaybackHandoffSnapshot(
+            identity: try identity(),
+            positionSeconds: 180,
+            playbackRate: 1.5,
+            sourceDeviceID: "phone"
+        )
+        let client = FakePlaybackHandoffClient(fetched: remote)
+        await client.setFetchDelay(250_000_000)
+        let player = PlayerService(playbackHandoff: client)
+        player.configure(context: context)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(context, position: 20)
+        player.load(episode)
+
+        player.resume()
+        episode.podcast?.subscriptionStateRaw = PodcastSubscriptionState.catalogOnly.rawValue
+        try context.save()
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        let fetched = await client.fetchedIdentities
+        XCTAssertEqual(fetched, [try identity()])
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(Int(player.currentPositionSeconds), 20)
+        XCTAssertEqual(player.effectiveRate, 1)
     }
 
     func testSeekCancelsPendingResumeHandoffSoLateFetchCannotBounceBack() async throws {

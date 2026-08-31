@@ -379,6 +379,7 @@ struct SubscriptionDeletionRepository {
         let title = podcast.title
         do {
             try PendingCloudFollowIntent.clear(feedURL: podcast.feedURL, in: context)
+            try PendingCloudRemoteActivationIntent.clear(feedURL: podcast.feedURL, in: context)
             try PendingCloudUnfollowIntent.set(feedURL: podcast.feedURL, in: context)
         } catch {
             context.rollback()

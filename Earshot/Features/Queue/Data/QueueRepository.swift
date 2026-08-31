@@ -8,6 +8,144 @@ extension Notification.Name {
     static let earshotQueueDidChange = Notification.Name("earshotQueueDidChange")
 }
 
+/// Application-store journal for Queue edits that snapshot projection cannot infer.
+enum PendingCloudQueueMutation {
+    private static let membershipPrefix = "pending_cloud_queue_membership_v1_"
+    private static let orderingPrefix = "pending_cloud_queue_ordering_v1_"
+    private static let bootstrapKey = "pending_cloud_queue_bootstrap_v1_complete"
+
+    struct Membership: Hashable, Sendable {
+        let token: String
+        let feedURL: String
+        let guid: String
+        let isQueued: Bool
+        let eventDate: Date
+    }
+
+    struct Ordering: Hashable, Sendable {
+        let token: String
+        let eventDate: Date
+    }
+
+    @discardableResult
+    static func stageMembership(
+        episode: Episode,
+        isQueued: Bool,
+        eventDate: Date = .now,
+        in context: ModelContext
+    ) -> Bool {
+        guard episode.podcast?.isFollowed == true,
+              let feedURL = episode.podcast?.feedURL,
+              !episode.guid.isEmpty else { return false }
+        stageMembership(
+            feedURL: feedURL,
+            guid: episode.guid,
+            isQueued: isQueued,
+            eventDate: eventDate,
+            in: context
+        )
+        return true
+    }
+
+    static func stageMembership(
+        feedURL: String,
+        guid: String,
+        isQueued: Bool,
+        eventDate: Date = .now,
+        in context: ModelContext
+    ) {
+        let feed = FeedURLIdentity.canonical(feedURL)
+        guard !feed.isEmpty, !guid.isEmpty else { return }
+        let token = UUID().uuidString
+        let components = [
+            "1",
+            isQueued ? "1" : "0",
+            String(eventDate.timeIntervalSinceReferenceDate),
+            Data(feed.utf8).base64EncodedString(),
+            Data(guid.utf8).base64EncodedString(),
+        ]
+        context.insert(AppSetting(key: membershipPrefix + token, value: components.joined(separator: "|")))
+    }
+
+    static func stageOrdering(eventDate: Date = .now, in context: ModelContext) {
+        context.insert(AppSetting(
+            key: orderingPrefix + UUID().uuidString,
+            value: String(eventDate.timeIntervalSinceReferenceDate)
+        ))
+    }
+
+    static func memberships(in context: ModelContext) throws -> [Membership] {
+        try context.fetch(FetchDescriptor<AppSetting>()).compactMap { row in
+            guard row.key.hasPrefix(membershipPrefix) else { return nil }
+            let token = String(row.key.dropFirst(membershipPrefix.count))
+            let components = row.value.split(separator: "|", omittingEmptySubsequences: false)
+            guard !token.isEmpty,
+                  components.count == 5,
+                  components[0] == "1",
+                  let queued = Self.bool(String(components[1])),
+                  let interval = TimeInterval(components[2]),
+                  let feedData = Data(base64Encoded: String(components[3])),
+                  let guidData = Data(base64Encoded: String(components[4])),
+                  let feed = String(data: feedData, encoding: .utf8),
+                  let guid = String(data: guidData, encoding: .utf8),
+                  !feed.isEmpty,
+                  !guid.isEmpty else { return nil }
+            return Membership(
+                token: token,
+                feedURL: FeedURLIdentity.canonical(feed),
+                guid: guid,
+                isQueued: queued,
+                eventDate: Date(timeIntervalSinceReferenceDate: interval)
+            )
+        }
+    }
+
+    static func orderings(in context: ModelContext) throws -> [Ordering] {
+        try context.fetch(FetchDescriptor<AppSetting>()).compactMap { row in
+            guard row.key.hasPrefix(orderingPrefix),
+                  let interval = TimeInterval(row.value) else { return nil }
+            let token = String(row.key.dropFirst(orderingPrefix.count))
+            guard !token.isEmpty else { return nil }
+            return Ordering(
+                token: token,
+                eventDate: Date(timeIntervalSinceReferenceDate: interval)
+            )
+        }
+    }
+
+    static func clear(
+        memberships: some Sequence<Membership>,
+        orderings: some Sequence<Ordering>,
+        in context: ModelContext
+    ) throws {
+        let keys = Set(memberships.map { membershipPrefix + $0.token })
+            .union(orderings.map { orderingPrefix + $0.token })
+        guard !keys.isEmpty else { return }
+        for row in try context.fetch(FetchDescriptor<AppSetting>()) where keys.contains(row.key) {
+            context.delete(row)
+        }
+    }
+
+    static func bootstrapCompleted(in context: ModelContext) throws -> Bool {
+        var descriptor = FetchDescriptor<AppSetting>(predicate: #Predicate { $0.key == bootstrapKey })
+        descriptor.fetchLimit = 1
+        return try !context.fetch(descriptor).isEmpty
+    }
+
+    static func markBootstrapCompleted(in context: ModelContext) throws {
+        guard try !bootstrapCompleted(in: context) else { return }
+        context.insert(AppSetting(key: bootstrapKey, value: "1"))
+    }
+
+    private static func bool(_ value: String) -> Bool? {
+        switch value {
+        case "1": true
+        case "0": false
+        default: nil
+        }
+    }
+}
+
 /// A section of the grouped Queue view: a run of episodes sharing a group key,
 /// whether that key is a podcast ("Group by podcast", #444) or a top-level
 /// folder ("Group by folder", #762). Generalized from the original
@@ -372,6 +510,7 @@ final class QueueRepository {
     /// Used by the reusable morning lineup; duplicates in `episodes` are ignored.
     func bringToFront(_ episodes: [Episode]) {
         var items = orderedItems()
+        let followedOrderWillChange = episodes.contains { $0.podcast?.isFollowed == true }
         var itemByEpisodeID: [PersistentIdentifier: QueueItem] = [:]
         for item in items {
             if let episodeID = item.episode?.persistentModelID {
@@ -395,6 +534,10 @@ final class QueueRepository {
 
         let order = QueueLogic.bringToFront(items.map(\.persistentModelID), frontItemIDs)
         let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.persistentModelID, $0) })
+        if followedOrderWillChange,
+           order != items.map(\.persistentModelID) {
+            PendingCloudQueueMutation.stageOrdering(in: context)
+        }
         compact(order.compactMap { byID[$0] })
     }
 
@@ -419,6 +562,9 @@ final class QueueRepository {
             insertIndex = 0
         }
         items.insert(item, at: min(insertIndex, items.count))
+        if episode.podcast?.isFollowed == true {
+            PendingCloudQueueMutation.stageOrdering(in: context)
+        }
         compact(items)
     }
 
@@ -494,8 +640,14 @@ final class QueueRepository {
         let items = orderedItems()
         let episodes = items.compactMap(\.episode)
         let shouldDeleteDownloads = DownloadCleanup.deleteAfterPlayedEnabled(context)
+        var stagedFollowedRemoval = false
         for item in items {
             if let episode = item.episode {
+                stagedFollowedRemoval = PendingCloudQueueMutation.stageMembership(
+                    episode: episode,
+                    isQueued: false,
+                    in: context
+                ) || stagedFollowedRemoval
                 episode.isPlayed = false
                 episode.inboxDismissed = true
                 if shouldDeleteDownloads {
@@ -503,6 +655,9 @@ final class QueueRepository {
                 }
             }
             context.delete(item)
+        }
+        if stagedFollowedRemoval {
+            PendingCloudQueueMutation.stageOrdering(in: context)
         }
         save()
         postEpisodeUserStateChanges(episodes, playedChangedExplicitly: true)
@@ -857,6 +1012,13 @@ final class QueueRepository {
     }
 
     private func enqueue(_ episode: Episode) -> QueueItem {
+        if PendingCloudQueueMutation.stageMembership(
+            episode: episode,
+            isQueued: true,
+            in: context
+        ) {
+            PendingCloudQueueMutation.stageOrdering(in: context)
+        }
         let item = QueueItem(episode: episode, position: 0)
         context.insert(item)
         episode.status = .inQueue
@@ -869,6 +1031,13 @@ final class QueueRepository {
         guard let item = items.first(where: {
             $0.episode?.persistentModelID == episode.persistentModelID
         }), let canonicalEpisode = item.episode else { return false }
+        if PendingCloudQueueMutation.stageMembership(
+            episode: canonicalEpisode,
+            isQueued: false,
+            in: context
+        ) {
+            PendingCloudQueueMutation.stageOrdering(in: context)
+        }
         items.removeAll { $0.persistentModelID == item.persistentModelID }
         context.delete(item)
         mutate(canonicalEpisode)
@@ -922,6 +1091,9 @@ final class QueueRepository {
     private func applyOrder(_ orderedIDs: [PersistentIdentifier], items: [QueueItem]) -> Bool {
         guard orderedIDs != items.map(\.persistentModelID) else { return false }
         let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.persistentModelID, $0) })
+        if items.contains(where: { $0.episode?.podcast?.isFollowed == true }) {
+            PendingCloudQueueMutation.stageOrdering(in: context)
+        }
         compact(orderedIDs.compactMap { byID[$0] })
         return true
     }
@@ -944,6 +1116,7 @@ final class QueueRepository {
             }
             return true
         } catch {
+            context.rollback()
             AppLog.player.error("Queue save failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
