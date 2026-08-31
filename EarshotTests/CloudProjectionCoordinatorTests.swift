@@ -2370,6 +2370,128 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         XCTAssertEqual(remoteSetting.value, "unplayed")
     }
 
+    func testMorningLineupProjectsFollowedOnlyAndMergesWithoutErasingLocalCatalog() async throws {
+        let app = try makeApplicationContainer()
+        let context = app.mainContext
+        let followedA = Podcast(feedURL: "https://followed.example/a", title: "A")
+        let followedB = Podcast(feedURL: "https://followed.example/b", title: "B")
+        let catalog = Podcast(
+            feedURL: "https://catalog.example/feed",
+            title: "Catalog",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue
+        )
+        func episode(_ guid: String, podcast: Podcast) -> Episode {
+            let value = Episode(
+                guid: guid,
+                title: guid,
+                audioURL: "https://example.com/\(guid).mp3"
+            )
+            value.podcast = podcast
+            context.insert(value)
+            return value
+        }
+        [followedA, followedB, catalog].forEach(context.insert)
+        let a = episode("a", podcast: followedA)
+        let localCatalog = episode("catalog", podcast: catalog)
+        let b = episode("b", podcast: followedB)
+        try context.save()
+        XCTAssertEqual(
+            QueueLineupStore(context: context).save([a, localCatalog, b]).savedCount,
+            3
+        )
+        let projection = try makeProjectionContainer()
+        let coordinator = await CloudProjectionCoordinator.makeForTesting(
+            applicationContainer: app,
+            projectionContainer: projection,
+            deviceID: "phone"
+        )
+
+        try await coordinator.reconcile()
+
+        let lineupKey = SettingsKey.morningLineup
+        let cloudRows = try projection.mainContext.fetch(
+            FetchDescriptor<CloudSettingProjection>(predicate: #Predicate {
+                $0.key == lineupKey
+            })
+        )
+        let phoneRow = try XCTUnwrap(cloudRows.first { $0.sourceDeviceID == "phone" })
+        XCTAssertEqual(
+            QueueLineupIdentityPolicy.identities(from: phoneRow.value)?.map(\.episodeGUID),
+            ["a", "b"]
+        )
+        XCTAssertFalse(phoneRow.value.contains("catalog.example"))
+
+        let remote = CloudSettingProjection()
+        remote.key = SettingsKey.morningLineup
+        remote.value = QueueLineupIdentityPolicy.encoded([
+            QueueLineupIdentity(feedURL: followedB.feedURL, episodeGUID: b.guid),
+            QueueLineupIdentity(feedURL: followedA.feedURL, episodeGUID: a.guid),
+        ])
+        remote.sourceDeviceID = "remote"
+        remote.modifiedAt = .distantFuture
+        projection.mainContext.insert(remote)
+        try projection.mainContext.save()
+        try await coordinator.reconcile()
+
+        let localAfterRemote = try XCTUnwrap(
+            AppSettingIdentity.value(for: SettingsKey.morningLineup, in: context)
+        )
+        XCTAssertEqual(
+            QueueLineupIdentityPolicy.identities(from: localAfterRemote)?.map(\.episodeGUID),
+            ["b", "catalog", "a"],
+            "remote followed order replaces followed slots without erasing local catalog"
+        )
+
+        remote.value = "invalid remote lineup"
+        try projection.mainContext.save()
+        try await coordinator.reconcile()
+        XCTAssertEqual(
+            AppSettingIdentity.value(for: SettingsKey.morningLineup, in: context),
+            localAfterRemote,
+            "invalid remote input leaves the richer local lineup intact"
+        )
+
+        try AppSettingIdentity.setValue(
+            "invalid local lineup",
+            for: SettingsKey.morningLineup,
+            in: context
+        )
+        try context.save()
+        let cloudBeforeInvalidPublish = phoneRow.value
+        try await coordinator.publishLocalSettingChange(
+            key: SettingsKey.morningLineup,
+            now: Date(timeIntervalSince1970: 300)
+        )
+        XCTAssertEqual(phoneRow.value, cloudBeforeInvalidPublish)
+
+        // Promotion makes the formerly local-only identity eligible for the next
+        // outbound projection without requiring any lineup rewrite.
+        catalog.subscriptionStateRaw = nil
+        QueueLineupStore(context: context).save([b, localCatalog, a])
+        for row in try projection.mainContext.fetch(FetchDescriptor<CloudSettingProjection>())
+            where row.key == SettingsKey.morningLineup {
+            projection.mainContext.delete(row)
+        }
+        try projection.mainContext.save()
+        try await coordinator.publishLocalSettingChange(
+            key: SettingsKey.morningLineup,
+            now: Date(timeIntervalSince1970: 400)
+        )
+        let promoted = try XCTUnwrap(
+            try projection.mainContext.fetch(
+                FetchDescriptor<CloudSettingProjection>(predicate: #Predicate {
+                    $0.key == lineupKey
+                })
+            ).first {
+                $0.sourceDeviceID == "phone"
+            }
+        )
+        XCTAssertEqual(
+            QueueLineupIdentityPolicy.identities(from: promoted.value)?.map(\.episodeGUID),
+            ["b", "catalog", "a"]
+        )
+    }
+
     private func makeApplicationContainer() throws -> ModelContainer {
         let full = Schema(versionedSchema: EarshotSchemaV12.self)
         return try ModelContainer(
