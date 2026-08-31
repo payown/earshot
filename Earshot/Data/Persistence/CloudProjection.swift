@@ -392,6 +392,7 @@ actor CloudProjectionCoordinator: ModelActor {
     private let pendingFollowFeedURLs: @Sendable (ModelContext) throws -> Set<String>
     private let followActivationCheckpoint: @Sendable (String) throws -> Void
     private let pendingIntentSave: @Sendable (ModelContext) throws -> Void
+    private let remoteSubscriptionSave: @Sendable (ModelContext) throws -> Void
     private var isApplyingRemote = false
 
     private init(
@@ -410,7 +411,10 @@ actor CloudProjectionCoordinator: ModelActor {
             try PendingCloudFollowIntent.feedURLs(in: $0)
         },
         followActivationCheckpoint: @escaping @Sendable (String) throws -> Void = { _ in },
-        pendingIntentSave: @escaping @Sendable (ModelContext) throws -> Void = { try $0.save() }
+        pendingIntentSave: @escaping @Sendable (ModelContext) throws -> Void = { try $0.save() },
+        remoteSubscriptionSave: @escaping @Sendable (ModelContext) throws -> Void = {
+            try $0.save()
+        }
     ) {
         let applicationContext = ModelContext(applicationContainer)
         modelExecutor = DefaultSerialModelExecutor(modelContext: applicationContext)
@@ -425,6 +429,7 @@ actor CloudProjectionCoordinator: ModelActor {
         self.pendingFollowFeedURLs = pendingFollowFeedURLs
         self.followActivationCheckpoint = followActivationCheckpoint
         self.pendingIntentSave = pendingIntentSave
+        self.remoteSubscriptionSave = remoteSubscriptionSave
     }
 
     nonisolated static func make(
@@ -481,7 +486,10 @@ actor CloudProjectionCoordinator: ModelActor {
             try PendingCloudFollowIntent.feedURLs(in: $0)
         },
         followActivationCheckpoint: @escaping @Sendable (String) throws -> Void = { _ in },
-        pendingIntentSave: @escaping @Sendable (ModelContext) throws -> Void = { try $0.save() }
+        pendingIntentSave: @escaping @Sendable (ModelContext) throws -> Void = { try $0.save() },
+        remoteSubscriptionSave: @escaping @Sendable (ModelContext) throws -> Void = {
+            try $0.save()
+        }
     ) async -> CloudProjectionCoordinator {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
@@ -495,14 +503,15 @@ actor CloudProjectionCoordinator: ModelActor {
                     remotePodcastDeletionDelayNanoseconds: remotePodcastDeletionDelayNanoseconds,
                     pendingFollowFeedURLs: pendingFollowFeedURLs,
                     followActivationCheckpoint: followActivationCheckpoint,
-                    pendingIntentSave: pendingIntentSave
+                    pendingIntentSave: pendingIntentSave,
+                    remoteSubscriptionSave: remoteSubscriptionSave
                 ))
             }
         }
     }
 #endif
 
-    func start() throws {
+    func start() async throws {
         refreshContextsFromStore()
         guard importObserver == nil else { return }
         importObserver = center.addObserver(
@@ -576,7 +585,7 @@ actor CloudProjectionCoordinator: ModelActor {
             Task { await self?.handleLocalFolderChange() }
         }
         guard seedInstrumentationEnabled() else {
-            try reconcile()
+            try await reconcile()
             return
         }
         let runID = UUID().uuidString
@@ -584,7 +593,7 @@ actor CloudProjectionCoordinator: ModelActor {
         let started = clock.now
         seedMarkerRecorder(.start(runID: runID))
         do {
-            try reconcile()
+            try await reconcile()
             seedMarkerRecorder(.complete(
                 runID: runID,
                 durationSeconds: Self.seconds(clock.now - started),
@@ -779,10 +788,10 @@ actor CloudProjectionCoordinator: ModelActor {
         }
     }
 
-    private func runScheduledReconciliation() {
+    private func runScheduledReconciliation() async {
         defer { reconcileTask = nil }
         do {
-            try reconcile()
+            try await reconcile()
         } catch {
             AppLog.data.error(
                 "Cloud projection reconciliation failed: \(error.localizedDescription, privacy: .public)"
@@ -798,14 +807,95 @@ actor CloudProjectionCoordinator: ModelActor {
         if !projectionContext.hasChanges { projectionContext.rollback() }
     }
 
+    /// Applies an active remote subscription under the same canonical identity
+    /// gate used by local Follow and catalog queue materialization. A catalog
+    /// shell is promoted in place and receives a distinct restart marker in the
+    /// same application-store save; the remote row remains the subscription
+    /// authority and is never retimestamped as a local Follow.
+    private func applyRemoteActiveSubscription(feedURL: String) async throws -> Bool {
+        let feed = FeedURLIdentity.canonical(feedURL)
+        await PodcastIdentityWriteGate.shared.acquire(feedURLs: [feed])
+        do {
+            try Task.checkCancellation()
+            let changed = try applyRemoteActiveSubscriptionWhileLocked(feedURL: feed)
+            await PodcastIdentityWriteGate.shared.release(feedURLs: [feed])
+            return changed
+        } catch {
+            modelContext.rollback()
+            await PodcastIdentityWriteGate.shared.release(feedURLs: [feed])
+            throw error
+        }
+    }
+
+    private func applyRemoteActiveSubscriptionWhileLocked(feedURL feed: String) throws -> Bool {
+        refreshContextsFromStore()
+        guard let remote = try projectionContext
+            .fetch(FetchDescriptor<CloudPodcastProjection>())
+            .filter({ FeedURLIdentity.canonical($0.feedURL) == feed })
+            .sorted(by: Self.projectionOrder)
+            .first,
+            remote.deletedAt == nil else { return false }
+        guard try !PendingCloudUnfollowIntent.feedURLs(in: modelContext).contains(feed) else {
+            return false
+        }
+
+        // Destructive duplicate repair retains its established pre-delete
+        // protocol and commits as a prerequisite. Promotion itself remains
+        // one rollback-safe save with no irreversible pre-save notification.
+        let repair = try IdentityRepairService(context: modelContext)
+            .repair(feedURLs: [feed])
+        if repair.didChange { try remoteSubscriptionSave(modelContext) }
+
+        let identity = PodcastIdentityService(context: modelContext)
+        let existing = try identity.existingAnyState(feedURL: feed)
+        let wasCatalogOnly = existing.map { !$0.isFollowed } ?? false
+        let podcast = existing ?? {
+            let inserted = Podcast(feedURL: feed, title: remote.title, createdAt: remote.createdAt)
+            modelContext.insert(inserted)
+            return inserted
+        }()
+        let before = value(podcast)
+        copy(remote, to: podcast)
+        if wasCatalogOnly {
+            podcast.subscriptionStateRaw = nil
+            try PendingCloudRemoteActivationIntent.set(feedURL: feed, in: modelContext)
+        }
+        let changed = existing == nil || wasCatalogOnly || before != value(podcast)
+        if modelContext.hasChanges { try remoteSubscriptionSave(modelContext) }
+        return changed
+    }
+
     /// Applies remote subscriptions before projecting local subscriptions. An
     /// empty new device therefore cannot overwrite a populated account.
-    func reconcile() throws {
+    func reconcile() async throws {
         refreshContextsFromStore()
         guard !isApplyingRemote else { return }
         isApplyingRemote = true
         defer { isApplyingRemote = false }
         try publishPendingUnfollowIntents()
+        refreshContextsFromStore()
+        let activeRemoteFeeds: [String]
+        do {
+            let cloudContext = projectionContext
+            let cloudRows = try cloudContext.fetch(FetchDescriptor<CloudPodcastProjection>())
+            var feeds: Set<String> = []
+            var seen: Set<String> = []
+            for row in cloudRows.sorted(by: Self.projectionOrder) {
+                let key = FeedURLIdentity.canonical(row.feedURL)
+                if seen.insert(key).inserted {
+                    if row.deletedAt == nil { feeds.insert(key) }
+                } else {
+                    cloudContext.delete(row)
+                }
+            }
+            if cloudContext.hasChanges { try cloudContext.save() }
+            activeRemoteFeeds = feeds.sorted()
+        }
+        var applicationChanged = false
+        for feedURL in activeRemoteFeeds {
+            applicationChanged = try await applyRemoteActiveSubscription(feedURL: feedURL)
+                || applicationChanged
+        }
         refreshContextsFromStore()
         let appContext = modelContext
         let cloudContext = projectionContext
@@ -813,11 +903,7 @@ actor CloudProjectionCoordinator: ModelActor {
         var cloudByFeed: [String: CloudPodcastProjection] = [:]
         for row in cloudRows.sorted(by: Self.projectionOrder) {
             let key = FeedURLIdentity.canonical(row.feedURL)
-            if cloudByFeed[key] == nil {
-                cloudByFeed[key] = row
-            } else {
-                cloudContext.delete(row)
-            }
+            if cloudByFeed[key] == nil { cloudByFeed[key] = row }
         }
 
         let podcastIdentity = PodcastIdentityService(context: appContext)
@@ -825,7 +911,6 @@ actor CloudProjectionCoordinator: ModelActor {
             for: Array(cloudByFeed.keys)
         )
         let pendingFollowFeeds = try pendingFollowFeedURLs(appContext)
-        var applicationChanged = false
         for row in cloudByFeed.values.sorted(by: Self.projectionOrder) {
             let key = FeedURLIdentity.canonical(row.feedURL)
             if row.deletedAt != nil {
@@ -913,6 +998,7 @@ actor CloudProjectionCoordinator: ModelActor {
             }),
             appContext: appContext
         )
+        try publishPendingRemoteActivations()
         knownLocalFeedURLs = Set(podcasts.map { FeedURLIdentity.canonical($0.feedURL) })
         // Seed only keys this device has never projected. Existing rows may
         // describe state that a prior remote reconciliation applied locally;
@@ -1207,6 +1293,56 @@ actor CloudProjectionCoordinator: ModelActor {
         }
         if cloudContext.hasChanges { try cloudContext.save() }
     }
+    private func prepareQueueProjectionBootstrapIfNeeded(
+        now: Date,
+        appContext: ModelContext,
+        cloudRows: [CloudQueueItemProjection]
+    ) throws {
+        guard try !PendingCloudQueueMutation.bootstrapCompleted(in: appContext) else { return }
+
+        let activeRows = cloudRows.filter { $0.deletedAt == nil && !$0.episodeGUID.isEmpty }
+        let projectedKeys = Set(activeRows.map(Self.episodeKey))
+        let pendingMembershipKeys = Set(
+            try PendingCloudQueueMutation.memberships(in: appContext).map {
+                EpisodeKey(feedURL: $0.feedURL, guid: $0.guid)
+            }
+        )
+        let items = try appContext.fetch(FetchDescriptor<QueueItem>())
+        var current: [EpisodeKey: Episode] = [:]
+        for item in items {
+            guard let episode = item.episode,
+                  episode.podcast?.isFollowed == true,
+                  let key = Self.episodeKey(for: episode) else { continue }
+            current[key] = episode
+        }
+        var stagedMembership = false
+        for key in current.keys {
+            guard !pendingMembershipKeys.contains(key),
+                  !projectedKeys.contains(key) else { continue }
+            PendingCloudQueueMutation.stageMembership(
+                feedURL: key.feedURL,
+                guid: key.guid,
+                isQueued: true,
+                eventDate: now,
+                in: appContext
+            )
+            stagedMembership = true
+        }
+        if stagedMembership {
+            PendingCloudQueueMutation.stageOrdering(eventDate: now, in: appContext)
+        }
+        // Keep bootstrap open until the first projection import/seed exists.
+        if !cloudRows.isEmpty {
+            try PendingCloudQueueMutation.markBootstrapCompleted(in: appContext)
+        }
+        do {
+            if appContext.hasChanges { try appContext.save() }
+        } catch {
+            appContext.rollback()
+            throw error
+        }
+    }
+
     func publishLocalQueueChanges(
         now: Date = .now,
         onlyIfCloudEmpty: Bool = false,
@@ -1219,6 +1355,13 @@ actor CloudProjectionCoordinator: ModelActor {
         let allRows = try cloudContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
         let rows = allRows.filter {
             activationFeed == nil || Self.episodeKey(for: $0).feedURL == activationFeed
+        }
+        if activationFeed == nil {
+            try prepareQueueProjectionBootstrapIfNeeded(
+                now: now,
+                appContext: appContext,
+                cloudRows: allRows
+            )
         }
 
         let items = try appContext.fetch(FetchDescriptor<QueueItem>(
@@ -1243,7 +1386,27 @@ actor CloudProjectionCoordinator: ModelActor {
             guard current[key] == nil else { continue }
             current[key] = (item.position, episode)
         }
-        if onlyIfCloudEmpty, !rows.isEmpty {
+        let observedMemberships = activationFeed == nil
+            ? try PendingCloudQueueMutation.memberships(in: appContext) : []
+        let observedOrderings = activationFeed == nil
+            ? try PendingCloudQueueMutation.orderings(in: appContext) : []
+        var membershipByKey: [EpisodeKey: PendingCloudQueueMutation.Membership] = [:]
+        for intent in observedMemberships {
+            let key = EpisodeKey(feedURL: intent.feedURL, guid: intent.guid)
+            if let existing = membershipByKey[key],
+               existing.eventDate > intent.eventDate
+                || (existing.eventDate == intent.eventDate && existing.token < intent.token) {
+                continue
+            }
+            membershipByKey[key] = intent
+        }
+        let orderingDate = observedOrderings.max {
+            if $0.eventDate != $1.eventDate { return $0.eventDate < $1.eventDate }
+            return $0.token > $1.token
+        }?.eventDate
+
+        if onlyIfCloudEmpty, !rows.isEmpty,
+           membershipByKey.isEmpty, orderingDate == nil {
             for row in rows where row.sourceDeviceID == deviceID && row.deletedAt == nil {
                 guard let item = current[Self.episodeKey(for: row)] else { continue }
                 Self.copyEpisodeMetadata(item.episode, to: row)
@@ -1263,14 +1426,34 @@ actor CloudProjectionCoordinator: ModelActor {
                 cloudContext.delete(row)
             }
         }
-        let priorKeys = activationFeed == nil
-            ? Set(rows.filter { $0.deletedAt == nil }.map(Self.episodeKey))
-            : Set(ownByKey.keys)
-        let keys = onlyIfCloudEmpty ? Set(current.keys) : priorKeys.union(current.keys)
+        let activeByKey = Dictionary(grouping: rows.filter { $0.deletedAt == nil }, by: Self.episodeKey)
+        var membershipWinnerByKey: [EpisodeKey: CloudQueueItemProjection] = [:]
+        for (key, contributions) in activeByKey {
+            membershipWinnerByKey[key] = contributions.sorted(by: Self.queueMembershipOrder).first
+        }
+
+        let cloudWasEmptySeed = onlyIfCloudEmpty && rows.isEmpty
+        var keys: Set<EpisodeKey>
+        if activationFeed != nil || cloudWasEmptySeed {
+            keys = Set(ownByKey.keys).union(current.keys)
+        } else {
+            keys = Set(ownByKey.keys).union(membershipByKey.keys)
+            if orderingDate != nil { keys.formUnion(current.keys) }
+        }
         for key in keys.sorted() {
+            var intent = membershipByKey[key]
+            let item = current[key]
+            let inheritedWinner = membershipWinnerByKey[key]
+            if ownByKey[key] == nil, intent == nil,
+               activationFeed == nil, !cloudWasEmptySeed {
+                // Ordering may adopt only a remote affirmative and its original clock.
+                guard inheritedWinner?.isQueued == true, item != nil else { continue }
+            }
             let row: CloudQueueItemProjection
+            let insertedRow: Bool
             if let existing = ownByKey[key] {
                 row = existing
+                insertedRow = false
             } else {
                 let inserted = CloudQueueItemProjection()
                 inserted.feedURL = key.feedURL
@@ -1279,22 +1462,57 @@ actor CloudProjectionCoordinator: ModelActor {
                 cloudContext.insert(inserted)
                 ownByKey[key] = inserted
                 row = inserted
+                insertedRow = true
             }
-            let item = current[key]
-            let queued = item != nil
+            let existingMembershipDate = row.membershipUpdatedAt == .distantPast
+                ? row.modifiedAt : row.membershipUpdatedAt
+            var ignoredStaleIntent = false
+            if let candidate = intent, !insertedRow,
+               candidate.eventDate < existingMembershipDate {
+                // Never let an older retry rewind saved local membership.
+                intent = nil
+                ignoredStaleIntent = true
+            }
+            let snapshotOwnsMembership = activationFeed != nil || cloudWasEmptySeed
+            let queued: Bool
+            if ignoredStaleIntent {
+                queued = row.isQueued
+            } else if let intent {
+                queued = intent.isQueued
+            } else if snapshotOwnsMembership {
+                queued = item != nil
+            } else if insertedRow, inheritedWinner?.isQueued == true, item != nil {
+                queued = true
+            } else {
+                // Absence is not removal without a durable local intent.
+                queued = row.isQueued
+            }
             let position = item?.position ?? 0
             if let episode = item?.episode {
                 Self.copyEpisodeMetadata(episode, to: row)
             }
-            let membershipChanged = row.isQueued != queued || row.deletedAt != nil
-            if membershipChanged || row.position != position {
+            let membershipChanged = insertedRow || intent != nil
+                || row.isQueued != queued || row.deletedAt != nil
+            let mayPublishPosition = activationFeed != nil || cloudWasEmptySeed
+                || orderingDate != nil || intent?.isQueued == true
+            let positionChanged = mayPublishPosition && row.position != position
+            if membershipChanged || positionChanged {
                 row.isQueued = queued
-                row.position = position
-                row.modifiedAt = now
+                if mayPublishPosition { row.position = position }
                 row.deletedAt = nil
                 if membershipChanged {
-                    row.membershipUpdatedAt = now
+                    row.membershipUpdatedAt = intent?.eventDate
+                        ?? inheritedWinner.map {
+                            $0.membershipUpdatedAt == .distantPast
+                                ? $0.modifiedAt : $0.membershipUpdatedAt
+                        }
+                        ?? now
                 }
+                // Position uses the later event without advancing membership's clock.
+                row.modifiedAt = [
+                    intent?.eventDate,
+                    mayPublishPosition ? orderingDate : nil,
+                ].compactMap { $0 }.max() ?? now
             } else if row.modifiedAt == .distantPast {
                 row.modifiedAt = now
             }
@@ -1306,6 +1524,19 @@ actor CloudProjectionCoordinator: ModelActor {
             }
         }
         if cloudContext.hasChanges { try cloudContext.save() }
+        guard activationFeed == nil,
+              !observedMemberships.isEmpty || !observedOrderings.isEmpty else { return }
+        do {
+            try PendingCloudQueueMutation.clear(
+                memberships: observedMemberships,
+                orderings: observedOrderings,
+                in: appContext
+            )
+            if appContext.hasChanges { try appContext.save() }
+        } catch {
+            appContext.rollback()
+            throw error
+        }
     }
     func publishLocalSettings(
         now: Date = .now,
@@ -1939,6 +2170,18 @@ actor CloudProjectionCoordinator: ModelActor {
 
     private func publishActivatedFollowGraph(feedURL: String, tokens: Set<String>) throws {
         let feed = FeedURLIdentity.canonical(feedURL)
+        try publishFollowDependentGraph(feedURL: feed)
+        try validateFollowActivation(feedURL: feed, tokens: tokens)
+        let active = try projectionContext.fetch(FetchDescriptor<CloudPodcastProjection>()).contains {
+            FeedURLIdentity.canonical($0.feedURL) == feed && $0.deletedAt == nil
+        }
+        guard active else { throw CocoaError(.validationMissingMandatoryProperty) }
+        try followActivationCheckpoint("verified")
+        try validateFollowActivation(feedURL: feed, tokens: tokens)
+    }
+
+    private func publishFollowDependentGraph(feedURL: String) throws {
+        let feed = FeedURLIdentity.canonical(feedURL)
         try publishLocalEpisodeStateChanges(activatingFeedURL: feed)
         try followActivationCheckpoint("episode")
         try publishLocalQueueChanges(activatingFeedURL: feed)
@@ -1951,13 +2194,6 @@ actor CloudProjectionCoordinator: ModelActor {
         try followActivationCheckpoint("history")
         try publishLocalFolderChanges(activatingFeedURL: feed)
         try followActivationCheckpoint("folders")
-        try validateFollowActivation(feedURL: feed, tokens: tokens)
-        let active = try projectionContext.fetch(FetchDescriptor<CloudPodcastProjection>()).contains {
-            FeedURLIdentity.canonical($0.feedURL) == feed && $0.deletedAt == nil
-        }
-        guard active else { throw CocoaError(.validationMissingMandatoryProperty) }
-        try followActivationCheckpoint("verified")
-        try validateFollowActivation(feedURL: feed, tokens: tokens)
     }
 
     private func validateFollowActivation(feedURL: String, tokens: Set<String>) throws {
@@ -1971,6 +2207,60 @@ actor CloudProjectionCoordinator: ModelActor {
             feedURL: feedURL, in: modelContext
         ))
         else { throw CancellationError() }
+    }
+
+    /// Completes feed-scoped publication for catalog graphs promoted by an
+    /// active remote subscription. Snapshot generations are cleared exactly;
+    /// a newer activation written by another context remains restart-visible.
+    private func publishPendingRemoteActivations() throws {
+        let grouped = Dictionary(grouping: try PendingCloudRemoteActivationIntent.intents(
+            in: modelContext
+        )) { $0.feed }
+        for feed in grouped.keys.sorted() {
+            let tokens = Set(grouped[feed, default: []].map(\.token))
+            guard !tokens.isEmpty,
+                  try validateRemoteActivation(feedURL: feed, tokens: tokens) else { continue }
+            try publishFollowDependentGraph(feedURL: feed)
+            guard try validateRemoteActivation(feedURL: feed, tokens: tokens) else { continue }
+            try followActivationCheckpoint("verified")
+            guard try validateRemoteActivation(feedURL: feed, tokens: tokens) else { continue }
+            do {
+                for token in tokens {
+                    try PendingCloudRemoteActivationIntent.clear(
+                        feedURL: feed, matching: token, in: modelContext
+                    )
+                }
+                if modelContext.hasChanges { try pendingIntentSave(modelContext) }
+            } catch {
+                modelContext.rollback()
+                throw error
+            }
+        }
+    }
+
+    private func validateRemoteActivation(feedURL: String, tokens: Set<String>) throws -> Bool {
+        refreshContextsFromStore()
+        let feed = FeedURLIdentity.canonical(feedURL)
+        let followed = try PodcastIdentityService(context: modelContext)
+            .existingFollowed(feedURL: feed) != nil
+        let pendingUnfollow = try PendingCloudUnfollowIntent.feedURLs(in: modelContext)
+            .contains(feed)
+        let active = try projectionContext.fetch(FetchDescriptor<CloudPodcastProjection>())
+            .contains {
+                FeedURLIdentity.canonical($0.feedURL) == feed && $0.deletedAt == nil
+            }
+        if !followed || pendingUnfollow {
+            try neutralizeCancelledFollowActivation(feedURL: feed)
+            return false
+        }
+        // The projection import may not yet contain the remote subscription row
+        // that created this durable application marker. Retain the marker and
+        // wait rather than manufacturing dependent rows without its authority.
+        guard active else { return false }
+        let currentTokens = Set(try PendingCloudRemoteActivationIntent.tokens(
+            feedURL: feed, in: modelContext
+        ))
+        return !tokens.isDisjoint(with: currentTokens)
     }
 
     private func publishPendingUnfollowIntents(feedURLs requested: Set<String>? = nil) throws {

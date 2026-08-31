@@ -172,6 +172,11 @@ enum SettingsKey {
 
     static let pendingCloudFollowPrefix = "pending_cloud_follow_"
     static let pendingCloudUnfollowPrefix = "pending_cloud_unfollow_"
+    /// Device-local restart journal for a subscription learned from an active
+    /// Cloud row while this device still held a catalog-only shell. Unlike the
+    /// explicit Follow intent, this marker never revives a subscription tombstone
+    /// or takes ownership of the Cloud subscription clock.
+    static let pendingCloudRemoteActivationPrefix = "pending_cloud_remote_activation_"
 
     static func pendingCloudFollow(token: String) -> String {
         pendingCloudFollowPrefix + token
@@ -179,6 +184,10 @@ enum SettingsKey {
 
     static func pendingCloudUnfollow(token: String) -> String {
         pendingCloudUnfollowPrefix + token
+    }
+
+    static func pendingCloudRemoteActivation(token: String) -> String {
+        pendingCloudRemoteActivationPrefix + token
     }
 
     /// Device-local unresolved runtime guard. It remains visible until the user

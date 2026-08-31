@@ -1350,6 +1350,7 @@ final class FeedRefreshActorTests: XCTestCase {
         seed.insert(podcast)
         seed.insert(episode)
         seed.insert(QueueItem(episode: episode, position: 2))
+        try PendingCloudRemoteActivationIntent.set(feedURL: feedURL, in: seed)
         try seed.save()
         let podcastID = podcast.persistentModelID
         let actor = FeedRefreshActor(modelContainer: container)
@@ -1374,6 +1375,7 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(stored.episodes?.first?.positionSeconds, 75)
         XCTAssertEqual(stored.episodes?.first?.queueItem?.position, 2)
         XCTAssertFalse(try PendingCloudFollowIntent.exists(feedURL: feedURL, in: assertion))
+        XCTAssertTrue(try PendingCloudRemoteActivationIntent.exists(feedURL: feedURL, in: assertion))
         let hasPendingChanges = await actor.hasPendingChangesForTesting()
         XCTAssertFalse(hasPendingChanges)
 
@@ -1391,6 +1393,7 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(try assertion.fetchCount(FetchDescriptor<Episode>()), 2)
         XCTAssertEqual(stored.episodes?.first { $0.guid == "a" }?.positionSeconds, 75)
         XCTAssertEqual(stored.episodes?.first { $0.guid == "a" }?.queueItem?.position, 2)
+        XCTAssertFalse(try PendingCloudRemoteActivationIntent.exists(feedURL: feedURL, in: assertion))
     }
 
     func testBulkSaveFailureRetainsConcurrentAlreadyFollowedResult() async throws {

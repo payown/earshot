@@ -330,6 +330,57 @@ enum PendingCloudUnfollowIntent {
     }
 }
 
+/// Restart journal for dependent graph publication after an active remote
+/// subscription promotes a local catalog shell. It is deliberately distinct from
+/// ``PendingCloudFollowIntent``: remote-derived state must never override a newer
+/// subscription tombstone as though it were an explicit local Follow.
+enum PendingCloudRemoteActivationIntent {
+    static func intents(in context: ModelContext) throws -> [(token: String, feed: String)] {
+        try PendingCloudIntent.intents(
+            prefix: SettingsKey.pendingCloudRemoteActivationPrefix,
+            in: context
+        )
+    }
+
+    static func tokens(feedURL: String, in context: ModelContext) throws -> [String] {
+        let feed = FeedURLIdentity.canonical(feedURL)
+        return try intents(in: context).filter { $0.feed == feed }.map(\.token)
+    }
+
+    static func exists(feedURL: String, in context: ModelContext) throws -> Bool {
+        try !tokens(feedURL: feedURL, in: context).isEmpty
+    }
+
+    static func set(feedURL: String, in context: ModelContext) throws {
+        try PendingCloudIntent.set(
+            feedURL: feedURL,
+            prefix: SettingsKey.pendingCloudRemoteActivationPrefix,
+            in: context
+        )
+    }
+
+    static func clear(feedURL: String, in context: ModelContext) throws {
+        try PendingCloudIntent.clear(
+            feedURL: feedURL,
+            prefix: SettingsKey.pendingCloudRemoteActivationPrefix,
+            in: context
+        )
+    }
+
+    static func clear(
+        feedURL: String,
+        matching token: String,
+        in context: ModelContext
+    ) throws {
+        try PendingCloudIntent.clear(
+            feedURL: feedURL,
+            token: token,
+            prefix: SettingsKey.pendingCloudRemoteActivationPrefix,
+            in: context
+        )
+    }
+}
+
 enum LocalAppSettingIdentity {
     static func rows(for key: String, in context: ModelContext) throws -> [LocalAppSetting] {
         try context.fetch(

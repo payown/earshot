@@ -61,6 +61,7 @@ actor EpisodeFilterMaintenance {
         var dismissedFromInbox = 0
         var removedFromQueue = 0
         var retainedCurrentlyPlaying = 0
+        var stagedFollowedRemoval = false
 
         for (index, episode) in candidates.enumerated() {
             try Task.checkCancellation()
@@ -77,6 +78,11 @@ actor EpisodeFilterMaintenance {
             }
 
             if let queueItem = episode.queueItem {
+                stagedFollowedRemoval = PendingCloudQueueMutation.stageMembership(
+                    episode: episode,
+                    isQueued: false,
+                    in: modelContext
+                ) || stagedFollowedRemoval
                 modelContext.delete(queueItem)
                 if episode.status == .inQueue { episode.status = .newEpisode }
                 removedFromQueue += 1
@@ -88,7 +94,12 @@ actor EpisodeFilterMaintenance {
             if index.isMultiple(of: 100) { await Task.yield() }
         }
 
-        if removedFromQueue > 0 { recompactQueue() }
+        if removedFromQueue > 0 {
+            recompactQueue()
+            if stagedFollowedRemoval {
+                PendingCloudQueueMutation.stageOrdering(in: modelContext)
+            }
+        }
         if modelContext.hasChanges { try modelContext.save() }
         return ExistingEpisodeFilterReport(
             evaluated: candidates.count,

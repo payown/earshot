@@ -1297,6 +1297,7 @@ actor FeedRefreshActor {
             podcast.lastSeenPubDate = now
         }
         try PendingCloudUnfollowIntent.clear(feedURL: canonical, in: modelContext)
+        try PendingCloudRemoteActivationIntent.clear(feedURL: canonical, in: modelContext)
         try PendingCloudFollowIntent.set(feedURL: canonical, in: modelContext)
         AppLog.subscriptions.info(
             "Subscribed to \(podcast.title, privacy: .public) with \(parsedEpisodes.count) feed episodes"
@@ -1883,11 +1884,20 @@ actor FeedRefreshActor {
     private func enqueueAtEnd(_ episodes: [Episode]) {
         let descriptor = FetchDescriptor<QueueItem>(sortBy: [SortDescriptor(\.position)])
         var items = ((try? modelContext.fetch(descriptor)) ?? []).filter { $0.episode != nil }
+        var stagedFollowedAddition = false
         for episode in episodes where episode.queueItem == nil {
+            stagedFollowedAddition = PendingCloudQueueMutation.stageMembership(
+                episode: episode,
+                isQueued: true,
+                in: modelContext
+            ) || stagedFollowedAddition
             let item = QueueItem(episode: episode, position: items.count)
             modelContext.insert(item)
             episode.status = .inQueue
             items.append(item)
+        }
+        if stagedFollowedAddition {
+            PendingCloudQueueMutation.stageOrdering(in: modelContext)
         }
         for (index, item) in items.enumerated() where item.position != index {
             item.position = index
@@ -1925,11 +1935,22 @@ actor FeedRefreshActor {
         )
         guard !evictIDs.isEmpty else { return }
 
+        var stagedFollowedRemoval = false
         for item in queued where evictIDs.contains(item.persistentModelID) {
             // Dequeue only: keep the episode in the library, dismissed as
             // auto-queue left it, so it neither floods the inbox nor is deleted.
-            item.episode?.status = .newEpisode
+            if let episode = item.episode {
+                stagedFollowedRemoval = PendingCloudQueueMutation.stageMembership(
+                    episode: episode,
+                    isQueued: false,
+                    in: modelContext
+                ) || stagedFollowedRemoval
+                episode.status = .newEpisode
+            }
             modelContext.delete(item)
+        }
+        if stagedFollowedRemoval {
+            PendingCloudQueueMutation.stageOrdering(in: modelContext)
         }
         recompactQueue()
         AppLog.subscriptions.info(
