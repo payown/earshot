@@ -182,6 +182,8 @@ enum StoreMigration {
         case beforeCompletedFinalOpen
         case beforeFreshStoreMarkers
         case afterFreshV9MirroredFinalization
+        case afterMirroredV10Preparation
+        case afterLocalV11Preparation
         case afterBridgeMarker
         case beforeSplitMarker
         case afterSplitMarker
@@ -287,7 +289,7 @@ enum StoreMigration {
         return false
     }
 
-    /// Opens the current split V11 store, advances V8/V9/V10 stores, or
+    /// Opens the current split V12 store, advances V8/V9/V10/V11 stores, or
     /// upgrades a supported V5/V6/V7 store through a bounded local-state preflight.
     /// V5 is the evidence-backed production floor: public App Store build 155
     /// created V5, while TestFlight build 161 created V6. Earlier SwiftData
@@ -308,8 +310,9 @@ enum StoreMigration {
             throw StoreMigrationFailure.operational(underlying: error)
         }
         let localURL = localStoreURL(for: url)
+        try rejectStoresNewerThanApp(mirroredURL: url, localURL: localURL)
 
-        // A settled V11 launch needs one final two-store open and the bounded
+        // A settled V12 launch needs one final two-store open and the bounded
         // projection of device-local rows. Read-only metadata classification
         // comes first so an older store can never be opened as V10 without the
         // migration safety gate below.
@@ -372,14 +375,15 @@ enum StoreMigration {
         }
 
         // A process death inside the initial two-configuration open can leave
-        // only one empty V9 or V10 file. Prove the existing configuration empty,
+        // only one empty V9, V10, V11, or current file. Prove the existing
+        // configuration empty,
         // advance it when needed, then create and verify the missing companion.
         let mirroredExists = FileManager.default.fileExists(atPath: url.path)
         let localExists = FileManager.default.fileExists(atPath: localURL.path)
         if mirroredExists != localExists {
             let existingURL = mirroredExists ? url : localURL
             if let existingMajor = try? storeMajorVersion(at: existingURL),
-               [9, 10, MigrationBackupManager.targetSchemaMajor].contains(existingMajor) {
+               [9, 10, 11, MigrationBackupManager.targetSchemaMajor].contains(existingMajor) {
                 do {
                     let existingIsEmpty = if mirroredExists {
                         try isProvenEmptyMirroredStore(at: url, major: existingMajor)
@@ -476,8 +480,8 @@ enum StoreMigration {
         let unmarkedMirroredMajor = try? storeMajorVersion(at: url)
         let unmarkedLocalMajor = try? storeMajorVersion(at: localURL)
         if let unmarkedMirroredMajor, let unmarkedLocalMajor,
-           [9, 10, 11].contains(unmarkedMirroredMajor),
-           [9, 10, 11].contains(unmarkedLocalMajor),
+           [9, 10, 11, 12].contains(unmarkedMirroredMajor),
+           [9, 10, 11, 12].contains(unmarkedLocalMajor),
            unmarkedMirroredMajor == 9 || unmarkedLocalMajor == 9 {
             do {
                 guard try isProvenEmptyMirroredStore(
@@ -582,19 +586,21 @@ enum StoreMigration {
         } catch {
             throw StoreMigrationFailure.operational(underlying: error)
         }
-        AppLog.data.info("V11 device-local copy validated")
+        AppLog.data.info("V12 device-local copy validated")
         progress(.migratingMirroredStore)
         do {
             try profiled("mirrored-store-migration") {
                 try finalizeMirroredStore(at: url)
             }
+        } catch let failure as InjectedMigrationFailure {
+            throw failure
         } catch {
             if indicatesNewerStore(error) {
                 throw StoreOpenError.storeNewerThanApp(underlying: error)
             }
             throw StoreMigrationFailure.operational(underlying: error)
         }
-        AppLog.data.info("V11 mirrored-store cutover completed")
+        AppLog.data.info("V12 mirrored-store cutover completed")
         progress(.openingAndRepairing)
         do {
             return try profiled("final-open-hydrate-and-repair") {
@@ -786,7 +792,7 @@ enum StoreMigration {
             // file. Open the local URL as the sole full-schema configuration so
             // it gets the same metadata as the later two-store container without
             // creating and prematurely unlinking an empty staging database.
-            let full = Schema(versionedSchema: EarshotSchemaV11.self)
+            let full = Schema(versionedSchema: EarshotSchemaV12.self)
             let container = try ModelContainer(
                 for: full,
                 configurations: ModelConfiguration(
@@ -878,10 +884,13 @@ enum StoreMigration {
                 )
                 return rows.contains { $0.value == "1" }
             }
-            guard [10, 11].contains(major) else { return false }
-            let full = major == 10
-                ? Schema(versionedSchema: EarshotSchemaV10.self)
-                : Schema(versionedSchema: EarshotSchemaV11.self)
+            guard [10, 11, 12].contains(major) else { return false }
+            let full: Schema
+            switch major {
+            case 10: full = Schema(versionedSchema: EarshotSchemaV10.self)
+            case 11: full = Schema(versionedSchema: EarshotSchemaV11.self)
+            default: full = Schema(versionedSchema: EarshotSchemaV12.self)
+            }
             let container = try ModelContainer(
                 for: full,
                 configurations: ModelConfiguration(
@@ -889,6 +898,22 @@ enum StoreMigration {
                     cloudKitDatabase: .none
                 )
             )
+            if major == 10 {
+                let key = splitCompletionKey
+                return try ModelContext(container).fetch(
+                    FetchDescriptor<EarshotSchemaV10.LocalAppSetting>(
+                        predicate: #Predicate { $0.key == key }
+                    )
+                ).contains { $0.value == "1" }
+            }
+            if major == 11 {
+                let key = splitCompletionKey
+                return try ModelContext(container).fetch(
+                    FetchDescriptor<EarshotSchemaV11.LocalAppSetting>(
+                        predicate: #Predicate { $0.key == key }
+                    )
+                ).contains { $0.value == "1" }
+            }
             return LocalAppSettingIdentity.value(
                 for: splitCompletionKey, in: ModelContext(container)
             ) == "1"
@@ -896,13 +921,16 @@ enum StoreMigration {
     }
 
     private static func hasIdentityRepairCompletionMarker(at localURL: URL) -> Bool {
-        guard let major = try? storeMajorVersion(at: localURL), [10, 11].contains(major) else {
+        guard let major = try? storeMajorVersion(at: localURL), [10, 11, 12].contains(major) else {
             return false
         }
         return (try? autoreleasepool {
-            let full = major == 10
-                ? Schema(versionedSchema: EarshotSchemaV10.self)
-                : Schema(versionedSchema: EarshotSchemaV11.self)
+            let full: Schema
+            switch major {
+            case 10: full = Schema(versionedSchema: EarshotSchemaV10.self)
+            case 11: full = Schema(versionedSchema: EarshotSchemaV11.self)
+            default: full = Schema(versionedSchema: EarshotSchemaV12.self)
+            }
             let container = try ModelContainer(
                 for: full,
                 configurations: ModelConfiguration(
@@ -910,6 +938,22 @@ enum StoreMigration {
                     cloudKitDatabase: .none
                 )
             )
+            if major == 10 {
+                let key = identityRepairCompletionKey
+                return try ModelContext(container).fetch(
+                    FetchDescriptor<EarshotSchemaV10.LocalAppSetting>(
+                        predicate: #Predicate { $0.key == key }
+                    )
+                ).contains { $0.value == "1" }
+            }
+            if major == 11 {
+                let key = identityRepairCompletionKey
+                return try ModelContext(container).fetch(
+                    FetchDescriptor<EarshotSchemaV11.LocalAppSetting>(
+                        predicate: #Predicate { $0.key == key }
+                    )
+                ).contains { $0.value == "1" }
+            }
             return LocalAppSettingIdentity.value(
                 for: identityRepairCompletionKey, in: ModelContext(container)
             ) == "1"
@@ -917,14 +961,14 @@ enum StoreMigration {
     }
 
     private static func openFinal(mirroredURL: URL, localURL: URL) throws -> ModelContainer {
-        let full = Schema(versionedSchema: EarshotSchemaV11.self)
+        let full = Schema(versionedSchema: EarshotSchemaV12.self)
         let mirrored = ModelConfiguration(
-            "FutureMirrored", schema: Schema(EarshotSchemaV11.mirroredModels),
+            "FutureMirrored", schema: Schema(EarshotSchemaV12.mirroredModels),
             url: mirroredURL,
             cloudKitDatabase: CloudKitLaunchPolicy.mirroredDatabase()
         )
         let local = ModelConfiguration(
-            "DeviceLocal", schema: Schema(EarshotSchemaV11.localModels),
+            "DeviceLocal", schema: Schema(EarshotSchemaV12.localModels),
             url: localURL, cloudKitDatabase: .none
         )
         return try ModelContainer(for: full, configurations: mirrored, local)
@@ -941,9 +985,9 @@ enum StoreMigration {
         try context.save()
     }
 
-    /// A force quit can occur after SwiftData creates both V10 files but before
+    /// A force quit can occur after SwiftData creates both current files but before
     /// the fresh-store markers are committed. Resume only when every user and
-    /// device-local entity is empty; any nonempty unmarked V11 store is routed
+    /// device-local entity is empty; any nonempty unmarked V12 store is routed
     /// to nondestructive recovery instead of being mistaken for a fresh install.
     private static func isProvenEmptyUnmarkedStore(in context: ModelContext) throws -> Bool {
         guard LocalAppSettingIdentity.value(for: splitCompletionKey, in: context) == nil,
@@ -1008,19 +1052,20 @@ enum StoreMigration {
                     )
                 )
                 let context = ModelContext(container)
-                return try context.fetchCount(FetchDescriptor<Podcast>()) == 0
-                    && context.fetchCount(FetchDescriptor<Episode>()) == 0
-                    && context.fetchCount(FetchDescriptor<QueueItem>()) == 0
-                    && context.fetchCount(FetchDescriptor<ListeningSession>()) == 0
-                    && context.fetchCount(FetchDescriptor<Bookmark>()) == 0
-                    && context.fetchCount(FetchDescriptor<PodcastFolder>()) == 0
-                    && context.fetchCount(FetchDescriptor<FolderMembership>()) == 0
-                    && context.fetchCount(FetchDescriptor<RecentlyExpired>()) == 0
-                    && context.fetchCount(FetchDescriptor<QuickActionConfig>()) == 0
-                    && context.fetchCount(FetchDescriptor<AppSetting>()) == 0
-                    && context.fetchCount(FetchDescriptor<EpisodeFolderMembership>()) == 0
+                return try isFrozenV10V11MirroredStoreEmpty(in: context)
             case 11:
                 let schema = Schema(versionedSchema: EarshotMirroredSchemaV11.self)
+                let container = try ModelContainer(
+                    for: schema,
+                    configurations: ModelConfiguration(
+                        "FutureMirrored", schema: schema, url: url,
+                        cloudKitDatabase: .none
+                    )
+                )
+                let context = ModelContext(container)
+                return try isFrozenV10V11MirroredStoreEmpty(in: context)
+            case 12:
+                let schema = Schema(versionedSchema: EarshotMirroredSchemaV12.self)
                 let container = try ModelContainer(
                     for: schema,
                     configurations: ModelConfiguration(
@@ -1044,6 +1089,34 @@ enum StoreMigration {
                 return false
             }
         }
+    }
+
+    private static func isFrozenV10V11MirroredStoreEmpty(
+        in context: ModelContext
+    ) throws -> Bool {
+        try context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.Podcast>()
+        ) == 0 && context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.Episode>()
+        ) == 0 && context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.QueueItem>()
+        ) == 0 && context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.ListeningSession>()
+        ) == 0 && context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.Bookmark>()
+        ) == 0 && context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.PodcastFolder>()
+        ) == 0 && context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.FolderMembership>()
+        ) == 0 && context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.RecentlyExpired>()
+        ) == 0 && context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.QuickActionConfig>()
+        ) == 0 && context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.AppSetting>()
+        ) == 0 && context.fetchCount(
+            FetchDescriptor<EarshotFrozenMirroredSchemaV10V11.EpisodeFolderMembership>()
+        ) == 0
     }
 
     private static func isProvenEmptyLocalStore(at url: URL, major: Int) throws -> Bool {
@@ -1076,17 +1149,38 @@ enum StoreMigration {
                     )
                 )
                 let context = ModelContext(container)
-                return try context.fetchCount(FetchDescriptor<LocalPodcastState>()) == 0
+                return try context.fetchCount(
+                    FetchDescriptor<EarshotSchemaV10.LocalPodcastState>()
+                ) == 0
                     && context.fetchCount(
                         FetchDescriptor<EarshotSchemaV10.LocalEpisodeState>()
                     ) == 0
-                    && context.fetchCount(FetchDescriptor<LocalAppSetting>()) == 0
+                    && context.fetchCount(
+                        FetchDescriptor<EarshotSchemaV10.LocalAppSetting>()
+                    ) == 0
             case 11:
                 let schema = Schema(versionedSchema: EarshotSchemaV11.self)
                 let container = try ModelContainer(
                     for: schema,
                     configurations: ModelConfiguration(
                         "DeviceLocal", schema: Schema(EarshotSchemaV11.localModels),
+                        url: url, cloudKitDatabase: .none
+                    )
+                )
+                let context = ModelContext(container)
+                return try context.fetchCount(
+                    FetchDescriptor<EarshotSchemaV11.LocalPodcastState>()
+                ) == 0 && context.fetchCount(
+                    FetchDescriptor<EarshotSchemaV11.LocalEpisodeState>()
+                ) == 0 && context.fetchCount(
+                    FetchDescriptor<EarshotSchemaV11.LocalAppSetting>()
+                ) == 0
+            case 12:
+                let schema = Schema(versionedSchema: EarshotSchemaV12.self)
+                let container = try ModelContainer(
+                    for: schema,
+                    configurations: ModelConfiguration(
+                        "DeviceLocal", schema: Schema(EarshotSchemaV12.localModels),
                         url: url, cloudKitDatabase: .none
                     )
                 )
@@ -1150,11 +1244,18 @@ enum StoreMigration {
             case 10:
                 break
             case 11:
+                break
+            case 12:
                 return
             default:
                 throw CocoaError(.persistentStoreIncompatibleVersionHash)
             }
-            try migrateMirroredV10Store(at: url)
+            if major <= 10 {
+                try failIfInjected(at: .afterMirroredV10Preparation)
+                try migrateMirroredV10StoreToV12(at: url)
+            } else {
+                try migrateMirroredV11Store(at: url)
+            }
         }
     }
 
@@ -1168,11 +1269,17 @@ enum StoreMigration {
         case 10:
             break
         case 11:
+            break
+        case 12:
             return
         default:
             throw CocoaError(.persistentStoreIncompatibleVersionHash)
         }
-        try migrateFullV10Store(at: url, configurationName: "DeviceLocal")
+        if major <= 10 {
+            try migrateFullV10Store(at: url, configurationName: "DeviceLocal")
+            try failIfInjected(at: .afterLocalV11Preparation)
+        }
+        try migrateLocalV11Store(at: url)
     }
 
     private static func migrateFullV8Store(
@@ -1235,14 +1342,38 @@ enum StoreMigration {
         )
     }
 
-    private static func migrateMirroredV10Store(at url: URL) throws {
-        // V11 changes only the separate device-local configuration. The
-        // mirrored model checksum is identical, so record the new version
-        // identifier directly (a staged plan rejects duplicate checksums).
+    private static func migrateMirroredV11Store(at url: URL) throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV12.self)
+        _ = try ModelContainer(
+            for: schema,
+            migrationPlan: EarshotV11ToV12MigrationPlan.self,
+            configurations: ModelConfiguration(
+                "FutureMirrored", schema: Schema(EarshotSchemaV12.mirroredModels),
+                url: url, cloudKitDatabase: .none
+            )
+        )
+    }
+
+    private static func migrateMirroredV10StoreToV12(at url: URL) throws {
+        let schema = Schema(versionedSchema: EarshotSchemaV12.self)
+        _ = try ModelContainer(
+            for: schema,
+            configurations: ModelConfiguration(
+                "FutureMirrored", schema: Schema(EarshotSchemaV12.mirroredModels),
+                url: url, cloudKitDatabase: .none
+            )
+        )
+    }
+
+    private static func migrateLocalV11Store(at url: URL) throws {
+        // V12 changes only the mirrored configuration. The local checksum is
+        // unchanged, so the staged plan would contain duplicate local versions.
+        // Advance only the aggregate version identifier, then let the final V12
+        // open perform the compatibility check.
         var metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
             type: .sqlite, at: url
         )
-        metadata[NSStoreModelVersionIdentifiersKey] = ["11.0.0"]
+        metadata[NSStoreModelVersionIdentifiersKey] = ["12.0.0"]
         try NSPersistentStoreCoordinator.setMetadata(
             metadata, forPersistentStoreOfType: NSSQLiteStoreType,
             at: url, options: nil
@@ -1259,6 +1390,24 @@ enum StoreMigration {
             throw CocoaError(.persistentStoreIncompatibleVersionHash)
         }
         return major
+    }
+
+    /// Metadata-only downgrade gate. It runs before any SwiftData container can
+    /// infer a reverse lightweight migration and rewrite a newer store.
+    static func rejectStoresNewerThanApp(
+        mirroredURL: URL,
+        localURL: URL,
+        supportedMajor: Int = MigrationBackupManager.targetSchemaMajor
+    ) throws {
+        for candidate in [mirroredURL, localURL]
+        where FileManager.default.fileExists(atPath: candidate.path) {
+            guard let major = try? storeMajorVersion(at: candidate) else { continue }
+            if major > supportedMajor {
+                throw StoreOpenError.storeNewerThanApp(
+                    underlying: CocoaError(.persistentStoreIncompatibleVersionHash)
+                )
+            }
+        }
     }
 
     /// Keeps the safety gate from turning corruption into a misleading storage
@@ -1379,7 +1528,7 @@ enum StoreMigration {
         return container
     }
 
-    /// Repairs relationship foreign keys before SwiftData opens the V11 store.
+    /// Repairs relationship foreign keys before SwiftData opens the current store.
     /// A dangling to-one is represented as a future fault; asking that object
     /// for even its persistent identifier traps in SwiftData and cannot be
     /// caught. SQL is therefore the only safe repair boundary for stores left

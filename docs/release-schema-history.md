@@ -229,6 +229,14 @@ schema remains V10; supported migration sources remain V5 and V6. Production
 schema deployment and TestFlight upload remain separate, explicitly approved
 release actions.
 
+The pending discovery workspace introduces SwiftData V12 but has no assigned
+build or distribution record. Its sole persisted addition is optional mirrored
+`Podcast.subscriptionStateRaw`; exact nested V10/V11 snapshots support V5–V11
+forward migration. Split V11 requires a verified, atomically restorable paired
+snapshot before advancing. Never reopen V12 with an older V11 binary: the new
+metadata gate cannot retrofit protection into already-shipped code. Record the
+first build and commit only after those release actions occur.
+
 ## Builds that reached distribution
 
 The build lists are exact. A missing number in a range was not present in App

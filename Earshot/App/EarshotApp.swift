@@ -212,7 +212,8 @@ final class AppRuntime {
     ) {
         self.mode = mode
         // Migration progress promotes the silent launch placeholder; file
-        // existence alone cannot distinguish a settled V11 store from V6-V10.
+        // existence alone cannot distinguish a settled current store from an
+        // older supported schema.
         self.showsLaunchPreparation = showsLaunchPreparation ?? false
         self.recoveryBackup = recoveryBackup
         self.launchOperation = launchOperation ?? Self.productionLaunch
