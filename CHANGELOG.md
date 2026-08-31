@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Feed refreshes now recognize publishers replacing broken episode audio without changing the episode GUID or publication date. Earshot updates the existing episode, safely replaces a stale download while preserving listening state, rejects invalid download payloads, and offers an accessible Refresh episode audio action when manual recovery is needed.
 - Player actions now verify that a retained episode still exists before using it, and identity repair unloads duplicate episodes before deleting their SwiftData rows.
 - Compact Cloud projection reconciliation now runs on a background SwiftData actor so large libraries and incoming iCloud changes do not block playback controls, navigation, or VoiceOver.
 - Transcript feeds offering multiple representations now prefer structured JSON, WebVTT, or SRT over HTML. Semantic HTML cue times also become structured metadata, so all three transcript styles work for providers such as Buzzsprout while ordinary spoken clock times remain intact. (build 240)

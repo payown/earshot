@@ -224,6 +224,9 @@ Kashe is a real-feeling person, not a symbol. Her blindness is part of her life,
   at display size so fast scrolling no longer hitches. Kashe always has audio
   playing, so she feels all of it at once; the through-line is the app no longer
   fighting VoiceOver while a show plays (Chapter 28)
+- When a publisher quietly replaced broken audio without publishing a new
+  episode, Kashe recovered the existing episode with Refresh episode audio
+  instead of unfollowing the show or losing her listening place (Chapter 80)
 - The two queue "add" actions were renamed from "Add to queue (top)" / "Add to
   queue (bottom)" to "Play next" / "Add to end of queue"; Play next now inserts
   right after the now-playing episode (front fallback when nothing relevant is
@@ -2937,4 +2940,54 @@ Renata asked whether she had found a new podcast.
 “I found one episode,” Kashe said. “I don't need a membership card for the
 whole shelf.”
 
+---
+
+Chapter 80, Build 250
+
+The episode that came back different
+
+What changed
+
+Podcast publishers sometimes replace a broken audio file without changing the
+episode's identity or publication date. Earshot used to see that as the same old
+episode and keep its original audio. A Library refresh now rechecks a bounded
+set of recent and active episodes, updates the existing record, and replaces a
+stale download without losing played state, Inbox state, queue position, or your
+listening place.
+
+If a downloaded copy cannot play, Earshot removes that copy and tries the
+current feed audio once. If the publisher's change cannot be detected
+automatically, the episode Actions menu and Now Playing screen now include
+Refresh episode audio. It fetches that exact episode again and preserves your
+listening state.
+
+Downloads also reject empty responses and web error pages. A download that
+finishes late after an episode was corrected can no longer overwrite the newer
+audio.
+
+What to test
+
+Refresh a show that recently replaced broken or missing audio, then play the
+existing episode without unfollowing and following the show again. If you saved
+the broken copy for offline listening, confirm Earshot replaces it and that the
+new copy plays.
+
+Try Refresh episode audio from an episode's Actions menu and from Now Playing.
+Before refreshing, move into the episode and note whether it is played, in the
+Inbox, or in the queue. Confirm those choices and your listening place remain
+unchanged. If recovery still fails, confirm Earshot says what happened and the
+message remains reachable on Now Playing. Please report the show and episode if
+you find a publisher correction Earshot still misses.
+
+Kashe started an episode in the driveway and heard nothing. The timer moved,
+but the voices did not. Her old answer would have been to unfollow the show,
+follow it again, and hope her place survived the trip.
+
+She opened Actions and chose Refresh episode audio. The same title returned,
+this time with two people already halfway through an argument. Her place was
+still there too.
+
+Renata asked what had changed.
+
+“Apparently the episode,” Kashe said. “It just forgot to introduce itself.”
 More chapters added here as Earshot ships.
