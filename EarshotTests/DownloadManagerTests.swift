@@ -76,6 +76,33 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertNil(episode.downloadPath)
     }
 
+    func testCorrectedMediaCleanupRunsAfterSavedRepairInstruction() async throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://h/feed.xml", title: "Show")
+        let episode = Episode(
+            guid: "corrected", title: "Episode", audioURL: "https://h/new.mp3"
+        )
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try context.save()
+        let staleName = "corrected-media-\(UUID().uuidString).mp3"
+        let staleFile = try plantDownloadFile(named: staleName)
+        let manager = makeManager(context)
+
+        await manager.replaceCorrectedMedia([
+            CorrectedEpisodeMedia(
+                episodeID: episode.persistentModelID,
+                restoreDownloadIntent: false,
+                staleDownloadPath: staleName
+            )
+        ])
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleFile.path))
+        XCTAssertEqual(episode.downloadStatus, .none)
+        XCTAssertNil(episode.downloadPath)
+    }
+
     func testDownloadAllReportsEligibleStartedSkippedAndFailed() async {
         let context = TestStore.freshContext()
         let invalid = Episode(guid: "batch-invalid", title: "Invalid", audioURL: "")
@@ -419,6 +446,58 @@ final class DownloadManagerTests: XCTestCase {
 
         let requestCount = await center.addedRequestCount()
         XCTAssertEqual(requestCount, 0)
+    }
+
+    func testLateCompletionFromSupersededSourceIsDeletedAndCannotBecomeDownloaded() throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://feed.test/rss", title: "Show")
+        let episode = Episode(
+            guid: "corrected-guid", title: "Corrected",
+            audioURL: "https://cdn.test/new.mp3", downloadStatus: .none
+        )
+        episode.podcast = podcast
+        context.insert(podcast)
+        context.insert(episode)
+        try context.save()
+        let name = "earshot-stale-\(UUID().uuidString).mp3"
+        let fileURL = try plantDownloadFile(named: name)
+        let identity = DownloadTaskKey.key(feedURL: podcast.feedURL, guid: episode.guid)
+        let oldSource = try XCTUnwrap(URL(string: "https://cdn.test/old.mp3"))
+        let staleTaskKey = DownloadTransferKey.key(
+            identityKey: identity, sourceURL: oldSource
+        )
+        DownloadManager.setContainerForTesting(context.container)
+        defer { DownloadManager.setContainerForTesting(nil) }
+
+        DownloadManager.handle(PendingDownloadTerminalEvent(
+            taskKey: staleTaskKey,
+            outcome: .finished(fileName: name)
+        ))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertEqual(episode.downloadStatus, .none)
+        XCTAssertNil(episode.downloadPath)
+    }
+
+    func testDownloadPayloadValidationRejectsEmptyAndKnownNonMediaBodies() {
+        XCTAssertFalse(DownloadPayloadValidation.accepts(
+            statusCode: 200, contentType: "audio/mpeg", byteCount: 0
+        ))
+        XCTAssertFalse(DownloadPayloadValidation.accepts(
+            statusCode: 200, contentType: "text/html", byteCount: 500
+        ))
+        XCTAssertFalse(DownloadPayloadValidation.accepts(
+            statusCode: 200, contentType: "application/json", byteCount: 500
+        ))
+        XCTAssertFalse(DownloadPayloadValidation.accepts(
+            statusCode: 404, contentType: "audio/mpeg", byteCount: 500
+        ))
+        XCTAssertTrue(DownloadPayloadValidation.accepts(
+            statusCode: 200, contentType: "audio/mpeg", byteCount: 500
+        ))
+        XCTAssertTrue(DownloadPayloadValidation.accepts(
+            statusCode: 200, contentType: "application/octet-stream", byteCount: 500
+        ))
     }
 
     // MARK: DownloadCleanup — delete downloads after played

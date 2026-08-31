@@ -64,6 +64,24 @@ final class DownloadTaskKeyTests: XCTestCase {
         XCTAssertEqual(trailingSeparator.guid, "https://f|")
     }
 
+    func testVersionedTransferKeyRoundTripsIdentityAndSource() throws {
+        let identity = DownloadTaskKey.key(
+            feedURL: "https://feed.example/rss", guid: "episode|with|pipes"
+        )
+        let source = try XCTUnwrap(URL(string: "https://cdn.example/repaired.mp3?token=1"))
+        let key = DownloadTransferKey.key(identityKey: identity, sourceURL: source)
+
+        XCTAssertEqual(DownloadTransferKey.parse(key)?.identityKey, identity)
+        XCTAssertEqual(DownloadTransferKey.parse(key)?.sourceURL, source.absoluteString)
+        XCTAssertEqual(DownloadTransferKey.identityKey(from: key), identity)
+    }
+
+    func testLegacyTransferKeyRemainsItsOwnIdentity() {
+        let legacy = "https://feed.example/rss|episode"
+        XCTAssertNil(DownloadTransferKey.parse(legacy))
+        XCTAssertEqual(DownloadTransferKey.identityKey(from: legacy), legacy)
+    }
+
     // MARK: episode(matching:in:) resolution
 
     private func insertEpisode(

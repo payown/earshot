@@ -43,7 +43,8 @@ enum DownloadTaskKey {
     /// guid alone, preserving pre-#576 behavior. Synchronous; runs on whatever
     /// context the caller owns (main or a ModelActor's).
     static func episode(matching key: String, in context: ModelContext) -> Episode? {
-        let (feedURL, guid) = parse(key)
+        let identityKey = DownloadTransferKey.parse(key)?.identityKey ?? key
+        let (feedURL, guid) = parse(identityKey)
         let byGUID = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == guid })
         let candidates = (try? context.fetch(byGUID)) ?? []
         guard let feedURL else { return candidates.first }
@@ -54,9 +55,51 @@ enum DownloadTaskKey {
             return match
         }
         if candidates.count == 1 { return candidates.first }
-        var wholeKeyAsGUID = FetchDescriptor<Episode>(predicate: #Predicate { $0.guid == key })
+        var wholeKeyAsGUID = FetchDescriptor<Episode>(
+            predicate: #Predicate { $0.guid == identityKey }
+        )
         wholeKeyAsGUID.fetchLimit = 1
         return (try? context.fetch(wholeKeyAsGUID))?.first
+    }
+}
+
+/// Versioned identity for a background transfer. The source URL is carried in
+/// the task description so a completion delivered after a feed correction can
+/// prove it still belongs to the episode's current enclosure. Older task
+/// descriptions remain plain ``DownloadTaskKey`` values and continue to work.
+enum DownloadTransferKey {
+    private struct Payload: Codable {
+        let identityKey: String
+        let sourceURL: String
+    }
+
+    struct Parsed: Equatable, Sendable {
+        let identityKey: String
+        let sourceURL: String
+    }
+
+    private static let prefix = "earshot-download-v2:"
+
+    static func key(identityKey: String, sourceURL: URL) -> String {
+        let payload = Payload(
+            identityKey: identityKey,
+            sourceURL: sourceURL.absoluteString
+        )
+        guard let data = try? JSONEncoder().encode(payload) else { return identityKey }
+        return prefix + data.base64EncodedString()
+    }
+
+    static func parse(_ value: String) -> Parsed? {
+        guard value.hasPrefix(prefix),
+              let data = Data(base64Encoded: String(value.dropFirst(prefix.count))),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              !payload.identityKey.isEmpty,
+              !payload.sourceURL.isEmpty else { return nil }
+        return Parsed(identityKey: payload.identityKey, sourceURL: payload.sourceURL)
+    }
+
+    static func identityKey(from value: String) -> String {
+        parse(value)?.identityKey ?? value
     }
 }
 
