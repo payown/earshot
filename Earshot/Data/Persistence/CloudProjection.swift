@@ -286,7 +286,7 @@ actor CloudProjectionCoordinator: ModelActor {
         let lastSeenPubDate: Date?
     }
 
-    private struct EpisodeKey: Hashable, Comparable {
+    private struct EpisodeKey: Hashable, Comparable, Sendable {
         let feedURL: String
         let guid: String
 
@@ -294,6 +294,40 @@ actor CloudProjectionCoordinator: ModelActor {
             if lhs.feedURL != rhs.feedURL { return lhs.feedURL < rhs.feedURL }
             return lhs.guid < rhs.guid
         }
+    }
+
+    /// Relationship-free queue state crossing from the projection actor to the
+    /// application-store writer. SwiftData models must never cross this boundary:
+    /// another context may delete their relationship rows while this actor is
+    /// suspended.
+    private struct RemoteQueuePlan: Sendable {
+        struct Entry: Sendable {
+            let key: EpisodeKey
+            let isQueued: Bool
+            let membershipUpdatedAt: Date
+            let membershipModifiedAt: Date
+            let membershipSourceDeviceID: String
+            let position: Int
+            let positionModifiedAt: Date
+            let positionSourceDeviceID: String
+            let metadata: EpisodeMetadata?
+        }
+
+        struct EpisodeMetadata: Sendable {
+            let title: String
+            let audioURL: String
+            let episodeDescription: String?
+            let durationSeconds: Int?
+            let pubDate: Date?
+            let artworkURL: String?
+            let episodeNumber: Int?
+            let seasonNumber: Int?
+            let chapterURL: String?
+            let transcriptURL: String?
+        }
+
+        let entries: [Entry]
+        let currentDeviceID: String
     }
 
     /// A value snapshot of one local history row. Relationship objects may be
@@ -393,6 +427,7 @@ actor CloudProjectionCoordinator: ModelActor {
     private let followActivationCheckpoint: @Sendable (String) throws -> Void
     private let pendingIntentSave: @Sendable (ModelContext) throws -> Void
     private let remoteSubscriptionSave: @Sendable (ModelContext) throws -> Void
+    private let queueApplicationCheckpoint: (@Sendable (String) async throws -> Void)?
     private var isApplyingRemote = false
 
     private init(
@@ -414,7 +449,8 @@ actor CloudProjectionCoordinator: ModelActor {
         pendingIntentSave: @escaping @Sendable (ModelContext) throws -> Void = { try $0.save() },
         remoteSubscriptionSave: @escaping @Sendable (ModelContext) throws -> Void = {
             try $0.save()
-        }
+        },
+        queueApplicationCheckpoint: (@Sendable (String) async throws -> Void)? = nil
     ) {
         let applicationContext = ModelContext(applicationContainer)
         modelExecutor = DefaultSerialModelExecutor(modelContext: applicationContext)
@@ -430,6 +466,7 @@ actor CloudProjectionCoordinator: ModelActor {
         self.followActivationCheckpoint = followActivationCheckpoint
         self.pendingIntentSave = pendingIntentSave
         self.remoteSubscriptionSave = remoteSubscriptionSave
+        self.queueApplicationCheckpoint = queueApplicationCheckpoint
     }
 
     nonisolated static func make(
@@ -489,7 +526,8 @@ actor CloudProjectionCoordinator: ModelActor {
         pendingIntentSave: @escaping @Sendable (ModelContext) throws -> Void = { try $0.save() },
         remoteSubscriptionSave: @escaping @Sendable (ModelContext) throws -> Void = {
             try $0.save()
-        }
+        },
+        queueApplicationCheckpoint: (@Sendable (String) async throws -> Void)? = nil
     ) async -> CloudProjectionCoordinator {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
@@ -504,7 +542,8 @@ actor CloudProjectionCoordinator: ModelActor {
                     pendingFollowFeedURLs: pendingFollowFeedURLs,
                     followActivationCheckpoint: followActivationCheckpoint,
                     pendingIntentSave: pendingIntentSave,
-                    remoteSubscriptionSave: remoteSubscriptionSave
+                    remoteSubscriptionSave: remoteSubscriptionSave,
+                    queueApplicationCheckpoint: queueApplicationCheckpoint
                 ))
             }
         }
@@ -1013,7 +1052,7 @@ actor CloudProjectionCoordinator: ModelActor {
             center.post(name: .earshotInboxDidChange, object: nil)
         }
         try publishLocalQueueChanges(now: .now, onlyIfCloudEmpty: true)
-        let queueChanged = try applyRemoteQueue(
+        let queueChanged = try await applyRemoteQueue(
             appContext: appContext,
             cloudContext: cloudContext
         )
@@ -2693,7 +2732,7 @@ actor CloudProjectionCoordinator: ModelActor {
     private func applyRemoteQueue(
         appContext: ModelContext,
         cloudContext: ModelContext
-    ) throws -> Bool {
+    ) async throws -> Bool {
         let rows = try cloudContext.fetch(FetchDescriptor<CloudQueueItemProjection>())
             .filter { $0.deletedAt == nil && !$0.episodeGUID.isEmpty }
         var contributionByDevice: [String: CloudQueueItemProjection] = [:]
@@ -2724,76 +2763,292 @@ actor CloudProjectionCoordinator: ModelActor {
                 .sorted(by: Self.queueProjectionOrder)
                 .first
         }
-        var episodes = applicationEpisodes(matching: Set(winners.keys))
-        for key in winners.keys.sorted() where episodes[key] == nil {
-            guard let winner = winners[key],
-                  winner.isQueued,
-                  let metadata = grouped[key]?.sorted(by: Self.queueProjectionOrder).first(where: {
-                      $0.episodeTitle?.isEmpty == false && $0.episodeAudioURL?.isEmpty == false
-                  }),
-                  let title = metadata.episodeTitle,
-                  !title.isEmpty,
-                  let audioURL = metadata.episodeAudioURL,
-                  !audioURL.isEmpty,
-                  let podcast = try PodcastIdentityService(context: appContext)
-                    .existingFollowed(feedURL: key.feedURL)
-            else { continue }
+
+        let plan = RemoteQueuePlan(
+            entries: winners.keys.sorted().compactMap { key in
+                guard let membership = winners[key] else { return nil }
+                let position = positionWinners[key] ?? membership
+                let metadataRow = grouped[key]?
+                    .sorted(by: Self.queueProjectionOrder)
+                    .first {
+                        $0.episodeTitle?.isEmpty == false
+                            && $0.episodeAudioURL?.isEmpty == false
+                    }
+                let metadata: RemoteQueuePlan.EpisodeMetadata?
+                if let metadataRow,
+                   let title = metadataRow.episodeTitle,
+                   let audioURL = metadataRow.episodeAudioURL {
+                    metadata = RemoteQueuePlan.EpisodeMetadata(
+                        title: title,
+                        audioURL: audioURL,
+                        episodeDescription: metadataRow.episodeDescription,
+                        durationSeconds: metadataRow.episodeDurationSeconds,
+                        pubDate: metadataRow.episodePubDate,
+                        artworkURL: metadataRow.episodeArtworkURL,
+                        episodeNumber: metadataRow.episodeNumber,
+                        seasonNumber: metadataRow.episodeSeasonNumber,
+                        chapterURL: metadataRow.episodeChapterURL,
+                        transcriptURL: metadataRow.episodeTranscriptURL
+                    )
+                } else {
+                    metadata = nil
+                }
+                return RemoteQueuePlan.Entry(
+                    key: key,
+                    isQueued: membership.isQueued,
+                    membershipUpdatedAt: membership.membershipUpdatedAt == .distantPast
+                        ? membership.modifiedAt : membership.membershipUpdatedAt,
+                    membershipModifiedAt: membership.modifiedAt,
+                    membershipSourceDeviceID: membership.sourceDeviceID,
+                    position: position.position,
+                    positionModifiedAt: position.modifiedAt,
+                    positionSourceDeviceID: position.sourceDeviceID,
+                    metadata: metadata
+                )
+            },
+            currentDeviceID: deviceID
+        )
+
+        // The testing checkpoint intentionally faults the coordinator's old
+        // inverse before playback deletes it in another context. Production does
+        // not resolve this graph; only the Sendable plan crosses to MainActor.
+        if let queueApplicationCheckpoint {
+            let episodes = applicationEpisodes(matching: Set(winners.keys))
+            let inverseCount = episodes.values.reduce(into: 0) { count, episode in
+                if episode.queueItem != nil { count += 1 }
+            }
+            try await queueApplicationCheckpoint("episodes-resolved:\(inverseCount)")
+        }
+
+        let changed = try await Self.applyRemoteQueuePlan(
+            plan,
+            applicationContainer: modelContainer,
+            checkpoint: queueApplicationCheckpoint
+        )
+        if cloudContext.hasChanges { try cloudContext.save() }
+        return changed
+    }
+
+    /// MainActor serializes this transaction with playback queue writes and keeps
+    /// the UI's registered graph coherent. Commit any pre-existing UI work before
+    /// establishing the rollback boundary; a queue-pass failure can then roll
+    /// back only mutations made by this transaction.
+    @MainActor
+    private static func applyRemoteQueuePlan(
+        _ plan: RemoteQueuePlan,
+        applicationContainer: ModelContainer,
+        checkpoint: (@Sendable (String) async throws -> Void)?
+    ) async throws -> Bool {
+        let context = applicationContainer.mainContext
+        if context.hasChanges {
+            // Queue repositories already use immediate saves. Preserve unrelated
+            // dirty UI edits by committing them; never roll them back as though
+            // they belonged to remote queue application.
+            try context.save()
+        }
+        if let checkpoint {
+            let plannedKeys = Set(plan.entries.map(\.key))
+            // Complete model iteration before awaiting and retain only a scalar.
+            let existingCount = try context.fetch(FetchDescriptor<QueueItem>())
+                .reduce(into: 0) { count, item in
+                    guard let episode = item.episode,
+                          let key = episodeKey(for: episode),
+                          plannedKeys.contains(key) else { return }
+                    count += 1
+                }
+            try await checkpoint("existing-fetched:\(existingCount)")
+        }
+
+        // The test hook can suspend. Save any work that arrived during it before
+        // establishing the no-await transaction's rollback boundary.
+        if context.hasChanges { try context.save() }
+        do {
+            let changed = try applyRemoteQueuePlanSynchronously(plan, in: context)
+            if context.hasChanges { try context.save() }
+            return changed
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    /// Re-fetch, decide, mutate, and save without an actor suspension. This is
+    /// deliberately a small application-store critical section; projection
+    /// scanning and winner calculation stay on the Cloud actor.
+    @MainActor
+    private static func applyRemoteQueuePlanSynchronously(
+        _ plan: RemoteQueuePlan,
+        in context: ModelContext
+    ) throws -> Bool {
+        let entriesByKey = Dictionary(uniqueKeysWithValues: plan.entries.map { ($0.key, $0) })
+        let pendingMemberships = try PendingCloudQueueMutation.memberships(in: context)
+        let pendingOrderings = try PendingCloudQueueMutation.orderings(in: context)
+        var pendingMembershipByKey: [EpisodeKey: PendingCloudQueueMutation.Membership] = [:]
+        for pending in pendingMemberships {
+            let key = EpisodeKey(feedURL: pending.feedURL, guid: pending.guid)
+            if let existing = pendingMembershipByKey[key],
+               existing.eventDate > pending.eventDate
+                || (existing.eventDate == pending.eventDate && existing.token < pending.token) {
+                continue
+            }
+            pendingMembershipByKey[key] = pending
+        }
+        let latestOrdering = pendingOrderings.max {
+            if $0.eventDate != $1.eventDate { return $0.eventDate < $1.eventDate }
+            return $0.token > $1.token
+        }?.eventDate
+
+        let identity = PodcastIdentityService(context: context)
+        let requestedFeeds = Set(plan.entries.map { $0.key.feedURL })
+        var podcastByFeed: [String: Podcast] = [:]
+        for feed in requestedFeeds.sorted() {
+            if let podcast = try identity.existingFollowed(feedURL: feed) {
+                podcastByFeed[feed] = podcast
+            }
+        }
+        let requestedByFeed = Dictionary(grouping: plan.entries.map(\.key), by: \.feedURL)
+        var episodesByKey: [EpisodeKey: Episode] = [:]
+        for (feed, keys) in requestedByFeed {
+            guard let podcast = podcastByFeed[feed] else { continue }
+            let guids = keys.map(\.guid)
+            let podcastID = podcast.persistentModelID
+            let episodes = try context.fetch(FetchDescriptor<Episode>(predicate: #Predicate {
+                $0.podcast?.persistentModelID == podcastID && guids.contains($0.guid)
+            }))
+            for episode in episodes.sorted(by: episodeOrder) {
+                let key = EpisodeKey(feedURL: feed, guid: episode.guid)
+                if episodesByKey[key] == nil { episodesByKey[key] = episode }
+            }
+        }
+
+        let existing = try context.fetch(FetchDescriptor<QueueItem>(
+            sortBy: [SortDescriptor(\.position)]
+        ))
+        var existingByKey: [EpisodeKey: QueueItem] = [:]
+        var keyByItemID: [PersistentIdentifier: EpisodeKey] = [:]
+        var changed = false
+        for item in existing {
+            guard let episode = item.episode,
+                  episode.podcast?.isFollowed == true,
+                  let key = episodeKey(for: episode) else { continue }
+            keyByItemID[item.persistentModelID] = key
+            if existingByKey[key] == nil {
+                existingByKey[key] = item
+            } else {
+                // Repair an aged duplicate without ever assigning a contested
+                // one-to-one inverse.
+                context.delete(item)
+                changed = true
+            }
+        }
+
+        func pendingMembershipWins(
+            _ pending: PendingCloudQueueMutation.Membership,
+            over remote: RemoteQueuePlan.Entry
+        ) -> Bool {
+            if pending.eventDate != remote.membershipUpdatedAt {
+                return pending.eventDate > remote.membershipUpdatedAt
+            }
+            // Publishing an equal-clock edit updates this device's own row.
+            if remote.membershipSourceDeviceID == plan.currentDeviceID { return true }
+            let virtualModifiedAt = max(
+                pending.eventDate,
+                latestOrdering ?? pending.eventDate
+            )
+            if virtualModifiedAt != remote.membershipModifiedAt {
+                return virtualModifiedAt > remote.membershipModifiedAt
+            }
+            return plan.currentDeviceID < remote.membershipSourceDeviceID
+        }
+
+        func localPositionWins(
+            for key: EpisodeKey,
+            remote: RemoteQueuePlan.Entry
+        ) -> Bool {
+            let membershipDate = pendingMembershipByKey[key].flatMap {
+                $0.isQueued ? $0.eventDate : nil
+            }
+            guard let localDate = [latestOrdering, membershipDate]
+                .compactMap({ $0 }).max() else { return false }
+            if localDate != remote.positionModifiedAt {
+                return localDate > remote.positionModifiedAt
+            }
+            if remote.positionSourceDeviceID == plan.currentDeviceID { return true }
+            return plan.currentDeviceID < remote.positionSourceDeviceID
+        }
+
+        var effectiveQueuedByKey: [EpisodeKey: Bool] = [:]
+        var targetPositionByKey: [EpisodeKey: Int] = [:]
+        for entry in plan.entries {
+            let pending = pendingMembershipByKey[entry.key]
+            let queued = pending.map { pendingMembershipWins($0, over: entry) }
+                == true ? pending!.isQueued : entry.isQueued
+            effectiveQueuedByKey[entry.key] = queued
+            if localPositionWins(for: entry.key, remote: entry),
+               let current = existingByKey[entry.key] {
+                targetPositionByKey[entry.key] = current.position
+            } else {
+                targetPositionByKey[entry.key] = entry.position
+            }
+        }
+
+        for entry in plan.entries where effectiveQueuedByKey[entry.key] == true
+            && episodesByKey[entry.key] == nil {
+            guard let podcast = podcastByFeed[entry.key.feedURL],
+                  let metadata = entry.metadata else { continue }
             let episode = Episode(
-                guid: key.guid,
-                title: title,
-                audioURL: audioURL,
+                guid: entry.key.guid,
+                title: metadata.title,
+                audioURL: metadata.audioURL,
                 episodeDescription: metadata.episodeDescription,
-                durationSeconds: metadata.episodeDurationSeconds,
-                pubDate: metadata.episodePubDate,
-                artworkURL: metadata.episodeArtworkURL,
+                durationSeconds: metadata.durationSeconds,
+                pubDate: metadata.pubDate,
+                artworkURL: metadata.artworkURL,
                 episodeNumber: metadata.episodeNumber,
-                seasonNumber: metadata.episodeSeasonNumber,
-                chapterURL: metadata.episodeChapterURL,
-                transcriptURL: metadata.episodeTranscriptURL,
+                seasonNumber: metadata.seasonNumber,
+                chapterURL: metadata.chapterURL,
+                transcriptURL: metadata.transcriptURL,
                 status: .inQueue,
                 inboxDismissed: true
             )
             episode.podcast = podcast
-            appContext.insert(episode)
-            episodes[key] = episode
-        }
-        let existing = try appContext.fetch(FetchDescriptor<QueueItem>(
-            sortBy: [SortDescriptor(\.position)]
-        ))
-        var existingByKey: [EpisodeKey: QueueItem] = [:]
-        for item in existing {
-            guard let episode = item.episode,
-                  episode.podcast?.isFollowed == true,
-                  let key = Self.episodeKey(for: episode),
-                  existingByKey[key] == nil else { continue }
-            existingByKey[key] = item
+            context.insert(episode)
+            episodesByKey[entry.key] = episode
+            changed = true
         }
 
-        var changed = false
-        for key in winners.keys.sorted() {
-            guard let winner = winners[key], let episode = episodes[key] else { continue }
-            if winner.isQueued {
-                if existingByKey[key] == nil {
-                    let position = positionWinners[key]?.position ?? winner.position
-                    let item = QueueItem(episode: episode, position: position)
-                    appContext.insert(item)
-                    existingByKey[key] = item
+        for entry in plan.entries {
+            guard let episode = episodesByKey[entry.key] else { continue }
+            if effectiveQueuedByKey[entry.key] == true {
+                if existingByKey[entry.key] == nil {
+                    // A non-nil inverse that was absent from the QueueItem fetch
+                    // is an inconsistent cross-context snapshot. Defer this key
+                    // instead of invoking SwiftData's trapping relationship setter.
+                    guard episode.queueItem == nil else { continue }
+                    let item = QueueItem(
+                        episode: episode,
+                        position: targetPositionByKey[entry.key] ?? entry.position
+                    )
+                    context.insert(item)
+                    existingByKey[entry.key] = item
+                    keyByItemID[item.persistentModelID] = entry.key
                     changed = true
                 }
                 if episode.status != .inQueue {
                     episode.status = .inQueue
                     changed = true
                 }
-            } else if let item = existingByKey.removeValue(forKey: key) {
-                appContext.delete(item)
+            } else if let item = existingByKey.removeValue(forKey: entry.key) {
+                context.delete(item)
                 if episode.status == .inQueue { episode.status = .newEpisode }
                 changed = true
             }
         }
 
         let projected = existingByKey.compactMap { key, item -> (QueueItem, Int, EpisodeKey)? in
-            guard let winner = winners[key], winner.isQueued else { return nil }
-            return (item, positionWinners[key]?.position ?? winner.position, key)
+            guard entriesByKey[key] != nil,
+                  effectiveQueuedByKey[key] == true else { return nil }
+            return (item, targetPositionByKey[key] ?? item.position, key)
         }.sorted {
             if $0.1 != $1.1 { return $0.1 < $1.1 }
             return $0.2 < $1.2
@@ -2801,9 +3056,11 @@ actor CloudProjectionCoordinator: ModelActor {
         var projectedIndex = 0
         var ordered: [QueueItem] = []
         for item in existing where !item.isDeleted {
-            if item.episode?.podcast?.isFollowed != true {
+            guard let key = keyByItemID[item.persistentModelID], entriesByKey[key] != nil else {
                 ordered.append(item)
-            } else if projected.indices.contains(projectedIndex) {
+                continue
+            }
+            if projected.indices.contains(projectedIndex) {
                 ordered.append(projected[projectedIndex].0)
                 projectedIndex += 1
             }
@@ -2813,8 +3070,6 @@ actor CloudProjectionCoordinator: ModelActor {
             item.position = position
             changed = true
         }
-        if appContext.hasChanges { try appContext.save() }
-        if cloudContext.hasChanges { try cloudContext.save() }
         return changed
     }
 
