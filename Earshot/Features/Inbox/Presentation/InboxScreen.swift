@@ -815,6 +815,7 @@ private struct AllInboxCandidates<Content: View>: View {
     let optInOnly: Bool
     let content: ([Episode]) -> Content
     @State private var candidates: [Episode]?
+    @State private var reloadScheduled = false
 
     init(optInOnly: Bool, @ViewBuilder content: @escaping ([Episode]) -> Content) {
         self.optInOnly = optInOnly
@@ -842,12 +843,25 @@ private struct AllInboxCandidates<Content: View>: View {
             NotificationCenter.default.publisher(for: .earshotInboxDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
-            reload()
+            scheduleReload()
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotQueueDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
+            scheduleReload()
+        }
+    }
+
+    /// Inbox and Queue notifications commonly describe the same durable
+    /// mutation. Collapse notifications delivered in one main-run-loop turn so
+    /// the relationship query runs once without delaying later independent
+    /// changes.
+    private func scheduleReload() {
+        guard !reloadScheduled else { return }
+        reloadScheduled = true
+        DispatchQueue.main.async {
+            reloadScheduled = false
             reload()
         }
     }
@@ -873,6 +887,7 @@ struct FolderScopedInboxCandidates<Content: View>: View {
 
     @State private var candidates: [Episode] = []
     @State private var loaded = false
+    @State private var reloadScheduled = false
 
     init(folder: PodcastFolder, @ViewBuilder content: @escaping ([Episode]) -> Content) {
         self.folder = folder
@@ -904,12 +919,21 @@ struct FolderScopedInboxCandidates<Content: View>: View {
             NotificationCenter.default.publisher(for: .earshotInboxDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
-            reload()
+            scheduleReload()
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotQueueDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
+            scheduleReload()
+        }
+    }
+
+    private func scheduleReload() {
+        guard !reloadScheduled else { return }
+        reloadScheduled = true
+        DispatchQueue.main.async {
+            reloadScheduled = false
             reload()
         }
     }

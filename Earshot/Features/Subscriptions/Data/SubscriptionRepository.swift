@@ -495,7 +495,10 @@ extension SubscriptionRepository {
     /// — this is what makes auto-download fire on an ORDINARY refresh of an
     /// already-subscribed podcast, not just on first subscribe (#639).
     @discardableResult
-    func refresh(_ podcast: Podcast) async throws -> RefreshOutcome {
+    func refresh(
+        _ podcast: Podcast,
+        reconcileEpisodeModels: Bool = true
+    ) async throws -> RefreshOutcome {
         let feedURL = podcast.feedURL
         let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
         guard let outcome = try await actor.refreshOne(
@@ -508,7 +511,9 @@ extension SubscriptionRepository {
         // holding `podcast` (e.g. EpisodeListView, the tests) observes the new
         // episodes and advanced high-water mark immediately. Only THIS podcast's
         // episodes need re-faulting.
-        mergeBackgroundWrites(affectedPodcastIDs: [podcast.persistentModelID])
+        mergeBackgroundWrites(
+            affectedPodcastIDs: reconcileEpisodeModels ? [podcast.persistentModelID] : []
+        )
         publishInboxReentries(outcome.inboxReentryEpisodeIDs)
         // Refresh-time auto-queue mutates the queue on the background actor, so
         // QueueRepository never gets a chance to publish its normal change
@@ -533,7 +538,8 @@ extension SubscriptionRepository {
     /// main context is reconciled only after the durable background save.
     func loadOlderEpisodes(
         for podcast: Podcast,
-        pageSize: Int = 10
+        pageSize: Int = 10,
+        reconcileEpisodeModels: Bool = true
     ) async throws -> OlderEpisodePageOutcome {
         let actor = await FeedRefreshActor.makeBackground(modelContainer: context.container)
         guard let outcome = try await actor.loadOlderEpisodes(
@@ -544,7 +550,9 @@ extension SubscriptionRepository {
             return OlderEpisodePageOutcome(inserted: 0, hasMore: false)
         }
         if outcome.inserted > 0 {
-            mergeBackgroundWrites(affectedPodcastIDs: [podcast.persistentModelID])
+            mergeBackgroundWrites(
+                affectedPodcastIDs: reconcileEpisodeModels ? [podcast.persistentModelID] : []
+            )
         }
         return outcome
     }

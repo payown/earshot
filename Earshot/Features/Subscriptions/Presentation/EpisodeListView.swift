@@ -45,6 +45,12 @@ struct EpisodeListView: View {
     // filter and chronological sort, so it only narrows the list the user is
     // already viewing and never changes either preference.
     @State private var searchText = ""
+    /// Store-backed page state. It owns only the requested models and never
+    /// touches the potentially 45,000-row `podcast.episodes` inverse.
+    @State private var episodeList: EpisodeListDataSource?
+    @State private var searchReloadTask: Task<Void, Never>?
+    @State private var episodeStateReloadTask: Task<Void, Never>?
+    @State private var isBulkEpisodeMutation = false
     // Moves VoiceOver focus onto the first episode row when entering selection
     // mode, and to the Select/Done button on exit; keyed on the stable
     // PersistentIdentifier so focus rides the row across the select-mode toggle
@@ -58,32 +64,17 @@ struct EpisodeListView: View {
     // Mirrors the Inbox's neighbor-focus wiring.
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusEmptyFilter: Bool
+    @AccessibilityFocusState private var focusResultsHeading: Bool
 
     /// Played/unheard filter for this podcast's list. Loaded per podcast on
     /// appear (default ``EpisodeListFilter/unheard``) and persisted on change
     /// under the `podcast_filter_<feedURL>` AppSetting key (#489).
     @State private var filter: EpisodeListFilter = SettingsDefault.episodeListFilter
 
-    /// All episodes in the user's chosen order (global ``EpisodeSortOrder``,
-    /// default ``EpisodeSortOrder/latestFirst`` which preserves the pre-existing
-    /// newest-first order). The filter is applied on top of this (#459).
-    private var sortedEpisodes: [Episode] {
-        // A remote unfollow can delete this podcast while its episode screen is
-        // still visible. SwiftData traps if a deleted model's relationship is
-        // faulted, so never touch `episodes` once deletion has begun; the cloud
-        // projection notification below dismisses the now-stale destination.
-        guard !podcast.isDeleted else { return [] }
-        return settings.episodeSortOrder.sorted(podcast.episodes ?? [])
-    }
-
-    /// The visible set: the active filter applied to the sorted episodes.
-    private var filteredSortedEpisodes: [Episode] {
-        filter.apply(to: sortedEpisodes)
-    }
-
-    /// The rows currently rendered after filter, sort, and search are composed.
+    /// The currently loaded, still-live page. Filtering, sorting, and search all
+    /// happen in the store before these models enter view state.
     private var visibleEpisodes: [Episode] {
-        EpisodeSearchFilter.filter(filteredSortedEpisodes, query: searchText)
+        (episodeList?.episodes ?? []).filter { !$0.isDeleted && $0.modelContext == context }
     }
 
     /// Count of unplayed episodes across the WHOLE podcast, not just the
@@ -95,8 +86,12 @@ struct EpisodeListView: View {
     /// `podcast.episodes` directly, so it stays consistent with what the list
     /// is already computing.
     private var unplayedCount: Int {
-        sortedEpisodes.filter { !$0.isPlayed }.count
+        episodeList?.unplayedCount ?? 0
     }
+
+    private var allEpisodeCount: Int { episodeList?.allCount ?? 0 }
+    private var filteredCount: Int { episodeList?.filteredCount ?? 0 }
+    private var matchingCount: Int { episodeList?.matchingCount ?? 0 }
 
     /// Persists and announces only on a genuine user change, so loading the
     /// stored value on appear doesn't speak over VoiceOver.
@@ -108,7 +103,9 @@ struct EpisodeListView: View {
                 filter = newValue
                 let store = AppSettingsStore(context: context)
                 store.setEpisodeListFilter(newValue, forFeedURL: podcast.feedURL)
-                Announcer.announce(newValue.announcement(count: newValue.apply(to: sortedEpisodes).count))
+                let count = ensureEpisodeList().count(filter: newValue, searchText: "")
+                Announcer.announce(newValue.announcement(count: count))
+                resetEpisodePage(moveFocusToResults: true)
             }
         )
     }
@@ -127,12 +124,12 @@ struct EpisodeListView: View {
                 .pickerStyle(.segmented)
                 .accessibilityLabel("Filter episodes")
             }
-            if !filteredSortedEpisodes.isEmpty {
+            if filteredCount > 0 {
                 Section {
                     chronologicalSortButton
                 }
             }
-            if sortedEpisodes.isEmpty && podcast.refreshedAt == nil {
+            if allEpisodeCount == 0 && podcast.refreshedAt == nil {
                 // Freshly-migrated show whose episodes haven't been fetched yet.
                 // Distinguish "still loading" from a genuinely empty feed so a
                 // VoiceOver user isn't told "no episodes" prematurely.
@@ -143,7 +140,7 @@ struct EpisodeListView: View {
                         .accessibilityLabel("Loading episodes")
                         .accessibilityAddTraits(.updatesFrequently)
                 }
-            } else if filteredSortedEpisodes.isEmpty {
+            } else if filteredCount == 0 {
                 // Episodes exist but none match the current filter. Give a
                 // descriptive message and a one-tap way out, not a blank list.
                 Section {
@@ -166,25 +163,44 @@ struct EpisodeListView: View {
                             // mode is entered (#758).
                             .accessibilityFocused($focusedRowID, equals: episode.persistentModelID)
                     }
+                    if episodeList?.hasMore == true {
+                        Button(showMoreEpisodesLabel) {
+                            episodeList?.loadMore(
+                                filter: filter,
+                                sort: settings.episodeSortOrder,
+                                searchText: searchText
+                            )
+                        }
+                    }
                 } header: {
                     Text(filter == .unheard
-                         ? "^[\(visibleEpisodes.count) unheard episode](inflect: true)"
-                         : "^[\(visibleEpisodes.count) episode](inflect: true)")
+                         ? "^[\(matchingCount) unheard episode](inflect: true)"
+                         : "^[\(matchingCount) episode](inflect: true)")
+                        .accessibilityFocused($focusResultsHeading)
                 }
             }
-            Section {
-                olderEpisodesControl
+            if episodeList != nil && episodeList?.hasMore == false {
+                Section {
+                    olderEpisodesControl
+                }
             }
         }
-        .onAppear {
+        .task {
             filter = AppSettingsStore(context: context).episodeListFilter(forFeedURL: podcast.feedURL)
+            resetEpisodePage(moveFocusToResults: false)
         }
         .navigationTitle(podcast.title)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search episodes")
+        .onChange(of: searchText) {
+            scheduleSearchReload()
+        }
         .onSubmit(of: .search) {
             guard EpisodeSearchFilter.isActive(searchText) else { return }
-            Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: visibleEpisodes.count))
+            searchReloadTask?.cancel()
+            resetEpisodePage(moveFocusToResults: false)
+            Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: matchingCount))
+            focusResultsHeading = true
         }
         .refreshable { await refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .earshotWillDeleteEpisodes)
@@ -196,7 +212,29 @@ struct EpisodeListView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply)
             .receive(on: DispatchQueue.main)) { _ in
-            if podcast.isDeleted { dismiss() }
+            if podcast.isDeleted {
+                dismiss()
+            } else {
+                reloadEpisodePage()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .earshotEpisodeUserStateDidChange)
+            .receive(on: DispatchQueue.main)) { note in
+            guard !isBulkEpisodeMutation,
+                  let snapshots = note.object as? [EpisodeUserStateSnapshot],
+                  snapshots.contains(where: {
+                      $0.feedURL == FeedURLIdentity.canonical(podcast.feedURL)
+                  })
+            else { return }
+            // State setters can publish multiple saves in one run-loop turn.
+            // Cancel and replace the pending task so the screen performs one
+            // scoped page reload, not one reload per notification.
+            episodeStateReloadTask?.cancel()
+            episodeStateReloadTask = Task { @MainActor in
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                reloadEpisodePage()
+            }
         }
         // Persistent episode multi-select bar (#758): Add to folder is primary and
         // its label carries the live count ("Add 3 episodes to folder") — the
@@ -509,8 +547,13 @@ struct EpisodeListView: View {
     /// user just confirmed a deliberate bulk action and needs to hear it
     /// landed.
     private func markAllPlayed() {
-        let count = EpisodeRepository(context: context).markAllPlayed(in: podcast)
-        Announcer.announce(MarkAllPlayedAnnouncement.text(count: count), assertive: true)
+        Task { @MainActor in
+            isBulkEpisodeMutation = true
+            let count = await EpisodeRepository(context: context).markAllPlayed(in: podcast)
+            isBulkEpisodeMutation = false
+            reloadEpisodePage()
+            Announcer.announce(MarkAllPlayedAnnouncement.text(count: count), assertive: true)
+        }
     }
 
     /// A reversible chronological sort control. Sorting changes only the list's
@@ -519,6 +562,7 @@ struct EpisodeListView: View {
         let target = settings.episodeSortOrder.chronologicalToggleTarget
         return Button {
             settings.episodeSortOrder = target
+            resetEpisodePage(moveFocusToResults: true)
             Announcer.announce(target.announcement)
         } label: {
             Label(settings.episodeSortOrder.chronologicalToggleTitle, systemImage: "arrow.up.arrow.down")
@@ -601,7 +645,8 @@ struct EpisodeListView: View {
                 downloader: downloads,
                 queue: QueueRepository(context: context),
                 isEntitled: entitlements.isEntitled
-            ).refresh(podcast)
+            ).refresh(podcast, reconcileEpisodeModels: false)
+            resetEpisodePage(moveFocusToResults: false)
             RefreshCompletionHaptics.playIfNeeded(
                 trigger: .manualPullToRefresh,
                 succeeded: true,
@@ -649,9 +694,10 @@ struct EpisodeListView: View {
                 context: context,
                 downloader: downloads,
                 isEntitled: entitlements.isEntitled
-            ).loadOlderEpisodes(for: podcast)
+            ).loadOlderEpisodes(for: podcast, reconcileEpisodeModels: false)
             olderEpisodesState = outcome.hasMore ? .ready : .end
             if outcome.inserted > 0 {
+                resetEpisodePage(moveFocusToResults: false)
                 Announcer.announce("Loaded \(outcome.inserted) older episodes")
             } else {
                 Announcer.announce("All available episodes loaded")
@@ -672,6 +718,58 @@ struct EpisodeListView: View {
             return [episode.title, url]
         }
         return [episode.title]
+    }
+
+    private var showMoreEpisodesLabel: String {
+        "Show 100 more episodes, \(visibleEpisodes.count.formatted()) loaded of \(matchingCount.formatted())"
+    }
+
+    @discardableResult
+    private func ensureEpisodeList() -> EpisodeListDataSource {
+        if let episodeList { return episodeList }
+        let source = EpisodeListDataSource(
+            context: context,
+            podcastID: podcast.persistentModelID,
+            podcastTitle: podcast.title
+        )
+        episodeList = source
+        return source
+    }
+
+    private func resetEpisodePage(moveFocusToResults: Bool) {
+        guard !podcast.isDeleted else { return }
+        ensureEpisodeList().resetAndLoad(
+            filter: filter,
+            sort: settings.episodeSortOrder,
+            searchText: searchText
+        )
+        if moveFocusToResults, matchingCount > 0 {
+            DispatchQueue.main.async { focusResultsHeading = true }
+        }
+    }
+
+    private func reloadEpisodePage() {
+        guard !podcast.isDeleted, let episodeList else { return }
+        episodeList.reloadKeepingLoadedLimit(
+            filter: filter,
+            sort: settings.episodeSortOrder,
+            searchText: searchText
+        )
+    }
+
+    /// Keeps store search work off the keystroke path and prevents a superseded
+    /// query from publishing late results. Submit bypasses the delay above.
+    private func scheduleSearchReload() {
+        searchReloadTask?.cancel()
+        searchReloadTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            resetEpisodePage(moveFocusToResults: false)
+        }
     }
 }
 

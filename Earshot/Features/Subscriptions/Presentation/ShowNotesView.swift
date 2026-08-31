@@ -11,7 +11,7 @@ struct ShowNotesView: View {
                 // the notes can be navigated paragraph by paragraph instead of read
                 // as one continuous block (#547). `id: \.offset` is stable for a
                 // static, read-only list that never reorders.
-                VStack(alignment: .leading, spacing: Spacing.md) {
+                LazyVStack(alignment: .leading, spacing: Spacing.md) {
                     ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                         Text(paragraph)
                             .font(.body)
@@ -47,6 +47,8 @@ struct ShowNotesView: View {
     /// paragraph so each stays its own VoiceOver element (#547). A friendly
     /// placeholder shows when the episode has no description.
     private var paragraphs: [AttributedString] {
+        let interval = PerformanceSignposts.signposter.beginInterval("ShowNotesParse")
+        defer { PerformanceSignposts.signposter.endInterval("ShowNotesParse", interval) }
         let paragraphs = EpisodeSummary.attributedParagraphs(episode.episodeDescription)
         return paragraphs.isEmpty
             ? [AttributedString("No show notes for this episode.")]

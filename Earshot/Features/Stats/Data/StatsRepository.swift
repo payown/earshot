@@ -25,6 +25,8 @@ final class StatsRepository {
         includeStreak: Bool = false,
         podcastIDs: Set<PersistentIdentifier>? = nil
     ) -> ListeningStats {
+        let interval = PerformanceSignposts.signposter.beginInterval("StatsAggregation")
+        defer { PerformanceSignposts.signposter.endInterval("StatsAggregation", interval) }
         let since = period.since(now: now)
         let sessions = sessionsSince(since, podcastIDs: podcastIDs)
 
@@ -66,9 +68,11 @@ final class StatsRepository {
     func applyRetention(days: Int, now: Date = .now) {
         guard days > 0 else { return }
         let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
-        let stale = (try? context.fetch(FetchDescriptor<ListeningSession>())) ?? []
+        let stale = (try? context.fetch(FetchDescriptor<ListeningSession>(
+            predicate: #Predicate { $0.date < cutoff }
+        ))) ?? []
         var removed = 0
-        for session in stale where session.date < cutoff {
+        for session in stale {
             context.delete(session)
             removed += 1
         }
@@ -141,9 +145,16 @@ final class StatsRepository {
         _ since: Date?,
         podcastIDs: Set<PersistentIdentifier>? = nil
     ) -> [ListeningSession] {
-        let all = (try? context.fetch(FetchDescriptor<ListeningSession>())) ?? []
+        let descriptor: FetchDescriptor<ListeningSession>
+        if let since {
+            descriptor = FetchDescriptor<ListeningSession>(
+                predicate: #Predicate { $0.date >= since }
+            )
+        } else {
+            descriptor = FetchDescriptor<ListeningSession>()
+        }
+        let all = (try? context.fetch(descriptor)) ?? []
         return all.filter { session in
-            if let since, session.date < since { return false }
             guard let podcastIDs else { return true }
             guard let podcastID = podcast(for: session)?.persistentModelID else { return false }
             return podcastIDs.contains(podcastID)
@@ -163,15 +174,17 @@ final class StatsRepository {
         // Scope the store fetch to completed rows. Large libraries can contain
         // hundreds of thousands of episodes, while only played rows contribute
         // to this value; folder filtering remains an inexpensive identity check.
+        // Keep the optional-date cutoff in memory after the store has removed
+        // every unplayed row. SwiftData does not reliably include pending
+        // inserts when a predicate force-unwraps an optional date, and stats are
+        // also queried from tests/import paths before an explicit save.
         let descriptor = FetchDescriptor<Episode>(
             predicate: #Predicate { $0.playedAt != nil }
         )
         let played = (try? context.fetch(descriptor)) ?? []
         return played.filter { episode in
             guard let playedAt = episode.playedAt else { return false }
-            guard let since else { return true }
-            return playedAt >= since
-        }.filter { episode in
+            if let since, playedAt < since { return false }
             guard let podcastIDs else { return true }
             guard let podcastID = episode.podcast?.persistentModelID else { return false }
             return podcastIDs.contains(podcastID)

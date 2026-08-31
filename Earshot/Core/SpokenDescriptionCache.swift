@@ -29,6 +29,10 @@ final class SpokenDescriptionCache {
         if let value = cache.object(forKey: key) as String? {
             return value == Self.noValue ? nil : value
         }
+        let interval = PerformanceSignposts.signposter.beginInterval("SpokenDescriptionPrepare")
+        defer {
+            PerformanceSignposts.signposter.endInterval("SpokenDescriptionPrepare", interval)
+        }
         let value: String?
         switch mode {
         case .off:
