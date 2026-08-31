@@ -1333,6 +1333,127 @@ final class FeedRefreshActorTests: XCTestCase {
 
     // MARK: subscribeAll (bulk OPML path)
 
+    func testCatalogPromotionSaveFailureRollsBackAndRetryPreservesIdentity() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/catalog-promotion.xml"
+        let seed = ModelContext(container)
+        let podcast = Podcast(
+            feedURL: feedURL, title: "Catalog",
+            subscriptionStateRaw: PodcastSubscriptionState.catalogOnly.rawValue
+        )
+        let episode = Episode(
+            guid: "a", title: "Catalog episode", audioURL: "https://x/a.mp3",
+            pubDate: d1, status: .inQueue, positionSeconds: 75,
+            inboxDismissed: true
+        )
+        episode.podcast = podcast
+        seed.insert(podcast)
+        seed.insert(episode)
+        seed.insert(QueueItem(episode: episode, position: 2))
+        try seed.save()
+        let podcastID = podcast.persistentModelID
+        let actor = FeedRefreshActor(modelContainer: container)
+        await actor.forceNextSaveFailureForTesting()
+
+        do {
+            _ = try await actor.subscribe(
+                feedURL: feedURL,
+                feed: FakeFeed(parsedFeed([
+                    parsedEpisode("a", d2), parsedEpisode("b", d3),
+                ])),
+                inboxSeedCount: 3
+            )
+            XCTFail("Expected the injected mirrored save to fail")
+        } catch { }
+
+        var assertion = ModelContext(container)
+        var stored = try XCTUnwrap(assertion.fetch(FetchDescriptor<Podcast>()).first)
+        XCTAssertEqual(stored.persistentModelID, podcastID)
+        XCTAssertFalse(stored.isFollowed)
+        XCTAssertEqual(try assertion.fetchCount(FetchDescriptor<Episode>()), 1)
+        XCTAssertEqual(stored.episodes?.first?.positionSeconds, 75)
+        XCTAssertEqual(stored.episodes?.first?.queueItem?.position, 2)
+        XCTAssertFalse(try PendingCloudFollowIntent.exists(feedURL: feedURL, in: assertion))
+        let hasPendingChanges = await actor.hasPendingChangesForTesting()
+        XCTAssertFalse(hasPendingChanges)
+
+        _ = try await actor.subscribe(
+            feedURL: feedURL,
+            feed: FakeFeed(parsedFeed([
+                parsedEpisode("a", d2), parsedEpisode("b", d3),
+            ])),
+            inboxSeedCount: 3
+        )
+        assertion = ModelContext(container)
+        stored = try XCTUnwrap(assertion.fetch(FetchDescriptor<Podcast>()).first)
+        XCTAssertEqual(stored.persistentModelID, podcastID)
+        XCTAssertTrue(stored.isFollowed)
+        XCTAssertEqual(try assertion.fetchCount(FetchDescriptor<Episode>()), 2)
+        XCTAssertEqual(stored.episodes?.first { $0.guid == "a" }?.positionSeconds, 75)
+        XCTAssertEqual(stored.episodes?.first { $0.guid == "a" }?.queueItem?.position, 2)
+    }
+
+    func testBulkSaveFailureRetainsConcurrentAlreadyFollowedResult() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        await actor.forceNextSaveFailureForTesting()
+        let followedURL = "https://x/concurrent-followed.xml"
+        let failedURL = "https://x/rolled-back.xml"
+        let fetcher = BlockingBulkFeed(
+            blockedURL: followedURL,
+            feed: parsedFeed([parsedEpisode("episode", d1)])
+        )
+        let task = Task {
+            await actor.subscribeAllReport(
+                feedURLs: [followedURL, failedURL],
+                feed: fetcher,
+                inboxSeedCount: 3,
+                maximumFollowedCount: nil
+            )
+        }
+        await fetcher.waitUntilBlockedFetchStarts()
+        let concurrentContext = ModelContext(container)
+        concurrentContext.insert(Podcast(feedURL: followedURL, title: "Peer Follow"))
+        try concurrentContext.save()
+        await fetcher.releaseBlockedFetch()
+        let report = await task.value
+        XCTAssertEqual(report.results.count, 1)
+        XCTAssertEqual(report.results.first?.feedURL, followedURL)
+        XCTAssertTrue(report.results.first?.alreadySubscribed == true)
+        XCTAssertEqual(report.failed, 1)
+        XCTAssertEqual(report.skippedForCap, 0)
+        let stored = try ModelContext(container).fetch(FetchDescriptor<Podcast>())
+        XCTAssertEqual(stored.map(\.feedURL), [followedURL])
+    }
+    func testBulkZeroSlotDecisionRetainsConcurrentFollowWithoutFetchingIt() async throws {
+        let container = cleanContainer()
+        let actor = FeedRefreshActor(modelContainer: container)
+        let followedURL = "https://x/peer-filled-slot.xml"
+        let skippedURL = "https://x/still-new.xml"
+        let fetcher = RecordingFeed(parsedFeed([parsedEpisode("never", d1)]))
+
+        await SubscriptionCapacityWriteGate.shared.acquire()
+        let task = Task {
+            await actor.subscribeAllReport(
+                feedURLs: [followedURL, skippedURL],
+                feed: fetcher,
+                inboxSeedCount: 3,
+                maximumFollowedCount: 1
+            )
+        }
+        await Task.yield()
+        let peerContext = ModelContext(container)
+        peerContext.insert(Podcast(feedURL: followedURL, title: "Peer Follow"))
+        try peerContext.save()
+        await SubscriptionCapacityWriteGate.shared.release()
+        let report = await task.value
+        XCTAssertEqual(report.results.map(\.feedURL), [followedURL])
+        XCTAssertTrue(report.results.first?.alreadySubscribed == true)
+        XCTAssertEqual(report.skippedForCap, 1)
+        XCTAssertEqual(report.failed, 0)
+        let fetchedURLs = await fetcher.allURLs()
+        XCTAssertTrue(fetchedURLs.isEmpty)
+    }
     /// Bulk subscribe inserts every feed's podcast + backlog on the actor's own
     /// background context, returns one result per feed in input order, and reports
     /// progress with increasing completed counts up to total.
@@ -1752,6 +1873,40 @@ private actor RecordingFeed: FeedFetching {
 
     func lastURL() -> String? { urls.last }
     func allURLs() -> [String] { urls }
+}
+
+private actor BlockingBulkFeed: FeedFetching {
+    private let blockedURL: String
+    private let feed: ParsedFeed
+    private var startedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+    private var didStart = false
+
+    init(blockedURL: String, feed: ParsedFeed) {
+        self.blockedURL = blockedURL
+        self.feed = feed
+    }
+
+    func fetch(_ urlString: String) async throws -> ParsedFeed {
+        if urlString == blockedURL {
+            didStart = true
+            let waiters = startedWaiters
+            startedWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+            await withCheckedContinuation { releaseWaiter = $0 }
+        }
+        return feed
+    }
+
+    func waitUntilBlockedFetchStarts() async {
+        guard !didStart else { return }
+        await withCheckedContinuation { startedWaiters.append($0) }
+    }
+
+    func releaseBlockedFetch() {
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
 }
 
 /// Holds the first three requests until all are active. Later requests finish
