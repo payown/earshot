@@ -301,6 +301,7 @@ struct PodcastSettingsView: View {
     private var notificationsSection: some View {
         Section {
             Toggle("Notify on new episodes", isOn: notificationEnabledBinding)
+                .accessibilityHint("Earshot checks for new episodes during background refresh")
                 // Request notification permission the first time the user turns
                 // this on. The async request is owned by a `.task(id:)` keyed on
                 // `authRequestToken` (below) — NOT a bare `Task {}` — so it is
@@ -364,7 +365,7 @@ struct PodcastSettingsView: View {
                 }
             }
         } header: {
-            Text("Notifications")
+            Text("New Episode Notifications")
                 .accessibilityAddTraits(.isHeader)
         } footer: {
             Text("Sends a notification when new episodes are detected during a background refresh.")

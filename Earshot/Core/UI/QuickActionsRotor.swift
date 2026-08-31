@@ -33,6 +33,20 @@ enum QuickActionsRotor {
     static func declarationOrder<T>(_ actions: [T]) -> [T] {
         compensatesReversedEmission ? actions.reversed() : actions
     }
+
+    /// Combines the Library row's configurable actions with fixed supplemental
+    /// actions before applying the same single reversal used everywhere else.
+    /// Supplemental actions are designed to be announced last and never affect
+    /// the configurable first action used for the row's primary double-tap.
+    static func podcastDeclarationOrder(
+        _ actions: [DeferredActionPresentation<PodcastAction>],
+        supplementalActions: [PodcastRowSupplementalAction]
+    ) -> [PodcastRowRotorAction] {
+        declarationOrder(
+            actions.map(PodcastRowRotorAction.configured)
+                + supplementalActions.map(PodcastRowRotorAction.supplemental)
+        )
+    }
 }
 
 /// Context menus do not share the OS rotor's reversed-emission behavior. They
@@ -55,6 +69,37 @@ struct DeferredActionPresentation<Action: Identifiable>: Identifiable where Acti
     let isDestructive: Bool
 
     var id: Action.ID { action.id }
+}
+
+/// A stable, non-configurable action appended by a Library podcast row. It
+/// carries no runnable closure, so recycled rows keep value-only inputs and the
+/// action can share the centralized VoiceOver rotor-order compensation.
+struct PodcastRowSupplementalAction: Identifiable, Equatable {
+    let id: String
+    let label: String
+}
+
+/// One declaration handed to SwiftUI for a Library podcast row. The enum lets
+/// configurable and supplemental actions travel through one ordered array.
+enum PodcastRowRotorAction: Identifiable {
+    case configured(DeferredActionPresentation<PodcastAction>)
+    case supplemental(PodcastRowSupplementalAction)
+
+    var id: String {
+        switch self {
+        case .configured(let presentation):
+            return "configured-\(presentation.id)"
+        case .supplemental(let action):
+            return "supplemental-\(action.id)"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .configured(let presentation): presentation.label
+        case .supplemental(let action): action.label
+        }
+    }
 }
 
 /// Store-backed lifetime checks for activating an action captured by a row that
@@ -209,11 +254,23 @@ extension View {
     /// Stable-enum podcast variant used by the Library's large lazy list.
     func podcastActionsRotor(
         _ actions: [DeferredActionPresentation<PodcastAction>],
-        perform: @escaping (PodcastAction) -> Void
+        supplementalActions: [PodcastRowSupplementalAction] = [],
+        perform: @escaping (PodcastAction) -> Void,
+        performSupplemental: @escaping (PodcastRowSupplementalAction) -> Void = { _ in }
     ) -> some View {
         accessibilityActions {
-            ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
-                Button(action.label) { perform(action.action) }
+            ForEach(QuickActionsRotor.podcastDeclarationOrder(
+                actions,
+                supplementalActions: supplementalActions
+            )) { action in
+                Button(action.label) {
+                    switch action {
+                    case .configured(let presentation):
+                        perform(presentation.action)
+                    case .supplemental(let supplemental):
+                        performSupplemental(supplemental)
+                    }
+                }
             }
         }
     }

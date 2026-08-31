@@ -70,4 +70,76 @@ final class QuickActionsRotorTests: XCTestCase {
         let declared = QuickActionsContextMenu.declarationOrder(actions)
         XCTAssertEqual(declared.map(\.isDestructive), [false, true])
     }
+
+    func testPodcastSupplementalActionHasStableValueIdentity() {
+        let action = PodcastRowSupplementalAction(
+            id: "readFullDescription",
+            label: "Read full description"
+        )
+
+        XCTAssertEqual(action.id, "readFullDescription")
+        XCTAssertEqual(action.label, "Read full description")
+        XCTAssertEqual(action, action)
+    }
+
+    func testPodcastSupplementalActionIsAppendedBeforeRotorCompensation() throws {
+        let configured = [
+            DeferredActionPresentation(
+                action: PodcastAction.share,
+                label: "Share podcast",
+                isDestructive: false
+            ),
+            DeferredActionPresentation(
+                action: PodcastAction.unsubscribe,
+                label: "Unfollow",
+                isDestructive: true
+            ),
+        ]
+        let supplemental = [
+            PodcastRowSupplementalAction(
+                id: "readFullDescription",
+                label: "Read full description"
+            ),
+        ]
+        let declared = QuickActionsRotor.podcastDeclarationOrder(
+            configured,
+            supplementalActions: supplemental
+        )
+
+        if QuickActionsRotor.compensatesReversedEmission {
+            XCTAssertEqual(
+                declared.map(\.label),
+                ["Read full description", "Unfollow", "Share podcast"]
+            )
+        } else {
+            XCTAssertEqual(
+                declared.map(\.label),
+                ["Share podcast", "Unfollow", "Read full description"]
+            )
+        }
+    }
+
+    func testPodcastDeclarationOrderWithoutSupplementalMatchesExistingOrder() {
+        let configured = [
+            DeferredActionPresentation(
+                action: PodcastAction.share,
+                label: "Share podcast",
+                isDestructive: false
+            ),
+            DeferredActionPresentation(
+                action: PodcastAction.unsubscribe,
+                label: "Unfollow",
+                isDestructive: true
+            ),
+        ]
+
+        let declared = QuickActionsRotor.podcastDeclarationOrder(
+            configured,
+            supplementalActions: []
+        )
+        XCTAssertEqual(
+            declared.map(\.label),
+            QuickActionsRotor.declarationOrder(configured).map(\.label)
+        )
+    }
 }

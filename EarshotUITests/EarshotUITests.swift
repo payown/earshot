@@ -57,11 +57,11 @@ final class EarshotUITests: XCTestCase {
         ]
         app.launch()
 
-        let addPodcast = app.buttons["Add podcast"].firstMatch
+        let addPodcast = app.buttons["Discover podcasts"].firstMatch
         XCTAssertTrue(addPodcast.waitForExistence(timeout: 10))
         addPodcast.tap()
 
-        XCTAssertTrue(app.navigationBars["Add podcast"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Discover podcasts"].waitForExistence(timeout: 5))
         let search = app.searchFields.firstMatch
         let browse = app.buttons["Browse categories"].firstMatch
         let rss = app.buttons["Add by RSS URL"].firstMatch

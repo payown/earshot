@@ -43,46 +43,41 @@ final class PodcastPreviewModelTests: XCTestCase {
         )
     }
 
-    // MARK: recentEpisodes (pure)
+    // MARK: availableEpisodes (pure)
 
-    func testRecentEpisodesAreNewestFirstAndCapped() {
-        // Deliberately out of order; expect d3, d2, d1 after sort, capped at 2.
+    func testAvailableEpisodesAreNewestFirstAndNotCapped() {
+        // Deliberately out of order. Every publisher-feed episode is retained.
         let feed = parsedFeed([
             parsedEpisode("a", d1),
             parsedEpisode("c", d3),
             parsedEpisode("b", d2),
         ])
 
-        let recent = PodcastPreviewModel.recentEpisodes(from: feed, limit: 2)
+        let available = PodcastPreviewModel.availableEpisodes(from: feed)
 
-        XCTAssertEqual(recent.map(\.id), ["c", "b"], "Newest first, limited to 2")
+        XCTAssertEqual(available.map(\.id), ["c", "b", "a"])
     }
 
-    func testRecentEpisodesUndatedSortLast() {
+    func testAvailableEpisodesUndatedSortLast() {
         let feed = parsedFeed([
             parsedEpisode("dated", d2),
             parsedEpisode("undated", nil),
         ])
 
-        let recent = PodcastPreviewModel.recentEpisodes(from: feed, limit: 5)
+        let available = PodcastPreviewModel.availableEpisodes(from: feed)
 
-        XCTAssertEqual(recent.first?.id, "dated", "A dated episode outranks an undated one")
-        XCTAssertEqual(recent.count, 2)
+        XCTAssertEqual(available.first?.id, "dated", "A dated episode outranks an undated one")
+        XCTAssertEqual(available.count, 2)
     }
 
-    func testRecentEpisodesLimitZeroReturnsNone() {
-        let feed = parsedFeed([parsedEpisode("a", d1)])
-        XCTAssertTrue(PodcastPreviewModel.recentEpisodes(from: feed, limit: 0).isEmpty)
-    }
-
-    func testRecentEpisodesCarryDurationAndDate() {
+    func testAvailableEpisodesCarryDurationAndDate() {
         let feed = parsedFeed([parsedEpisode("a", d1, duration: 3600)])
-        let recent = PodcastPreviewModel.recentEpisodes(from: feed, limit: 5)
-        XCTAssertEqual(recent.first?.durationSeconds, 3600)
-        XCTAssertEqual(recent.first?.pubDate, d1)
+        let available = PodcastPreviewModel.availableEpisodes(from: feed)
+        XCTAssertEqual(available.first?.durationSeconds, 3600)
+        XCTAssertEqual(available.first?.pubDate, d1)
     }
 
-    func testRecentEpisodesCarryAudioURLAndStreamFields() {
+    func testAvailableEpisodesCarryAudioURLAndStreamFields() {
         // #517: the enclosure URL (plus description, artwork, chapters) must reach
         // the PreviewEpisode so the preview row can stream without subscribing.
         let parsed = ParsedEpisode(
@@ -91,13 +86,118 @@ final class PodcastPreviewModelTests: XCTestCase {
             artworkURL: "https://x/art.jpg", episodeNumber: nil, seasonNumber: nil,
             chapterURL: "https://x/chapters.json", transcriptURL: nil
         )
-        let recent = PodcastPreviewModel.recentEpisodes(from: parsedFeed([parsed]), limit: 5)
+        let available = PodcastPreviewModel.availableEpisodes(from: parsedFeed([parsed]))
 
-        let first = recent.first
+        let first = available.first
         XCTAssertEqual(first?.audioURL, "https://x/g.mp3")
         XCTAssertEqual(first?.episodeDescription, "Show notes")
         XCTAssertEqual(first?.artworkURL, "https://x/art.jpg")
         XCTAssertEqual(first?.chapterURL, "https://x/chapters.json")
+        XCTAssertEqual(first?.searchableDescription, "Show notes")
+    }
+
+    func testAvailableEpisodesUseDeterministicTieBreaks() {
+        let feed = parsedFeed([
+            parsedEpisode("z-guid", d1),
+            ParsedEpisode(
+                guid: "a-guid", title: "Alpha", audioURL: "https://x/a.mp3",
+                description: nil, pubDate: d1, durationSeconds: nil, artworkURL: nil,
+                episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+            ),
+            ParsedEpisode(
+                guid: "b-guid", title: "Alpha", audioURL: "https://x/b.mp3",
+                description: nil, pubDate: d1, durationSeconds: nil, artworkURL: nil,
+                episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+            ),
+        ])
+
+        XCTAssertEqual(
+            PodcastPreviewModel.availableEpisodes(from: feed).map(\.id),
+            ["a-guid", "b-guid", "z-guid"]
+        )
+    }
+
+    func testAvailableEpisodesDeduplicateGUIDForStableRowIdentity() {
+        let older = ParsedEpisode(
+            guid: "duplicate", title: "Older copy", audioURL: "https://x/old.mp3",
+            description: nil, pubDate: d1, durationSeconds: nil, artworkURL: nil,
+            episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+        let newer = ParsedEpisode(
+            guid: "duplicate", title: "Newer copy", audioURL: "https://x/new.mp3",
+            description: nil, pubDate: d2, durationSeconds: nil, artworkURL: nil,
+            episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+
+        let available = PodcastPreviewModel.availableEpisodes(from: parsedFeed([older, newer]))
+
+        XCTAssertEqual(available.count, 1)
+        XCTAssertEqual(available.first?.id, "duplicate")
+        XCTAssertEqual(available.first?.title, "Newer copy")
+    }
+
+    func testAvailableEpisodeDeduplicationIsStableWhenFeedOrderReverses() {
+        let first = ParsedEpisode(
+            guid: "duplicate", title: "Zulu", audioURL: "https://x/z.mp3",
+            description: nil, pubDate: d1, durationSeconds: nil, artworkURL: nil,
+            episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+        let second = ParsedEpisode(
+            guid: "duplicate", title: "Alpha", audioURL: "https://x/a.mp3",
+            description: nil, pubDate: d1, durationSeconds: nil, artworkURL: nil,
+            episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+        )
+
+        let forward = PodcastPreviewModel.availableEpisodes(from: parsedFeed([first, second]))
+        let reversed = PodcastPreviewModel.availableEpisodes(from: parsedFeed([second, first]))
+
+        XCTAssertEqual(forward, reversed)
+        XCTAssertEqual(forward.first?.title, "Alpha")
+    }
+
+    // MARK: Preview sort and search (pure)
+
+    func testOldestFirstSortKeepsUndatedEpisodesLast() {
+        let episodes = PodcastPreviewModel.availableEpisodes(from: parsedFeed([
+            parsedEpisode("new", d3), parsedEpisode("undated", nil), parsedEpisode("old", d1),
+        ]))
+
+        XCTAssertEqual(
+            PreviewEpisodeSortOrder.oldestFirst.sorted(episodes).map(\.id),
+            ["old", "new", "undated"]
+        )
+    }
+
+    func testPreviewSearchMatchesTitleCaseAndDiacriticInsensitively() {
+        let episodes = PodcastPreviewModel.availableEpisodes(from: parsedFeed([
+            ParsedEpisode(
+                guid: "one", title: "Café stories", audioURL: "https://x/one.mp3",
+                description: nil, pubDate: d1, durationSeconds: nil, artworkURL: nil,
+                episodeNumber: nil, seasonNumber: nil, chapterURL: nil, transcriptURL: nil
+            ),
+        ]))
+
+        XCTAssertEqual(PreviewEpisodeSearchFilter.filter(episodes, query: "  CAFE ").map(\.id), ["one"])
+    }
+
+    func testPreviewSearchMatchesPlainTextDescription() {
+        let parsed = ParsedEpisode(
+            guid: "one", title: "Different title", audioURL: "https://x/one.mp3",
+            description: "<p>Investigating <strong>oceanography</strong>.</p>", pubDate: d1,
+            durationSeconds: nil, artworkURL: nil, episodeNumber: nil, seasonNumber: nil,
+            chapterURL: nil, transcriptURL: nil
+        )
+        let episodes = PodcastPreviewModel.availableEpisodes(from: parsedFeed([parsed]))
+
+        XCTAssertEqual(PreviewEpisodeSearchFilter.filter(episodes, query: "OCEANOGRAPHY").map(\.id), ["one"])
+    }
+
+    func testInactivePreviewSearchPreservesAllEpisodesAndOrder() {
+        let episodes = PodcastPreviewModel.availableEpisodes(from: parsedFeed([
+            parsedEpisode("new", d3), parsedEpisode("old", d1),
+        ]))
+
+        XCTAssertEqual(PreviewEpisodeSearchFilter.filter(episodes, query: "  \n"), episodes)
     }
 
     // MARK: cleanedDescription (pure)
@@ -125,14 +225,14 @@ final class PodcastPreviewModelTests: XCTestCase {
 
     // MARK: load() state transitions
 
-    func testLoadPublishesDescriptionAndRecentEpisodes() async {
+    func testLoadPublishesDescriptionAndAvailableEpisodes() async {
         let feed = parsedFeed(
             [parsedEpisode("a", d1), parsedEpisode("b", d2)],
             description: "A great show"
         )
         let model = PodcastPreviewModel(feed: StubFeedFetcher(.success(feed)))
 
-        await model.load(feedURL: "https://x/feed.xml", recentLimit: 5)
+        await model.load(feedURL: "https://x/feed.xml")
 
         guard case let .loaded(description, episodes) = model.state else {
             return XCTFail("Expected loaded state, got \(model.state)")

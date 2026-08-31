@@ -28,7 +28,8 @@ enum DirectoryPodcastRowSpeech {
             identity: "directory-podcast:\(FeedURLIdentity.canonical(feedURL))",
             html: description,
             mode: mode,
-            briefLimit: 240
+            briefLimit: 240,
+            preferredBriefSentenceCount: 2
         ) {
             parts.append(spokenDescription)
         }
