@@ -874,6 +874,84 @@ final class QueueRepositoryTests: XCTestCase {
                        "Play next inserts after the current episode, not at the front")
     }
 
+    // MARK: Durable compact-Cloud Queue intent
+
+    func testFollowedAddAndRemovePersistMembershipAndOrderingIntentWithQueue() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Intent")
+        let episode = makeEpisode(ctx, "intent", podcast: podcast)
+        try ctx.save()
+        let repo = QueueRepository(context: ctx)
+
+        repo.add(episode)
+
+        var memberships = try PendingCloudQueueMutation.memberships(in: ctx)
+        XCTAssertEqual(memberships.count, 1)
+        XCTAssertEqual(memberships.first?.feedURL, FeedURLIdentity.canonical(podcast.feedURL))
+        XCTAssertEqual(memberships.first?.guid, episode.guid)
+        XCTAssertEqual(memberships.first?.isQueued, true)
+        XCTAssertFalse(try PendingCloudQueueMutation.orderings(in: ctx).isEmpty)
+
+        XCTAssertTrue(repo.cancelFromQueue(episode))
+
+        memberships = try PendingCloudQueueMutation.memberships(in: ctx)
+        XCTAssertEqual(memberships.count, 2)
+        XCTAssertEqual(Set(memberships.map(\.isQueued)), [true, false])
+        XCTAssertGreaterThanOrEqual(try PendingCloudQueueMutation.orderings(in: ctx).count, 2)
+        XCTAssertTrue(repo.queue().isEmpty)
+    }
+
+    func testCatalogQueueMutationCreatesNoCloudIntent() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Catalog")
+        podcast.subscriptionStateRaw = PodcastSubscriptionState.catalogOnly.rawValue
+        let episode = makeEpisode(ctx, "catalog", podcast: podcast)
+        try ctx.save()
+        let repo = QueueRepository(context: ctx)
+
+        repo.add(episode)
+        XCTAssertTrue(try PendingCloudQueueMutation.memberships(in: ctx).isEmpty)
+        XCTAssertTrue(try PendingCloudQueueMutation.orderings(in: ctx).isEmpty)
+
+        XCTAssertTrue(repo.cancelFromQueue(episode))
+        XCTAssertTrue(try PendingCloudQueueMutation.memberships(in: ctx).isEmpty)
+        XCTAssertTrue(try PendingCloudQueueMutation.orderings(in: ctx).isEmpty)
+    }
+
+    func testClearingObservedQueueIntentLeavesNewerGenerationDurable() throws {
+        let ctx = TestStore.freshContext()
+        PendingCloudQueueMutation.stageMembership(
+            feedURL: "https://example.com/feed", guid: "episode", isQueued: true,
+            eventDate: Date(timeIntervalSince1970: 100), in: ctx
+        )
+        PendingCloudQueueMutation.stageOrdering(eventDate: Date(timeIntervalSince1970: 100), in: ctx)
+        try ctx.save()
+        let observedMemberships = try PendingCloudQueueMutation.memberships(in: ctx)
+        let observedOrderings = try PendingCloudQueueMutation.orderings(in: ctx)
+
+        PendingCloudQueueMutation.stageMembership(
+            feedURL: "https://example.com/feed", guid: "episode", isQueued: false,
+            eventDate: Date(timeIntervalSince1970: 200), in: ctx
+        )
+        PendingCloudQueueMutation.stageOrdering(eventDate: Date(timeIntervalSince1970: 200), in: ctx)
+        try ctx.save()
+
+        try PendingCloudQueueMutation.clear(
+            memberships: observedMemberships, orderings: observedOrderings, in: ctx
+        )
+        try ctx.save()
+
+        let remainingMembership = try XCTUnwrap(
+            PendingCloudQueueMutation.memberships(in: ctx).first
+        )
+        XCTAssertFalse(remainingMembership.isQueued)
+        XCTAssertEqual(remainingMembership.eventDate, Date(timeIntervalSince1970: 200))
+        XCTAssertEqual(
+            try PendingCloudQueueMutation.orderings(in: ctx).map(\.eventDate),
+            [Date(timeIntervalSince1970: 200)]
+        )
+    }
+
     /// #446 / #487: the boundary helpers the binge run relies on still behave —
     /// group-end off stops at a different-group next, but a Play-next override on
     /// that next item bypasses the stop for that one advance. Pure-logic guard

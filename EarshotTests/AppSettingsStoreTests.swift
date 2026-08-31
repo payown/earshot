@@ -10,11 +10,49 @@ final class AppSettingsStoreTests: XCTestCase {
             feedURL: " HTTPS://Example.COM:443/feed.xml#fragment ", in: context
         )
         try PendingCloudUnfollowIntent.set(feedURL: "https://example.com/feed.xml", in: context)
+        try PendingCloudRemoteActivationIntent.set(
+            feedURL: "https://example.com/feed.xml", in: context
+        )
         let rows = try context.fetch(FetchDescriptor<AppSetting>())
         XCTAssertEqual(Set(rows.map(\.value)), ["https://example.com/feed.xml"])
         XCTAssertTrue(rows.allSatisfy { AppSettingScope.isLocal($0.key) })
         XCTAssertTrue(rows.contains { $0.key.hasPrefix(SettingsKey.pendingCloudFollowPrefix) })
         XCTAssertTrue(rows.contains { $0.key.hasPrefix(SettingsKey.pendingCloudUnfollowPrefix) })
+        XCTAssertTrue(rows.contains {
+            $0.key.hasPrefix(SettingsKey.pendingCloudRemoteActivationPrefix)
+        })
+    }
+
+    func testRemoteActivationGenerationClearCannotDeleteReplacement() throws {
+        let first = TestStore.freshContext()
+        let container = first.container
+        let feed = "https://example.com/remote"
+        try PendingCloudRemoteActivationIntent.set(feedURL: feed, in: first)
+        try first.save()
+        let oldToken = try XCTUnwrap(
+            PendingCloudRemoteActivationIntent.tokens(feedURL: feed, in: first).first
+        )
+
+        let replacement = ModelContext(container)
+        try PendingCloudRemoteActivationIntent.set(feedURL: feed, in: replacement)
+        try replacement.save()
+        try PendingCloudRemoteActivationIntent.clear(
+            feedURL: feed, matching: oldToken, in: first
+        )
+        try first.save()
+
+        let fresh = ModelContext(container)
+        let remaining = try PendingCloudRemoteActivationIntent.tokens(
+            feedURL: feed, in: fresh
+        )
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertNotEqual(remaining.first, oldToken)
+        XCTAssertTrue(try PendingCloudRemoteActivationIntent.exists(feedURL: feed, in: fresh))
+        XCTAssertTrue(
+            try fresh.fetch(FetchDescriptor<AppSetting>()).allSatisfy {
+                AppSettingScope.isLocal($0.key)
+            }
+        )
     }
 
     func testIntentGenerationsPreserveNewerFollowAndUnfollowMarkers() throws {
