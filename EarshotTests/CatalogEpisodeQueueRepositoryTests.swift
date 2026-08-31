@@ -139,6 +139,11 @@ final class CatalogEpisodeQueueRepositoryTests: XCTestCase {
         XCTAssertEqual(secondResult, .success(.alreadyQueued))
 
         XCTAssertEqual(observed.count(), 1, "metadata-only retry is not a queue change")
+        XCTAssertEqual(
+            try repository.queuedEpisodeIdentities(),
+            [try XCTUnwrap(refreshed.catalogIdentity)],
+            "a silent no-op still exposes the authoritative durable membership snapshot"
+        )
         let context = freshAssertionContext()
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 1)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 1)
@@ -567,8 +572,14 @@ final class CatalogEpisodeQueueRepositoryTests: XCTestCase {
         _ = TestStore.freshContext()
         let value = preview()
         let canonical = FeedURLIdentity.canonical(value.podcastFeedURL)
+        let center = NotificationCenter()
+        let observed = notificationCounter(center: center)
+        defer { center.removeObserver(observed.token) }
         await PodcastIdentityWriteGate.shared.acquire(feedURLs: [canonical])
-        let repository = CatalogEpisodeQueueRepository(container: TestStore.container)
+        let repository = CatalogEpisodeQueueRepository(
+            container: TestStore.container,
+            notificationCenter: center
+        )
         let task = Task { await repository.add(value) }
         await Task.yield()
         task.cancel()
@@ -580,9 +591,11 @@ final class CatalogEpisodeQueueRepositoryTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Podcast>()), 0)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Episode>()), 0)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<QueueItem>()), 0)
+        XCTAssertEqual(observed.count(), 0, "cancelled waiter neither mutates nor publishes")
 
         let retry = await repository.add(value)
         XCTAssertEqual(retry, .success(.added), "cancelled waiter released the feed identity key")
+        XCTAssertEqual(observed.count(), 1)
     }
 
     func testConcurrentDifferentFeedAddsKeepDenseQueueAndEqualGUIDsDistinct() async throws {
@@ -604,6 +617,44 @@ final class CatalogEpisodeQueueRepositoryTests: XCTestCase {
         )
         XCTAssertEqual(items.map(\.position), [0, 1])
         XCTAssertEqual(Set(items.compactMap { $0.episode?.podcast?.title }), Set(["One", "Two"]))
+    }
+
+    func testQueuedIdentitySnapshotIsValueOnlyCanonicalAndFeedScoped() async throws {
+        _ = TestStore.freshContext()
+        let repository = CatalogEpisodeQueueRepository(container: TestStore.container)
+        let first = preview(
+            feedURL: "HTTPS://One.Example:443/feed/#directory",
+            show: "One",
+            guid: "shared"
+        )
+        let second = preview(
+            feedURL: "https://two.example/feed",
+            show: "Two",
+            guid: "shared"
+        )
+
+        let firstAdd = await repository.add(first)
+        let secondAdd = await repository.add(second)
+        XCTAssertEqual(firstAdd, .success(.added))
+        XCTAssertEqual(secondAdd, .success(.added))
+
+        let identities = try repository.queuedEpisodeIdentities()
+        XCTAssertEqual(identities.count, 2)
+        XCTAssertTrue(identities.contains(CatalogEpisodeIdentity(
+            feedURL: FeedURLIdentity.canonical(first.podcastFeedURL),
+            guid: "shared"
+        )))
+        XCTAssertTrue(identities.contains(CatalogEpisodeIdentity(
+            feedURL: FeedURLIdentity.canonical(second.podcastFeedURL),
+            guid: "shared"
+        )))
+
+        let removal = await repository.remove(try XCTUnwrap(first.catalogIdentity))
+        XCTAssertEqual(removal, .success(.removed))
+        XCTAssertEqual(
+            try repository.queuedEpisodeIdentities(),
+            [try XCTUnwrap(second.catalogIdentity)]
+        )
     }
 
     func testInvalidMaterializationInputsNeverWriteOrNotify() async throws {

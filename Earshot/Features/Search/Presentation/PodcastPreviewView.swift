@@ -30,6 +30,11 @@ struct PodcastPreviewView: View {
     /// Earshot Plus entitlement, for the free-tier podcast cap gate (#635).
     @Environment(EntitlementStore.self) private var entitlements
 
+    /// Context menus are a sighted convenience. SwiftUI promotes their buttons
+    /// into VoiceOver's Actions rotor, so the live environment value removes the
+    /// menu while VoiceOver is running and prevents duplicate actions.
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+
     /// Subscriptions, so the Follow / Unfollow control reflects live state and the
     /// label flips the moment the toggle completes — without re-entering the view.
     @Query(filter: PodcastQuery.followed) private var podcasts: [Podcast]
@@ -45,6 +50,16 @@ struct PodcastPreviewView: View {
     /// workflow from browsing the Library.
     @State private var searchText = ""
     @State private var sortOrder: PreviewEpisodeSortOrder = .newestFirst
+
+    /// Screen-scoped, value-only queue state. Refreshed from a single durable
+    /// snapshot after committed queue notifications; no row retains SwiftData
+    /// models or performs its own fetch.
+    @State private var queuedEpisodeIdentities: Set<CatalogEpisodeIdentity> = []
+
+    /// The preview owns at most one queue mutation. Leaving the screen or
+    /// activating another preview action cancels a waiter before it can acquire
+    /// the feed identity gate and mutate or announce on a different screen.
+    @State private var queueMutationTask: Task<Void, Never>?
 
     /// A pending subscribe-to-folder offer (#764). Set to the just-followed podcast
     /// when folders already exist; presents the shared ``FolderPickerView`` in
@@ -116,11 +131,22 @@ struct PodcastPreviewView: View {
         // new show and announces the result, or Cancel skips.
         .folderPicker($subscribeFolderPick)
         .task {
+            refreshQueuedEpisodeIdentities()
             await model.load(
                 feedURL: result.feedURL,
                 podcastTitle: result.title,
                 podcastArtworkURL: result.artworkURL
             )
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .earshotQueueDidChange)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            refreshQueuedEpisodeIdentities()
+        }
+        .onDisappear {
+            queueMutationTask?.cancel()
+            queueMutationTask = nil
         }
     }
 
@@ -190,7 +216,11 @@ struct PodcastPreviewView: View {
 
     @ViewBuilder
     private func episodeRow(_ episode: PreviewEpisode) -> some View {
-        if episode.audioURL.isEmpty {
+        let actions = PreviewEpisodeActions.resolved(
+            audioURL: episode.audioURL,
+            isQueued: episode.catalogIdentity.map(queuedEpisodeIdentities.contains) ?? false
+        )
+        if actions.isEmpty {
             // No enclosure URL: render a static, non-playable row so a feed missing
             // audio degrades gracefully rather than offering a dead play action.
             episodeRowContent(episode)
@@ -198,7 +228,7 @@ struct PodcastPreviewView: View {
         } else {
             // A Button is already a single VoiceOver element with the button trait,
             // so the one-stop-per-row requirement is preserved without combining.
-            Button {
+            let base = Button {
                 streamPreview(episode)
             } label: {
                 episodeRowContent(episode)
@@ -206,6 +236,16 @@ struct PodcastPreviewView: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Streams this episode")
+            .stableActionsRotor(actions) { action in
+                performPreviewAction(action, episode: episode)
+            }
+            if voiceOverEnabled {
+                base
+            } else {
+                base.stableActionsContextMenu(actions) { action in
+                    performPreviewAction(action, episode: episode)
+                }
+            }
         }
     }
 
@@ -295,6 +335,90 @@ struct PodcastPreviewView: View {
             chapterURL: episode.chapterURL,
             durationSeconds: episode.durationSeconds
         )
+    }
+
+    private func performPreviewAction(
+        _ action: PreviewEpisodeAction,
+        episode: PreviewEpisode
+    ) {
+        queueMutationTask?.cancel()
+        queueMutationTask = nil
+
+        guard action != .playNow else {
+            streamPreview(episode)
+            return
+        }
+
+        let currentIdentity = persistedNowPlayingIdentity()
+        let repository = CatalogEpisodeQueueRepository(container: context.container)
+        queueMutationTask = Task { @MainActor in
+            let result: Result<CatalogEpisodeQueueOutcome, CatalogEpisodeQueueFailure>
+            switch action {
+            case .playNow:
+                return
+            case .addToQueueEnd:
+                result = await repository.add(episode)
+            case .removeFromQueue:
+                guard let identity = episode.catalogIdentity else {
+                    Announcer.announce("Couldn't remove \(episode.title) from the queue")
+                    return
+                }
+                result = await repository.remove(identity)
+            case .playNext:
+                result = await repository.playNext(episode, after: currentIdentity)
+            }
+
+            // Cancellation can occur while the repository waits for the feed
+            // identity gate. Never reconcile state or speak after this view has
+            // disappeared or a newer action has superseded this one.
+            guard !Task.isCancelled else { return }
+
+            switch result {
+            case let .success(outcome):
+                if PreviewEpisodeActions.needsNoOpMembershipRefresh(after: outcome) {
+                    refreshQueuedEpisodeIdentities()
+                }
+                if let announcement = PreviewEpisodeActions.announcement(
+                    for: action,
+                    outcome: outcome,
+                    title: episode.title
+                ) {
+                    Announcer.announce(announcement)
+                }
+            case let .failure(failure):
+                if let announcement = PreviewEpisodeActions.failureAnnouncement(
+                    for: action,
+                    failure: failure,
+                    title: episode.title
+                ) {
+                    Announcer.announce(announcement)
+                }
+            }
+        }
+    }
+
+    /// A detached preview has no Podcast relationship, so it naturally yields
+    /// no persisted anchor and Play Next moves to the front. Only this value
+    /// crosses the repository's async boundary.
+    private func persistedNowPlayingIdentity() -> CatalogEpisodeIdentity? {
+        guard let episode = player.nowPlayingEpisode,
+              let feedURL = episode.podcast?.feedURL else { return nil }
+        let canonicalFeedURL = FeedURLIdentity.canonical(feedURL)
+        let guid = episode.guid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !canonicalFeedURL.isEmpty, !guid.isEmpty else { return nil }
+        return CatalogEpisodeIdentity(feedURL: canonicalFeedURL, guid: guid)
+    }
+
+    private func refreshQueuedEpisodeIdentities() {
+        do {
+            queuedEpisodeIdentities = try CatalogEpisodeQueueRepository(
+                container: context.container
+            ).queuedEpisodeIdentities()
+        } catch {
+            AppLog.player.error(
+                "Discovery queue membership refresh failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     /// Follow when not subscribed, unfollow when subscribed. The `@Query` updates

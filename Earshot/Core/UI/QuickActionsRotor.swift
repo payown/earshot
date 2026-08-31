@@ -58,6 +58,14 @@ enum QuickActionsContextMenu {
     }
 }
 
+/// Stable, value-only action metadata for fixed action sets. Unlike
+/// ``QuickActionItem``, conformers do not store a UUID or runnable closure, so a
+/// recycled list row keeps the same action identities across state updates.
+protocol StableQuickActionPresentation: Identifiable {
+    var label: String { get }
+    var isDestructive: Bool { get }
+}
+
 /// Immutable presentation for an action whose label or role originally came
 /// from a SwiftData model. SwiftUI can evaluate accessibility/context-menu
 /// builders long after the row body returned; carrying only values here keeps
@@ -133,6 +141,42 @@ enum PersistentModelLifetime {
 }
 
 extension View {
+    /// Fixed-action counterpart to ``rotorActions(_:)``. It uses the same
+    /// centralized reversed-emission compensation while retaining stable value
+    /// identities and one shared runner for an entire row.
+    func stableActionsRotor<Action: StableQuickActionPresentation>(
+        _ actions: [Action],
+        perform: @escaping (Action) -> Void
+    ) -> some View {
+        accessibilityActions {
+            ForEach(QuickActionsRotor.declarationOrder(actions)) { action in
+                Button(action.label) { perform(action) }
+            }
+        }
+    }
+
+    /// Sighted long-press companion to ``stableActionsRotor``. Context menus do
+    /// not reverse their declaration order, so the designed array is used as-is.
+    @ViewBuilder
+    func stableActionsContextMenu<Action: StableQuickActionPresentation>(
+        _ actions: [Action],
+        perform: @escaping (Action) -> Void
+    ) -> some View {
+        if actions.isEmpty {
+            self
+        } else {
+            contextMenu {
+                ForEach(QuickActionsContextMenu.declarationOrder(actions)) { action in
+                    Button(role: action.isDestructive ? .destructive : nil) {
+                        perform(action)
+                    } label: {
+                        Text(action.label)
+                    }
+                }
+            }
+        }
+    }
+
     /// Exposes `actions` as VoiceOver custom actions (the Actions rotor) so the
     /// rotor announces them in the order the array lists them, compensating for
     /// the OS's reversed emission — see ``QuickActionsRotor``.
