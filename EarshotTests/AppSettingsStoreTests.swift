@@ -4,6 +4,52 @@ import SwiftData
 
 @MainActor
 final class AppSettingsStoreTests: XCTestCase {
+    func testPendingCloudFollowIntentIsCanonicalAndDeviceLocal() throws {
+        let context = TestStore.freshContext()
+        try PendingCloudFollowIntent.set(
+            feedURL: " HTTPS://Example.COM:443/feed.xml#fragment ", in: context
+        )
+        try PendingCloudUnfollowIntent.set(feedURL: "https://example.com/feed.xml", in: context)
+        let rows = try context.fetch(FetchDescriptor<AppSetting>())
+        XCTAssertEqual(Set(rows.map(\.value)), ["https://example.com/feed.xml"])
+        XCTAssertTrue(rows.allSatisfy { AppSettingScope.isLocal($0.key) })
+        XCTAssertTrue(rows.contains { $0.key.hasPrefix(SettingsKey.pendingCloudFollowPrefix) })
+        XCTAssertTrue(rows.contains { $0.key.hasPrefix(SettingsKey.pendingCloudUnfollowPrefix) })
+    }
+
+    func testIntentGenerationsPreserveNewerFollowAndUnfollowMarkers() throws {
+        let first = TestStore.freshContext()
+        let container = first.container
+        let feed = "https://example.com/feed"
+        try PendingCloudFollowIntent.set(feedURL: feed, in: first)
+        try first.save()
+        let oldFollow = try XCTUnwrap(PendingCloudFollowIntent.token(feedURL: feed, in: first))
+        let replacement = ModelContext(container)
+        try PendingCloudFollowIntent.set(feedURL: feed, in: replacement)
+        try replacement.save()
+        try PendingCloudFollowIntent.clear(feedURL: feed, matching: oldFollow, in: first)
+        try first.save()
+        XCTAssertTrue(try PendingCloudFollowIntent.exists(feedURL: feed, in: ModelContext(container)))
+
+        let unfollow = ModelContext(container)
+        try PendingCloudFollowIntent.clear(feedURL: feed, in: unfollow)
+        try PendingCloudUnfollowIntent.set(feedURL: feed, in: unfollow)
+        try unfollow.save()
+        let oldUnfollow = try XCTUnwrap(PendingCloudUnfollowIntent.intents(in: unfollow).first?.token)
+        let newest = ModelContext(container)
+        try PendingCloudUnfollowIntent.set(feedURL: feed, in: newest)
+        try newest.save()
+        try PendingCloudUnfollowIntent.clear(feedURL: feed, matching: oldUnfollow, in: unfollow)
+        try unfollow.save()
+        XCTAssertTrue(try PendingCloudUnfollowIntent.feedURLs(in: ModelContext(container)).contains(feed))
+
+        let duplicate = ModelContext(container)
+        let key = SettingsKey.pendingCloudUnfollowPrefix + UUID().uuidString
+        duplicate.insert(AppSetting(key: key, value: feed))
+        duplicate.insert(AppSetting(key: key, value: feed))
+        try duplicate.save()
+        XCTAssertGreaterThanOrEqual(try PendingCloudUnfollowIntent.intents(in: duplicate).count, 3)
+    }
 
     private func makeStore() throws -> AppSettingsStore {
         AppSettingsStore(context: TestStore.freshContext())
