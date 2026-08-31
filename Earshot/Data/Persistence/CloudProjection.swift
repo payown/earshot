@@ -1244,9 +1244,14 @@ actor CloudProjectionCoordinator: ModelActor {
         let followedFeeds = try followedFeedURLs(in: appContext)
         for setting in settings where AppSettingScope.isMirrored(setting.key)
             && Self.settingBelongsToFollowedPodcast(setting.key, followedFeeds: followedFeeds) {
-            try publishLocalSettingChange(
+            guard let projectedValue = Self.projectedSettingValue(
                 key: setting.key,
                 value: setting.value,
+                followedFeeds: followedFeeds
+            ) else { continue }
+            try publishLocalSettingChange(
+                key: setting.key,
+                value: projectedValue,
                 now: now,
                 rows: rows,
                 cloudContext: cloudContext
@@ -1265,12 +1270,17 @@ actor CloudProjectionCoordinator: ModelActor {
             canonical,
             followedFeeds: followedFeeds
         ) else { return }
-        guard let value = AppSettingIdentity.value(for: canonical, in: appContext) else { return }
+        guard let value = AppSettingIdentity.value(for: canonical, in: appContext),
+              let projectedValue = Self.projectedSettingValue(
+                  key: canonical,
+                  value: value,
+                  followedFeeds: followedFeeds
+              ) else { return }
         let cloudContext = projectionContext
         let rows = try cloudContext.fetch(FetchDescriptor<CloudSettingProjection>())
         try publishLocalSettingChange(
             key: canonical,
-            value: value,
+            value: projectedValue,
             now: now,
             rows: rows,
             cloudContext: cloudContext
@@ -1962,6 +1972,20 @@ actor CloudProjectionCoordinator: ModelActor {
             .map { FeedURLIdentity.canonical($0.feedURL) })
     }
 
+    private static func projectedSettingValue(
+        key: String,
+        value: String,
+        followedFeeds: Set<String>
+    ) -> String? {
+        guard AppSettingIdentity.canonicalKey(key) == SettingsKey.morningLineup else {
+            return value
+        }
+        return QueueLineupIdentityPolicy.outboundValue(
+            value,
+            followedFeeds: followedFeeds
+        )
+    }
+
     private static func settingBelongsToFollowedPodcast(
         _ rawKey: String,
         followedFeeds: Set<String>
@@ -2230,8 +2254,20 @@ actor CloudProjectionCoordinator: ModelActor {
         var changed = false
         for key in newestByKey.keys.sorted() {
             guard let contributions = newestByKey[key],
-                  let value = Self.mergedSettingValue(key: key, rows: contributions),
-                  AppSettingIdentity.value(for: key, in: appContext) != value else { continue }
+                  let remoteValue = Self.mergedSettingValue(key: key, rows: contributions)
+            else { continue }
+            let localValue = AppSettingIdentity.value(for: key, in: appContext)
+            let value: String
+            if key == SettingsKey.morningLineup {
+                value = QueueLineupIdentityPolicy.mergingRemoteValue(
+                    remoteValue,
+                    into: localValue ?? "[]",
+                    followedFeeds: followedFeeds
+                )
+            } else {
+                value = remoteValue
+            }
+            guard localValue != value else { continue }
             try AppSettingIdentity.setValue(value, for: key, in: appContext)
             changed = true
         }

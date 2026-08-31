@@ -33,10 +33,16 @@ enum LocalStateStore {
     }
 
     static func episodeRows(for key: EpisodeLocalKey, in context: ModelContext) -> [LocalEpisodeState] {
+        (try? episodeRowsThrowing(for: key, in: context)) ?? []
+    }
+
+    static func episodeRowsThrowing(
+        for key: EpisodeLocalKey, in context: ModelContext
+    ) throws -> [LocalEpisodeState] {
         let guid = key.guid
-        return ((try? context.fetch(
+        return try context.fetch(
             FetchDescriptor<LocalEpisodeState>(predicate: #Predicate { $0.episodeGUID == guid })
-        )) ?? []).filter { FeedURLIdentity.canonical($0.podcastFeedURL) == key.feedURL }
+        ).filter { FeedURLIdentity.canonical($0.podcastFeedURL) == key.feedURL }
     }
 
     static func episode(matching key: EpisodeLocalKey, in context: ModelContext) -> Episode? {
