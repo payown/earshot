@@ -58,11 +58,13 @@ struct FolderDetailScreen: View {
     @AccessibilityFocusState private var focusEmptyState: Bool
 
     // Folder-scoped Inbox section (#763). The candidate snapshot is owned by
-    // `FolderScopedInboxCandidates`; these states only bound row rendering and
+    // `InboxCandidates`; these states only bound row rendering and
     // re-anchor VoiceOver when a played/queued episode leaves the section.
     @State private var displayedNewEpisodeLimit = InboxLogic.displayBatchSize
     @AccessibilityFocusState private var focusedNewEpisodeID: PersistentIdentifier?
     @AccessibilityFocusState private var focusNewEpisodesEmpty: Bool
+    @State private var pendingNewEpisodeFocusID: PersistentIdentifier?
+    @State private var pendingNewEpisodesEmptyFocus = false
 
     // Multi-select for this folder's PODCASTS section (#757). Add/Move reuse the
     // shared `FolderPickerView`; Remove from folder calls the repo directly.
@@ -231,8 +233,17 @@ struct FolderDetailScreen: View {
                 subfoldersSection
                 podcastsSection
                 if !selection.isSelecting {
-                    FolderScopedInboxCandidates(folder: folder) { newEpisodes in
-                        newEpisodesSection(newEpisodes)
+                    InboxCandidates(
+                        scope: .folder(folder.persistentModelID),
+                        optInOnly: settings.inboxOptInOnly,
+                        searchText: "",
+                        requestedLimit: displayedNewEpisodeLimit,
+                        onPagePublished: applyPendingNewEpisodeFocus
+                    ) { snapshot in
+                        newEpisodesSection(
+                            snapshot.episodes,
+                            totalCount: snapshot.matchingCount
+                        )
                     }
                 }
                 episodesSection
@@ -424,8 +435,11 @@ struct FolderDetailScreen: View {
     /// can navigate by heading and learn that the scope currently has no new
     /// episodes. Rendering is bounded in the same predictable 100-row batches as
     /// the main Inbox.
-    private func newEpisodesSection(_ newEpisodes: [Episode]) -> some View {
-        let displayed = newEpisodes.prefix(displayedNewEpisodeLimit)
+    private func newEpisodesSection(
+        _ newEpisodes: [Episode],
+        totalCount: Int
+    ) -> some View {
+        let displayed = newEpisodes[...]
         return Section {
             if newEpisodes.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -452,27 +466,29 @@ struct FolderDetailScreen: View {
                             supportsMoveToFolder: true
                         ),
                         includesPodcastName: true,
-                        performAction: { action in performNewEpisodeAction(action, for: episode) }
+                        performAction: { action in
+                            performNewEpisodeAction(action, for: episode, in: newEpisodes)
+                        }
                     )
                     .accessibilityFocused(
                         $focusedNewEpisodeID, equals: episode.persistentModelID
                     )
                 }
-                if displayed.count < newEpisodes.count {
+                if displayed.count < totalCount {
                     Button {
                         displayedNewEpisodeLimit = InboxLogic.nextDisplayLimit(
                             current: displayedNewEpisodeLimit,
-                            total: newEpisodes.count
+                            total: totalCount
                         )
                         Announcer.announce(
-                            "Showing \(displayedNewEpisodeLimit) of \(newEpisodes.count) new episodes"
+                            "Showing \(displayedNewEpisodeLimit) of \(totalCount) new episodes"
                         )
                     } label: {
                         Label("Show 100 more", systemImage: "chevron.down.circle")
                     }
                     .accessibilityLabel("Show 100 more new episodes")
                     .accessibilityHint(
-                        "Currently showing \(displayed.count) of \(newEpisodes.count) new episodes"
+                        "Currently showing \(displayed.count) of \(totalCount) new episodes"
                     )
                 }
             }
@@ -489,9 +505,13 @@ struct FolderDetailScreen: View {
     /// flips state and move VoiceOver focus after the event-driven snapshot
     /// reloads. Queue actions trigger the same reload through
     /// `.earshotQueueDidChange`.
-    private func performNewEpisodeAction(_ action: EpisodeAction, for episode: Episode) {
+    private func performNewEpisodeAction(
+        _ action: EpisodeAction,
+        for episode: Episode,
+        in visibleEpisodes: [Episode]
+    ) {
         let focusAfterRemoval = {
-            focusAfterNewEpisodeLeaves(episode)
+            focusAfterNewEpisodeLeaves(episode, in: visibleEpisodes)
         }
         buildEpisodeActions(
             episode: episode,
@@ -514,14 +534,30 @@ struct FolderDetailScreen: View {
         ).first?.run()
     }
 
-    private func focusAfterNewEpisodeLeaves(_ episode: Episode) {
-        let neighbor = neighborID(of: episode, in: repositoryInboxEpisodes())
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if let neighbor {
-                focusedNewEpisodeID = neighbor
-            } else {
-                focusNewEpisodesEmpty = true
-            }
+    private func focusAfterNewEpisodeLeaves(_ episode: Episode, in visibleEpisodes: [Episode]) {
+        let neighbor = neighborID(of: episode, in: visibleEpisodes)
+        pendingNewEpisodeFocusID = neighbor
+        pendingNewEpisodesEmptyFocus = neighbor == nil
+    }
+
+    private func applyPendingNewEpisodeFocus(_ snapshot: InboxPresentationSnapshot) {
+        let target = InboxPendingFocusLogic.target(
+            pendingEpisode: pendingNewEpisodeFocusID,
+            pendingEmpty: pendingNewEpisodesEmptyFocus,
+            publishedEpisodes: snapshot.episodes.map(\.persistentModelID),
+            matchingCount: snapshot.matchingCount
+        )
+        switch target {
+        case .episode(let episodeID):
+            self.pendingNewEpisodeFocusID = nil
+            pendingNewEpisodesEmptyFocus = false
+            DispatchQueue.main.async { focusedNewEpisodeID = episodeID }
+        case .empty:
+            pendingNewEpisodeFocusID = nil
+            pendingNewEpisodesEmptyFocus = false
+            DispatchQueue.main.async { focusNewEpisodesEmpty = true }
+        case .wait:
+            break
         }
     }
 
@@ -880,10 +916,6 @@ struct FolderDetailScreen: View {
     }
 
     // MARK: Actions
-
-    private func repositoryInboxEpisodes() -> [Episode] {
-        InboxRepository(context: context).inboxEpisodes(in: folder)
-    }
 
     /// Queues every age-eligible new episode in the folder subtree, then starts
     /// the first (newest) episode. `playFromEpisodeList` is idempotent after the

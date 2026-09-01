@@ -77,6 +77,247 @@ enum InboxQuery {
     }
 }
 
+/// A stable Inbox scope that can cross from SwiftUI's main context to the
+/// background page loader without carrying SwiftData models between actors.
+enum InboxPageScope: Sendable, Equatable, Hashable {
+    case all
+    case folder(PersistentIdentifier)
+}
+
+/// One bounded presentation page. `inboxCount` preserves the existing title and
+/// Clear-Inbox wording while `matchingCount` drives search announcements and the
+/// explicit Show-more boundary.
+struct InboxIdentifierPage: Sendable, Equatable {
+    let ids: [PersistentIdentifier]
+    let downloadIDs: [PersistentIdentifier]
+    let inboxCount: Int
+    let matchingCount: Int
+    let candidateCount: Int
+    let downloadEligibleCount: Int
+    let downloadSkippedCount: Int
+
+    var hasMore: Bool { ids.count < matchingCount }
+}
+
+private struct InboxSortableIdentifier: Sendable {
+    let id: PersistentIdentifier
+    let pubDate: Date?
+    let createdAt: Date
+    let guid: String
+}
+
+/// Background, fixed-memory Inbox scan. SwiftData cannot predicate on the
+/// stored `EpisodeStatus` enum, so the actor scans the already store-bounded
+/// unplayed/non-dismissed candidate set in small pages and retains only scalar
+/// identities for publication.
+@ModelActor
+actor InboxPageLoader {
+    static let storeBatchSize = 128
+
+    func page(
+        scope: InboxPageScope,
+        optInOnly: Bool,
+        searchText: String,
+        limit requestedLimit: Int
+    ) throws -> InboxIdentifierPage {
+        let limit = max(InboxLogic.displayBatchSize, requestedLimit)
+        let podcastIDs = try scopePodcastIDs(scope)
+        var candidateCount = 0
+        var inboxCount = 0
+        var matchingCount = 0
+        var matches: [InboxSortableIdentifier] = []
+        var downloadEligibleCount = 0
+        var downloadSkippedCount = 0
+        var downloadMatches: [InboxSortableIdentifier] = []
+
+        switch scope {
+        case .all:
+            var offset = 0
+            while true {
+                try Task.checkCancellation()
+                var descriptor = FetchDescriptor<Episode>(
+                    predicate: InboxQuery.unplayedPredicate(optInOnly: optInOnly),
+                    sortBy: [
+                        SortDescriptor(\Episode.pubDate, order: .reverse),
+                        SortDescriptor(\Episode.createdAt, order: .reverse),
+                        SortDescriptor(\Episode.guid, order: .forward),
+                    ]
+                )
+                descriptor.fetchOffset = offset
+                descriptor.fetchLimit = Self.storeBatchSize
+                let batch = try modelContext.fetch(descriptor)
+                guard !batch.isEmpty else { break }
+                candidateCount += batch.count
+                collect(
+                    batch,
+                    optInOnly: optInOnly,
+                    searchText: searchText,
+                    limit: limit,
+                    inboxCount: &inboxCount,
+                    matchingCount: &matchingCount,
+                    matches: &matches,
+                    downloadEligibleCount: &downloadEligibleCount,
+                    downloadSkippedCount: &downloadSkippedCount,
+                    downloadMatches: &downloadMatches
+                )
+                if batch.count < Self.storeBatchSize { break }
+                offset += batch.count
+            }
+
+        case .folder:
+            for podcastID in podcastIDs {
+                var offset = 0
+                while true {
+                    try Task.checkCancellation()
+                    var descriptor = FetchDescriptor<Episode>(
+                        predicate: InboxQuery.folderUnplayedPredicate(podcastID: podcastID),
+                        sortBy: [
+                            SortDescriptor(\Episode.pubDate, order: .reverse),
+                            SortDescriptor(\Episode.createdAt, order: .reverse),
+                            SortDescriptor(\Episode.guid, order: .forward),
+                        ]
+                    )
+                    descriptor.fetchOffset = offset
+                    descriptor.fetchLimit = Self.storeBatchSize
+                    let batch = try modelContext.fetch(descriptor)
+                    guard !batch.isEmpty else { break }
+                    candidateCount += batch.count
+                    collect(
+                        batch,
+                        optInOnly: optInOnly,
+                        searchText: searchText,
+                        limit: limit,
+                        inboxCount: &inboxCount,
+                        matchingCount: &matchingCount,
+                        matches: &matches,
+                        downloadEligibleCount: &downloadEligibleCount,
+                        downloadSkippedCount: &downloadSkippedCount,
+                        downloadMatches: &downloadMatches
+                    )
+                    if batch.count < Self.storeBatchSize { break }
+                    offset += batch.count
+                }
+            }
+        }
+
+        matches.sort(by: Self.precedes)
+        return InboxIdentifierPage(
+            ids: matches.prefix(limit).map(\.id),
+            downloadIDs: downloadMatches.map(\.id),
+            inboxCount: inboxCount,
+            matchingCount: matchingCount,
+            candidateCount: candidateCount,
+            downloadEligibleCount: downloadEligibleCount,
+            downloadSkippedCount: downloadSkippedCount
+        )
+    }
+
+    private func collect(
+        _ episodes: [Episode],
+        optInOnly: Bool,
+        searchText: String,
+        limit: Int,
+        inboxCount: inout Int,
+        matchingCount: inout Int,
+        matches: inout [InboxSortableIdentifier],
+        downloadEligibleCount: inout Int,
+        downloadSkippedCount: inout Int,
+        downloadMatches: inout [InboxSortableIdentifier]
+    ) {
+        for episode in episodes where isInboxEpisode(episode, optInOnly: optInOnly) {
+            inboxCount += 1
+            guard Self.matches(episode, query: searchText) else { continue }
+            matchingCount += 1
+            let candidate = InboxSortableIdentifier(
+                id: episode.persistentModelID,
+                pubDate: episode.pubDate,
+                createdAt: episode.createdAt,
+                guid: episode.guid
+            )
+            Self.retain(candidate, limit: limit, in: &matches)
+            if episode.downloadStatus == .none || episode.downloadStatus == .failed {
+                downloadEligibleCount += 1
+                Self.retain(
+                    candidate,
+                    limit: ManualDownloadBatchPlan.maximumEpisodeCount,
+                    in: &downloadMatches
+                )
+            } else {
+                downloadSkippedCount += 1
+            }
+        }
+    }
+
+    private static func retain(
+        _ candidate: InboxSortableIdentifier,
+        limit: Int,
+        in matches: inout [InboxSortableIdentifier]
+    ) {
+        if matches.count < limit {
+            matches.append(candidate)
+            matches.sort(by: Self.precedes)
+        } else if let last = matches.last, Self.precedes(candidate, last) {
+            matches[matches.count - 1] = candidate
+            matches.sort(by: Self.precedes)
+        }
+    }
+
+    private func isInboxEpisode(_ episode: Episode, optInOnly: Bool) -> Bool {
+        guard episode.status == .newEpisode,
+              !episode.inboxDismissed,
+              episode.podcast?.isCatalogOnly != true else { return false }
+        if optInOnly { return episode.podcast?.inboxIncluded == true }
+        return episode.podcast.map {
+            !InboxLogic.isExcluded(
+                inboxExcluded: $0.inboxExcluded,
+                inboxIncluded: $0.inboxIncluded
+            )
+        } ?? true
+    }
+
+    private static func matches(_ episode: Episode, query: String) -> Bool {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        if episode.title.localizedStandardContains(query) { return true }
+        if episode.podcast?.title.localizedStandardContains(query) == true { return true }
+        return EpisodeSummary.plainText(episode.episodeDescription)
+            .localizedStandardContains(query)
+    }
+
+    private func scopePodcastIDs(_ scope: InboxPageScope) throws -> [PersistentIdentifier] {
+        guard case .folder(let rootID) = scope else { return [] }
+        var pending = [rootID]
+        var visited = Set<PersistentIdentifier>()
+        var podcastIDs = Set<PersistentIdentifier>()
+        while let folderID = pending.popLast(), visited.insert(folderID).inserted {
+            try Task.checkCancellation()
+            let memberships = try modelContext.fetch(FetchDescriptor<FolderMembership>(
+                predicate: #Predicate { $0.folder?.persistentModelID == folderID }
+            ))
+            podcastIDs.formUnion(memberships.compactMap { membership in
+                guard membership.podcast?.isFollowed == true else { return nil }
+                return membership.podcast?.persistentModelID
+            })
+            let children = try modelContext.fetch(FetchDescriptor<PodcastFolder>(
+                predicate: #Predicate { $0.parent?.persistentModelID == folderID }
+            ))
+            pending.append(contentsOf: children.map(\.persistentModelID))
+        }
+        return Array(podcastIDs)
+    }
+
+    private static func precedes(
+        _ lhs: InboxSortableIdentifier,
+        _ rhs: InboxSortableIdentifier
+    ) -> Bool {
+        if lhs.pubDate != rhs.pubDate {
+            return FolderLogic.byPubDateDescending(lhs.pubDate, rhs.pubDate)
+        }
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+        return lhs.guid < rhs.guid
+    }
+}
+
 /// The inbox is a view over episodes: `status == .newEpisode && !inboxDismissed`
 /// from non-excluded podcasts. Per-podcast caps (count / age) hide overflow by
 /// setting `inboxDismissed` — one-directional, so caps never fight Clear Inbox
@@ -89,6 +330,61 @@ final class InboxRepository {
     init(context: ModelContext) {
         self.context = context
         self.settings = AppSettingsStore(context: context)
+    }
+
+    func identifierPage(
+        scope: InboxPageScope,
+        optInOnly: Bool,
+        searchText: String,
+        limit: Int
+    ) async throws -> InboxIdentifierPage {
+        try await InboxPageLoader(modelContainer: context.container).page(
+            scope: scope,
+            optInOnly: optInOnly,
+            searchText: searchText,
+            limit: limit
+        )
+    }
+
+    func resolve(_ ids: [PersistentIdentifier]) -> [Episode] {
+        guard !ids.isEmpty else { return [] }
+        let requestedIDs = ids
+        let descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { requestedIDs.contains($0.persistentModelID) }
+        )
+        let fetched = (try? context.fetch(descriptor)) ?? []
+        let byID = Dictionary(uniqueKeysWithValues: fetched.map {
+            ($0.persistentModelID, $0)
+        })
+        return ids.compactMap { byID[$0] }
+    }
+
+    /// Clears the complete selected Inbox scope in bounded, durable batches.
+    /// Each pass asks the background actor for the first remaining page, so
+    /// deleting or syncing rows between passes cannot invalidate an offset.
+    @discardableResult
+    func clearInbox(scope: InboxPageScope, optInOnly: Bool) async -> Int {
+        var cleared = 0
+        while !Task.isCancelled {
+            let page: InboxIdentifierPage
+            do {
+                page = try await identifierPage(
+                    scope: scope,
+                    optInOnly: optInOnly,
+                    searchText: "",
+                    limit: InboxLogic.displayBatchSize
+                )
+            } catch {
+                AppLog.data.error("Inbox clear page failed: \(error.localizedDescription, privacy: .public)")
+                break
+            }
+            let batch = resolve(page.ids)
+            guard !batch.isEmpty else { break }
+            clearInbox(batch)
+            cleared += batch.count
+            await Task.yield()
+        }
+        return cleared
     }
 
     /// Removes models that SwiftData invalidated after an event-driven Inbox

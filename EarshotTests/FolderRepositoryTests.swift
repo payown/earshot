@@ -202,6 +202,12 @@ final class FolderRepositoryTests: XCTestCase {
         XCTAssertEqual(snapshot.subfolderCounts[child.persistentModelID], 1)
         XCTAssertEqual(snapshot.podcastCounts[child.persistentModelID], 1)
         XCTAssertTrue(snapshot.hasSubtreeSubscriptions)
+        XCTAssertTrue(snapshot.scopeSignature.folderIDs.contains(root.persistentModelID))
+        XCTAssertTrue(snapshot.scopeSignature.folderIDs.contains(child.persistentModelID))
+        XCTAssertFalse(snapshot.scopeSignature.folderIDs.contains(unrelated.persistentModelID))
+        XCTAssertTrue(snapshot.scopeSignature.podcastIDs.contains(rootPodcast.persistentModelID))
+        XCTAssertTrue(snapshot.scopeSignature.podcastIDs.contains(childPodcast.persistentModelID))
+        XCTAssertFalse(snapshot.scopeSignature.podcastIDs.contains(unrelatedPodcast.persistentModelID))
         XCTAssertFalse(snapshot.podcasts.contains { $0.persistentModelID == unrelatedPodcast.persistentModelID })
         XCTAssertFalse(snapshot.episodes.contains { $0.persistentModelID == unrelatedEpisode.persistentModelID })
     }

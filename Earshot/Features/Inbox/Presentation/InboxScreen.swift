@@ -10,14 +10,72 @@ private struct DownloadAllRequest: Identifiable {
     let deferredCount: Int
     let scope: String
 
-    init(candidates: [Episode], scope: String) {
-        let plan = ManualDownloadBatchPlan.make(statuses: candidates.map(\.downloadStatus))
+    init(
+        candidates: [Episode],
+        eligibleCount: Int,
+        skippedCount: Int,
+        scope: String
+    ) {
         self.candidates = candidates
-        episodes = plan.selectedIndices.map { candidates[$0] }
-        eligibleCount = plan.eligibleCount
-        skippedCount = plan.skippedCount
-        deferredCount = plan.deferredCount
+        episodes = candidates
+        self.eligibleCount = eligibleCount
+        self.skippedCount = skippedCount
+        deferredCount = max(0, eligibleCount - candidates.count)
         self.scope = scope
+    }
+}
+
+struct InboxPresentationSnapshot {
+    let episodes: [Episode]
+    let downloadCandidates: [Episode]
+    let inboxCount: Int
+    let matchingCount: Int
+    let downloadEligibleCount: Int
+    let downloadSkippedCount: Int
+}
+
+enum InboxPendingFocusTarget<ID: Hashable>: Equatable {
+    case episode(ID)
+    case empty
+    case wait
+}
+
+enum InboxPendingFocusLogic {
+    static func target<ID: Hashable>(
+        pendingEpisode: ID?,
+        pendingEmpty: Bool,
+        publishedEpisodes: [ID],
+        matchingCount: Int
+    ) -> InboxPendingFocusTarget<ID> {
+        if let pendingEpisode {
+            if publishedEpisodes.contains(pendingEpisode) {
+                return .episode(pendingEpisode)
+            }
+            if let fallback = publishedEpisodes.first {
+                return .episode(fallback)
+            }
+            if matchingCount == 0 { return .empty }
+        } else if pendingEmpty {
+            if let fallback = publishedEpisodes.first {
+                return .episode(fallback)
+            }
+            if matchingCount == 0 { return .empty }
+        }
+        return .wait
+    }
+}
+
+struct InboxReloadCoalescer: Equatable {
+    private(set) var isScheduled = false
+
+    mutating func request() -> Bool {
+        guard !isScheduled else { return false }
+        isScheduled = true
+        return true
+    }
+
+    mutating func consume() {
+        isScheduled = false
     }
 }
 
@@ -78,6 +136,7 @@ struct InboxScreen: View {
     // Mirrors the Library unfollow flow (`SubscriptionsView.pendingUnsubscribe`)
     // so the UX is identical.
     @State private var pendingUnfollow: Podcast?
+    @State private var pendingUnfollowLeavesVisibleEmpty = false
     // The in-place `.searchable` filter (#457, Part A). Pure presentation: the
     // @Query-backed inbox is filtered in memory, never re-fetched.
     @State private var searchText = ""
@@ -89,6 +148,8 @@ struct InboxScreen: View {
     // "Mark as played" removes the focused row from the inbox (#579). Mirrors
     // the Queue's neighbor-focus wiring.
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
+    @State private var pendingFocusedEpisode: PersistentIdentifier?
+    @State private var pendingEmptyFocus = false
     @AccessibilityFocusState private var focusLaunchHeading: Bool
     @AccessibilityFocusState private var focusRefreshStatus: Bool
     // Tracked by SwiftUI, so toggling VoiceOver while the Inbox is on screen
@@ -109,18 +170,30 @@ struct InboxScreen: View {
     var body: some View {
         Group {
             if let selectedFolder {
-                FolderScopedInboxCandidates(folder: selectedFolder) { candidates in
-                    inboxContent(candidates: candidates)
+                InboxCandidates(
+                    scope: .folder(selectedFolder.persistentModelID),
+                    optInOnly: settings.inboxOptInOnly,
+                    searchText: searchText,
+                    requestedLimit: displayedEpisodeLimit,
+                    onPagePublished: applyPendingFocus
+                ) { snapshot in
+                    inboxContent(snapshot: snapshot)
                 }
             } else {
-                AllInboxCandidates(optInOnly: settings.inboxOptInOnly) { candidates in
-                    inboxContent(candidates: candidates)
+                InboxCandidates(
+                    scope: .all,
+                    optInOnly: settings.inboxOptInOnly,
+                    searchText: searchText,
+                    requestedLimit: displayedEpisodeLimit,
+                    onPagePublished: applyPendingFocus
+                ) { snapshot in
+                    inboxContent(snapshot: snapshot)
                 }
             }
         }
     }
 
-    private func inboxContent(candidates: [Episode]) -> some View {
+    private func inboxContent(snapshot: InboxPresentationSnapshot) -> some View {
         // Compute the inbox once per body so the list, empty-state check, title,
         // count, and Clear dialog all read a single value instead of re-running
         // the filter (formerly a re-fetch) several times per render.
@@ -131,16 +204,13 @@ struct InboxScreen: View {
         // identity repair or CloudKit projection has deleted. Check SwiftData's
         // backing-data state before touching any persisted property; a stale
         // `status` getter traps rather than throwing (TestFlight build 210).
-        let inbox = InboxRepository.liveEpisodes(candidates, in: context)
+        let visible = InboxRepository.liveEpisodes(snapshot.episodes, in: context)
             .filter { $0.status == .newEpisode }
-        // What the list actually shows: the inbox narrowed by the search field
-        // (#457). With no search active this IS `inbox` (same array, no copy).
-        let visible = EpisodeSearchFilter.filter(inbox, query: searchText)
-        let displayed = visible.prefix(displayedEpisodeLimit)
+        let displayed = visible[...]
         return VStack(spacing: 0) {
             inboxFilter
             Group {
-                if inbox.isEmpty {
+                if snapshot.inboxCount == 0 {
                     ContentUnavailableView(
                         selectedFolder == nil ? "Inbox is empty" : "No new episodes",
                         systemImage: "tray",
@@ -148,7 +218,7 @@ struct InboxScreen: View {
                     )
                     .accessibilityElement(children: .combine)
                     .accessibilityFocused($focusEmpty)
-                } else if visible.isEmpty {
+                } else if snapshot.matchingCount == 0 {
                     // Search matched nothing. Bound to the same focus target as
                     // the true empty state so mutation focus never gets stranded.
                     NoSearchMatchesView(query: searchText)
@@ -159,7 +229,11 @@ struct InboxScreen: View {
                         // episode Quick Actions. Sighted-only swipes stay gated
                         // below so iOS cannot mirror duplicates into the rotor.
                         ForEach(displayed) { episode in
-                            rowContainer(for: episode)
+                            rowContainer(
+                                for: episode,
+                                visible: visible,
+                                inboxCount: snapshot.inboxCount
+                            )
                                 .accessibilityFocused(
                                     $focusedEpisode, equals: episode.persistentModelID
                                 )
@@ -167,22 +241,22 @@ struct InboxScreen: View {
                                     $focusedRowID, equals: episode.persistentModelID
                                 )
                         }
-                        if displayed.count < visible.count {
+                        if displayed.count < snapshot.matchingCount {
                             Button {
                                 displayedEpisodeLimit = InboxLogic.nextDisplayLimit(
                                     current: displayedEpisodeLimit,
-                                    total: visible.count
+                                    total: snapshot.matchingCount
                                 )
                                 let newCount = displayedEpisodeLimit
                                 Announcer.announce(
-                                    "Showing \(newCount) of \(visible.count) episodes"
+                                    "Showing \(newCount) of \(snapshot.matchingCount) episodes"
                                 )
                             } label: {
                                 Label("Show 100 more", systemImage: "chevron.down.circle")
                             }
                             .accessibilityLabel("Show 100 more episodes")
                             .accessibilityHint(
-                                "Currently showing \(displayed.count) of \(visible.count) episodes"
+                                "Currently showing \(displayed.count) of \(snapshot.matchingCount) episodes"
                             )
                         }
                     }
@@ -247,13 +321,23 @@ struct InboxScreen: View {
                             id: "queue",
                             title: EpisodeBatchLabel.addToQueue(count: selection.count),
                             systemImage: "text.badge.plus",
-                            handler: { addSelectedToQueue(visible: visible) }
+                            handler: {
+                                addSelectedToQueue(
+                                    visible: visible,
+                                    inboxCount: snapshot.inboxCount
+                                )
+                            }
                         ),
                         MultiSelectAction(
                             id: "played",
                             title: EpisodeBatchLabel.markPlayed(count: selection.count),
                             systemImage: "checkmark.circle",
-                            handler: { markSelectedPlayed(visible: visible) }
+                            handler: {
+                                markSelectedPlayed(
+                                    visible: visible,
+                                    inboxCount: snapshot.inboxCount
+                                )
+                            }
                         ),
                     ],
                     announcementNoun: "episode"
@@ -279,16 +363,16 @@ struct InboxScreen: View {
             requestTabEntryFocus()
         }
         .onChange(of: searchText) { _, _ in displayedEpisodeLimit = InboxLogic.displayBatchSize }
-        .onSubmit(of: .search) { announceMatches(count: visible.count) }
+        .onSubmit(of: .search) { announceMatches(count: snapshot.matchingCount) }
         .toolbar {
             // Deliberately `inbox.count`, not `visible.count`: the title states
             // the TOTAL inbox size even while a search narrows the list (#457).
             // The title is the inbox's identity, not the filter's result count —
             // the match tally is announced from the search field on submit.
             ToolbarItem(placement: .principal) {
-                Text(InboxLogic.inboxTitle(count: inbox.count))
+                Text(InboxLogic.inboxTitle(count: snapshot.inboxCount))
                     .font(.headline)
-                    .accessibilityLabel(InboxLogic.inboxTitleAccessibilityLabel(count: inbox.count))
+                    .accessibilityLabel(InboxLogic.inboxTitleAccessibilityLabel(count: snapshot.inboxCount))
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityFocused($focusLaunchHeading)
             }
@@ -297,7 +381,7 @@ struct InboxScreen: View {
             // the change. Only offered when there's something to select; hidden
             // while the inbox is empty just like Clear inbox. The batch actions
             // themselves live in the bottom MultiSelectBar, not the toolbar.
-            if !inbox.isEmpty {
+            if snapshot.inboxCount > 0 {
                 ToolbarItem(placement: .topBarLeading) {
                     if selection.isSelecting {
                         Button("Done") { exitSelection(announce: true) }
@@ -313,12 +397,14 @@ struct InboxScreen: View {
                     }
                 }
             }
-            if !selection.isSelecting && !inbox.isEmpty {
+            if !selection.isSelecting && snapshot.inboxCount > 0 {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
                             downloadAllRequest = DownloadAllRequest(
-                                candidates: visible,
+                                candidates: snapshot.downloadCandidates,
+                                eligibleCount: snapshot.downloadEligibleCount,
+                                skippedCount: snapshot.downloadSkippedCount,
                                 scope: EpisodeSearchFilter.isActive(searchText)
                                     ? "current filtered Inbox" : "Inbox"
                             )
@@ -376,10 +462,10 @@ struct InboxScreen: View {
             isPresented: $confirmingClear,
             titleVisibility: .visible
         ) {
-            Button("Clear inbox", role: .destructive) { clearInbox(inbox) }
+            Button("Clear inbox", role: .destructive) { clearInbox() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Hides all \(inbox.count) episodes from the inbox. They stay in your podcasts.")
+            Text("Hides all \(snapshot.inboxCount) episodes from the inbox. They stay in your podcasts.")
         }
         // Podcast-level destructive confirmation for the inbox-row "Unfollow"
         // swipe (#500). Wording and structure mirror Library's unfollow dialog
@@ -463,7 +549,11 @@ struct InboxScreen: View {
     /// selection mode (#758, via the shared ``SelectableRow`` scaffold),
     /// otherwise the normal navigate/rotor + sighted-swipe row.
     @ViewBuilder
-    private func rowContainer(for episode: Episode) -> some View {
+    private func rowContainer(
+        for episode: Episode,
+        visible: [Episode],
+        inboxCount: Int
+    ) -> some View {
         if selection.isSelecting {
             EpisodeSelectableRow(
                 episode: episode,
@@ -472,7 +562,7 @@ struct InboxScreen: View {
                 onToggle: { selection.toggle(episode.persistentModelID) }
             )
         } else {
-            normalRow(for: episode)
+            normalRow(for: episode, visible: visible, inboxCount: inboxCount)
         }
     }
 
@@ -480,8 +570,12 @@ struct InboxScreen: View {
     /// plus, for sighted users only, the mark-played and unfollow swipes. Selection
     /// mode swaps this out entirely for ``EpisodeSelectableRow`` (#758).
     @ViewBuilder
-    private func normalRow(for episode: Episode) -> some View {
-        let row = episodeRow(for: episode)
+    private func normalRow(
+        for episode: Episode,
+        visible: [Episode],
+        inboxCount: Int
+    ) -> some View {
+        let row = episodeRow(for: episode, visible: visible, inboxCount: inboxCount)
         if voiceOverEnabled {
             row
         } else {
@@ -495,13 +589,13 @@ struct InboxScreen: View {
                 // it an icon + text (never color alone).
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     Button {
-                        markPlayed(episode)
+                        markPlayed(episode, inboxCount: inboxCount)
                     } label: {
                         Label("Mark as played", systemImage: "checkmark.circle")
                     }
                     .tint(.green)
                     Button {
-                        removeFromInbox(episode)
+                        removeFromInbox(episode, visible: visible)
                     } label: {
                         Label("Remove from Inbox", systemImage: "tray.and.arrow.down")
                     }
@@ -517,7 +611,7 @@ struct InboxScreen: View {
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     if let podcast = episode.podcast {
                         Button(role: .destructive) {
-                            pendingUnfollow = podcast
+                            prepareUnfollow(podcast, visible: visible)
                         } label: {
                             Label("Unfollow this podcast", systemImage: "xmark.bin")
                         }
@@ -526,12 +620,18 @@ struct InboxScreen: View {
         }
     }
 
-    private func episodeRow(for episode: Episode) -> EpisodeRow {
+    private func episodeRow(
+        for episode: Episode,
+        visible: [Episode],
+        inboxCount: Int
+    ) -> EpisodeRow {
         EpisodeRow(
             episode: episode,
             deferredActions: availableActions(for: episode),
             includesPodcastName: true,
-            performAction: { action in perform(action, for: episode) }
+            performAction: { action in
+                perform(action, for: episode, visible: visible, inboxCount: inboxCount)
+            }
         )
     }
 
@@ -559,19 +659,23 @@ struct InboxScreen: View {
     /// queue / Mark as played remove rows), otherwise the Select/Done toolbar
     /// button. `focusDelay` lets a folder batch push the focus move past the
     /// picker's own +0.5s result announcement so the two don't collide.
-    private func exitSelection(announce: Bool, focusDelay: TimeInterval = 0.5) {
+    private func exitSelection(
+        announce: Bool,
+        focusDelay: TimeInterval = 0.5,
+        inboxWillBeEmpty: Bool = false
+    ) {
         withAnimation(Motion.preferred(.easeInOut(duration: 0.2))) {
             selection.exit()
         }
         if announce {
             Announcer.announce("Selection mode off")
         }
+        if inboxWillBeEmpty {
+            pendingEmptyFocus = true
+            return
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + focusDelay) {
-            if currentInboxEpisodes().isEmpty {
-                focusEmpty = true
-            } else {
-                focusSelectButton = true
-            }
+            focusSelectButton = true
         }
     }
 
@@ -601,14 +705,14 @@ struct InboxScreen: View {
     /// the Inbox on their own (same as the single-row "Add to end of queue" Quick
     /// Action); `exitSelection` re-anchors focus to the empty state or the Select
     /// button depending on whether that emptied the inbox.
-    private func addSelectedToQueue(visible: [Episode]) {
+    private func addSelectedToQueue(visible: [Episode], inboxCount: Int) {
         let toAdd = selectedEpisodes(in: visible)
         guard !toAdd.isEmpty else { return }
         QueueRepository(context: context).add(toAdd)
         // Noun-carrying result ("Added 3 episodes to queue"), matching the folder
         // batch announcement's phrasing.
         Announcer.announce("Added \(EpisodeBatchLabel.episodePhrase(toAdd.count)) to queue", assertive: true)
-        exitSelection(announce: false)
+        exitSelection(announce: false, inboxWillBeEmpty: toAdd.count >= inboxCount)
     }
 
     /// Marks every selected episode played and dismisses them from the inbox via
@@ -616,7 +720,7 @@ struct InboxScreen: View {
     /// sighted swipe and rotor use), then exits selection mode. The marked
     /// episodes leave the inbox, so `exitSelection` re-anchors focus off the
     /// removed rows.
-    private func markSelectedPlayed(visible: [Episode]) {
+    private func markSelectedPlayed(visible: [Episode], inboxCount: Int) {
         let toMark = selectedEpisodes(in: visible)
         guard !toMark.isEmpty else { return }
         let repo = InboxRepository(context: context)
@@ -624,25 +728,36 @@ struct InboxScreen: View {
             repo.markPlayed(episode)
         }
         Announcer.announce("Marked \(EpisodeBatchLabel.episodePhrase(toMark.count)) as played", assertive: true)
-        exitSelection(announce: false)
+        exitSelection(announce: false, inboxWillBeEmpty: toMark.count >= inboxCount)
     }
 
-    private func clearInbox(_ episodes: [Episode]) {
-        InboxRepository(context: context).clearInbox(episodes)
-        Announcer.announce("Inbox cleared")
-        // The list collapses to the empty state; move focus there so VoiceOver
-        // isn't orphaned on the vanished Clear button.
-        // Delay so the list has collapsed to the empty state (the focus target)
-        // before we request focus on it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { focusEmpty = true }
+    private func clearInbox() {
+        let scope = selectedFolderID.map(InboxPageScope.folder) ?? .all
+        let optInOnly = settings.inboxOptInOnly
+        Task { @MainActor in
+            pendingEmptyFocus = true
+            _ = await InboxRepository(context: context).clearInbox(
+                scope: scope,
+                optInOnly: optInOnly
+            )
+            Announcer.announce("Inbox cleared")
+        }
     }
 
     private func startDownloadAll(_ request: DownloadAllRequest) {
         downloadAllRequest = nil
         isEnrollingDownloads = true
         Task { @MainActor in
-            let report = await downloads.downloadAll(request.candidates)
+            let batch = await downloads.downloadAll(request.candidates)
             isEnrollingDownloads = false
+            let report = DownloadBatchReport(
+                eligible: request.eligibleCount,
+                started: batch.started,
+                skipped: request.skippedCount + batch.skipped,
+                deferred: request.deferredCount,
+                failed: batch.failed,
+                wasCancelled: batch.wasCancelled
+            )
             Announcer.announce(report.announcement, assertive: true)
         }
     }
@@ -651,18 +766,14 @@ struct InboxScreen: View {
     /// repository path (#546), then announces it. If that empties the inbox the
     /// focused row is gone, so move VoiceOver focus to the empty state (mirrors
     /// `clearInbox` / `unfollow`).
-    private func markPlayed(_ episode: Episode) {
+    private func markPlayed(_ episode: Episode, inboxCount: Int) {
         InboxRepository(context: context).markPlayed(episode)
         Announcer.announce("Marked as played")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if currentInboxEpisodes().isEmpty {
-                focusEmpty = true
-            }
-        }
+        if inboxCount == 1 { pendingEmptyFocus = true }
     }
 
-    private func removeFromInbox(_ episode: Episode) {
-        focusAfterInboxRowLeaves(episode)
+    private func removeFromInbox(_ episode: Episode, visible: [Episode]) {
+        focusAfterInboxRowLeaves(episode, in: visible)
         InboxRepository(context: context).dismiss(episode)
         Announcer.announce("Removed from Inbox")
     }
@@ -679,19 +790,15 @@ struct InboxScreen: View {
         pendingUnfollow = nil
         guard removed else { return }
         Announcer.announce("Unfollowed \(title)")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            // Checked against the list AS DISPLAYED (#457): with a search
-            // active, unfollowing can empty the VISIBLE list (every match was
-            // the unfollowed show) while the inbox itself still has episodes.
-            // The no-match state then shows, and it's bound to `focusEmpty`, so
-            // this filtered check is what actually parks VoiceOver on it. With
-            // no search the filter passes the inbox through unchanged.
-            if EpisodeSearchFilter.filter(
-                currentInboxEpisodes(), query: searchText
-            ).isEmpty {
-                focusEmpty = true
-            }
+        if pendingUnfollowLeavesVisibleEmpty { pendingEmptyFocus = true }
+    }
+
+    private func prepareUnfollow(_ podcast: Podcast, visible: [Episode]) {
+        let podcastID = podcast.persistentModelID
+        pendingUnfollowLeavesVisibleEmpty = !visible.contains {
+            $0.podcast?.persistentModelID != podcastID
         }
+        pendingUnfollow = podcast
     }
 
     /// Keeps only stable enum identifiers in an Inbox row. The two conditional
@@ -713,7 +820,12 @@ struct InboxScreen: View {
     /// Resolve only the action the user actually activated. This retains the
     /// established builder as the single execution path without paying its
     /// UUID/closure cost during every lazy-list row realization.
-    private func perform(_ action: EpisodeAction, for episode: Episode) {
+    private func perform(
+        _ action: EpisodeAction,
+        for episode: Episode,
+        visible: [Episode],
+        inboxCount: Int
+    ) {
         buildEpisodeActions(
             episode: episode,
             order: [action],
@@ -723,17 +835,21 @@ struct InboxScreen: View {
             onShowNotes: { showNotesEpisode = episode },
             onShare: { sharingEpisode = episode },
             onBookmarks: { bookmarksEpisode = episode },
-            onUnfollow: { pendingUnfollow = episode.podcast },
+            onUnfollow: {
+                if let podcast = episode.podcast {
+                    prepareUnfollow(podcast, visible: visible)
+                }
+            },
             onMarkPlayed: { nowPlayed in
                 guard nowPlayed else { return }
-                focusAfterInboxRowLeaves(episode)
+                focusAfterInboxRowLeaves(episode, in: visible)
             },
-            onWillQueue: { focusAfterInboxRowLeaves(episode) },
+            onWillQueue: { focusAfterInboxRowLeaves(episode, in: visible) },
             onExport: { exportEpisode = episode },
             onExportTranscript: { exportTranscriptEpisode = episode },
             onAddToFolder: { folderPickRequest = .episode($0, mode: .add) },
             onMoveToFolder: { folderPickRequest = .episode($0, mode: .move) },
-            onRemoveFromInbox: { removeFromInbox(episode) }
+            onRemoveFromInbox: { removeFromInbox(episode, visible: visible) }
         ).first?.run()
     }
 
@@ -745,31 +861,33 @@ struct InboxScreen: View {
         Announcer.announce(EpisodeSearchFilter.resultAnnouncement(count: count))
     }
 
-    /// Current Inbox membership under the selected folder scope. Mutation focus
-    /// recovery uses this instead of the global Inbox so clearing/playing the
-    /// last visible folder episode lands on the visible empty state (#763).
-    private func currentInboxEpisodes() -> [Episode] {
-        let repository = InboxRepository(context: context)
-        if let selectedFolder {
-            return repository.inboxEpisodes(in: selectedFolder)
-        }
-        return repository.inboxEpisodes()
-    }
-
     /// Re-anchors VoiceOver after a played or queued action removes an Inbox row.
     /// The neighbor comes from the list as displayed — folder scope and search
     /// included — and is captured before the mutation changes membership.
-    private func focusAfterInboxRowLeaves(_ episode: Episode) {
-        let neighbor = neighborID(
-            of: episode,
-            in: EpisodeSearchFilter.filter(currentInboxEpisodes(), query: searchText)
+    private func focusAfterInboxRowLeaves(_ episode: Episode, in visible: [Episode]) {
+        let neighbor = neighborID(of: episode, in: visible)
+        pendingFocusedEpisode = neighbor
+        pendingEmptyFocus = neighbor == nil
+    }
+
+    private func applyPendingFocus(_ snapshot: InboxPresentationSnapshot) {
+        let target = InboxPendingFocusLogic.target(
+            pendingEpisode: pendingFocusedEpisode,
+            pendingEmpty: pendingEmptyFocus,
+            publishedEpisodes: snapshot.episodes.map(\.persistentModelID),
+            matchingCount: snapshot.matchingCount
         )
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if let neighbor {
-                focusedEpisode = neighbor
-            } else {
-                focusEmpty = true
-            }
+        switch target {
+        case .episode(let episodeID):
+            self.pendingFocusedEpisode = nil
+            pendingEmptyFocus = false
+            DispatchQueue.main.async { focusedEpisode = episodeID }
+        case .empty:
+            pendingFocusedEpisode = nil
+            pendingEmptyFocus = false
+            DispatchQueue.main.async { focusEmpty = true }
+        case .wait:
+            break
         }
     }
 
@@ -803,41 +921,62 @@ struct InboxScreen: View {
     }
 }
 
-/// Global Inbox candidates stay in their selected store-queryable mode. Keeping
-/// this fetch in a conditional child means SwiftUI tears it down while a folder
-/// filter is active instead of continuing to materialize the global candidate
-/// set behind the scoped UI (#763). It is event-driven rather than a live
-/// `@Query`: unrelated SwiftData saves must not repeatedly run the relationship
-/// predicate on the main actor while VoiceOver is using the app.
-private struct AllInboxCandidates<Content: View>: View {
+/// Event-driven, actor-backed Inbox page. Only resolved models for the requested
+/// page enter the main context; folder traversal, status filtering, search, and
+/// total counts remain off the VoiceOver-critical actor.
+struct InboxCandidates<Content: View>: View {
     @Environment(\.modelContext) private var context
-
+    @Environment(SettingsStore.self) private var settings
+    let scope: InboxPageScope
     let optInOnly: Bool
-    let content: ([Episode]) -> Content
-    @State private var candidates: [Episode]?
-    @State private var reloadScheduled = false
+    let searchText: String
+    let requestedLimit: Int
+    let onPagePublished: (InboxPresentationSnapshot) -> Void
+    let content: (InboxPresentationSnapshot) -> Content
+    @State private var snapshot: InboxPresentationSnapshot?
+    @State private var reloadCoalescer = InboxReloadCoalescer()
+    @State private var generation = 0
 
-    init(optInOnly: Bool, @ViewBuilder content: @escaping ([Episode]) -> Content) {
+    init(
+        scope: InboxPageScope,
+        optInOnly: Bool,
+        searchText: String,
+        requestedLimit: Int,
+        onPagePublished: @escaping (InboxPresentationSnapshot) -> Void = { _ in },
+        @ViewBuilder content: @escaping (InboxPresentationSnapshot) -> Content
+    ) {
+        self.scope = scope
         self.optInOnly = optInOnly
+        self.searchText = searchText
+        self.requestedLimit = requestedLimit
+        self.onPagePublished = onPagePublished
         self.content = content
     }
 
     var body: some View {
         Group {
-            if let candidates {
-                content(InboxRepository.currentEpisodes(candidates, in: context))
+            if let snapshot {
+                content(snapshot)
             } else {
                 ProgressView("Loading inbox")
                     .accessibilityLabel("Loading inbox")
             }
         }
-        .task(id: optInOnly) { reload() }
+        .task(id: RequestKey(
+            scope: scope,
+            optInOnly: optInOnly,
+            searchText: searchText,
+            requestedLimit: requestedLimit,
+            generation: generation
+        )) {
+            await reload()
+        }
         // A pushed destination can mutate Inbox membership while this snapshot
         // is covered and not receiving notifications. Refresh when navigation
         // reveals it again so newly added candidates and policy changes also
         // catch up, while `currentEpisodes` removes stale rows immediately.
         .onAppear {
-            if candidates != nil { reload() }
+            if snapshot != nil { scheduleReload() }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotInboxDidChange)
@@ -858,90 +997,74 @@ private struct AllInboxCandidates<Content: View>: View {
     /// the relationship query runs once without delaying later independent
     /// changes.
     private func scheduleReload() {
-        guard !reloadScheduled else { return }
-        reloadScheduled = true
+        guard reloadCoalescer.request() else { return }
         DispatchQueue.main.async {
-            reloadScheduled = false
-            reload()
+            reloadCoalescer.consume()
+            generation &+= 1
         }
     }
 
-    private func reload() {
+    private func reload() async {
         let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
-        defer { PerformanceSignposts.signposter.endInterval("InboxReload", interval) }
-        candidates = InboxRepository(context: context).inboxEpisodes()
-    }
-}
-
-/// Live snapshot for one folder subtree. SwiftData cannot safely express a
-/// captured array `contains` across Episode's optional Podcast relationship, so
-/// ``InboxRepository/inboxEpisodes(in:)`` performs supported scalar relationship
-/// predicates per de-duplicated podcast. Reloads are event-driven: scope changes
-/// or the same Inbox mutation notification that refreshes the tab badge — never
-/// playback-position saves (#736, #763).
-struct FolderScopedInboxCandidates<Content: View>: View {
-    @Environment(\.modelContext) private var context
-    @Environment(SettingsStore.self) private var settings
-    let folder: PodcastFolder
-    let content: ([Episode]) -> Content
-
-    @State private var candidates: [Episode] = []
-    @State private var loaded = false
-    @State private var reloadScheduled = false
-
-    init(folder: PodcastFolder, @ViewBuilder content: @escaping ([Episode]) -> Content) {
-        self.folder = folder
-        self.content = content
-    }
-
-    private var scopeSignature: [String] {
-        FolderRepository(context: context).subtreeSubscriptions(of: folder)
-            .map(\.feedURL)
-            .sorted() + ["opt-in-only:\(settings.inboxOptInOnly)"]
-    }
-
-    var body: some View {
-        Group {
-            if loaded {
-                content(InboxRepository.currentEpisodes(candidates, in: context))
-            } else {
-                ProgressView("Loading folder inbox")
-                    .accessibilityLabel("Loading folder inbox")
+        do {
+            let repository = InboxRepository(context: context)
+            let page = try await repository.identifierPage(
+                scope: scope,
+                optInOnly: optInOnly,
+                searchText: searchText,
+                limit: requestedLimit
+            )
+            try Task.checkCancellation()
+            let resolved = repository.resolve(Array(Set(page.ids + page.downloadIDs)))
+            let byID = Dictionary(uniqueKeysWithValues: resolved.map {
+                ($0.persistentModelID, $0)
+            })
+            let episodes = page.ids.compactMap { byID[$0] }
+            let downloadCandidates = page.downloadIDs.compactMap { byID[$0] }
+            let speechRequests = episodes.map {
+                SpokenDescriptionRequest(
+                    identity: "episode:\($0.guid)\u{1}\($0.audioURL)",
+                    html: $0.episodeDescription,
+                    mode: settings.spokenEpisodeDescriptionMode,
+                    briefLimit: 140
+                )
             }
-        }
-        .task(id: scopeSignature) { reload() }
-        // Returning from a podcast detail doesn't change `scopeSignature`, so
-        // `.task(id:)` alone may retain the pre-navigation candidate snapshot.
-        .onAppear {
-            if loaded { reload() }
-        }
-        .onReceive(
-            NotificationCenter.default.publisher(for: .earshotInboxDidChange)
-                .receive(on: DispatchQueue.main)
-        ) { _ in
-            scheduleReload()
-        }
-        .onReceive(
-            NotificationCenter.default.publisher(for: .earshotQueueDidChange)
-                .receive(on: DispatchQueue.main)
-        ) { _ in
-            scheduleReload()
+            await SpokenDescriptionCache.shared.prepare(speechRequests)
+            try Task.checkCancellation()
+            let published = InboxPresentationSnapshot(
+                episodes: episodes,
+                downloadCandidates: downloadCandidates,
+                inboxCount: page.inboxCount,
+                matchingCount: page.matchingCount,
+                downloadEligibleCount: page.downloadEligibleCount,
+                downloadSkippedCount: page.downloadSkippedCount
+            )
+            snapshot = published
+            onPagePublished(published)
+            PerformanceSignposts.signposter.endInterval(
+                "InboxReload",
+                interval,
+                "candidateCount=\(page.candidateCount, privacy: .public) returnedCount=\(episodes.count, privacy: .public)"
+            )
+        } catch {
+            PerformanceSignposts.signposter.endInterval("InboxReload", interval)
+            guard !Task.isCancelled else { return }
+            snapshot = InboxPresentationSnapshot(
+                episodes: [],
+                downloadCandidates: [],
+                inboxCount: 0,
+                matchingCount: 0,
+                downloadEligibleCount: 0,
+                downloadSkippedCount: 0
+            )
         }
     }
 
-    private func scheduleReload() {
-        guard !reloadScheduled else { return }
-        reloadScheduled = true
-        DispatchQueue.main.async {
-            reloadScheduled = false
-            reload()
-        }
-    }
-
-    private func reload() {
-        let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
-        defer { PerformanceSignposts.signposter.endInterval("InboxReload", interval) }
-        candidates = InboxRepository(context: context).inboxEpisodes(in: folder)
-        loaded = true
+    private struct RequestKey: Hashable {
+        let scope: InboxPageScope
+        let optInOnly: Bool
+        let searchText: String
+        let requestedLimit: Int
+        let generation: Int
     }
 }

@@ -281,4 +281,135 @@ final class InboxBadgeCountTests: XCTestCase {
 
         XCTAssertGreaterThan(posted, 0, "marking played must post .earshotInboxDidChange")
     }
+
+    func testIdentifierPagingReturnsOnlyRequestedModelsAndStableLaterPage() async throws {
+        let ctx = TestStore.freshContext()
+        let show = podcast(ctx, "Paged")
+        for index in 0..<205 {
+            let item = episode(ctx, String(format: "page-%03d", index), podcast: show)
+            item.pubDate = Date(timeIntervalSince1970: TimeInterval(index))
+        }
+        try ctx.save()
+
+        let repository = InboxRepository(context: ctx)
+        let first = try await repository.identifierPage(
+            scope: .all,
+            optInOnly: false,
+            searchText: "",
+            limit: 100
+        )
+        let second = try await repository.identifierPage(
+            scope: .all,
+            optInOnly: false,
+            searchText: "",
+            limit: 200
+        )
+
+        XCTAssertEqual(first.ids.count, 100)
+        XCTAssertEqual(first.inboxCount, 205)
+        XCTAssertEqual(first.matchingCount, 205)
+        XCTAssertEqual(first.candidateCount, 205)
+        XCTAssertEqual(first.downloadIDs.count, ManualDownloadBatchPlan.maximumEpisodeCount)
+        XCTAssertEqual(first.downloadEligibleCount, 205)
+        XCTAssertEqual(first.downloadSkippedCount, 0)
+        XCTAssertTrue(first.hasMore)
+        XCTAssertEqual(Array(second.ids.prefix(100)), first.ids)
+        XCTAssertEqual(second.ids.count, 200)
+        XCTAssertTrue(second.hasMore)
+    }
+
+    func testResolvingPageToleratesConcurrentDeletion() async throws {
+        let ctx = TestStore.freshContext()
+        let show = podcast(ctx, "Concurrent deletion")
+        for index in 0..<3 {
+            episode(ctx, "delete-\(index)", podcast: show)
+        }
+        try ctx.save()
+
+        let repository = InboxRepository(context: ctx)
+        let page = try await repository.identifierPage(
+            scope: .all,
+            optInOnly: false,
+            searchText: "",
+            limit: 100
+        )
+        let removedID = try XCTUnwrap(page.ids.first)
+        let removed = try XCTUnwrap(ctx.model(for: removedID) as? Episode)
+        ctx.delete(removed)
+        try ctx.save()
+
+        let resolved = repository.resolve(page.ids)
+        XCTAssertEqual(resolved.count, 2)
+        XCTAssertFalse(resolved.contains { $0.persistentModelID == removedID })
+    }
+
+    func testFullScopeClearUsesAllPagesAndLeavesOutsideFolderUntouched() async throws {
+        let ctx = TestStore.freshContext()
+        let inside = podcast(ctx, "Inside pages")
+        let outside = podcast(ctx, "Outside pages")
+        let folders = FolderRepository(context: ctx)
+        let root = folders.createFolder(name: "Paged root")
+        folders.add(inside, to: root)
+        for index in 0..<205 {
+            episode(ctx, "inside-page-\(index)", podcast: inside)
+        }
+        let outsideEpisode = episode(ctx, "outside-page", podcast: outside)
+        try ctx.save()
+
+        let cleared = await InboxRepository(context: ctx).clearInbox(
+            scope: .folder(root.persistentModelID),
+            optInOnly: false
+        )
+
+        XCTAssertEqual(cleared, 205)
+        XCTAssertTrue(InboxRepository(context: ctx).inboxEpisodes(in: root).isEmpty)
+        XCTAssertFalse(outsideEpisode.inboxDismissed)
+    }
+
+    func testReloadCoalescerCollapsesOneRunLoopBurst() {
+        var coalescer = InboxReloadCoalescer()
+        XCTAssertTrue(coalescer.request())
+        XCTAssertFalse(coalescer.request())
+        coalescer.consume()
+        XCTAssertTrue(coalescer.request())
+    }
+
+    func testPendingFocusWaitsForPublicationAndFallsBackAfterDeletion() {
+        XCTAssertEqual(
+            InboxPendingFocusLogic.target(
+                pendingEpisode: "neighbor",
+                pendingEmpty: false,
+                publishedEpisodes: [],
+                matchingCount: 2
+            ),
+            .wait
+        )
+        XCTAssertEqual(
+            InboxPendingFocusLogic.target(
+                pendingEpisode: "neighbor",
+                pendingEmpty: false,
+                publishedEpisodes: ["fallback"],
+                matchingCount: 1
+            ),
+            .episode("fallback")
+        )
+        XCTAssertEqual(
+            InboxPendingFocusLogic.target(
+                pendingEpisode: Optional<String>.none,
+                pendingEmpty: true,
+                publishedEpisodes: ["later-page-row"],
+                matchingCount: 1
+            ),
+            .episode("later-page-row")
+        )
+        XCTAssertEqual(
+            InboxPendingFocusLogic.target(
+                pendingEpisode: Optional<String>.none,
+                pendingEmpty: true,
+                publishedEpisodes: [],
+                matchingCount: 0
+            ),
+            .empty
+        )
+    }
 }

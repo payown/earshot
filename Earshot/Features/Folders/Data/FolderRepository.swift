@@ -41,6 +41,15 @@ struct FolderDetailSnapshot {
     let subfolderCounts: [PersistentIdentifier: Int]
     let podcastCounts: [PersistentIdentifier: Int]
     let hasSubtreeSubscriptions: Bool
+    let scopeSignature: FolderScopeSignature
+}
+
+/// Scalar identity of the exact subtree used to build a detail snapshot. Keeping
+/// this alongside the cached counts lets event-driven consumers compare scope
+/// without walking SwiftData relationships from a SwiftUI body.
+struct FolderScopeSignature: Equatable {
+    let folderIDs: Set<PersistentIdentifier>
+    let podcastIDs: Set<PersistentIdentifier>
 }
 
 /// SwiftData-backed folder store: create/rename/delete folders, manage podcast
@@ -88,29 +97,36 @@ final class FolderRepository {
             }
             .compactMap(\.episode)
 
+        var childrenByFolder = [folderID: subfolders]
+        var membershipsByFolder = [folderID: directMemberships]
+        var pending = subfolders.map(\.persistentModelID)
+        var visited: Set<PersistentIdentifier> = [folderID]
+        while let currentID = pending.popLast(), visited.insert(currentID).inserted {
+            let children = childFolders(parentID: currentID)
+            let memberships = podcastMemberships(inFolderID: currentID)
+            childrenByFolder[currentID] = children
+            membershipsByFolder[currentID] = memberships
+            pending.append(contentsOf: children.map(\.persistentModelID))
+        }
+
         var subfolderCounts: [PersistentIdentifier: Int] = [:]
         var podcastCounts: [PersistentIdentifier: Int] = [:]
         for child in subfolders {
             let childID = child.persistentModelID
-            subfolderCounts[childID] = childFolders(parentID: childID).count
+            subfolderCounts[childID] = childrenByFolder[childID, default: []].count
             // Preserve the former @Query count exactly: membership rows are
             // counted regardless of podcast state, while the visible podcast
             // collection itself continues to require `isFollowed`.
-            podcastCounts[childID] = podcastMemberships(inFolderID: childID).count
+            podcastCounts[childID] = membershipsByFolder[childID, default: []].count
         }
 
-        var pending = subfolders.map(\.persistentModelID)
-        var visited = Set<PersistentIdentifier>()
-        var hasSubtreeSubscriptions = !podcasts.isEmpty
-        while let currentID = pending.popLast(), visited.insert(currentID).inserted {
-            if podcastMemberships(inFolderID: currentID).contains(where: {
-                $0.podcast?.isFollowed == true
-            }) {
-                hasSubtreeSubscriptions = true
-                break
-            }
-            pending.append(contentsOf: childFolders(parentID: currentID).map(\.persistentModelID))
+        let allMemberships = membershipsByFolder.values.flatMap { $0 }
+        let hasSubtreeSubscriptions = allMemberships.contains {
+            $0.podcast?.isFollowed == true
         }
+        let scopePodcastIDs = Set(allMemberships.compactMap {
+            $0.podcast?.persistentModelID
+        })
 
         return FolderDetailSnapshot(
             podcasts: podcasts,
@@ -118,7 +134,11 @@ final class FolderRepository {
             episodes: episodes,
             subfolderCounts: subfolderCounts,
             podcastCounts: podcastCounts,
-            hasSubtreeSubscriptions: hasSubtreeSubscriptions
+            hasSubtreeSubscriptions: hasSubtreeSubscriptions,
+            scopeSignature: FolderScopeSignature(
+                folderIDs: visited,
+                podcastIDs: scopePodcastIDs
+            )
         )
     }
 
