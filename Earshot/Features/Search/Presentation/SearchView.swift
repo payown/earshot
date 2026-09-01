@@ -50,6 +50,22 @@ enum SearchScope: Equatable {
     }
 }
 
+/// Chooses a stable VoiceOver destination after an incremental page mutates a
+/// section. A continuing page keeps focus on its surviving Show-more button; a
+/// terminal page moves focus to the first newly appended row at that boundary.
+enum LocalSearchPageFocusPolicy {
+    enum Destination: Equatable {
+        case showMore
+        case boundaryRow
+        case unchanged
+    }
+
+    static func destination(hasMore: Bool, hasBoundaryRow: Bool) -> Destination {
+        if hasMore { return .showMore }
+        return hasBoundaryRow ? .boundaryRow : .unchanged
+    }
+}
+
 /// Search across local content and — in the `.addPodcast` scope only — the iTunes
 /// podcast directory. The set of result sections is driven entirely by the scope
 /// (see ``SearchScope``): `.library` shows local podcasts, episodes, and bookmarks
@@ -146,7 +162,7 @@ struct SearchView<HeaderContent: View>: View {
     @State private var isLocalSearchPending = false
     @State private var localSearchLoaders: LocalSearchLoaders?
     @State private var localSearchTask: Task<Void, Never>?
-    @AccessibilityFocusState private var focusedShowMoreSection: LocalSection?
+    @AccessibilityFocusState private var localSearchFocusTarget: LocalSearchFocusTarget?
     @State private var directoryState: DirectoryState = .idle
     @State private var directoryTask: Task<Void, Never>?
     /// The last directory summary spoken to VoiceOver. Used to suppress repeat
@@ -195,6 +211,10 @@ struct SearchView<HeaderContent: View>: View {
                             )
                             : nil))
                         .rotorActions(fullDescriptionActions(for: podcast))
+                        .accessibilityFocused(
+                            $localSearchFocusTarget,
+                            equals: .podcast(podcast.persistentModelID)
+                        )
                     }
                     if hasMorePodcasts {
                         showMoreButton(section: .podcasts, loaded: matchedPodcasts.count)
@@ -212,6 +232,10 @@ struct SearchView<HeaderContent: View>: View {
                             ),
                             performAction: { action in perform(action, for: episode) }
                         )
+                        .accessibilityFocused(
+                            $localSearchFocusTarget,
+                            equals: .episode(episode.persistentModelID)
+                        )
                     }
                     if hasMoreEpisodes {
                         showMoreButton(section: .episodes, loaded: matchedEpisodes.count)
@@ -222,6 +246,10 @@ struct SearchView<HeaderContent: View>: View {
                 Section(header: Text("Bookmarks").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedBookmarks) { bookmark in
                         bookmarkRow(bookmark)
+                            .accessibilityFocused(
+                                $localSearchFocusTarget,
+                                equals: .bookmark(bookmark.persistentModelID)
+                            )
                     }
                     if hasMoreBookmarks {
                         showMoreButton(section: .bookmarks, loaded: matchedBookmarks.count)
@@ -270,11 +298,18 @@ struct SearchView<HeaderContent: View>: View {
         var spokenName: String { rawValue }
     }
 
+    private enum LocalSearchFocusTarget: Hashable {
+        case showMore(LocalSection)
+        case podcast(PersistentIdentifier)
+        case episode(PersistentIdentifier)
+        case bookmark(PersistentIdentifier)
+    }
+
     private func showMoreButton(section: LocalSection, loaded: Int) -> some View {
         Button("Show more \(section.spokenName), \(loaded) loaded") {
             loadMore(section: section)
         }
-        .accessibilityFocused($focusedShowMoreSection, equals: section)
+        .accessibilityFocused($localSearchFocusTarget, equals: .showMore(section))
     }
 
     private func fullDescriptionActions(for podcast: Podcast) -> [QuickActionItem] {
@@ -439,7 +474,7 @@ struct SearchView<HeaderContent: View>: View {
         hasMorePodcasts = false
         hasMoreEpisodes = false
         hasMoreBookmarks = false
-        focusedShowMoreSection = nil
+        localSearchFocusTarget = nil
         guard !trimmed.isEmpty else {
             isLocalSearchPending = false
             return
@@ -586,6 +621,7 @@ struct SearchView<HeaderContent: View>: View {
                 }
 
                 let appendedCount: Int
+                let boundaryFocusTarget: LocalSearchFocusTarget?
                 switch section {
                 case .podcasts:
                     let rows = page.ids.compactMap { context.model(for: $0) as? Podcast }
@@ -602,12 +638,16 @@ struct SearchView<HeaderContent: View>: View {
                         return
                     }
                     let existing = Set(matchedPodcasts.map(\.persistentModelID))
-                    matchedPodcasts.append(contentsOf: rows.filter {
+                    let newRows = rows.filter {
                         !existing.contains($0.persistentModelID)
-                    })
+                    }
+                    matchedPodcasts.append(contentsOf: newRows)
                     podcastNextOffset = page.nextOffset
                     hasMorePodcasts = page.hasMore
                     appendedCount = matchedPodcasts.count
+                    boundaryFocusTarget = (newRows.first ?? matchedPodcasts.last).map {
+                        .podcast($0.persistentModelID)
+                    }
                 case .episodes:
                     let rows = page.ids.compactMap { context.model(for: $0) as? Episode }
                     await SpokenDescriptionCache.shared.prepare(
@@ -623,21 +663,29 @@ struct SearchView<HeaderContent: View>: View {
                         return
                     }
                     let existing = Set(matchedEpisodes.map(\.persistentModelID))
-                    matchedEpisodes.append(contentsOf: rows.filter {
+                    let newRows = rows.filter {
                         !existing.contains($0.persistentModelID)
-                    })
+                    }
+                    matchedEpisodes.append(contentsOf: newRows)
                     episodeNextOffset = page.nextOffset
                     hasMoreEpisodes = page.hasMore
                     appendedCount = matchedEpisodes.count
+                    boundaryFocusTarget = (newRows.first ?? matchedEpisodes.last).map {
+                        .episode($0.persistentModelID)
+                    }
                 case .bookmarks:
                     let rows = page.ids.compactMap { context.model(for: $0) as? Bookmark }
                     let existing = Set(matchedBookmarks.map(\.persistentModelID))
-                    matchedBookmarks.append(contentsOf: rows.filter {
+                    let newRows = rows.filter {
                         !existing.contains($0.persistentModelID)
-                    })
+                    }
+                    matchedBookmarks.append(contentsOf: newRows)
                     bookmarkNextOffset = page.nextOffset
                     hasMoreBookmarks = page.hasMore
                     appendedCount = matchedBookmarks.count
+                    boundaryFocusTarget = (newRows.first ?? matchedBookmarks.last).map {
+                        .bookmark($0.persistentModelID)
+                    }
                 }
 
                 PerformanceSignposts.signposter.endInterval(
@@ -648,8 +696,19 @@ struct SearchView<HeaderContent: View>: View {
                 Announcer.announce(
                     "Showing 1 through \(appendedCount) \(section.spokenName)"
                 )
-                if page.hasMore {
-                    DispatchQueue.main.async { focusedShowMoreSection = section }
+                let focusDestination = LocalSearchPageFocusPolicy.destination(
+                    hasMore: page.hasMore,
+                    hasBoundaryRow: boundaryFocusTarget != nil
+                )
+                DispatchQueue.main.async {
+                    switch focusDestination {
+                    case .showMore:
+                        localSearchFocusTarget = .showMore(section)
+                    case .boundaryRow:
+                        localSearchFocusTarget = boundaryFocusTarget
+                    case .unchanged:
+                        break
+                    }
                 }
             } catch {
                 PerformanceSignposts.signposter.endInterval("LocalSearchQuery", interval)

@@ -138,6 +138,21 @@ final class LocalSearchLoaderTests: XCTestCase {
         ))
     }
 
+    func testIncrementalPageFocusKeepsContinuingBoundaryAndFallsBackForTerminalPage() {
+        XCTAssertEqual(
+            LocalSearchPageFocusPolicy.destination(hasMore: true, hasBoundaryRow: true),
+            .showMore
+        )
+        XCTAssertEqual(
+            LocalSearchPageFocusPolicy.destination(hasMore: false, hasBoundaryRow: true),
+            .boundaryRow
+        )
+        XCTAssertEqual(
+            LocalSearchPageFocusPolicy.destination(hasMore: false, hasBoundaryRow: false),
+            .unchanged
+        )
+    }
+
     func testStoreCandidatePreservesCrossFieldSearchSemantics() async throws {
         let context = TestStore.freshContext()
         let podcast = Podcast(
