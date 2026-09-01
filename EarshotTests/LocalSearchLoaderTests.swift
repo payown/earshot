@@ -32,7 +32,7 @@ final class LocalSearchLoaderTests: XCTestCase {
         XCTAssertNotNil(loaders.bookmarks)
     }
 
-    func testPodcastSearchUsesExactSearchLogicFollowedPredicateAndStableCaps() async throws {
+    func testPodcastSearchUsesExactSearchLogicFollowedPredicateAndIncrementalPages() async throws {
         let context = TestStore.freshContext()
         for index in 0..<30 {
             context.insert(Podcast(
@@ -56,10 +56,20 @@ final class LocalSearchLoaderTests: XCTestCase {
         XCTAssertEqual(first.ids.count, 25)
         XCTAssertTrue(first.hasMore)
 
-        let expanded = try await loader.page(query: "sWiFt", limit: 50)
-        XCTAssertEqual(expanded.ids.count, 30, "catalog-only podcasts stay outside Library search")
-        XCTAssertFalse(expanded.hasMore)
-        XCTAssertEqual(Array(expanded.ids.prefix(25)), first.ids, "Show more keeps the first page stable")
+        let second = try await loader.page(
+            query: "sWiFt",
+            after: try XCTUnwrap(first.nextOffset),
+            limit: 25
+        )
+        XCTAssertEqual(second.ids.count, 5, "catalog-only podcasts stay outside Library search")
+        XCTAssertFalse(second.hasMore)
+        XCTAssertTrue(Set(first.ids).isDisjoint(with: second.ids))
+        XCTAssertEqual(Set(first.ids + second.ids).count, 30)
+        XCTAssertLessThanOrEqual(
+            second.inspectedCount,
+            6,
+            "Show more resumes at its cursor instead of rescanning the first 25 results"
+        )
     }
 
     func testEpisodeAndBookmarkPredicatesExcludeCatalogOnlyContent() async throws {
@@ -108,5 +118,120 @@ final class LocalSearchLoaderTests: XCTestCase {
         } catch is CancellationError {
             // Expected: each store batch and row checks cooperative cancellation.
         }
+    }
+
+    func testSupersededOrCancelledRequestCannotPublish() {
+        XCTAssertTrue(LocalSearchPublicationPolicy.accepts(
+            requestedTerm: "swift",
+            currentTerm: "swift",
+            isCancelled: false
+        ))
+        XCTAssertFalse(LocalSearchPublicationPolicy.accepts(
+            requestedTerm: "swift",
+            currentTerm: "swiftui",
+            isCancelled: false
+        ))
+        XCTAssertFalse(LocalSearchPublicationPolicy.accepts(
+            requestedTerm: "swift",
+            currentTerm: "swift",
+            isCancelled: true
+        ))
+    }
+
+    func testStoreCandidatePreservesCrossFieldSearchSemantics() async throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(
+            feedURL: "https://example.com/cross-field",
+            title: "Daily Swift",
+            author: "Team Earshot"
+        )
+        context.insert(podcast)
+        let episode = Episode(
+            guid: "cross",
+            title: "Episode boundary",
+            audioURL: "https://example.com/cross.mp3"
+        )
+        episode.podcast = podcast
+        context.insert(episode)
+        context.insert(Bookmark(
+            episode: episode,
+            positionSeconds: 1,
+            note: "Remember episode"
+        ))
+        try context.save()
+
+        let podcastPage = try await LocalPodcastSearchLoader(
+            modelContainer: TestStore.container
+        ).page(query: "Swift Team")
+        let bookmarkPage = try await LocalBookmarkSearchLoader(
+            modelContainer: TestStore.container
+        ).page(query: "episode Episode")
+
+        XCTAssertEqual(podcastPage.ids, [podcast.persistentModelID])
+        XCTAssertEqual(bookmarkPage.ids.count, 1)
+    }
+
+    func testStorePredicateDoesNotInspectUnrelatedEpisodeCatalog() async throws {
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://example.com/scale", title: "Scale")
+        context.insert(podcast)
+        for index in 0..<2_000 {
+            let episode = Episode(
+                guid: "unrelated-\(index)",
+                title: "Unrelated \(index)",
+                audioURL: "https://example.com/unrelated-\(index).mp3"
+            )
+            episode.podcast = podcast
+            context.insert(episode)
+        }
+        for index in 0..<30 {
+            let episode = Episode(
+                guid: "needle-\(index)",
+                title: "Needle \(String(format: "%02d", index))",
+                audioURL: "https://example.com/needle-\(index).mp3"
+            )
+            episode.podcast = podcast
+            context.insert(episode)
+        }
+        try context.save()
+
+        let page = try await LocalEpisodeSearchLoader(
+            modelContainer: TestStore.container
+        ).page(query: "needle")
+
+        XCTAssertEqual(page.ids.count, LocalSearchScanPolicy.resultPageSize)
+        XCTAssertTrue(page.hasMore)
+        XCTAssertEqual(
+            page.inspectedCount,
+            LocalSearchScanPolicy.resultPageSize + 1,
+            "SQLite text filtering prevents an unrelated 2,000-row catalog scan"
+        )
+    }
+
+    func testLargeCatalogDiagnosticPublishesOnlyOneBoundedPage() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["RUN_LOCAL_SEARCH_SCALE_DIAG"] != nil,
+            "Set RUN_LOCAL_SEARCH_SCALE_DIAG=1 for the 242,000-row diagnostic."
+        )
+        let context = TestStore.freshContext()
+        let podcast = Podcast(feedURL: "https://example.com/diagnostic", title: "Diagnostic")
+        context.insert(podcast)
+        for index in 0..<242_000 {
+            let episode = Episode(
+                guid: "diag-\(index)",
+                title: index < 30 ? "Needle \(index)" : "Unrelated \(index)",
+                audioURL: "https://example.com/diag-\(index).mp3"
+            )
+            episode.podcast = podcast
+            context.insert(episode)
+        }
+        try context.save()
+
+        let page = try await LocalEpisodeSearchLoader(
+            modelContainer: TestStore.container
+        ).page(query: "needle")
+
+        XCTAssertEqual(page.ids.count, LocalSearchScanPolicy.resultPageSize)
+        XCTAssertEqual(page.inspectedCount, LocalSearchScanPolicy.resultPageSize + 1)
     }
 }

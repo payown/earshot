@@ -6,8 +6,12 @@ import SwiftData
 /// on the main context before rendering them.
 struct LocalSearchPage: Sendable, Equatable {
     let ids: [PersistentIdentifier]
-    let hasMore: Bool
+    /// Store offset at which the next page must resume. `nil` means the
+    /// predicate-backed corpus was exhausted.
+    let nextOffset: Int?
     let inspectedCount: Int
+
+    var hasMore: Bool { nextOffset != nil }
 }
 
 /// The immutable loader topology for a Search scope. Keeping this value separate
@@ -43,32 +47,68 @@ struct LocalSearchLoaders: Sendable {
     }
 }
 
-/// Shared bounded-scan policy. Store predicates establish corpus membership;
-/// this final pass deliberately uses SearchLogic so matching remains byte-for-
-/// byte identical to the former in-memory implementation.
+/// Shared bounded-scan policy. SQLite first narrows each corpus with a supported
+/// localized predicate. A residual `SearchLogic` check preserves the former
+/// byte-for-byte matching behavior when the store predicate is deliberately a
+/// superset (notably a query spanning title/author or note/episode title).
 enum LocalSearchScanPolicy {
     static let resultPageSize = 25
-    static let storeBatchSize = 128
+    static let storeBatchSize = 64
 
     static func normalizedLimit(_ requested: Int) -> Int {
         max(resultPageSize, requested)
+    }
+
+    /// Any exact match in fields joined with one space must contain its first
+    /// query token in at least one constituent field. Using that token in SQLite
+    /// therefore bounds common searches without excluding cross-field matches.
+    static func storeCandidate(_ query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.split(whereSeparator: \Character.isWhitespace).first.map(String.init)
+            ?? trimmed
+    }
+}
+
+/// Pure late-publication gate shared by initial and incremental requests.
+/// Keeping it testable pins the rule that cancellation and query replacement
+/// both reject an otherwise successful actor response.
+enum LocalSearchPublicationPolicy {
+    static func accepts(
+        requestedTerm: String,
+        currentTerm: String,
+        isCancelled: Bool
+    ) -> Bool {
+        !isCancelled && requestedTerm == currentTerm
     }
 }
 
 @ModelActor
 actor LocalPodcastSearchLoader {
-    func page(query: String, limit requestedLimit: Int) throws -> LocalSearchPage {
+    func page(
+        query: String,
+        after offset: Int? = nil,
+        limit requestedLimit: Int = LocalSearchScanPolicy.resultPageSize
+    ) throws -> LocalSearchPage {
         let limit = LocalSearchScanPolicy.normalizedLimit(requestedLimit)
-        var offset = 0
+        let candidate = LocalSearchScanPolicy.storeCandidate(query)
+        let predicate = #Predicate<Podcast> { podcast in
+            podcast.title.localizedStandardContains(candidate)
+                || podcast.author?.localizedStandardContains(candidate) == true
+        }
+        var scanOffset = offset ?? 0
         var inspected = 0
         var matches: [PersistentIdentifier] = []
 
-        while matches.count <= limit {
+        while true {
             try Task.checkCancellation()
-            var descriptor = PodcastQuery.followedDescriptor()
-            descriptor.fetchOffset = offset
+            var descriptor = FetchDescriptor<Podcast>(
+                predicate: predicate,
+                sortBy: [SortDescriptor(\.title), SortDescriptor(\.feedURL)]
+            )
+            descriptor.fetchOffset = scanOffset
             descriptor.fetchLimit = LocalSearchScanPolicy.storeBatchSize
             descriptor.propertiesToFetch = [
+                \Podcast.feedURL,
                 \Podcast.title,
                 \Podcast.author,
                 \Podcast.podcastDescription,
@@ -77,109 +117,134 @@ actor LocalPodcastSearchLoader {
             let batch = try modelContext.fetch(descriptor)
             guard !batch.isEmpty else { break }
 
-            inspected += batch.count
-            for podcast in batch {
+            for (index, podcast) in batch.enumerated() {
                 try Task.checkCancellation()
-                if SearchLogic.matches(
+                inspected += 1
+                if podcast.isFollowed, SearchLogic.matches(
                     "\(podcast.title) \(podcast.author ?? "")",
                     query: query
                 ) {
+                    if matches.count == limit {
+                        return LocalSearchPage(
+                            ids: matches,
+                            nextOffset: scanOffset + index,
+                            inspectedCount: inspected
+                        )
+                    }
                     matches.append(podcast.persistentModelID)
-                    if matches.count > limit { break }
                 }
             }
+            scanOffset += batch.count
             if batch.count < LocalSearchScanPolicy.storeBatchSize { break }
-            offset += batch.count
         }
 
-        return LocalSearchPage(
-            ids: Array(matches.prefix(limit)),
-            hasMore: matches.count > limit,
-            inspectedCount: inspected
-        )
+        return LocalSearchPage(ids: matches, nextOffset: nil, inspectedCount: inspected)
     }
 }
 
 @ModelActor
 actor LocalEpisodeSearchLoader {
-    func page(query: String, limit requestedLimit: Int) throws -> LocalSearchPage {
+    func page(
+        query: String,
+        after offset: Int? = nil,
+        limit requestedLimit: Int = LocalSearchScanPolicy.resultPageSize
+    ) throws -> LocalSearchPage {
         let limit = LocalSearchScanPolicy.normalizedLimit(requestedLimit)
-        let catalog = PodcastSubscriptionState.catalogOnly.rawValue
-        let followed = #Predicate<Episode> { episode in
-            episode.podcast != nil
-                && (episode.podcast?.subscriptionStateRaw == nil
-                    || episode.podcast?.subscriptionStateRaw != catalog)
+        let candidate = LocalSearchScanPolicy.storeCandidate(query)
+        let predicate = #Predicate<Episode> { episode in
+            episode.title.localizedStandardContains(candidate)
         }
-        var offset = 0
+        var scanOffset = offset ?? 0
         var inspected = 0
         var matches: [PersistentIdentifier] = []
 
-        while matches.count <= limit {
+        while true {
             try Task.checkCancellation()
-            var descriptor = FetchDescriptor<Episode>(predicate: followed)
-            descriptor.fetchOffset = offset
+            var descriptor = FetchDescriptor<Episode>(
+                predicate: predicate,
+                sortBy: [
+                    SortDescriptor(\.title),
+                    SortDescriptor(\.guid),
+                    SortDescriptor(\.audioURL),
+                ]
+            )
+            descriptor.fetchOffset = scanOffset
             descriptor.fetchLimit = LocalSearchScanPolicy.storeBatchSize
+            descriptor.propertiesToFetch = [\.title, \.guid, \.audioURL]
             let batch = try modelContext.fetch(descriptor)
             guard !batch.isEmpty else { break }
 
-            inspected += batch.count
-            for episode in batch {
+            for (index, episode) in batch.enumerated() {
                 try Task.checkCancellation()
-                if SearchLogic.matches(episode.title, query: query) {
+                inspected += 1
+                if PodcastQuery.isInFollowedLibrary(episode),
+                   SearchLogic.matches(episode.title, query: query) {
+                    if matches.count == limit {
+                        return LocalSearchPage(
+                            ids: matches,
+                            nextOffset: scanOffset + index,
+                            inspectedCount: inspected
+                        )
+                    }
                     matches.append(episode.persistentModelID)
-                    if matches.count > limit { break }
                 }
             }
+            scanOffset += batch.count
             if batch.count < LocalSearchScanPolicy.storeBatchSize { break }
-            offset += batch.count
         }
 
-        return LocalSearchPage(
-            ids: Array(matches.prefix(limit)),
-            hasMore: matches.count > limit,
-            inspectedCount: inspected
-        )
+        return LocalSearchPage(ids: matches, nextOffset: nil, inspectedCount: inspected)
     }
 }
 
 @ModelActor
 actor LocalBookmarkSearchLoader {
-    func page(query: String, limit requestedLimit: Int) throws -> LocalSearchPage {
+    func page(
+        query: String,
+        after offset: Int? = nil,
+        limit requestedLimit: Int = LocalSearchScanPolicy.resultPageSize
+    ) throws -> LocalSearchPage {
         let limit = LocalSearchScanPolicy.normalizedLimit(requestedLimit)
-        let followed = #Predicate<Bookmark> { bookmark in
-            bookmark.episode != nil
-        }
-        var offset = 0
+        var scanOffset = offset ?? 0
         var inspected = 0
         var matches: [PersistentIdentifier] = []
 
-        while matches.count <= limit {
+        while true {
             try Task.checkCancellation()
-            var descriptor = FetchDescriptor<Bookmark>(predicate: followed)
-            descriptor.fetchOffset = offset
+            // SwiftData's optional Bookmark -> Episode title predicate causes a
+            // compiler macro timeout under complete Swift 6 checking. Keep this
+            // smaller corpus as a bounded cancellable residual scan rather than
+            // silently dropping title-only matches.
+            var descriptor = FetchDescriptor<Bookmark>(
+                sortBy: [SortDescriptor(\.createdAt, order: .reverse), SortDescriptor(\.note)]
+            )
+            descriptor.fetchOffset = scanOffset
             descriptor.fetchLimit = LocalSearchScanPolicy.storeBatchSize
+            descriptor.propertiesToFetch = [\.note, \.createdAt, \.positionSeconds]
             let batch = try modelContext.fetch(descriptor)
             guard !batch.isEmpty else { break }
 
-            inspected += batch.count
-            for bookmark in batch {
+            for (index, bookmark) in batch.enumerated() {
                 try Task.checkCancellation()
+                inspected += 1
                 if PodcastQuery.isInFollowedLibrary(bookmark), SearchLogic.matches(
                     "\(bookmark.note) \(bookmark.episode?.title ?? "")",
                     query: query
                 ) {
+                    if matches.count == limit {
+                        return LocalSearchPage(
+                            ids: matches,
+                            nextOffset: scanOffset + index,
+                            inspectedCount: inspected
+                        )
+                    }
                     matches.append(bookmark.persistentModelID)
-                    if matches.count > limit { break }
                 }
             }
+            scanOffset += batch.count
             if batch.count < LocalSearchScanPolicy.storeBatchSize { break }
-            offset += batch.count
         }
 
-        return LocalSearchPage(
-            ids: Array(matches.prefix(limit)),
-            hasMore: matches.count > limit,
-            inspectedCount: inspected
-        )
+        return LocalSearchPage(ids: matches, nextOffset: nil, inspectedCount: inspected)
     }
 }

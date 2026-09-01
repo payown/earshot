@@ -137,15 +137,16 @@ struct SearchView<HeaderContent: View>: View {
     @State private var matchedPodcasts: [Podcast] = []
     @State private var matchedEpisodes: [Episode] = []
     @State private var matchedBookmarks: [Bookmark] = []
-    @State private var podcastLimit = LocalSearchScanPolicy.resultPageSize
-    @State private var episodeLimit = LocalSearchScanPolicy.resultPageSize
-    @State private var bookmarkLimit = LocalSearchScanPolicy.resultPageSize
+    @State private var podcastNextOffset: Int?
+    @State private var episodeNextOffset: Int?
+    @State private var bookmarkNextOffset: Int?
     @State private var hasMorePodcasts = false
     @State private var hasMoreEpisodes = false
     @State private var hasMoreBookmarks = false
     @State private var isLocalSearchPending = false
     @State private var localSearchLoaders: LocalSearchLoaders?
     @State private var localSearchTask: Task<Void, Never>?
+    @AccessibilityFocusState private var focusedShowMoreSection: LocalSection?
     @State private var directoryState: DirectoryState = .idle
     @State private var directoryTask: Task<Void, Never>?
     /// The last directory summary spoken to VoiceOver. Used to suppress repeat
@@ -261,7 +262,7 @@ struct SearchView<HeaderContent: View>: View {
         .overlay { emptyOverlay }
     }
 
-    private enum LocalSection: String {
+    private enum LocalSection: String, Hashable {
         case podcasts
         case episodes
         case bookmarks
@@ -271,13 +272,9 @@ struct SearchView<HeaderContent: View>: View {
 
     private func showMoreButton(section: LocalSection, loaded: Int) -> some View {
         Button("Show more \(section.spokenName), \(loaded) loaded") {
-            switch section {
-            case .podcasts: podcastLimit += LocalSearchScanPolicy.resultPageSize
-            case .episodes: episodeLimit += LocalSearchScanPolicy.resultPageSize
-            case .bookmarks: bookmarkLimit += LocalSearchScanPolicy.resultPageSize
-            }
-            scheduleLocalSearch(for: query, immediate: true)
+            loadMore(section: section)
         }
+        .accessibilityFocused($focusedShowMoreSection, equals: section)
     }
 
     private func fullDescriptionActions(for podcast: Podcast) -> [QuickActionItem] {
@@ -431,17 +428,20 @@ struct SearchView<HeaderContent: View>: View {
         localSearchTask?.cancel()
 
         let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A new query owns a new result set. Clear the superseded models before
+        // the debounce so stale rows cannot remain actionable under new text.
+        matchedPodcasts = []
+        matchedEpisodes = []
+        matchedBookmarks = []
+        podcastNextOffset = nil
+        episodeNextOffset = nil
+        bookmarkNextOffset = nil
+        hasMorePodcasts = false
+        hasMoreEpisodes = false
+        hasMoreBookmarks = false
+        focusedShowMoreSection = nil
         guard !trimmed.isEmpty else {
             isLocalSearchPending = false
-            matchedPodcasts = []
-            matchedEpisodes = []
-            matchedBookmarks = []
-            podcastLimit = LocalSearchScanPolicy.resultPageSize
-            episodeLimit = LocalSearchScanPolicy.resultPageSize
-            bookmarkLimit = LocalSearchScanPolicy.resultPageSize
-            hasMorePodcasts = false
-            hasMoreEpisodes = false
-            hasMoreBookmarks = false
             return
         }
 
@@ -454,9 +454,6 @@ struct SearchView<HeaderContent: View>: View {
             )
         }
         guard let loaders = localSearchLoaders else { return }
-        let requestedPodcastLimit = podcastLimit
-        let requestedEpisodeLimit = episodeLimit
-        let requestedBookmarkLimit = bookmarkLimit
 
         localSearchTask = Task {
             if !immediate {
@@ -467,36 +464,55 @@ struct SearchView<HeaderContent: View>: View {
             let interval = PerformanceSignposts.signposter.beginInterval("LocalSearchQuery")
             do {
                 async let podcastPage = loaders.podcasts.page(
-                    query: trimmed,
-                    limit: requestedPodcastLimit
+                    query: trimmed
                 )
                 async let episodePage = loaders.episodes?.page(
-                    query: trimmed,
-                    limit: requestedEpisodeLimit
+                    query: trimmed
                 )
                 async let bookmarkPage = loaders.bookmarks?.page(
-                    query: trimmed,
-                    limit: requestedBookmarkLimit
+                    query: trimmed
                 )
                 let pages = try await (podcastPage, episodePage, bookmarkPage)
                 try Task.checkCancellation()
-                guard query == term else {
+                guard LocalSearchPublicationPolicy.accepts(
+                    requestedTerm: term,
+                    currentTerm: query,
+                    isCancelled: Task.isCancelled
+                ) else {
                     PerformanceSignposts.signposter.endInterval("LocalSearchQuery", interval)
                     return
                 }
 
-                matchedPodcasts = pages.0.ids.compactMap {
+                let podcasts = pages.0.ids.compactMap {
                     context.model(for: $0) as? Podcast
                 }
-                matchedEpisodes = (pages.1?.ids ?? []).compactMap {
+                let episodes = (pages.1?.ids ?? []).compactMap {
                     context.model(for: $0) as? Episode
                 }
-                matchedBookmarks = (pages.2?.ids ?? []).compactMap {
+                let bookmarks = (pages.2?.ids ?? []).compactMap {
                     context.model(for: $0) as? Bookmark
                 }
+                await SpokenDescriptionCache.shared.prepare(
+                    spokenDescriptionRequests(podcasts: podcasts, episodes: episodes)
+                )
+                try Task.checkCancellation()
+                guard LocalSearchPublicationPolicy.accepts(
+                    requestedTerm: term,
+                    currentTerm: query,
+                    isCancelled: Task.isCancelled
+                ) else {
+                    PerformanceSignposts.signposter.endInterval("LocalSearchQuery", interval)
+                    return
+                }
+                matchedPodcasts = podcasts
+                matchedEpisodes = episodes
+                matchedBookmarks = bookmarks
                 hasMorePodcasts = pages.0.hasMore
                 hasMoreEpisodes = pages.1?.hasMore ?? false
                 hasMoreBookmarks = pages.2?.hasMore ?? false
+                podcastNextOffset = pages.0.nextOffset
+                episodeNextOffset = pages.1?.nextOffset
+                bookmarkNextOffset = pages.2?.nextOffset
                 isLocalSearchPending = false
 
                 let returned = matchedPodcasts.count
@@ -519,8 +535,153 @@ struct SearchView<HeaderContent: View>: View {
                 hasMorePodcasts = false
                 hasMoreEpisodes = false
                 hasMoreBookmarks = false
+                podcastNextOffset = nil
+                episodeNextOffset = nil
+                bookmarkNextOffset = nil
                 isLocalSearchPending = false
             }
+        }
+    }
+
+    /// Loads exactly one additional section page from its actor-held store
+    /// cursor. Existing rows remain in place, and if another boundary remains it
+    /// regains VoiceOver focus after publication instead of focus jumping into a
+    /// newly inserted row.
+    private func loadMore(section: LocalSection) {
+        localSearchTask?.cancel()
+        let term = query
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let loaders = localSearchLoaders else { return }
+
+        let offset: Int?
+        switch section {
+        case .podcasts: offset = podcastNextOffset
+        case .episodes: offset = episodeNextOffset
+        case .bookmarks: offset = bookmarkNextOffset
+        }
+        guard let offset else { return }
+
+        localSearchTask = Task {
+            let interval = PerformanceSignposts.signposter.beginInterval("LocalSearchQuery")
+            do {
+                let page: LocalSearchPage
+                switch section {
+                case .podcasts:
+                    page = try await loaders.podcasts.page(query: trimmed, after: offset)
+                case .episodes:
+                    guard let loader = loaders.episodes else { return }
+                    page = try await loader.page(query: trimmed, after: offset)
+                case .bookmarks:
+                    guard let loader = loaders.bookmarks else { return }
+                    page = try await loader.page(query: trimmed, after: offset)
+                }
+                try Task.checkCancellation()
+                guard LocalSearchPublicationPolicy.accepts(
+                    requestedTerm: term,
+                    currentTerm: query,
+                    isCancelled: Task.isCancelled
+                ) else {
+                    PerformanceSignposts.signposter.endInterval("LocalSearchQuery", interval)
+                    return
+                }
+
+                let appendedCount: Int
+                switch section {
+                case .podcasts:
+                    let rows = page.ids.compactMap { context.model(for: $0) as? Podcast }
+                    await SpokenDescriptionCache.shared.prepare(
+                        spokenDescriptionRequests(podcasts: rows, episodes: [])
+                    )
+                    try Task.checkCancellation()
+                    guard LocalSearchPublicationPolicy.accepts(
+                        requestedTerm: term,
+                        currentTerm: query,
+                        isCancelled: Task.isCancelled
+                    ) else {
+                        PerformanceSignposts.signposter.endInterval("LocalSearchQuery", interval)
+                        return
+                    }
+                    let existing = Set(matchedPodcasts.map(\.persistentModelID))
+                    matchedPodcasts.append(contentsOf: rows.filter {
+                        !existing.contains($0.persistentModelID)
+                    })
+                    podcastNextOffset = page.nextOffset
+                    hasMorePodcasts = page.hasMore
+                    appendedCount = matchedPodcasts.count
+                case .episodes:
+                    let rows = page.ids.compactMap { context.model(for: $0) as? Episode }
+                    await SpokenDescriptionCache.shared.prepare(
+                        spokenDescriptionRequests(podcasts: [], episodes: rows)
+                    )
+                    try Task.checkCancellation()
+                    guard LocalSearchPublicationPolicy.accepts(
+                        requestedTerm: term,
+                        currentTerm: query,
+                        isCancelled: Task.isCancelled
+                    ) else {
+                        PerformanceSignposts.signposter.endInterval("LocalSearchQuery", interval)
+                        return
+                    }
+                    let existing = Set(matchedEpisodes.map(\.persistentModelID))
+                    matchedEpisodes.append(contentsOf: rows.filter {
+                        !existing.contains($0.persistentModelID)
+                    })
+                    episodeNextOffset = page.nextOffset
+                    hasMoreEpisodes = page.hasMore
+                    appendedCount = matchedEpisodes.count
+                case .bookmarks:
+                    let rows = page.ids.compactMap { context.model(for: $0) as? Bookmark }
+                    let existing = Set(matchedBookmarks.map(\.persistentModelID))
+                    matchedBookmarks.append(contentsOf: rows.filter {
+                        !existing.contains($0.persistentModelID)
+                    })
+                    bookmarkNextOffset = page.nextOffset
+                    hasMoreBookmarks = page.hasMore
+                    appendedCount = matchedBookmarks.count
+                }
+
+                PerformanceSignposts.signposter.endInterval(
+                    "LocalSearchQuery",
+                    interval,
+                    "inspectedCount=\(page.inspectedCount), returnedCount=\(page.ids.count)"
+                )
+                Announcer.announce(
+                    "Showing 1 through \(appendedCount) \(section.spokenName)"
+                )
+                if page.hasMore {
+                    DispatchQueue.main.async { focusedShowMoreSection = section }
+                }
+            } catch {
+                PerformanceSignposts.signposter.endInterval("LocalSearchQuery", interval)
+            }
+        }
+    }
+
+    /// Extracts only immutable scalar inputs before the sanitizer leaves the
+    /// main actor. Row rendering then hits the bounded thread-safe cache instead
+    /// of parsing HTML during a VoiceOver right-flick.
+    private func spokenDescriptionRequests(
+        podcasts: [Podcast],
+        episodes: [Episode]
+    ) -> [SpokenDescriptionRequest] {
+        guard voiceOverEnabled else { return [] }
+        let podcastMode = settings.spokenPodcastDescriptionMode
+        let episodeMode = settings.episodeSpokenDetails.descriptionMode
+        return podcasts.map {
+            SpokenDescriptionRequest(
+                identity: "podcast:\(FeedURLIdentity.canonical($0.feedURL))",
+                html: $0.podcastDescription,
+                mode: podcastMode,
+                briefLimit: 240,
+                preferredBriefSentenceCount: 2
+            )
+        } + episodes.map {
+            SpokenDescriptionRequest(
+                identity: "episode:\($0.guid)\u{1}\($0.audioURL)",
+                html: $0.episodeDescription,
+                mode: episodeMode,
+                briefLimit: 140
+            )
         }
     }
 
