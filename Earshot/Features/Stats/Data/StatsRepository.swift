@@ -215,3 +215,189 @@ final class StatsRepository {
         }
     }
 }
+
+/// Background aggregation for the Stats screen. The actor owns its context and
+/// returns only Sendable scalar snapshots, so a large listening history never
+/// blocks VoiceOver on the main actor or crosses contexts as SwiftData models.
+@ModelActor
+actor StatsSnapshotLoader {
+    private static let batchSize = 512
+
+    func stats(
+        for period: StatsPeriod,
+        now: Date,
+        includeStreak: Bool,
+        podcastIDs: Set<PersistentIdentifier>?
+    ) throws -> ListeningStats {
+        let interval = PerformanceSignposts.signposter.beginInterval("StatsAggregation")
+        var inspectedSessions = 0
+        defer {
+            PerformanceSignposts.signposter.endInterval(
+                "StatsAggregation",
+                interval,
+                "inspectedSessions=\(inspectedSessions, privacy: .public)"
+            )
+        }
+
+        var totalSeconds = 0
+        var timeSavedSeconds = 0
+        var byPodcast: [String: (seconds: Int, count: Int)] = [:]
+        try forEachSession(since: period.since(now: now)) { session in
+            inspectedSessions += 1
+            guard self.matchesScope(session, podcastIDs: podcastIDs) else { return }
+            totalSeconds += session.durationSeconds
+            timeSavedSeconds += StatsLogic.timeSavedBySpeed(
+                durationSeconds: session.durationSeconds,
+                speed: session.speed
+            )
+            let title = self.podcast(for: session)?.title ?? "Unknown Podcast"
+            let existing = byPodcast[title] ?? (0, 0)
+            byPodcast[title] = (
+                existing.seconds + session.durationSeconds,
+                existing.count + 1
+            )
+        }
+
+        let sessionDates: [Date]
+        if includeStreak {
+            var dates: [Date] = []
+            try forEachSession(since: nil) { session in
+                guard self.matchesScope(session, podcastIDs: podcastIDs) else { return }
+                dates.append(session.date)
+            }
+            sessionDates = dates
+        } else {
+            sessionDates = []
+        }
+
+        return ListeningStats(
+            totalSeconds: totalSeconds,
+            timeSavedSeconds: timeSavedSeconds,
+            episodesCompleted: try episodesCompleted(
+                since: period.since(now: now),
+                podcastIDs: podcastIDs
+            ),
+            currentStreakDays: includeStreak
+                ? StatsLogic.currentStreak(sessionDates: sessionDates, now: now)
+                : 0,
+            perPodcast: byPodcast.map {
+                PodcastStat(
+                    podcastTitle: $0.key,
+                    totalSeconds: $0.value.seconds,
+                    episodeCount: $0.value.count
+                )
+            }.sorted { $0.totalSeconds > $1.totalSeconds }
+        )
+    }
+
+    private func forEachSession(
+        since: Date?,
+        body: (ListeningSession) -> Void
+    ) throws {
+        var offset = 0
+        while true {
+            try Task.checkCancellation()
+            var descriptor: FetchDescriptor<ListeningSession>
+            if let since {
+                descriptor = FetchDescriptor(predicate: #Predicate { $0.date >= since })
+            } else {
+                descriptor = FetchDescriptor()
+            }
+            descriptor.fetchOffset = offset
+            descriptor.fetchLimit = Self.batchSize
+            let batch = try modelContext.fetch(descriptor)
+            guard !batch.isEmpty else { return }
+            for session in batch {
+                try Task.checkCancellation()
+                body(session)
+            }
+            guard batch.count == Self.batchSize else { return }
+            offset += batch.count
+        }
+    }
+
+    private func episodesCompleted(
+        since: Date?,
+        podcastIDs: Set<PersistentIdentifier>?
+    ) throws -> Int {
+        var offset = 0
+        var count = 0
+        while true {
+            try Task.checkCancellation()
+            // SwiftData does not support a forced unwrap in a store predicate.
+            // Bound the fetch to completed rows, then apply the optional cutoff
+            // while visiting each small page.
+            var descriptor = FetchDescriptor<Episode>(
+                predicate: #Predicate { $0.playedAt != nil }
+            )
+            descriptor.fetchOffset = offset
+            descriptor.fetchLimit = Self.batchSize
+            let batch = try modelContext.fetch(descriptor)
+            guard !batch.isEmpty else { return count }
+            count += batch.lazy.filter { episode in
+                guard let playedAt = episode.playedAt else { return false }
+                if let since, playedAt < since { return false }
+                guard let podcastIDs else { return true }
+                guard let id = episode.podcast?.persistentModelID else { return false }
+                return podcastIDs.contains(id)
+            }.count
+            guard batch.count == Self.batchSize else { return count }
+            offset += batch.count
+        }
+    }
+
+    private func matchesScope(
+        _ session: ListeningSession,
+        podcastIDs: Set<PersistentIdentifier>?
+    ) -> Bool {
+        guard let podcastIDs else { return true }
+        guard let id = podcast(for: session)?.persistentModelID else { return false }
+        return podcastIDs.contains(id)
+    }
+
+    private func podcast(for session: ListeningSession) -> Podcast? {
+        session.podcast ?? session.episode?.podcast
+    }
+}
+
+/// Startup retention uses bounded delete/save batches on a private model actor.
+/// This keeps launch and VoiceOver navigation independent from history size.
+@ModelActor
+actor StatsMaintenanceActor {
+    private static let batchSize = 256
+
+    func applyRetention(days: Int, now: Date = .now) async {
+        guard days > 0 else { return }
+        let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
+        var removed = 0
+        do {
+            while true {
+                try Task.checkCancellation()
+                var descriptor = FetchDescriptor<ListeningSession>(
+                    predicate: #Predicate { $0.date < cutoff }
+                )
+                descriptor.fetchLimit = Self.batchSize
+                let stale = try modelContext.fetch(descriptor)
+                guard !stale.isEmpty else { break }
+                stale.forEach(modelContext.delete)
+                try modelContext.save()
+                removed += stale.count
+                if stale.count < Self.batchSize { break }
+            }
+            guard removed > 0 else { return }
+            AppLog.data.info("Stats retention removed \(removed) old session(s)")
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: .earshotListeningHistoryDidChange,
+                    object: nil
+                )
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            AppLog.data.error(
+                "Stats retention failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+}

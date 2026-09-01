@@ -4,7 +4,7 @@ import SwiftData
 /// The session-local folder lens for Listening Stats. Identity-only folder
 /// storage lets the screen resolve the live breadcrumb and recover cleanly if a
 /// selected folder is deleted; no settings or schema migration is required.
-enum StatsFolderScope: Hashable {
+enum StatsFolderScope: Hashable, Sendable {
     case allFolders
     case folder(PersistentIdentifier)
     case unfiled
@@ -25,6 +25,9 @@ struct StatsScreen: View {
     @State private var period: StatsPeriod = .thisWeek
     @State private var folderScope: StatsFolderScope = .allFolders
     @State private var stats: ListeningStats = .empty
+    @State private var hasLoadedStats = false
+    @State private var statsLoader: StatsSnapshotLoader?
+    @State private var reloadTask: Task<Void, Never>?
     @State private var exportFile: StatsCSVFile?
     @State private var confirmingDelete = false
 
@@ -41,7 +44,11 @@ struct StatsScreen: View {
                 .accessibilityLabel("Stats period")
             }
 
-            if stats.totalSeconds == 0 {
+            if !hasLoadedStats {
+                Section {
+                    ProgressView("Loading listening stats")
+                }
+            } else if stats.totalSeconds == 0 {
                 // Lead with the empty state so a VoiceOver user meets it first,
                 // rather than wading through a column of zeroes.
                 Section {
@@ -86,7 +93,7 @@ struct StatsScreen: View {
                 } label: {
                     Label("Export history (CSV)", systemImage: "square.and.arrow.up")
                 }
-                .disabled(stats.totalSeconds == 0)
+                .disabled(!hasLoadedStats || stats.totalSeconds == 0)
                 .accessibilityHint(stats.totalSeconds == 0 ? "Nothing to export yet. Listen to an episode first." : "")
 
                 Button(role: .destructive) {
@@ -98,21 +105,13 @@ struct StatsScreen: View {
         }
         .navigationTitle("Listening Stats")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: reload)
+        .onAppear { reload() }
         .onChange(of: period) { _, _ in
-            reload()
-            // The numbers below change silently, so confirm the new total.
-            Announcer.announce("\(period.label). Total listening \(StatsLogic.spokenDuration(stats.totalSeconds)).")
+            reload(announcement: .period)
         }
         .onChange(of: folderScope) { oldScope, newScope in
             guard newScope != oldScope else { return }
-            reload()
-            Announcer.announce(
-                StatsFolderAnnouncement.text(
-                    scopeName: selectedScopeName,
-                    totalSeconds: stats.totalSeconds
-                )
-            )
+            reload(announcement: .folder)
         }
         .onChange(of: folders.map(\.persistentModelID)) { _, availableIDs in
             guard case let .folder(folderID) = folderScope,
@@ -120,6 +119,7 @@ struct StatsScreen: View {
             folderScope = .allFolders
         }
         .onChange(of: settings.statsStreaksEnabled) { _, _ in reload() }
+        .onDisappear { reloadTask?.cancel() }
         .sheet(item: $exportFile) { file in
             ShareSheet(items: [file.url])
         }
@@ -204,12 +204,58 @@ struct StatsScreen: View {
         return "No listening was recorded for \(selectedScopeName) in \(period.label.lowercased())."
     }
 
-    private func reload() {
-        stats = StatsRepository(context: context).stats(
-            for: period,
-            includeStreak: settings.statsStreaksEnabled,
-            podcastIDs: selectedPodcastIDs
-        )
+    private enum ReloadAnnouncement {
+        case period
+        case folder
+    }
+
+    private func reload(announcement: ReloadAnnouncement? = nil) {
+        reloadTask?.cancel()
+        if statsLoader == nil {
+            statsLoader = StatsSnapshotLoader(modelContainer: context.container)
+        }
+        guard let statsLoader else { return }
+
+        let requestedPeriod = period
+        let requestedScope = folderScope
+        let includeStreak = settings.statsStreaksEnabled
+        let podcastIDs = selectedPodcastIDs
+        let scopeName = selectedScopeName
+        reloadTask = Task { @MainActor in
+            do {
+                let loaded = try await statsLoader.stats(
+                    for: requestedPeriod,
+                    now: .now,
+                    includeStreak: includeStreak,
+                    podcastIDs: podcastIDs
+                )
+                try Task.checkCancellation()
+                guard period == requestedPeriod, folderScope == requestedScope else { return }
+                stats = loaded
+                hasLoadedStats = true
+                switch announcement {
+                case .period:
+                    Announcer.announce(
+                        "\(requestedPeriod.label). Total listening \(StatsLogic.spokenDuration(loaded.totalSeconds))."
+                    )
+                case .folder:
+                    Announcer.announce(
+                        StatsFolderAnnouncement.text(
+                            scopeName: scopeName,
+                            totalSeconds: loaded.totalSeconds
+                        )
+                    )
+                case nil:
+                    break
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                AppLog.data.error(
+                    "Stats snapshot failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
     }
 
     private func deleteAll() {

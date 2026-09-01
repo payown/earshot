@@ -3,6 +3,8 @@ import SwiftUI
 struct ShowNotesView: View {
     let episode: Episode
     @Environment(\.dismiss) private var dismiss
+    @State private var paragraphs: [AttributedString] = []
+    @State private var hasPreparedParagraphs = false
 
     var body: some View {
         NavigationStack {
@@ -11,25 +13,31 @@ struct ShowNotesView: View {
                 // the notes can be navigated paragraph by paragraph instead of read
                 // as one continuous block (#547). `id: \.offset` is stable for a
                 // static, read-only list that never reorders.
-                LazyVStack(alignment: .leading, spacing: Spacing.md) {
-                    ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                        Text(paragraph)
-                            .font(.body)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
+                if hasPreparedParagraphs {
+                    LazyVStack(alignment: .leading, spacing: Spacing.md) {
+                        ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                            Text(paragraph)
+                                .font(.body)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
                     }
+                    .padding()
+                    // Defense in depth: the builder already drops unsafe schemes, but
+                    // scope an explicit policy to the notes so only http(s)/mailto ever
+                    // open and anything else is discarded rather than handed to the OS.
+                    .environment(\.openURL, OpenURLAction { url in
+                        guard let scheme = url.scheme?.lowercased(),
+                              Self.openableLinkSchemes.contains(scheme) else {
+                            return .discarded
+                        }
+                        return .systemAction
+                    })
+                } else {
+                    ProgressView("Preparing show notes")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding()
                 }
-                .padding()
-                // Defense in depth: the builder already drops unsafe schemes, but
-                // scope an explicit policy to the notes so only http(s)/mailto ever
-                // open and anything else is discarded rather than handed to the OS.
-                .environment(\.openURL, OpenURLAction { url in
-                    guard let scheme = url.scheme?.lowercased(),
-                          Self.openableLinkSchemes.contains(scheme) else {
-                        return .discarded
-                    }
-                    return .systemAction
-                })
             }
             .navigationTitle("Show notes")
             .navigationBarTitleDisplayMode(.inline)
@@ -39,20 +47,13 @@ struct ShowNotesView: View {
                 }
             }
         }
-    }
-
-    /// Readable show notes split into paragraphs via the shared HTML parser, with
-    /// tappable `<a href>` links and inline bold/italic preserved as attributed
-    /// runs (#565, building on #547 and #495). Kept as one `AttributedString` per
-    /// paragraph so each stays its own VoiceOver element (#547). A friendly
-    /// placeholder shows when the episode has no description.
-    private var paragraphs: [AttributedString] {
-        let interval = PerformanceSignposts.signposter.beginInterval("ShowNotesParse")
-        defer { PerformanceSignposts.signposter.endInterval("ShowNotesParse", interval) }
-        let paragraphs = EpisodeSummary.attributedParagraphs(episode.episodeDescription)
-        return paragraphs.isEmpty
-            ? [AttributedString("No show notes for this episode.")]
-            : paragraphs.map(Self.underliningLinks)
+        .task(id: episode.persistentModelID) {
+            let source = episode.episodeDescription
+            let prepared = await ShowNotesPreparation.prepare(source)
+            guard !Task.isCancelled else { return }
+            paragraphs = prepared.map(Self.underliningLinks)
+            hasPreparedParagraphs = true
+        }
     }
 
     /// Underlines every `.link` run so links are distinguished from surrounding
@@ -73,4 +74,19 @@ struct ShowNotesView: View {
 
     /// Schemes the notes will actually open. Mirrors the builder's allow-list.
     private static let openableLinkSchemes: Set<String> = ["http", "https", "mailto"]
+}
+
+/// Parses immutable source text away from the main actor. Only Sendable value
+/// types cross back into SwiftUI; SwiftData models never leave their context.
+enum ShowNotesPreparation {
+    static func prepare(_ source: String?) async -> [AttributedString] {
+        await Task.detached(priority: .userInitiated) {
+            let interval = PerformanceSignposts.signposter.beginInterval("ShowNotesParse")
+            defer { PerformanceSignposts.signposter.endInterval("ShowNotesParse", interval) }
+            let parsed = EpisodeSummary.attributedParagraphs(source)
+            return parsed.isEmpty
+                ? [AttributedString("No show notes for this episode.")]
+                : parsed
+        }.value
+    }
 }

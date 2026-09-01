@@ -252,6 +252,56 @@ final class StatsTests: XCTestCase {
         XCTAssertEqual(stats.episodesCompleted, 1)
     }
 
+    func testBackgroundSnapshotMatchesExistingAggregationExactly() async throws {
+        let ctx = TestStore.freshContext()
+        let inside = makePodcast(ctx, "Inside")
+        let outside = makePodcast(ctx, "Outside")
+        makeSession(ctx, podcast: inside, seconds: 100, speed: 2, date: now)
+        makeSession(ctx, podcast: inside, seconds: 50, date: now.addingTimeInterval(-40 * 86_400))
+        makeSession(ctx, podcast: outside, seconds: 200, date: now)
+        makeCompletedEpisode(ctx, podcast: inside, guid: "inside", playedAt: now)
+        makeCompletedEpisode(ctx, podcast: outside, guid: "outside", playedAt: now)
+        try ctx.save()
+        let scope: Set<PersistentIdentifier> = [inside.persistentModelID]
+        let expected = StatsRepository(context: ctx).stats(
+            for: .thisWeek,
+            now: now,
+            includeStreak: true,
+            podcastIDs: scope
+        )
+        let loader = StatsSnapshotLoader(modelContainer: ctx.container)
+
+        let actual = try await loader.stats(
+            for: .thisWeek,
+            now: now,
+            includeStreak: true,
+            podcastIDs: scope
+        )
+
+        XCTAssertEqual(actual, expected)
+    }
+
+    func testBackgroundRetentionDeletesInBoundedBatches() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "History")
+        for index in 0..<600 {
+            makeSession(
+                ctx,
+                podcast: podcast,
+                seconds: 1,
+                date: now.addingTimeInterval(-Double(100 + index) * 86_400)
+            )
+        }
+        makeSession(ctx, podcast: podcast, seconds: 1, date: now)
+        try ctx.save()
+        let maintenance = StatsMaintenanceActor(modelContainer: ctx.container)
+
+        await maintenance.applyRetention(days: 90, now: now)
+
+        ctx.rollback()
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<ListeningSession>()).count, 1)
+    }
+
     func testApplyRetentionDeletesOldSessions() throws {
         let ctx = TestStore.freshContext()
         let a = makePodcast(ctx, "Alpha")

@@ -448,7 +448,8 @@ struct RootView: View {
             ExpirationService(context: modelContext).runExpiration()
             #endif
             try await runtime.activateCloudProjectionIfNeeded(container: modelContext.container)
-            StatsRepository(context: modelContext).applyRetention(days: settings.historyRetentionDays)
+            let statsMaintenance = StatsMaintenanceActor(modelContainer: modelContext.container)
+            await statsMaintenance.applyRetention(days: settings.historyRetentionDays)
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
         }
         guard activationCompleted else { return }

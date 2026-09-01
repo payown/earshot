@@ -4,8 +4,7 @@ import Foundation
 /// source content and mode so feed refreshes and setting changes cannot reuse
 /// stale speech. Full descriptions are cost-bounded to avoid retaining a whole
 /// large library's notes.
-@MainActor
-final class SpokenDescriptionCache {
+final class SpokenDescriptionCache: @unchecked Sendable {
     static let shared = SpokenDescriptionCache()
 
     private static let noValue = "\u{0}__earshot_no_spoken_description__"
@@ -14,6 +13,25 @@ final class SpokenDescriptionCache {
     init() {
         cache.countLimit = 500
         cache.totalCostLimit = 2 * 1_024 * 1_024
+    }
+
+    /// Warms exact row-speech values away from the main actor. Callers extract
+    /// immutable scalar requests from their page before crossing actors; the
+    /// thread-safe NSCache remains the bounded handoff back to row rendering.
+    func prepare(_ requests: [SpokenDescriptionRequest]) async {
+        guard !requests.isEmpty else { return }
+        await Task.detached(priority: .userInitiated) { [self] in
+            for request in requests {
+                guard !Task.isCancelled else { return }
+                _ = text(
+                    identity: request.identity,
+                    html: request.html,
+                    mode: request.mode,
+                    briefLimit: request.briefLimit,
+                    preferredBriefSentenceCount: request.preferredBriefSentenceCount
+                )
+            }
+        }.value
     }
 
     func text(
@@ -50,6 +68,28 @@ final class SpokenDescriptionCache {
         let stored = value ?? Self.noValue
         cache.setObject(stored as NSString, forKey: key, cost: stored.utf16.count * 2)
         return value
+    }
+}
+
+struct SpokenDescriptionRequest: Sendable, Equatable {
+    let identity: String
+    let html: String?
+    let mode: SpokenDescriptionMode
+    let briefLimit: Int
+    let preferredBriefSentenceCount: Int
+
+    init(
+        identity: String,
+        html: String?,
+        mode: SpokenDescriptionMode,
+        briefLimit: Int,
+        preferredBriefSentenceCount: Int = 1
+    ) {
+        self.identity = identity
+        self.html = html
+        self.mode = mode
+        self.briefLimit = briefLimit
+        self.preferredBriefSentenceCount = preferredBriefSentenceCount
     }
 }
 

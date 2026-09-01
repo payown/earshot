@@ -111,4 +111,27 @@ final class AccessibilitySpeechTests: XCTestCase {
             "A thoughtful show about accessibility."
         )
     }
+
+    func testBackgroundPreparationProducesExactSynchronousGoldenValue() async {
+        let cache = SpokenDescriptionCache()
+        let request = SpokenDescriptionRequest(
+            identity: "episode:prepared",
+            html: "<p>First sentence.</p><p>Second sentence.</p>",
+            mode: .brief,
+            briefLimit: 140
+        )
+
+        await cache.prepare([request])
+
+        XCTAssertEqual(
+            cache.text(
+                identity: request.identity,
+                html: request.html,
+                mode: request.mode,
+                briefLimit: request.briefLimit,
+                preferredBriefSentenceCount: request.preferredBriefSentenceCount
+            ),
+            "First sentence.Second sentence."
+        )
+    }
 }

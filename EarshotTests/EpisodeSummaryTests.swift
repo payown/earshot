@@ -428,4 +428,20 @@ final class EpisodeSummaryTests: XCTestCase {
         XCTAssertTrue(EpisodeSummary.attributedParagraphs(nil).isEmpty)
         XCTAssertTrue(EpisodeSummary.attributedParagraphs("").isEmpty)
     }
+
+    func testShowNotesPreparationPreservesParagraphTextAndLinks() async throws {
+        let html = "<p>First <a href=\"https://example.com/path\">link</a>.</p><p><strong>Second</strong>.</p>"
+
+        let prepared = await ShowNotesPreparation.prepare(html)
+
+        XCTAssertEqual(prepared.map(plainString), ["First link.", "Second."])
+        let linkRun = try XCTUnwrap(firstLinkRun(in: try XCTUnwrap(prepared.first)))
+        XCTAssertEqual(linkRun.link, URL(string: "https://example.com/path"))
+    }
+
+    func testShowNotesPreparationUsesExactExistingEmptyPlaceholder() async {
+        let prepared = await ShowNotesPreparation.prepare(nil)
+
+        XCTAssertEqual(prepared.map(plainString), ["No show notes for this episode."])
+    }
 }
