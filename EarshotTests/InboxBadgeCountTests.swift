@@ -412,4 +412,77 @@ final class InboxBadgeCountTests: XCTestCase {
             .empty
         )
     }
+
+    func testCandidatePresentationNeverShowsSnapshotFromDifferentQuery() {
+        let all = InboxCandidateQueryKey(scope: .all, optInOnly: false, searchText: "")
+        let searched = InboxCandidateQueryKey(
+            scope: .all,
+            optInOnly: false,
+            searchText: "swift"
+        )
+
+        XCTAssertEqual(
+            InboxCandidatePresentationLogic.phase(
+                requested: searched,
+                published: all,
+                failed: nil
+            ),
+            .loading
+        )
+        XCTAssertEqual(
+            InboxCandidatePresentationLogic.phase(
+                requested: searched,
+                published: all,
+                failed: searched
+            ),
+            .retry
+        )
+        XCTAssertEqual(
+            InboxCandidatePresentationLogic.phase(
+                requested: all,
+                published: all,
+                failed: all
+            ),
+            .content,
+            "a refresh failure must retain the last good page for the same query"
+        )
+    }
+
+    func testShowMoreWaitsForPublishedRowsAndOnlyUsesTerminalFocusFallback() {
+        let pending = InboxShowMoreRequest(previousCount: 100)
+        XCTAssertNil(InboxShowMoreLogic.publication(
+            pending: pending,
+            publishedIDs: Array(0..<100),
+            totalCount: 250,
+            noun: "episodes"
+        ))
+
+        let laterPage = InboxShowMoreLogic.publication(
+            pending: pending,
+            publishedIDs: Array(0..<200),
+            totalCount: 250,
+            noun: "episodes"
+        )
+        XCTAssertEqual(laterPage?.announcement, "Showing 200 of 250 episodes")
+        XCTAssertNil(laterPage?.terminalFocus)
+
+        let terminalPage = InboxShowMoreLogic.publication(
+            pending: pending,
+            publishedIDs: Array(0..<150),
+            totalCount: 150,
+            noun: "new episodes"
+        )
+        XCTAssertEqual(terminalPage?.announcement, "Showing 150 of 150 new episodes")
+        XCTAssertEqual(terminalPage?.terminalFocus, 149)
+    }
+
+    func testFolderInboxLoadingLabelIsContextual() {
+        let ctx = TestStore.freshContext()
+        let folder = FolderRepository(context: ctx).createFolder(name: "Loading")
+        XCTAssertEqual(
+            InboxPageScope.folder(folder.persistentModelID).loadingAccessibilityLabel,
+            "Loading folder inbox"
+        )
+        XCTAssertEqual(InboxPageScope.all.loadingAccessibilityLabel, "Loading inbox")
+    }
 }

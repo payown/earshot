@@ -61,6 +61,7 @@ struct FolderDetailScreen: View {
     // `InboxCandidates`; these states only bound row rendering and
     // re-anchor VoiceOver when a played/queued episode leaves the section.
     @State private var displayedNewEpisodeLimit = InboxLogic.displayBatchSize
+    @State private var pendingNewEpisodeShowMore: InboxShowMoreRequest?
     @AccessibilityFocusState private var focusedNewEpisodeID: PersistentIdentifier?
     @AccessibilityFocusState private var focusNewEpisodesEmpty: Bool
     @State private var pendingNewEpisodeFocusID: PersistentIdentifier?
@@ -238,7 +239,7 @@ struct FolderDetailScreen: View {
                         optInOnly: settings.inboxOptInOnly,
                         searchText: "",
                         requestedLimit: displayedNewEpisodeLimit,
-                        onPagePublished: applyPendingNewEpisodeFocus
+                        onPagePublished: applyPublishedNewEpisodePage
                     ) { snapshot in
                         newEpisodesSection(
                             snapshot.episodes,
@@ -476,12 +477,12 @@ struct FolderDetailScreen: View {
                 }
                 if displayed.count < totalCount {
                     Button {
+                        pendingNewEpisodeShowMore = InboxShowMoreRequest(
+                            previousCount: displayed.count
+                        )
                         displayedNewEpisodeLimit = InboxLogic.nextDisplayLimit(
                             current: displayedNewEpisodeLimit,
                             total: totalCount
-                        )
-                        Announcer.announce(
-                            "Showing \(displayedNewEpisodeLimit) of \(totalCount) new episodes"
                         )
                     } label: {
                         Label("Show 100 more", systemImage: "chevron.down.circle")
@@ -558,6 +559,23 @@ struct FolderDetailScreen: View {
             DispatchQueue.main.async { focusNewEpisodesEmpty = true }
         case .wait:
             break
+        }
+    }
+
+    private func applyPublishedNewEpisodePage(_ snapshot: InboxPresentationSnapshot) {
+        applyPendingNewEpisodeFocus(snapshot)
+        guard let publication = InboxShowMoreLogic.publication(
+            pending: pendingNewEpisodeShowMore,
+            publishedIDs: snapshot.episodes.map(\.persistentModelID),
+            totalCount: snapshot.matchingCount,
+            noun: "new episodes"
+        ) else { return }
+        pendingNewEpisodeShowMore = nil
+        DispatchQueue.main.async {
+            Announcer.announce(publication.announcement)
+            if let terminalFocus = publication.terminalFocus {
+                focusedNewEpisodeID = terminalFocus
+            }
         }
     }
 

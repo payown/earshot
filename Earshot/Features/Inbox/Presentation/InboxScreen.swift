@@ -79,6 +79,64 @@ struct InboxReloadCoalescer: Equatable {
     }
 }
 
+struct InboxCandidateQueryKey: Equatable, Hashable {
+    let scope: InboxPageScope
+    let optInOnly: Bool
+    let searchText: String
+}
+
+extension InboxPageScope {
+    var loadingAccessibilityLabel: String {
+        switch self {
+        case .all: "Loading inbox"
+        case .folder: "Loading folder inbox"
+        }
+    }
+}
+
+enum InboxLoadPresentationPhase: Equatable {
+    case content
+    case loading
+    case retry
+}
+
+enum InboxCandidatePresentationLogic {
+    static func phase(
+        requested: InboxCandidateQueryKey,
+        published: InboxCandidateQueryKey?,
+        failed: InboxCandidateQueryKey?
+    ) -> InboxLoadPresentationPhase {
+        if published == requested { return .content }
+        if failed == requested { return .retry }
+        return .loading
+    }
+}
+
+struct InboxShowMoreRequest: Equatable {
+    let previousCount: Int
+}
+
+struct InboxShowMorePublication<ID: Hashable>: Equatable {
+    let announcement: String
+    let terminalFocus: ID?
+}
+
+enum InboxShowMoreLogic {
+    static func publication<ID: Hashable>(
+        pending: InboxShowMoreRequest?,
+        publishedIDs: [ID],
+        totalCount: Int,
+        noun: String
+    ) -> InboxShowMorePublication<ID>? {
+        guard let pending, publishedIDs.count > pending.previousCount else { return nil }
+        let terminal = publishedIDs.count >= totalCount ? publishedIDs.last : nil
+        return InboxShowMorePublication(
+            announcement: "Showing \(publishedIDs.count) of \(totalCount) \(noun)",
+            terminalFocus: terminal
+        )
+    }
+}
+
 /// The Inbox: new, untriaged episodes. Each row carries the configured episode
 /// Quick Actions (rotor + default tap). "Clear inbox" dismisses everything
 /// currently shown.
@@ -143,6 +201,7 @@ struct InboxScreen: View {
     /// Keep initial view construction bounded on large inboxes. More episodes
     /// remain available in explicit, predictable batches without deleting data.
     @State private var displayedEpisodeLimit = InboxLogic.displayBatchSize
+    @State private var pendingShowMore: InboxShowMoreRequest?
     @AccessibilityFocusState private var focusEmpty: Bool
     // Focus target for the row that should take VoiceOver focus after the rotor
     // "Mark as played" removes the focused row from the inbox (#579). Mirrors
@@ -175,7 +234,7 @@ struct InboxScreen: View {
                     optInOnly: settings.inboxOptInOnly,
                     searchText: searchText,
                     requestedLimit: displayedEpisodeLimit,
-                    onPagePublished: applyPendingFocus
+                    onPagePublished: applyPublishedInboxPage
                 ) { snapshot in
                     inboxContent(snapshot: snapshot)
                 }
@@ -185,7 +244,7 @@ struct InboxScreen: View {
                     optInOnly: settings.inboxOptInOnly,
                     searchText: searchText,
                     requestedLimit: displayedEpisodeLimit,
-                    onPagePublished: applyPendingFocus
+                    onPagePublished: applyPublishedInboxPage
                 ) { snapshot in
                     inboxContent(snapshot: snapshot)
                 }
@@ -243,13 +302,12 @@ struct InboxScreen: View {
                         }
                         if displayed.count < snapshot.matchingCount {
                             Button {
+                                pendingShowMore = InboxShowMoreRequest(
+                                    previousCount: displayed.count
+                                )
                                 displayedEpisodeLimit = InboxLogic.nextDisplayLimit(
                                     current: displayedEpisodeLimit,
                                     total: snapshot.matchingCount
-                                )
-                                let newCount = displayedEpisodeLimit
-                                Announcer.announce(
-                                    "Showing \(newCount) of \(snapshot.matchingCount) episodes"
                                 )
                             } label: {
                                 Label("Show 100 more", systemImage: "chevron.down.circle")
@@ -362,7 +420,14 @@ struct InboxScreen: View {
         .onChange(of: runtime.tabFocusRevision) { _, _ in
             requestTabEntryFocus()
         }
-        .onChange(of: searchText) { _, _ in displayedEpisodeLimit = InboxLogic.displayBatchSize }
+        .onChange(of: searchText) { _, _ in
+            pendingShowMore = nil
+            displayedEpisodeLimit = InboxLogic.displayBatchSize
+        }
+        .onChange(of: selectedFolderID) { _, _ in
+            pendingShowMore = nil
+            displayedEpisodeLimit = InboxLogic.displayBatchSize
+        }
         .onSubmit(of: .search) { announceMatches(count: snapshot.matchingCount) }
         .toolbar {
             // Deliberately `inbox.count`, not `visible.count`: the title states
@@ -432,12 +497,7 @@ struct InboxScreen: View {
             }
         }
         .confirmationDialog(
-            downloadAllRequest.map {
-                $0.deferredCount > 0
-                    ? "Download the next \($0.episodes.count) episodes?"
-                    : "Download \($0.episodes.count) episodes?"
-            }
-                ?? "Download episodes?",
+            downloadAllConfirmationTitle,
             isPresented: Binding(
                 get: { downloadAllRequest != nil },
                 set: { if !$0 { downloadAllRequest = nil } }
@@ -762,6 +822,14 @@ struct InboxScreen: View {
         }
     }
 
+    private var downloadAllConfirmationTitle: String {
+        guard let request = downloadAllRequest else { return "Download episodes?" }
+        if request.deferredCount > 0 {
+            return "Download the next \(request.episodes.count) episodes?"
+        }
+        return "Download \(request.episodes.count) episodes?"
+    }
+
     /// Marks `episode` played and dismisses it from the inbox via the shared
     /// repository path (#546), then announces it. If that empties the inbox the
     /// focused row is gone, so move VoiceOver focus to the empty state (mirrors
@@ -891,6 +959,23 @@ struct InboxScreen: View {
         }
     }
 
+    private func applyPublishedInboxPage(_ snapshot: InboxPresentationSnapshot) {
+        applyPendingFocus(snapshot)
+        guard let publication = InboxShowMoreLogic.publication(
+            pending: pendingShowMore,
+            publishedIDs: snapshot.episodes.map(\.persistentModelID),
+            totalCount: snapshot.matchingCount,
+            noun: "episodes"
+        ) else { return }
+        pendingShowMore = nil
+        DispatchQueue.main.async {
+            Announcer.announce(publication.announcement)
+            if let terminalFocus = publication.terminalFocus {
+                focusedEpisode = terminalFocus
+            }
+        }
+    }
+
     private func requestLaunchHeadingFocus() {
         guard runtime.consumeLaunchFocus(.inbox) else { return }
         focusHeadingOrRefreshStatus()
@@ -934,6 +1019,8 @@ struct InboxCandidates<Content: View>: View {
     let onPagePublished: (InboxPresentationSnapshot) -> Void
     let content: (InboxPresentationSnapshot) -> Content
     @State private var snapshot: InboxPresentationSnapshot?
+    @State private var publishedQuery: InboxCandidateQueryKey?
+    @State private var failedQuery: InboxCandidateQueryKey?
     @State private var reloadCoalescer = InboxReloadCoalescer()
     @State private var generation = 0
 
@@ -955,11 +1042,27 @@ struct InboxCandidates<Content: View>: View {
 
     var body: some View {
         Group {
-            if let snapshot {
-                content(snapshot)
-            } else {
-                ProgressView("Loading inbox")
-                    .accessibilityLabel("Loading inbox")
+            switch InboxCandidatePresentationLogic.phase(
+                requested: queryKey,
+                published: publishedQuery,
+                failed: failedQuery
+            ) {
+            case .content:
+                if let snapshot { content(snapshot) }
+            case .loading:
+                ProgressView(loadingLabel)
+                    .accessibilityLabel(loadingLabel)
+            case .retry:
+                ContentUnavailableView {
+                    Label("Unable to load inbox", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text("The inbox could not be loaded.")
+                } actions: {
+                    Button("Retry") {
+                        failedQuery = nil
+                        generation &+= 1
+                    }
+                }
             }
         }
         .task(id: RequestKey(
@@ -969,7 +1072,7 @@ struct InboxCandidates<Content: View>: View {
             requestedLimit: requestedLimit,
             generation: generation
         )) {
-            await reload()
+            await reload(query: queryKey, limit: requestedLimit)
         }
         // A pushed destination can mutate Inbox membership while this snapshot
         // is covered and not receiving notifications. Refresh when navigation
@@ -1004,15 +1107,27 @@ struct InboxCandidates<Content: View>: View {
         }
     }
 
-    private func reload() async {
+    private var queryKey: InboxCandidateQueryKey {
+        InboxCandidateQueryKey(
+            scope: scope,
+            optInOnly: optInOnly,
+            searchText: searchText
+        )
+    }
+
+    private var loadingLabel: String {
+        scope.loadingAccessibilityLabel
+    }
+
+    private func reload(query: InboxCandidateQueryKey, limit: Int) async {
         let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
         do {
             let repository = InboxRepository(context: context)
             let page = try await repository.identifierPage(
-                scope: scope,
-                optInOnly: optInOnly,
-                searchText: searchText,
-                limit: requestedLimit
+                scope: query.scope,
+                optInOnly: query.optInOnly,
+                searchText: query.searchText,
+                limit: limit
             )
             try Task.checkCancellation()
             let resolved = repository.resolve(Array(Set(page.ids + page.downloadIDs)))
@@ -1040,6 +1155,8 @@ struct InboxCandidates<Content: View>: View {
                 downloadSkippedCount: page.downloadSkippedCount
             )
             snapshot = published
+            publishedQuery = query
+            failedQuery = nil
             onPagePublished(published)
             PerformanceSignposts.signposter.endInterval(
                 "InboxReload",
@@ -1049,14 +1166,7 @@ struct InboxCandidates<Content: View>: View {
         } catch {
             PerformanceSignposts.signposter.endInterval("InboxReload", interval)
             guard !Task.isCancelled else { return }
-            snapshot = InboxPresentationSnapshot(
-                episodes: [],
-                downloadCandidates: [],
-                inboxCount: 0,
-                matchingCount: 0,
-                downloadEligibleCount: 0,
-                downloadSkippedCount: 0
-            )
+            failedQuery = query
         }
     }
 
