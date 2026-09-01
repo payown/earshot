@@ -35,8 +35,10 @@ final class EpisodeListDataSourceTests: XCTestCase {
     func testInitialAndExplicitNextPageAreBounded() throws {
         let (context, podcast) = try fixture(count: 250)
         let data = source(context, podcast)
+        XCTAssertFalse(data.hasLoaded, "the view must expose its explicit loading state before the first fetch")
 
         data.resetAndLoad(filter: .all, sort: .latestFirst, searchText: "")
+        XCTAssertTrue(data.hasLoaded)
         XCTAssertEqual(data.episodes.count, 100)
         XCTAssertEqual(data.matchingCount, 250)
         XCTAssertTrue(data.hasMore)
@@ -46,6 +48,20 @@ final class EpisodeListDataSourceTests: XCTestCase {
         XCTAssertEqual(data.episodes.count, 200)
         XCTAssertEqual(Set(data.episodes.map(\.persistentModelID)).count, 200)
         XCTAssertTrue(data.hasMore)
+    }
+
+    func testLoadMorePreservesExistingPrefixInBothChronologicalDirections() throws {
+        let (context, podcast) = try fixture(count: 250)
+        let data = source(context, podcast)
+
+        for order in [EpisodeSortOrder.latestFirst, .latestLast] {
+            data.resetAndLoad(filter: .all, sort: order, searchText: "")
+            let initialIDs = data.episodes.map(\.persistentModelID)
+
+            data.loadMore(filter: .all, sort: order, searchText: "")
+
+            XCTAssertEqual(Array(data.episodes.map(\.persistentModelID).prefix(100)), initialIDs)
+        }
     }
 
     func testStressPodcastPublishesOnlyFirstHundredModels() throws {
@@ -108,7 +124,7 @@ final class EpisodeListDataSourceTests: XCTestCase {
         XCTAssertEqual(data.matchingCount, 80, "matching the podcast title preserves the old all-row behavior")
     }
 
-    func testEqualDateRawStoreBoundaryIsDeterministicButDocumentsArticleResidual() throws {
+    func testEqualDateBoundaryKeepsExistingPrefixInPlaceAfterLoadMore() throws {
         let context = TestStore.freshContext()
         let podcast = Podcast(feedURL: "https://example.com/ties.xml", title: "Ties")
         context.insert(podcast)
@@ -132,13 +148,15 @@ final class EpisodeListDataSourceTests: XCTestCase {
         data.resetAndLoad(filter: .all, sort: .latestFirst, searchText: "")
 
         XCTAssertEqual(data.episodes.count, 100)
+        let initialIDs = data.episodes.map(\.persistentModelID)
         XCTAssertEqual(data.episodes.first?.guid, "b0")
         XCTAssertFalse(
             data.episodes.contains { $0.guid == "apple" },
-            "the exact 100-model fetch cannot see an article-aware title beyond the raw-title store boundary"
+            "the bounded first page ends before the later raw-title store row"
         )
         data.loadMore(filter: .all, sort: .latestFirst, searchText: "")
-        XCTAssertEqual(data.episodes.first?.guid, "apple")
+        XCTAssertEqual(Array(data.episodes.map(\.persistentModelID).prefix(100)), initialIDs)
+        XCTAssertEqual(data.episodes.last?.guid, "apple")
     }
 
     func testDeletionBetweenPagesDoesNotDuplicateOrCrash() throws {
@@ -151,8 +169,33 @@ final class EpisodeListDataSourceTests: XCTestCase {
 
         data.loadMore(filter: .all, sort: .latestFirst, searchText: "")
 
-        XCTAssertEqual(data.episodes.count, 199, "the deleted loaded row is removed; the request still fetches only 100 more")
-        XCTAssertEqual(Set(data.episodes.map(\.persistentModelID)).count, 199)
+        XCTAssertEqual(data.episodes.count, 200, "the bounded prefix closes the deleted row's gap")
+        XCTAssertEqual(Set(data.episodes.map(\.persistentModelID)).count, 200)
         XCTAssertFalse(data.episodes.contains { $0.isDeleted })
+    }
+
+    func testRepublishBetweenPagesRemainsDeterministicWithoutDuplicates() throws {
+        let (context, podcast) = try fixture(count: 250)
+        let data = source(context, podcast)
+        data.resetAndLoad(filter: .all, sort: .latestFirst, searchText: "")
+        let republished = try XCTUnwrap(data.episodes.last)
+        republished.pubDate = Date(timeIntervalSince1970: 1_800_000_000)
+        try context.save()
+
+        data.loadMore(filter: .all, sort: .latestFirst, searchText: "")
+
+        XCTAssertEqual(data.episodes.count, 200)
+        XCTAssertEqual(Set(data.episodes.map(\.persistentModelID)).count, 200)
+        XCTAssertEqual(data.episodes.first?.persistentModelID, republished.persistentModelID)
+    }
+
+    func testPagingAnnouncementUsesGroupedCountsAndPluralization() {
+        XCTAssertEqual(
+            EpisodePageAnnouncement.text(loaded: 1_200, total: 45_436),
+            "Showing 1,200 of 45,436 episodes"
+        )
+        XCTAssertEqual(EpisodePageAnnouncement.text(loaded: 1, total: 1), "Showing 1 of 1 episode")
+        XCTAssertEqual(EpisodePageFocusTarget.afterLoading(hasMore: true), .showMore)
+        XCTAssertEqual(EpisodePageFocusTarget.afterLoading(hasMore: false), .olderEpisodes)
     }
 }

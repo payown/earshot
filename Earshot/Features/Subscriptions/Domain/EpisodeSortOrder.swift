@@ -51,11 +51,12 @@ enum EpisodeSortOrder: String, Codable, Identifiable {
         episodes.sorted(by: precedes)
     }
 
-    /// Store ordering for the dated bucket. A GUID tie-break makes page
-    /// boundaries deterministic even when a feed republishes multiple rows with
-    /// identical dates and titles. The bounded page is re-sorted with
-    /// ``precedes`` after fetching to retain the existing article-aware title
-    /// semantics for loaded rows.
+    /// Store ordering for the dated bucket. Title and GUID tie-breakers make
+    /// every bounded prefix deterministic even when a feed republishes multiple
+    /// rows with identical dates. Page-backed screens must retain this exact
+    /// store order rather than re-sorting individual pages: a comparator that
+    /// differs at a page boundary can move a newly loaded row ahead of the
+    /// VoiceOver user's current position.
     var storeSortDescriptors: [SortDescriptor<Episode>] {
         [
             SortDescriptor(\Episode.pubDate, order: self == .latestFirst ? .reverse : .forward),

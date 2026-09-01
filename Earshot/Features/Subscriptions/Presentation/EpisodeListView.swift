@@ -65,6 +65,8 @@ struct EpisodeListView: View {
     @AccessibilityFocusState private var focusedEpisode: PersistentIdentifier?
     @AccessibilityFocusState private var focusEmptyFilter: Bool
     @AccessibilityFocusState private var focusResultsHeading: Bool
+    @AccessibilityFocusState private var focusShowMoreEpisodes: Bool
+    @AccessibilityFocusState private var focusOlderEpisodesControl: Bool
 
     /// Played/unheard filter for this podcast's list. Loaded per podcast on
     /// appear (default ``EpisodeListFilter/unheard``) and persisted on change
@@ -115,24 +117,7 @@ struct EpisodeListView: View {
             Section {
                 header
             }
-            Section {
-                Picker("Filter episodes", selection: filterSelection) {
-                    ForEach(EpisodeListFilter.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityLabel("Filter episodes")
-            }
-            if filteredCount > 0 {
-                Section {
-                    chronologicalSortButton
-                }
-            }
-            if allEpisodeCount == 0 && podcast.refreshedAt == nil {
-                // Freshly-migrated show whose episodes haven't been fetched yet.
-                // Distinguish "still loading" from a genuinely empty feed so a
-                // VoiceOver user isn't told "no episodes" prematurely.
+            if episodeList?.hasLoaded != true {
                 Section {
                     Label("Loading episodes…", systemImage: "arrow.triangle.2.circlepath")
                         .foregroundStyle(.secondary)
@@ -140,48 +125,73 @@ struct EpisodeListView: View {
                         .accessibilityLabel("Loading episodes")
                         .accessibilityAddTraits(.updatesFrequently)
                 }
-            } else if filteredCount == 0 {
-                // Episodes exist but none match the current filter. Give a
-                // descriptive message and a one-tap way out, not a blank list.
-                Section {
-                    emptyFilterState
-                }
-            } else if visibleEpisodes.isEmpty {
-                Section {
-                    NoSearchMatchesView(query: searchText)
-                        .accessibilityFocused($focusEmptyFilter)
-                }
             } else {
                 Section {
-                    ForEach(visibleEpisodes) { episode in
-                        rowContainer(for: episode)
-                            // Lets the rotor mark-played runner hand VoiceOver focus
-                            // to this row when its neighbor vanishes (#579).
-                            .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
-                            // Same focus id on whichever row variant renders, so
-                            // focus can be moved onto the first row when selection
-                            // mode is entered (#758).
-                            .accessibilityFocused($focusedRowID, equals: episode.persistentModelID)
-                    }
-                    if episodeList?.hasMore == true {
-                        Button(showMoreEpisodesLabel) {
-                            episodeList?.loadMore(
-                                filter: filter,
-                                sort: settings.episodeSortOrder,
-                                searchText: searchText
-                            )
+                    Picker("Filter episodes", selection: filterSelection) {
+                        ForEach(EpisodeListFilter.allCases) { option in
+                            Text(option.title).tag(option)
                         }
                     }
-                } header: {
-                    Text(filter == .unheard
-                         ? "^[\(matchingCount) unheard episode](inflect: true)"
-                         : "^[\(matchingCount) episode](inflect: true)")
-                        .accessibilityFocused($focusResultsHeading)
+                    .pickerStyle(.segmented)
+                    .accessibilityLabel("Filter episodes")
                 }
-            }
-            if episodeList != nil && episodeList?.hasMore == false {
-                Section {
-                    olderEpisodesControl
+                if filteredCount > 0 {
+                    Section {
+                        chronologicalSortButton
+                    }
+                }
+                if allEpisodeCount == 0 && podcast.refreshedAt == nil {
+                    // Freshly-migrated show whose episodes haven't been fetched yet.
+                    // Distinguish "still loading" from a genuinely empty feed so a
+                    // VoiceOver user isn't told "no episodes" prematurely.
+                    Section {
+                        Label("Loading episodes…", systemImage: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(.secondary)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Loading episodes")
+                            .accessibilityAddTraits(.updatesFrequently)
+                    }
+                } else if filteredCount == 0 {
+                    // Episodes exist but none match the current filter. Give a
+                    // descriptive message and a one-tap way out, not a blank list.
+                    Section {
+                        emptyFilterState
+                    }
+                } else if visibleEpisodes.isEmpty {
+                    Section {
+                        NoSearchMatchesView(query: searchText)
+                            .accessibilityFocused($focusEmptyFilter)
+                    }
+                } else {
+                    Section {
+                        ForEach(visibleEpisodes) { episode in
+                            rowContainer(for: episode)
+                                // Lets the rotor mark-played runner hand VoiceOver focus
+                                // to this row when its neighbor vanishes (#579).
+                                .accessibilityFocused($focusedEpisode, equals: episode.persistentModelID)
+                                // Same focus id on whichever row variant renders, so
+                                // focus can be moved onto the first row when selection
+                                // mode is entered (#758).
+                                .accessibilityFocused($focusedRowID, equals: episode.persistentModelID)
+                        }
+                        if episodeList?.hasMore == true {
+                            Button(showMoreEpisodesLabel) {
+                                loadMoreEpisodes()
+                            }
+                            .accessibilityFocused($focusShowMoreEpisodes)
+                        }
+                    } header: {
+                        Text(filter == .unheard
+                             ? "^[\(matchingCount) unheard episode](inflect: true)"
+                             : "^[\(matchingCount) episode](inflect: true)")
+                            .accessibilityFocused($focusResultsHeading)
+                    }
+                }
+                if episodeList?.hasMore == false {
+                    Section {
+                        olderEpisodesControl
+                            .accessibilityFocused($focusOlderEpisodesControl)
+                    }
                 }
             }
         }
@@ -271,25 +281,27 @@ struct EpisodeListView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                // Bulk "Mark all as played" (#640) for shows with hundreds or
-                // thousands of episodes, where scrolling to mark each one is
-                // impractical. Disabled — not hidden — when there's nothing
-                // unplayed, mirroring InboxScreen's "Add to Queue" pattern, so
-                // VoiceOver users can still find it and learn why it's
-                // inactive rather than have it vanish unexplained.
-                Button {
-                    requestMarkAllPlayed()
-                } label: {
-                    Label("Mark all as played", systemImage: "checklist.checked")
+            if episodeList?.hasLoaded == true {
+                ToolbarItem(placement: .topBarTrailing) {
+                    // Bulk "Mark all as played" (#640) for shows with hundreds or
+                    // thousands of episodes, where scrolling to mark each one is
+                    // impractical. Disabled — not hidden — when there's nothing
+                    // unplayed, mirroring InboxScreen's "Add to Queue" pattern, so
+                    // VoiceOver users can still find it and learn why it's
+                    // inactive rather than have it vanish unexplained.
+                    Button {
+                        requestMarkAllPlayed()
+                    } label: {
+                        Label("Mark all as played", systemImage: "checklist.checked")
+                    }
+                    .disabled(unplayedCount == 0)
+                    .accessibilityLabel("Mark all as played")
+                    .accessibilityHint(
+                        unplayedCount == 0
+                            ? "No unplayed episodes"
+                            : "Marks all \(unplayedCount) unplayed episodes in \(podcast.title) as played"
+                    )
                 }
-                .disabled(unplayedCount == 0)
-                .accessibilityLabel("Mark all as played")
-                .accessibilityHint(
-                    unplayedCount == 0
-                        ? "No unplayed episodes"
-                        : "Marks all \(unplayedCount) unplayed episodes in \(podcast.title) as played"
-                )
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -724,6 +736,29 @@ struct EpisodeListView: View {
         "Show 100 more episodes, \(visibleEpisodes.count.formatted()) loaded of \(matchingCount.formatted())"
     }
 
+    private func loadMoreEpisodes() {
+        guard let episodeList else { return }
+        guard episodeList.loadMore(
+            filter: filter,
+            sort: settings.episodeSortOrder,
+            searchText: searchText
+        ) else { return }
+        Announcer.announce(EpisodePageAnnouncement.text(
+            loaded: visibleEpisodes.count,
+            total: matchingCount
+        ))
+        // Let the explicit completion announcement finish before VoiceOver
+        // repeats the boundary's updated label or advances to remote history.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            switch EpisodePageFocusTarget.afterLoading(hasMore: episodeList.hasMore) {
+            case .showMore:
+                focusShowMoreEpisodes = true
+            case .olderEpisodes:
+                focusOlderEpisodesControl = true
+            }
+        }
+    }
+
     @discardableResult
     private func ensureEpisodeList() -> EpisodeListDataSource {
         if let episodeList { return episodeList }
@@ -789,6 +824,25 @@ enum MarkAllPlayedAnnouncement {
     static func text(count: Int) -> String {
         let noun = count == 1 ? "episode" : "episodes"
         return "Marked \(count.formatted()) \(noun) as played"
+    }
+}
+
+/// Pure paging completion wording so VoiceOver receives an explicit boundary
+/// update before focus returns to the Show-more button (or advances to the
+/// existing remote-history control when the stored page is exhausted).
+enum EpisodePageAnnouncement {
+    static func text(loaded: Int, total: Int) -> String {
+        let noun = total == 1 ? "episode" : "episodes"
+        return "Showing \(loaded.formatted()) of \(total.formatted()) \(noun)"
+    }
+}
+
+enum EpisodePageFocusTarget: Equatable {
+    case showMore
+    case olderEpisodes
+
+    static func afterLoading(hasMore: Bool) -> Self {
+        hasMore ? .showMore : .olderEpisodes
     }
 }
 

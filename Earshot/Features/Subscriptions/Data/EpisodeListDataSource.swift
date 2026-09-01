@@ -19,6 +19,7 @@ final class EpisodeListDataSource {
     private(set) var allCount = 0
     private(set) var unplayedCount = 0
     private(set) var isLoading = false
+    private(set) var hasLoaded = false
 
     private let context: ModelContext
     private let podcastID: PersistentIdentifier
@@ -47,29 +48,32 @@ final class EpisodeListDataSource {
         )
     }
 
-    func loadMore(filter: EpisodeListFilter, sort: EpisodeSortOrder, searchText: String) {
-        guard !isLoading, hasMore else { return }
+    @discardableResult
+    func loadMore(filter: EpisodeListFilter, sort: EpisodeSortOrder, searchText: String) -> Bool {
+        guard !isLoading, hasMore else { return false }
         isLoading = true
         defer { isLoading = false }
-        episodes = episodes.filter { !$0.isDeleted && $0.modelContext == context }
 
         let interval = PerformanceSignposts.signposter.beginInterval("EpisodeListLoadMore")
         defer { PerformanceSignposts.signposter.endInterval("EpisodeListLoadMore", interval) }
         do {
             matchingCount = try context.fetchCount(descriptor(filter: filter, searchText: searchText))
-            let next = try fetchPage(
+            // Refetch the bounded prefix instead of applying an offset to a
+            // collection that may have changed since the previous page. A
+            // deletion before an offset would otherwise skip its successor;
+            // an insertion could return a duplicate. The store's complete sort
+            // order also guarantees the existing prefix remains in place when
+            // the underlying collection is unchanged.
+            episodes = try fetchPage(
                 filter: filter,
                 sort: sort,
                 searchText: searchText,
-                limit: Self.pageSize,
-                datedOffset: episodes.lazy.filter { $0.pubDate != nil }.count,
-                undatedOffset: episodes.lazy.filter { $0.pubDate == nil }.count
+                limit: min(matchingCount, episodes.count + Self.pageSize)
             )
-            let loadedIDs = Set(episodes.map(\.persistentModelID))
-            episodes.append(contentsOf: next.filter { !loadedIDs.contains($0.persistentModelID) })
-            episodes.sort(by: sort.precedes)
+            return true
         } catch {
             AppLog.data.error("Episode list next page failed: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
@@ -100,6 +104,7 @@ final class EpisodeListDataSource {
         let signpostID = PerformanceSignposts.signposter.makeSignpostID()
         let state = PerformanceSignposts.signposter.beginInterval(intervalName, id: signpostID)
         defer {
+            hasLoaded = true
             PerformanceSignposts.signposter.endInterval(
                 intervalName,
                 state,
@@ -116,9 +121,7 @@ final class EpisodeListDataSource {
                 filter: filter,
                 sort: sort,
                 searchText: searchText,
-                limit: limit,
-                datedOffset: 0,
-                undatedOffset: 0
+                limit: limit
             )
         } catch {
             AppLog.data.error("Episode list page failed: \(error.localizedDescription, privacy: .public)")
@@ -134,18 +137,14 @@ final class EpisodeListDataSource {
         filter: EpisodeListFilter,
         sort: EpisodeSortOrder,
         searchText: String,
-        limit: Int,
-        datedOffset: Int,
-        undatedOffset: Int
+        limit: Int
     ) throws -> [Episode] {
         guard limit > 0 else { return [] }
 
         var dated = descriptor(filter: filter, searchText: searchText, datePresence: .dated)
         dated.sortBy = sort.storeSortDescriptors
-        dated.fetchOffset = datedOffset
         dated.fetchLimit = limit
         var result = try context.fetch(dated)
-        result.sort(by: sort.precedes)
 
         let remaining = limit - result.count
         if remaining > 0 {
@@ -154,11 +153,8 @@ final class EpisodeListDataSource {
                 SortDescriptor(\Episode.title, order: .forward),
                 SortDescriptor(\Episode.guid, order: .forward),
             ]
-            undated.fetchOffset = undatedOffset
             undated.fetchLimit = remaining
-            var rows = try context.fetch(undated)
-            rows.sort(by: sort.precedes)
-            result.append(contentsOf: rows)
+            result.append(contentsOf: try context.fetch(undated))
         }
 
         return result
