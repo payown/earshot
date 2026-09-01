@@ -448,6 +448,21 @@ final class InboxBadgeCountTests: XCTestCase {
         )
     }
 
+    func testMountedQueryShellSuppressesCountUntilCurrentResultsPublish() {
+        var state = InboxShellResultState()
+        state.didPublish(matchingCount: 42)
+        XCTAssertEqual(state.matchingCount, 42)
+
+        state.queryDidChange()
+        XCTAssertNil(
+            state.matchingCount,
+            "the mounted shell must not announce the previous query's count"
+        )
+
+        state.didPublish(matchingCount: 7)
+        XCTAssertEqual(state.matchingCount, 7)
+    }
+
     func testShowMoreWaitsForPublishedRowsAndOnlyUsesTerminalFocusFallback() {
         let pending = InboxShowMoreRequest(previousCount: 100)
         XCTAssertNil(InboxShowMoreLogic.publication(

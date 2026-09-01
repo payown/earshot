@@ -112,6 +112,18 @@ enum InboxCandidatePresentationLogic {
     }
 }
 
+struct InboxShellResultState: Equatable {
+    private(set) var matchingCount: Int?
+
+    mutating func queryDidChange() {
+        matchingCount = nil
+    }
+
+    mutating func didPublish(matchingCount: Int) {
+        self.matchingCount = matchingCount
+    }
+}
+
 struct InboxShowMoreRequest: Equatable {
     let previousCount: Int
 }
@@ -202,6 +214,7 @@ struct InboxScreen: View {
     /// remain available in explicit, predictable batches without deleting data.
     @State private var displayedEpisodeLimit = InboxLogic.displayBatchSize
     @State private var pendingShowMore: InboxShowMoreRequest?
+    @State private var shellResultState = InboxShellResultState()
     @AccessibilityFocusState private var focusEmpty: Bool
     // Focus target for the row that should take VoiceOver focus after the rotor
     // "Mark as played" removes the focused row from the inbox (#579). Mirrors
@@ -227,27 +240,59 @@ struct InboxScreen: View {
     }
 
     var body: some View {
-        Group {
-            if let selectedFolder {
-                InboxCandidates(
-                    scope: .folder(selectedFolder.persistentModelID),
-                    optInOnly: settings.inboxOptInOnly,
-                    searchText: searchText,
-                    requestedLimit: displayedEpisodeLimit,
-                    onPagePublished: applyPublishedInboxPage
-                ) { snapshot in
-                    inboxContent(snapshot: snapshot)
+        VStack(spacing: 0) {
+            inboxFilter
+            Group {
+                if let selectedFolder {
+                    InboxCandidates(
+                        scope: .folder(selectedFolder.persistentModelID),
+                        optInOnly: settings.inboxOptInOnly,
+                        searchText: searchText,
+                        requestedLimit: displayedEpisodeLimit,
+                        onPagePublished: applyPublishedInboxPage
+                    ) { snapshot in
+                        inboxContent(snapshot: snapshot)
+                    }
+                } else {
+                    InboxCandidates(
+                        scope: .all,
+                        optInOnly: settings.inboxOptInOnly,
+                        searchText: searchText,
+                        requestedLimit: displayedEpisodeLimit,
+                        onPagePublished: applyPublishedInboxPage
+                    ) { snapshot in
+                        inboxContent(snapshot: snapshot)
+                    }
                 }
-            } else {
-                InboxCandidates(
-                    scope: .all,
-                    optInOnly: settings.inboxOptInOnly,
-                    searchText: searchText,
-                    requestedLimit: displayedEpisodeLimit,
-                    onPagePublished: applyPublishedInboxPage
-                ) { snapshot in
-                    inboxContent(snapshot: snapshot)
-                }
+            }
+        }
+        // The search and folder-filter shell lives above the result-state switch.
+        // A new actor query can replace rows with Loading/Retry without replacing
+        // the search field and collapsing its VoiceOver or keyboard focus.
+        .searchable(text: $searchText, prompt: "Search inbox")
+        .onAppear {
+            requestLaunchHeadingFocus()
+            requestTabEntryFocus()
+        }
+        .onChange(of: runtime.launchFocusRequest) { _, _ in
+            requestLaunchHeadingFocus()
+        }
+        .onChange(of: runtime.tabFocusRevision) { _, _ in
+            requestTabEntryFocus()
+        }
+        .onChange(of: searchText) { _, _ in
+            shellResultState.queryDidChange()
+            pendingShowMore = nil
+            displayedEpisodeLimit = InboxLogic.displayBatchSize
+        }
+        .onChange(of: selectedFolderID) { _, _ in
+            shellResultState.queryDidChange()
+            pendingShowMore = nil
+            displayedEpisodeLimit = InboxLogic.displayBatchSize
+        }
+        .onSubmit(of: .search) {
+            if let matchingCount = shellResultState.matchingCount {
+                announceMatches(count: matchingCount)
             }
         }
     }
@@ -266,9 +311,7 @@ struct InboxScreen: View {
         let visible = InboxRepository.liveEpisodes(snapshot.episodes, in: context)
             .filter { $0.status == .newEpisode }
         let displayed = visible[...]
-        return VStack(spacing: 0) {
-            inboxFilter
-            Group {
+        return Group {
                 if snapshot.inboxCount == 0 {
                     ContentUnavailableView(
                         selectedFolder == nil ? "Inbox is empty" : "No new episodes",
@@ -319,7 +362,6 @@ struct InboxScreen: View {
                         }
                     }
                 }
-            }
         }
         // The visible title and its VoiceOver label both derive from
         // `inbox.count`, which comes from the @Query-backed `inbox` — so they
@@ -403,32 +445,6 @@ struct InboxScreen: View {
                 .transition(.move(edge: .bottom))
             }
         }
-        // In-place search filter (#457, Part A). The system `.searchable` field
-        // is the standard accessible search affordance (labeled, focusable,
-        // clearable). The result count is announced on SUBMIT only — never per
-        // keystroke, never while the field is empty — so typing stays quiet and
-        // the user asks for the tally when they want it (the list itself
-        // updates live as they type).
-        .searchable(text: $searchText, prompt: "Search inbox")
-        .onAppear {
-            requestLaunchHeadingFocus()
-            requestTabEntryFocus()
-        }
-        .onChange(of: runtime.launchFocusRequest) { _, _ in
-            requestLaunchHeadingFocus()
-        }
-        .onChange(of: runtime.tabFocusRevision) { _, _ in
-            requestTabEntryFocus()
-        }
-        .onChange(of: searchText) { _, _ in
-            pendingShowMore = nil
-            displayedEpisodeLimit = InboxLogic.displayBatchSize
-        }
-        .onChange(of: selectedFolderID) { _, _ in
-            pendingShowMore = nil
-            displayedEpisodeLimit = InboxLogic.displayBatchSize
-        }
-        .onSubmit(of: .search) { announceMatches(count: snapshot.matchingCount) }
         .toolbar {
             // Deliberately `inbox.count`, not `visible.count`: the title states
             // the TOTAL inbox size even while a search narrows the list (#457).
@@ -960,6 +976,7 @@ struct InboxScreen: View {
     }
 
     private func applyPublishedInboxPage(_ snapshot: InboxPresentationSnapshot) {
+        shellResultState.didPublish(matchingCount: snapshot.matchingCount)
         applyPendingFocus(snapshot)
         guard let publication = InboxShowMoreLogic.publication(
             pending: pendingShowMore,
