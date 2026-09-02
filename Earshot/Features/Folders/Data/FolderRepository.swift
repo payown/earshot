@@ -31,6 +31,18 @@ enum FolderMoveResult: Equatable {
     case rejectedCycle
 }
 
+/// The complete, cached presentation input for one folder detail screen.
+/// Every collection is loaded with a folder-identity predicate so opening one
+/// folder never scans the app's global membership tables.
+struct FolderDetailSnapshot {
+    let podcasts: [Podcast]
+    let subfolders: [PodcastFolder]
+    let episodes: [Episode]
+    let subfolderCounts: [PersistentIdentifier: Int]
+    let podcastCounts: [PersistentIdentifier: Int]
+    let hasSubtreeSubscriptions: Bool
+}
+
 /// SwiftData-backed folder store: create/rename/delete folders, manage podcast
 /// membership and per-folder ordering, set a per-folder queue age limit, and
 /// queue a folder's latest unplayed episodes. Mirrors the Flutter
@@ -46,6 +58,69 @@ final class FolderRepository {
     }
 
     // MARK: Reads
+
+    /// Loads all presentation inputs used by ``FolderDetailScreen`` once. The
+    /// view keeps this snapshot until a relevant repository notification asks
+    /// for another one, avoiding fetches and derived global scans during body
+    /// evaluation and VoiceOver navigation.
+    func detailSnapshot(for folder: PodcastFolder) -> FolderDetailSnapshot {
+        let interval = PerformanceSignposts.signposter.beginInterval("FolderDetailSnapshot")
+        defer {
+            PerformanceSignposts.signposter.endInterval("FolderDetailSnapshot", interval)
+        }
+
+        let folderID = folder.persistentModelID
+        let directMemberships = podcastMemberships(inFolderID: folderID)
+        let podcasts = directMemberships
+            .sorted { lhs, rhs in
+                if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+                return (lhs.podcast?.title ?? "") < (rhs.podcast?.title ?? "")
+            }
+            .compactMap(\.podcast)
+            .filter(\.isFollowed)
+        let subfolders = childFolders(parentID: folderID)
+        let episodes = episodeMemberships(inFolderID: folderID)
+            .sorted { lhs, rhs in
+                if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+                let l = lhs.episode?.pubDate, r = rhs.episode?.pubDate
+                if l != r { return FolderLogic.byPubDateDescending(l, r) }
+                return (lhs.episode?.title ?? "") < (rhs.episode?.title ?? "")
+            }
+            .compactMap(\.episode)
+
+        var subfolderCounts: [PersistentIdentifier: Int] = [:]
+        var podcastCounts: [PersistentIdentifier: Int] = [:]
+        for child in subfolders {
+            let childID = child.persistentModelID
+            subfolderCounts[childID] = childFolders(parentID: childID).count
+            // Preserve the former @Query count exactly: membership rows are
+            // counted regardless of podcast state, while the visible podcast
+            // collection itself continues to require `isFollowed`.
+            podcastCounts[childID] = podcastMemberships(inFolderID: childID).count
+        }
+
+        var pending = subfolders.map(\.persistentModelID)
+        var visited = Set<PersistentIdentifier>()
+        var hasSubtreeSubscriptions = !podcasts.isEmpty
+        while let currentID = pending.popLast(), visited.insert(currentID).inserted {
+            if podcastMemberships(inFolderID: currentID).contains(where: {
+                $0.podcast?.isFollowed == true
+            }) {
+                hasSubtreeSubscriptions = true
+                break
+            }
+            pending.append(contentsOf: childFolders(parentID: currentID).map(\.persistentModelID))
+        }
+
+        return FolderDetailSnapshot(
+            podcasts: podcasts,
+            subfolders: subfolders,
+            episodes: episodes,
+            subfolderCounts: subfolderCounts,
+            podcastCounts: podcastCounts,
+            hasSubtreeSubscriptions: hasSubtreeSubscriptions
+        )
+    }
 
     /// All folders, ordered by `sortOrder` then name.
     func folders() -> [PodcastFolder] {
@@ -460,9 +535,33 @@ final class FolderRepository {
     /// join has no inverse collection on ``PodcastFolder``, so it is resolved by
     /// fetching and filtering — the same approach as ``removeEpisodeMemberships(forFolders:)``.
     private func episodeMemberships(in folder: PodcastFolder) -> [EpisodeFolderMembership] {
-        let id = folder.persistentModelID
-        let all = (try? context.fetch(FetchDescriptor<EpisodeFolderMembership>())) ?? []
-        return all.filter { $0.folder?.persistentModelID == id }
+        episodeMemberships(inFolderID: folder.persistentModelID)
+    }
+
+    private func episodeMemberships(
+        inFolderID folderID: PersistentIdentifier
+    ) -> [EpisodeFolderMembership] {
+        let descriptor = FetchDescriptor<EpisodeFolderMembership>(
+            predicate: #Predicate { $0.folder?.persistentModelID == folderID }
+        )
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
+    private func podcastMemberships(
+        inFolderID folderID: PersistentIdentifier
+    ) -> [FolderMembership] {
+        let descriptor = FetchDescriptor<FolderMembership>(
+            predicate: #Predicate { $0.folder?.persistentModelID == folderID }
+        )
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
+    private func childFolders(parentID: PersistentIdentifier) -> [PodcastFolder] {
+        let descriptor = FetchDescriptor<PodcastFolder>(
+            predicate: #Predicate { $0.parent?.persistentModelID == parentID },
+            sortBy: [SortDescriptor(\.sortOrder), SortDescriptor(\.name)]
+        )
+        return (try? context.fetch(descriptor)) ?? []
     }
 
     // MARK: Queueing
@@ -562,6 +661,10 @@ final class FolderRepository {
         (try? context.fetch(FetchDescriptor<FolderMembership>())) ?? []
     }
 
+    private func allEpisodeMemberships() -> [EpisodeFolderMembership] {
+        (try? context.fetch(FetchDescriptor<EpisodeFolderMembership>())) ?? []
+    }
+
     private func membershipsByFolderID()
         -> [PersistentIdentifier: [FolderMembership]] {
         Dictionary(grouping: allMemberships()) { membership in
@@ -572,28 +675,73 @@ final class FolderRepository {
         }
     }
 
-    /// Maps each podcast to the top-level folder whose subtree contains it, for
-    /// subtree-aware queue grouping (#762). A podcast filed in a nested subfolder
-    /// resolves to its top-level ancestor; a podcast filed under several top-level
-    /// folders resolves to the first in ``childFolders(of:)`` order (`sortOrder`
-    /// then name) — deterministic, and one bucket per podcast. Podcasts in no
-    /// folder are absent from the result; callers treat a missing key as
-    /// "Unfiled".
+    /// Builds the Queue's episode-first folder lookup. A directly filed episode
+    /// resolves through its own folder before the Queue falls back to the
+    /// podcast's folder. Nested memberships resolve to their top-level ancestor.
+    /// If an episode or podcast is filed under several top-level folders, the
+    /// first root in ``childFolders(of:)`` order (`sortOrder` then name) wins,
+    /// matching the Queue's existing deterministic one-section rule.
     ///
-    /// Built from the folder structure only: its cost scales with the number of
-    /// folders and podcast memberships, NOT with the queue or episode count, and
-    /// it is meant to be built ONCE per grouping pass so each episode is a single
-    /// O(1) dictionary lookup rather than an O(folders) walk (performance.md).
-    func rootFolderByPodcast() -> [PersistentIdentifier: PersistentIdentifier] {
-        var map: [PersistentIdentifier: PersistentIdentifier] = [:]
+    /// Both membership tables are fetched once and grouped by folder before the
+    /// tree walk. Its cost scales with folders + membership rows, not with the
+    /// queue or catalog size; each queued episode is then an O(1) lookup.
+    func queueFolderResolution() -> QueueFolderResolution {
+        let podcastMemberships = membershipsByFolderID()
+        let episodeMemberships = Dictionary(grouping: allEpisodeMemberships()) {
+            $0.folder?.persistentModelID
+        }.reduce(into: [PersistentIdentifier: [EpisodeFolderMembership]]()) { result, element in
+            guard let folderID = element.key else { return }
+            result[folderID] = element.value
+        }
+        var rootByPodcast: [PersistentIdentifier: PersistentIdentifier] = [:]
+        var rootByEpisode: [PersistentIdentifier: PersistentIdentifier] = [:]
         for root in childFolders(of: nil) {
             let rootID = root.persistentModelID
-            for podcast in subtreeSubscriptions(of: root) {
-                let pid = podcast.persistentModelID
-                if map[pid] == nil { map[pid] = rootID }
+            for node in FolderLogic.flattenSubtree(root) {
+                let folderID = node.persistentModelID
+                for membership in podcastMemberships[folderID, default: []] {
+                    guard let podcast = membership.podcast, podcast.isFollowed else { continue }
+                    if rootByPodcast[podcast.persistentModelID] == nil {
+                        rootByPodcast[podcast.persistentModelID] = rootID
+                    }
+                }
+                for membership in episodeMemberships[folderID, default: []] {
+                    guard let episode = membership.episode else { continue }
+                    if rootByEpisode[episode.persistentModelID] == nil {
+                        rootByEpisode[episode.persistentModelID] = rootID
+                    }
+                }
             }
         }
-        return map
+        return QueueFolderResolution(
+            rootByPodcast: rootByPodcast,
+            rootByEpisode: rootByEpisode
+        )
+    }
+
+    /// Compatibility read for callers that only need podcast membership.
+    func rootFolderByPodcast() -> [PersistentIdentifier: PersistentIdentifier] {
+        queueFolderResolution().rootByPodcast
+    }
+
+    /// Whether `episode` belongs to `folder`'s subtree either explicitly or by
+    /// inheriting its podcast membership. Playback origin uses this broader
+    /// definition so "Playing from Saturday" survives advancement through the
+    /// same episode-first folder group shown in the Queue.
+    func episode(_ episode: Episode, belongsToSubtreeOf folder: PodcastFolder) -> Bool {
+        let folderIDs = Set(FolderLogic.flattenSubtree(folder).map(\.persistentModelID))
+        let episodeID = episode.persistentModelID
+        if allEpisodeMemberships().contains(where: {
+            $0.episode?.persistentModelID == episodeID
+                && $0.folder.map { folderIDs.contains($0.persistentModelID) } == true
+        }) {
+            return true
+        }
+        guard let podcastID = episode.podcast?.persistentModelID else { return false }
+        return allMemberships().contains {
+            $0.podcast?.persistentModelID == podcastID
+                && $0.folder.map { folderIDs.contains($0.persistentModelID) } == true
+        }
     }
 
     // MARK: OPML export (folders phase 3 — #764)

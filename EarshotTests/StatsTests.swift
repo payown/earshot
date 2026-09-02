@@ -264,6 +264,32 @@ final class StatsTests: XCTestCase {
         XCTAssertEqual(try ctx.fetch(FetchDescriptor<ListeningSession>()).count, 1)
     }
 
+    func testBackgroundRetentionDeletesInBoundedBatches() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Background retention")
+        for index in 0..<600 {
+            makeSession(
+                ctx,
+                podcast: podcast,
+                seconds: 1,
+                date: now.addingTimeInterval(-Double(100 + index) * 86_400)
+            )
+        }
+        makeSession(ctx, podcast: podcast, seconds: 1, date: now)
+        try ctx.save()
+
+        let report = await StatsMaintenance.applyRetention(
+            modelContainer: ctx.container,
+            days: 90,
+            now: now
+        )
+
+        ctx.rollback()
+        XCTAssertEqual(try ctx.fetch(FetchDescriptor<ListeningSession>()).count, 1)
+        XCTAssertEqual(report.removed, 600)
+        XCTAssertFalse(report.executedStoreWorkOnMainThread)
+    }
+
     func testApplyRetentionZeroKeepsEverything() throws {
         let ctx = TestStore.freshContext()
         let a = makePodcast(ctx, "Alpha")

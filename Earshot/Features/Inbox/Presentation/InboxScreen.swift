@@ -25,6 +25,7 @@ private struct DownloadAllRequest: Identifiable {
 /// Quick Actions (rotor + default tap). "Clear inbox" dismisses everything
 /// currently shown.
 struct InboxScreen: View {
+    var isActive = true
     @Environment(AppRuntime.self) private var runtime
     @Environment(\.modelContext) private var context
     @Environment(PlayerService.self) private var player
@@ -109,11 +110,17 @@ struct InboxScreen: View {
     var body: some View {
         Group {
             if let selectedFolder {
-                FolderScopedInboxCandidates(folder: selectedFolder) { candidates in
+                FolderScopedInboxCandidates(
+                    folder: selectedFolder,
+                    isActive: isActive
+                ) { candidates in
                     inboxContent(candidates: candidates)
                 }
             } else {
-                AllInboxCandidates(optInOnly: settings.inboxOptInOnly) { candidates in
+                AllInboxCandidates(
+                    optInOnly: settings.inboxOptInOnly,
+                    isActive: isActive
+                ) { candidates in
                     inboxContent(candidates: candidates)
                 }
             }
@@ -813,11 +820,19 @@ private struct AllInboxCandidates<Content: View>: View {
     @Environment(\.modelContext) private var context
 
     let optInOnly: Bool
+    let isActive: Bool
     let content: ([Episode]) -> Content
     @State private var candidates: [Episode]?
+    @State private var reloadScheduled = false
+    @State private var reloadGeneration = 0
 
-    init(optInOnly: Bool, @ViewBuilder content: @escaping ([Episode]) -> Content) {
+    init(
+        optInOnly: Bool,
+        isActive: Bool,
+        @ViewBuilder content: @escaping ([Episode]) -> Content
+    ) {
         self.optInOnly = optInOnly
+        self.isActive = isActive
         self.content = content
     }
 
@@ -830,32 +845,57 @@ private struct AllInboxCandidates<Content: View>: View {
                     .accessibilityLabel("Loading inbox")
             }
         }
-        .task(id: optInOnly) { reload() }
+        .task(id: isActive ? (optInOnly ? 2 : 1) : 0) {
+            if isActive { reload() }
+        }
         // A pushed destination can mutate Inbox membership while this snapshot
         // is covered and not receiving notifications. Refresh when navigation
         // reveals it again so newly added candidates and policy changes also
         // catch up, while `currentEpisodes` removes stale rows immediately.
         .onAppear {
-            if candidates != nil { reload() }
+            if isActive, candidates != nil { reload() }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotInboxDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
-            reload()
+            if isActive { scheduleReload() }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotQueueDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
+            if isActive { scheduleReload() }
+        }
+    }
+
+    /// Inbox and Queue notifications commonly describe the same durable
+    /// mutation. Collapse notifications delivered in one main-run-loop turn so
+    /// the relationship query runs once without delaying later independent
+    /// changes.
+    private func scheduleReload() {
+        guard !reloadScheduled else { return }
+        reloadScheduled = true
+        DispatchQueue.main.async {
+            reloadScheduled = false
             reload()
         }
     }
 
     private func reload() {
         let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
-        defer { PerformanceSignposts.signposter.endInterval("InboxReload", interval) }
-        candidates = InboxRepository(context: context).inboxEpisodes()
+        let loaded = InboxRepository(context: context).inboxEpisodes()
+        PerformanceSignposts.signposter.endInterval("InboxReload", interval)
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        // Fetching a large Inbox and constructing its first VoiceOver rows in
+        // one main-loop turn measured as a 281 ms cold-launch microhang. Keep
+        // the same main-context models and exact ordering, but let UIKit service
+        // accessibility between the store phase and the row-rendering phase.
+        DispatchQueue.main.async {
+            guard isActive, generation == reloadGeneration else { return }
+            candidates = loaded
+        }
     }
 }
 
@@ -869,13 +909,21 @@ struct FolderScopedInboxCandidates<Content: View>: View {
     @Environment(\.modelContext) private var context
     @Environment(SettingsStore.self) private var settings
     let folder: PodcastFolder
+    let isActive: Bool
     let content: ([Episode]) -> Content
 
     @State private var candidates: [Episode] = []
     @State private var loaded = false
+    @State private var reloadScheduled = false
+    @State private var reloadGeneration = 0
 
-    init(folder: PodcastFolder, @ViewBuilder content: @escaping ([Episode]) -> Content) {
+    init(
+        folder: PodcastFolder,
+        isActive: Bool = true,
+        @ViewBuilder content: @escaping ([Episode]) -> Content
+    ) {
         self.folder = folder
+        self.isActive = isActive
         self.content = content
     }
 
@@ -894,30 +942,47 @@ struct FolderScopedInboxCandidates<Content: View>: View {
                     .accessibilityLabel("Loading folder inbox")
             }
         }
-        .task(id: scopeSignature) { reload() }
+        .task(id: scopeSignature + ["active:\(isActive)"]) {
+            if isActive { reload() }
+        }
         // Returning from a podcast detail doesn't change `scopeSignature`, so
         // `.task(id:)` alone may retain the pre-navigation candidate snapshot.
         .onAppear {
-            if loaded { reload() }
+            if isActive, loaded { reload() }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotInboxDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
-            reload()
+            if isActive { scheduleReload() }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotQueueDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
+            if isActive { scheduleReload() }
+        }
+    }
+
+    private func scheduleReload() {
+        guard !reloadScheduled else { return }
+        reloadScheduled = true
+        DispatchQueue.main.async {
+            reloadScheduled = false
             reload()
         }
     }
 
     private func reload() {
         let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
-        defer { PerformanceSignposts.signposter.endInterval("InboxReload", interval) }
-        candidates = InboxRepository(context: context).inboxEpisodes(in: folder)
-        loaded = true
+        let snapshot = InboxRepository(context: context).inboxEpisodes(in: folder)
+        PerformanceSignposts.signposter.endInterval("InboxReload", interval)
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        DispatchQueue.main.async {
+            guard isActive, generation == reloadGeneration else { return }
+            candidates = snapshot
+            loaded = true
+        }
     }
 }

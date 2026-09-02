@@ -237,7 +237,7 @@ final class QuickActionBuildersTests: XCTestCase {
         let items = buildQueueActions(
             episode: episode,
             order: [.moveToTop, .moveUp, .playNow, .moveDown, .moveToBottom],
-            moveMode: .groupedByFolder(rootByPodcast: [:]),
+            moveMode: .groupedByFolder(resolution: .empty),
             player: PlayerService(),
             downloads: DownloadManager(),
             context: ctx,
@@ -654,7 +654,7 @@ final class QuickActionBuildersTests: XCTestCase {
         let reversedGroups = Array(podcastGroups.reversed())
 
         let order = displayedQueueOrder(
-            moveMode: .groupedByFolder(rootByPodcast: [:]),
+            moveMode: .groupedByFolder(resolution: .empty),
             flat: repo.queue(),
             grouped: reversedGroups
         )

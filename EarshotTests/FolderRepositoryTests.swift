@@ -171,6 +171,54 @@ final class FolderRepositoryTests: XCTestCase {
         XCTAssertEqual(repo.podcasts(in: folder).map(\.title), ["Three", "One", "Two"])
     }
 
+    func testDetailSnapshotIsFolderScopedAndPrecomputesChildCounts() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let child = repo.createSubfolder(named: "Child", under: root)
+        _ = repo.createSubfolder(named: "Grandchild", under: child)
+        let unrelated = repo.createFolder(name: "Unrelated")
+
+        let rootPodcast = makePodcast(ctx, "Root show")
+        let childPodcast = makePodcast(ctx, "Child show")
+        let unrelatedPodcast = makePodcast(ctx, "Unrelated show")
+        repo.add(rootPodcast, to: root)
+        repo.add(childPodcast, to: child)
+        repo.add(unrelatedPodcast, to: unrelated)
+
+        let older = makeEpisode(
+            ctx, rootPodcast, guid: "older", pubDate: now.addingTimeInterval(-60)
+        )
+        let newer = makeEpisode(ctx, rootPodcast, guid: "newer", pubDate: now)
+        let unrelatedEpisode = makeEpisode(ctx, unrelatedPodcast, guid: "outside", pubDate: now)
+        repo.addEpisodes([older, newer], to: root)
+        repo.addEpisodes([unrelatedEpisode], to: unrelated)
+
+        let snapshot = repo.detailSnapshot(for: root)
+
+        XCTAssertEqual(snapshot.podcasts.map(\.title), ["Root show"])
+        XCTAssertEqual(snapshot.subfolders.map(\.name), ["Child"])
+        XCTAssertEqual(snapshot.episodes.map(\.guid), ["older", "newer"])
+        XCTAssertEqual(snapshot.subfolderCounts[child.persistentModelID], 1)
+        XCTAssertEqual(snapshot.podcastCounts[child.persistentModelID], 1)
+        XCTAssertTrue(snapshot.hasSubtreeSubscriptions)
+        XCTAssertFalse(snapshot.podcasts.contains { $0.persistentModelID == unrelatedPodcast.persistentModelID })
+        XCTAssertFalse(snapshot.episodes.contains { $0.persistentModelID == unrelatedEpisode.persistentModelID })
+    }
+
+    func testDetailSnapshotDetectsSubscriptionOnlyInDescendant() {
+        let ctx = TestStore.freshContext()
+        let repo = FolderRepository(context: ctx)
+        let root = repo.createFolder(name: "Root")
+        let child = repo.createSubfolder(named: "Child", under: root)
+        repo.add(makePodcast(ctx, "Nested show"), to: child)
+
+        let snapshot = repo.detailSnapshot(for: root)
+
+        XCTAssertTrue(snapshot.podcasts.isEmpty)
+        XCTAssertTrue(snapshot.hasSubtreeSubscriptions)
+    }
+
     func testSetMembershipsReplacesFolders() {
         let ctx = TestStore.freshContext()
         let repo = FolderRepository(context: ctx)
