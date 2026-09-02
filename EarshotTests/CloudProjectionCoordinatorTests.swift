@@ -3708,10 +3708,26 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             throw CocoaError(.fileReadUnknown)
         }
         defer { sqlite3_close(database) }
-        guard sqlite3_exec(database, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, nil)
-                == SQLITE_OK,
-              sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
-            throw CocoaError(.fileWriteUnknown)
+        // Core Data can release its last WAL writer just after the seed
+        // container leaves scope. Let SQLite wait for that bounded lock handoff
+        // instead of making the test depend on executor/autorelease timing.
+        sqlite3_busy_timeout(database, 5_000)
+        // Do not demand an exclusive TRUNCATE checkpoint here. SwiftData may
+        // retain a read handle briefly after the fixture's seed container leaves
+        // scope, especially when these async tests run back-to-back. A new SQLite
+        // connection sees the committed Core Data WAL and commits this fixture
+        // mutation into that same WAL, so checkpointing is unnecessary. Requiring
+        // it made otherwise-correct tests fail with SQLITE_BUSY / Cocoa 512 and
+        // could provoke "vnode unlinked while in use" diagnostics during cleanup.
+        let result = sqlite3_exec(database, sql, nil, nil, nil)
+        guard result == SQLITE_OK else {
+            let detail = database.map { String(cString: sqlite3_errmsg($0)) }
+                ?? "Unknown SQLite error"
+            throw NSError(
+                domain: "CloudProjectionCoordinatorTests.SQLiteFixture",
+                code: Int(result),
+                userInfo: [NSLocalizedDescriptionKey: detail]
+            )
         }
     }
 
