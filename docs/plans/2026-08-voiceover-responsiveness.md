@@ -25,6 +25,25 @@ scope to preserve build 251 behavior. A later paging change must also move those
 full-scope operations into bounded repository batches before the first-page-only
 contract in Phase 4 can be claimed.
 
+The 2026-09-02 `codex/concurrency-snappy` follow-up tightens that work without
+changing the Inbox interaction contract:
+
+- Inbox snapshots, tab-badge counts, launch expiration, and stats retention use
+  structured `@concurrent` entry points instead of continuation-wrapped GCD
+  blocks, so task cancellation remains visible to the work;
+- the global Inbox snapshot now excludes played legacy history in the store,
+  matching the already-bounded badge and folder predicates before models are
+  materialized; and
+- interactive Stats aggregation and CSV generation/write run on private
+  contexts, while confirmed history deletion runs off-main in durable 256-row
+  batches. Generation checks prevent an older period/folder result from
+  replacing a newer selection.
+
+Full Inbox paging is still intentionally open. It must preserve full-scope
+search, Download all, Clear Inbox, selection, exact counts, and VoiceOver focus;
+splitting that semantic change from the executor correction keeps both reviews
+small and independently reversible.
+
 The original build 250 Release-device trace remained blocked by the iOS 27/Xcode
 26.6 device support mismatch. The missing metrics and the still-main-context
 Inbox candidate fetch are preserved as open evidence/implementation boundaries
@@ -90,8 +109,8 @@ batch appears.
 
 - `StatsRepository` fetches and filters broad listening-session histories.
 - `SpokenDescriptionCache` sanitizes HTML synchronously on a cold row-cache miss.
-- `ShowNotesView` reparses the complete description from a computed property and
-  creates an eager paragraph stack.
+- `ShowNotesView` reparses the complete description from a computed property on
+  each evaluation, even though paragraph rendering itself uses `LazyVStack`.
 
 These are lower priority than the list and Search paths, but are measurable and
 should not be left as permanent unbounded work.
@@ -269,8 +288,10 @@ deletion, bulk-action full scope, and existing focus/speech behavior.
 
 ## Phase 5: move secondary work off the VoiceOver path
 
-1. Push date and completed predicates into `StatsRepository` fetches. Aggregate
-   scalar stats and apply retention in bounded background batches.
+1. Completed on `codex/concurrency-snappy`: interactive aggregation returns a
+   Sendable scalar snapshot from a private context; CSV formatting and writing
+   are off-main; retention and confirmed delete-all use bounded background
+   batches. Remaining predicate refinement can be measured independently.
 2. Precompute exact spoken-description strings for the next visible page off the
    main actor. Keep the current bounded cache and verify output against golden
    strings before switching callers.
