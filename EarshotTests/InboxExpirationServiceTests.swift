@@ -154,6 +154,26 @@ final class InboxExpirationServiceTests: XCTestCase {
 
     // MARK: Expiration
 
+    func testBackgroundExpirationRunsOffMainAndPersistsChanges() async throws {
+        let ctx = TestStore.freshContext()
+        let p = podcast(ctx, "Background")
+        p.queueAgeLimitDays = 7
+        let e = episode(ctx, "background-old", podcast: p, status: .inQueue)
+        ctx.insert(QueueItem(episode: e, position: 0, addedAt: daysAgo(10)))
+        try ctx.save()
+
+        let report = await ExpirationMaintenance.run(
+            modelContainer: ctx.container,
+            now: now
+        )
+
+        XCTAssertFalse(report.executedStoreWorkOnMainThread)
+        XCTAssertEqual(report.expired, 1)
+        let fresh = ModelContext(ctx.container)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<QueueItem>()), 0)
+        XCTAssertEqual(try fresh.fetchCount(FetchDescriptor<RecentlyExpired>()), 1)
+    }
+
     func testExpiresStaleQueuedEpisodesAndPersistsOneOrderingIntent() throws {
         let ctx = TestStore.freshContext()
         let p = podcast(ctx, "A")

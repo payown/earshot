@@ -569,10 +569,14 @@ struct RootView: View {
             capSettings.introducePodcastCapGatingIfNeeded(currentPodcastCount: count)
             #if DEBUG
             if !ScreenshotHarness.isActive {
-                ExpirationService(context: modelContext).runExpiration()
+                _ = await ExpirationMaintenance.run(
+                    modelContainer: modelContext.container
+                )
             }
             #else
-            ExpirationService(context: modelContext).runExpiration()
+            _ = await ExpirationMaintenance.run(
+                modelContainer: modelContext.container
+            )
             #endif
             try await runtime.activateCloudProjectionIfNeeded(container: modelContext.container)
             let statsReport = await StatsMaintenance.applyRetention(
