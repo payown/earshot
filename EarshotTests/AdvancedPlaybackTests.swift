@@ -1,6 +1,7 @@
 import XCTest
 import SwiftData
 import AVFoundation
+import Synchronization
 @testable import Earshot
 
 private struct CorrectedMediaFeedStub: FeedFetching {
@@ -89,20 +90,20 @@ final class AdvancedPlaybackTests: XCTestCase {
         player.configure(context: ctx)
         let episode = makeEpisode(ctx)
         player.load(episode)
-        var publishedFeedURL: String?
+        let publishedFeedURL = Mutex<String?>(nil)
         let observer = NotificationCenter.default.addObserver(
             forName: .earshotSubscriptionsDidChange,
             object: nil,
             queue: .main
         ) { notification in
-            publishedFeedURL = notification.object as? String
+            publishedFeedURL.withLock { $0 = notification.object as? String }
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
         player.setPodcastSpeedOverride(1.5, announce: false)
 
         XCTAssertEqual(episode.podcast?.speedOverride, 1.5)
-        XCTAssertEqual(publishedFeedURL, episode.podcast?.feedURL)
+        XCTAssertEqual(publishedFeedURL.withLock { $0 }, episode.podcast?.feedURL)
     }
 
     // MARK: Fast-forward

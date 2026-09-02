@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import Synchronization
 @testable import Earshot
 
 @MainActor
@@ -68,20 +69,22 @@ final class FolderRepositoryTests: XCTestCase {
             root.persistentModelID,
             child.persistentModelID,
         ]
-        var postedIDs = Set<PersistentIdentifier>()
+        let postedIDs = Mutex(Set<PersistentIdentifier>())
         let token = NotificationCenter.default.addObserver(
             forName: .earshotFoldersDidDelete,
             object: nil,
             queue: nil
         ) { note in
-            postedIDs = note.userInfo?[FolderRepository.deletedFolderIDsKey]
-                as? Set<PersistentIdentifier> ?? []
+            postedIDs.withLock {
+                $0 = note.userInfo?[FolderRepository.deletedFolderIDsKey]
+                    as? Set<PersistentIdentifier> ?? []
+            }
         }
         defer { NotificationCenter.default.removeObserver(token) }
 
         repo.delete(root, mode: .deleteSubtree)
 
-        XCTAssertEqual(postedIDs, expected)
+        XCTAssertEqual(postedIDs.withLock { $0 }, expected)
     }
 
     func testReorderFoldersPersists() {

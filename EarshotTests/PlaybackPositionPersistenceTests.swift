@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import Synchronization
 @testable import Earshot
 
 /// Durability tests for the #736 root fix: the ~5-second playback tick no longer
@@ -139,19 +140,21 @@ final class PlaybackPositionPersistenceTests: XCTestCase {
 
         let episode = makeEpisode(ctx)
         player.load(episode)
-        var received: EpisodeUserStateSnapshot?
+        let received = Mutex<EpisodeUserStateSnapshot?>(nil)
         let observer = NotificationCenter.default.addObserver(
             forName: .earshotEpisodeUserStateDidChange,
             object: nil,
             queue: nil
         ) { notification in
-            received = (notification.object as? [EpisodeUserStateSnapshot])?.last
+            received.withLock {
+                $0 = (notification.object as? [EpisodeUserStateSnapshot])?.last
+            }
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
         player.seek(to: 180)
 
-        XCTAssertEqual(try XCTUnwrap(received).positionSeconds, 180)
+        XCTAssertEqual(try XCTUnwrap(received.withLock { $0 }).positionSeconds, 180)
         XCTAssertEqual(episode.positionSeconds, 180)
     }
 

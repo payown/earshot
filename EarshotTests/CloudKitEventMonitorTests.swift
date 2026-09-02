@@ -1,4 +1,5 @@
 import XCTest
+import Synchronization
 @testable import Earshot
 
 @MainActor
@@ -6,17 +7,17 @@ final class CloudKitEventMonitorTests: XCTestCase {
     private var defaults: UserDefaults!
     private var defaultsSuiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         defaultsSuiteName = "CloudKitEventMonitorTests.\(UUID())"
         defaults = UserDefaults(suiteName: defaultsSuiteName)!
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         defaults.removePersistentDomain(forName: defaultsSuiteName)
         defaults = nil
         defaultsSuiteName = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testMonitorKeepsOnlyItsBoundedNewestEvents() {
@@ -45,32 +46,32 @@ final class CloudKitEventMonitorTests: XCTestCase {
     func testSuccessfulCompletedImportPostsRefreshNotificationOnce() {
         let center = NotificationCenter()
         let monitor = CloudKitEventMonitor(center: center)
-        var refreshCount = 0
+        let refreshCount = Mutex(0)
         let observer = center.addObserver(
             forName: .earshotCloudKitImportDidFinish,
             object: nil,
             queue: nil
         ) { _ in
-            refreshCount += 1
+            refreshCount.withLock { $0 += 1 }
         }
         defer { center.removeObserver(observer) }
 
         monitor.record(snapshot(kind: .import, second: 1))
         monitor.record(snapshot(kind: .export, second: 2))
 
-        XCTAssertEqual(refreshCount, 1)
+        XCTAssertEqual(refreshCount.withLock { $0 }, 1)
     }
 
     func testUnfinishedOrFailedImportDoesNotPostRefreshNotification() {
         let center = NotificationCenter()
         let monitor = CloudKitEventMonitor(center: center)
-        var refreshCount = 0
+        let refreshCount = Mutex(0)
         let observer = center.addObserver(
             forName: .earshotCloudKitImportDidFinish,
             object: nil,
             queue: nil
         ) { _ in
-            refreshCount += 1
+            refreshCount.withLock { $0 += 1 }
         }
         defer { center.removeObserver(observer) }
 
@@ -93,7 +94,7 @@ final class CloudKitEventMonitorTests: XCTestCase {
             errorDescription: "failed"
         ))
 
-        XCTAssertEqual(refreshCount, 0)
+        XCTAssertEqual(refreshCount.withLock { $0 }, 0)
     }
 
     func testNewestSuccessfulCompletionPersistsAcrossMonitorRestart() {
