@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import Synchronization
 @testable import Earshot
 
 /// The inbox tab badge count must NOT be computed by materializing the whole
@@ -151,6 +152,47 @@ final class InboxBadgeCountTests: XCTestCase {
 
         XCTAssertFalse(snapshot.executedStoreWorkOnMainThread)
         XCTAssertEqual(Set(snapshot.ids), expected)
+    }
+
+    func testBackgroundInboxSnapshotExcludesPlayedLegacyHistoryAtTheStoreBoundary() async throws {
+        let ctx = TestStore.freshContext()
+        let included = podcast(ctx, "Bounded Snapshot")
+        episode(ctx, "current-new", podcast: included)
+        let legacyPlayed = episode(ctx, "legacy-played", podcast: included, played: true)
+        legacyPlayed.inboxDismissed = false
+        try ctx.save()
+
+        let snapshot = try await InboxSnapshotLoader.all(
+            modelContainer: ctx.container,
+            optInOnly: false
+        )
+
+        XCTAssertEqual(snapshot.inspectedCount, 1)
+        XCTAssertEqual(snapshot.ids.count, 1)
+        XCTAssertFalse(snapshot.ids.contains(legacyPlayed.persistentModelID))
+    }
+
+    func testCancelledInboxSnapshotStopsBeforeStoreWork() async throws {
+        let ctx = TestStore.freshContext()
+        let gate = InboxSnapshotCancellationGate()
+        let task = Task {
+            await gate.wait()
+            return try await InboxSnapshotLoader.all(
+                modelContainer: ctx.container,
+                optInOnly: false
+            )
+        }
+
+        while !(await gate.isWaiting) { await Task.yield() }
+        task.cancel()
+        await gate.open()
+
+        do {
+            _ = try await task.value
+            XCTFail("A cancelled Inbox load must not continue into SwiftData")
+        } catch is CancellationError {
+            // Expected: @concurrent preserves the owning task's cancellation.
+        }
     }
 
     func testBackgroundInboxSnapshotPreservesFolderSubtreeScopeOffMain() async throws {
@@ -314,15 +356,18 @@ final class InboxBadgeCountTests: XCTestCase {
         episode(ctx, "new2", podcast: a)
         try? ctx.save()
 
-        var posted = 0
+        let posted = Mutex(0)
         let token = NotificationCenter.default.addObserver(
             forName: .earshotInboxDidChange, object: nil, queue: nil
-        ) { _ in posted += 1 }
+        ) { _ in posted.withLock { $0 += 1 } }
         defer { NotificationCenter.default.removeObserver(token) }
 
         InboxRepository(context: ctx).clearInbox()
 
-        XCTAssertGreaterThan(posted, 0, "clearing the inbox must post .earshotInboxDidChange for the badge")
+        XCTAssertGreaterThan(
+            posted.withLock { $0 }, 0,
+            "clearing the inbox must post .earshotInboxDidChange for the badge"
+        )
     }
 
     /// #736: marking episodes played changes the inbox count, so it must post
@@ -335,14 +380,32 @@ final class InboxBadgeCountTests: XCTestCase {
         episode(ctx, "new2", podcast: a)
         try? ctx.save()
 
-        var posted = 0
+        let posted = Mutex(0)
         let token = NotificationCenter.default.addObserver(
             forName: .earshotInboxDidChange, object: nil, queue: nil
-        ) { _ in posted += 1 }
+        ) { _ in posted.withLock { $0 += 1 } }
         defer { NotificationCenter.default.removeObserver(token) }
 
         _ = await EpisodeRepository(context: ctx).markAllPlayed(in: a)
 
-        XCTAssertGreaterThan(posted, 0, "marking played must post .earshotInboxDidChange")
+        XCTAssertGreaterThan(
+            posted.withLock { $0 }, 0,
+            "marking played must post .earshotInboxDidChange"
+        )
+    }
+}
+
+private actor InboxSnapshotCancellationGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var isWaiting = false
+
+    func wait() async {
+        isWaiting = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func open() {
+        continuation?.resume()
+        continuation = nil
     }
 }
