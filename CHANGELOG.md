@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- VoiceOver navigation remains responsive during cold launch, feed refresh, and
+  compact iCloud reconciliation. Startup maintenance, badge counts, Inbox
+  presentation updates, and Settings reads no longer repeatedly occupy the
+  main actor while a listener is flicking through the interface. (build 251)
+- Queue folder grouping now gives an episode's direct folder precedence over its
+  podcast's default folder. Visible groups, group actions, reordering, and
+  playback advancement use the same resolved folder. (build 251)
 - Feed refreshes now recognize publishers replacing broken episode audio without changing the episode GUID or publication date. Earshot updates the existing episode, safely replaces a stale download while preserving listening state, rejects invalid download payloads, and offers an accessible Refresh episode audio action when manual recovery is needed.
 - Player actions now verify that a retained episode still exists before using it, and identity repair unloads duplicate episodes before deleting their SwiftData rows.
 - Compact Cloud projection reconciliation now runs on a background SwiftData actor so large libraries and incoming iCloud changes do not block playback controls, navigation, or VoiceOver.

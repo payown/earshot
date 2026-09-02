@@ -690,6 +690,32 @@ final class AdvancedPlaybackTests: XCTestCase {
         )
     }
 
+    func test_folderOrigin_survivesAdvanceBetweenExplicitlyFiledEpisodes() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let podcast = Podcast(feedURL: "https://x/daily", title: "Daily")
+        ctx.insert(podcast)
+        let first = makeEpisode(ctx, guid: "saturday-1", podcast: podcast)
+        let second = makeEpisode(ctx, guid: "saturday-2", podcast: podcast)
+        let folders = FolderRepository(context: ctx)
+        let morning = folders.createFolder(name: "Morning")
+        let saturday = folders.createFolder(name: "Saturday")
+        folders.add(podcast, to: morning)
+        folders.addEpisodes([first, second], to: saturday)
+        QueueRepository(context: ctx).add([first, second])
+
+        player.playFromEpisodeList(first, origin: .folder(saturday.persistentModelID))
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertEqual(player.nowPlayingEpisodeID, second.persistentModelID)
+        XCTAssertEqual(
+            player.playbackOrigin,
+            .folder(saturday.persistentModelID),
+            "Explicit episode membership must keep the matching Playing-from route"
+        )
+    }
+
     func test_folderOrigin_clearsWhenQueueAdvanceLeavesFolderSubtree() {
         let ctx = TestStore.freshContext()
         let player = PlayerService()
@@ -1060,6 +1086,33 @@ final class AdvancedPlaybackTests: XCTestCase {
         XCTAssertEqual(
             player.nowPlayingEpisodeID, episodes.x3.persistentModelID,
             "Folder grouping must advance through the same top-level folder section shown in Queue"
+        )
+    }
+
+    func test_folderGroupedAdvanceUsesExplicitEpisodeFolderBeforePodcastFolder() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        let podcast = Podcast(feedURL: "https://daily/feed", title: "Daily")
+        ctx.insert(podcast)
+        let morningFirst = makeEpisode(ctx, guid: "morning-1", podcast: podcast)
+        let saturdayLong = makeEpisode(ctx, guid: "saturday-long", podcast: podcast)
+        let morningSecond = makeEpisode(ctx, guid: "morning-2", podcast: podcast)
+        let folders = FolderRepository(context: ctx)
+        let morning = folders.createFolder(name: "Morning")
+        let saturday = folders.createFolder(name: "Saturday")
+        folders.add(podcast, to: morning)
+        folders.addEpisodes([saturdayLong], to: saturday)
+        QueueRepository(context: ctx).add([morningFirst, saturdayLong, morningSecond])
+        AppSettingsStore(context: ctx).setQueueGrouping(.folder)
+
+        player.play(morningFirst)
+        player.markCurrentPlayedAndAdvance()
+
+        XCTAssertEqual(
+            player.nowPlayingEpisodeID,
+            morningSecond.persistentModelID,
+            "Auto-advance must follow Morning then Saturday exactly as the grouped Queue displays it"
         )
     }
 

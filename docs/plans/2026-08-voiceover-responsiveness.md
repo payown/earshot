@@ -1,6 +1,16 @@
 # VoiceOver responsiveness improvement plan
 
-Status: planning only. No performance production code is included in build 250.
+Status: the first implementation was distributed in TestFlight build 251 on
+2026-09-01, and Michael confirmed that build 251 is installed and in active use.
+It includes the Library scalar fetch, podcast episode paging, bounded local
+search, folder snapshot, background startup-maintenance, tab-badge, and compact
+Cloud-projection work. This plan remains the source for uncompleted follow-ups;
+build 251 does not claim that every phase below is finished.
+
+The original build 250 Release-device trace remained blocked by the iOS 27/Xcode
+26.6 device support mismatch. The missing metrics and the still-main-context
+Inbox candidate fetch are preserved as open evidence/implementation boundaries
+rather than being described as completed work.
 
 ## Objective
 

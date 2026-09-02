@@ -1,9 +1,13 @@
 import Foundation
+import Dispatch
 import SwiftData
 
 extension Notification.Name {
     static let earshotCloudProjectionDidApply = Notification.Name(
         "earshotCloudProjectionDidApply"
+    )
+    static let earshotCloudSettingsProjectionDidApply = Notification.Name(
+        "earshotCloudSettingsProjectionDidApply"
     )
     static let earshotSubscriptionsDidChange = Notification.Name(
         "earshotSubscriptionsDidChange"
@@ -250,6 +254,28 @@ enum CompactProjectionSeedMarker: Equatable, Sendable {
 }
 
 actor CloudProjectionCoordinator: ModelActor {
+    /// Marks UI change notifications emitted while applying remote projection
+    /// state. NotificationCenter delivers the observer on the main queue and
+    /// then hops back to this actor; checking `isApplyingRemote` after that hop
+    /// is too late because reconciliation may already have ended. Carry the
+    /// origin with the event so UI consumers still refresh without feeding the
+    /// projection's own write back into another reconciliation pass.
+    nonisolated static let notificationOriginKey =
+        "media.payown.earshot.cloud-projection-origin"
+
+    nonisolated static func isProjectionOriginated(_ notification: Notification) -> Bool {
+        notification.userInfo?[notificationOriginKey] as? Bool == true
+    }
+
+    /// Actor isolation alone does not promise a background thread. Under launch
+    /// pressure Swift's cooperative executor can run this actor on the main
+    /// thread, which makes otherwise-correct SwiftData reconciliation block
+    /// VoiceOver gestures. Pin the actor to a background serial executor while
+    /// retaining the single-writer ordering required by the projection stores.
+    nonisolated private let executionQueue: DispatchSerialQueue
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        executionQueue.asUnownedSerialExecutor()
+    }
     nonisolated let modelExecutor: any ModelExecutor
     nonisolated let modelContainer: ModelContainer
     /// Initial subscription projection is restartable at natural-key boundaries.
@@ -452,6 +478,10 @@ actor CloudProjectionCoordinator: ModelActor {
         },
         queueApplicationCheckpoint: (@Sendable (String) async throws -> Void)? = nil
     ) {
+        executionQueue = DispatchSerialQueue(
+            label: "media.payown.earshot.cloud-projection",
+            qos: .background
+        )
         let applicationContext = ModelContext(applicationContainer)
         modelExecutor = DefaultSerialModelExecutor(modelContext: applicationContext)
         modelContainer = applicationContainer
@@ -511,6 +541,10 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 
 #if DEBUG
+    func executorRunsOnMainThreadForTesting() -> Bool {
+        Thread.isMainThread
+    }
+
     nonisolated static func makeForTesting(
         applicationContainer: ModelContainer,
         projectionContainer: ModelContainer,
@@ -550,7 +584,7 @@ actor CloudProjectionCoordinator: ModelActor {
     }
 #endif
 
-    func start() async throws {
+    func start(performInitialReconciliation: Bool = true) async throws {
         refreshContextsFromStore()
         guard importObserver == nil else { return }
         importObserver = center.addObserver(
@@ -584,14 +618,16 @@ actor CloudProjectionCoordinator: ModelActor {
             forName: .earshotInboxDidChange,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
+            guard !Self.isProjectionOriginated(notification) else { return }
             Task { await self?.scheduleReconciliationUnlessApplyingRemote() }
         }
         queueObserver = center.addObserver(
             forName: .earshotQueueDidChange,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
+            guard !Self.isProjectionOriginated(notification) else { return }
             Task { await self?.handleLocalQueueChange() }
         }
         settingObserver = center.addObserver(
@@ -623,6 +659,7 @@ actor CloudProjectionCoordinator: ModelActor {
         ) { [weak self] _ in
             Task { await self?.handleLocalFolderChange() }
         }
+        guard performInitialReconciliation else { return }
         guard seedInstrumentationEnabled() else {
             try await reconcile()
             return
@@ -824,6 +861,16 @@ actor CloudProjectionCoordinator: ModelActor {
         guard reconcileTask == nil else { return }
         reconcileTask = Task { [weak self] in
             await self?.runScheduledReconciliation()
+        }
+    }
+
+    /// Starts the cold-launch pass without making RootView's main-actor
+    /// activation await it. The detached caller supplies background priority;
+    /// the coordinator retains the child so `stop()` can still cancel and join
+    /// it during reset or account replacement.
+    nonisolated func scheduleInitialReconciliationInBackground() {
+        Task.detached(priority: .background) { [weak self] in
+            await self?.scheduleReconciliation()
         }
     }
 
@@ -1049,7 +1096,7 @@ actor CloudProjectionCoordinator: ModelActor {
         )
         applicationChanged = episodeChanged || applicationChanged
         if episodeChanged {
-            center.post(name: .earshotInboxDidChange, object: nil)
+            postProjectionChange(.earshotInboxDidChange)
         }
         try publishLocalQueueChanges(now: .now, onlyIfCloudEmpty: true)
         let queueChanged = try await applyRemoteQueue(
@@ -1058,14 +1105,18 @@ actor CloudProjectionCoordinator: ModelActor {
         )
         applicationChanged = queueChanged || applicationChanged
         if queueChanged {
-            center.post(name: .earshotQueueDidChange, object: nil)
-            center.post(name: .earshotInboxDidChange, object: nil)
+            postProjectionChange(.earshotQueueDidChange)
+            postProjectionChange(.earshotInboxDidChange)
         }
         try publishLocalSettings(onlyIfCloudEmpty: true)
-        applicationChanged = try applyRemoteSettings(
+        let settingsChanged = try applyRemoteSettings(
             appContext: appContext,
             cloudContext: cloudContext
-        ) || applicationChanged
+        )
+        applicationChanged = settingsChanged || applicationChanged
+        if settingsChanged {
+            center.post(name: .earshotCloudSettingsProjectionDidApply, object: nil)
+        }
         let bookmarkChanged = try applyRemoteBookmarks(
             appContext: appContext,
             cloudContext: cloudContext
@@ -1087,6 +1138,14 @@ actor CloudProjectionCoordinator: ModelActor {
         if applicationChanged {
             center.post(name: .earshotCloudProjectionDidApply, object: nil)
         }
+    }
+
+    private func postProjectionChange(_ name: Notification.Name) {
+        center.post(
+            name: name,
+            object: nil,
+            userInfo: [Self.notificationOriginKey: true]
+        )
     }
 
     /// A remote tombstone can arrive while the deleted podcast's episode list is
@@ -2900,9 +2959,18 @@ actor CloudProjectionCoordinator: ModelActor {
 
         let identity = PodcastIdentityService(context: context)
         let requestedFeeds = Set(plan.entries.map { $0.key.feedURL })
+        // Resolve the entire remote queue against one scalar Podcast fetch. A
+        // legacy, non-canonical stored URL makes `existingFollowed(feedURL:)`
+        // fall back to `allScalarPodcasts()`; doing that once per remote feed was
+        // O(feeds × library) on MainActor and produced measured ~428 ms VoiceOver
+        // microhangs while Settings was onscreen.
+        let resolvedPodcasts = try identity.existingAnyStateByCanonicalFeedURL(
+            for: Array(requestedFeeds)
+        )
         var podcastByFeed: [String: Podcast] = [:]
         for feed in requestedFeeds.sorted() {
-            if let podcast = try identity.existingFollowed(feedURL: feed) {
+            if let podcast = resolvedPodcasts[FeedURLIdentity.canonical(feed)],
+               podcast.isFollowed {
                 podcastByFeed[feed] = podcast
             }
         }
@@ -3232,6 +3300,17 @@ actor CloudProjectionCoordinator: ModelActor {
             )
             if localByKey[key] == nil { localByKey[key] = session.session }
         }
+        let activeRows = newestByID.values.filter { $0.deletedAt == nil }
+        let podcastByFeed = try PodcastIdentityService(context: appContext)
+            .existingAnyStateByCanonicalFeedURL(for: activeRows.map(\.feedURL))
+        let requestedEpisodeKeys = Set(activeRows.compactMap { row -> EpisodeKey? in
+            guard let guid = row.episodeGUID else { return nil }
+            return EpisodeKey(
+                feedURL: FeedURLIdentity.canonical(row.feedURL),
+                guid: guid
+            )
+        })
+        let episodeByKey = applicationEpisodes(matching: requestedEpisodeKeys)
         var changed = local.repaired
         var locallyPresentIDs: Set<String> = []
         for row in newestByID.values.sorted(by: Self.sessionProjectionOrder) {
@@ -3247,15 +3326,10 @@ actor CloudProjectionCoordinator: ModelActor {
                 locallyPresentIDs.insert(row.sessionID)
                 continue
             }
-            guard let podcast = try PodcastIdentityService(context: appContext)
-                .existingFollowed(feedURL: row.feedURL) else { continue }
+            let feedURL = FeedURLIdentity.canonical(row.feedURL)
+            guard let podcast = podcastByFeed[feedURL], podcast.isFollowed else { continue }
             let episode: Episode? = if let guid = row.episodeGUID {
-                applicationEpisodes(matching: [
-                    EpisodeKey(
-                        feedURL: FeedURLIdentity.canonical(row.feedURL),
-                        guid: guid
-                    )
-                ]).values.first
+                episodeByKey[EpisodeKey(feedURL: feedURL, guid: guid)]
             } else {
                 nil
             }

@@ -92,58 +92,70 @@ final class SettingsStore {
             SettingsKey.onboardingComplete,
             default: SettingsDefault.onboardingComplete
         )
-        globalSpeed = store.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed)
-        volumeBoost = store.volumeBoost()
-        skipSilenceEnabled = store.bool(SettingsKey.skipSilenceEnabled, default: SettingsDefault.skipSilenceEnabled)
-        skipForwardSeconds = store.int(SettingsKey.skipForwardSeconds, default: SettingsDefault.skipForwardSeconds)
-        skipBackSeconds = store.int(SettingsKey.skipBackSeconds, default: SettingsDefault.skipBackSeconds)
-        continueAfterEpisode = store.bool(SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode)
-        continueAfterGroupEnds = store.bool(SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds)
-        chapterNavButtonsVisible = store.bool(SettingsKey.chapterNavButtonsVisible, default: SettingsDefault.chapterNavButtonsVisible)
-        launchScreen = store.launchScreen()
-        librarySortOrder = store.librarySortOrder()
-        episodeSortOrder = store.episodeSortOrder()
-        queueGrouping = store.queueGrouping()
-        showEpisodeNumbers = store.bool(SettingsKey.showEpisodeNumbers, default: SettingsDefault.showEpisodeNumbers)
-        openPlayerOnPlay = store.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay)
-        dismissPlayerWhenPlaybackEnds = store.bool(
+        assignIfChanged(\.globalSpeed, store.double(SettingsKey.globalSpeed, default: SettingsDefault.globalSpeed))
+        assignIfChanged(\.volumeBoost, store.volumeBoost())
+        assignIfChanged(\.skipSilenceEnabled, store.bool(SettingsKey.skipSilenceEnabled, default: SettingsDefault.skipSilenceEnabled))
+        assignIfChanged(\.skipForwardSeconds, store.int(SettingsKey.skipForwardSeconds, default: SettingsDefault.skipForwardSeconds))
+        assignIfChanged(\.skipBackSeconds, store.int(SettingsKey.skipBackSeconds, default: SettingsDefault.skipBackSeconds))
+        assignIfChanged(\.continueAfterEpisode, store.bool(SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode))
+        assignIfChanged(\.continueAfterGroupEnds, store.bool(SettingsKey.continueAfterGroupEnds, default: SettingsDefault.continueAfterGroupEnds))
+        assignIfChanged(\.chapterNavButtonsVisible, store.bool(SettingsKey.chapterNavButtonsVisible, default: SettingsDefault.chapterNavButtonsVisible))
+        assignIfChanged(\.launchScreen, store.launchScreen())
+        assignIfChanged(\.librarySortOrder, store.librarySortOrder())
+        assignIfChanged(\.episodeSortOrder, store.episodeSortOrder())
+        assignIfChanged(\.queueGrouping, store.queueGrouping())
+        assignIfChanged(\.showEpisodeNumbers, store.bool(SettingsKey.showEpisodeNumbers, default: SettingsDefault.showEpisodeNumbers))
+        assignIfChanged(\.openPlayerOnPlay, store.bool(SettingsKey.openPlayerOnPlay, default: SettingsDefault.openPlayerOnPlay))
+        assignIfChanged(\.dismissPlayerWhenPlaybackEnds, store.bool(
             SettingsKey.dismissPlayerWhenPlaybackEnds,
             default: SettingsDefault.dismissPlayerWhenPlaybackEnds
-        )
-        spokenEpisodePodcastName = store.bool(SettingsKey.spokenEpisodePodcastName, default: true)
-        spokenEpisodePublishedDate = store.bool(SettingsKey.spokenEpisodePublishedDate, default: true)
-        spokenEpisodeDownloadStatus = store.bool(SettingsKey.spokenEpisodeDownloadStatus, default: true)
-        spokenEpisodeDuration = store.bool(SettingsKey.spokenEpisodeDuration, default: true)
-        spokenEpisodeDescriptionMode = SpokenDescriptionMode(
+        ))
+        assignIfChanged(\.spokenEpisodePodcastName, store.bool(SettingsKey.spokenEpisodePodcastName, default: true))
+        assignIfChanged(\.spokenEpisodePublishedDate, store.bool(SettingsKey.spokenEpisodePublishedDate, default: true))
+        assignIfChanged(\.spokenEpisodeDownloadStatus, store.bool(SettingsKey.spokenEpisodeDownloadStatus, default: true))
+        assignIfChanged(\.spokenEpisodeDuration, store.bool(SettingsKey.spokenEpisodeDuration, default: true))
+        assignIfChanged(\.spokenEpisodeDescriptionMode, SpokenDescriptionMode(
             rawValue: store.rawValue(SettingsKey.spokenEpisodeDescriptionMode) ?? ""
-        ) ?? .brief
-        spokenPodcastDescriptionMode = SpokenDescriptionMode(
+        ) ?? .brief)
+        assignIfChanged(\.spokenPodcastDescriptionMode, SpokenDescriptionMode(
             rawValue: store.rawValue(SettingsKey.spokenPodcastDescriptionMode) ?? ""
-        ) ?? .brief
-        hapticFeedbackEnabled = store.bool(
+        ) ?? .brief)
+        assignIfChanged(\.hapticFeedbackEnabled, store.bool(
             SettingsKey.hapticFeedbackEnabled,
             default: SettingsDefault.hapticFeedbackEnabled
-        )
-        transcriptExportMetadata = store.initializeTranscriptExportMetadataIfNeeded(
+        ))
+        assignIfChanged(\.transcriptExportMetadata, store.initializeTranscriptExportMetadataIfNeeded(
             default: wasExistingInstallation ? .speakersAndTimestamps : .speakersOnly
-        )
-        themeOverride = store.themeOverride()
-        accentColor = store.accentChoice()
-        layoutDensity = store.layoutDensity()
-        inboxOptInOnly = store.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
-        inboxDefaultCount = store.inboxDefaultCount()
-        wifiOnlyDownloads = store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads)
-        downloadCompletionNotifications = store.bool(
+        ))
+        assignIfChanged(\.themeOverride, store.themeOverride())
+        assignIfChanged(\.accentColor, store.accentChoice())
+        assignIfChanged(\.layoutDensity, store.layoutDensity())
+        assignIfChanged(\.inboxOptInOnly, store.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly))
+        assignIfChanged(\.inboxDefaultCount, store.inboxDefaultCount())
+        assignIfChanged(\.wifiOnlyDownloads, store.bool(SettingsKey.wifiOnlyDownloads, default: SettingsDefault.wifiOnlyDownloads))
+        assignIfChanged(\.downloadCompletionNotifications, store.bool(
             SettingsKey.downloadCompletionNotifications,
             default: SettingsDefault.downloadCompletionNotifications
-        )
-        deleteDownloadAfterPlayed = store.bool(SettingsKey.deleteDownloadAfterPlayed, default: SettingsDefault.deleteDownloadAfterPlayed)
-        autoDownloadQueued = store.bool(SettingsKey.autoDownloadQueued, default: SettingsDefault.autoDownloadQueued)
-        autoDownloadCount = store.int(SettingsKey.autoDownloadCount, default: SettingsDefault.autoDownloadCount)
-        historyRetentionDays = store.int(SettingsKey.historyRetentionDays, default: SettingsDefault.historyRetentionDays)
-        statsStreaksEnabled = store.bool(SettingsKey.statsStreaksEnabled, default: SettingsDefault.statsStreaksEnabled)
-        onboardingComplete = store.bool(SettingsKey.onboardingComplete, default: SettingsDefault.onboardingComplete)
+        ))
+        assignIfChanged(\.deleteDownloadAfterPlayed, store.bool(SettingsKey.deleteDownloadAfterPlayed, default: SettingsDefault.deleteDownloadAfterPlayed))
+        assignIfChanged(\.autoDownloadQueued, store.bool(SettingsKey.autoDownloadQueued, default: SettingsDefault.autoDownloadQueued))
+        assignIfChanged(\.autoDownloadCount, store.int(SettingsKey.autoDownloadCount, default: SettingsDefault.autoDownloadCount))
+        assignIfChanged(\.historyRetentionDays, store.int(SettingsKey.historyRetentionDays, default: SettingsDefault.historyRetentionDays))
+        assignIfChanged(\.statsStreaksEnabled, store.bool(SettingsKey.statsStreaksEnabled, default: SettingsDefault.statsStreaksEnabled))
+        assignIfChanged(\.onboardingComplete, store.bool(SettingsKey.onboardingComplete, default: SettingsDefault.onboardingComplete))
         loaded = true
+    }
+
+    /// Observation invalidates SwiftUI even when an observable property is
+    /// assigned its current value. A CloudKit pass used to reassign every
+    /// setting after any projected model changed, repeatedly rebuilding the
+    /// Settings accessibility tree while VoiceOver was finding its next item.
+    private func assignIfChanged<Value: Equatable>(
+        _ keyPath: ReferenceWritableKeyPath<SettingsStore, Value>,
+        _ value: Value
+    ) {
+        guard self[keyPath: keyPath] != value else { return }
+        self[keyPath: keyPath] = value
     }
 
     func releasePersistence() { store = nil; loaded = false }

@@ -1,11 +1,12 @@
 # Next TestFlight change inventory
 
-Status: Chapter 80, build 250 is prepared but not uploaded. Its proposed exact
-copy is in `build-250-notes.txt`. Chapter 79, build 249 remains the newest build
-shipped to the Internal Testing Group and Public Testers on 2026-08-31.
+Status: Chapter 81, build 251 was uploaded to TestFlight and confirmed installed
+by Michael on 2026-09-01. Build 251 superseded the uninstalled build 250
+responsiveness candidate and is the current device-distributed integration
+baseline.
 
-The last shipped story is Chapter 79 for build 249. The prepared TestFlight
-upload must follow the maintenance contract in `docs/kashe.md`:
+The current shipped story is Chapter 81 for build 251. Future TestFlight uploads
+must continue to follow the maintenance contract in `docs/kashe.md`:
 
 - assign the chapter to the build that is actually uploaded;
 - append the full chapter to `docs/kashe.md` in the same shipping change;
@@ -13,20 +14,24 @@ upload must follow the maintenance contract in `docs/kashe.md`:
 - use that exact chapter as the TestFlight `--notes` payload;
 - keep the complete chapter at or below 2,500 characters before upload.
 
-## Significant changes since build 249
+## Changes represented by build 251
 
-The next Kashe chapter’s “What changed” and “What to test” sections must account
-for every applicable item below. They may group related behavior, but must not
-fall back to generic “bug fixes and performance improvements” copy.
+Chapter 81’s “What changed” and “What to test” sections account for every
+applicable item below.
 
-- Build 250: Refresh reconciles corrected feed metadata for bounded recent and
+- Refresh reconciles corrected feed metadata for bounded recent and
   device-active episodes even when their GUID and publication date do not change.
-- Build 250: Corrected or invalid local audio is replaced without losing played,
+- Corrected or invalid local audio is replaced without losing played,
   Inbox, queue, or listening-position state; superseded background completions
   cannot restore stale media.
-- Build 250: Episode Actions and Now Playing include Refresh episode audio, with
+- Episode Actions and Now Playing include Refresh episode audio, with
   one automatic retry for a failed local copy and a persistent accessible failure
   message when recovery does not succeed.
+- Cold-launch maintenance, badge counts, refresh work, and compact Cloud
+  projection no longer repeatedly occupy the main actor while VoiceOver is
+  navigating Inbox and Settings.
+- Queue folder grouping, group actions, reordering, and playback advancement use
+  an episode's direct folder before its podcast's default folder.
 
 ## Shipping checklist
 
@@ -38,6 +43,7 @@ fall back to generic “bug fixes and performance improvements” copy.
   facts requiring an established-details update.
 - [x] Save the exact same text as `docs/testflight/build-N-notes.txt`.
 - [x] Verify the payload is at most 2,500 characters with `wc -m`.
-- [ ] Obtain Michael’s explicit TestFlight-upload approval.
-- [ ] Upload using the checked-in notes file and verify App Store Connect shows
-  the same chapter.
+- [x] Obtain Michael’s explicit TestFlight-upload approval.
+- [x] Upload using the checked-in notes file and verify build 251 is available
+  through TestFlight.
+- [x] Confirm Michael installed and is using build 251.

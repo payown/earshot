@@ -113,6 +113,26 @@ final class InboxBadgeCountTests: XCTestCase {
         XCTAssertEqual(repo.inboxCount(optInOnly: false), repo.inboxEpisodes().count)
     }
 
+    func testBackgroundBadgeLoaderPreservesExactInboxCount() async throws {
+        let ctx = TestStore.freshContext()
+        let included = podcast(ctx, "Included")
+        let catalog = podcast(ctx, "Catalog")
+        catalog.subscriptionStateRaw = PodcastSubscriptionState.catalogOnly.rawValue
+        episode(ctx, "included-new", podcast: included)
+        episode(ctx, "included-queued", podcast: included, status: .inQueue)
+        episode(ctx, "catalog-new", podcast: catalog)
+        try ctx.save()
+
+        let expected = InboxRepository(context: ctx).inboxCount(optInOnly: false)
+        let snapshot = await TabBadgeSnapshotLoader.inboxCount(
+            modelContainer: ctx.container,
+            optInOnly: false
+        )
+
+        XCTAssertEqual(snapshot.count, expected)
+        XCTAssertFalse(snapshot.executedStoreWorkOnMainThread)
+    }
+
     /// In opt-in-only mode, only podcasts explicitly opted in contribute.
     func testInboxCountOptInOnlyCountsOnlyIncludedPodcasts() {
         let ctx = TestStore.freshContext()
