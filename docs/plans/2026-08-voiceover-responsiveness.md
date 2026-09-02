@@ -315,6 +315,32 @@ deletion, bulk-action full scope, and existing focus/speech behavior.
 These should be separate PRs so a text-output regression cannot hide inside a
 Stats or layout refactor.
 
+## September 2 device follow-up: refresh contention
+
+Build 251 remained responsive until the 15-minute automatic refresh window,
+then VoiceOver navigation became sluggish in Library and on the presented Now
+Playing sheet. Delaying foreground maintenance by three seconds protected the
+initial resume announcement but did not protect interaction once feed work began.
+
+The code-first follow-up found three compounding costs:
+
+- Inbox and Library read the per-feed refresh snapshot in their top-level bodies.
+  Because `TabView` retains inactive roots, each feed completion rebuilt both
+  large list subtrees even when Now Playing covered them.
+- Launch and foreground refresh overlapped three network downloads and synchronous
+  XML parses. They were off-main, but still competed for device CPU with SwiftUI
+  and VoiceOver.
+- Every durable ten-feed checkpoint ran an unconditional main-actor queued-
+  download scan and saved a diagnostic status row, including all-unchanged
+  checkpoints. That duplicated SwiftData invalidations from the actor save.
+
+The follow-up isolates the live status banner in a small observable child,
+serializes only automatic interactive refreshes (manual and OS background passes
+retain three-way overlap), skips empty download/cap work, and keeps checkpoint
+progress in memory until the exact final or cancelled report is persisted.
+Accessibility labels, values, traits, rotor actions, and focus requests are
+unchanged.
+
 ## Verification and rollout
 
 Every PR runs:

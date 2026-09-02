@@ -226,10 +226,8 @@ struct InboxScreen: View {
         .navigationTitle("Inbox")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top) {
-            if FeedRefreshInlineStatus.shouldShow(runtime.feedRefreshStatus.snapshot) {
-                FeedRefreshInlineStatus(snapshot: runtime.feedRefreshStatus.snapshot)
-                    .accessibilityFocused($focusRefreshStatus)
-            }
+            LiveFeedRefreshInlineStatus()
+                .accessibilityFocused($focusRefreshStatus)
         }
         // Persistent episode multi-select bar (#758): Add to folder is primary
         // and its label carries the live count ("Add 3 episodes to folder") — the

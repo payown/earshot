@@ -229,6 +229,26 @@ final class FeedRefreshStatusTests: XCTestCase {
         )
     }
 
+    func testCheckpointStaysLiveWithoutAddingASecondSwiftDataSave() {
+        let context = TestStore.freshContext()
+        let monitor = FeedRefreshStatusMonitor()
+        monitor.configure(context: context)
+        monitor.start(trigger: .foreground, total: 100)
+
+        monitor.checkpoint(FeedRefreshStatusCheckpoint(
+            checked: 10,
+            newEpisodes: 2,
+            unchangedFeeds: 8
+        ))
+
+        XCTAssertEqual(monitor.snapshot.checked, 10)
+        XCTAssertEqual(monitor.snapshot.newEpisodes, 2)
+        XCTAssertEqual(monitor.snapshot.unchangedFeeds, 8)
+        let persisted = FeedRefreshStatusStore.load(from: context)
+        XCTAssertEqual(persisted?.checked, 0)
+        XCTAssertEqual(persisted?.state, .running)
+    }
+
     func testCancelledPartialPassRemainsInterrupted() {
         let monitor = FeedRefreshStatusMonitor()
         monitor.finish(SubscriptionRefreshReport(

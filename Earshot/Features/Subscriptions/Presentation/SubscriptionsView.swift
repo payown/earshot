@@ -149,10 +149,8 @@ struct SubscriptionsView: View {
         .navigationTitle("Library")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top) {
-            if FeedRefreshInlineStatus.shouldShow(runtime.feedRefreshStatus.snapshot) {
-                FeedRefreshInlineStatus(snapshot: runtime.feedRefreshStatus.snapshot)
-                    .accessibilityFocused($focusRefreshStatus)
-            }
+            LiveFeedRefreshInlineStatus()
+                .accessibilityFocused($focusRefreshStatus)
         }
         .onAppear {
             // This screen remains alive while Discovery is pushed onto the
