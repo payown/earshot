@@ -43,7 +43,77 @@ private struct CleartextPlaybackWarningPresenter: ViewModifier {
         }
     }
 }
+
 import UIKit
+
+/// Computes the two root-tab badges on a private SwiftData model actor. These
+/// counts are app chrome, so neither may monopolize the main actor while
+/// VoiceOver is resolving the next focused element (#736 follow-up).
+///
+/// Only scalar counts cross the actor boundary. The Inbox count deliberately
+/// preserves the exact existing membership rules: SwiftData cannot predicate on
+/// the stored Codable enum reliably, so the final status check remains in
+/// memory, just no longer on the interaction actor.
+struct TabBadgeSnapshot: Sendable, Equatable {
+    let count: Int
+    let executedStoreWorkOnMainThread: Bool
+}
+
+enum TabBadgeSnapshotLoader {
+    static func inboxCount(
+        modelContainer: ModelContainer,
+        optInOnly: Bool
+    ) async -> TabBadgeSnapshot {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(
+                    returning: inboxCountSynchronously(
+                        modelContainer: modelContainer,
+                        optInOnly: optInOnly
+                    )
+                )
+            }
+        }
+    }
+
+    private static func inboxCountSynchronously(
+        modelContainer: ModelContainer,
+        optInOnly: Bool
+    ) -> TabBadgeSnapshot {
+        let context = ModelContext(modelContainer)
+        let onMainThread = Thread.isMainThread
+        let descriptor = FetchDescriptor<Episode>(
+            predicate: InboxQuery.unplayedPredicate(optInOnly: optInOnly)
+        )
+        let candidates = (try? context.fetch(descriptor)) ?? []
+        let count = candidates.lazy.filter {
+            $0.status == .newEpisode && $0.podcast?.isCatalogOnly != true
+        }.count
+        return TabBadgeSnapshot(
+            count: count,
+            executedStoreWorkOnMainThread: onMainThread || Thread.isMainThread
+        )
+    }
+
+    static func queueCount(
+        modelContainer: ModelContainer
+    ) async -> TabBadgeSnapshot {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                let context = ModelContext(modelContainer)
+                let onMainThread = Thread.isMainThread
+                let descriptor = FetchDescriptor<QueueItem>(
+                    predicate: #Predicate { $0.episode != nil }
+                )
+                let count = (try? context.fetchCount(descriptor)) ?? 0
+                continuation.resume(returning: TabBadgeSnapshot(
+                    count: count,
+                    executedStoreWorkOnMainThread: onMainThread || Thread.isMainThread
+                ))
+            }
+        }
+    }
+}
 
 /// Owns the Inbox badge count separately from RootView so changing playback
 /// position cannot make RootView evaluate Inbox relationships.
@@ -70,15 +140,18 @@ private struct InboxTabBadge: View {
     let selectedTab: RootTab?
 
     @State private var count = 0
+    @State private var reloadTask: Task<Void, Never>?
+    @State private var reloadScheduled = false
 
     var body: some View {
         TabBarBadgeApplier(tabIndex: 0, count: count)
-            .onAppear { recompute() }
-            .onChange(of: optInOnly) { _, _ in recompute() }
+            .onAppear { scheduleReload() }
+            .onDisappear { reloadTask?.cancel() }
+            .onChange(of: optInOnly) { _, _ in scheduleReload() }
             // Foreground heals any inbox change we didn't get an explicit signal
             // for (a background feed refresh, a podcast include/exclude).
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { recompute() }
+                if phase == .active { scheduleReload() }
             }
             // Re-assert the native badge after a tab switch drops it. No store
             // work — just re-apply the cached count.
@@ -88,17 +161,91 @@ private struct InboxTabBadge: View {
             // Recompute only on real inbox changes — never on a position save.
             // Delivered on main since a background context can post these.
             .onReceive(NotificationCenter.default.publisher(for: .earshotInboxDidChange).receive(on: DispatchQueue.main)) { _ in
-                recompute()
+                scheduleReload()
             }
             .onReceive(NotificationCenter.default.publisher(for: .earshotQueueDidChange).receive(on: DispatchQueue.main)) { _ in
-                recompute()
+                scheduleReload()
             }
     }
 
-    private func recompute() {
-        let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
-        defer { PerformanceSignposts.signposter.endInterval("InboxReload", interval) }
-        count = InboxRepository(context: context).inboxCount(optInOnly: optInOnly)
+    /// Inbox and Queue notifications can describe the same durable mutation.
+    /// Collapse a run-loop burst before cancelling/restarting the actor request.
+    private func scheduleReload() {
+        guard !reloadScheduled else { return }
+        reloadScheduled = true
+        DispatchQueue.main.async {
+            reloadScheduled = false
+            reload()
+        }
+    }
+
+    private func reload() {
+        reloadTask?.cancel()
+        let modelContainer = context.container
+        let requestedOptInOnly = optInOnly
+        reloadTask = Task { @MainActor in
+            let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
+            let loaded = await TabBadgeSnapshotLoader.inboxCount(
+                modelContainer: modelContainer,
+                optInOnly: requestedOptInOnly
+            )
+            PerformanceSignposts.signposter.endInterval("InboxReload", interval)
+            guard !Task.isCancelled, requestedOptInOnly == optInOnly else { return }
+            count = loaded.count
+        }
+    }
+}
+
+/// Event-driven Queue badge that keeps the entire QueueItem collection out of
+/// RootView. A root-level `@Query` is invalidated by main-context saves unrelated
+/// to the queue; on a refresh-heavy launch that repeatedly makes SwiftUI inspect
+/// and update the whole tab tree while VoiceOver is navigating Settings.
+private struct QueueTabBadge: View {
+    @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
+    let selectedTab: RootTab?
+
+    @State private var count = 0
+    @State private var reloadTask: Task<Void, Never>?
+    @State private var reloadScheduled = false
+
+    var body: some View {
+        TabBarBadgeApplier(tabIndex: 1, count: count)
+            .onAppear { scheduleReload() }
+            .onDisappear { reloadTask?.cancel() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { scheduleReload() }
+            }
+            .onChange(of: selectedTab) { _, _ in
+                TabBarBadgeApplier.apply(tabIndex: 1, count: count)
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .earshotQueueDidChange)
+                    .receive(on: DispatchQueue.main)
+            ) { _ in
+                scheduleReload()
+            }
+    }
+
+    private func scheduleReload() {
+        guard !reloadScheduled else { return }
+        reloadScheduled = true
+        DispatchQueue.main.async {
+            reloadScheduled = false
+            reload()
+        }
+    }
+
+    private func reload() {
+        reloadTask?.cancel()
+        let modelContainer = context.container
+        reloadTask = Task { @MainActor in
+            let loaded = await TabBadgeSnapshotLoader.queueCount(
+                modelContainer: modelContainer
+            )
+            guard !Task.isCancelled else { return }
+            count = loaded.count
+        }
     }
 }
 
@@ -120,13 +267,6 @@ struct RootView: View {
     @State private var resumeImportAfterPaywall = false
     @State private var confirmOPMLReplacement = false
     @State private var rootServicesActivated = false
-
-    /// Every queue row. SwiftData keeps this current, so it both drives the
-    /// re-render when the queue changes AND supplies the rows the Queue tab badge
-    /// count is reduced from — without a fresh fetch per body. Reduced through
-    /// `QueueRepository.displayedCount(from:)` so the count drops orphan rows and
-    /// equals exactly what `QueueScreen` shows (#491). Mirrors `inboxCandidates`.
-    @Query(sort: \QueueItem.position) private var queueItems: [QueueItem]
 
     /// Which tab is selected. Optional so the first paint can resolve the saved
     /// launch-screen preference synchronously (#492) instead of rendering Inbox
@@ -159,13 +299,6 @@ struct RootView: View {
         // Inbox screen. It never walks Episode→Podcast relationships in Swift,
         // which keeps a playback-position save from fanning out into inverse
         // relationship faults. The bubble is hidden automatically at 0.
-        // Live queue count for the Queue tab badge, reduced the same way the Queue
-        // screen builds its list (orphan rows dropped). Shown via the same native
-        // `UITabBarItem` badge mechanism as Inbox so UIKit folds ", N items" into
-        // the single tab element ("Queue, N items") with no extra VoiceOver stop
-        // (#491).
-        let queueBadgeCount = QueueRepository.displayedCount(from: queueItems)
-
         // Selection binding that honors the saved Launch screen on cold launch
         // (#492): while `selectedTab` is still nil it reports the persisted launch
         // tab (read synchronously), so the first frame already shows the right
@@ -193,7 +326,7 @@ struct RootView: View {
 
         TabView(selection: tabSelection) {
             NavigationStack {
-                InboxScreen()
+                InboxScreen(isActive: (selectedTab ?? resolvedLaunchTab) == .inbox)
             }
             .modifier(TabChrome())
             .tabItem { Label("Inbox", systemImage: "tray") }
@@ -254,7 +387,7 @@ struct RootView: View {
         .background(InboxTabBadge(optInOnly: settings.inboxOptInOnly, selectedTab: selectedTab))
         // Native UITabBarItem badge for the Queue episode count (#491): same
         // mechanism and VoiceOver folding as the Inbox badge above, on tab 1.
-        .background(TabBarBadgeApplier(tabIndex: 1, count: queueBadgeCount))
+        .background(QueueTabBadge(selectedTab: selectedTab))
         // Route a notification tap / action into the Library tab + podcast detail
         // (#72). Reacting on the published intent keeps the delegate decoupled
         // from the view tree.
@@ -284,12 +417,6 @@ struct RootView: View {
             }
         } message: {
             Text("Earshot can keep one OPML file ready to continue. Replacing it discards the currently pending file.")
-        }
-        // Re-assert the native Inbox badge after a tab switch: SwiftUI can rebuild
-        // the tab-bar items on selection change and transiently drop a manually
-        // set `badgeValue`. Cheap and idempotent.
-        .onChange(of: selectedTab) { _, _ in
-            TabBarBadgeApplier.apply(tabIndex: 1, count: queueBadgeCount)
         }
         // Appearance preferences (#461): theme override, accent tint, and layout
         // density, applied at the root so every tab, push, and sheet follows.
@@ -386,7 +513,7 @@ struct RootView: View {
             player.updateRemoteSkipIntervals()
         }
         .onReceive(
-            NotificationCenter.default.publisher(for: .earshotCloudProjectionDidApply)
+            NotificationCenter.default.publisher(for: .earshotCloudSettingsProjectionDidApply)
                 .receive(on: DispatchQueue.main)
         ) { _ in
             settings.configure(context: modelContext)
@@ -436,10 +563,10 @@ struct RootView: View {
             try Task.checkCancellation()
             settings.configure(context: modelContext)
             runtime.listeningPlaces.configure(context: modelContext)
+            tips.configure(context: modelContext)
             let capSettings = AppSettingsStore(context: modelContext)
             let count = (try? PodcastQuery.followedCount(in: modelContext)) ?? 0
             capSettings.introducePodcastCapGatingIfNeeded(currentPodcastCount: count)
-            tips.configure(context: modelContext)
             #if DEBUG
             if !ScreenshotHarness.isActive {
                 ExpirationService(context: modelContext).runExpiration()
@@ -448,7 +575,16 @@ struct RootView: View {
             ExpirationService(context: modelContext).runExpiration()
             #endif
             try await runtime.activateCloudProjectionIfNeeded(container: modelContext.container)
-            StatsRepository(context: modelContext).applyRetention(days: settings.historyRetentionDays)
+            let statsReport = await StatsMaintenance.applyRetention(
+                modelContainer: modelContext.container,
+                days: settings.historyRetentionDays
+            )
+            if statsReport.removed > 0 {
+                NotificationCenter.default.post(
+                    name: .earshotListeningHistoryDidChange,
+                    object: nil
+                )
+            }
             PlaybackStartup.restoreLastEpisode(into: player, context: modelContext)
         }
         guard activationCompleted else { return }

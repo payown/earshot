@@ -2990,4 +2990,55 @@ still there too.
 Renata asked what had changed.
 
 “Apparently the episode,” Kashe said. “It just forgot to introduce itself.”
+
+---
+
+Chapter 81, Build 251
+
+The Saturday shelf and the quiet hallway
+
+What changed
+
+VoiceOver navigation should stay responsive from a cold launch and while
+Earshot is refreshing or applying iCloud changes. Startup maintenance, tab
+badge counts, and other database work no longer repeatedly occupy the path
+VoiceOver needs for flick navigation. Inbox and Settings received extra work
+because that is where the delay was easiest to reproduce. Spoken labels,
+actions, and focus behavior are unchanged.
+
+The Queue's folder grouping now respects an episode filed directly into a
+folder. If a podcast normally belongs to Morning but one long episode belongs
+to Saturday, that queued episode appears under Saturday. Its direct episode
+folder wins over the podcast's default folder. The visible group, group actions,
+reordering, and playback advancement now all use that same answer.
+
+What to test
+
+Turn on VoiceOver, force-quit Earshot, and open it from a cold launch. Begin
+flicking immediately. Visit all five tabs, then spend extra time moving through
+Inbox and Settings. Also try explore by touch and repeat while a refresh or
+iCloud update is settling. Each flick should move promptly and consistently;
+there should not be a period where explore by touch works but flicks are mostly
+ignored. Please report the tab, what Earshot was doing, and whether the delay
+started immediately or after a moment.
+
+Next, use a podcast assigned to Morning. Add one of its episodes to the Queue,
+then file that individual episode in Saturday. Set the Queue to Group by folder.
+The episode should appear in Saturday, not Morning, while the rest of the
+podcast remains in Morning. Confirm Library, Saturday still shows it. Try Play
+Group, moving within the group, letting playback advance, closing Earshot, and
+opening it again. Every place should continue to agree that this episode is in
+Saturday.
+
+Kashe opened Earshot before the kettle had decided to boil. She flicked through
+the Inbox, crossed Settings, and came back without waiting for the hallway to
+clear.
+
+One long interview still belonged to Saturday, even though its show woke her
+every morning. In the Queue, Saturday finally kept the episode she had given it.
+
+Renata asked whether anything dramatic had happened.
+
+“No,” Kashe said. “The doors opened when I touched them, and the shelf remembered
+what I put there.”
 More chapters added here as Earshot ships.

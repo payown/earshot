@@ -875,13 +875,14 @@ final class AppRuntime {
                 applicationContainer: container
             )
             try Task.checkCancellation()
-            try await coordinator.start()
+            try await coordinator.start(performInitialReconciliation: false)
             if Task.isCancelled || resetInFlight {
                 await coordinator.stop()
                 return
             }
             cloudProjectionCoordinator = coordinator
             cloudSyncAvailability = .available
+            coordinator.scheduleInitialReconciliationInBackground()
         }
         cloudProjectionActivationTask = task
         defer { cloudProjectionActivationTask = nil }

@@ -44,6 +44,17 @@ private actor QueueApplicationRaceGate {
 
 @MainActor
 final class CloudProjectionCoordinatorTests: XCTestCase {
+    func testProjectionOriginMarkerDistinguishesSelfGeneratedUIEvents() {
+        let external = Notification(name: .earshotInboxDidChange)
+        XCTAssertFalse(CloudProjectionCoordinator.isProjectionOriginated(external))
+
+        let projected = Notification(
+            name: .earshotInboxDidChange,
+            userInfo: [CloudProjectionCoordinator.notificationOriginKey: true]
+        )
+        XCTAssertTrue(CloudProjectionCoordinator.isProjectionOriginated(projected))
+    }
+
     func testBackgroundConstructionKeepsProjectionWorkFromBlockingMainActor() async throws {
         let app = try makeApplicationContainer()
         for index in 0..<2_000 {
@@ -57,6 +68,11 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         let coordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: app,
             projectionContainer: projection
+        )
+        let executorRunsOnMainThread = await coordinator.executorRunsOnMainThreadForTesting()
+        XCTAssertFalse(
+            executorRunsOnMainThread,
+            "Cloud projection store work must never borrow VoiceOver's main thread"
         )
 
         let heartbeatState = Mutex((isFinished: false, count: 0))
@@ -2731,10 +2747,11 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
         phoneSettings.setDouble(1.5, for: SettingsKey.globalSpeed)
         phoneSettings.setRawValue("phone-only", for: SettingsKey.lastPlayingEpisodeID)
         let projection = try makeProjectionContainer()
+        let phoneCenter = NotificationCenter()
         let phoneCoordinator = await CloudProjectionCoordinator.makeForTesting(
             applicationContainer: phone,
             projectionContainer: projection,
-            center: NotificationCenter(),
+            center: phoneCenter,
             deviceID: "phone"
         )
         try await phoneCoordinator.reconcile()
@@ -2756,9 +2773,19 @@ final class CloudProjectionCoordinatorTests: XCTestCase {
             key: SettingsKey.globalSpeed,
             now: .distantFuture
         )
+        var settingsApplyCount = 0
+        let token = phoneCenter.addObserver(
+            forName: .earshotCloudSettingsProjectionDidApply,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { settingsApplyCount += 1 }
+        }
+        defer { phoneCenter.removeObserver(token) }
         try await phoneCoordinator.reconcile()
 
         XCTAssertEqual(phoneSettings.double(SettingsKey.globalSpeed, default: 1), 2)
+        XCTAssertEqual(settingsApplyCount, 1)
     }
 
     func testCoreLibraryRoundTripFromPhoneToMacAndBack() async throws {

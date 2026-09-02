@@ -1566,16 +1566,15 @@ final class PlayerService {
         // mode resolves nested memberships to their top-level folder once, then
         // each episode is an O(1) lookup; None and Podcast retain podcast
         // boundaries for the "Continue after group ends" setting.
-        let rootByPodcast: [PersistentIdentifier: PersistentIdentifier]
+        let folderResolution: QueueFolderResolution
         if grouping == .folder, let context {
-            rootByPodcast = FolderRepository(context: context).rootFolderByPodcast()
+            folderResolution = FolderRepository(context: context).queueFolderResolution()
         } else {
-            rootByPodcast = [:]
+            folderResolution = .empty
         }
         let groupKey: (Episode) -> QueueGroup.Kind = { episode in
-            if grouping == .folder, let podcastID = episode.podcast?.persistentModelID {
-                if let rootID = rootByPodcast[podcastID] { return .folder(rootID) }
-                return .unfiled
+            if grouping == .folder {
+                return folderResolution.key(for: episode)
             }
             if let podcastID = episode.podcast?.persistentModelID { return .podcast(podcastID) }
             return .unfiled
@@ -1610,9 +1609,7 @@ final class PlayerService {
     /// folder subtree; crossing a folder boundary clears it before the episode
     /// becomes observable in Now Playing.
     private func playbackOriginAdvanceEvent(to nextEpisode: Episode) -> PlaybackOriginEvent {
-        guard let playbackOrigin,
-              let context,
-              let podcastID = nextEpisode.podcast?.persistentModelID else {
+        guard let playbackOrigin, let context else {
             return .advanced(nextEpisodeBelongsToOrigin: false)
         }
         let repository = FolderRepository(context: context)
@@ -1621,9 +1618,7 @@ final class PlayerService {
         }) else {
             return .advanced(nextEpisodeBelongsToOrigin: false)
         }
-        let belongs = repository.subtreeSubscriptions(of: folder).contains {
-            $0.persistentModelID == podcastID
-        }
+        let belongs = repository.episode(nextEpisode, belongsToSubtreeOf: folder)
         return .advanced(nextEpisodeBelongsToOrigin: belongs)
     }
 

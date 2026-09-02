@@ -405,6 +405,51 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(stored.positionSeconds, 321)
     }
 
+    func testAutomaticRefreshDefersExistingMetadataReconciliationUntilManualRefresh() async throws {
+        let container = cleanContainer()
+        let feedURL = "https://x/deferred-correction.xml"
+        do {
+            let context = ModelContext(container)
+            let podcast = Podcast(feedURL: feedURL, title: "Show", lastSeenPubDate: d2)
+            let episode = Episode(
+                guid: "same", title: "Original", audioURL: "https://x/broken.mp3",
+                pubDate: d2
+            )
+            episode.podcast = podcast
+            context.insert(podcast)
+            context.insert(episode)
+            try context.save()
+        }
+        var repaired = parsedEpisode("same", d2, audioURL: "https://x/repaired.mp3")
+        repaired.title = "Corrected"
+        let fetcher = FakeFeed(parsedFeed([repaired]))
+        let actor = FeedRefreshActor(modelContainer: container)
+
+        let automatic = await actor.refreshAllReport(
+            feed: fetcher,
+            autoQueueEnabled: false,
+            trigger: .coldLaunch,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+        var stored = try XCTUnwrap(try episodes(container).first)
+        XCTAssertEqual(automatic.results.first?.outcome.metadataUpdatedCount, 0)
+        XCTAssertEqual(stored.title, "Original")
+        XCTAssertEqual(stored.audioURL, "https://x/broken.mp3")
+
+        let manual = await actor.refreshAllReport(
+            feed: fetcher,
+            autoQueueEnabled: false,
+            trigger: .manualToolbar,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+        stored = try XCTUnwrap(try episodes(container).first)
+        XCTAssertEqual(manual.results.first?.outcome.metadataUpdatedCount, 1)
+        XCTAssertEqual(stored.title, "Corrected")
+        XCTAssertEqual(stored.audioURL, "https://x/repaired.mp3")
+    }
+
     func testCorrectedDownloadedMediaRequestsReplacementWithoutNewEpisodeEffects() async throws {
         let container = cleanContainer()
         let feedURL = "https://x/downloaded-correction.xml"

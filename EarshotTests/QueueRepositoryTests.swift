@@ -141,6 +141,19 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(QueueRepository.displayedCount(from: items), 1)
     }
 
+    func testBackgroundBadgeLoaderCountsOnlyDisplayedQueueRows() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Background badge")
+        QueueRepository(context: ctx).add(makeEpisode(ctx, "real", podcast: podcast))
+        ctx.insert(QueueItem(position: 99))
+        try ctx.save()
+
+        let snapshot = await TabBadgeSnapshotLoader.queueCount(modelContainer: ctx.container)
+
+        XCTAssertEqual(snapshot.count, 1)
+        XCTAssertFalse(snapshot.executedStoreWorkOnMainThread)
+    }
+
     // MARK: add / status transitions
 
     func testAddAppendsToEndAndSetsStatusInQueue() {

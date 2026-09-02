@@ -553,7 +553,11 @@ actor FeedRefreshActor {
                             "inputIndex=\(inputIndex) candidateCount=\(repairGUIDs.count)"
                         )
                         let applyOutcome = apply(
-                            parsed, to: podcast, autoQueueEnabled: autoQueueEnabled
+                            parsed,
+                            to: podcast,
+                            autoQueueEnabled: autoQueueEnabled,
+                            reconcileExistingEpisodeMetadata:
+                                trigger.reconcilesExistingEpisodeMetadata
                         )
                         try FeedRefreshValidatorStore.set(
                             validators,
@@ -674,7 +678,12 @@ actor FeedRefreshActor {
         let repair = try IdentityRepairService(context: modelContext)
             .repairEpisodes(in: podcast, matchingGUIDs: repairGUIDs)
         if repair.didChange { try saveWithSignpost() }
-        let applyOutcome = apply(parsed, to: podcast, autoQueueEnabled: autoQueueEnabled)
+        let applyOutcome = apply(
+            parsed,
+            to: podcast,
+            autoQueueEnabled: autoQueueEnabled,
+            reconcileExistingEpisodeMetadata: true
+        )
         // Save BEFORE resolving `newEpisodeIDs` — persistentModelID is temporary
         // for a newly-inserted Episode until the context saves (same reason
         // `subscribe(feedURL:feed:inboxSeedCount:)` above saves before `result()`).
@@ -1500,7 +1509,10 @@ actor FeedRefreshActor {
     /// directly because the newly-inserted episodes' `persistentModelID`s are not
     /// permanent until the caller saves.
     private func apply(
-        _ parsed: ParsedFeed, to podcast: Podcast, autoQueueEnabled: Bool
+        _ parsed: ParsedFeed,
+        to podcast: Podcast,
+        autoQueueEnabled: Bool,
+        reconcileExistingEpisodeMetadata: Bool
     ) -> ApplyOutcome {
         let now = Date.now
         // A malformed feed can contain the same natural key more than once in a
@@ -1563,15 +1575,20 @@ actor FeedRefreshActor {
             now: now
         )
         let candidateEpisodes = selection.candidates
-        let recentCorrectionItems = Array(parsedEpisodes.sorted {
-            ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast)
-        }.prefix(Self.correctedMetadataWindow))
-        let priorityCorrectionGUIDs = correctionPriorityGUIDs(for: podcast)
-        let correctionItems = Self.deduplicatedEpisodes(
-            recentCorrectionItems + parsedEpisodes.filter {
-                priorityCorrectionGUIDs.contains($0.guid)
-            }
-        )
+        let correctionItems: [ParsedEpisode]
+        if reconcileExistingEpisodeMetadata {
+            let recentCorrectionItems = Array(parsedEpisodes.sorted {
+                ($0.pubDate ?? .distantPast) > ($1.pubDate ?? .distantPast)
+            }.prefix(Self.correctedMetadataWindow))
+            let priorityCorrectionGUIDs = correctionPriorityGUIDs(for: podcast)
+            correctionItems = Self.deduplicatedEpisodes(
+                recentCorrectionItems + parsedEpisodes.filter {
+                    priorityCorrectionGUIDs.contains($0.guid)
+                }
+            )
+        } else {
+            correctionItems = []
+        }
         let lookupGUIDs = Array(Set(
             candidateEpisodes.map(\.guid) + correctionItems.map(\.guid)
         ))
