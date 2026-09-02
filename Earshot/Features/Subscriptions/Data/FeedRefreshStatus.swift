@@ -177,7 +177,10 @@ final class FeedRefreshStatusMonitor {
         snapshot.checked = max(snapshot.checked, durableChecked)
         snapshot.newEpisodes += checkpoint.newEpisodes
         snapshot.unchangedFeeds += checkpoint.unchangedFeeds
-        persist()
+        // The feed actor already made this content durable. Saving a diagnostic
+        // status row after every actor batch doubles SwiftData save notifications
+        // and invalidates every live @Query in the tab tree. Keep live progress
+        // in memory; start and finish (including cancellation) remain persisted.
     }
 
     func finish(_ report: SubscriptionRefreshReport, now: Date = Date()) {

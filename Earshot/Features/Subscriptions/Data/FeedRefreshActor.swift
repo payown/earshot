@@ -55,10 +55,22 @@ actor FeedRefreshActor {
     // import faster in isolation but could starve the foreground UI; two proved
     // responsive in the build-169 device test, so build 170 measures the middle.
     private static let subscribeFetchConcurrency = 3
-    /// Whole-library refresh uses the same bounded network overlap as OPML.
-    /// Parsed results are still applied serially on this model actor, so this
-    /// never creates concurrent SwiftData writers.
+    /// Explicit and OS-owned whole-library refreshes use bounded overlap. An
+    /// automatic pass running while the app is interactive uses one slot: three
+    /// simultaneous downloads/XML parses measurably competed with VoiceOver and
+    /// the player on device even though none of that work used the main actor.
     private static let refreshFetchConcurrency = 3
+
+    private nonisolated static func refreshFetchConcurrency(
+        for trigger: FeedRefreshTrigger
+    ) -> Int {
+        switch trigger {
+        case .coldLaunch, .foreground:
+            1
+        case .manualToolbar, .manualPullToRefresh, .backgroundTask, .unspecified:
+            refreshFetchConcurrency
+        }
+    }
 
     private struct FetchCandidate: Sendable {
         let index: Int
@@ -178,7 +190,7 @@ actor FeedRefreshActor {
                     // the retained producer cancels every task-group child. Waiting
                     // for one feed to finish before opening the window made a slow
                     // first feed stall the entire library for no safety benefit.
-                    for _ in 0..<refreshFetchConcurrency { addNext() }
+                    for _ in 0..<refreshFetchConcurrency(for: trigger) { addNext() }
                     while let result = await group.next() {
                         await channel.send(result)
                         addNext()

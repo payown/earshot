@@ -801,6 +801,30 @@ final class SubscriptionRepositoryTests: XCTestCase {
         )
     }
 
+    func testRefreshAllUnchangedCheckpointDoesNotSweepQueuedDownloads() async throws {
+        let ctx = TestStore.freshContext()
+        let fetcher = FakeFeedFetcher(feed([episode("a", d1)]))
+        let fakeDownloader = FakeDownloader()
+        let repo = SubscriptionRepository(
+            context: ctx,
+            feed: fetcher,
+            downloader: fakeDownloader,
+            queue: QueueRepository(context: ctx)
+        )
+        let podcast = try await repo.subscribe(feedURL: "https://x/unchanged.xml")
+        podcast.autoQueue = true
+        try ctx.save()
+        fakeDownloader.reset()
+
+        _ = await repo.refreshAllReport(trigger: .foreground)
+
+        XCTAssertEqual(
+            fakeDownloader.queuedDownloadSweeps,
+            0,
+            "An unchanged refresh must not scan the queue on the main actor"
+        )
+    }
+
     // MARK: RefreshOutcome.newEpisodeIDs (#639)
 
     /// The identifiers backing Bug 1's fix: `refresh(_:)` must report the

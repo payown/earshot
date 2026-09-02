@@ -65,6 +65,21 @@ struct FeedRefreshInlineStatus: View {
     }
 }
 
+/// Observes per-feed progress in a deliberately tiny subtree. `TabView` keeps
+/// inactive root tabs alive, so reading the snapshot from Inbox or Library's
+/// top-level body made every completed feed rebuild large lists and their
+/// VoiceOver trees even while Now Playing covered them.
+struct LiveFeedRefreshInlineStatus: View {
+    @Environment(AppRuntime.self) private var runtime
+
+    var body: some View {
+        let snapshot = runtime.feedRefreshStatus.snapshot
+        if FeedRefreshInlineStatus.shouldShow(snapshot) {
+            FeedRefreshInlineStatus(snapshot: snapshot)
+        }
+    }
+}
+
 struct FeedRefreshSettingsView: View {
     @Environment(AppRuntime.self) private var runtime
     @Environment(QuickActionStore.self) private var quickActions

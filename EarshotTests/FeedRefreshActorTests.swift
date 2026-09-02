@@ -1262,6 +1262,37 @@ final class FeedRefreshActorTests: XCTestCase {
         XCTAssertEqual(maximumActiveFetches, 3)
     }
 
+    func testForegroundRefreshUsesOneFetchToProtectInteraction() async throws {
+        let container = cleanContainer()
+        do {
+            let seedContext = ModelContext(container)
+            for index in 0..<4 {
+                seedContext.insert(Podcast(
+                    feedURL: "https://x/foreground-\(index).xml",
+                    title: "Show \(index)",
+                    lastSeenPubDate: d1
+                ))
+            }
+            try seedContext.save()
+        }
+        let fetcher = RefreshConcurrencyFeed(
+            parsedFeed([parsedEpisode("a", d1)]),
+            rendezvousCount: 1
+        )
+
+        let results = await FeedRefreshActor(modelContainer: container).refreshAll(
+            feed: fetcher,
+            autoQueueEnabled: false,
+            trigger: .foreground,
+            isCancelled: { false },
+            onProgress: { _, _ in }
+        )
+
+        let maximumActiveFetches = await fetcher.maximumActiveFetches()
+        XCTAssertEqual(results.count, 4)
+        XCTAssertEqual(maximumActiveFetches, 1)
+    }
+
     func testActorRefreshFailureReportsPodcastTitleAndReason() async throws {
         final class FailingFeed: FeedFetching, @unchecked Sendable {
             func fetch(_ urlString: String) async throws -> ParsedFeed {
@@ -2048,22 +2079,26 @@ private actor BlockingBulkFeed: FeedFetching {
 /// launch and never exceeds the bound.
 private actor RefreshConcurrencyFeed: FeedFetching {
     private let feed: ParsedFeed
+    private let rendezvousCount: Int
     private var callCount = 0
     private var active = 0
     private var maximumActive = 0
     private var rendezvous: [CheckedContinuation<Void, Never>] = []
 
-    init(_ feed: ParsedFeed) { self.feed = feed }
+    init(_ feed: ParsedFeed, rendezvousCount: Int = 3) {
+        self.feed = feed
+        self.rendezvousCount = rendezvousCount
+    }
 
     func fetch(_ urlString: String) async throws -> ParsedFeed {
         callCount += 1
         active += 1
         maximumActive = max(maximumActive, active)
 
-        if callCount <= 3 {
+        if callCount <= rendezvousCount {
             await withCheckedContinuation { continuation in
                 rendezvous.append(continuation)
-                if rendezvous.count == 3 {
+                if rendezvous.count == rendezvousCount {
                     let waiting = rendezvous
                     rendezvous.removeAll()
                     waiting.forEach { $0.resume() }

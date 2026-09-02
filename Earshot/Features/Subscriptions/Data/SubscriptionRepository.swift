@@ -644,20 +644,30 @@ extension SubscriptionRepository {
                 self.publishInboxReentries(
                     checkpoint.flatMap { $0.outcome.inboxReentryEpisodeIDs }
                 )
-                if self.autoQueueEnabled,
-                   checkpoint.contains(where: { !$0.outcome.newEpisodeIDs.isEmpty }) {
+                let newEpisodeIDGroups = checkpoint
+                    .map { $0.outcome.newEpisodeIDs }
+                    .filter { !$0.isEmpty }
+                let hasNewAutoQueueEpisodes = self.autoQueueEnabled
+                    && !newEpisodeIDGroups.isEmpty
+                if hasNewAutoQueueEpisodes {
                     NotificationCenter.default.post(
                         name: .earshotQueueDidChange,
                         object: nil
                     )
                 }
                 await self.autoDownloadRecent(
-                    episodeIDsPerPodcast: checkpoint.map { $0.outcome.newEpisodeIDs }
+                    episodeIDsPerPodcast: newEpisodeIDGroups
                 )
                 await self.downloader?.replaceCorrectedMedia(
                     checkpoint.flatMap { $0.outcome.correctedMedia }
                 )
-                await self.downloader?.downloadQueuedIfEnabled()
+                // Queue additions outside refresh already trigger their own
+                // sweep. During refresh, only a genuinely new auto-queued
+                // episode can create work; unchanged checkpoints must not scan
+                // the full queue on the main actor.
+                if hasNewAutoQueueEpisodes {
+                    await self.downloader?.downloadQueuedIfEnabled()
+                }
                 await onDurableNotifications(self.notifications(from: checkpoint))
                 onDurableCheckpoint(
                     FeedRefreshStatusCheckpoint(
