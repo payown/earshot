@@ -7,6 +7,24 @@ search, folder snapshot, background startup-maintenance, tab-badge, and compact
 Cloud-projection work. This plan remains the source for uncompleted follow-ups;
 build 251 does not claim that every phase below is finished.
 
+The 2026-09-02 direct-device follow-up on
+`codex/background-mainactor-work` moves three additional store-heavy paths away
+from the interaction actor without changing accessibility semantics:
+
+- global and folder-scoped Inbox membership queries now execute on private
+  contexts and return persistent identifiers; main-context resolution yields in
+  groups of 100, and stale reloads cannot publish over a newer scope;
+- Listening Places restore, history scanning, normalization, and JSON encoding
+  now execute on a private model actor in 256-row fetch batches; and
+- launch-time queue expiration and Recently Expired cleanup now execute on a
+  private context at utility quality of service.
+
+This is deliberately not described as completion of Inbox paging. Search,
+counts, focus recovery, and existing bulk actions still use the complete Inbox
+scope to preserve build 251 behavior. A later paging change must also move those
+full-scope operations into bounded repository batches before the first-page-only
+contract in Phase 4 can be claimed.
+
 The original build 250 Release-device trace remained blocked by the iOS 27/Xcode
 26.6 device support mismatch. The missing metrics and the still-main-context
 Inbox candidate fetch are preserved as open evidence/implementation boundaries
