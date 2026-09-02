@@ -77,6 +77,144 @@ enum InboxQuery {
     }
 }
 
+struct InboxCandidateSnapshot: Sendable, Equatable {
+    let ids: [PersistentIdentifier]
+    let inspectedCount: Int
+    let executedStoreWorkOnMainThread: Bool
+}
+
+/// Loads the complete event-driven Inbox identity snapshot away from the main
+/// actor. Presentation still resolves main-context models in cooperative chunks,
+/// preserving the existing search and bulk-action scopes byte-for-byte without
+/// making VoiceOver wait for the relationship query.
+enum InboxSnapshotLoader {
+    static func all(
+        modelContainer: ModelContainer,
+        optInOnly: Bool
+    ) async throws -> InboxCandidateSnapshot {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    continuation.resume(returning: try allSynchronously(
+                        modelContainer: modelContainer,
+                        optInOnly: optInOnly
+                    ))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func allSynchronously(
+        modelContainer: ModelContainer,
+        optInOnly: Bool
+    ) throws -> InboxCandidateSnapshot {
+        let modelContext = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<Episode>(
+            predicate: InboxQuery.predicate(optInOnly: optInOnly),
+            sortBy: [SortDescriptor(\Episode.pubDate, order: .reverse)]
+        )
+        let candidates = try modelContext.fetch(descriptor)
+        let ids = try candidates.compactMap { episode -> PersistentIdentifier? in
+            try Task.checkCancellation()
+            return Self.isCurrentInboxEpisode(episode, optInOnly: optInOnly)
+                ? episode.persistentModelID : nil
+        }
+        return InboxCandidateSnapshot(
+            ids: ids,
+            inspectedCount: candidates.count,
+            executedStoreWorkOnMainThread: Thread.isMainThread
+        )
+    }
+
+    static func folder(
+        modelContainer: ModelContainer,
+        id folderID: PersistentIdentifier,
+        optInOnly: Bool
+    ) async throws -> InboxCandidateSnapshot {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    continuation.resume(returning: try folderSynchronously(
+                        modelContainer: modelContainer,
+                        id: folderID,
+                        optInOnly: optInOnly
+                    ))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func folderSynchronously(
+        modelContainer: ModelContainer,
+        id folderID: PersistentIdentifier,
+        optInOnly: Bool
+    ) throws -> InboxCandidateSnapshot {
+        let modelContext = ModelContext(modelContainer)
+        var folderDescriptor = FetchDescriptor<PodcastFolder>(
+            predicate: #Predicate { $0.persistentModelID == folderID }
+        )
+        folderDescriptor.fetchLimit = 1
+        guard let folder = try modelContext.fetch(folderDescriptor).first else {
+            return InboxCandidateSnapshot(
+                ids: [], inspectedCount: 0,
+                executedStoreWorkOnMainThread: Thread.isMainThread
+            )
+        }
+
+        let podcasts = FolderRepository(context: modelContext).subtreeSubscriptions(of: folder)
+        var seen = Set<PersistentIdentifier>()
+        var candidates: [Episode] = []
+        var inspectedCount = 0
+        for podcast in podcasts {
+            try Task.checkCancellation()
+            let descriptor = FetchDescriptor<Episode>(
+                predicate: InboxQuery.folderUnplayedPredicate(
+                    podcastID: podcast.persistentModelID
+                ),
+                sortBy: [SortDescriptor(\Episode.pubDate, order: .reverse)]
+            )
+            let fetched = try modelContext.fetch(descriptor)
+            inspectedCount += fetched.count
+            for episode in fetched
+            where seen.insert(episode.persistentModelID).inserted
+                && Self.isCurrentInboxEpisode(episode, optInOnly: optInOnly) {
+                candidates.append(episode)
+            }
+        }
+        candidates.sort { lhs, rhs in
+            if lhs.pubDate != rhs.pubDate {
+                return FolderLogic.byPubDateDescending(lhs.pubDate, rhs.pubDate)
+            }
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+            return lhs.guid < rhs.guid
+        }
+        return InboxCandidateSnapshot(
+            ids: candidates.map(\.persistentModelID),
+            inspectedCount: inspectedCount,
+            executedStoreWorkOnMainThread: Thread.isMainThread
+        )
+    }
+
+    private static func isCurrentInboxEpisode(
+        _ episode: Episode,
+        optInOnly: Bool
+    ) -> Bool {
+        guard episode.status == .newEpisode,
+              !episode.inboxDismissed,
+              episode.podcast?.isCatalogOnly != true else { return false }
+        guard let podcast = episode.podcast else { return !optInOnly }
+        if optInOnly { return podcast.inboxIncluded }
+        return !InboxLogic.isExcluded(
+            inboxExcluded: podcast.inboxExcluded,
+            inboxIncluded: podcast.inboxIncluded
+        )
+    }
+}
+
 /// The inbox is a view over episodes: `status == .newEpisode && !inboxDismissed`
 /// from non-excluded podcasts. Per-podcast caps (count / age) hide overflow by
 /// setting `inboxDismissed` — one-directional, so caps never fight Clear Inbox
