@@ -4,7 +4,7 @@ import SwiftData
 /// The session-local folder lens for Listening Stats. Identity-only folder
 /// storage lets the screen resolve the live breadcrumb and recover cleanly if a
 /// selected folder is deleted; no settings or schema migration is required.
-enum StatsFolderScope: Hashable {
+enum StatsFolderScope: Hashable, Sendable {
     case allFolders
     case folder(PersistentIdentifier)
     case unfiled
@@ -26,6 +26,12 @@ struct StatsScreen: View {
     @State private var folderScope: StatsFolderScope = .allFolders
     @State private var stats: ListeningStats = .empty
     @State private var exportFile: StatsCSVFile?
+    @State private var reloadTask: Task<Void, Never>?
+    @State private var exportTask: Task<Void, Never>?
+    @State private var deletionTask: Task<Void, Never>?
+    @State private var reloadGeneration = 0
+    @State private var isExporting = false
+    @State private var isDeleting = false
     @State private var confirmingDelete = false
 
     var body: some View {
@@ -82,37 +88,36 @@ struct StatsScreen: View {
 
             Section("Data") {
                 Button {
-                    exportFile = StatsCSVFile(text: StatsRepository(context: context).csv())
+                    exportHistory()
                 } label: {
-                    Label("Export history (CSV)", systemImage: "square.and.arrow.up")
+                    Label(
+                        isExporting ? "Preparing history export" : "Export history (CSV)",
+                        systemImage: "square.and.arrow.up"
+                    )
                 }
-                .disabled(stats.totalSeconds == 0)
+                .disabled(stats.totalSeconds == 0 || isExporting)
                 .accessibilityHint(stats.totalSeconds == 0 ? "Nothing to export yet. Listen to an episode first." : "")
 
                 Button(role: .destructive) {
                     confirmingDelete = true
                 } label: {
-                    Label("Delete all history", systemImage: "trash")
+                    Label(
+                        isDeleting ? "Deleting listening history" : "Delete all history",
+                        systemImage: "trash"
+                    )
                 }
+                .disabled(isDeleting)
             }
         }
         .navigationTitle("Listening Stats")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: reload)
+        .onAppear { reload() }
         .onChange(of: period) { _, _ in
-            reload()
-            // The numbers below change silently, so confirm the new total.
-            Announcer.announce("\(period.label). Total listening \(StatsLogic.spokenDuration(stats.totalSeconds)).")
+            reload(announcement: .period(period.label))
         }
         .onChange(of: folderScope) { oldScope, newScope in
             guard newScope != oldScope else { return }
-            reload()
-            Announcer.announce(
-                StatsFolderAnnouncement.text(
-                    scopeName: selectedScopeName,
-                    totalSeconds: stats.totalSeconds
-                )
-            )
+            reload(announcement: .folder(selectedScopeName))
         }
         .onChange(of: folders.map(\.persistentModelID)) { _, availableIDs in
             guard case let .folder(folderID) = folderScope,
@@ -120,6 +125,10 @@ struct StatsScreen: View {
             folderScope = .allFolders
         }
         .onChange(of: settings.statsStreaksEnabled) { _, _ in reload() }
+        .onDisappear {
+            reloadTask?.cancel()
+            exportTask?.cancel()
+        }
         .sheet(item: $exportFile) { file in
             ShareSheet(items: [file.url])
         }
@@ -204,21 +213,97 @@ struct StatsScreen: View {
         return "No listening was recorded for \(selectedScopeName) in \(period.label.lowercased())."
     }
 
-    private func reload() {
-        stats = StatsRepository(context: context).stats(
-            for: period,
-            includeStreak: settings.statsStreaksEnabled,
-            podcastIDs: selectedPodcastIDs
-        )
+    private enum ReloadAnnouncement {
+        case period(String)
+        case folder(String)
+    }
+
+    private func reload(announcement: ReloadAnnouncement? = nil) {
+        reloadTask?.cancel()
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        let modelContainer = context.container
+        let requestedPeriod = period
+        let includeStreak = settings.statsStreaksEnabled
+        let podcastIDs = selectedPodcastIDs
+        reloadTask = Task { @MainActor in
+            do {
+                let report = try await StatsSnapshotLoader.load(
+                    modelContainer: modelContainer,
+                    period: requestedPeriod,
+                    includeStreak: includeStreak,
+                    podcastIDs: podcastIDs
+                )
+                guard generation == reloadGeneration, !Task.isCancelled else { return }
+                stats = report.stats
+                switch announcement {
+                case let .period(label):
+                    Announcer.announce(
+                        "\(label). Total listening \(StatsLogic.spokenDuration(stats.totalSeconds))."
+                    )
+                case let .folder(scopeName):
+                    Announcer.announce(
+                        StatsFolderAnnouncement.text(
+                            scopeName: scopeName,
+                            totalSeconds: stats.totalSeconds
+                        )
+                    )
+                case nil:
+                    break
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                AppLog.data.error(
+                    "Stats load failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private func exportHistory() {
+        exportTask?.cancel()
+        isExporting = true
+        let modelContainer = context.container
+        exportTask = Task { @MainActor in
+            defer { isExporting = false }
+            do {
+                let url = try await StatsSnapshotLoader.exportCSV(
+                    modelContainer: modelContainer
+                )
+                guard !Task.isCancelled else { return }
+                exportFile = StatsCSVFile(url: url)
+            } catch is CancellationError {
+                return
+            } catch {
+                AppLog.data.error(
+                    "Stats export failed: \(error.localizedDescription, privacy: .public)"
+                )
+                Announcer.announce("Listening history export failed")
+            }
+        }
     }
 
     private func deleteAll() {
-        StatsRepository(context: context).deleteAllHistory()
-        reload()
-        // Defer past the confirmation dialog's dismissal so VoiceOver doesn't drop
-        // the announcement mid-transition.
-        DispatchQueue.main.async {
-            Announcer.announce("Listening history deleted")
+        guard !isDeleting else { return }
+        isDeleting = true
+        let modelContainer = context.container
+        // Do not cancel a confirmed destructive operation on navigation: once
+        // deletion begins it must complete instead of leaving partial history.
+        deletionTask = Task { @MainActor in
+            defer { isDeleting = false }
+            do {
+                _ = try await StatsSnapshotLoader.deleteAllHistory(
+                    modelContainer: modelContainer
+                )
+                stats = .empty
+                Announcer.announce("Listening history deleted")
+            } catch {
+                AppLog.data.error(
+                    "Stats deletion failed: \(error.localizedDescription, privacy: .public)"
+                )
+                Announcer.announce("Listening history could not be deleted")
+            }
         }
     }
 }
@@ -228,10 +313,7 @@ struct StatsCSVFile: Identifiable {
     let id = UUID()
     let url: URL
 
-    init(text: String) {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("earshot-listening-history.csv")
-        try? text.data(using: .utf8)?.write(to: url)
+    init(url: URL) {
         self.url = url
     }
 }

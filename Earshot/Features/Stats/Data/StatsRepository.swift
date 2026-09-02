@@ -25,8 +25,27 @@ final class StatsRepository {
         includeStreak: Bool = false,
         podcastIDs: Set<PersistentIdentifier>? = nil
     ) -> ListeningStats {
+        // Synchronous callers are already confined to their ModelContext. The
+        // background screen loader uses the cancellable overload below.
+        stats(
+            for: period,
+            now: now,
+            includeStreak: includeStreak,
+            podcastIDs: podcastIDs,
+            cancellationCheck: {}
+        )
+    }
+
+    func stats(
+        for period: StatsPeriod,
+        now: Date = .now,
+        includeStreak: Bool = false,
+        podcastIDs: Set<PersistentIdentifier>? = nil,
+        cancellationCheck: () throws -> Void
+    ) rethrows -> ListeningStats {
         let interval = PerformanceSignposts.signposter.beginInterval("StatsAggregation")
         defer { PerformanceSignposts.signposter.endInterval("StatsAggregation", interval) }
+        try cancellationCheck()
         let since = period.since(now: now)
         let sessions = sessionsSince(since, podcastIDs: podcastIDs)
 
@@ -35,6 +54,7 @@ final class StatsRepository {
         var byPodcast: [String: (seconds: Int, count: Int)] = [:]
 
         for session in sessions {
+            try cancellationCheck()
             totalSeconds += session.durationSeconds
             timeSavedSeconds += StatsLogic.timeSavedBySpeed(
                 durationSeconds: session.durationSeconds, speed: session.speed
@@ -48,12 +68,17 @@ final class StatsRepository {
             .map { PodcastStat(podcastTitle: $0.key, totalSeconds: $0.value.seconds, episodeCount: $0.value.count) }
             .sorted { $0.totalSeconds > $1.totalSeconds }
 
-        let streak = includeStreak
-            ? StatsLogic.currentStreak(
+        try cancellationCheck()
+        let streak: Int
+        if includeStreak {
+            streak = StatsLogic.currentStreak(
                 sessionDates: allSessionDates(podcastIDs: podcastIDs),
                 now: now
             )
-            : 0
+        } else {
+            streak = 0
+        }
+        try cancellationCheck()
 
         return ListeningStats(
             totalSeconds: totalSeconds,
@@ -123,10 +148,19 @@ final class StatsRepository {
 
     /// All sessions as CSV (date,podcast,episode,seconds,speed), newest first.
     func csv(now: Date = .now) -> String {
+        csv(now: now, cancellationCheck: {})
+    }
+
+    func csv(
+        now: Date = .now,
+        cancellationCheck: () throws -> Void
+    ) rethrows -> String {
+        try cancellationCheck()
         let formatter = ISO8601DateFormatter()
         let rows = sessionsSince(nil).sorted { $0.date > $1.date }
         var lines = ["date,podcast,episode,duration_seconds,speed"]
         for session in rows {
+            try cancellationCheck()
             let fields = [
                 formatter.string(from: session.date),
                 session.podcast?.title ?? "Unknown Podcast",
@@ -216,6 +250,113 @@ final class StatsRepository {
     }
 }
 
+struct StatsSnapshotReport: Sendable, Equatable {
+    let stats: ListeningStats
+    let executedStoreWorkOnMainThread: Bool
+}
+
+struct StatsDeletionReport: Sendable, Equatable {
+    let removed: Int
+    let executedStoreWorkOnMainThread: Bool
+}
+
+/// Interactive stats work owns a private context on the concurrent executor.
+/// Only immutable aggregates or a finished file URL cross back to SwiftUI.
+enum StatsSnapshotLoader {
+    private static let deletionBatchSize = 256
+
+    @concurrent
+    static func load(
+        modelContainer: ModelContainer,
+        period: StatsPeriod,
+        includeStreak: Bool,
+        podcastIDs: Set<PersistentIdentifier>?
+    ) async throws -> StatsSnapshotReport {
+        try loadSynchronously(
+            modelContainer: modelContainer,
+            period: period,
+            includeStreak: includeStreak,
+            podcastIDs: podcastIDs
+        )
+    }
+
+    private static func loadSynchronously(
+        modelContainer: ModelContainer,
+        period: StatsPeriod,
+        includeStreak: Bool,
+        podcastIDs: Set<PersistentIdentifier>?
+    ) throws -> StatsSnapshotReport {
+        try Task.checkCancellation()
+        let context = ModelContext(modelContainer)
+        let executedOnMain = Thread.isMainThread
+        let stats = try StatsRepository(context: context).stats(
+            for: period,
+            includeStreak: includeStreak,
+            podcastIDs: podcastIDs,
+            cancellationCheck: { try Task.checkCancellation() }
+        )
+        try Task.checkCancellation()
+        return StatsSnapshotReport(
+            stats: stats,
+            executedStoreWorkOnMainThread: executedOnMain || Thread.isMainThread
+        )
+    }
+
+    @concurrent
+    static func exportCSV(modelContainer: ModelContainer) async throws -> URL {
+        try Task.checkCancellation()
+        let context = ModelContext(modelContainer)
+        let text = try StatsRepository(context: context).csv(
+            cancellationCheck: { try Task.checkCancellation() }
+        )
+        try Task.checkCancellation()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("earshot-listening-history-\(UUID().uuidString).csv")
+        try Data(text.utf8).write(to: url, options: .atomic)
+        return url
+    }
+
+    /// A user-confirmed destructive action is durable once it starts: batches
+    /// finish even if the Stats screen is dismissed, avoiding a surprising
+    /// half-deleted history. Each save bounds memory and crash-recovery loss.
+    @concurrent
+    static func deleteAllHistory(
+        modelContainer: ModelContainer
+    ) async throws -> StatsDeletionReport {
+        try deleteAllHistorySynchronously(modelContainer: modelContainer)
+    }
+
+    private static func deleteAllHistorySynchronously(
+        modelContainer: ModelContainer
+    ) throws -> StatsDeletionReport {
+        let context = ModelContext(modelContainer)
+        var removed = 0
+        var executedOnMain = Thread.isMainThread
+        while true {
+            var descriptor = FetchDescriptor<ListeningSession>()
+            descriptor.fetchLimit = deletionBatchSize
+            let batch = try context.fetch(descriptor)
+            executedOnMain = executedOnMain || Thread.isMainThread
+            guard !batch.isEmpty else { break }
+            batch.forEach(context.delete)
+            try context.save()
+            removed += batch.count
+            if batch.count < deletionBatchSize { break }
+        }
+        if removed > 0 {
+            NotificationCenter.default.post(
+                name: .earshotListeningHistoryDidChange,
+                object: nil
+            )
+            AppLog.data.info("Deleted all listening history")
+        }
+        return StatsDeletionReport(
+            removed: removed,
+            executedStoreWorkOnMainThread: executedOnMain
+        )
+    }
+}
+
 /// Startup retention runs on a private context in bounded durable batches. The
 /// previous implementation materialized and deleted every expired listening
 /// session on the main actor during RootView activation, directly competing with
@@ -228,22 +369,17 @@ struct StatsMaintenanceReport: Sendable, Equatable {
 enum StatsMaintenance {
     private static let batchSize = 256
 
+    @concurrent
     static func applyRetention(
         modelContainer: ModelContainer,
         days: Int,
         now: Date = .now
     ) async -> StatsMaintenanceReport {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                continuation.resume(
-                    returning: applyRetentionSynchronously(
-                        modelContainer: modelContainer,
-                        days: days,
-                        now: now
-                    )
-                )
-            }
-        }
+        applyRetentionSynchronously(
+            modelContainer: modelContainer,
+            days: days,
+            now: now
+        )
     }
 
     private static func applyRetentionSynchronously(
