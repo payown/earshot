@@ -290,6 +290,58 @@ final class StatsTests: XCTestCase {
         XCTAssertFalse(report.executedStoreWorkOnMainThread)
     }
 
+    func testBackgroundSnapshotMatchesSynchronousAggregationOffMain() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Background snapshot")
+        makeSession(ctx, podcast: podcast, seconds: 120, speed: 2, date: now)
+        makeCompletedEpisode(ctx, podcast: podcast, guid: "complete", playedAt: now)
+        try ctx.save()
+
+        let expected = StatsRepository(context: ctx).stats(for: .allTime, now: now)
+        let report = try await StatsSnapshotLoader.load(
+            modelContainer: ctx.container,
+            period: .allTime,
+            includeStreak: false,
+            podcastIDs: nil
+        )
+
+        XCTAssertEqual(report.stats, expected)
+        XCTAssertFalse(report.executedStoreWorkOnMainThread)
+    }
+
+    func testBackgroundCSVExportWritesExpectedFile() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Export, Background")
+        makeSession(ctx, podcast: podcast, seconds: 42, speed: 1.5, date: now)
+        try ctx.save()
+
+        let url = try await StatsSnapshotLoader.exportCSV(modelContainer: ctx.container)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let csv = try String(contentsOf: url, encoding: .utf8)
+
+        XCTAssertTrue(csv.hasPrefix("date,podcast,episode,duration_seconds,speed\n"))
+        XCTAssertTrue(csv.contains("\"Export, Background\""))
+        XCTAssertTrue(csv.contains(",42,1.5"))
+    }
+
+    func testBackgroundDeleteAllHistoryUsesBoundedOffMainWork() async throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx, "Delete background")
+        for index in 0..<600 {
+            makeSession(ctx, podcast: podcast, seconds: index, date: now)
+        }
+        try ctx.save()
+
+        let report = try await StatsSnapshotLoader.deleteAllHistory(
+            modelContainer: ctx.container
+        )
+
+        ctx.rollback()
+        XCTAssertEqual(try ctx.fetchCount(FetchDescriptor<ListeningSession>()), 0)
+        XCTAssertEqual(report.removed, 600)
+        XCTAssertFalse(report.executedStoreWorkOnMainThread)
+    }
+
     func testApplyRetentionZeroKeepsEverything() throws {
         let ctx = TestStore.freshContext()
         let a = makePodcast(ctx, "Alpha")

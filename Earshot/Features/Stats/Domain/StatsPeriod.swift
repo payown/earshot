@@ -2,7 +2,7 @@ import Foundation
 
 /// The time window a stats view covers. `since(now:)` is the inclusive lower
 /// bound for sessions, or `nil` for all-time. Mirrors the Flutter `StatsPeriod`.
-enum StatsPeriod: String, CaseIterable, Identifiable {
+enum StatsPeriod: String, CaseIterable, Identifiable, Sendable {
     case thisWeek
     case thisMonth
     case thisYear
@@ -36,7 +36,7 @@ enum StatsPeriod: String, CaseIterable, Identifiable {
 }
 
 /// Aggregated listening stats for a period.
-struct ListeningStats: Equatable {
+struct ListeningStats: Equatable, Sendable {
     var totalSeconds: Int
     var timeSavedSeconds: Int
     var episodesCompleted: Int
@@ -52,7 +52,7 @@ struct ListeningStats: Equatable {
 }
 
 /// Per-podcast listening totals within a period.
-struct PodcastStat: Equatable, Identifiable {
+struct PodcastStat: Equatable, Identifiable, Sendable {
     let podcastTitle: String
     let totalSeconds: Int
     let episodeCount: Int
