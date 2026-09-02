@@ -39,6 +39,19 @@ changing the Inbox interaction contract:
   batches. Generation checks prevent an older period/folder result from
   replacing a newer selection.
 
+Physical-device use of that direct build then isolated a foreground-resume
+latency trigger: VoiceOver speech on an already-presented Now Playing screen was
+significantly slower only after the 15-minute feed-refresh throttle elapsed.
+Foreground CloudKit retry and feed refresh had started in the same scene-active
+turn in which iOS rebuilds the accessibility tree and restores VoiceOver focus.
+The foreground maintenance request now runs at utility priority after a
+structured, cancellable three-second grace period. Returning inactive or
+background during that period cancels the request, while player state, speech,
+focus, and audio-session behavior remain unchanged. The heavy refresh engine
+remains on its private model actor; this change reserves the
+interaction-critical resume window rather than moving AVPlayer or UI-owned
+state away from the main actor.
+
 Full Inbox paging is still intentionally open. It must preserve full-scope
 search, Download all, Clear Inbox, selection, exact counts, and VoiceOver focus;
 splitting that semantic change from the executor correction keeps both reviews
