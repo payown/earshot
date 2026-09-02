@@ -133,11 +133,19 @@ struct SearchView<HeaderContent: View>: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
-    @Query(filter: PodcastQuery.followed) private var podcasts: [Podcast]
-    @Query private var episodes: [Episode]
-    @Query private var bookmarks: [Bookmark]
-
     @State private var query = ""
+    @State private var matchedPodcasts: [Podcast] = []
+    @State private var matchedEpisodes: [Episode] = []
+    @State private var matchedBookmarks: [Bookmark] = []
+    @State private var podcastLimit = LocalSearchScanPolicy.resultPageSize
+    @State private var episodeLimit = LocalSearchScanPolicy.resultPageSize
+    @State private var bookmarkLimit = LocalSearchScanPolicy.resultPageSize
+    @State private var hasMorePodcasts = false
+    @State private var hasMoreEpisodes = false
+    @State private var hasMoreBookmarks = false
+    @State private var isLocalSearchPending = false
+    @State private var localSearchLoaders: LocalSearchLoaders?
+    @State private var localSearchTask: Task<Void, Never>?
     @State private var directoryState: DirectoryState = .idle
     @State private var directoryTask: Task<Void, Never>?
     /// The last directory summary spoken to VoiceOver. Used to suppress repeat
@@ -155,22 +163,6 @@ struct SearchView<HeaderContent: View>: View {
     /// rather than stored because `SearchView` is generic (over its header content)
     /// and generic types can't hold static stored properties.
     private static var debounce: Duration { .milliseconds(350) }
-
-    private var matchedPodcasts: [Podcast] {
-        SearchLogic.filter(podcasts, query: query) { "\($0.title) \($0.author ?? "")" }
-    }
-    private var matchedEpisodes: [Episode] {
-        SearchLogic.filter(
-            episodes.filter(PodcastQuery.isInFollowedLibrary),
-            query: query
-        ) { $0.title }
-    }
-    private var matchedBookmarks: [Bookmark] {
-        SearchLogic.filter(
-            bookmarks.filter(PodcastQuery.isInFollowedLibrary),
-            query: query
-        ) { "\($0.note) \($0.episode?.title ?? "")" }
-    }
 
     /// Whether this scope surfaced any LOCAL results to the user. Only counts the
     /// sections this scope actually renders, so the Add-Podcast scope (which hides
@@ -203,6 +195,9 @@ struct SearchView<HeaderContent: View>: View {
                             : nil))
                         .rotorActions(fullDescriptionActions(for: podcast))
                     }
+                    if hasMorePodcasts {
+                        showMoreButton(section: .podcasts, loaded: matchedPodcasts.count)
+                    }
                 }
             }
             if scope.showsEpisodes && !matchedEpisodes.isEmpty {
@@ -217,12 +212,18 @@ struct SearchView<HeaderContent: View>: View {
                             performAction: { action in perform(action, for: episode) }
                         )
                     }
+                    if hasMoreEpisodes {
+                        showMoreButton(section: .episodes, loaded: matchedEpisodes.count)
+                    }
                 }
             }
             if scope.showsBookmarks && !matchedBookmarks.isEmpty {
                 Section(header: Text("Bookmarks").accessibilityAddTraits(.isHeader)) {
                     ForEach(matchedBookmarks) { bookmark in
                         bookmarkRow(bookmark)
+                    }
+                    if hasMoreBookmarks {
+                        showMoreButton(section: .bookmarks, loaded: matchedBookmarks.count)
                     }
                 }
             }
@@ -245,15 +246,38 @@ struct SearchView<HeaderContent: View>: View {
         // up, so no network request, debounce task, or directory state change can
         // occur.
         .onChange(of: query) { _, newValue in
+            scheduleLocalSearch(for: newValue)
             if scope.showsDirectory { scheduleDirectorySearch(for: newValue) }
         }
-        .onDisappear { directoryTask?.cancel() }
+        .onDisappear {
+            directoryTask?.cancel()
+            localSearchTask?.cancel()
+        }
         .navigationDestination(for: Podcast.self) { EpisodeListView(podcast: $0) }
         .sheet(item: $showNotesEpisode) { ShowNotesView(episode: $0) }
         .sheet(item: $bookmarksEpisode) { BookmarksListView(episode: $0) }
         .sheet(item: $sharingEpisode) { ShareSheet(items: shareItems(for: $0)) }
         .sheet(item: $fullPodcastDescription) { PodcastDescriptionView(presentation: $0) }
         .overlay { emptyOverlay }
+    }
+
+    private enum LocalSection: String {
+        case podcasts
+        case episodes
+        case bookmarks
+
+        var spokenName: String { rawValue }
+    }
+
+    private func showMoreButton(section: LocalSection, loaded: Int) -> some View {
+        Button("Show more \(section.spokenName), \(loaded) loaded") {
+            switch section {
+            case .podcasts: podcastLimit += LocalSearchScanPolicy.resultPageSize
+            case .episodes: episodeLimit += LocalSearchScanPolicy.resultPageSize
+            case .bookmarks: bookmarkLimit += LocalSearchScanPolicy.resultPageSize
+            }
+            scheduleLocalSearch(for: query, immediate: true)
+        }
     }
 
     private func fullDescriptionActions(for podcast: Podcast) -> [QuickActionItem] {
@@ -310,7 +334,7 @@ struct SearchView<HeaderContent: View>: View {
                     )
                 }
             }
-        } else if scope == .library && !hasLocalResults {
+        } else if scope == .library && !isLocalSearchPending && !hasLocalResults {
             ContentUnavailableView("No results in your library", systemImage: "magnifyingglass",
                                    description: Text("Nothing in your podcasts, episodes, or bookmarks matches “\(query)”. To find new podcasts, use Add podcast."))
         }
@@ -396,6 +420,108 @@ struct SearchView<HeaderContent: View>: View {
             onShowNotes: { showNotesEpisode = episode }, onShare: { sharingEpisode = episode },
             onBookmarks: { bookmarksEpisode = episode }
         ).first?.run()
+    }
+
+    /// Debounces local work independently from directory requests and cancels a
+    /// superseded scan. Publication is guarded by both cooperative cancellation
+    /// and the exact query value, so an older result can neither replace newer
+    /// rows nor cause a focus/announcement side effect. Local search is
+    /// intentionally silent and never changes accessibility focus.
+    private func scheduleLocalSearch(for term: String, immediate: Bool = false) {
+        localSearchTask?.cancel()
+
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            isLocalSearchPending = false
+            matchedPodcasts = []
+            matchedEpisodes = []
+            matchedBookmarks = []
+            podcastLimit = LocalSearchScanPolicy.resultPageSize
+            episodeLimit = LocalSearchScanPolicy.resultPageSize
+            bookmarkLimit = LocalSearchScanPolicy.resultPageSize
+            hasMorePodcasts = false
+            hasMoreEpisodes = false
+            hasMoreBookmarks = false
+            return
+        }
+
+        isLocalSearchPending = true
+
+        if localSearchLoaders == nil {
+            localSearchLoaders = LocalSearchLoaders(
+                scope: scope,
+                modelContainer: context.container
+            )
+        }
+        guard let loaders = localSearchLoaders else { return }
+        let requestedPodcastLimit = podcastLimit
+        let requestedEpisodeLimit = episodeLimit
+        let requestedBookmarkLimit = bookmarkLimit
+
+        localSearchTask = Task {
+            if !immediate {
+                try? await Task.sleep(for: .milliseconds(175))
+                if Task.isCancelled { return }
+            }
+
+            let interval = PerformanceSignposts.signposter.beginInterval("LocalSearchQuery")
+            do {
+                async let podcastPage = loaders.podcasts.page(
+                    query: trimmed,
+                    limit: requestedPodcastLimit
+                )
+                async let episodePage = loaders.episodes?.page(
+                    query: trimmed,
+                    limit: requestedEpisodeLimit
+                )
+                async let bookmarkPage = loaders.bookmarks?.page(
+                    query: trimmed,
+                    limit: requestedBookmarkLimit
+                )
+                let pages = try await (podcastPage, episodePage, bookmarkPage)
+                try Task.checkCancellation()
+                guard query == term else {
+                    PerformanceSignposts.signposter.endInterval("LocalSearchQuery", interval)
+                    return
+                }
+
+                matchedPodcasts = pages.0.ids.compactMap {
+                    context.model(for: $0) as? Podcast
+                }
+                matchedEpisodes = (pages.1?.ids ?? []).compactMap {
+                    context.model(for: $0) as? Episode
+                }
+                matchedBookmarks = (pages.2?.ids ?? []).compactMap {
+                    context.model(for: $0) as? Bookmark
+                }
+                hasMorePodcasts = pages.0.hasMore
+                hasMoreEpisodes = pages.1?.hasMore ?? false
+                hasMoreBookmarks = pages.2?.hasMore ?? false
+                isLocalSearchPending = false
+
+                let returned = matchedPodcasts.count
+                    + matchedEpisodes.count
+                    + matchedBookmarks.count
+                let inspected = pages.0.inspectedCount
+                    + (pages.1?.inspectedCount ?? 0)
+                    + (pages.2?.inspectedCount ?? 0)
+                PerformanceSignposts.signposter.endInterval(
+                    "LocalSearchQuery",
+                    interval,
+                    "inspectedCount=\(inspected), returnedCount=\(returned)"
+                )
+            } catch {
+                PerformanceSignposts.signposter.endInterval("LocalSearchQuery", interval)
+                guard !Task.isCancelled, query == term else { return }
+                matchedPodcasts = []
+                matchedEpisodes = []
+                matchedBookmarks = []
+                hasMorePodcasts = false
+                hasMoreEpisodes = false
+                hasMoreBookmarks = false
+                isLocalSearchPending = false
+            }
+        }
     }
 
     /// Debounces directory searches: each keystroke cancels the previous in-flight
