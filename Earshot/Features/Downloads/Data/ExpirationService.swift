@@ -12,20 +12,24 @@ struct ExpirationMaintenanceReport: Sendable, Equatable {
 /// activation uses this entry point so whole-queue scans and file deletion do
 /// not compete with VoiceOver's first focus movement.
 enum ExpirationMaintenance {
+    @concurrent
     static func run(
         modelContainer: ModelContainer,
         now: Date = .now
     ) async -> ExpirationMaintenanceReport {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                let context = ModelContext(modelContainer)
-                continuation.resume(returning: ExpirationWork.run(
-                    context: context,
-                    now: now,
-                    saveOperation: { try $0.save() }
-                ))
-            }
+        guard !Task.isCancelled else {
+            return ExpirationMaintenanceReport(
+                expired: 0,
+                purged: 0,
+                executedStoreWorkOnMainThread: false
+            )
         }
+        let context = ModelContext(modelContainer)
+        return ExpirationWork.run(
+            context: context,
+            now: now,
+            saveOperation: { try $0.save() }
+        )
     }
 }
 

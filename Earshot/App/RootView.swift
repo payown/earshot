@@ -60,20 +60,15 @@ struct TabBadgeSnapshot: Sendable, Equatable {
 }
 
 enum TabBadgeSnapshotLoader {
+    @concurrent
     static func inboxCount(
         modelContainer: ModelContainer,
         optInOnly: Bool
     ) async -> TabBadgeSnapshot {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                continuation.resume(
-                    returning: inboxCountSynchronously(
-                        modelContainer: modelContainer,
-                        optInOnly: optInOnly
-                    )
-                )
-            }
-        }
+        inboxCountSynchronously(
+            modelContainer: modelContainer,
+            optInOnly: optInOnly
+        )
     }
 
     private static func inboxCountSynchronously(
@@ -95,23 +90,26 @@ enum TabBadgeSnapshotLoader {
         )
     }
 
+    @concurrent
     static func queueCount(
         modelContainer: ModelContainer
     ) async -> TabBadgeSnapshot {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                let context = ModelContext(modelContainer)
-                let onMainThread = Thread.isMainThread
-                let descriptor = FetchDescriptor<QueueItem>(
-                    predicate: #Predicate { $0.episode != nil }
-                )
-                let count = (try? context.fetchCount(descriptor)) ?? 0
-                continuation.resume(returning: TabBadgeSnapshot(
-                    count: count,
-                    executedStoreWorkOnMainThread: onMainThread || Thread.isMainThread
-                ))
-            }
-        }
+        queueCountSynchronously(modelContainer: modelContainer)
+    }
+
+    private static func queueCountSynchronously(
+        modelContainer: ModelContainer
+    ) -> TabBadgeSnapshot {
+        let context = ModelContext(modelContainer)
+        let onMainThread = Thread.isMainThread
+        let descriptor = FetchDescriptor<QueueItem>(
+            predicate: #Predicate { $0.episode != nil }
+        )
+        let count = (try? context.fetchCount(descriptor)) ?? 0
+        return TabBadgeSnapshot(
+            count: count,
+            executedStoreWorkOnMainThread: onMainThread || Thread.isMainThread
+        )
     }
 }
 

@@ -88,34 +88,32 @@ struct InboxCandidateSnapshot: Sendable, Equatable {
 /// preserving the existing search and bulk-action scopes byte-for-byte without
 /// making VoiceOver wait for the relationship query.
 enum InboxSnapshotLoader {
+    @concurrent
     static func all(
         modelContainer: ModelContainer,
         optInOnly: Bool
     ) async throws -> InboxCandidateSnapshot {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    continuation.resume(returning: try allSynchronously(
-                        modelContainer: modelContainer,
-                        optInOnly: optInOnly
-                    ))
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        try allSynchronously(
+            modelContainer: modelContainer,
+            optInOnly: optInOnly
+        )
     }
 
     private static func allSynchronously(
         modelContainer: ModelContainer,
         optInOnly: Bool
     ) throws -> InboxCandidateSnapshot {
+        try Task.checkCancellation()
         let modelContext = ModelContext(modelContainer)
+        // A played episode cannot be in Inbox and always has a non-nil
+        // `playedAt`. Apply that durable scalar bound in SQLite so legacy
+        // played-but-not-dismissed history never enters the interactive load.
         let descriptor = FetchDescriptor<Episode>(
-            predicate: InboxQuery.predicate(optInOnly: optInOnly),
+            predicate: InboxQuery.unplayedPredicate(optInOnly: optInOnly),
             sortBy: [SortDescriptor(\Episode.pubDate, order: .reverse)]
         )
         let candidates = try modelContext.fetch(descriptor)
+        try Task.checkCancellation()
         let ids = try candidates.compactMap { episode -> PersistentIdentifier? in
             try Task.checkCancellation()
             return Self.isCurrentInboxEpisode(episode, optInOnly: optInOnly)
@@ -128,24 +126,17 @@ enum InboxSnapshotLoader {
         )
     }
 
+    @concurrent
     static func folder(
         modelContainer: ModelContainer,
         id folderID: PersistentIdentifier,
         optInOnly: Bool
     ) async throws -> InboxCandidateSnapshot {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    continuation.resume(returning: try folderSynchronously(
-                        modelContainer: modelContainer,
-                        id: folderID,
-                        optInOnly: optInOnly
-                    ))
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        try folderSynchronously(
+            modelContainer: modelContainer,
+            id: folderID,
+            optInOnly: optInOnly
+        )
     }
 
     private static func folderSynchronously(
@@ -153,6 +144,7 @@ enum InboxSnapshotLoader {
         id folderID: PersistentIdentifier,
         optInOnly: Bool
     ) throws -> InboxCandidateSnapshot {
+        try Task.checkCancellation()
         let modelContext = ModelContext(modelContainer)
         var folderDescriptor = FetchDescriptor<PodcastFolder>(
             predicate: #Predicate { $0.persistentModelID == folderID }
@@ -266,7 +258,7 @@ final class InboxRepository {
     func inboxEpisodes() -> [Episode] {
         let optInOnly = settings.bool(SettingsKey.inboxOptInOnly, default: SettingsDefault.inboxOptInOnly)
         let descriptor = FetchDescriptor<Episode>(
-            predicate: InboxQuery.predicate(optInOnly: optInOnly),
+            predicate: InboxQuery.unplayedPredicate(optInOnly: optInOnly),
             sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
         )
         return ((try? context.fetch(descriptor)) ?? []).filter {
