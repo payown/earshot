@@ -40,13 +40,11 @@ struct FolderDetailScreen: View {
     @State private var exportTranscriptEpisode: Episode?
     @State private var bookmarksEpisode: Episode?
     @State private var folderPickRequest: FolderPickRequest?
-    // `episodes(in:)` reads a detached `FetchDescriptor` (EpisodeFolderMembership
-    // has no inverse on PodcastFolder, by design), so — unlike `members` /
-    // `subfolders`, which ride tracked relationships — SwiftUI's Observation does
-    // NOT re-render this section when a membership is deleted here. Bumping this
-    // token inside `body`'s dependency graph (read via the `episodes` computed
-    // property) forces the one re-render after an in-screen "Remove from folder".
-    @State private var episodesReloadToken = 0
+    // One event-driven, folder-scoped presentation snapshot keeps membership
+    // fetches and count derivation out of `body` while preserving the exact rows
+    // and their persistent identities.
+    @State private var detailSnapshot: FolderDetailSnapshot?
+    @State private var snapshotReloadScheduled = false
     // Re-anchored after a "Remove from folder" so VoiceOver focus lands on the
     // still-present neighbor row, never the episode that just left this folder.
     @AccessibilityFocusState private var focusedEpisodeID: PersistentIdentifier?
@@ -87,33 +85,19 @@ struct FolderDetailScreen: View {
     // iOS mirrors swipe actions into the VoiceOver rotor, which duplicated the
     // row's custom "Remove from folder" action (#577).
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
-    @Query private var podcastMemberships: [FolderMembership]
-
     private var repository: FolderRepository { FolderRepository(context: context) }
 
     private var members: [Podcast] {
-        repository.podcasts(in: folder)
+        detailSnapshot?.podcasts ?? []
     }
 
     private var subfolders: [PodcastFolder] {
-        // Read through the tracked `children` relationship — NOT a detached
-        // `FetchDescriptor` — so SwiftUI's Observation re-renders when a non-drag
-        // reorder mutates a child's `sortOrder`. Podcast membership changes are
-        // observed separately through `podcastMemberships`, avoiding an inverse
-        // relationship fault while keeping row counts live.
-        // Sorted by `sortOrder` then name to match `FolderRepository.childFolders(of:)`.
-        (folder.children ?? []).sorted { lhs, rhs in
-            if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
-            return lhs.name < rhs.name
-        }
+        detailSnapshot?.subfolders ?? []
     }
 
     /// The episodes hand-picked into this folder (#759), in membership order.
-    /// Reads `episodesReloadToken` first so a bump forces `body` to re-run and
-    /// re-fetch after an in-screen removal (see the token's declaration note).
     private var episodes: [Episode] {
-        _ = episodesReloadToken
-        return repository.episodes(in: folder)
+        detailSnapshot?.episodes ?? []
     }
 
     private var isNested: Bool { folder.parent != nil }
@@ -215,11 +199,31 @@ struct FolderDetailScreen: View {
             .episodeAudioExport($exportEpisode)
             .episodeTranscriptExport($exportTranscriptEpisode)
             .folderPicker($folderPickRequest)
+            .task(id: folder.persistentModelID) { reloadSnapshot() }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .earshotFoldersDidChange)
+                    .receive(on: DispatchQueue.main)
+            ) { _ in
+                scheduleSnapshotReload()
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .earshotSubscriptionsDidChange)
+                    .receive(on: DispatchQueue.main)
+            ) { _ in
+                scheduleSnapshotReload()
+            }
     }
 
     @ViewBuilder
     private var content: some View {
-        if isCompletelyEmpty {
+        if detailSnapshot == nil {
+            ProgressView("Loading folder")
+                // Snapshot creation is synchronous and normally completes in the
+                // first task turn. Keep that transient implementation detail out
+                // of VoiceOver's swipe order so the screen's established first
+                // spoken element and focus behavior do not change.
+                .accessibilityHidden(true)
+        } else if isCompletelyEmpty {
             emptyState
         } else {
             List {
@@ -336,7 +340,7 @@ struct FolderDetailScreen: View {
         .accessibilityLabel(
             FolderDetailLabel.subfolderRow(
                 name: child.name,
-                subfolderCount: child.children?.count ?? 0,
+                subfolderCount: subfolderCount(in: child),
                 podcastCount: podcastCount(in: child)
             )
         )
@@ -377,7 +381,7 @@ struct FolderDetailScreen: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(child.name).font(.headline)
-                Text("^[\(child.children?.count ?? 0) subfolder](inflect: true), ^[\(podcastCount(in: child)) podcast](inflect: true)")
+                Text("^[\(subfolderCount(in: child)) subfolder](inflect: true), ^[\(podcastCount(in: child)) podcast](inflect: true)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -385,10 +389,11 @@ struct FolderDetailScreen: View {
     }
 
     private func podcastCount(in folder: PodcastFolder) -> Int {
-        let folderID = folder.persistentModelID
-        return podcastMemberships.lazy.filter {
-            $0.folder?.persistentModelID == folderID
-        }.count
+        detailSnapshot?.podcastCounts[folder.persistentModelID] ?? 0
+    }
+
+    private func subfolderCount(in folder: PodcastFolder) -> Int {
+        detailSnapshot?.subfolderCounts[folder.persistentModelID] ?? 0
     }
 
     // MARK: Podcasts
@@ -671,7 +676,7 @@ struct FolderDetailScreen: View {
                 } label: {
                     Label("Folder listening actions", systemImage: "play.circle")
                 }
-                .disabled(repository.subtreeSubscriptions(of: folder).isEmpty)
+                .disabled(detailSnapshot?.hasSubtreeSubscriptions != true)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 optionsMenu
@@ -976,7 +981,6 @@ struct FolderDetailScreen: View {
         Announcer.announce(
             FolderDetailLabel.removeEpisodeAnnouncement(title: title, folderName: folder.name)
         )
-        episodesReloadToken += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             if let neighbor {
                 focusedEpisodeID = neighbor
@@ -1010,5 +1014,18 @@ struct FolderDetailScreen: View {
         repository.delete(folder)
         Announcer.announce("Deleted folder \(name)")
         dismiss()
+    }
+
+    private func scheduleSnapshotReload() {
+        guard !snapshotReloadScheduled else { return }
+        snapshotReloadScheduled = true
+        DispatchQueue.main.async {
+            snapshotReloadScheduled = false
+            reloadSnapshot()
+        }
+    }
+
+    private func reloadSnapshot() {
+        detailSnapshot = repository.detailSnapshot(for: folder)
     }
 }

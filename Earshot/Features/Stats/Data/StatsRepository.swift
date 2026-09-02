@@ -25,6 +25,8 @@ final class StatsRepository {
         includeStreak: Bool = false,
         podcastIDs: Set<PersistentIdentifier>? = nil
     ) -> ListeningStats {
+        let interval = PerformanceSignposts.signposter.beginInterval("StatsAggregation")
+        defer { PerformanceSignposts.signposter.endInterval("StatsAggregation", interval) }
         let since = period.since(now: now)
         let sessions = sessionsSince(since, podcastIDs: podcastIDs)
 
@@ -66,9 +68,11 @@ final class StatsRepository {
     func applyRetention(days: Int, now: Date = .now) {
         guard days > 0 else { return }
         let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
-        let stale = (try? context.fetch(FetchDescriptor<ListeningSession>())) ?? []
+        let stale = (try? context.fetch(FetchDescriptor<ListeningSession>(
+            predicate: #Predicate { $0.date < cutoff }
+        ))) ?? []
         var removed = 0
-        for session in stale where session.date < cutoff {
+        for session in stale {
             context.delete(session)
             removed += 1
         }
@@ -141,9 +145,16 @@ final class StatsRepository {
         _ since: Date?,
         podcastIDs: Set<PersistentIdentifier>? = nil
     ) -> [ListeningSession] {
-        let all = (try? context.fetch(FetchDescriptor<ListeningSession>())) ?? []
+        let descriptor: FetchDescriptor<ListeningSession>
+        if let since {
+            descriptor = FetchDescriptor<ListeningSession>(
+                predicate: #Predicate { $0.date >= since }
+            )
+        } else {
+            descriptor = FetchDescriptor<ListeningSession>()
+        }
+        let all = (try? context.fetch(descriptor)) ?? []
         return all.filter { session in
-            if let since, session.date < since { return false }
             guard let podcastIDs else { return true }
             guard let podcastID = podcast(for: session)?.persistentModelID else { return false }
             return podcastIDs.contains(podcastID)
@@ -163,15 +174,17 @@ final class StatsRepository {
         // Scope the store fetch to completed rows. Large libraries can contain
         // hundreds of thousands of episodes, while only played rows contribute
         // to this value; folder filtering remains an inexpensive identity check.
+        // Keep the optional-date cutoff in memory after the store has removed
+        // every unplayed row. SwiftData does not reliably include pending
+        // inserts when a predicate force-unwraps an optional date, and stats are
+        // also queried from tests/import paths before an explicit save.
         let descriptor = FetchDescriptor<Episode>(
             predicate: #Predicate { $0.playedAt != nil }
         )
         let played = (try? context.fetch(descriptor)) ?? []
         return played.filter { episode in
             guard let playedAt = episode.playedAt else { return false }
-            guard let since else { return true }
-            return playedAt >= since
-        }.filter { episode in
+            if let since, playedAt < since { return false }
             guard let podcastIDs else { return true }
             guard let podcastID = episode.podcast?.persistentModelID else { return false }
             return podcastIDs.contains(podcastID)
@@ -199,6 +212,91 @@ final class StatsRepository {
             NotificationCenter.default.post(name: .earshotListeningHistoryDidChange, object: nil)
         } catch {
             AppLog.data.error("Stats save failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+}
+
+/// Startup retention runs on a private context in bounded durable batches. The
+/// previous implementation materialized and deleted every expired listening
+/// session on the main actor during RootView activation, directly competing with
+/// VoiceOver focus movement on a cold launch.
+struct StatsMaintenanceReport: Sendable, Equatable {
+    let removed: Int
+    let executedStoreWorkOnMainThread: Bool
+}
+
+enum StatsMaintenance {
+    private static let batchSize = 256
+
+    static func applyRetention(
+        modelContainer: ModelContainer,
+        days: Int,
+        now: Date = .now
+    ) async -> StatsMaintenanceReport {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(
+                    returning: applyRetentionSynchronously(
+                        modelContainer: modelContainer,
+                        days: days,
+                        now: now
+                    )
+                )
+            }
+        }
+    }
+
+    private static func applyRetentionSynchronously(
+        modelContainer: ModelContainer,
+        days: Int,
+        now: Date
+    ) -> StatsMaintenanceReport {
+        guard days > 0 else {
+            return StatsMaintenanceReport(
+                removed: 0,
+                executedStoreWorkOnMainThread: false
+            )
+        }
+        let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
+        let modelContext = ModelContext(modelContainer)
+        var removed = 0
+        var executedStoreWorkOnMainThread = false
+        do {
+            while true {
+                try Task.checkCancellation()
+                executedStoreWorkOnMainThread = executedStoreWorkOnMainThread
+                    || Thread.isMainThread
+                var descriptor = FetchDescriptor<ListeningSession>(
+                    predicate: #Predicate { $0.date < cutoff }
+                )
+                descriptor.fetchLimit = Self.batchSize
+                let stale = try modelContext.fetch(descriptor)
+                guard !stale.isEmpty else { break }
+                stale.forEach(modelContext.delete)
+                try modelContext.save()
+                removed += stale.count
+                if stale.count < Self.batchSize { break }
+            }
+            if removed > 0 {
+                AppLog.data.info("Stats retention removed \(removed) old session(s)")
+            }
+            return StatsMaintenanceReport(
+                removed: removed,
+                executedStoreWorkOnMainThread: executedStoreWorkOnMainThread
+            )
+        } catch is CancellationError {
+            return StatsMaintenanceReport(
+                removed: 0,
+                executedStoreWorkOnMainThread: executedStoreWorkOnMainThread
+            )
+        } catch {
+            AppLog.data.error(
+                "Stats retention failed: \(error.localizedDescription, privacy: .public)"
+            )
+            return StatsMaintenanceReport(
+                removed: 0,
+                executedStoreWorkOnMainThread: executedStoreWorkOnMainThread
+            )
         }
     }
 }

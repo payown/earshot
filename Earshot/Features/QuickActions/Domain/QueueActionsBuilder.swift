@@ -7,13 +7,13 @@ import SwiftData
 /// - `.grouped`: only Move up / down, swapping within the row's podcast group
 ///   (top/bottom are ambiguous across groups, so they're dropped).
 /// - `.groupedByFolder`: same as `.grouped` but swapping within the row's FOLDER
-///   group (#762), keyed by the subtree-aware `rootByPodcast` map so a row can
-///   move past a different podcast that shares its folder.
+///   group (#762), keyed by the episode-first folder resolution so a row can
+///   move past another show in the same folder without drifting from display.
 /// - `.none`: no move actions at all.
 enum QueueMoveMode: Equatable {
     case flat
     case grouped
-    case groupedByFolder(rootByPodcast: [PersistentIdentifier: PersistentIdentifier])
+    case groupedByFolder(resolution: QueueFolderResolution)
     case none
 
     /// Whether the mode renders episodes in grouped sections (podcast or folder),
@@ -134,9 +134,9 @@ func buildQueueActions(
             case .grouped:
                 return QuickActionItem(label: "Move up", isDestructive: false,
                                        run: moved(repo.moveUpWithinGroup, "Moved \(episode.title) up"))
-            case let .groupedByFolder(rootByPodcast):
+            case let .groupedByFolder(resolution):
                 return QuickActionItem(label: "Move up", isDestructive: false,
-                                       run: moved({ repo.moveUpWithinFolderGroup($0, rootByPodcast: rootByPodcast) },
+                                       run: moved({ repo.moveUpWithinFolderGroup($0, resolution: resolution) },
                                                   "Moved \(episode.title) up"))
             case .none:
                 return nil
@@ -149,9 +149,9 @@ func buildQueueActions(
             case .grouped:
                 return QuickActionItem(label: "Move down", isDestructive: false,
                                        run: moved(repo.moveDownWithinGroup, "Moved \(episode.title) down"))
-            case let .groupedByFolder(rootByPodcast):
+            case let .groupedByFolder(resolution):
                 return QuickActionItem(label: "Move down", isDestructive: false,
-                                       run: moved({ repo.moveDownWithinFolderGroup($0, rootByPodcast: rootByPodcast) },
+                                       run: moved({ repo.moveDownWithinFolderGroup($0, resolution: resolution) },
                                                   "Moved \(episode.title) down"))
             case .none:
                 return nil

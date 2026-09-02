@@ -261,7 +261,7 @@ struct QueueScreen: View {
             let folderGrouping = repo.groupedQueueByFolder()
             groupedList(
                 groups: filtered(folderGrouping.groups),
-                moveMode: .groupedByFolder(rootByPodcast: folderGrouping.rootByPodcast),
+                moveMode: .groupedByFolder(resolution: folderGrouping.resolution),
                 folderGrouping: folderGrouping
             )
         } else {
@@ -389,19 +389,19 @@ struct QueueScreen: View {
     private func playGroup(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) -> Episode? {
         if let podcast = group.podcast { return repo.playGroup(podcast) }
         guard let folderGrouping else { return nil }
-        return repo.playGroup(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+        return repo.playGroup(group.kind, resolution: folderGrouping.resolution)
     }
 
     private func moveGroupUp(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) -> Bool {
         if let podcast = group.podcast { return repo.moveGroupUp(podcast) }
         guard let folderGrouping else { return false }
-        return repo.moveGroupUp(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+        return repo.moveGroupUp(group.kind, resolution: folderGrouping.resolution)
     }
 
     private func moveGroupDown(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) -> Bool {
         if let podcast = group.podcast { return repo.moveGroupDown(podcast) }
         guard let folderGrouping else { return false }
-        return repo.moveGroupDown(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+        return repo.moveGroupDown(group.kind, resolution: folderGrouping.resolution)
     }
 
     private func sortNewest(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) {
@@ -410,7 +410,7 @@ struct QueueScreen: View {
             return
         }
         guard let folderGrouping else { return }
-        repo.playNewestFirst(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+        repo.playNewestFirst(group.kind, resolution: folderGrouping.resolution)
     }
 
     private func sortOldest(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) {
@@ -419,7 +419,7 @@ struct QueueScreen: View {
             return
         }
         guard let folderGrouping else { return }
-        repo.playOldestFirst(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+        repo.playOldestFirst(group.kind, resolution: folderGrouping.resolution)
     }
 
     private func shuffleGroup(_ group: QueueGroup, folderGrouping: QueueFolderGrouping?) {
@@ -428,7 +428,7 @@ struct QueueScreen: View {
             return
         }
         guard let folderGrouping else { return }
-        repo.shuffleGroup(group.kind, rootByPodcast: folderGrouping.rootByPodcast)
+        repo.shuffleGroup(group.kind, resolution: folderGrouping.resolution)
     }
 
     // MARK: Row
@@ -590,8 +590,8 @@ struct QueueScreen: View {
                 switch moveMode {
                 case .grouped:
                     repo.moveUpWithinGroup(episode)
-                case let .groupedByFolder(rootByPodcast):
-                    repo.moveUpWithinFolderGroup(episode, rootByPodcast: rootByPodcast)
+                case let .groupedByFolder(resolution):
+                    repo.moveUpWithinFolderGroup(episode, resolution: resolution)
                 case .flat, .none:
                     break
                 }
@@ -599,8 +599,8 @@ struct QueueScreen: View {
                 switch moveMode {
                 case .grouped:
                     repo.moveDownWithinGroup(episode)
-                case let .groupedByFolder(rootByPodcast):
-                    repo.moveDownWithinFolderGroup(episode, rootByPodcast: rootByPodcast)
+                case let .groupedByFolder(resolution):
+                    repo.moveDownWithinFolderGroup(episode, resolution: resolution)
                 case .flat, .none:
                     break
                 }

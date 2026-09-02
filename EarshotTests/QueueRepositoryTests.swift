@@ -548,8 +548,8 @@ final class QueueRepositoryTests: XCTestCase {
         XCTAssertEqual(grouping.groups[0].episodes.map(\.title), ["Ep a1", "Ep a2"])
         XCTAssertEqual(grouping.groups[1].episodes.map(\.title), ["Ep b1"])
         XCTAssertEqual(grouping.groups[2].episodes.map(\.title), ["Ep u1"])
-        XCTAssertEqual(grouping.rootByPodcast[pa.persistentModelID], news.persistentModelID)
-        XCTAssertNil(grouping.rootByPodcast[pu.persistentModelID])
+        XCTAssertEqual(grouping.resolution.rootByPodcast[pa.persistentModelID], news.persistentModelID)
+        XCTAssertNil(grouping.resolution.rootByPodcast[pu.persistentModelID])
     }
 
     func testFolderGroupingUsesFirstTopLevelFolderForMultiplyFiledPodcast() {
@@ -567,7 +567,62 @@ final class QueueRepositoryTests: XCTestCase {
         let grouping = repo.groupedQueueByFolder()
 
         XCTAssertEqual(grouping.groups.map(\.title), ["First"])
-        XCTAssertEqual(grouping.rootByPodcast[podcast.persistentModelID], first.persistentModelID)
+        XCTAssertEqual(grouping.resolution.rootByPodcast[podcast.persistentModelID], first.persistentModelID)
+    }
+
+    func testFolderGroupingPrefersAnEpisodesExplicitFolderOverItsPodcastFolder() {
+        let ctx = TestStore.freshContext()
+        let folders = FolderRepository(context: ctx)
+        let morning = folders.createFolder(name: "Morning")
+        let saturday = folders.createFolder(name: "Saturday")
+        let podcast = makePodcast(ctx, "Daily")
+        folders.add(podcast, to: morning)
+
+        let ordinary = makeEpisode(ctx, "ordinary", podcast: podcast)
+        let long = makeEpisode(ctx, "long", podcast: podcast)
+        folders.addEpisodes([long], to: saturday)
+        let repo = QueueRepository(context: ctx)
+        repo.add([ordinary, long])
+
+        let grouping = repo.groupedQueueByFolder()
+
+        XCTAssertEqual(grouping.groups.map(\.title), ["Morning", "Saturday"])
+        XCTAssertEqual(grouping.groups[0].episodes.map(\.title), ["Ep ordinary"])
+        XCTAssertEqual(grouping.groups[1].episodes.map(\.title), ["Ep long"])
+        XCTAssertEqual(
+            grouping.resolution.rootByEpisode[long.persistentModelID],
+            saturday.persistentModelID,
+            "Direct episode filing must override the podcast's usual Queue folder"
+        )
+
+        let front = repo.playGroup(
+            .folder(saturday.persistentModelID),
+            resolution: grouping.resolution
+        )
+        XCTAssertEqual(front?.persistentModelID, long.persistentModelID)
+        XCTAssertEqual(titles(repo), ["Ep long", "Ep ordinary"],
+                       "Folder rotor actions must use the same episode-first grouping as display")
+    }
+
+    func testExplicitEpisodeInSeveralRootsUsesFirstFolderOrderDeterministically() {
+        let ctx = TestStore.freshContext()
+        let folders = FolderRepository(context: ctx)
+        let first = folders.createFolder(name: "First")
+        let second = folders.createFolder(name: "Second")
+        let podcast = makePodcast(ctx, "A")
+        let episode = makeEpisode(ctx, "a1", podcast: podcast)
+        folders.addEpisodes([episode], to: second)
+        folders.addEpisodes([episode], to: first)
+        let repo = QueueRepository(context: ctx)
+        repo.add(episode)
+
+        let grouping = repo.groupedQueueByFolder()
+
+        XCTAssertEqual(grouping.groups.map(\.title), ["First"])
+        XCTAssertEqual(
+            grouping.resolution.rootByEpisode[episode.persistentModelID],
+            first.persistentModelID
+        )
     }
 
     func testMoveWithinFolderGroupCanCrossPodcastBoundary() {
@@ -586,9 +641,9 @@ final class QueueRepositoryTests: XCTestCase {
         let b = makeEpisode(ctx, "b", podcast: pb)
         let repo = QueueRepository(context: ctx)
         [a, c, b].forEach(repo.add)
-        let map = repo.groupedQueueByFolder().rootByPodcast
+        let resolution = repo.groupedQueueByFolder().resolution
 
-        XCTAssertTrue(repo.moveDownWithinFolderGroup(a, rootByPodcast: map))
+        XCTAssertTrue(repo.moveDownWithinFolderGroup(a, resolution: resolution))
 
         XCTAssertEqual(titles(repo), ["Ep b", "Ep c", "Ep a"])
     }
@@ -612,10 +667,10 @@ final class QueueRepositoryTests: XCTestCase {
         let grouping = repo.groupedQueueByFolder()
         let firstKey = QueueGroup.Kind.folder(first.persistentModelID)
 
-        XCTAssertTrue(repo.moveGroupDown(firstKey, rootByPodcast: grouping.rootByPodcast))
+        XCTAssertTrue(repo.moveGroupDown(firstKey, resolution: grouping.resolution))
         XCTAssertEqual(titles(repo), ["Ep b", "Ep a", "Ep c"])
 
-        let front = repo.playGroup(firstKey, rootByPodcast: grouping.rootByPodcast)
+        let front = repo.playGroup(firstKey, resolution: grouping.resolution)
         XCTAssertEqual(front?.title, "Ep a")
         XCTAssertEqual(titles(repo), ["Ep a", "Ep c", "Ep b"])
     }
