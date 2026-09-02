@@ -133,6 +133,50 @@ final class InboxBadgeCountTests: XCTestCase {
         XCTAssertFalse(snapshot.executedStoreWorkOnMainThread)
     }
 
+    func testBackgroundInboxSnapshotPreservesGlobalMembershipOffMain() async throws {
+        let ctx = TestStore.freshContext()
+        let included = podcast(ctx, "Included Snapshot")
+        let excluded = podcast(ctx, "Excluded Snapshot")
+        excluded.inboxExcluded = true
+        episode(ctx, "snapshot-new", podcast: included)
+        episode(ctx, "snapshot-queued", podcast: included, status: .inQueue)
+        episode(ctx, "snapshot-excluded", podcast: excluded)
+        try ctx.save()
+
+        let expected = Set(InboxRepository(context: ctx).inboxEpisodes().map(\.persistentModelID))
+        let snapshot = try await InboxSnapshotLoader.all(
+            modelContainer: ctx.container,
+            optInOnly: false
+        )
+
+        XCTAssertFalse(snapshot.executedStoreWorkOnMainThread)
+        XCTAssertEqual(Set(snapshot.ids), expected)
+    }
+
+    func testBackgroundInboxSnapshotPreservesFolderSubtreeScopeOffMain() async throws {
+        let ctx = TestStore.freshContext()
+        let inside = podcast(ctx, "Inside Snapshot")
+        let outside = podcast(ctx, "Outside Snapshot")
+        episode(ctx, "inside-snapshot", podcast: inside)
+        episode(ctx, "outside-snapshot", podcast: outside)
+        let folders = FolderRepository(context: ctx)
+        let root = folders.createFolder(name: "Snapshot Root")
+        let child = folders.createSubfolder(named: "Snapshot Child", under: root)
+        folders.add(inside, to: child)
+        try ctx.save()
+
+        let expected = InboxRepository(context: ctx).inboxEpisodes(in: root)
+            .map(\.persistentModelID)
+        let snapshot = try await InboxSnapshotLoader.folder(
+            modelContainer: ctx.container,
+            id: root.persistentModelID,
+            optInOnly: false
+        )
+
+        XCTAssertFalse(snapshot.executedStoreWorkOnMainThread)
+        XCTAssertEqual(snapshot.ids, expected)
+    }
+
     /// In opt-in-only mode, only podcasts explicitly opted in contribute.
     func testInboxCountOptInOnlyCountsOnlyIncludedPodcasts() {
         let ctx = TestStore.freshContext()

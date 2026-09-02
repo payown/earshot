@@ -4,6 +4,45 @@ import XCTest
 
 @MainActor
 final class ListeningPlacesServiceTests: XCTestCase {
+    func testSnapshotPreparationRunsOffMainAndReturnsValueOnlyPayload() async throws {
+        let container = try makeContainer()
+        let podcast = Podcast(feedURL: "https://example.com/feed", title: "Example Show")
+        let episode = Episode(
+            guid: "background-guid",
+            title: "Background Episode",
+            audioURL: "https://example.com/audio.mp3",
+            durationSeconds: 600,
+            positionSeconds: 42
+        )
+        episode.podcast = podcast
+        container.mainContext.insert(podcast)
+        container.mainContext.insert(episode)
+        try container.mainContext.save()
+
+        let loader = await ListeningPlacesSnapshotLoader.makeBackground(
+            modelContainer: container
+        )
+        let executesOnMain = await loader.isExecutingOnMainThreadForTesting()
+        XCTAssertFalse(executesOnMain)
+
+        let prepared = try await loader.prepare(
+            pendingZeroSnapshots: [],
+            includeLabels: true,
+            previousRecords: [],
+            previousSignatures: [:],
+            previousUpdatedAtByID: [:],
+            deviceID: "1234abcd",
+            appVersion: "earshot/test",
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+
+        XCTAssertEqual(prepared.inspectedCount, 1)
+        XCTAssertEqual(prepared.records.count, 1)
+        XCTAssertEqual(prepared.records.first?.positionMilliseconds, 42_000)
+        XCTAssertEqual(prepared.records.first?.label, "Example Show: Background Episode")
+        XCTAssertNotNil(prepared.data)
+    }
+
     func testChoosingFolderWritesMeaningfulStateWithoutPrivateLabels() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "listening-places-\(UUID().uuidString)", directoryHint: .isDirectory)

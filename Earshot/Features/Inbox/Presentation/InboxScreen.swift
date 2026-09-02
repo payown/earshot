@@ -85,6 +85,10 @@ struct InboxScreen: View {
     /// Keep initial view construction bounded on large inboxes. More episodes
     /// remain available in explicit, predictable batches without deleting data.
     @State private var displayedEpisodeLimit = InboxLogic.displayBatchSize
+    // The event-driven child loader owns store refreshes. Focus recovery reads
+    // this same selected-scope snapshot instead of synchronously re-querying
+    // the store during a VoiceOver action.
+    @State private var currentCandidateSnapshot: [Episode] = []
     @AccessibilityFocusState private var focusEmpty: Bool
     // Focus target for the row that should take VoiceOver focus after the rotor
     // "Mark as played" removes the focused row from the inbox (#579). Mirrors
@@ -275,6 +279,10 @@ struct InboxScreen: View {
         // the user asks for the tally when they want it (the list itself
         // updates live as they type).
         .searchable(text: $searchText, prompt: "Search inbox")
+        .modifier(CandidateSnapshotSyncModifier(
+            candidates: candidates,
+            snapshot: $currentCandidateSnapshot
+        ))
         .onAppear {
             requestLaunchHeadingFocus()
             requestTabEntryFocus()
@@ -756,11 +764,7 @@ struct InboxScreen: View {
     /// recovery uses this instead of the global Inbox so clearing/playing the
     /// last visible folder episode lands on the visible empty state (#763).
     private func currentInboxEpisodes() -> [Episode] {
-        let repository = InboxRepository(context: context)
-        if let selectedFolder {
-            return repository.inboxEpisodes(in: selectedFolder)
-        }
-        return repository.inboxEpisodes()
+        InboxRepository.currentEpisodes(currentCandidateSnapshot, in: context)
     }
 
     /// Re-anchors VoiceOver after a played or queued action removes an Inbox row.
@@ -810,6 +814,23 @@ struct InboxScreen: View {
     }
 }
 
+/// Keeps focus-recovery actions on the already loaded Inbox snapshot without
+/// adding more generic work to `InboxScreen`'s large view expression.
+private struct CandidateSnapshotSyncModifier: ViewModifier {
+    let candidates: [Episode]
+    @Binding var snapshot: [Episode]
+
+    private var candidateIDs: [PersistentIdentifier] {
+        candidates.map(\.persistentModelID)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { snapshot = candidates }
+            .onChange(of: candidateIDs) { _, _ in snapshot = candidates }
+    }
+}
+
 /// Global Inbox candidates stay in their selected store-queryable mode. Keeping
 /// this fetch in a conditional child means SwiftUI tears it down while a folder
 /// filter is active instead of continuing to materialize the global candidate
@@ -825,6 +846,7 @@ private struct AllInboxCandidates<Content: View>: View {
     @State private var candidates: [Episode]?
     @State private var reloadScheduled = false
     @State private var reloadGeneration = 0
+    @State private var reloadTask: Task<Void, Never>?
 
     init(
         optInOnly: Bool,
@@ -846,14 +868,14 @@ private struct AllInboxCandidates<Content: View>: View {
             }
         }
         .task(id: isActive ? (optInOnly ? 2 : 1) : 0) {
-            if isActive { reload() }
+            if isActive { await reload() }
         }
         // A pushed destination can mutate Inbox membership while this snapshot
         // is covered and not receiving notifications. Refresh when navigation
         // reveals it again so newly added candidates and policy changes also
         // catch up, while `currentEpisodes` removes stale rows immediately.
         .onAppear {
-            if isActive, candidates != nil { reload() }
+            if isActive, candidates != nil { startReload() }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotInboxDidChange)
@@ -867,6 +889,7 @@ private struct AllInboxCandidates<Content: View>: View {
         ) { _ in
             if isActive { scheduleReload() }
         }
+        .onDisappear { reloadTask?.cancel() }
     }
 
     /// Inbox and Queue notifications commonly describe the same durable
@@ -878,23 +901,44 @@ private struct AllInboxCandidates<Content: View>: View {
         reloadScheduled = true
         DispatchQueue.main.async {
             reloadScheduled = false
-            reload()
+            startReload()
         }
     }
 
-    private func reload() {
+    private func startReload() {
+        reloadTask?.cancel()
+        reloadTask = Task { await reload() }
+    }
+
+    private func reload() async {
         let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
-        let loaded = InboxRepository(context: context).inboxEpisodes()
-        PerformanceSignposts.signposter.endInterval("InboxReload", interval)
         reloadGeneration += 1
         let generation = reloadGeneration
-        // Fetching a large Inbox and constructing its first VoiceOver rows in
-        // one main-loop turn measured as a 281 ms cold-launch microhang. Keep
-        // the same main-context models and exact ordering, but let UIKit service
-        // accessibility between the store phase and the row-rendering phase.
-        DispatchQueue.main.async {
-            guard isActive, generation == reloadGeneration else { return }
+        do {
+            let snapshot = try await InboxSnapshotLoader.all(
+                modelContainer: context.container,
+                optInOnly: optInOnly
+            )
+            let loaded = try await resolveInboxEpisodes(
+                snapshot.ids,
+                in: context
+            )
+            guard isActive, generation == reloadGeneration else {
+                PerformanceSignposts.signposter.endInterval("InboxReload", interval)
+                return
+            }
             candidates = loaded
+            PerformanceSignposts.signposter.endInterval(
+                "InboxReload",
+                interval,
+                "inspectedCount=\(snapshot.inspectedCount), returnedCount=\(loaded.count)"
+            )
+        } catch {
+            PerformanceSignposts.signposter.endInterval("InboxReload", interval)
+            guard !Task.isCancelled else { return }
+            AppLog.data.error(
+                "Inbox reload failed: \(error.localizedDescription, privacy: .public)"
+            )
         }
     }
 }
@@ -916,6 +960,7 @@ struct FolderScopedInboxCandidates<Content: View>: View {
     @State private var loaded = false
     @State private var reloadScheduled = false
     @State private var reloadGeneration = 0
+    @State private var reloadTask: Task<Void, Never>?
 
     init(
         folder: PodcastFolder,
@@ -928,9 +973,10 @@ struct FolderScopedInboxCandidates<Content: View>: View {
     }
 
     private var scopeSignature: [String] {
-        FolderRepository(context: context).subtreeSubscriptions(of: folder)
-            .map(\.feedURL)
-            .sorted() + ["opt-in-only:\(settings.inboxOptInOnly)"]
+        [
+            String(describing: folder.persistentModelID),
+            "opt-in-only:\(settings.inboxOptInOnly)",
+        ]
     }
 
     var body: some View {
@@ -943,12 +989,12 @@ struct FolderScopedInboxCandidates<Content: View>: View {
             }
         }
         .task(id: scopeSignature + ["active:\(isActive)"]) {
-            if isActive { reload() }
+            if isActive { await reload() }
         }
         // Returning from a podcast detail doesn't change `scopeSignature`, so
         // `.task(id:)` alone may retain the pre-navigation candidate snapshot.
         .onAppear {
-            if isActive, loaded { reload() }
+            if isActive, loaded { startReload() }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotInboxDidChange)
@@ -956,8 +1002,15 @@ struct FolderScopedInboxCandidates<Content: View>: View {
         ) { _ in
             if isActive { scheduleReload() }
         }
+        .onDisappear { reloadTask?.cancel() }
         .onReceive(
             NotificationCenter.default.publisher(for: .earshotQueueDidChange)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            if isActive { scheduleReload() }
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .earshotFoldersDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
             if isActive { scheduleReload() }
@@ -969,20 +1022,72 @@ struct FolderScopedInboxCandidates<Content: View>: View {
         reloadScheduled = true
         DispatchQueue.main.async {
             reloadScheduled = false
-            reload()
+            startReload()
         }
     }
 
-    private func reload() {
+    private func startReload() {
+        reloadTask?.cancel()
+        reloadTask = Task { await reload() }
+    }
+
+    private func reload() async {
         let interval = PerformanceSignposts.signposter.beginInterval("InboxReload")
-        let snapshot = InboxRepository(context: context).inboxEpisodes(in: folder)
-        PerformanceSignposts.signposter.endInterval("InboxReload", interval)
         reloadGeneration += 1
         let generation = reloadGeneration
-        DispatchQueue.main.async {
-            guard isActive, generation == reloadGeneration else { return }
-            candidates = snapshot
+        let folderID = folder.persistentModelID
+        let optInOnly = settings.inboxOptInOnly
+        do {
+            let snapshot = try await InboxSnapshotLoader.folder(
+                modelContainer: context.container,
+                id: folderID,
+                optInOnly: optInOnly
+            )
+            let resolved = try await resolveInboxEpisodes(snapshot.ids, in: context)
+            guard isActive, generation == reloadGeneration else {
+                PerformanceSignposts.signposter.endInterval("InboxReload", interval)
+                return
+            }
+            candidates = resolved
             loaded = true
+            PerformanceSignposts.signposter.endInterval(
+                "InboxReload",
+                interval,
+                "inspectedCount=\(snapshot.inspectedCount), returnedCount=\(resolved.count)"
+            )
+        } catch {
+            PerformanceSignposts.signposter.endInterval("InboxReload", interval)
+            guard !Task.isCancelled else { return }
+            AppLog.data.error(
+                "Folder Inbox reload failed: \(error.localizedDescription, privacy: .public)"
+            )
         }
     }
+}
+
+/// Main-context resolution is deliberately chunked. The background loader owns
+/// the expensive relationship query; this hop creates the exact models the UI
+/// already expects while yielding between bounded groups so accessibility work
+/// is never locked out by a large identity snapshot.
+@MainActor
+private func resolveInboxEpisodes(
+    _ ids: [PersistentIdentifier],
+    in context: ModelContext
+) async throws -> [Episode] {
+    let chunkSize = InboxLogic.displayBatchSize
+    var resolved: [Episode] = []
+    resolved.reserveCapacity(ids.count)
+    for start in stride(from: 0, to: ids.count, by: chunkSize) {
+        try Task.checkCancellation()
+        let end = min(ids.count, start + chunkSize)
+        for id in ids[start..<end] {
+            if let episode = context.model(for: id) as? Episode,
+               !episode.isDeleted,
+               episode.modelContext == context {
+                resolved.append(episode)
+            }
+        }
+        await Task.yield()
+    }
+    return resolved
 }
