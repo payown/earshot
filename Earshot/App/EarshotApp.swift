@@ -1155,6 +1155,15 @@ struct EarshotApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var runtime: AppRuntime
+    /// A scene-owned request makes foreground maintenance structured: changing
+    /// back to inactive/background cancels the pending grace period before it
+    /// can start work under an audio background allowance.
+    @State private var foregroundMaintenanceRequestID: UUID?
+
+    /// VoiceOver must rebuild the visible accessibility tree and restore focus
+    /// when the app becomes active. Automatic feed freshness is not urgent
+    /// enough to compete for those first interaction-critical main-actor turns.
+    private static let foregroundMaintenanceGrace: Duration = .seconds(3)
 
     /// True when the process is hosting an XCTest run. Unit tests use the app as
     /// their test host; rendering the real SwiftUI tree (with `@Query` observing
@@ -1194,6 +1203,7 @@ struct EarshotApp: App {
                 mode: .normal
             ))
         }
+        _foregroundMaintenanceRequestID = State(initialValue: nil)
     }
 
     /// The seeded in-memory container for an App Store screenshot run, or `nil`
@@ -1268,14 +1278,40 @@ struct EarshotApp: App {
             }
             .environment(runtime)
             .task { await runtime.activateProcessServices() }
+            .task(id: foregroundMaintenanceRequestID, priority: .utility) {
+                guard foregroundMaintenanceRequestID != nil,
+                      runtime.shouldRunBackgroundServices else { return }
+                do {
+                    try await Task.sleep(for: Self.foregroundMaintenanceGrace)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled,
+                      let container = runtime.readyContainer else { return }
+                await runtime.retryCloudProjectionWhenActive()
+                guard !Task.isCancelled else { return }
+                await BackgroundFeedRefresher.runRefresh(
+                    container: container,
+                    trigger: .foreground
+                )
+            }
             .onOpenURL { runtime.enqueueIncomingFile($0) }
         }
-        // Background: schedule the next OS wake. Active: run a throttled refresh
-        // so returning to the app surfaces new episodes immediately rather than
-        // waiting on an opportunistic BGAppRefreshTask (#470). Skipped under tests.
+        // Background: schedule the next OS wake. Active: request a throttled
+        // refresh after the interaction grace above, so returning to the app
+        // surfaces new episodes promptly without delaying VoiceOver focus and
+        // first speech (#470). Skipped under tests.
         .onChange(of: scenePhase) { _, phase in
             runtime.updateLaunchScenePhase(phase)
-            guard runtime.shouldRunBackgroundServices else { return }
+            if phase != .active {
+                foregroundMaintenanceRequestID = nil
+            }
+            guard runtime.shouldRunBackgroundServices else {
+                foregroundMaintenanceRequestID = nil
+                return
+            }
             switch phase {
             case .background:
                 StoreWALDiagnostics.log(.appBackground)
@@ -1287,14 +1323,7 @@ struct EarshotApp: App {
                 BackgroundFeedRefresher.scheduleNext()
                 Task { await runtime.listeningPlaces.writeNow() }
             case .active:
-                guard let container = runtime.readyContainer else { return }
-                Task {
-                    await runtime.retryCloudProjectionWhenActive()
-                    await BackgroundFeedRefresher.runRefresh(
-                        container: container,
-                        trigger: .foreground
-                    )
-                }
+                foregroundMaintenanceRequestID = UUID()
             default:
                 break
             }
