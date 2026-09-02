@@ -749,24 +749,9 @@ struct SubscriptionsView: View {
     /// demand; merely entering Library cannot materialize every show's inverse
     /// episode relationship.
     private func loadPodcasts() {
-        let interval = PerformanceSignposts.signposter.beginInterval("LibraryReload")
-        defer { PerformanceSignposts.signposter.endInterval("LibraryReload", interval) }
-        var descriptor = PodcastQuery.followedDescriptor(
-            sortBy: [SortDescriptor(\.title)]
-        )
-        descriptor.propertiesToFetch = [
-            \Podcast.feedURL,
-            \Podcast.title,
-            \Podcast.author,
-            \Podcast.artworkURL,
-            \Podcast.subscriptionStateRaw,
-            \Podcast.autoQueue,
-            \Podcast.notificationEnabled,
-            \Podcast.inboxExcluded,
-            \Podcast.inboxIncluded,
-            \Podcast.createdAt,
-            \Podcast.lastSeenPubDate,
-        ]
+        let interval = PerformanceSignposts.signposter.beginInterval("LibrarySnapshotLoad")
+        defer { PerformanceSignposts.signposter.endInterval("LibrarySnapshotLoad", interval) }
+        let descriptor = LibraryPodcastSnapshot.descriptor()
         podcasts = (try? context.fetch(descriptor)) ?? []
         hasLoadedPodcasts = true
     }
@@ -791,6 +776,35 @@ struct SubscriptionsView: View {
                 focusLaunchHeading = true
             }
         }
+    }
+}
+
+/// The complete scalar projection consumed by a Library row and its actions.
+/// Keeping the descriptor in one testable place prevents a newly-read row field
+/// from becoming an N-row fault during rapid VoiceOver navigation.
+@MainActor
+enum LibraryPodcastSnapshot {
+    static let properties: [PartialKeyPath<Podcast>] = [
+        \Podcast.feedURL,
+        \Podcast.title,
+        \Podcast.author,
+        \Podcast.podcastDescription,
+        \Podcast.artworkURL,
+        \Podcast.subscriptionStateRaw,
+        \Podcast.autoQueue,
+        \Podcast.notificationEnabled,
+        \Podcast.inboxExcluded,
+        \Podcast.inboxIncluded,
+        \Podcast.createdAt,
+        \Podcast.lastSeenPubDate,
+    ]
+
+    static func descriptor() -> FetchDescriptor<Podcast> {
+        var descriptor = PodcastQuery.followedDescriptor(
+            sortBy: [SortDescriptor(\.title)]
+        )
+        descriptor.propertiesToFetch = properties
+        return descriptor
     }
 }
 

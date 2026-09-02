@@ -40,7 +40,7 @@ final class InboxBadgeCountTests: XCTestCase {
         )
     }
 
-    func testCurrentEpisodesDropsBulkPlayedItemFromCachedFolderSnapshot() throws {
+    func testCurrentEpisodesDropsBulkPlayedItemFromCachedFolderSnapshot() async throws {
         let ctx = TestStore.freshContext()
         let show = podcast(ctx, "Folder Cached")
         let item = episode(ctx, "folder-cached-new", podcast: show)
@@ -51,7 +51,8 @@ final class InboxBadgeCountTests: XCTestCase {
         let cached = InboxRepository(context: ctx).inboxEpisodes(in: folder)
         XCTAssertEqual(cached.map(\.guid), ["folder-cached-new"])
 
-        XCTAssertEqual(EpisodeRepository(context: ctx).markAllPlayed(in: show), 1)
+        let changed = await EpisodeRepository(context: ctx).markAllPlayed(in: show)
+        XCTAssertEqual(changed, 1)
 
         XCTAssertTrue(item.isPlayed, "precondition: bulk mark played succeeded")
         XCTAssertEqual(cached.map(\.guid), ["folder-cached-new"], "the retained folder array is stale")
@@ -263,7 +264,7 @@ final class InboxBadgeCountTests: XCTestCase {
     /// #736: marking episodes played changes the inbox count, so it must post
     /// `.earshotInboxDidChange` too — otherwise the badge would stay stale until
     /// the next foreground.
-    func testMarkAllPlayedPostsInboxDidChange() {
+    func testMarkAllPlayedPostsInboxDidChange() async {
         let ctx = TestStore.freshContext()
         let a = podcast(ctx, "A")
         episode(ctx, "new1", podcast: a)
@@ -276,7 +277,7 @@ final class InboxBadgeCountTests: XCTestCase {
         ) { _ in posted += 1 }
         defer { NotificationCenter.default.removeObserver(token) }
 
-        EpisodeRepository(context: ctx).markAllPlayed(in: a)
+        _ = await EpisodeRepository(context: ctx).markAllPlayed(in: a)
 
         XCTAssertGreaterThan(posted, 0, "marking played must post .earshotInboxDidChange")
     }

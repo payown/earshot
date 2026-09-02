@@ -5,8 +5,8 @@ import SwiftData
 /// Covers `EpisodeRepository.markAllPlayed(in:)`, the batched "Mark all as
 /// played" operation backing #640. The issue is explicitly about performance on
 /// very large podcasts (1000+ episodes), so the primary fixture here is
-/// oversized on purpose -- the point is proving ONE batched save fires
-/// regardless of episode count, not one save per mutated row.
+/// oversized on purpose -- the point is proving one save fires per bounded
+/// page, never one save per mutated row.
 @MainActor
 final class EpisodeRepositoryTests: XCTestCase {
 
@@ -27,7 +27,7 @@ final class EpisodeRepositoryTests: XCTestCase {
 
     // MARK: Large-list batching (the issue's explicit ask)
 
-    func testMarkAllPlayedBatchesSaveExactlyOnceForLargeList() {
+    func testMarkAllPlayedUsesBoundedSavesForLargeList() async throws {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx, "A")
 
@@ -42,14 +42,22 @@ final class EpisodeRepositoryTests: XCTestCase {
             e.playedAt = fixedPlayedAt // distinct from `.now` so overwrites are detectable
             return e
         }
+        // Production bulk operations page durable library rows. Persist the
+        // oversized fixture before the first fetch; a fetchLimit over pending
+        // inserts is a different SwiftData registration scenario.
+        try ctx.save()
 
         var saveCount = 0
         let repo = EpisodeRepository(context: ctx, onSave: { saveCount += 1 })
 
-        let changed = repo.markAllPlayed(in: p)
+        let changed = await repo.markAllPlayed(in: p)
 
         XCTAssertEqual(changed, unplayedCount, "return value counts only episodes actually flipped")
-        XCTAssertEqual(saveCount, 1, "exactly one batched save regardless of episode count, not one per episode")
+        XCTAssertEqual(
+            saveCount,
+            Int(ceil(Double(unplayedCount) / Double(EpisodeRepository.batchSize))),
+            "one durable save per bounded batch, never one save per episode"
+        )
         XCTAssertTrue(unplayed.allSatisfy(\.isPlayed), "every previously-unplayed episode is now played")
         XCTAssertTrue(
             alreadyPlayed.allSatisfy { $0.playedAt == fixedPlayedAt },
@@ -60,7 +68,7 @@ final class EpisodeRepositoryTests: XCTestCase {
 
     // MARK: No-op cases -- must not dirty the context
 
-    func testMarkAllPlayedOnFullyPlayedPodcastReturnsZeroAndSkipsSave() {
+    func testMarkAllPlayedOnFullyPlayedPodcastReturnsZeroAndSkipsSave() async {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx, "A")
         let e = makeEpisode(ctx, "a", podcast: p)
@@ -69,20 +77,20 @@ final class EpisodeRepositoryTests: XCTestCase {
         var saveCount = 0
         let repo = EpisodeRepository(context: ctx, onSave: { saveCount += 1 })
 
-        let changed = repo.markAllPlayed(in: p)
+        let changed = await repo.markAllPlayed(in: p)
 
         XCTAssertEqual(changed, 0)
         XCTAssertEqual(saveCount, 0, "no wasted save when nothing needs to change")
     }
 
-    func testMarkAllPlayedOnEmptyPodcastReturnsZeroAndSkipsSave() {
+    func testMarkAllPlayedOnEmptyPodcastReturnsZeroAndSkipsSave() async {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx, "A")
 
         var saveCount = 0
         let repo = EpisodeRepository(context: ctx, onSave: { saveCount += 1 })
 
-        let changed = repo.markAllPlayed(in: p)
+        let changed = await repo.markAllPlayed(in: p)
 
         XCTAssertEqual(changed, 0)
         XCTAssertEqual(saveCount, 0)
@@ -94,7 +102,7 @@ final class EpisodeRepositoryTests: XCTestCase {
     /// `InboxRepository.markPlayed(_:)` (the single-episode mark-played path)
     /// does, so the inbox can't resurface episodes the user just bulk-marked
     /// played.
-    func testMarkAllPlayedDismissesFromInboxMatchingSingleEpisodePath() {
+    func testMarkAllPlayedDismissesFromInboxMatchingSingleEpisodePath() async {
         let ctx = TestStore.freshContext()
         let p = makePodcast(ctx, "A")
         let a = makeEpisode(ctx, "a", podcast: p)
@@ -107,7 +115,7 @@ final class EpisodeRepositoryTests: XCTestCase {
 
         // Under test: the new bulk path, applied to the whole podcast (including a).
         let repo = EpisodeRepository(context: ctx)
-        _ = repo.markAllPlayed(in: p)
+        _ = await repo.markAllPlayed(in: p)
 
         XCTAssertTrue(a.inboxDismissed, "bulk mark-played must dismiss from the inbox like the single-episode path")
         XCTAssertEqual(

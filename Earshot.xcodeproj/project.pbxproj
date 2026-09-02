@@ -234,6 +234,7 @@
 		9D88443901823ACD73579CD2 /* PlaybackHandoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A819D9D59B333EDB8C03A3D /* PlaybackHandoffTests.swift */; };
 		9DCBB4FD2C9E5F5D4C32803F /* StoreWALDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB06625653237B41175EB89D /* StoreWALDiagnosticsTests.swift */; };
 		9E710C86EB230B361A7D8B75 /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62ED2FC514BDF3D857EBC8EF /* MockURLProtocol.swift */; };
+		9FFE10BD7168BCAEA2B8B0FF /* EpisodeListDataSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABAB3C4388D47FA0BCCDDFFC /* EpisodeListDataSourceTests.swift */; };
 		A17BD04A2E9B376E2A5F0351 /* PodcastCapPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BDEE459C0D777CB9F63272B /* PodcastCapPolicy.swift */; };
 		A18F64CF1E9874FBACECD300 /* AddPodcastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7151D01B33B040C471F672D5 /* AddPodcastView.swift */; };
 		A30738B63FB4B7FFF5BF3B04 /* AppInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E7921BD843199173A93C88 /* AppInfoTests.swift */; };
@@ -244,6 +245,7 @@
 		A3FB4153E4416BC7D50401C6 /* ContextualTip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 275500EE3D24782391B8B3D8 /* ContextualTip.swift */; };
 		A4B28DBC8BAF35773BD2AA29 /* QuickActionMoveLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A620DD9E59E963067557733 /* QuickActionMoveLogic.swift */; };
 		A5562928188E34157246A1FE /* EarshotSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF69017C7C2090E496CBC830 /* EarshotSchema.swift */; };
+		A5C1AD7E9D3D1989E5CDDECB /* EpisodeListDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F52373EDCBD586AE8EA2BC /* EpisodeListDataSource.swift */; };
 		A61A0329EC284CB95EDBC266 /* StoreMigrationFloorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D982AB8F3D53E99E5C264E /* StoreMigrationFloorTests.swift */; };
 		A6342256047C7E00CC2D46A9 /* FeedRefreshPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4936B28AE733CDBC3C66FA97 /* FeedRefreshPolicy.swift */; };
 		A66F5F9A02B2E31F587CB2B4 /* ReduceMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = B460461D7FFCC6EB70CB51B4 /* ReduceMotion.swift */; };
@@ -285,6 +287,7 @@
 		B6D0444F2A771E88438780DD /* FolderSyncConflictPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B492B3341CA73BD2C9021FD /* FolderSyncConflictPolicyTests.swift */; };
 		B77016B49167013804A83D5D /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446E3CD362BA5EC597F7DF75 /* TranscriptView.swift */; };
 		B877F98462F5C9D214120660 /* MediaTransportDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CBF86A935D12011C38FFCEC /* MediaTransportDiagnosticsTests.swift */; };
+		B965C3AEF6212E9F97B00434 /* LibraryPodcastSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE509F6583BC2D84918DC126 /* LibraryPodcastSnapshotTests.swift */; };
 		B976F875CA2E076695C9B30B /* StatsPeriod.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA719A9EE6C298B619478083 /* StatsPeriod.swift */; };
 		BA2FEB2E6D8058574743F17E /* TabBarBadgeApplier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B3BE83021D9D2D3FBC6E08B /* TabBarBadgeApplier.swift */; };
 		BACED0BD92ADFC48635B4E08 /* PrivacySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30FAC1A82C939CF4C1F79EB9 /* PrivacySettingsView.swift */; };
@@ -453,6 +456,7 @@
 		0EBE4F963BE24E3EFDE7E7C3 /* EntitlementFactMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementFactMapperTests.swift; sourceTree = "<group>"; };
 		0FA9D5BBD889383C2707CD87 /* PlaybackAudioLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackAudioLogic.swift; sourceTree = "<group>"; };
 		0FAE84EA17DC1E88FAFAA276 /* NotificationRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationRouter.swift; sourceTree = "<group>"; };
+		11F52373EDCBD586AE8EA2BC /* EpisodeListDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeListDataSource.swift; sourceTree = "<group>"; };
 		12C01B02A39EC9D1F2D40E13 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		1521B21C185DD6C9E5EC83EB /* EntitlementFact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementFact.swift; sourceTree = "<group>"; };
 		153E920C6B22C967CFB67F3E /* ITunesSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITunesSearchService.swift; sourceTree = "<group>"; };
@@ -710,6 +714,7 @@
 		A951F33F168DD2CF36836C6D /* SearchResultPositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultPositionTests.swift; sourceTree = "<group>"; };
 		AA789973BA39F31DCC581287 /* EarshotUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EarshotUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB33B0E5DEFF8E22CBB0B979 /* PodcastDescriptionPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastDescriptionPresentationTests.swift; sourceTree = "<group>"; };
+		ABAB3C4388D47FA0BCCDDFFC /* EpisodeListDataSourceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeListDataSourceTests.swift; sourceTree = "<group>"; };
 		ABEBC70285DA0D1C6FF8D924 /* TipJarViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipJarViewModelTests.swift; sourceTree = "<group>"; };
 		ABEEC723E5C0BC90DFC057B2 /* AppSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSetting.swift; sourceTree = "<group>"; };
 		ADC1DFD3FFD884A7FE8029F6 /* ActiveDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveDownload.swift; sourceTree = "<group>"; };
@@ -760,6 +765,7 @@
 		CD35FC1FC81012FE505CB283 /* ScreenshotFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotFixtures.swift; sourceTree = "<group>"; };
 		CE11723CD083B143985A7C7C /* PodcastActionsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastActionsBuilder.swift; sourceTree = "<group>"; };
 		CE3D0B29C92483947ADFC8FD /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
+		CE509F6583BC2D84918DC126 /* LibraryPodcastSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryPodcastSnapshotTests.swift; sourceTree = "<group>"; };
 		CE96D8D6DD47BE7CDCE6D094 /* MultiSelectState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiSelectState.swift; sourceTree = "<group>"; };
 		CF92E05A0193AF0123DA2A5B /* NowPlayingArtworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingArtworkTests.swift; sourceTree = "<group>"; };
 		CFB688696CCDAE1D14C0451D /* EarshotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarshotUITests.swift; sourceTree = "<group>"; };
@@ -1144,6 +1150,7 @@
 				BA3163F8BF4B08FCDA9355C3 /* EntitlementStoreTests.swift */,
 				339F4A0A7A0FCC29DAFD1150 /* EpisodeExportLogicTests.swift */,
 				4C637633A587C87094F56176 /* EpisodeFilterTests.swift */,
+				ABAB3C4388D47FA0BCCDDFFC /* EpisodeListDataSourceTests.swift */,
 				08020597D3A064F49F78DCA0 /* EpisodeListFilterTests.swift */,
 				D9A1936103158B459C7D2215 /* EpisodeMultiSelectTests.swift */,
 				C96E2134A6C0EAFD89BEAA02 /* EpisodeRepositoryTests.swift */,
@@ -1176,6 +1183,7 @@
 				17E95BEBF055BA2A6E2302DA /* InboxHistoryMaintenanceTests.swift */,
 				7D1FF1B05CD9DD1E0A619E9F /* ITunesSearchServiceTests.swift */,
 				3F992A474580C7C064FBD876 /* LargeLibraryMemoryTests.swift */,
+				CE509F6583BC2D84918DC126 /* LibraryPodcastSnapshotTests.swift */,
 				C27CF4D211EF845D99883619 /* LibrarySortTests.swift */,
 				89379FE627FA4377E6C3222A /* ListeningPlacesFormatTests.swift */,
 				FD1F818A8097AB3F0BF2CC36 /* ListeningPlacesServiceTests.swift */,
@@ -1843,6 +1851,7 @@
 			children = (
 				584E2B098C7168FC03024400 /* BackgroundFeedRefresher.swift */,
 				677AA7914D40DC730CD0B810 /* EpisodeFilterMaintenance.swift */,
+				11F52373EDCBD586AE8EA2BC /* EpisodeListDataSource.swift */,
 				B8B9B6240BDE0DB59C089BFE /* EpisodeRepository.swift */,
 				EDFA3F3CA348D04071922663 /* FeedRefreshActor.swift */,
 				54EEF019E405369F02C66D0D /* FeedRefreshCache.swift */,
@@ -2124,6 +2133,7 @@
 				2C42C8C06EFE23E15B33DCCD /* EpisodeFilterMaintenance.swift in Sources */,
 				D3A892D2243DF99A3B7B373F /* EpisodeFiltersView.swift in Sources */,
 				71994D0C2559A6B2F35E50D5 /* EpisodeFolderMembership.swift in Sources */,
+				A5C1AD7E9D3D1989E5CDDECB /* EpisodeListDataSource.swift in Sources */,
 				1FBD881481458AAC273BC891 /* EpisodeListFilter.swift in Sources */,
 				A6ABA0F37BA96A1A6D768F49 /* EpisodeListView.swift in Sources */,
 				64B9A72723184B0AA8EEADD4 /* EpisodeRepository.swift in Sources */,
@@ -2355,6 +2365,7 @@
 				112902B838116ADAF3D00EBC /* EntitlementStoreTests.swift in Sources */,
 				0623BB8FF5D6F2C31A2E8FC2 /* EpisodeExportLogicTests.swift in Sources */,
 				F7C0CC40B546C0C0349B8CF2 /* EpisodeFilterTests.swift in Sources */,
+				9FFE10BD7168BCAEA2B8B0FF /* EpisodeListDataSourceTests.swift in Sources */,
 				FE9A753BE81846F53385CFC2 /* EpisodeListFilterTests.swift in Sources */,
 				E80F2BBCC01CBEA02ACBB492 /* EpisodeMultiSelectTests.swift in Sources */,
 				5586E9F965B694289182646E /* EpisodeRepositoryTests.swift in Sources */,
@@ -2387,6 +2398,7 @@
 				D0EAF35C0542B99058B990D8 /* InboxExpirationServiceTests.swift in Sources */,
 				C4F7C0544F3894E1B221C17C /* InboxHistoryMaintenanceTests.swift in Sources */,
 				69EF05CA2664706F91AA2EC4 /* LargeLibraryMemoryTests.swift in Sources */,
+				B965C3AEF6212E9F97B00434 /* LibraryPodcastSnapshotTests.swift in Sources */,
 				C35D439E9E576F4A27BFD711 /* LibrarySortTests.swift in Sources */,
 				79121AB785358A6AFEC1367E /* ListeningPlacesFormatTests.swift in Sources */,
 				863579F2F3B26691050CA211 /* ListeningPlacesServiceTests.swift in Sources */,

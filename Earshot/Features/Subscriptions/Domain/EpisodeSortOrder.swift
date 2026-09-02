@@ -48,24 +48,36 @@ enum EpisodeSortOrder: String, Codable, Identifiable {
     /// `pubDate`; episodes with no `pubDate` always sort last regardless of
     /// direction, so undated episodes never jump to the top.
     func sorted(_ episodes: [Episode]) -> [Episode] {
-        switch self {
-        case .latestFirst:
-            return episodes.sorted {
-                Self.inDateOrder(
-                    lhsDate: $0.pubDate, lhsTitle: $0.title,
-                    rhsDate: $1.pubDate, rhsTitle: $1.title,
-                    ascending: false
-                )
-            }
-        case .latestLast:
-            return episodes.sorted {
-                Self.inDateOrder(
-                    lhsDate: $0.pubDate, lhsTitle: $0.title,
-                    rhsDate: $1.pubDate, rhsTitle: $1.title,
-                    ascending: true
-                )
-            }
-        }
+        episodes.sorted(by: precedes)
+    }
+
+    /// Store ordering for the dated bucket. A GUID tie-break makes page
+    /// boundaries deterministic even when a feed republishes multiple rows with
+    /// identical dates and titles. The bounded page is re-sorted with
+    /// ``precedes`` after fetching to retain the existing article-aware title
+    /// semantics for loaded rows.
+    var storeSortDescriptors: [SortDescriptor<Episode>] {
+        [
+            SortDescriptor(\Episode.pubDate, order: self == .latestFirst ? .reverse : .forward),
+            SortDescriptor(\Episode.title, order: .forward),
+            SortDescriptor(\Episode.guid, order: .forward),
+        ]
+    }
+
+    func precedes(_ lhs: Episode, _ rhs: Episode) -> Bool {
+        let dateOrdered = Self.inDateOrder(
+            lhsDate: lhs.pubDate, lhsTitle: lhs.title,
+            rhsDate: rhs.pubDate, rhsTitle: rhs.title,
+            ascending: self == .latestLast
+        )
+        if dateOrdered { return true }
+        let reverseOrdered = Self.inDateOrder(
+            lhsDate: rhs.pubDate, lhsTitle: rhs.title,
+            rhsDate: lhs.pubDate, rhsTitle: lhs.title,
+            ascending: self == .latestLast
+        )
+        if reverseOrdered { return false }
+        return lhs.guid.localizedStandardCompare(rhs.guid) == .orderedAscending
     }
 
     /// Orders two optional dates. `ascending == false` is newest-first. Missing
