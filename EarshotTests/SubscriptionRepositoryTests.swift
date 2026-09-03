@@ -1038,18 +1038,18 @@ final class SubscriptionRepositoryTests: XCTestCase {
         let ctx = TestStore.freshContext()
         let fetcher = CountingFeedFetcher(feed([episode("a", d1)]))
         let repo = SubscriptionRepository(context: ctx, feed: fetcher)
-        try await seedSubscriptions(3, fetcher: fetcher, repo: repo)
+        try await seedSubscriptions(6, fetcher: fetcher, repo: repo)
 
         let before = fetcher.fetchCount
-        // Cancel as soon as the first feed has been fetched. The scheduler opens
-        // its three-request window together, but stops processing after the first
-        // completed result observes cancellation.
+        // Cancel as soon as the first feed has been fetched. Depending on task
+        // scheduling, one to three requests may enter the bounded window before
+        // cancellation becomes visible. No later request may be scheduled.
         var progressCalls = 0
         await repo.refreshAll(isCancelled: { fetcher.fetchCount - before >= 1 }) { _, _ in
             progressCalls += 1
         }
 
-        XCTAssertEqual(fetcher.fetchCount - before, 3)
+        XCTAssertTrue((1...3).contains(fetcher.fetchCount - before))
         // Progress fired only for the one feed processed before cancellation.
         XCTAssertEqual(progressCalls, 1)
     }
