@@ -10,10 +10,18 @@ import SwiftData
 /// doubles adopt `@unchecked Sendable`.
 protocol FeedFetching: Sendable {
     func fetch(_ urlString: String) async throws -> ParsedFeed
+    /// Reads only the channel-level description when a caller does not need the
+    /// episode catalog. Production uses a lightweight parser; the default keeps
+    /// test doubles and alternate fetchers source-compatible.
+    func fetchDescription(_ urlString: String) async throws -> String?
     func refresh(_ request: FeedRefreshRequest) async throws -> FeedRefreshFetchResult
 }
 
 extension FeedFetching {
+    func fetchDescription(_ urlString: String) async throws -> String? {
+        try await fetch(urlString).description
+    }
+
     /// Source-compatible fallback for test doubles and alternate fetchers. A
     /// fetcher that does not understand HTTP validators still participates in
     /// refresh correctly; it simply reports a modified representation.

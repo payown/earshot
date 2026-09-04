@@ -32,7 +32,7 @@ struct DirectoryPodcastResults: View {
     }
 
     var body: some View {
-        ForEach(Array(results.enumerated()), id: \.offset) { _, result in
+        ForEach(results) { result in
             DirectoryPodcastRow(
                 result: result,
                 subscribed: isSubscribed(result),
@@ -59,7 +59,7 @@ struct DirectoryPodcastResults: View {
         .sheet(isPresented: $showPaywall) { PaywallView() }
         .sheet(item: $fullDescription) { PodcastDescriptionView(presentation: $0) }
         .folderPicker($subscribeFolderPick)
-        .task(id: descriptionLoadKey) {
+        .task(id: descriptionLoadKey, priority: .utility) {
             guard DirectoryPodcastDescriptionPolicy.shouldLoad(
                 voiceOverEnabled: voiceOverEnabled,
                 mode: spokenDescriptionMode

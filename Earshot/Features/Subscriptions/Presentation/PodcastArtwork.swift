@@ -40,7 +40,9 @@ struct PodcastArtwork: View {
                 .strokeBorder(AppColor.separator, lineWidth: 0.5)
         )
         .accessibilityHidden(true)
-        .task(id: urlString) { await load() }
+        // Artwork is decorative and must never compete with typing or VoiceOver
+        // navigation for user-initiated executor time.
+        .task(id: urlString, priority: .utility) { await load() }
     }
 
     private func load() async {

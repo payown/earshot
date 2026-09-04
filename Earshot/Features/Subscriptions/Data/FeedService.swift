@@ -23,16 +23,31 @@ struct FeedService {
     }
 
     func fetch(_ urlString: String) async throws -> ParsedFeed {
-        let data: Data
+        let data = try await feedData(from: urlString)
+        try Task.checkCancellation()
+        guard let feed = RSSParser().parse(data) else { throw FeedError.parse }
+        return feed
+    }
+
+    /// Fetches only the channel metadata needed by directory-result speech.
+    /// Unlike a subscription fetch, this deliberately stops XML parsing when
+    /// the first episode begins. Popular feeds can contain thousands of items;
+    /// parsing all of them for one row description starved interaction work when
+    /// a directory search returned 25 shows.
+    func fetchDescription(_ urlString: String) async throws -> String? {
+        let data = try await feedData(from: urlString)
+        try Task.checkCancellation()
+        return RSSParser().parseChannelMetadata(data)?.description
+    }
+
+    private func feedData(from urlString: String) async throws -> Data {
         do {
-            data = try await client.data(from: urlString)
+            return try await client.data(from: urlString)
         } catch HTTPError.badURL {
             throw FeedError.badURL
         } catch let error as HTTPError {
             throw FeedError.network(error.localizedDescription)
         }
-        guard let feed = RSSParser().parse(data) else { throw FeedError.parse }
-        return feed
     }
 
     func refresh(_ request: FeedRefreshRequest) async throws -> FeedRefreshFetchResult {

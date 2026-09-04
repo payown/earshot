@@ -33,7 +33,7 @@ actor DirectoryPodcastDescriptionService {
 
     func descriptions(
         for feedURLs: [String],
-        maximumConcurrent: Int = 4
+        maximumConcurrent: Int = 2
     ) async -> [String: String] {
         let canonicalURLs = feedURLs.reduce(into: [String]()) { result, url in
             let canonical = FeedURLIdentity.canonical(url)
@@ -44,14 +44,9 @@ actor DirectoryPodcastDescriptionService {
         var pending: [String] = []
         for url in canonicalURLs {
             switch cache[url] {
-            case let .value(description):
-                resolved[url] = description
-            case .missing:
-                break
-            case .failed:
-                pending.append(url)
-            case nil:
-                pending.append(url)
+            case let .value(description): resolved[url] = description
+            case .missing: break
+            case .failed, nil: pending.append(url)
             }
         }
 
@@ -91,10 +86,8 @@ actor DirectoryPodcastDescriptionService {
                 group.addTask {
                     guard !Task.isCancelled else { return (url, .failed) }
                     do {
-                        let parsed = try await feed.fetch(url)
-                        if let description = parsed.description {
-                            return (url, .value(description))
-                        }
+                        let description = try await feed.fetchDescription(url)
+                        if let description { return (url, .value(description)) }
                         return (url, .missing)
                     } catch {
                         return (url, .failed)

@@ -35,6 +35,9 @@ final class DirectoryPodcastDescriptionServiceTests: XCTestCase {
         let counts = await feed.requestCounts
         XCTAssertEqual(counts["https://one.example/feed"], 1)
         XCTAssertEqual(counts["https://two.example/feed"], 1)
+        let fullFetches = await feed.fullFeedRequestCount
+        XCTAssertEqual(fullFetches, 0,
+                       "Directory speech must not request full episode catalogs")
     }
 
     func testDeduplicatesCanonicalFeedURLs() async {
@@ -44,8 +47,7 @@ final class DirectoryPodcastDescriptionServiceTests: XCTestCase {
         let service = DirectoryPodcastDescriptionService(feed: feed)
 
         let descriptions = await service.descriptions(for: [
-            "HTTPS://Example.COM:443/feed#top",
-            "https://example.com/feed",
+            "HTTPS://Example.COM:443/feed#top", "https://example.com/feed",
         ])
 
         XCTAssertEqual(descriptions, ["https://example.com/feed": "Description"])
@@ -80,6 +82,21 @@ final class DirectoryPodcastDescriptionServiceTests: XCTestCase {
         let maximum = await feed.maximumActiveRequests
         XCTAssertEqual(maximum, 3)
     }
+
+    func testDefaultConcurrencyIsConservativeForInteractiveSearch() async {
+        let urls = (1...6).map { "https://\($0).example/feed" }
+        let feed = DirectoryDescriptionFeedStub(
+            descriptions: Dictionary(uniqueKeysWithValues: urls.map { ($0, "Description") }),
+            delayNanoseconds: 20_000_000
+        )
+        let service = DirectoryPodcastDescriptionService(feed: feed)
+
+        _ = await service.descriptions(for: urls)
+
+        let maximum = await feed.maximumActiveRequests
+        XCTAssertEqual(maximum, 2)
+    }
+
 }
 
 private actor DirectoryDescriptionFeedStub: FeedFetching {
@@ -87,6 +104,7 @@ private actor DirectoryDescriptionFeedStub: FeedFetching {
     let failingURLs: Set<String>
     let delayNanoseconds: UInt64
     private(set) var requestCounts: [String: Int] = [:]
+    private(set) var fullFeedRequestCount = 0
     private(set) var maximumActiveRequests = 0
     private var activeRequests = 0
 
@@ -101,6 +119,21 @@ private actor DirectoryDescriptionFeedStub: FeedFetching {
     }
 
     func fetch(_ urlString: String) async throws -> ParsedFeed {
+        fullFeedRequestCount += 1
+        let description = try await fetchDescription(urlString)
+        return ParsedFeed(
+            title: "Show",
+            artworkURL: nil,
+            description: description,
+            author: nil,
+            websiteURL: nil,
+            language: nil,
+            category: nil,
+            episodes: []
+        )
+    }
+
+    func fetchDescription(_ urlString: String) async throws -> String? {
         requestCounts[urlString, default: 0] += 1
         activeRequests += 1
         maximumActiveRequests = max(maximumActiveRequests, activeRequests)
@@ -109,15 +142,6 @@ private actor DirectoryDescriptionFeedStub: FeedFetching {
             try await Task.sleep(nanoseconds: delayNanoseconds)
         }
         if failingURLs.contains(urlString) { throw URLError(.notConnectedToInternet) }
-        return ParsedFeed(
-            title: "Show",
-            artworkURL: nil,
-            description: descriptions[urlString],
-            author: nil,
-            websiteURL: nil,
-            language: nil,
-            category: nil,
-            episodes: []
-        )
+        return descriptions[urlString]
     }
 }
