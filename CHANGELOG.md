@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Discover podcast search no longer becomes unresponsive after directory results
+  arrive with VoiceOver enabled. Search rows now keep stable identities, fetch
+  descriptions with bounded low-priority work, stop RSS parsing before the
+  episode catalog, and prevent artwork connection bursts. (build 255)
 - VoiceOver navigation remains responsive during cold launch, feed refresh, and
   compact iCloud reconciliation. Startup maintenance, badge counts, Inbox
   presentation updates, and Settings reads no longer repeatedly occupy the
