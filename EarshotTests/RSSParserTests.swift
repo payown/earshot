@@ -33,6 +33,15 @@ final class RSSParserTests: XCTestCase {
         XCTAssertEqual(feed.artworkURL, "https://example.com/art.jpg")
     }
 
+    func testChannelMetadataParsingStopsBeforeEpisodes() throws {
+        let feed = try XCTUnwrap(RSSParser().parseChannelMetadata(Data(sampleRSS.utf8)))
+        XCTAssertEqual(feed.title, "Test Show")
+        XCTAssertEqual(feed.description, "A test podcast.")
+        XCTAssertEqual(feed.artworkURL, "https://example.com/art.jpg")
+        XCTAssertTrue(feed.episodes.isEmpty,
+                      "Directory descriptions must not construct the episode catalog")
+    }
+
     func testParsesEpisodes() throws {
         let feed = try XCTUnwrap(RSSParser().parse(Data(sampleRSS.utf8)))
         XCTAssertEqual(feed.episodes.count, 2)
@@ -105,6 +114,13 @@ final class RSSParserTests: XCTestCase {
         XCTAssertEqual(feed.artworkURL, "https://example.com/atom-art.jpg")
         XCTAssertEqual(feed.author, "Atom Author")
         XCTAssertEqual(feed.websiteURL, "https://example.com/")
+    }
+
+    func testChannelMetadataParsingStopsBeforeAtomEntries() throws {
+        let feed = try XCTUnwrap(RSSParser().parseChannelMetadata(Data(sampleAtom.utf8)))
+        XCTAssertEqual(feed.title, "Atom Show")
+        XCTAssertEqual(feed.description, "An Atom podcast.")
+        XCTAssertTrue(feed.episodes.isEmpty)
     }
 
     func testParsesAtomEntriesAndSkipsNonAudio() throws {

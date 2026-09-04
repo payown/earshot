@@ -47,6 +47,11 @@ struct ParsedFeed: Sendable {
 /// subscribe to a feed and populate episodes. Namespaces are not processed, so
 /// element names arrive as qualified names (e.g. `itunes:duration`).
 final class RSSParser: NSObject, XMLParserDelegate {
+    /// Directory search needs channel metadata but no episode catalog. In that
+    /// mode the parser intentionally aborts at the first item/entry, after the
+    /// channel fields that feeds conventionally place before their episodes.
+    private var stopsBeforeEpisodes = false
+    private var stoppedBeforeEpisodes = false
     // Feed-level
     private var feedTitle = ""
     private var feedImage: String?
@@ -147,11 +152,23 @@ final class RSSParser: NSObject, XMLParserDelegate {
     }
 
     func parse(_ data: Data) -> ParsedFeed? {
+        parse(data, stopsBeforeEpisodes: false)
+    }
+
+    /// Parses channel-level fields without constructing any ``ParsedEpisode``
+    /// values. This is the bounded path for directory VoiceOver descriptions.
+    func parseChannelMetadata(_ data: Data) -> ParsedFeed? {
+        parse(data, stopsBeforeEpisodes: true)
+    }
+
+    private func parse(_ data: Data, stopsBeforeEpisodes: Bool) -> ParsedFeed? {
+        self.stopsBeforeEpisodes = stopsBeforeEpisodes
+        stoppedBeforeEpisodes = false
         let parser = XMLParser(data: data)
         parser.delegate = self
         let succeeded = parser.parse()
         var title = feedTitle.trimmed
-        if !succeeded {
+        if !succeeded && !stoppedBeforeEpisodes {
             // Malformed XML somewhere in the document. Everything delegate
             // callbacks accumulated before the abort point is still good, so
             // return a partial feed instead of discarding it all — a broken
@@ -241,6 +258,11 @@ final class RSSParser: NSObject, XMLParserDelegate {
         text = ""
         switch elementName {
         case "item", "entry":
+            if stopsBeforeEpisodes {
+                stoppedBeforeEpisodes = true
+                parser.abortParsing()
+                return
+            }
             inItem = true
             itemTitle = ""; itemAudio = ""; itemGUID = ""
             itemEnclosureByteLength = nil

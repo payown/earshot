@@ -52,6 +52,9 @@ final class ArtworkCache: @unchecked Sendable {
     /// On-disk capacity of the backing ``URLCache``. The system may evict under
     /// storage pressure, which is acceptable for re-fetchable artwork.
     static let diskCapacity = 200 * 1024 * 1024    // 200 MB
+    /// Apple directory results commonly share one CDN host. Let URLSession bound
+    /// that burst instead of opening a connection for every newly-created row.
+    static let maximumConnectionsPerHost = 2
 
     /// Subdirectory name under the Caches directory that holds the URLCache.
     static let directoryName = "artwork"
@@ -136,6 +139,7 @@ final class ArtworkCache: @unchecked Sendable {
         } else {
             let config = URLSessionConfiguration.default
             config.urlCache = cache
+            config.httpMaximumConnectionsPerHost = maximumConnectionsPerHost
             // Serve cached data when present so a relaunch reads from disk instead
             // of re-downloading; only reach the network on a true miss.
             config.requestCachePolicy = .returnCacheDataElseLoad
