@@ -54,6 +54,7 @@ struct NowPlayingScreen: View {
 
     @State private var showingControls = false
     @State private var pendingOptionAction: (() -> Void)?
+    @State private var restoresOptionsFocus = false
     @AccessibilityFocusState private var moreOptionsFocused: Bool
     @State private var showingNotes = false
     // The transcript reader sheet (#451), shown only when the current episode's
@@ -167,10 +168,10 @@ struct NowPlayingScreen: View {
             .sheet(isPresented: $showingTranscript) {
                 TranscriptView(episode: player.nowPlayingEpisode)
             }
-            .sheet(item: $exportURL) { file in
+            .sheet(item: $exportURL, onDismiss: restoreOptionsFocus) { file in
                 ShareSheet(items: [file.url])
             }
-            .sheet(isPresented: $showingBookmarks) {
+            .sheet(isPresented: $showingBookmarks, onDismiss: restoreOptionsFocus) {
                 if let episode = player.nowPlayingEpisode {
                     BookmarksListView(episode: episode)
                 }
@@ -396,7 +397,8 @@ struct NowPlayingScreen: View {
     /// collapsed into one element so each button keeps its own action.
     @ViewBuilder
     private var chapterRow: some View {
-        if let title = player.currentChapterTitle {
+        if player.chapterCount > 0 {
+            let title = player.currentChapterTitle ?? "Chapters"
             HStack(spacing: Spacing.md) {
                 if showChapterNavButtons {
                     transportButton(
@@ -805,8 +807,17 @@ struct NowPlayingScreen: View {
     }
 
     private func closeOptionsThen(_ action: @escaping () -> Void) {
+        restoresOptionsFocus = true
         pendingOptionAction = action
         showingControls = false
+    }
+
+    private func restoreOptionsFocus() {
+        guard restoresOptionsFocus else { return }
+        restoresOptionsFocus = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            moreOptionsFocused = true
+        }
     }
 
     /// Export label reflects the download-then-share wait so the user knows the
@@ -840,6 +851,7 @@ struct NowPlayingScreen: View {
             if let url {
                 exportURL = ExportFile(url: url)
             } else {
+                restoreOptionsFocus()
                 Announcer.announce("Could not export audio file")
             }
         }
