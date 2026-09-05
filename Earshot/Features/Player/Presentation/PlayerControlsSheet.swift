@@ -40,10 +40,18 @@ struct PlayerControlsSheet<EpisodeActions: View>: View {
             }
             .navigationTitle("More options")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Text("Done")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, Spacing.lg)
+                .background(.regularMaterial)
             }
 
         }
