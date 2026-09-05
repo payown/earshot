@@ -1049,6 +1049,25 @@ final class AdvancedPlaybackTests: XCTestCase {
         XCTAssertEqual(repo.queue().map(\.persistentModelID), originalIDs)
     }
 
+    func testExplicitQueueNavigationWithMissingAudioKeepsCurrentAndQueue() throws {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        let episodes = makeInterleavedShowsQueue(ctx)
+        episodes.y1.audioURL = ""
+        episodes.x1.positionSeconds = 123
+        try ctx.save()
+        let originalIDs = QueueRepository(context: ctx).queue().map(\.persistentModelID)
+        player.load(episodes.x1)
+        player.nextInQueue()
+        player.markCurrentPlayedAndNextInQueue()
+        XCTAssertEqual(player.nowPlayingEpisodeID, episodes.x1.persistentModelID)
+        XCTAssertEqual(episodes.x1.positionSeconds, 123)
+        XCTAssertFalse(episodes.x1.isPlayed)
+        XCTAssertEqual(QueueRepository(context: ctx).queue().map(\.persistentModelID), originalIDs)
+    }
+
     func testExplicitQueueNavigationStopsAtBothBoundaries() {
         let ctx = TestStore.freshContext()
         let player = PlayerService()
