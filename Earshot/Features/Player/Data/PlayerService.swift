@@ -1012,6 +1012,8 @@ final class PlayerService {
     }
 
     func pause() {
+        // An explicit stop supersedes any automatic or manual pending start.
+        beginMediaResolution()
         pause(providesPauseHaptic: true)
     }
 
