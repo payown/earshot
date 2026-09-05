@@ -2,6 +2,17 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: iPhone feedback follow-up (#951)
+
+Michael verified names, Queue navigation/wrapping and timers, Library/Settings,
+Clear Queue cancellation, and improved hints. He requests one More options
+entry and more accurate/larger Player touch targets before merge. Consolidated
+episode commands and playback settings in a native List sheet, removed the
+duplicate chapter entry, and retained direct chapter/transport and rotor access.
+Play/Pause now has an 80pt label target, skips 64pt, and secondary buttons at
+least 44pt. Native geometry/presentation checks and source review pending.
+No TestFlight upload, issue closure, release or main merge; reinstall locally.
+
 ## September 5, 2026: navigation cleanup (#951)
 
 Implemented on codex/951-navigation-cleanup. Library toolbar goes from six

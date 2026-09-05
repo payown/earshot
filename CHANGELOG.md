@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Consolidated player menus into More options and enlarged playback touch targets.
+
 ### Added
 
 - Add Podcast now includes expandable Apple Podcasts categories and subcategories. Category results use the same podcast details and Follow or Unfollow actions as search results.

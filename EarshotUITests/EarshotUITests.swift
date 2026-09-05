@@ -6,6 +6,46 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testPlayerOptionsAndTouchTargets() {
+        verifyPlayerOptionsAndTargets(largeText: false)
+    }
+
+    func testPlayerOptionsAndTouchTargetsAtLargestText() {
+        verifyPlayerOptionsAndTargets(largeText: true)
+    }
+
+    private func verifyPlayerOptionsAndTargets(largeText: Bool) {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        app.launch()
+        let more = app.buttons["More options"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Player options"].exists)
+        XCTAssertFalse(app.buttons["Episode actions"].exists)
+        let back = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Skip back")).firstMatch
+        let forward = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Skip forward")).firstMatch
+        let play = app.buttons.matching(NSPredicate(format: "label == 'Play' OR label == 'Pause'")).firstMatch
+        for (control, minimum) in [(more, 44.0), (back, 64.0), (play, 80.0), (forward, 64.0)] {
+            XCTAssertGreaterThanOrEqual(control.frame.width, minimum)
+            XCTAssertGreaterThanOrEqual(control.frame.height, minimum)
+            XCTAssertGreaterThanOrEqual(control.frame.minX, 0)
+            XCTAssertLessThanOrEqual(control.frame.maxX, app.frame.width)
+        }
+        XCTAssertFalse(back.frame.intersects(play.frame))
+        XCTAssertFalse(play.frame.intersects(forward.frame))
+        more.tap()
+        XCTAssertTrue(app.navigationBars["More options"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["Mark as played"].count, 1)
+        let bookmarks = app.buttons["Bookmarks"].firstMatch
+        for _ in 0..<6 where !bookmarks.isHittable { app.swipeUp() }
+        XCTAssertTrue(bookmarks.isHittable)
+        bookmarks.tap()
+        XCTAssertTrue(app.navigationBars["Bookmarks"].waitForExistence(timeout: 5))
+    }
+
     func testQueueClearRequiresConfirmationAndCancelPreservesQueue() {
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
