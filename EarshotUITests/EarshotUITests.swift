@@ -84,12 +84,12 @@ final class EarshotUITests: XCTestCase {
         XCTAssertGreaterThan(notes.frame.minY, play.frame.maxY)
         XCTAssertLessThan(notes.frame.maxY, app.frame.maxY)
         let scroll = app.scrollViews.firstMatch
-        let extend = app.buttons["Extend sleep timer by 5 minutes"]
+        let extend = scroll.buttons["Extend sleep timer by 5 minutes"]
         for _ in 0..<20 {
             if extend.exists && extend.isHittable && extend.frame.maxY <= scroll.frame.maxY { break }
             scroll.swipeUp()
         }
-        XCTAssertTrue(extend.isHittable)
+        XCTAssertTrue(extend.isHittable, app.debugDescription)
         XCTAssertLessThanOrEqual(extend.frame.maxY, scroll.frame.maxY)
         XCTAssertLessThanOrEqual(scroll.frame.maxY, position.frame.minY)
         XCTAssertEqual(play.frame.minY, initial[2].minY, accuracy: 1)
