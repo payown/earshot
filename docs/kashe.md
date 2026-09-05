@@ -3041,31 +3041,4 @@ Renata asked whether anything dramatic had happened.
 
 “No,” Kashe said. “The doors opened when I touched them, and the shelf remembered
 what I put there.”
-
----
-
-### Chapter 82 — Build 256
-
-*Kashe keeps her long interviews for later, and later needs to remember where she stopped.*
-
-**What to test:**
-
-In Podcast Settings, choose Rename podcast and save a short name. Check Library, search, Queue, and the player, then refresh and reopen Earshot. Your name should stay. Restore the publisher's name and confirm it returns. If you use private iCloud sync on two devices, check both renaming and restoring there too.
-
-With VoiceOver hints on, focus artwork, Skip back, and Skip forward in Now Playing. Listen for the new hints. Use their Actions rotor: Previous in Queue and Next in Queue should follow the displayed grouped order, leaving skipped episodes unplayed in their existing positions with saved listening places. Neither action wraps at the ends. Double-tapping Skip still moves within the episode. Check the equivalent artwork and menu actions. Repeat with hints off; the actions must still work.
-
-Try Mark as played and next in Queue on a queued episode. Only that explicit choice should mark it played and move on. Ordinary Previous and Next should work even with automatic advance off; starting another episode manually retains the existing sleep-timer cancellation behavior.
-
-In Settings, Playback, confirm Wrap Queue to remaining episodes starts off. Enable it, finish the last queued episode with earlier unplayed items remaining, and confirm playback returns to the first eligible item. Finished episodes must not return. Repeat with Stop after this episode, a sleep timer, and automatic-advance stop settings; those stops must still win.
-
-Explore Library options, Queue options, Player options, and the grouped Settings destinations with VoiceOver. Find your frequent controls and row actions. Choose Clear Queue, then Cancel: nothing should be removed. Check focus when menus and sheets close. Report anything harder to find or slower to reach.
-
-Kashe had twelve minutes before leaving and forty minutes of interview in her ear. She moved to the next queued episode. The interview stayed where she'd put it, unfinished, without needing an argument about what finished meant.
-
-That evening she went back. The guest was still halfway through the same answer. Kashe set the phone beside the windowsill speaker and reached for the work she'd left there.
-
-Before bed she chose Stop after this episode. There were other voices waiting, and she meant to hear them. Tomorrow was allowed to keep something.
-
----
-
 More chapters added here as Earshot ships.

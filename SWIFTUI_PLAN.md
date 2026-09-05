@@ -2,6 +2,17 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: delivery changed to direct iPhone installation
+
+Michael requested Wi-Fi installation on his iPhone before TestFlight. No
+TestFlight upload has occurred or is authorized for this step. Keep the build
+number at 255; version 1.2.2 identifies the integration. Use a signed Release
+build and devicectl over the paired local-network connection. The proposed
+Chapter 82 remains a draft outside the canonical story until distribution.
+The full simulator native suite passed 2,264 tests, with 29 skips and zero
+failures. Final pause regression and UI checks are running. No main merge,
+issue closure, or release before Michael verifies on his iPhone.
+
 ## September 5, 2026: Mac validation of Queue navigation (#949)
 
 Xcode 26.6 / Swift 6.3.3: 163 PlaybackLogicTests and AdvancedPlaybackTests

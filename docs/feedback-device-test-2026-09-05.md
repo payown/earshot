@@ -1,7 +1,8 @@
 # Earshot feedback device test
 
-Pre-merge integration: `codex/feedback-integration`. Intended internal TestFlight
-build: 1.2.2 (256). Installation and physical VoiceOver verification are pending.
+Pre-merge integration: `codex/feedback-integration`. Direct Wi-Fi iPhone
+build: 1.2.2 (255). Installation and physical VoiceOver verification are pending.
+Michael requested direct device testing first; do not upload to TestFlight.
 Do not merge the feature PRs or close #947–#951 until Michael confirms.
 
 ## Short VoiceOver checklist
