@@ -7,11 +7,23 @@ Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 Michael requested Wi-Fi installation on his iPhone before TestFlight. No
 TestFlight upload has occurred or is authorized for this step. Keep the build
 number at 255; version 1.2.2 identifies the integration. Use a signed Release
-build and devicectl over the paired local-network connection. The proposed
+build and devicectl over the paired local-network connection. Final Release
+build and signature checks passed; 1.2.2 (255) was installed and launched on
+Michael’s iPhone over Wi-Fi on September 5. The proposed
 Chapter 82 remains a draft outside the canonical story until distribution.
 The full simulator native suite passed 2,264 tests, with 29 skips and zero
-failures. Final pause regression and UI checks are running. No main merge,
+failures. Final playback/media follow-up passed 73 tests; the final name identity
+assertion also passed. Four of five selected UI flows passed initially; the
+Queue-clear flow exposed an unreachable Cancel in confirmationDialog. Replaced
+it with a native alert and reran that flow successfully. The required source
+accessibility gate passed again for the final alert. Physical VoiceOver is
+still pending. No main merge,
 issue closure, or release before Michael verifies on his iPhone.
+
+Draft PRs assigned to payown: #952 (names), #953 (hints), #954 (Queue
+navigation), #955 (wrapping), and #956 (navigation cleanup). Each targets main;
+none is merged. The integrated device checklist is in
+`docs/feedback-device-test-2026-09-05.md`.
 
 ## September 5, 2026: Mac validation of Queue navigation (#949)
 

@@ -1,7 +1,9 @@
 # Earshot feedback device test
 
 Pre-merge integration: `codex/feedback-integration`. Direct Wi-Fi iPhone
-build: 1.2.2 (255). Installation and physical VoiceOver verification are pending.
+build: 1.2.2 (255), installed and launched on Michael’s iPhone over the paired
+local-network connection on September 5, 2026. Physical VoiceOver verification
+is pending. The final Release build and signature verification passed.
 Michael requested direct device testing first; do not upload to TestFlight.
 Do not merge the feature PRs or close #947–#951 until Michael confirms.
 
@@ -11,8 +13,9 @@ Do not merge the feature PRs or close #947–#951 until Michael confirms.
    Save a short name. Hear it in Library, Queue, and Now Playing. Search for
    both the new and publisher names. Refresh and reopen Earshot; the override
    should remain. Restore original name; the current publisher name returns.
-   Cancel should discard edits, and blank names should not save. If using two
-   synced devices, check both rename and restore arrive on the other device.
+   Cancel should discard edits, and blank names should not save. Cross-device
+   iCloud verification needs matching signing environments; this development-
+   signed local build does not establish production iCloud sync behavior.
 2. **Player actions:** With a few queued episodes, open Now Playing. On Skip
    forward, use Next in Queue; on Skip back, use Previous in Queue. The skipped
    episode stays unplayed in the same Queue position and resumes at its saved
@@ -49,3 +52,15 @@ CloudKit schema change. Publisher metadata remains separate and shared exports
 retain publisher names. Restore is an explicit cleared preference. Queue wrap
 is opt-in and does not recreate consumed episodes. Folder-wide oldest-first
 runs (#944) remain unimplemented and independent of normal Queue navigation.
+
+## Native validation
+
+Full integrated unit suite: 2,264 tests, 29 skips, zero failures; known
+StoreKit suites excluded as required. Final playback/media follow-up: 73
+passed. Name identity assertion passed. All five selected UI flows passed
+across the initial run and corrected Queue-clear rerun. The initial clear
+dialog lacked a reachable Cancel; the final native alert fixes that failure.
+Required source accessibility review passed, including the final alert.
+
+Draft PRs: #952 names, #953 hints, #954 Queue navigation, #955 wrapping,
+#956 navigation cleanup. Physical VoiceOver is not claimed as verified by these native checks.
