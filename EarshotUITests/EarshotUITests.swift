@@ -70,7 +70,11 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(mark.isHittable)
         XCTAssertEqual(app.buttons.matching(identifier: "Mark as played").count, 1)
         let bookmarks = app.buttons["Bookmarks"].firstMatch
-        for _ in 0..<6 where !bookmarks.isHittable { app.swipeUp() }
+        // A partially visible List row can report hittable while its center
+        // is clipped below the pinned Done area. Bring the whole row into view.
+        for _ in 0..<6 where !bookmarks.isHittable || bookmarks.frame.maxY > app.buttons["Done"].frame.minY {
+            app.swipeUp()
+        }
         XCTAssertTrue(bookmarks.isHittable)
         bookmarks.tap()
         XCTAssertTrue(app.navigationBars["Bookmarks"].waitForExistence(timeout: 5), app.debugDescription)
