@@ -53,6 +53,8 @@ struct NowPlayingScreen: View {
     private var folders: [PodcastFolder]
 
     @State private var showingControls = false
+    @State private var pendingOptionAction: (() -> Void)?
+    @AccessibilityFocusState private var moreOptionsFocused: Bool
     @State private var showingNotes = false
     // The transcript reader sheet (#451), shown only when the current episode's
     // feed advertised a transcript URL.
@@ -120,23 +122,36 @@ struct NowPlayingScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }
+                    Button { dismiss() } label: {
+                        Text("Close")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
                         .accessibilityLabel("Close player")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingControls = true
                     } label: {
-                        Image(systemName: "slider.horizontal.3")
+                        Image(systemName: "ellipsis.circle")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
-                    .accessibilityLabel("Player options")
-                    .accessibilityHint("Sleep timer, volume boost, and chapters")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    episodeActionsMenu
+                    .accessibilityLabel("More options")
+                    .accessibilityHint("Episode actions and playback settings")
+                    .accessibilityFocused($moreOptionsFocused)
                 }
             }
-            .sheet(isPresented: $showingControls) { PlayerControlsSheet() }
+            .sheet(isPresented: $showingControls, onDismiss: {
+                let action = pendingOptionAction
+                pendingOptionAction = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    if let action { action() }
+                    else { moreOptionsFocused = true }
+                }
+            }) {
+                PlayerControlsSheet { episodeOptions }
+            }
             .sheet(isPresented: $showingSpeedPicker, onDismiss: {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     speedBadgeFocused = true
@@ -459,11 +474,12 @@ struct NowPlayingScreen: View {
     // MARK: Transport
 
     private var transportRow: some View {
-        HStack(spacing: Spacing.xl) {
+        HStack(spacing: Spacing.md) {
             transportButton(
                 systemImage: "gobackward",
                 label: "Skip back \(secondsPhrase(player.skipBackSeconds))",
                 font: .title,
+                target: 64,
                 action: player.skipBack
             )
             // Pair "Previous chapter" with Skip back as a VoiceOver custom action
@@ -486,15 +502,18 @@ struct NowPlayingScreen: View {
                 Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(.system(.largeTitle, design: .default))
                     .imageScale(.large)
+                    .frame(minWidth: 80, minHeight: 80)
+                    .contentShape(Rectangle())
                     .accessibilityHidden(true)
             }
-            .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
+            .buttonStyle(.plain)
             .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
 
             transportButton(
                 systemImage: "goforward",
                 label: "Skip forward \(secondsPhrase(player.skipForwardSeconds))",
                 font: .title,
+                target: 64,
                 action: player.skipForward
             )
             // Pair "Next chapter" with Skip forward as a VoiceOver custom action
@@ -518,15 +537,17 @@ struct NowPlayingScreen: View {
         systemImage: String,
         label: String,
         font: Font,
+        target: CGFloat = 44,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(font)
-                .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
+                .frame(minWidth: target, minHeight: target)
                 .contentShape(Rectangle())
                 .accessibilityHidden(true)
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(label)
     }
 
@@ -549,6 +570,8 @@ struct NowPlayingScreen: View {
                     .foregroundStyle(.primary)
                     .padding(.horizontal, Spacing.md)
                     .padding(.vertical, Spacing.xs)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .background(.thinMaterial, in: Capsule())
             }
             // Replace the button's accessibility node with a PURE adjustable
@@ -649,7 +672,19 @@ struct NowPlayingScreen: View {
     private var sleepTimerRow: some View {
         let timer = player.sleepTimer
         if timer.isActive {
-            HStack(spacing: Spacing.md) {
+            ViewThatFits(in: .horizontal) {
+                sleepTimerContents(horizontal: true)
+                sleepTimerContents(horizontal: false)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Spacing.xs)
+        }
+    }
+
+    private func sleepTimerContents(horizontal: Bool) -> some View {
+        let timer = player.sleepTimer
+        let layout = horizontal ? AnyLayout(HStackLayout(spacing: Spacing.md)) : AnyLayout(VStackLayout(spacing: Spacing.md))
+        return layout {
                 Image(systemName: "moon.zzz.fill")
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
@@ -663,7 +698,7 @@ struct NowPlayingScreen: View {
                         ? "End of episode"
                         : SleepTimerLogic.spokenRemaining(timer.remainingSeconds))
 
-                Spacer()
+                if horizontal { Spacer() }
 
                 if !timer.endOfEpisode {
                     Button {
@@ -674,13 +709,12 @@ struct NowPlayingScreen: View {
                             .font(.subheadline.weight(.medium))
                             .padding(.horizontal, Spacing.md)
                             .padding(.vertical, Spacing.xs)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                             .background(.thinMaterial, in: Capsule())
                     }
                     .accessibilityLabel("Extend sleep timer by 5 minutes")
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Spacing.xs)
         }
     }
 
@@ -760,20 +794,13 @@ struct NowPlayingScreen: View {
         .accessibilityHint("Opens the episode transcript")
     }
 
-    // MARK: Episode actions menu (#371)
+    // MARK: Unified options
 
-    /// The toolbar overflow menu surfacing the three episode actions as a visible
-    /// control alongside the VoiceOver rotor actions on the artwork. Each
-    /// destructive-feeling action carries a leading icon so its nature isn't
-    /// signalled by position alone. "Stop after this episode" shows a checkmark
-    /// while active.
-    private var episodeActionsMenu: some View {
-        Menu {
-            Section("Queue navigation") {
-                Button("Previous in Queue", action: player.previousInQueue)
-                Button("Next in Queue", action: player.nextInQueue)
-                Button("Mark as played and next in Queue", action: player.markCurrentPlayedAndNextInQueue)
-            }
+    @ViewBuilder
+    private var episodeOptions: some View {
+        Button("Previous in Queue", action: player.previousInQueue)
+        Button("Next in Queue", action: player.nextInQueue)
+        Button("Mark as played and next in Queue", action: player.markCurrentPlayedAndNextInQueue)
             Button {
                 player.markCurrentPlayedAndAdvance()
             } label: {
@@ -781,23 +808,14 @@ struct NowPlayingScreen: View {
             }
 
             Button {
-                startExport()
+                closeOptionsThen { startExport() }
             } label: {
                 Label(exportActionLabel, systemImage: "square.and.arrow.up")
             }
             .disabled(isExporting)
 
             Button {
-                player.toggleStopAfterEpisode()
-            } label: {
-                Label(
-                    "Stop after this episode",
-                    systemImage: player.stopAfterCurrentEpisode ? "checkmark" : "stop.circle"
-                )
-            }
-
-            Button {
-                showingBookmarks = true
+                closeOptionsThen { showingBookmarks = true }
             } label: {
                 Label("Bookmarks", systemImage: "bookmark")
             }
@@ -808,13 +826,11 @@ struct NowPlayingScreen: View {
             } label: {
                 Label("Refresh episode audio", systemImage: "arrow.clockwise")
             }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-        }
-        .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
-        .accessibilityLabel("Episode actions")
-        .accessibilityHint("Mark as played, export audio, stop after this episode, bookmarks, and refresh episode audio")
-        .disabled(player.nowPlayingEpisode == nil)
+    }
+
+    private func closeOptionsThen(_ action: @escaping () -> Void) {
+        pendingOptionAction = action
+        showingControls = false
     }
 
     /// Export label reflects the download-then-share wait so the user knows the

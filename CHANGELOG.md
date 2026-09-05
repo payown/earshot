@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Consolidated player menus into More options and enlarged playback touch targets.
+
 ### Added
 
 - Player actions now offer Previous in Queue, Next in Queue, and Mark as played and next in Queue. Previous/Next preserve skipped episodes and their saved places. (#949)
