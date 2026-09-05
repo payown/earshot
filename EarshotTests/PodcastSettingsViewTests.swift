@@ -49,6 +49,7 @@ final class PodcastSettingsViewTests: XCTestCase {
         names.reload(context: ctx)
         XCTAssertThrowsError(try names.save(" \n ", for: podcast, context: ctx))
         XCTAssertEqual(podcast.displayName, "Test Podcast")
+        let originalFeed = podcast.feedURL
         try names.save("Personal Show", for: podcast, context: ctx)
         let episode = Episode(guid: "search-name", title: "Episode", audioURL: "https://test.example/e.mp3")
         episode.podcast = podcast
@@ -57,7 +58,6 @@ final class PodcastSettingsViewTests: XCTestCase {
         XCTAssertTrue(EpisodeSearchFilter.matches(episode, query: "Personal"))
         XCTAssertTrue(EpisodeSearchFilter.matches(episode, query: "Test Podcast"))
         XCTAssertTrue(AppSettingScope.isMirrored(SettingsKey.podcastDisplayName(feedURL: podcast.feedURL)))
-        let originalFeed = podcast.feedURL
         XCTAssertEqual(podcast.feedURL, originalFeed)
         XCTAssertFalse(episode.isPlayed)
         XCTAssertTrue(podcast.isFollowed)
