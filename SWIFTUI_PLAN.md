@@ -2,6 +2,29 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: post-1.2.1 user feedback
+
+Michael reports App Store approval of 1.2.1 and authorized implementation.
+Issues: #947 custom podcast names; #948 player hints; #949 Previous/Next in
+Queue; #950 optional wrap to earlier remaining Queue items; #951 UI navigation
+cleanup. The code at 44002eb stops at the last queued item even if earlier
+items remain. Wrapping does not mean resurrecting completed/removed episodes.
+
+#949 first implementation is on feature/949-queue-navigation in a linked
+worktree. Skipped episodes remain in their original Queue positions and retain
+unplayed status and saved position. Explicit navigation follows displayed
+Queue grouping and bypasses automatic stop preferences; manual episode starts
+retain the existing sleep-timer/stop-after-current cancellation behavior.
+First/last boundaries do not wrap. Existing Mark as played remains available
+for unqueued episodes and its established auto-advance policy.
+
+Validation: source/accessibility review and git diff --check only in this
+workspace. Xcode and Swift are unavailable, so added XCTest coverage has not
+run. Required next gate: Xcode tests, physical-device VoiceOver, then a
+pre-merge test build. Do not merge or close issues until Michael verifies.
+No signing, schema, purchase, reset, or release-number changes in this batch.
+
+
 > **2026-07-30 — restructure.** SwiftUI is now the primary codebase and the app
 > lives at the **repo root** (it was under `EarshotSwift/` while this plan was
 > written, so older entries below reference that path — read them as historical).

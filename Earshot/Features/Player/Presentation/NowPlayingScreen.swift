@@ -244,6 +244,15 @@ struct NowPlayingScreen: View {
                 })
             }
         }
+        actions.append(QuickActionItem(label: "Previous in Queue", isDestructive: false) {
+            player.previousInQueue()
+        })
+        actions.append(QuickActionItem(label: "Next in Queue", isDestructive: false) {
+            player.nextInQueue()
+        })
+        actions.append(QuickActionItem(label: "Mark as played and next in Queue", isDestructive: false) {
+            player.markCurrentPlayedAndNextInQueue()
+        })
         actions.append(QuickActionItem(label: "Mark as played", isDestructive: false) {
             player.markCurrentPlayedAndAdvance()
         })
@@ -462,6 +471,9 @@ struct NowPlayingScreen: View {
             .accessibilityAction(named: "Previous chapter") {
                 player.previousChapterOrAnnounceNoChapters()
             }
+            .accessibilityAction(named: "Previous in Queue") {
+                player.previousInQueue()
+            }
 
             // Dynamic VoiceOver name reflecting the action the button performs
             // ("Play" when paused, "Pause" when playing), matching the mini bar.
@@ -486,6 +498,12 @@ struct NowPlayingScreen: View {
             // (#560); mirrors the Skip back / Previous chapter pairing above.
             .accessibilityAction(named: "Next chapter") {
                 player.nextChapterOrAnnounceNoChapters()
+            }
+            .accessibilityAction(named: "Next in Queue") {
+                player.nextInQueue()
+            }
+            .accessibilityAction(named: "Mark as played and next in Queue") {
+                player.markCurrentPlayedAndNextInQueue()
             }
         }
         .frame(maxWidth: .infinity)
@@ -747,6 +765,11 @@ struct NowPlayingScreen: View {
     /// while active.
     private var episodeActionsMenu: some View {
         Menu {
+            Section("Queue navigation") {
+                Button("Previous in Queue", action: player.previousInQueue)
+                Button("Next in Queue", action: player.nextInQueue)
+                Button("Mark as played and next in Queue", action: player.markCurrentPlayedAndNextInQueue)
+            }
             Button {
                 player.markCurrentPlayedAndAdvance()
             } label: {

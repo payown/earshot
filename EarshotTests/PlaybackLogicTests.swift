@@ -3,6 +3,22 @@ import XCTest
 
 /// Unit tests for the pure playback rules. No AVFoundation, no real files.
 final class PlaybackLogicTests: XCTestCase {
+    func testExplicitQueueNavigationPreservesOrderAndFindsBothNeighbors() {
+        let queue = ["a", "c", "b", "d"]
+        XCTAssertEqual(PlaybackLogic.queueNeighborID(queue: queue, current: "b", direction: .previous), "c")
+        XCTAssertEqual(PlaybackLogic.queueNeighborID(queue: queue, current: "b", direction: .next), "d")
+        XCTAssertEqual(queue, ["a", "c", "b", "d"])
+    }
+
+    func testExplicitQueueNavigationDoesNotWrapOrGuessMissingPosition() {
+        XCTAssertNil(PlaybackLogic.queueNeighborID(queue: ["a", "b"], current: "a", direction: .previous))
+        XCTAssertNil(PlaybackLogic.queueNeighborID(queue: ["a", "b"], current: "b", direction: .next))
+        XCTAssertNil(PlaybackLogic.queueNeighborID(queue: ["a"], current: "missing", direction: .next))
+        XCTAssertNil(PlaybackLogic.queueNeighborID(queue: ["a"], current: nil, direction: .previous))
+        XCTAssertNil(PlaybackLogic.queueNeighborID(queue: [String](), current: "a", direction: .next))
+        XCTAssertNil(PlaybackLogic.queueNeighborID(queue: ["a"], current: "a", direction: .next))
+    }
+
 
     func testProjectedPositionFollowsForwardProgressWhilePaused() {
         XCTAssertEqual(
