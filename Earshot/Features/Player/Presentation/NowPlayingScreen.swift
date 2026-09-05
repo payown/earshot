@@ -129,7 +129,8 @@ struct NowPlayingScreen: View {
                     } label: {
                         Image(systemName: "slider.horizontal.3")
                     }
-                    .accessibilityLabel("Player controls, sleep timer and chapters")
+                    .accessibilityLabel("Player options")
+                    .accessibilityHint("Sleep timer, volume boost, and chapters")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     episodeActionsMenu

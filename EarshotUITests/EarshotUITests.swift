@@ -31,6 +31,25 @@ final class EarshotUITests: XCTestCase {
         XCTAssertEqual(rename.value as? String, originalName)
     }
 
+    func testQueueClearRequiresConfirmationAndCancelPreservesQueue() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "queue"]
+        app.launch()
+        let options = app.buttons["Queue options"].firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 10))
+        options.tap()
+        app.buttons["Clear queue"].firstMatch.tap()
+        let clear = app.buttons["Clear entire Queue"].firstMatch
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        app.buttons["Cancel"].firstMatch.tap()
+        XCTAssertFalse(clear.exists)
+        options.tap()
+        XCTAssertTrue(app.buttons["Clear queue"].firstMatch.exists)
+        app.buttons["Clear queue"].firstMatch.tap()
+        clear.tap()
+        XCTAssertTrue(app.staticTexts["Queue is empty"].firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testSeededLibraryLaunchAndTabNavigationSmoke() {
         let app = XCUIApplication()
         app.launchArguments = [

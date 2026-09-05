@@ -94,6 +94,26 @@ refresh-failure row names. Added disk-reopen, two-device projection/restore,
 local-name search, 10k-episode cached lookup, and editor UI coverage; final
 rerun/integrated tests pending. Physical VoiceOver and TestFlight remain
 pending. No main merge, issue closure, purchase/reset/signing or #944 changes.
+## September 5, 2026: navigation cleanup (#951)
+
+Implemented on codex/951-navigation-cleanup. Library toolbar goes from six
+controls to five: Search, Folders, Refresh, Library options, Discover. Sort and
+Select move under Library options; current sort is still spoken and Done stays
+direct while selecting. Frequent refresh and existing per-row rotor actions
+remain direct. Queue options has Organization, Downloads, Saved lineup, and
+separate Clear queue groups. Clearing requires confirmation for the entire
+Queue, explains download retention, and announces success only after saving;
+focus returns to the Queue heading. Player options now consistently names its
+opener and sheet and hints at sleep timer, volume boost, and chapters.
+Settings destinations are grouped into Listening, Personalization, Library and
+sync, and Help and privacy. Purchase UI is unchanged.
+
+Task audit: Inbox and podcast details retain their current search, filters,
+row actions, and settings entry points; no extra hierarchy was added there.
+Source accessibility review passed. Simulator build-for-testing succeeded;
+Queue-clear UI regression and full integrated tests pending. Physical checks:
+Explore by Touch, swipe order, menu dismissal focus, largest Dynamic Type,
+and hints enabled/disabled. No merge, issue closure, or release.
 
 > **2026-07-30 — restructure.** SwiftUI is now the primary codebase and the app
 > lives at the **repo root** (it was under `EarshotSwift/` while this plan was
