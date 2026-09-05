@@ -285,7 +285,7 @@ struct DownloadsScreen: View {
             Button("Unfollow", role: .destructive) { unfollow(podcast) }
             Button("Cancel", role: .cancel) { pendingUnfollow = nil }
         } message: { podcast in
-            Text("This removes \(podcast.title) and its episodes from your library. This can't be undone.")
+            Text("This removes \(podcast.displayName) and its episodes from your library. This can't be undone.")
         }
         // Destructive "Clear all downloads" confirmation (toolbar trash button).
         // Same shape as the unfollow dialog above so the flow reads identically.
@@ -397,7 +397,7 @@ struct DownloadsScreen: View {
         return HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.title).font(.body)
-                if let podcast = episode.podcast?.title {
+                if let podcast = episode.podcast?.displayName {
                     Text(podcast).font(.caption).foregroundStyle(.secondary)
                 }
                 Text(days <= 0 ? "Expiring soon" : "^[\(days) day](inflect: true) left to restore")
@@ -414,7 +414,7 @@ struct DownloadsScreen: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            [episode.title, episode.podcast?.title].compactMap { $0 }.joined(separator: ", ")
+            [episode.title, episode.podcast?.displayName].compactMap { $0 }.joined(separator: ", ")
         )
         .accessibilityValue(days <= 0 ? "Recently expired, expiring soon" : "Recently expired, \(days) \(days == 1 ? "day" : "days") left to restore")
         .accessibilityHint("Restorable for a limited time")
@@ -498,7 +498,7 @@ struct DownloadsScreen: View {
     /// success only on `true`. The show's downloaded episodes drop out of the
     /// @Query-backed list automatically.
     private func unfollow(_ podcast: Podcast) {
-        let title = podcast.title
+        let title = podcast.displayName
         let removed = SubscriptionRepository(context: context).unsubscribe(podcast)
         pendingUnfollow = nil
         guard removed else { return }

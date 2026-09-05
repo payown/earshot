@@ -2,6 +2,34 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: personal podcast display names (#947)
+
+Implemented on codex/947-podcast-names. Podcast Settings opens a draft name
+editor with Save, Cancel, and Restore original name. Blank names are rejected;
+save failures keep the editor open. Publisher title remains refresh-owned and
+unchanged. Followed-podcast presentation uses an observed in-memory name map,
+loaded only at settings initialization/import or explicit rename, so row reads
+never fetch settings or episodes. Library sorts by effective name; local and
+podcast-detail searches accept both personal and publisher names. Player and
+Queue group speech use effective names. Directory/catalog-only titles stay
+publisher-owned. Shared files/text (OPML, audio/transcript exports, CSV, and
+Listening Places labels) retain publisher names for portability.
+
+Persistence decision: canonical-feed-keyed AppSetting, mirrored through the
+existing private CloudSettingProjection contract, no new schema/entity/field.
+Normal newest-modified contribution wins; ties use existing source-device ID
+then value ordering. Restore writes an explicit empty value, not row deletion,
+so stale contributions cannot revive an older override. Followed-feed scoping
+applies to publication, activation, and imports. No new CloudKit schema rollout.
+
+Initial native gates passed 61 tests (one pre-existing intentional search
+capability skip), including schema drift, editor logic, and search. Source
+accessibility review found and fixed podcast-detail search invalidation and
+refresh-failure row names. Added disk-reopen, two-device projection/restore,
+local-name search, 10k-episode cached lookup, and editor UI coverage; final
+rerun/integrated tests pending. Physical VoiceOver and TestFlight remain
+pending. No main merge, issue closure, purchase/reset/signing or #944 changes.
+
 > **2026-07-30 — restructure.** SwiftUI is now the primary codebase and the app
 > lives at the **repo root** (it was under `EarshotSwift/` while this plan was
 > written, so older entries below reference that path — read them as historical).

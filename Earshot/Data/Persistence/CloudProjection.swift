@@ -2666,6 +2666,7 @@ actor CloudProjectionCoordinator: ModelActor {
             SettingsKey.podcastFilterPrefix,
             SettingsKey.podcastInboxCapPrefix,
             SettingsKey.episodeFilterConfigurationPrefix,
+            SettingsKey.podcastDisplayNamePrefix,
         ] where key.hasPrefix(prefix) {
             return followedFeeds.contains(
                 FeedURLIdentity.canonical(String(key.dropFirst(prefix.count)))
@@ -2683,6 +2684,7 @@ actor CloudProjectionCoordinator: ModelActor {
             SettingsKey.podcastFilterPrefix,
             SettingsKey.podcastInboxCapPrefix,
             SettingsKey.episodeFilterConfigurationPrefix,
+            SettingsKey.podcastDisplayNamePrefix,
         ] where key.hasPrefix(prefix) {
             return FeedURLIdentity.canonical(String(key.dropFirst(prefix.count))) == feed
         }
