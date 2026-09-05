@@ -65,6 +65,9 @@ final class EarshotUITests: XCTestCase {
         more.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.85)).tap()
         XCTAssertTrue(app.navigationBars["More options"].waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(app.buttons["Done"].frame.height, 44)
+        let mark = app.buttons["Mark as played"].firstMatch
+        for _ in 0..<6 where !mark.isHittable { app.swipeUp() }
+        XCTAssertTrue(mark.isHittable)
         XCTAssertEqual(app.buttons.matching(identifier: "Mark as played").count, 1)
         let bookmarks = app.buttons["Bookmarks"].firstMatch
         for _ in 0..<6 where !bookmarks.isHittable { app.swipeUp() }
