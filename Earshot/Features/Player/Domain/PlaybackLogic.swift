@@ -259,13 +259,15 @@ enum PlaybackLogic {
         after current: ID?,
         currentGroupKey: Key?,
         continueAfterEpisode: Bool,
-        continueAfterGroupEnds: Bool
+        continueAfterGroupEnds: Bool,
+        wrapToRemaining: Bool = false
     ) -> ID? {
         guard continueAfterEpisode else { return nil }
         let next: (id: ID, groupKey: Key)?
         if let current, let idx = queue.firstIndex(where: { $0.id == current }) {
             let nextIndex = queue.index(after: idx)
-            next = nextIndex < queue.endIndex ? queue[nextIndex] : nil
+            next = nextIndex < queue.endIndex ? queue[nextIndex]
+                : (wrapToRemaining ? queue.first(where: { $0.id != current }) : nil)
         } else {
             next = queue.first
         }

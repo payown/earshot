@@ -90,6 +90,12 @@ struct PlaybackSettingsView: View {
             }
 
             Section {
+                Toggle("Wrap Queue to remaining episodes", isOn: $settings.wrapQueue)
+            } footer: {
+                Text("After the last queued episode finishes, continue from the first remaining unplayed episode. Completed episodes are not added back. Auto-advance settings, sleep timers, and Stop after this episode still apply. Previous and Next in Queue do not wrap.")
+            }
+
+            Section {
                 Toggle("Open the player when you play an episode", isOn: $settings.openPlayerOnPlay)
             } footer: {
                 Text("When on, playing an episode opens the full player screen. When off, it plays in the background — tap the mini player to open it.")
