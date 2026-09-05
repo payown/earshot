@@ -2,6 +2,39 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: bottom Player row (#951)
+
+Michael requested a focused comfort adjustment: playback position remains above
+transport, with native audio destination and Show notes side by side underneath.
+Moved the existing controls out of the scrolling content. Show notes retains
+its label and footprint when unavailable, using native disabled semantics and
+an explanatory hint. The row wraps its text at larger sizes without changing
+layout based on episode content. Existing header, options, artwork/actions,
+slider interaction and focus restoration are preserved. iPhone remains portrait
+only; the short-height horizontal slider/transport variant was removed to keep
+the explicitly requested order.
+
+Required earshot-accessibility source gate PASS. SE measured normal-text frames:
+slider y443 h56; Play/Pause y511 h80; skips y519 h64; bottom row y603 h56.
+SE AX5: slider y363 h56; Play/Pause y431 h90.5; skips y440.5 h72;
+Show notes y533.5 h125.5, native AirPlay y568.5 h56. The text-driven row height
+is stable when notes disappear. Both initial SE stability/slider tests passed
+with long titles, late chapters, missing artwork, folder context, errors, timers
+and notes becoming unavailable. Final stability and scroll-access reruns passed
+on SE and Pro Max at standard/AX5 text. The added scroll test initially selected
+the mini-player's hidden Extend button; scoping to the full Player resolved it.
+Current checks total eight UI flows across the two devices, plus 168 playback/
+Queue tests and 15 sleep-timer tests, all passing. Show notes activation and the
+native AirPlay button's bounds/hit-test availability passed. The simulator did
+not expose the system audio-destination sheet; destination selection and physical
+VoiceOver accuracy/focus/comfort remain device checks.
+
+Pro Max normal: slider y698 h56; Play/Pause y766 h80 (center 806); bottom row
+y858 h56, leaving 42pt below the controls. AX5: Play/Pause y687 h89.67;
+notes y788.67 h125.33; AirPlay y823.33 h56. Frames are in screen points.
+Signed Release 1.2.2 (255), app code 6817eea, was installed and launched over Wi-Fi;
+the running process was verified. No merge, issue closure, release or TestFlight.
+
 ## September 5, 2026: anchored Player refinement (#951)
 
 Michael explicitly requested stable physical transport positions. Implemented in
