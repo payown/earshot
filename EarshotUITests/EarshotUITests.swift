@@ -25,9 +25,9 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(more.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Player options"].exists)
         XCTAssertFalse(app.buttons["Episode actions"].exists)
-        let back = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Skip back")).firstMatch
-        let forward = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Skip forward")).firstMatch
-        let play = app.buttons.matching(NSPredicate(format: "label == 'Play' OR label == 'Pause'")).firstMatch
+        let back = app.buttons["player.gobackward"]
+        let forward = app.buttons["player.goforward"]
+        let play = app.buttons["player.playPause"]
         for (control, minimum) in [(more, 44.0), (back, 64.0), (play, 80.0), (forward, 64.0)] {
             XCTAssertGreaterThanOrEqual(control.frame.width, minimum)
             XCTAssertGreaterThanOrEqual(control.frame.height, minimum)
@@ -36,8 +36,10 @@ final class EarshotUITests: XCTestCase {
         }
         XCTAssertFalse(back.frame.intersects(play.frame))
         XCTAssertFalse(play.frame.intersects(forward.frame))
-        more.tap()
+        // Measure the full player, not the mini bar behind its sheet.
+        more.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.85)).tap()
         XCTAssertTrue(app.navigationBars["More options"].waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(app.buttons["Done"].frame.height, 44)
         XCTAssertEqual(app.buttons.matching(identifier: "Mark as played").count, 1)
         let bookmarks = app.buttons["Bookmarks"].firstMatch
         for _ in 0..<6 where !bookmarks.isHittable { app.swipeUp() }

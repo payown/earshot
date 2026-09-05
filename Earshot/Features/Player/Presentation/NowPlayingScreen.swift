@@ -498,6 +498,7 @@ struct NowPlayingScreen: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+            .accessibilityIdentifier("player.playPause")
 
             transportButton(
                 systemImage: "goforward",
@@ -532,6 +533,7 @@ struct NowPlayingScreen: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .accessibilityIdentifier("player.\(systemImage)")
     }
 
     // MARK: Speed control row
