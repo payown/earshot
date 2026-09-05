@@ -2,6 +2,16 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: Mac validation of Queue navigation (#949)
+
+Xcode 26.6 / Swift 6.3.3: 163 PlaybackLogicTests and AdvancedPlaybackTests
+passed on the iOS 26.5 simulator. Required source accessibility review found
+missing spoken feedback for unusable audio. Fixed navigation to announce the
+failure; explicit mark-and-next now validates the next source before changing
+played state. Added regression coverage preserving the current episode, saved
+position and Queue for both failure paths. Device VoiceOver remains pending.
+Integration is on codex/feedback-integration; no merge to main or release.
+
 ## September 5, 2026: post-1.2.1 user feedback
 
 Michael reports App Store approval of 1.2.1 and authorized implementation.

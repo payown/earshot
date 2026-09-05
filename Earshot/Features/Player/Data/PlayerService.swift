@@ -656,6 +656,9 @@ final class PlayerService {
                 audioURL: episode.audioURL
             ) else {
                 AppLog.player.error("Cannot play episode, no usable source: \(episode.audioURL, privacy: .public)")
+                if announcesQueueNavigation {
+                    Announcer.announce("Could not play \(episode.title). No usable audio source.")
+                }
                 return
             }
             if resolvedURL == nil, url.scheme?.lowercased() == "http" {
@@ -1712,6 +1715,13 @@ final class PlayerService {
             )
             : nextAdvanceID(after: finished, in: queued)
         let nextEpisode = queued.first { $0.persistentModelID == nextID }
+        if explicitQueueNavigation, let nextEpisode,
+           PlaybackLogic.resolvePlaybackURL(
+               downloadPath: nextEpisode.localAudioURL?.path, audioURL: nextEpisode.audioURL
+           ) == nil {
+            Announcer.announce("Could not play \(nextEpisode.title). No usable audio source.")
+            return
+        }
 
         guard repo.markPlayedAndRemove(finished) else {
             Announcer.announce("Could not mark as played")
