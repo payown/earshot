@@ -20,7 +20,9 @@ flows passed. Small-screen SE geometry, near-edge More options activation and
 Bookmarks presentation passed at standard and AX5 text. Pro final rerun also passed at both sizes.
 The UI harness was corrected to identify full-player rather than mini-player
 controls, and to fully scroll lazy/partly clipped rows into view before tapping.
-No TestFlight upload, issue closure, release or main merge; reinstall locally.
+Final signed Release 1.2.2 (255) refinement installed over Wi-Fi on September 5.
+No TestFlight upload, issue closure, release or main merge; await Michael’s
+verification of the new menus and touch areas.
 
 ## September 5, 2026: delivery changed to direct iPhone installation
 

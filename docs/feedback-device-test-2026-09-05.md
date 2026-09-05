@@ -2,12 +2,29 @@
 
 Pre-merge integration: `codex/feedback-integration`. Direct Wi-Fi iPhone
 build: 1.2.2 (255), installed and launched on Michael’s iPhone over the paired
-local-network connection on September 5, 2026. Physical VoiceOver verification
+local-network connection on September 5, 2026. The first-build VoiceOver checks passed; verification of the player refinement
 is pending. The final Release build and signature verification passed.
 Michael requested direct device testing first; do not upload to TestFlight.
 Do not merge the feature PRs or close #947–#951 until Michael confirms.
 
-## Short VoiceOver checklist
+## Player refinement checklist
+
+Michael passed the original checks below on the first Wi-Fi build. This second
+local revision keeps version 1.2.2 (255); identify it by the single More options
+button and larger transport controls. The refinement was installed over Wi-Fi on September 5, 2026.
+
+1. Open Now Playing, then More options. There should be one options opener,
+   Episode actions followed by Playback settings, and no duplicate chapter
+   destination. Queue commands remain flat, and chapters remain direct.
+2. Open Bookmarks, then close it. Focus should return to More options. Close
+   More options with Done and check the same return point.
+3. Explore Play/Pause and both Skip buttons by touch, including near their
+   edges. Each should announce and activate only its own control. Check speed,
+   More options, Close, and +5 min while a countdown timer is running.
+4. Repeat at larger text, scrolling as needed. Check chapter access, spacing,
+   and the existing artwork/Skip rotor actions and hints.
+
+## Original VoiceOver checklist (passed on iPhone)
 
 1. **Names:** Library, open a followed show, Podcast settings, Rename podcast.
    Save a short name. Hear it in Library, Queue, and Now Playing. Search for
@@ -31,7 +48,7 @@ Do not merge the feature PRs or close #947–#951 until Michael confirms.
    stops take precedence; a countdown keeps running across automatic advances.
    Manual Previous/Next still do not wrap and keep their timer-cancel behavior.
 4. **Navigation:** Library options contains Sort and Select; Search, Folders,
-   Refresh, and Discover remain direct. Player options opens sleep timer,
+   Refresh, and Discover remain direct. More options includes sleep timer,
    volume boost, and chapters. Settings headings group the existing destinations.
    Existing episode and podcast rotor actions should still be available.
 5. **Clear Queue:** Queue options, Clear queue explains the whole Queue and
@@ -64,3 +81,9 @@ Required source accessibility review passed, including the final alert.
 
 Draft PRs: #952 names, #953 hints, #954 Queue navigation, #955 wrapping,
 #956 navigation cleanup. Physical VoiceOver is not claimed as verified by these native checks.
+
+Player refinement validation: 105 selected native unit tests passed, five
+existing UI flows passed, and the final geometry/near-edge activation/Bookmarks
+flows passed at normal and AX5 text on iPhone SE and iPhone 17 Pro. Required
+source accessibility review passed. The signed Release build passed and was
+installed locally; no TestFlight upload.
