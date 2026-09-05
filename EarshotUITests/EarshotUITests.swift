@@ -48,7 +48,7 @@ final class EarshotUITests: XCTestCase {
         for _ in 0..<6 where !bookmarks.isHittable { app.swipeUp() }
         XCTAssertTrue(bookmarks.isHittable)
         bookmarks.tap()
-        XCTAssertTrue(app.navigationBars["Bookmarks"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Bookmarks"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
     func testQueueClearRequiresConfirmationAndCancelPreservesQueue() {
