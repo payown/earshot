@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Consolidated player menus into More options, combined the header, and anchored playback position and transport below scrolling episode content. Enlarged slider hit and accessibility areas while preserving artwork actions. (#951)
+- Consolidated player menus into More options, combined the header, and anchored playback position and transport below scrolling episode content. Enlarged slider hit and accessibility areas while preserving artwork actions. Audio destination and Show notes now sit below transport in a stable row; unavailable notes stay in place. (#951)
 
 ### Added
 

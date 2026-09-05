@@ -78,6 +78,7 @@ enum ScreenshotHarness {
                     try? await Task.sleep(for: .seconds(12))
                     player.currentTitle = String(repeating: "A long episode title for layout testing. ", count: 6)
                     player.currentArtist = String(repeating: "A long podcast name. ", count: 4)
+                    episode.episodeDescription = nil
                     episode.artworkURL = nil
                     episode.podcast?.artworkURL = nil
                     player.setChapters([Chapter(index: 0, startTime: 0, title: "A chapter arriving after the Player opens")])

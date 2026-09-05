@@ -82,33 +82,29 @@ struct NowPlayingScreen: View {
 
     var body: some View {
         NavigationStack {
-            GeometryReader { geometry in
-                VStack(spacing: 0) {
-                    playerHeader
-                    ScrollView {
-                        VStack(spacing: Spacing.xl) {
-                            artworkBlock
-                                .padding(.top, Spacing.lg)
-                            titleBlock
-                            if let failure = player.playbackFailureMessage {
-                                Label(failure, systemImage: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.secondary)
-                                    .accessibilityElement(children: .ignore)
-                                    .accessibilityLabel(failure)
-                            }
-                            chapterRow
-                            speedRow
-                            sleepTimerRow
-                            airPlayRow
-                            if hasShowNotes { showNotesButton }
-                            if hasTranscript { transcriptButton }
+            VStack(spacing: 0) {
+                playerHeader
+                ScrollView {
+                    VStack(spacing: Spacing.xl) {
+                        artworkBlock
+                            .padding(.top, Spacing.lg)
+                        titleBlock
+                        if let failure = player.playbackFailureMessage {
+                            Label(failure, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.secondary)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(failure)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, Spacing.lg)
-                        .padding(.bottom, Spacing.xl)
+                        chapterRow
+                        speedRow
+                        sleepTimerRow
+                        if hasTranscript { transcriptButton }
                     }
-                    playbackDock(compact: geometry.size.height < 400)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.bottom, Spacing.xl)
                 }
+                playbackDock
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingControls, onDismiss: {
@@ -189,11 +185,8 @@ struct NowPlayingScreen: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func playbackDock(compact: Bool) -> some View {
-        let layout = compact
-            ? AnyLayout(HStackLayout(spacing: Spacing.md))
-            : AnyLayout(VStackLayout(spacing: Spacing.xs))
-        return VStack(spacing: Spacing.xs) {
+    private var playbackDock: some View {
+        VStack(spacing: Spacing.xs) {
             // Clocks can grow upward without moving the slider or transport.
             ViewThatFits(in: .horizontal) {
                 HStack {
@@ -210,11 +203,16 @@ struct NowPlayingScreen: View {
             .monospacedDigit()
             .foregroundStyle(.secondary)
             .accessibilityHidden(true) // The slider speaks both complete times.
-            layout {
-                ScrubberView(player: player, preview: $scrubPreview)
-                transportRow
-                    .fixedSize(horizontal: compact, vertical: true)
+            ScrubberView(player: player, preview: $scrubPreview)
+            transportRow
+            HStack(spacing: Spacing.lg) {
+                RoutePickerView()
+                    .frame(width: 64, height: 56)
+                    .frame(maxWidth: .infinity)
+                showNotesButton
+                    .frame(maxWidth: .infinity)
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, Spacing.lg)
@@ -764,50 +762,27 @@ struct NowPlayingScreen: View {
         return ""
     }
 
-    // MARK: AirPlay route picker
-
-    /// A centered AirPlay route picker. Tapping presents the system output-device
-    /// sheet (AirPlay, Bluetooth, etc.). The accessible label and hint are set on
-    /// the underlying `AVRoutePickerView` inside `RoutePickerView`.
-    private var airPlayRow: some View {
-        HStack {
-            Spacer()
-            RoutePickerView()
-                .frame(minWidth: Spacing.minTouchTarget, minHeight: Spacing.minTouchTarget)
-            Spacer()
-        }
-    }
-
     // MARK: Show notes
 
     private var showNotesButton: some View {
         Button {
             showingNotes = true
         } label: {
-            HStack {
-                Text("Show notes")
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
-            // Guarantee a 44pt-plus tap target at default Dynamic Type; the
-            // vertical padding alone leaves the row short of the minimum.
-            // Mirrors the Transcript row below (#579).
-            .frame(minHeight: Spacing.minTouchTarget)
-            .contentShape(Rectangle())
+            Text("Show notes")
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 56)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.vertical, Spacing.sm)
-        .accessibilityHint("Opens the episode show notes")
+        .disabled(!hasShowNotes)
+        .accessibilityHint(hasShowNotes ? "Opens the episode show notes" : "This episode has no show notes")
     }
 
     // MARK: Transcript (#451)
 
-    /// Opens the transcript reader. Mirrors the Show notes row exactly (same
-    /// layout, chevron, and 44pt-plus row height) so the two entry points read as a
-    /// pair. Shown only when the current episode advertised a transcript URL, so it
+    /// Opens the transcript reader from the scrolling details. Shown only when
+    /// the current episode advertised a transcript URL, so it
     /// never offers a dead action.
     private var transcriptButton: some View {
         Button {
