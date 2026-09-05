@@ -4,6 +4,16 @@ import XCTest
 /// Unit tests for the pure playback rules. No AVFoundation, no real files.
 final class PlaybackLogicTests: XCTestCase {
 
+    func testWrappingUsesFirstRemainingAndHonorsStopSettings() {
+        let queue = [(id: "a", groupKey: "x"), (id: "b", groupKey: "y")]
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(queue: queue, after: "b", currentGroupKey: "y", continueAfterEpisode: true, continueAfterGroupEnds: true))
+        XCTAssertEqual(PlaybackLogic.nextUpHonoringBoundaries(queue: queue, after: "b", currentGroupKey: "y", continueAfterEpisode: true, continueAfterGroupEnds: true, wrapToRemaining: true), "a")
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(queue: queue, after: "b", currentGroupKey: "y", continueAfterEpisode: false, continueAfterGroupEnds: true, wrapToRemaining: true))
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(queue: queue, after: "b", currentGroupKey: "y", continueAfterEpisode: true, continueAfterGroupEnds: false, wrapToRemaining: true))
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(queue: [(id: "a", groupKey: "x")], after: "a", currentGroupKey: "x", continueAfterEpisode: true, continueAfterGroupEnds: true, wrapToRemaining: true))
+        XCTAssertNil(PlaybackLogic.nextUpHonoringBoundaries(queue: [(id: String, groupKey: String)](), after: "a", currentGroupKey: "x", continueAfterEpisode: true, continueAfterGroupEnds: true, wrapToRemaining: true))
+    }
+
     func testProjectedPositionFollowsForwardProgressWhilePaused() {
         XCTAssertEqual(
             PlaybackLogic.projectedPlaybackPosition(

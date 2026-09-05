@@ -335,7 +335,11 @@ final class PlayerService {
 
     /// Pauses when a countdown sleep timer fires, with a short fade so it isn't
     /// an abrupt cut.
+    private var automaticPlaybackStoppedByTimer = false
+
     private func handleSleepTimerExpired() {
+        automaticPlaybackStoppedByTimer = true
+        beginMediaResolution()
         fadeOutThenPause()
         Announcer.announce("Sleep timer ended. Paused.")
     }
@@ -367,6 +371,7 @@ final class PlayerService {
     /// left quiet by a mid-fade volume write (review P1-4). Volume is otherwise
     /// only ever touched by the fade, so 1.0 is the correct baseline.
     private func cancelFadeIfNeeded() {
+        automaticPlaybackStoppedByTimer = false
         fadeGeneration &+= 1
         if player.volume != 1.0 { player.volume = 1.0 }
     }
@@ -639,8 +644,11 @@ final class PlayerService {
         resolvedURL: URL? = nil,
         startSecondsOverride: Double? = nil,
         presentsFullPlayerWhenStarted: Bool = false,
-        providesStartHaptic: Bool = false
+        providesStartHaptic: Bool = false,
+        automaticallyAdvancing: Bool = false
     ) {
+        guard !automaticallyAdvancing || !automaticPlaybackStoppedByTimer else { return }
+        if !automaticallyAdvancing { automaticPlaybackStoppedByTimer = false }
         if resolvedURL == nil {
             beginMediaResolution()
         }
@@ -674,7 +682,8 @@ final class PlayerService {
                         resolvedURL: resolved,
                         startSecondsOverride: startSecondsOverride,
                         presentsFullPlayerWhenStarted: presentsFullPlayerWhenStarted,
-                        providesStartHaptic: providesStartHaptic
+                        providesStartHaptic: providesStartHaptic,
+                        automaticallyAdvancing: automaticallyAdvancing
                     )
                 }
                 return
@@ -685,8 +694,8 @@ final class PlayerService {
             currentMediaResolutionComplete = true
         }
 
-        // A new episode supersedes any in-flight sleep-timer fade (P1-4).
-        cancelFadeIfNeeded()
+        // Only deliberate starts supersede an expired timer's fade/pause.
+        if !automaticallyAdvancing { cancelFadeIfNeeded() }
 
         // Apply source context only after resolving a playable URL. A failed
         // start must not clear or replace the origin of audio that remains loaded.
@@ -705,7 +714,7 @@ final class PlayerService {
         // Both countdown and end-of-episode modes are cancelled. The cancellation
         // is announced via VoiceOver only if the timer was actually running so we
         // don't fire a spurious announcement on every episode start.
-        if sleepTimer.isActive {
+        if sleepTimer.isActive && !automaticallyAdvancing {
             sleepTimer.cancel()
             Announcer.announce("Sleep timer cancelled")
         }
@@ -782,6 +791,9 @@ final class PlayerService {
             )
         }
 
+        if automaticallyAdvancing {
+            Announcer.announce("Now playing \(episode.title)")
+        }
         persistLastPlayingEpisode(episode)
         updateNowPlayingInfo()
         refreshPreload()
@@ -1545,7 +1557,17 @@ final class PlayerService {
     /// group, silently breaking Play Next across podcasts, so the raw
     /// positional candidate wins immediately whenever it's a registered
     /// override — checked before grouping is ever applied.
-    private func nextAdvanceID(after finished: Episode, in queued: [Episode]) -> PersistentIdentifier? {
+    private func nextAdvanceID(
+        after finished: Episode, in queued: [Episode], allowsWrapping: Bool = false
+    ) -> PersistentIdentifier? {
+        let wrap = allowsWrapping && (settings?.bool(
+            SettingsKey.wrapQueue, default: SettingsDefault.wrapQueue
+        ) ?? SettingsDefault.wrapQueue)
+        // Retain the cursor even if the 95% completion threshold marked it played.
+        // Earlier completed items never become wrapping candidates.
+        let eligibleIDs = Set(queued.filter {
+            !$0.isPlayed || $0.persistentModelID == finished.persistentModelID
+        }.map(\.persistentModelID))
         let continueEpisode = settings?.bool(
             SettingsKey.continueAfterEpisode, default: SettingsDefault.continueAfterEpisode
         ) ?? SettingsDefault.continueAfterEpisode
@@ -1580,16 +1602,17 @@ final class PlayerService {
             return .unfiled
         }
 
-        let orderedPairs: [(id: PersistentIdentifier, groupKey: QueueGroup.Kind)]
+        let allOrderedPairs: [(id: PersistentIdentifier, groupKey: QueueGroup.Kind)]
         if grouping != .none {
             let forGrouping = queued.map { (id: $0.persistentModelID, key: groupKey($0)) }
-            orderedPairs = QueueLogic.group(forGrouping).flatMap { group in
+            allOrderedPairs = QueueLogic.group(forGrouping).flatMap { group in
                 group.ids.map { (id: $0, groupKey: group.key) }
             }
         } else {
-            orderedPairs = queued.map { (id: $0.persistentModelID, groupKey: groupKey($0)) }
+            allOrderedPairs = queued.map { (id: $0.persistentModelID, groupKey: groupKey($0)) }
         }
 
+        let orderedPairs = wrap ? allOrderedPairs.filter { eligibleIDs.contains($0.id) } : allOrderedPairs
         let candidate = PlaybackLogic.nextUpID(
             queue: orderedPairs.map(\.id), after: finished.persistentModelID
         )
@@ -1600,7 +1623,8 @@ final class PlayerService {
             continueAfterEpisode: continueEpisode,
             continueAfterGroupEnds: PlaybackLogic.continueAfterGroupEnds(
                 setting: groupSetting, nextCandidate: candidate, playNextOverrides: playNextOverrides
-            )
+            ),
+            wrapToRemaining: wrap
         )
     }
 
@@ -2481,6 +2505,7 @@ final class PlayerService {
             return
         }
 
+        guard !automaticPlaybackStoppedByTimer else { return }
         // Record the just-finished listening before advancing.
         flushListeningSession()
 
@@ -2517,14 +2542,22 @@ final class PlayerService {
         }
 
         let queued = repo.queue()
-        let nextID = nextAdvanceID(after: finished, in: queued)
+        let nextID = nextAdvanceID(after: finished, in: queued, allowsWrapping: true)
         let nextEpisode = queued.first { $0.persistentModelID == nextID }
 
         // The finished episode: mark played and remove it from the queue. Reset
         // its position since it played to the end.
-        repo.markPlayedAndRemove(finished)
+        guard repo.markPlayedAndRemove(finished) else {
+            pause(providesPauseHaptic: false)
+            Announcer.announce("Could not save episode completion. Playback stopped.")
+            return
+        }
         finished.positionSeconds = 0
-        saveContext()
+        guard saveContext() else {
+            pause(providesPauseHaptic: false)
+            Announcer.announce("Could not save episode completion. Playback stopped.")
+            return
+        }
 
         guard let nextEpisode else {
             // Episode finished with nothing queued after it: stop and hide the
@@ -2539,6 +2572,15 @@ final class PlayerService {
             Announcer.announce("Episode finished")
             return
         }
+        guard PlaybackLogic.resolvePlaybackURL(
+            downloadPath: nextEpisode.localAudioURL?.path, audioURL: nextEpisode.audioURL
+        ) != nil else {
+            isPlaying = false
+            intendsToPlay = false
+            clearNowPlayingPresentation()
+            Announcer.announce("Could not play \(nextEpisode.title). No usable audio source.")
+            return
+        }
         // We're advancing to it now, so its Play-next override is spent.
         playNextOverrides.remove(nextEpisode.persistentModelID)
 
@@ -2550,9 +2592,9 @@ final class PlayerService {
         play(
             nextEpisode,
             preparedItem: prepared,
-            originEvent: playbackOriginAdvanceEvent(to: nextEpisode)
+            originEvent: playbackOriginAdvanceEvent(to: nextEpisode),
+            automaticallyAdvancing: true
         )
-        Announcer.announce("Now playing \(nextEpisode.title)")
     }
 
     // MARK: Private — gapless preload
@@ -2575,7 +2617,7 @@ final class PlayerService {
             return
         }
         let queued = QueueRepository(context: context).queue()
-        let nextID = nextAdvanceID(after: current, in: queued)
+        let nextID = nextAdvanceID(after: current, in: queued, allowsWrapping: true)
         guard let next = queued.first(where: { $0.persistentModelID == nextID }) else {
             clearPreload()
             return

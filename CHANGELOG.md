@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional Queue wrapping continues from the first remaining unplayed episode after the last finishes. Off by default; stop preferences and sleep timers still apply. (#950)
+
 - Add Podcast now includes expandable Apple Podcasts categories and subcategories. Category results use the same podcast details and Follow or Unfollow actions as search results.
 - Podcast descriptions in search and category results now follow the Podcast list details preference under Accessibility, including Off, Brief, and Full modes.
 - Transcript metadata now offers Speakers only, Timestamps only, or Speakers and timestamps under Settings > Data. The device-local choice applies live in the transcript viewer and to exports from both the viewer and episode Actions; new installations default to Speakers only while existing installations retain the previous combined format. (closes #900)

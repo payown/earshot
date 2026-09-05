@@ -2,6 +2,24 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: optional Queue wrapping (#950)
+
+Implemented on codex/950-queue-wrap. Default-off Wrap Queue to remaining
+episodes uses the displayed grouped order, then excludes completed items.
+Only natural completion and preload use wrapping; explicit Previous/Next and
+mark-and-next remain nonwrapping. Continue-after-episode and group stops,
+Stop after this episode, and sleep timers take precedence. Countdown timers
+survive automatic advancement; expiration invalidates pending media resolution
+and cannot be cancelled by an automatic start. Manual-start timer policy stays
+unchanged. This is normal Queue policy only; #944 folder runs remain deferred.
+
+The preference uses the existing mirrored scalar-setting contract. No schema,
+signing, reset, purchase, or folder-run changes. Source accessibility gate
+passed after correcting order-before-filtering and timer-expiry races. Native
+focused tests: 172 passed on Xcode 26.6 / iOS 26.5 before final additional
+unusable-target/completion-save guards; rerun and integrated suite pending.
+Device VoiceOver and integrated pre-merge TestFlight remain pending. No merge.
+
 > **2026-07-30 — restructure.** SwiftUI is now the primary codebase and the app
 > lives at the **repo root** (it was under `EarshotSwift/` while this plan was
 > written, so older entries below reference that path — read them as historical).
