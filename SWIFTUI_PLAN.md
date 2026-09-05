@@ -2,6 +2,13 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: Mac compilation of player hints (#948)
+
+Xcode 26.6 / Swift 6.3.3 simulator Debug build succeeded. Required
+Earshot accessibility source gate passed: existing labels, actions, and
+Play/Pause semantics remain intact. Native integrated tests and physical
+VoiceOver verification with hints on/off remain pending. No release or merge.
+
 ## September 5, 2026: player action discovery (#948)
 
 Michael authorized work on post-1.2.1 feedback. Added concise discovery hints
