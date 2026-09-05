@@ -10,7 +10,16 @@ entry and more accurate/larger Player touch targets before merge. Consolidated
 episode commands and playback settings in a native List sheet, removed the
 duplicate chapter entry, and retained direct chapter/transport and rotor access.
 Play/Pause now has an 80pt label target, skips 64pt, and secondary buttons at
-least 44pt. Native geometry/presentation checks and source review pending.
+least 44pt. Native testing exposed a 36pt toolbar accessibility frame, so Close
+and More options now use a reserved header inset and Done a reserved bottom
+inset. Chapter access remains direct before the first chapter; options-origin
+Bookmarks/share dismissal explicitly returns focus to More options.
+Required accessibility source gate passed. Selected playback/speed tests: 90
+passed; sleep-timer logic/controller: 15 passed. Five existing integrated UI
+flows passed. Small-screen SE geometry, near-edge More options activation and
+Bookmarks presentation passed at standard and AX5 text. Pro final rerun also passed at both sizes.
+The UI harness was corrected to identify full-player rather than mini-player
+controls, and to fully scroll lazy/partly clipped rows into view before tapping.
 No TestFlight upload, issue closure, release or main merge; reinstall locally.
 
 ## September 5, 2026: navigation cleanup (#951)
