@@ -17,12 +17,23 @@ final class EarshotUITests: XCTestCase {
         let play = app.buttons["player.playPause"]
         XCTAssertTrue(play.waitForExistence(timeout: 10))
         let position = app.descendants(matching: .any).matching(identifier: "player.position").firstMatch
-        let controls = [position, app.buttons["player.gobackward"], play, app.buttons["player.goforward"]]
+        let notes = app.buttons["Show notes"]
+        let route = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "AirPlay")).firstMatch
+        let controls = [position, app.buttons["player.gobackward"], play, app.buttons["player.goforward"], route, notes]
         let initial = controls.map(\.frame)
         XCTAssertGreaterThanOrEqual(position.frame.height, 56)
         XCTAssertTrue(play.isHittable)
         XCTAssertLessThanOrEqual(play.frame.maxY, app.frame.maxY)
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Episode artwork")).firstMatch.exists)
+        XCTAssertTrue(notes.isEnabled)
+        XCTAssertEqual(app.buttons.matching(identifier: "Show notes").count, 1)
+        XCTAssertGreaterThanOrEqual(route.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(notes.frame.height, 56)
+        XCTAssertGreaterThan(route.frame.minY, play.frame.maxY)
+        XCTAssertGreaterThan(notes.frame.minY, play.frame.maxY)
+        XCTAssertLessThanOrEqual(position.frame.maxY, play.frame.minY)
+        XCTAssertFalse(route.frame.intersects(notes.frame))
+        XCTContext.runActivity(named: "Player frames AX5=\(largeText): \(controls.map { NSCoder.string(for: $0.frame) }.joined(separator: "; "))") { _ in }
         let prior = position.value as? String
         position.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.08)).tap()
         XCTAssertNotEqual(position.value as? String, prior)
@@ -43,18 +54,43 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(app.buttons["More options"].isHittable)
         XCTAssertTrue(app.buttons["Close player"].isHittable)
         XCTAssertFalse(position.frame.intersects(play.frame))
-        let notes = app.buttons["Show notes"]
-        for _ in 0..<10 {
-            if notes.exists && notes.isHittable && notes.frame.maxY <= position.frame.minY { break }
-            app.scrollViews.firstMatch.swipeUp()
+        XCTAssertTrue(notes.exists)
+        XCTAssertFalse(notes.isEnabled)
+        XCTAssertGreaterThan(notes.frame.minY, play.frame.maxY)
+        XCTAssertLessThan(notes.frame.maxY, app.frame.maxY)
+        let scroll = app.scrollViews.firstMatch
+        let extend = app.buttons["Extend sleep timer by 5 minutes"]
+        for _ in 0..<20 {
+            if extend.exists && extend.isHittable && extend.frame.maxY <= scroll.frame.maxY { break }
+            scroll.swipeUp()
         }
-        XCTAssertTrue(notes.isHittable)
-        XCTAssertLessThanOrEqual(notes.frame.maxY, position.frame.minY)
+        XCTAssertTrue(extend.isHittable)
+        XCTAssertLessThanOrEqual(extend.frame.maxY, scroll.frame.maxY)
+        XCTAssertLessThanOrEqual(scroll.frame.maxY, position.frame.minY)
         XCTAssertEqual(play.frame.minY, initial[2].minY, accuracy: 1)
         for control in [app.buttons["Close player"], app.buttons["More options"]] {
             XCTAssertGreaterThanOrEqual(control.frame.width, 44)
             XCTAssertGreaterThanOrEqual(control.frame.height, 44)
         }
+    }
+
+    func testPlayerBottomRowOpensNotesAndExposesNativeAudioRouteButton() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        app.launch()
+        let notes = app.buttons["Show notes"]
+        XCTAssertTrue(notes.waitForExistence(timeout: 10))
+        notes.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.85)).tap()
+        XCTAssertTrue(app.navigationBars["Show notes"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        let route = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "AirPlay")).firstMatch
+        XCTAssertTrue(route.waitForExistence(timeout: 5))
+        let nativeRouteButton = app.buttons["AirPlay"].firstMatch
+        XCTAssertTrue(nativeRouteButton.isHittable)
+        XCTAssertGreaterThanOrEqual(nativeRouteButton.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(nativeRouteButton.frame.height, 44)
+        XCTAssertLessThan(nativeRouteButton.frame.maxX, notes.frame.minX)
+        XCTAssertLessThan(nativeRouteButton.frame.maxY, app.frame.maxY)
     }
 
     func testPlayerOptionsAndTouchTargets() {
