@@ -7,29 +7,29 @@ is pending. The final Release build and signature verification passed.
 Michael requested direct device testing first; do not upload to TestFlight.
 Do not merge the feature PRs or close #947–#951 until Michael confirms.
 
-## Final anchored Player checklist
+## Final bottom-row Player checklist
 
-The newest local revision keeps version 1.2.2 (255). Identify it by the single
-Close / Now Playing / More options header and the playback position plus
-transport area fixed below the scrolling artwork and episode details.
-Physical VoiceOver verification of this revision is pending.
+The latest local revision keeps version 1.2.2 (255). The anchored area now reads
+Playback position, Skip back / Play-Pause / Skip forward, then AirPlay (audio
+destination) and Show notes side by side. The bottom row raises transport while
+preserving its physical position for a given screen and text setting.
 
-1. Find Play/Pause and both skips by touch. Change to short and long episodes,
-   with and without chapters/artwork, while playing and paused. Start/cancel a
-   timer and scroll episode details. The primary controls and slider should
-   remain in the same physical area for the same text setting.
-2. Explore the slider near its top and bottom edges, then swipe up/down to
-   adjust it. It should announce Playback position with the current time, and
-   adjacent controls should not take focus. Check that its focus rectangle
-   matches the broad touch area. With VoiceOver off, dragging should preview
-   the destination time and commit the seek on release.
-3. Find Episode artwork in the scrolling content and use its Actions rotor.
-   Existing playback/Queue/chapter/episode shortcuts should still work.
-4. Swipe through Close, Now Playing and More options. Begin exploring as soon
-   as the Player opens; focus should not jump back after a delay.
-5. Open and dismiss More options, then Bookmarks through More options. Focus
-   should return to More options. Repeat at larger text, and verify all details
-   and Show notes remain reachable above the reserved playback area.
+1. Explore playback position, then move down to Play/Pause and the skips. Check
+   whether they feel comfortably placed; their enlarged targets should remain
+   separate. The position slider must stay above transport.
+2. Find AirPlay and Show notes below transport. Open each, then return. AirPlay
+   should present the native destination picker. Actual destination selection
+   is a physical-device check; the simulator did not expose that system sheet.
+3. Compare episodes with and without notes. Show notes must stay in place and
+   announce its unavailable/disabled state when absent. Transport must not move.
+4. Change long/short episodes, wait for chapters/artwork, and start/cancel a timer.
+   Scroll all details and repeat at larger text. Controls should stay anchored,
+   notes should wrap without clipping, and the Home indicator should stay clear.
+5. Confirm artwork and its Actions remain reachable, and returning from More
+   options still restores focus. No delayed opening request should steal focus.
+
+Measured simulator bounds and native test results are documented below. They do
+not establish physical VoiceOver touch accuracy, focus, or comfort.
 
 ## Original VoiceOver checklist (passed on iPhone)
 
@@ -103,3 +103,22 @@ Pro Max iOS 27 layout flows passed. Both screen sizes passed standard and AX5
 content-transition stability, slider coordinate edge taps, visible artwork,
 header bounds and access to the last scrolling control. Source accessibility
 gate PASS. Physical VoiceOver touch accuracy and focus restoration await Michael.
+
+Bottom-row revision (app code 6817eea): signed Release 1.2.2 (255) installed and
+launched over Wi-Fi; running process verified. Required accessibility source
+review passed. Focused native checks: 168 playback/Queue tests and 15 sleep-timer
+tests passed. Eight UI checks passed across SE and Pro Max, including standard
+and AX5 geometry, notes becoming disabled without moving controls, slider edge
+taps, scrolling to the last timer control, Show notes activation, native AirPlay
+button bounds, and existing More options/Bookmarks flows. An initial scroll
+assertion selected the mini-player behind the sheet; the corrected query scopes
+to the full Player. The native destination sheet wasn't exposed in the simulator;
+physical destination selection remains unverified.
+
+Measured standard-text targets: slider 56pt high, skips 64×64, Play/Pause 80×80,
+AirPlay 64×56 and notes 56pt high. Notes wraps to about 125pt high at AX5 while
+remaining beside AirPlay. Pro Max standard-text Play/Pause center is 806pt from
+the screen top; bottom-row buttons end at 914pt on the 956pt screen, clear of the
+Home indicator. Episode-content changes left measured y-positions/heights
+unchanged within the 1pt test tolerance. These are simulator measurements, not
+Michael's physical VoiceOver results.
