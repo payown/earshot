@@ -38,7 +38,7 @@ final class EarshotUITests: XCTestCase {
         XCTAssertFalse(play.frame.intersects(forward.frame))
         more.tap()
         XCTAssertTrue(app.navigationBars["More options"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.buttons["Mark as played"].count, 1)
+        XCTAssertEqual(app.buttons.matching(identifier: "Mark as played").count, 1)
         let bookmarks = app.buttons["Bookmarks"].firstMatch
         for _ in 0..<6 where !bookmarks.isHittable { app.swipeUp() }
         XCTAssertTrue(bookmarks.isHittable)
