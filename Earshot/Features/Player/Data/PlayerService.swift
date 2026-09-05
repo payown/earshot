@@ -748,7 +748,7 @@ final class PlayerService {
         handoffRateOverride = handoff?.playbackRate
         didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
-        currentArtist = episode.podcast?.title ?? episode.podcast?.author
+        currentArtist = episode.podcast?.displayName ?? episode.podcast?.author
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
 
         // Halt the outgoing item's render before the swap (#549). Without this,
@@ -891,7 +891,7 @@ final class PlayerService {
         handoffRateOverride = nil
         didLogDeletedEpisodeGuard = false
         currentTitle = episode.title
-        currentArtist = episode.podcast?.title ?? episode.podcast?.author
+        currentArtist = episode.podcast?.displayName ?? episode.podcast?.author
         durationSeconds = episode.durationSeconds.map(Double.init) ?? 0
 
         let item = makePlayerItem(url: url)
@@ -1975,6 +1975,12 @@ final class PlayerService {
             return
         }
         nextChapter()
+    }
+
+    func refreshPodcastDisplayName() {
+        guard let currentEpisode, !currentEpisodeIsTransient else { return }
+        currentArtist = currentEpisode.podcast?.displayName ?? currentEpisode.podcast?.author
+        updateNowPlayingInfo()
     }
 
     func previousChapterOrAnnounceNoChapters() {

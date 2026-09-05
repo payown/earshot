@@ -756,7 +756,7 @@ struct FolderDetailScreen: View {
         HStack(spacing: Spacing.md) {
             PodcastArtwork(urlString: podcast.artworkURL)
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(podcast.title).font(.headline)
+                Text(podcast.displayName).font(.headline)
                 if let author = podcast.author, !author.isEmpty {
                     Text(author)
                         .font(.subheadline)
@@ -874,9 +874,9 @@ struct FolderDetailScreen: View {
 
     private func rowLabel(for podcast: Podcast) -> String {
         if let author = podcast.author, !author.isEmpty {
-            return "\(podcast.title), \(author)"
+            return "\(podcast.displayName), \(author)"
         }
-        return podcast.title
+        return podcast.displayName
     }
 
     // MARK: Actions
@@ -964,7 +964,7 @@ struct FolderDetailScreen: View {
 
     private func remove(_ podcast: Podcast) {
         repository.remove(podcast, from: folder)
-        Announcer.announce("Removed \(podcast.title) from \(folder.name)")
+        Announcer.announce("Removed \(podcast.displayName) from \(folder.name)")
     }
 
     /// Drops one episode's membership in this folder (#759). The episode itself

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Player actions now offer Previous in Queue, Next in Queue, and Mark as played and next in Queue. Previous/Next preserve skipped episodes and their saved places. (#949)
 - Optional Queue wrapping continues from the first remaining unplayed episode after the last finishes. Off by default; stop preferences and sleep timers still apply. (#950)
+- Followed podcasts can have personal display names, with an option to restore the publisher name. Names survive refresh, sync through private iCloud, and work in Library sorting and local search. (#947)
 
 - Add Podcast now includes expandable Apple Podcasts categories and subcategories. Category results use the same podcast details and Follow or Unfollow actions as search results.
 - Podcast descriptions in search and category results now follow the Podcast list details preference under Accessibility, including Off, Brief, and Full modes.

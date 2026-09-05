@@ -156,6 +156,12 @@ enum SettingsKey {
     // with `inboxMaxEpisodes = nil` and silently drops the limit (#548).
     // `Podcast.inboxMaxEpisodes` stays the live source of truth for all
     // existing flows; this keyed copy exists only to restore it on re-add.
+    static let podcastDisplayNamePrefix = "podcast_display_name_"
+
+    static func podcastDisplayName(feedURL: String) -> String {
+        podcastDisplayNamePrefix + FeedURLIdentity.canonical(feedURL)
+    }
+
     static let podcastInboxCapPrefix = "podcast_inbox_cap_"
 
     /// The full per-podcast inbox-cap key for a given feed URL (#548).
@@ -263,6 +269,7 @@ enum AppSettingScope {
         let canonical = AppSettingIdentity.canonicalKey(key)
         if canonical.hasPrefix(SettingsKey.podcastFilterPrefix)
             || canonical.hasPrefix(SettingsKey.podcastInboxCapPrefix)
+            || canonical.hasPrefix(SettingsKey.podcastDisplayNamePrefix)
             || canonical.hasPrefix(SettingsKey.episodeFilterConfigurationPrefix) {
             return false
         }

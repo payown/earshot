@@ -8,6 +8,91 @@ import SwiftData
 @MainActor
 final class PodcastSettingsViewTests: XCTestCase {
 
+    func testPersonalNameSurvivesRefreshAndFreshContextAndRestore() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx)
+        let episode = Episode(guid: "name-episode", title: "Episode", audioURL: "https://test.example/audio.mp3")
+        episode.podcast = podcast
+        episode.positionSeconds = 123
+        ctx.insert(episode)
+        try ctx.save()
+        QueueRepository(context: ctx).add(episode)
+        let id = podcast.persistentModelID
+        let episodeID = episode.persistentModelID
+        let queueIDs = QueueRepository(context: ctx).queue().map(\.persistentModelID)
+        let names = PodcastDisplayNames.shared
+        names.reload(context: ctx)
+        try names.save("  My Show  ", for: podcast, context: ctx)
+        XCTAssertEqual(podcast.displayName, "My Show")
+        XCTAssertEqual(podcast.title, "Test Podcast")
+        podcast.title = "Publisher refreshed title"
+        try ctx.save()
+        names.reload(context: ctx)
+        XCTAssertEqual(podcast.displayName, "My Show")
+        let reopened = ModelContext(ctx.container)
+        names.reload(context: reopened)
+        let restored = try XCTUnwrap(reopened.model(for: id) as? Podcast)
+        XCTAssertEqual(restored.displayName, "My Show")
+        XCTAssertEqual(restored.title, "Publisher refreshed title")
+        XCTAssertEqual(QueueRepository(context: reopened).queue().map(\.persistentModelID), queueIDs)
+        XCTAssertEqual((reopened.model(for: episodeID) as? Episode)?.positionSeconds, 123)
+        try names.save(nil, for: restored, context: reopened)
+        XCTAssertEqual(restored.displayName, "Publisher refreshed title")
+        XCTAssertEqual(AppSettingsStore(context: reopened).rawValue(SettingsKey.podcastDisplayName(feedURL: podcast.feedURL)), "")
+    }
+
+    func testPersonalNameRejectsBlankAndSearchFindsBothNames() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx)
+        try ctx.save()
+        let names = PodcastDisplayNames.shared
+        names.reload(context: ctx)
+        XCTAssertThrowsError(try names.save(" \n ", for: podcast, context: ctx))
+        XCTAssertEqual(podcast.displayName, "Test Podcast")
+        try names.save("Personal Show", for: podcast, context: ctx)
+        let episode = Episode(guid: "search-name", title: "Episode", audioURL: "https://test.example/e.mp3")
+        episode.podcast = podcast
+        ctx.insert(episode)
+        try ctx.save()
+        XCTAssertTrue(EpisodeSearchFilter.matches(episode, query: "Personal"))
+        XCTAssertTrue(EpisodeSearchFilter.matches(episode, query: "Test Podcast"))
+        XCTAssertTrue(AppSettingScope.isMirrored(SettingsKey.podcastDisplayName(feedURL: podcast.feedURL)))
+        let originalFeed = podcast.feedURL
+        XCTAssertEqual(podcast.feedURL, originalFeed)
+        XCTAssertFalse(episode.isPlayed)
+        XCTAssertTrue(podcast.isFollowed)
+    }
+
+    func testPersonalNamesReloadAndCatalogOnlyKeepsPublisherTitle() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx)
+        try ctx.save()
+        let names = PodcastDisplayNames.shared
+        try names.save("Personal Show", for: podcast, context: ctx)
+        podcast.subscriptionStateRaw = PodcastSubscriptionState.catalogOnly.rawValue
+        XCTAssertEqual(podcast.displayName, "Test Podcast")
+        XCTAssertEqual(try PodcastNamePolicy.snapshot(context: ctx)[FeedURLIdentity.canonical(podcast.feedURL)], "Personal Show")
+    }
+
+    func testDisplayNameLookupStaysBoundedWithTenThousandEpisodes() throws {
+        let ctx = TestStore.freshContext()
+        let podcast = makePodcast(ctx)
+        var episodes: [Episode] = []
+        for index in 0..<10_000 {
+            let episode = Episode(guid: "name-scale-\(index)", title: "Episode", audioURL: "https://test.example/\(index).mp3")
+            episode.podcast = podcast
+            ctx.insert(episode)
+            episodes.append(episode)
+        }
+        try ctx.save()
+        try PodcastDisplayNames.shared.save("Personal Show", for: podcast, context: ctx)
+        let start = Date()
+        let matching = episodes.reduce(0) { $0 + ($1.podcast?.displayName == "Personal Show" ? 1 : 0) }
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertEqual(matching, 10_000)
+        XCTAssertLessThan(elapsed, 3, "Presentation lookup must stay cached and never query the episode table")
+    }
+
     // MARK: Helpers
 
     private func makePodcast(_ ctx: ModelContext) -> Podcast {

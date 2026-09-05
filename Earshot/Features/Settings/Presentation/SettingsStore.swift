@@ -83,6 +83,7 @@ final class SettingsStore {
     @ObservationIgnored private(set) var loaded = false
 
     func configure(context: ModelContext) {
+        PodcastDisplayNames.shared.reload(context: context)
         let store = AppSettingsStore(context: context)
         self.store = store
         loaded = false

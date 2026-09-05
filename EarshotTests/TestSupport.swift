@@ -32,6 +32,7 @@ enum TestStore {
         wipe(ctx, LocalEpisodeState.self)
         wipe(ctx, LocalAppSetting.self)
         try? ctx.save()
+        PodcastDisplayNames.shared.reload(context: ctx)
         return ctx
     }
 
