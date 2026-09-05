@@ -209,6 +209,7 @@ struct NowPlayingScreen: View {
             // the label, value, and rotor action below reliably attach to it.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Episode artwork")
+            .accessibilityHint("Use Actions for playback and episode options")
             // Offer the scan rotor action (#610), plus the three episode actions
             // (#371) so VoiceOver users reach Mark as played, Export audio file,
             // and Stop after this episode from the artwork rotor — the same set
@@ -474,6 +475,7 @@ struct NowPlayingScreen: View {
             .accessibilityAction(named: "Previous in Queue") {
                 player.previousInQueue()
             }
+            .accessibilityHint("Use Actions for more navigation options")
 
             // Dynamic VoiceOver name reflecting the action the button performs
             // ("Play" when paused, "Pause" when playing), matching the mini bar.
@@ -505,6 +507,7 @@ struct NowPlayingScreen: View {
             .accessibilityAction(named: "Mark as played and next in Queue") {
                 player.markCurrentPlayedAndNextInQueue()
             }
+            .accessibilityHint("Use Actions for more navigation options")
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Spacing.sm)

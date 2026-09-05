@@ -24,6 +24,16 @@ run. Required next gate: Xcode tests, physical-device VoiceOver, then a
 pre-merge test build. Do not merge or close issues until Michael verifies.
 No signing, schema, purchase, reset, or release-number changes in this batch.
 
+## September 5, 2026: player action discovery (#948)
+
+Michael authorized work on post-1.2.1 feedback. Added concise discovery hints
+on Skip back, Skip forward, and artwork; all existing labels/actions and
+Play/Pause behavior remain intact. Play/Pause has no hidden action to explain.
+Hints are guidance only; actions still work when VoiceOver hints are disabled.
+Coordinate with #949 navigation additions; avoid duplicating system-provided
+"Actions available" wording. Source-reviewed only: this workspace has no
+Xcode/Swift or iPhone. Run native tests and verify hints on/off and action order
+on device before merging. No issue closure or distribution performed here.
 
 > **2026-07-30 — restructure.** SwiftUI is now the primary codebase and the app
 > lives at the **repo root** (it was under `EarshotSwift/` while this plan was
