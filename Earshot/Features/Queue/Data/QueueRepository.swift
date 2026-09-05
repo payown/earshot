@@ -657,7 +657,8 @@ final class QueueRepository {
     /// played-then-queued episode resurfaced here with a stale `playedAt` would be
     /// silently dropped from the inbox count. For an already-unplayed episode this
     /// is equivalent to the old assignment.
-    func clear() {
+    @discardableResult
+    func clear() -> Bool {
         let items = orderedItems()
         let episodes = items.compactMap(\.episode)
         let shouldDeleteDownloads = DownloadCleanup.deleteAfterPlayedEnabled(context)
@@ -680,8 +681,9 @@ final class QueueRepository {
         if stagedFollowedRemoval {
             PendingCloudQueueMutation.stageOrdering(in: context)
         }
-        save()
+        guard save() else { return false }
         postEpisodeUserStateChanges(episodes, playedChangedExplicitly: true)
+        return true
     }
 
     // MARK: Moves

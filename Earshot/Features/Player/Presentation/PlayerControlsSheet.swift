@@ -28,7 +28,7 @@ struct PlayerControlsSheet: View {
                 volumeBoostSection
                 chaptersSection
             }
-            .navigationTitle("Player")
+            .navigationTitle("Player options")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
