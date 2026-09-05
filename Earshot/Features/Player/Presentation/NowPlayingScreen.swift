@@ -121,16 +121,15 @@ struct NowPlayingScreen: View {
             }
             .navigationTitle("Now Playing")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack {
                     Button { dismiss() } label: {
                         Text("Close")
                             .frame(minWidth: 44, minHeight: 44)
                             .contentShape(Rectangle())
                     }
                         .accessibilityLabel("Close player")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
+                    Spacer()
                     Button {
                         showingControls = true
                     } label: {
@@ -142,6 +141,9 @@ struct NowPlayingScreen: View {
                     .accessibilityHint("Episode actions and playback settings")
                     .accessibilityFocused($moreOptionsFocused)
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, Spacing.lg)
+                .background(.regularMaterial)
             }
             .sheet(isPresented: $showingControls, onDismiss: {
                 let action = pendingOptionAction
