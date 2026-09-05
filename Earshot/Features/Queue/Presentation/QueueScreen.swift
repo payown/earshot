@@ -119,7 +119,7 @@ struct QueueScreen: View {
             .searchable(text: $searchText, prompt: "Search queue")
             .onSubmit(of: .search) { announceMatches() }
             .toolbar { toolbar }
-            .confirmationDialog("Clear the entire Queue?", isPresented: $confirmingClearQueue, titleVisibility: .visible) {
+            .alert("Clear the entire Queue?", isPresented: $confirmingClearQueue) {
                 Button("Clear entire Queue", role: .destructive) {
                     let saved = repo.clear()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
