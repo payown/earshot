@@ -126,4 +126,21 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Drama"].firstMatch.exists)
         XCTAssertTrue(app.buttons["Science Fiction"].firstMatch.exists)
     }
+    func testPlayerQueueActionsRemainAvailableInVisibleMenu() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying"]
+        app.launch()
+        let actions = app.buttons["Episode actions"].firstMatch
+        XCTAssertTrue(actions.waitForExistence(timeout: 10))
+        let skipBack = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Skip back")).firstMatch
+        let skipForward = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Skip forward")).firstMatch
+        XCTAssertTrue(skipBack.exists)
+        XCTAssertTrue(skipForward.exists)
+        actions.tap()
+        XCTAssertTrue(app.buttons["Previous in Queue"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Next in Queue"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["Mark as played and next in Queue"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["Mark as played"].firstMatch.exists)
+    }
+
 }
