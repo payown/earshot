@@ -33,6 +33,12 @@ workspace. Xcode and Swift are unavailable, so added XCTest coverage has not
 run. Required next gate: Xcode tests, physical-device VoiceOver, then a
 pre-merge test build. Do not merge or close issues until Michael verifies.
 No signing, schema, purchase, reset, or release-number changes in this batch.
+## September 5, 2026: Mac compilation of player hints (#948)
+
+Xcode 26.6 / Swift 6.3.3 simulator Debug build succeeded. Required
+Earshot accessibility source gate passed: existing labels, actions, and
+Play/Pause semantics remain intact. Native integrated tests and physical
+VoiceOver verification with hints on/off remain pending. No release or merge.
 
 ## September 5, 2026: player action discovery (#948)
 
