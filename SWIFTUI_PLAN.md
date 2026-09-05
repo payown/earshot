@@ -2,6 +2,39 @@
 
 Living task log for the SwiftUI rebuild. Maintained by the Planning Agent.
 
+## September 5, 2026: anchored Player refinement (#951)
+
+Michael explicitly requested stable physical transport positions. Implemented in
+feedback-integration, to be carried into the existing #951 branch/PR #956.
+Header (Close, Now Playing, More options), scrolling episode content, and bottom
+playback dock are layout siblings. The dock reserves space instead of covering
+content; optional chapters, timers, folder context and errors remain in the
+scroll region. Artwork stays visible at 140pt with its existing VoiceOver stop
+and custom actions. Transport targets remain 64/80/64pt. The 56pt slider region
+uses a full-height native UIControl with native slider rendering and the existing
+spoken adjustable representation. Actual coordinate taps exposed UISlider's
+narrow gesture region, so a wrapper frame alone was rejected. Elapsed time still
+previews the drag destination; seeking persists once at release.
+
+Removed the delayed initial title-focus request; system opening focus can no
+longer be overridden after interaction starts. Existing sheet-return focus is
+preserved. No accessibility sort priority disguises the visual order. iPhone
+orientation remains portrait as configured; short-height layouts adapt the dock
+horizontally without changing the orientation policy.
+
+Required earshot-accessibility source gate PASS after restoring draft-time
+preview, forwarding disabled state, and checking complete adaptive clocks.
+SE standard/AX5 native coordinate edge-tap and dynamic-content stability tests
+passed; the final Pro Max iOS 27 standard/AX5 checks also passed, including
+artwork reachability, full scroll-content access and header bounds. Full native
+unit suite: 2,265 tests, 29 skipped, zero failures (StoreKit suites excluded).
+Signed Release 1.2.2 (255), code revision 97bef25, installed and launched over
+the paired Wi-Fi connection on Michael’s iPhone; running process verified.
+Final SE UI run: all seven flows passed (standard/AX5 stability and slider
+edge taps, standard/AX5 options/Bookmarks, names, Queue actions, Clear Queue
+cancellation). Physical iPhone VoiceOver focus and explore-by-touch accuracy
+remain Michael’s acceptance checks. No main merge, issue closure, TestFlight upload or release.
+
 ## September 5, 2026: iPhone feedback follow-up (#951)
 
 Michael verified names, Queue navigation/wrapping and timers, Library/Settings,
