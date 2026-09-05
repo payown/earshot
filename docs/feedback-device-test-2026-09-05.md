@@ -7,22 +7,29 @@ is pending. The final Release build and signature verification passed.
 Michael requested direct device testing first; do not upload to TestFlight.
 Do not merge the feature PRs or close #947–#951 until Michael confirms.
 
-## Player refinement checklist
+## Final anchored Player checklist
 
-Michael passed the original checks below on the first Wi-Fi build. This second
-local revision keeps version 1.2.2 (255); identify it by the single More options
-button and larger transport controls. The refinement was installed over Wi-Fi on September 5, 2026.
+The newest local revision keeps version 1.2.2 (255). Identify it by the single
+Close / Now Playing / More options header and the playback position plus
+transport area fixed below the scrolling artwork and episode details.
+Physical VoiceOver verification of this revision is pending.
 
-1. Open Now Playing, then More options. There should be one options opener,
-   Episode actions followed by Playback settings, and no duplicate chapter
-   destination. Queue commands remain flat, and chapters remain direct.
-2. Open Bookmarks, then close it. Focus should return to More options. Close
-   More options with Done and check the same return point.
-3. Explore Play/Pause and both Skip buttons by touch, including near their
-   edges. Each should announce and activate only its own control. Check speed,
-   More options, Close, and +5 min while a countdown timer is running.
-4. Repeat at larger text, scrolling as needed. Check chapter access, spacing,
-   and the existing artwork/Skip rotor actions and hints.
+1. Find Play/Pause and both skips by touch. Change to short and long episodes,
+   with and without chapters/artwork, while playing and paused. Start/cancel a
+   timer and scroll episode details. The primary controls and slider should
+   remain in the same physical area for the same text setting.
+2. Explore the slider near its top and bottom edges, then swipe up/down to
+   adjust it. It should announce Playback position with the current time, and
+   adjacent controls should not take focus. Check that its focus rectangle
+   matches the broad touch area. With VoiceOver off, dragging should preview
+   the destination time and commit the seek on release.
+3. Find Episode artwork in the scrolling content and use its Actions rotor.
+   Existing playback/Queue/chapter/episode shortcuts should still work.
+4. Swipe through Close, Now Playing and More options. Begin exploring as soon
+   as the Player opens; focus should not jump back after a delay.
+5. Open and dismiss More options, then Bookmarks through More options. Focus
+   should return to More options. Repeat at larger text, and verify all details
+   and Show notes remain reachable above the reserved playback area.
 
 ## Original VoiceOver checklist (passed on iPhone)
 
@@ -48,8 +55,8 @@ button and larger transport controls. The refinement was installed over Wi-Fi on
    stops take precedence; a countdown keeps running across automatic advances.
    Manual Previous/Next still do not wrap and keep their timer-cancel behavior.
 4. **Navigation:** Library options contains Sort and Select; Search, Folders,
-   Refresh, and Discover remain direct. More options includes sleep timer,
-   volume boost, and chapters. Settings headings group the existing destinations.
+   Refresh, and Discover remain direct. More options includes sleep timer and
+   volume boost; chapters remain directly available. Settings headings group the existing destinations.
    Existing episode and podcast rotor actions should still be available.
 5. **Clear Queue:** Queue options, Clear queue explains the whole Queue and
    whether downloaded audio will be deleted. Cancel must leave everything
@@ -87,3 +94,12 @@ existing UI flows passed, and the final geometry/near-edge activation/Bookmarks
 flows passed at normal and AX5 text on iPhone SE and iPhone 17 Pro. Required
 source accessibility review passed. The signed Release build passed and was
 installed locally; no TestFlight upload.
+
+Final anchored revision (97bef25): signed Release 1.2.2 (255) built, signature
+verified, installed and launched over Wi-Fi on the iPhone 17 Pro Max. The running
+process was verified. Native unit suite: 2,265 tests, 29 skipped, zero failures;
+known StoreKit suites excluded. Seven final SE UI flows passed; two matching
+Pro Max iOS 27 layout flows passed. Both screen sizes passed standard and AX5
+content-transition stability, slider coordinate edge taps, visible artwork,
+header bounds and access to the last scrolling control. Source accessibility
+gate PASS. Physical VoiceOver touch accuracy and focus restoration await Michael.
