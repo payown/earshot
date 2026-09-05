@@ -46,12 +46,10 @@ struct NowPlayingScreen: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.playbackFolderNavigation) private var openPlaybackFolder
-    // Drives the artwork's smaller footprint at accessibility Dynamic Type
-    // sizes so the transport and scrubber stay above the fold (#579).
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Query(sort: [SortDescriptor(\PodcastFolder.sortOrder), SortDescriptor(\PodcastFolder.name)])
     private var folders: [PodcastFolder]
 
+    @State private var scrubPreview: Double?
     @State private var showingControls = false
     @State private var pendingOptionAction: (() -> Void)?
     @State private var restoresOptionsFocus = false
@@ -72,10 +70,6 @@ struct NowPlayingScreen: View {
     @State private var exportURL: ExportFile?
     @State private var isExporting = false
 
-    // On present, VoiceOver should land on the episode title (a heading), not the
-    // Close button or the decorative artwork. We request focus after a short
-    // settle so the sheet transition doesn't drop the request mid-animation.
-    @AccessibilityFocusState private var titleFocused: Bool
     @AccessibilityFocusState private var speedBadgeFocused: Bool
 
     /// Latches the speed a VoiceOver flick just set, so the badge's spoken value
@@ -88,63 +82,35 @@ struct NowPlayingScreen: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: Spacing.xl) {
-                    artworkBlock
-                        .padding(.top, Spacing.lg)
-
-                    titleBlock
-                    if let failure = player.playbackFailureMessage {
-                        Label(failure, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.secondary)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(failure)
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    playerHeader
+                    ScrollView {
+                        VStack(spacing: Spacing.xl) {
+                            artworkBlock
+                                .padding(.top, Spacing.lg)
+                            titleBlock
+                            if let failure = player.playbackFailureMessage {
+                                Label(failure, systemImage: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel(failure)
+                            }
+                            chapterRow
+                            speedRow
+                            sleepTimerRow
+                            airPlayRow
+                            if hasShowNotes { showNotesButton }
+                            if hasTranscript { transcriptButton }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Spacing.lg)
+                        .padding(.bottom, Spacing.xl)
                     }
-                    chapterRow
-                    ScrubberView(player: player)
-                    transportRow
-                    speedRow
-                    sleepTimerRow
-                    airPlayRow
-
-                    if hasShowNotes {
-                        showNotesButton
-                    }
-
-                    if hasTranscript {
-                        transcriptButton
-                    }
+                    playbackDock(compact: geometry.size.height < 400)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, Spacing.lg)
-                .padding(.bottom, Spacing.xl)
             }
-            .navigationTitle("Now Playing")
-            .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                HStack {
-                    Button { dismiss() } label: {
-                        Text("Close")
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                        .accessibilityLabel("Close player")
-                    Spacer()
-                    Button {
-                        showingControls = true
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("More options")
-                    .accessibilityHint("Episode actions and playback settings")
-                    .accessibilityFocused($moreOptionsFocused)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, Spacing.lg)
-                .background(.regularMaterial)
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingControls, onDismiss: {
                 let action = pendingOptionAction
                 pendingOptionAction = nil
@@ -182,12 +148,6 @@ struct NowPlayingScreen: View {
                 ChapterListView()
             }
         }
-        .task {
-            // Let the present transition settle before requesting VoiceOver focus;
-            // a request mid-animation is dropped.
-            try? await Task.sleep(for: .milliseconds(500))
-            titleFocused = true
-        }
         // Deleting the loaded episode clears the player's observed identity
         // before SwiftData performs the cascade. Close this modal at that same
         // boundary instead of leaving a stale, empty Now Playing destination on
@@ -195,6 +155,81 @@ struct NowPlayingScreen: View {
         .onChange(of: player.nowPlayingEpisodeID) { _, episodeID in
             if episodeID == nil { dismiss() }
         }
+    }
+
+    // Header, scroll region and dock are layout siblings in visual and semantic
+    // order. No overlay or accessibility sort priority is needed. System initial
+    // focus is left alone: no delayed request can steal focus after a first touch.
+    private var playerHeader: some View {
+        HStack(spacing: Spacing.sm) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Close player")
+            Spacer(minLength: 0)
+            Text("Now Playing")
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            Button { showingControls = true } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("More options")
+            .accessibilityHint("Episode actions and playback settings")
+            .accessibilityFocused($moreOptionsFocused)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, Spacing.lg)
+        .background(.regularMaterial)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func playbackDock(compact: Bool) -> some View {
+        let layout = compact
+            ? AnyLayout(HStackLayout(spacing: Spacing.md))
+            : AnyLayout(VStackLayout(spacing: Spacing.xs))
+        return VStack(spacing: Spacing.xs) {
+            // Clocks can grow upward without moving the slider or transport.
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    playbackElapsed
+                    Spacer()
+                    playbackDuration
+                }
+                VStack(spacing: 0) {
+                    playbackElapsed
+                    playbackDuration
+                }
+            }
+            .font(.footnote)
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true) // The slider speaks both complete times.
+            layout {
+                ScrubberView(player: player, preview: $scrubPreview)
+                transportRow
+                    .fixedSize(horizontal: compact, vertical: true)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.bottom, Spacing.sm)
+        .background(.regularMaterial)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var playbackElapsed: some View {
+        Text(BookmarkLogic.clock(Int(scrubPreview ?? player.currentPositionSeconds)))
+            .fixedSize()
+    }
+    private var playbackDuration: some View {
+        Text(player.hasKnownDuration ? BookmarkLogic.clock(Int(player.durationSeconds)) : "--:--")
+            .fixedSize()
     }
 
     // MARK: Artwork (with hold-to-fast-forward, #373)
@@ -208,12 +243,9 @@ struct NowPlayingScreen: View {
     /// available too.
     @ViewBuilder
     private var artworkBlock: some View {
-        // At accessibility Dynamic Type sizes the surrounding text rows grow
-        // several fold, and the full 280pt square pushes the transport and
-        // scrubber below the fold on smaller devices (#579). Shrink only the
-        // visual: the label, rotor actions, and the press-and-hold scan pad
-        // behave identically at both sizes.
-        let side: CGFloat = dynamicTypeSize.isAccessibilitySize ? 140 : 280
+        // Compact visible artwork retains its accessibility stop and actions.
+        // The transport occupies a separate, reserved region below this scroll view.
+        let side: CGFloat = 140
         let base = PodcastArtwork(urlString: artworkURLString, size: side, cornerRadius: 16)
             // A zero-distance long press fires `pressing:` on touch-down and again
             // on release, giving us begin/end without a separate drag gesture.
@@ -321,7 +353,6 @@ struct NowPlayingScreen: View {
                 // player lands on — no extra stop (#513). Falls back to the plain
                 // title when nothing is loaded.
                 .accessibilityLabel(titleAccessibilityLabel)
-                .accessibilityFocused($titleFocused)
             if let artist = player.currentArtist {
                 Text(artist)
                     .font(.subheadline)
@@ -918,6 +949,7 @@ struct NowPlayingScreen: View {
 /// `context.save()` off the drag path (the #362 main-run-loop lesson).
 private struct ScrubberView: View {
     let player: PlayerService
+    @Binding var preview: Double?
 
     @State private var isEditing = false
     @State private var dragSeconds: Double = 0
@@ -949,12 +981,12 @@ private struct ScrubberView: View {
 
     var body: some View {
         VStack(spacing: Spacing.xs) {
-            Slider(
+            PlayerPositionSlider(
                 value: Binding(
                     get: { displaySeconds },
-                    set: { dragSeconds = $0 }
+                    set: { dragSeconds = $0; preview = $0 }
                 ),
-                in: 0...(hasDuration ? duration : 1),
+                maximum: hasDuration ? duration : 1,
                 onEditingChanged: { editing in
                     if editing {
                         // Seed from the live position so the thumb doesn't jump on
@@ -962,13 +994,16 @@ private struct ScrubberView: View {
                         // pending adjust latch so it can't shadow the drag.
                         dragSeconds = player.currentPositionSeconds
                         adjustTarget = nil
+                        preview = dragSeconds
                         isEditing = true
                     } else {
                         player.seek(to: dragSeconds)
                         isEditing = false
+                        preview = nil
                     }
                 }
             )
+            .frame(height: 56)
             .disabled(!hasDuration)
             // Clear the VoiceOver-adjust latch once the live position converges on
             // the target, so subsequent ticks drive the display normally again.
@@ -1006,17 +1041,6 @@ private struct ScrubberView: View {
                 }
             }
 
-            HStack {
-                Text(BookmarkLogic.clock(Int(displaySeconds)))
-                Spacer()
-                Text(hasDuration ? BookmarkLogic.clock(Int(duration)) : "--:--")
-            }
-            .font(.footnote)
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
-            // The slider element already speaks the elapsed time; keep these
-            // visual labels out of the VoiceOver tree so they aren't stray stops.
-            .accessibilityHidden(true)
         }
     }
 
@@ -1025,7 +1049,9 @@ private struct ScrubberView: View {
     /// on by the caller only when a duration is known.
     private var scrubberAccessibilityElement: some View {
         Color.clear
+            .frame(height: 56)
             .accessibilityElement()
+            .accessibilityIdentifier("player.position")
             // The label is static so VoiceOver isn't re-reading it every second as
             // the 1Hz position tick rebuilds this view. The live time rides in the
             // value, which an adjustable control is expected to update. Previously
@@ -1042,5 +1068,90 @@ private struct ScrubberView: View {
         let elapsed = BookmarkLogic.spoken(Int(displaySeconds))
         guard hasDuration else { return elapsed }
         return "\(elapsed) of \(BookmarkLogic.spoken(Int(duration)))"
+    }
+}
+
+/// Native slider rendering with a full-height interaction region. UISlider's
+/// default narrow tracking region does not match an enlarged SwiftUI wrapper.
+private struct PlayerPositionSlider: UIViewRepresentable {
+    @Binding var value: Double
+    let maximum: Double
+    let onEditingChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeUIView(context: Context) -> FullAreaSlider {
+        let slider = FullAreaSlider()
+        slider.isAccessibilityElement = false // SwiftUI supplies the time-based adjustable element.
+        slider.onBegin = { [weak coordinator = context.coordinator] in coordinator?.began($0) }
+        slider.addTarget(context.coordinator, action: #selector(Coordinator.changed), for: .valueChanged)
+        slider.onEnd = { [weak coordinator = context.coordinator] in coordinator?.ended($0) }
+        return slider
+    }
+    func updateUIView(_ slider: FullAreaSlider, context: Context) {
+        context.coordinator.parent = self
+        slider.isEnabled = context.environment.isEnabled
+        slider.maximumValue = Float(maximum)
+        slider.minimumValue = 0
+        slider.tintColor = UIColor(Color.accentColor)
+        if !slider.isTracking { slider.value = Float(value) }
+    }
+    @MainActor
+    final class Coordinator {
+        var parent: PlayerPositionSlider
+        init(_ parent: PlayerPositionSlider) { self.parent = parent }
+        @objc func began(_ sender: FullAreaSlider) { parent.onEditingChanged(true) }
+        @objc func changed(_ sender: FullAreaSlider) { parent.value = Double(sender.value) }
+        @objc func ended(_ sender: FullAreaSlider) {
+            parent.value = Double(sender.value)
+            parent.onEditingChanged(false)
+        }
+    }
+    final class FullAreaSlider: UIControl {
+        private let visual = UISlider()
+        var minimumValue: Float { get { visual.minimumValue } set { visual.minimumValue = newValue } }
+        var maximumValue: Float { get { visual.maximumValue } set { visual.maximumValue = newValue } }
+        var value: Float { get { visual.value } set { visual.value = newValue } }
+        var onBegin: ((FullAreaSlider) -> Void)?
+        var onEnd: ((FullAreaSlider) -> Void)?
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            visual.isUserInteractionEnabled = false
+            visual.isAccessibilityElement = false
+            addSubview(visual)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override var intrinsicContentSize: CGSize { CGSize(width: UIView.noIntrinsicMetric, height: 56) }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            visual.frame = bounds
+        }
+        override var isEnabled: Bool { didSet { visual.isEnabled = isEnabled } }
+
+        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+            isEnabled && bounds.contains(point)
+        }
+        private func move(to touch: UITouch) {
+            let track = visual.trackRect(forBounds: visual.bounds)
+            let fraction = min(1, max(0, (touch.location(in: self).x - track.minX) / max(1, track.width)))
+            value = minimumValue + Float(fraction) * (maximumValue - minimumValue)
+            sendActions(for: .valueChanged)
+        }
+        override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
+            guard isEnabled else { return false }
+            onBegin?(self)
+            move(to: touch)
+            return true
+        }
+        override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
+            move(to: touch)
+            return true
+        }
+        override func endTracking(_ touch: UITouch?, with event: UIEvent?) {
+            if let touch { move(to: touch) }
+            onEnd?(self)
+        }
+        override func cancelTracking(with event: UIEvent?) {
+            onEnd?(self)
+        }
     }
 }
