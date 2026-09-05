@@ -3420,3 +3420,14 @@ final class PlayerService {
         center.skipBackwardCommand.preferredIntervals = [NSNumber(value: skipBackSeconds)]
     }
 }
+
+#if DEBUG
+extension PlayerService {
+    /// In-memory UI fixture only; never included in an installed Release build.
+    func showLayoutTestFailure(folderID: PersistentIdentifier) {
+        guard ScreenshotHarness.isSeeding else { return }
+        playbackOrigin = .folder(folderID)
+        playbackFailureMessage = "Layout test: audio unavailable. Try refreshing this episode."
+    }
+}
+#endif

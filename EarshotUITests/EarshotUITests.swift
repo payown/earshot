@@ -6,6 +6,57 @@ final class EarshotUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testAnchoredPlayerStabilityAndSliderEdges() { verifyAnchoredPlayer(largeText: false) }
+    func testAnchoredPlayerStabilityAtLargestText() { verifyAnchoredPlayer(largeText: true) }
+
+    private func verifyAnchoredPlayer(largeText: Bool) {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestScreenshotSeed", "-screenshotScreen", "nowPlaying", "-playerLayoutTransition"]
+        if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch()
+        let play = app.buttons["player.playPause"]
+        XCTAssertTrue(play.waitForExistence(timeout: 10))
+        let position = app.descendants(matching: .any).matching(identifier: "player.position").firstMatch
+        let controls = [position, app.buttons["player.gobackward"], play, app.buttons["player.goforward"]]
+        let initial = controls.map(\.frame)
+        XCTAssertGreaterThanOrEqual(position.frame.height, 56)
+        XCTAssertTrue(play.isHittable)
+        XCTAssertLessThanOrEqual(play.frame.maxY, app.frame.maxY)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Episode artwork")).firstMatch.exists)
+        let prior = position.value as? String
+        position.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.08)).tap()
+        XCTAssertNotEqual(position.value as? String, prior)
+        let first = position.value as? String
+        position.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.92)).tap()
+        XCTAssertNotEqual(position.value as? String, first)
+        // Changes arrive after the initial measurements, without reopening the sheet.
+        let changed = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A long episode title")).firstMatch
+        XCTAssertTrue(changed.waitForExistence(timeout: 20))
+        for (control, rect) in zip(controls, initial) {
+            XCTAssertEqual(control.frame.minY, rect.minY, accuracy: 1)
+            XCTAssertEqual(control.frame.height, rect.height, accuracy: 1)
+        }
+        app.scrollViews.firstMatch.swipeUp()
+        for (control, rect) in zip(controls, initial) {
+            XCTAssertEqual(control.frame.minY, rect.minY, accuracy: 1)
+        }
+        XCTAssertTrue(app.buttons["More options"].isHittable)
+        XCTAssertTrue(app.buttons["Close player"].isHittable)
+        XCTAssertFalse(position.frame.intersects(play.frame))
+        let notes = app.buttons["Show notes"]
+        for _ in 0..<10 {
+            if notes.exists && notes.isHittable && notes.frame.maxY <= position.frame.minY { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(notes.isHittable)
+        XCTAssertLessThanOrEqual(notes.frame.maxY, position.frame.minY)
+        XCTAssertEqual(play.frame.minY, initial[2].minY, accuracy: 1)
+        for control in [app.buttons["Close player"], app.buttons["More options"]] {
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        }
+    }
+
     func testPlayerOptionsAndTouchTargets() {
         verifyPlayerOptionsAndTargets(largeText: false)
     }
