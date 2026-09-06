@@ -57,7 +57,17 @@ final class FolderRunController {
                 isConnected = true
                 if let snapshot, [.paused, .ready].contains(snapshot.state) {
                     let first = try await opened.window(id: snapshot.id, limit: 1).first
-                    if prior?.state == .playing || first?.identity == identity(player.nowPlayingEpisode) {
+                    if player.isPlaying {
+                        // A remote command may have restored playback before
+                        // root maintenance connected this controller. Adopt the
+                        // matching cursor without reloading or pausing audio;
+                        // leave deliberately unrelated playback untouched.
+                        if let first, first.identity == identity(player.nowPlayingEpisode) {
+                            currentItem = first
+                            driving = true
+                            self.snapshot = try await opened.resume(id: snapshot.id)
+                        }
+                    } else if prior?.state == .playing || first?.identity == identity(player.nowPlayingEpisode) {
                         try await selectNext(autoplay: false)
                     }
                 }

@@ -258,6 +258,37 @@ final class FolderRunIntegrationTests: XCTestCase {
         await run.release()
     }
 
+    func testLateFolderRecoveryPreservesAlreadyStartedPlayback() async throws {
+        for matchesRun in [true, false] {
+            let (context, folder, a, _) = try fixture()
+            let first = episode("first", podcast: a, context: context, age: 900)
+            let other = episode("other", podcast: a, context: context, age: 800)
+            try context.save()
+            let store = try await FolderRunStore.open()
+            let original = PlayerService()
+            original.configure(context: context)
+            await original.folderRuns.connect(context: context, player: original, testStore: store)
+            original.folderRuns.start(folder: folder, replacing: nil, feed: FolderRunTestFeed(), startsPlayback: false)
+            await original.folderRuns.waitForOperationForTesting()
+            let id = try XCTUnwrap(original.folderRuns.snapshot?.id)
+            _ = try await store.resume(id: id)
+            await original.folderRuns.release()
+
+            let player = PlayerService()
+            player.configure(context: context)
+            let current = matchesRun ? first : other
+            player.play(current)
+            XCTAssertTrue(player.isPlaying)
+            await player.folderRuns.connect(context: context, player: player, testStore: store)
+            XCTAssertTrue(player.isPlaying)
+            XCTAssertEqual(player.nowPlayingEpisode?.guid, current.guid)
+            XCTAssertEqual(player.folderRuns.driving, matchesRun)
+            XCTAssertEqual(player.folderRuns.snapshot?.state, matchesRun ? .playing : .paused)
+            player.stopAndUnload()
+            await player.folderRuns.release()
+        }
+    }
+
     func testUnrelatedPlaybackPausesRunAndAudioFailureCanBeSkippedWithoutMarkingPlayed() async throws {
         let (context, folder, a, _) = try fixture()
         let first = episode("first", podcast: a, context: context, age: 900)
