@@ -34,7 +34,8 @@ Pro Max simulator standard text: Play/Pause center moved from 806 to 520 screen
 points (286pt higher, near the middle of a 956pt screen). At AX5 it moved from
 about 732 to 545pt. These measurements do not establish physical comfort or
 VoiceOver focus/touch accuracy at Michael's current settings. That is the
-purpose of this local trial. No TestFlight, merge, issue closure or release.
+purpose of the local trial. Michael subsequently approved the placement and
+the complete batch. Distribution remains on hold.
 
 Final trial validation: required earshot-accessibility source review PASS;
 183 focused playback/Queue/sleep-timer tests passed. Standard/AX5 stability,
@@ -119,7 +120,8 @@ known StoreKit suites excluded. Seven final SE UI flows passed; two matching
 Pro Max iOS 27 layout flows passed. Both screen sizes passed standard and AX5
 content-transition stability, slider coordinate edge taps, visible artwork,
 header bounds and access to the last scrolling control. Source accessibility
-gate PASS. Physical VoiceOver touch accuracy and focus restoration await Michael.
+gate PASS. This earlier validation preceded Michael’s final approval recorded
+above; it is retained as historical test evidence.
 
 Bottom-row revision (app code 6817eea): signed Release 1.2.2 (255) installed and
 launched over Wi-Fi; running process verified. Required accessibility source
