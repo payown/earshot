@@ -1024,6 +1024,98 @@ final class AdvancedPlaybackTests: XCTestCase {
         return (x1, x2, x3, y1, y2)
     }
 
+    func testExplicitQueueNavigationUsesGroupedOrderAndPreservesSkippedEpisode() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        let episodes = makeInterleavedShowsQueue(ctx)
+        let settings = AppSettingsStore(context: ctx)
+        settings.setQueueGrouping(.podcast)
+        settings.setBool(false, for: SettingsKey.continueAfterEpisode)
+        settings.setBool(false, for: SettingsKey.continueAfterGroupEnds)
+        let repo = QueueRepository(context: ctx)
+        let originalIDs = repo.queue().map(\.persistentModelID)
+        episodes.x2.positionSeconds = 123
+        try? ctx.save()
+        player.load(episodes.x2)
+        player.nextInQueue()
+        XCTAssertEqual(player.nowPlayingEpisodeID, episodes.x3.persistentModelID)
+        XCTAssertFalse(episodes.x2.isPlayed)
+        XCTAssertEqual(episodes.x2.positionSeconds, 123)
+        XCTAssertEqual(repo.queue().map(\.persistentModelID), originalIDs)
+        player.previousInQueue()
+        XCTAssertEqual(player.nowPlayingEpisodeID, episodes.x2.persistentModelID)
+        XCTAssertEqual(repo.queue().map(\.persistentModelID), originalIDs)
+    }
+
+    func testExplicitQueueNavigationWithMissingAudioKeepsCurrentAndQueue() throws {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        let episodes = makeInterleavedShowsQueue(ctx)
+        episodes.y1.audioURL = ""
+        episodes.x1.positionSeconds = 123
+        try ctx.save()
+        let originalIDs = QueueRepository(context: ctx).queue().map(\.persistentModelID)
+        player.load(episodes.x1)
+        player.nextInQueue()
+        player.markCurrentPlayedAndNextInQueue()
+        XCTAssertEqual(player.nowPlayingEpisodeID, episodes.x1.persistentModelID)
+        XCTAssertEqual(episodes.x1.positionSeconds, 123)
+        XCTAssertFalse(episodes.x1.isPlayed)
+        XCTAssertEqual(QueueRepository(context: ctx).queue().map(\.persistentModelID), originalIDs)
+    }
+
+    func testExplicitQueueNavigationStopsAtBothBoundaries() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        let episodes = makeInterleavedShowsQueue(ctx)
+        player.play(episodes.x1)
+        player.previousInQueue()
+        XCTAssertEqual(player.nowPlayingEpisodeID, episodes.x1.persistentModelID)
+        player.play(episodes.x3)
+        player.nextInQueue()
+        XCTAssertEqual(player.nowPlayingEpisodeID, episodes.x3.persistentModelID)
+        XCTAssertFalse(episodes.x3.isPlayed)
+    }
+
+    func testExplicitMarkAndNextDoesNotMutateUnqueuedEpisode() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        let episode = makeEpisode(ctx)
+        episode.positionSeconds = 123
+        try? ctx.save()
+        player.load(episode)
+        player.markCurrentPlayedAndNextInQueue()
+        XCTAssertEqual(player.nowPlayingEpisodeID, episode.persistentModelID)
+        XCTAssertFalse(episode.isPlayed)
+        XCTAssertEqual(episode.positionSeconds, 123)
+    }
+
+    func testExplicitMarkAndNextIgnoresAutomaticStopPreferences() {
+        let ctx = TestStore.freshContext()
+        let player = PlayerService()
+        player.configure(context: ctx)
+        defer { player.stopAndUnload() }
+        let episodes = makeInterleavedShowsQueue(ctx)
+        let settings = AppSettingsStore(context: ctx)
+        settings.setBool(false, for: SettingsKey.continueAfterEpisode)
+        settings.setBool(false, for: SettingsKey.continueAfterGroupEnds)
+        player.play(episodes.x2)
+        player.markCurrentPlayedAndNextInQueue()
+        XCTAssertTrue(episodes.x2.isPlayed)
+        XCTAssertEqual(player.nowPlayingEpisodeID, episodes.y2.persistentModelID)
+        XCTAssertFalse(QueueRepository(context: ctx).queue().contains {
+            $0.persistentModelID == episodes.x2.persistentModelID
+        })
+    }
+
     func test_markCurrentPlayedAndAdvance_groupedDisplayOn_followsGroupedOrderNotRawInterleavedOrder() {
         let ctx = TestStore.freshContext()
         let player = PlayerService()
