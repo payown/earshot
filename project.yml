@@ -25,6 +25,8 @@ targets:
       - path: Earshot
         excludes:
           - "Testing/**"
+      - path: docs/inbox-queue-downloads-guide.md
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: media.payown.earshot

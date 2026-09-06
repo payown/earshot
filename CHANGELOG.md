@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Download activity shows downloading, Wi-Fi-waiting, failed, and completed counts, with individual and bounded batch retries. Available from Downloads and download settings. (#958)
+- An offline Inbox, Queue, and Downloads workflow guide is available in Help & About and download settings. The [same guide](docs/inbox-queue-downloads-guide.md) explains automatic downloads, clearing, and troubleshooting. (#959)
+
 - Player actions now offer Previous in Queue, Next in Queue, and Mark as played and next in Queue. Previous/Next preserve skipped episodes and their saved places. (#949)
 - Optional Queue wrapping continues from the first remaining unplayed episode after the last finishes. Off by default; stop preferences and sleep timers still apply. (#950)
 - Followed podcasts can have personal display names, with an option to restore the publisher name. Names survive refresh, sync through private iCloud, and work in Library sorting and local search. (#947)
@@ -32,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the Voice Enhance setting because it selected a spoken-audio session mode and mono output but did not perform speech-enhancement processing. Playback continues to use stereo output and the stable time-stretch algorithm.
 
 ### Fixed
+
+- Download all now reports requests accepted and waiting for Wi-Fi separately from completion. Failed episodes are visibly and audibly identified; download completions no longer queue per-episode VoiceOver announcements. Repeated requests no longer start duplicate active transfers. (#958)
 
 - Discover podcast search no longer becomes unresponsive after directory results
   arrive with VoiceOver enabled. Search rows now keep stable identities, fetch

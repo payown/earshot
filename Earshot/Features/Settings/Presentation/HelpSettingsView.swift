@@ -9,6 +9,7 @@ struct HelpSettingsView: View {
             // names the screen, so a matching header would be a redundant
             // VoiceOver heading stop.
             Section {
+                NavigationLink("Inbox, Queue, and Downloads guide") { ListeningWorkflowGuide() }
                 NavigationLink {
                     SendFeedbackView()
                 } label: {

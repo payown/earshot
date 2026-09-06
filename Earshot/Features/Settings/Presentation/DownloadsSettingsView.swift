@@ -47,6 +47,10 @@ struct DownloadsSettingsView: View {
     var body: some View {
         @Bindable var settings = settings
         Form {
+            Section {
+                NavigationLink("Download activity") { DownloadActivityScreen() }
+                NavigationLink("Inbox, Queue, and Downloads guide") { ListeningWorkflowGuide() }
+            }
             // No section header: the "Downloads" navigation title already names
             // the screen, so a matching header would be a redundant VoiceOver
             // heading stop.

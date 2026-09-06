@@ -237,6 +237,14 @@ struct DownloadsScreen: View {
             playedFilter = AppSettingsStore(context: context).downloadsPlayedFilter()
         }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink {
+                    DownloadActivityScreen()
+                } label: {
+                    Label("Download activity", systemImage: "arrow.down.circle")
+                }
+                .accessibilityHint("Review downloading, waiting for Wi-Fi, and failed episodes")
+            }
             ToolbarItem(placement: .principal) {
                 Text("Downloads")
                     .font(.headline)
