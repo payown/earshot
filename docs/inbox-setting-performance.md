@@ -31,6 +31,14 @@ notification still scheduled full reconciliation; the corrected test seeds its
 initial graph without a pending reconciliation and uses the actual settings
 save path.
 
+Final local validation on September 6, 2026 passed 201 tests, with one skipped
+and zero failures, including the full CloudProjectionCoordinatorTests suite.
+Result: `/tmp/earshot-inbox-setting-performance-final.xcresult`.
+Signed Release build and strict signature verification passed. Version 1.2.2
+build 260 (command-line version override) was installed directly over Michael's
+existing app via Wi-Fi, without a data reset or diagnostic logging. Source:
+`fd31290`. Physical responsiveness acceptance remains pending.
+
 Device acceptance: in the same podcast, change unlimited to one, immediately
 flick to the next control, and repeat in both directions. Check spoken value,
 focus, and responsiveness; reopen settings to verify persistence. Refresh then
