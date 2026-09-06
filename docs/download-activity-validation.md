@@ -4,7 +4,9 @@ Issues: #958 and #959. Implementation based on main at `7b1e855` (build 256).
 
 ## Automated coverage
 
-Verified on 2026-09-05 with Xcode 26.6 and the iPhone 17 iOS 26.5 simulator: 119 focused unit tests and both UI tests passed. The initial unsigned UI runner could not launch; using Xcode's normal simulator signing resolved the launch failure. No project signing settings changed.
+Verified on 2026-09-05 with Xcode 26.6 and the iPhone 17 iOS 26.5 simulator: 119 focused unit tests and both UI tests passed. An initial unsigned UI runner could not launch; a subsequent locally signed run passed. An unchanged unsigned CI rerun also launched successfully, so signing has not been established as the cause. No signing configuration changed.
+
+The full CI rerun passed 2,266 tests and exposed one existing Player UI test that tapped Bookmarks after scrolling its center under the navigation bar. The test now uses short directed drags and checks both visible edges before tapping; its standard- and largest-text cases passed locally after the correction.
 
 DownloadActivityTests covers 19 accepted requests followed by nine successful terminal events, six failures, and four continuing transfers. It checks the live count projection, reopens a data context to verify durable failure state, and retries only the six failures. Additional tests cover Wi-Fi waiting and resumption, duplicate calls while on and off Wi-Fi, invalid media URLs, cancellation, the 50-request limit, and bundling the offline guide.
 
