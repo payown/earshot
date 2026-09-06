@@ -973,11 +973,11 @@ final class PlayerService {
 
     func resume() {
         automaticPlaybackStoppedByTimer = false
-        if folderRuns.resumeTransportIfNeeded() { return }
         resume(providesStartHaptic: true)
     }
 
     private func resume(providesStartHaptic: Bool) {
+        if folderRuns.resumeTransportIfNeeded() { return }
         guard !releaseInvalidCurrentEpisodeIfNeeded() else { return }
         guard let episode = currentEpisode else { return }
         if !currentMediaResolutionComplete,
